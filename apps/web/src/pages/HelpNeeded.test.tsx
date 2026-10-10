@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -26,7 +26,7 @@ describe("help page", () => {
 
 	it("offers_the_choices_for_the_reason", async () => {
 		const { container, s } = await openedGate(
-			"/tasks/FRK-1/help",
+			"/tasks/CTV-1/help",
 			[
 				"team.get",
 				"contract.get",
@@ -44,10 +44,10 @@ describe("help page", () => {
 		expect(
 			s.calls("query").find((q) => q.params.name === "escalation.choices")
 				?.params.params,
-		).toEqual({ task_id: "FRK-1" });
-		// Farik stopped the task for its tries, so the words are Farik's.
+		).toEqual({ task_id: "CTV-1" });
+		// Catervas stopped the task for its tries, so the words are Catervas's.
 		const said = screen.getByRole("region", {
-			name: "Farik explains what happened",
+			name: "Catervas explains what happened",
 		});
 		expect(
 			within(said).getByText(
@@ -79,7 +79,7 @@ describe("help page", () => {
 			command: {
 				command: "escalation_resolve",
 				body: {
-					task_id: "FRK-1",
+					task_id: "CTV-1",
 					to: "in_progress",
 					extra_tries: 2,
 					message: "Wait for the page before the check.",
@@ -109,7 +109,7 @@ describe("help page", () => {
 			command: {
 				command: "escalation_resolve",
 				body: {
-					task_id: "FRK-1",
+					task_id: "CTV-1",
 					to: "refining",
 					message: "Ask Mira to change the plan",
 				},
@@ -128,7 +128,7 @@ describe("help page", () => {
 	});
 
 	it("signs_the_agents_own_words_and_lists_what_it_tried_since", async () => {
-		await openedGate("/tasks/FRK-1/help", HELP, ESCALATED, undefined, {
+		await openedGate("/tasks/CTV-1/help", HELP, ESCALATED, undefined, {
 			"task.history": {
 				events: [
 					note(2, "progress", "Tried before you last answered.", "theo"),
@@ -163,7 +163,7 @@ describe("help page", () => {
 
 	it("sends_a_plan_to_approve_to_its_page", async () => {
 		const { container } = await openedGate(
-			"/tasks/FRK-1/help",
+			"/tasks/CTV-1/help",
 			HELP,
 			ESCALATED,
 			undefined,
@@ -175,22 +175,22 @@ describe("help page", () => {
 			},
 		);
 		const read = await screen.findByRole("link", { name: "Read the plan" });
-		expect(read.getAttribute("href")).toBe("/tasks/FRK-1/plan");
+		expect(read.getAttribute("href")).toBe("/tasks/CTV-1/plan");
 		expect(screen.queryByLabelText(/A note for Theo/)).toBeNull();
 		await expectNoAxeViolations(container);
 	});
 
 	it("says_when_there_is_nothing_to_choose", async () => {
-		await openedGate("/tasks/FRK-1/help", HELP, ESCALATED, undefined, {
+		await openedGate("/tasks/CTV-1/help", HELP, ESCALATED, undefined, {
 			"task.history": { events: [raised(5, "risk_gate", "Risky work.")] },
 			"escalation.choices": { choices: [] },
 		});
 		expect(
 			await screen.findByText("There is nothing to choose here yet."),
 		).toBeTruthy();
-		// Raised by no agent: Farik's words.
+		// Raised by no agent: Catervas's words.
 		expect(
-			screen.getByRole("region", { name: "Farik explains what happened" }),
+			screen.getByRole("region", { name: "Catervas explains what happened" }),
 		).toBeTruthy();
 		expect(screen.queryByLabelText(/A note for Theo/)).toBeNull();
 	});

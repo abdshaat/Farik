@@ -1,8 +1,8 @@
 //! Whether the human has paused the team (`docs/SPEC.md` section 3): the log's last `team.paused`
 //! or `team.resumed` says, so that a pause holds across a restart and every process agrees.
 
-use farik_protocol::event::{EventBody, EventKind, FarikEvent, TeamPausedBodyReason};
-use farik_store::{EventLog, EventQuery, StoreError};
+use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, TeamPausedBodyReason};
+use catervas_store::{EventLog, EventQuery, StoreError};
 
 /// Whether the log's last `team.paused` or `team.resumed` is a `team.paused`.
 ///
@@ -14,7 +14,7 @@ pub fn paused(log: &EventLog) -> Result<bool, StoreError> {
 }
 
 /// The log's last `team.paused` or `team.resumed`.
-fn last(log: &EventLog) -> Result<Option<FarikEvent>, StoreError> {
+fn last(log: &EventLog) -> Result<Option<CatervasEvent>, StoreError> {
     let query = EventQuery {
         kinds: vec![EventKind::TeamPaused, EventKind::TeamResumed],
         ..EventQuery::default()
@@ -37,8 +37,8 @@ pub fn key_refused(log: &EventLog) -> Result<bool, StoreError> {
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::event::{EventBody, EventIds, new_event};
-    use farik_store::{EventLog, IN_MEMORY, open_event_log};
+    use catervas_protocol::event::{EventBody, EventIds, new_event};
+    use catervas_store::{EventLog, IN_MEMORY, open_event_log};
     use serde_json::json;
     use std::path::Path;
 
@@ -73,7 +73,7 @@ mod tests {
         record(&log, false);
         assert!(!key_refused(&log).expect("reads"));
         let refused = serde_json::from_value(
-            json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+            json!({ "by": "catervas", "reason": "credential_refused", "detail": "401" }),
         )
         .expect("a body");
         let ids = EventIds {

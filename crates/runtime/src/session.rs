@@ -5,12 +5,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
+use catervas_core::budget::SessionLimits;
+use catervas_core::contract::TaskId;
+use catervas_core::pricing::Usage;
+use catervas_core::team::{Agent, Effort};
+use catervas_roles::RoleDefinition;
 use chrono::{DateTime, Utc};
-use farik_core::budget::SessionLimits;
-use farik_core::contract::TaskId;
-use farik_core::pricing::Usage;
-use farik_core::team::{Agent, Effort};
-use farik_roles::RoleDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc::Receiver;
@@ -55,10 +55,10 @@ pub enum McpTransport {
         /// Its arguments.
         args: Vec<String>,
     },
-    /// A user's connector started on the host by `farik connector run`, which asks the daemon
+    /// A user's connector started on the host by `catervas connector run`, which asks the daemon
     /// for its command and keys (ADR 0030).
     Launched,
-    /// A user's connector at `url`, whose headers `farik connector headers` asks the daemon for
+    /// A user's connector at `url`, whose headers `catervas connector headers` asks the daemon for
     /// (ADR 0030).
     Helped {
         /// Where the server listens.
@@ -90,7 +90,7 @@ pub struct SessionSkill {
 /// Everything a runtime needs to start one session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionSpec {
-    /// Farik's id for the session, which the runtime also hands the program.
+    /// Catervas's id for the session, which the runtime also hands the program.
     pub session_id: String,
     /// The agent the session is for.
     pub agent_id: String,
@@ -104,14 +104,14 @@ pub struct SessionSpec {
     pub model: String,
     /// How hard the model thinks.
     pub effort: Effort,
-    /// The Farik tools the session may call, by name. The daemon's hook enforces it; nothing
+    /// The Catervas tools the session may call, by name. The daemon's hook enforces it; nothing
     /// puts it on the program's command line.
-    pub farik_tools: Vec<String>,
+    pub catervas_tools: Vec<String>,
     /// The program's own tools the session may call, and no other: the allowlist
     /// (`claude::allowed_builtins` gives the ones an agent's tiers grant).
     pub builtin_tools: Vec<String>,
-    /// The MCP servers it is given besides Farik's own, which the runtime adds itself; a server
-    /// here named `farik` is refused.
+    /// The MCP servers it is given besides Catervas's own, which the runtime adds itself; a server
+    /// here named `catervas` is refused.
     pub mcp_servers: Vec<McpServerConfig>,
     /// The connector tools it may never call, as `mcp__<server>__<tool>`: refused by the program
     /// beside `Bash`, and by the hook whatever the program does.
@@ -196,7 +196,7 @@ pub enum RuntimeError {
         /// What, and which field.
         detail: String,
     },
-    /// The program is older than the oldest version Farik was tested against.
+    /// The program is older than the oldest version Catervas was tested against.
     VersionTooOld {
         /// The version found.
         found: String,
@@ -218,7 +218,7 @@ impl fmt::Display for RuntimeError {
             }
             Self::VersionTooOld { found, required } => write!(
                 formatter,
-                "Claude Code {found} is older than {required}, the oldest version Farik runs on"
+                "Claude Code {found} is older than {required}, the oldest version Catervas runs on"
             ),
             Self::Aborted => write!(formatter, "the session was stopped"),
             Self::Limit => write!(formatter, "the session was stopped by a limit"),
@@ -230,7 +230,7 @@ impl std::error::Error for RuntimeError {}
 
 /// A running session, held by whoever started it.
 pub trait SessionHandle: Send {
-    /// Farik's id for the session.
+    /// Catervas's id for the session.
     fn session_id(&self) -> &str;
     /// What the session reports, in order; closed after `Ended`.
     fn events(&mut self) -> &mut Receiver<SessionEvent>;
@@ -289,10 +289,10 @@ pub fn session_model(agent: &Agent, role: &RoleDefinition) -> (String, Effort) {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::Role;
-    use farik_core::team::fixtures::an_agent_wire;
-    use farik_core::team::{Agent, Effort};
-    use farik_roles::load_role;
+    use catervas_core::contract::Role;
+    use catervas_core::team::fixtures::an_agent_wire;
+    use catervas_core::team::{Agent, Effort};
+    use catervas_roles::load_role;
     use serde_json::json;
 
     use super::{RuntimeError, SessionPurpose, session_model};
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn takes_the_agents_model_and_else_the_roles() {
-        let role = load_role(Role::SoftwareDeveloper).expect("Farik ships the role");
+        let role = load_role(Role::SoftwareDeveloper).expect("Catervas ships the role");
         assert_ne!(
             role.effort,
             Effort::Low,
@@ -338,9 +338,9 @@ mod tests {
 
     #[test]
     fn takes_the_roles_effort_whatever_it_is_when_the_agent_names_none() {
-        // Every role Farik ships runs at high effort, so the fallback is proved on one that does
+        // Every role Catervas ships runs at high effort, so the fallback is proved on one that does
         // not.
-        let mut role = load_role(Role::SoftwareDeveloper).expect("Farik ships the role");
+        let mut role = load_role(Role::SoftwareDeveloper).expect("Catervas ships the role");
         role.effort = Effort::Medium;
         assert_eq!(
             session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5-5" }))), &role),

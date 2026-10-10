@@ -4,12 +4,12 @@
 //! dismissing count only from an envelope that names no agent and no session, so that no agent can
 //! make any of them happen by recording it.
 
-use chrono::{DateTime, NaiveDate, Utc};
-use farik_core::contract::TaskId;
-use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, SellerMessageDraftedBody, SellerMessagePurpose,
+use catervas_core::contract::TaskId;
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventKind, SellerMessageDraftedBody, SellerMessagePurpose,
     SellerMessageSentBody, SellerReplyReceivedBody,
 };
+use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::purchase_orders::{OrderState, purchase_orders};
 use crate::{EventLog, EventQuery, StoreError};
@@ -56,7 +56,7 @@ pub struct SellerMessageRecord {
     pub drafted_at: DateTime<Utc>,
     /// Where it stands.
     pub state: MessageState,
-    /// Farik's sentence about the last try that failed, while the message waits.
+    /// Catervas's sentence about the last try that failed, while the message waits.
     pub why: Option<String>,
     /// When that try failed: the `recorded_at` of the latest `seller_message.failed`, while the
     /// message waits.
@@ -74,9 +74,9 @@ pub struct SellerReplyRecord {
     pub reply: u64,
     /// The task of the message it answers.
     pub task_id: TaskId,
-    /// What Farik read. Untrusted.
+    /// What Catervas read. Untrusted.
     pub received: SellerReplyReceivedBody,
-    /// When Farik read it.
+    /// When Catervas read it.
     pub received_at: DateTime<Utc>,
     /// Whether the owner dismissed it on Today.
     pub dismissed: bool,
@@ -93,9 +93,9 @@ pub struct SellerMail {
     pub replies: Vec<SellerReplyRecord>,
 }
 
-/// Whether `event` was recorded by the owner or by Farik: its envelope names no agent and no
+/// Whether `event` was recorded by the owner or by Catervas: its envelope names no agent and no
 /// session.
-fn is_unattended(event: &FarikEvent) -> bool {
+fn is_unattended(event: &CatervasEvent) -> bool {
     event.envelope.ids.agent_id.is_none() && event.envelope.ids.session_id.is_none()
 }
 
@@ -190,7 +190,7 @@ pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
                     record.state = MessageState::Discarded;
                 }
             }
-            // An order ended by the owner or by Farik ends its message with it, from that moment:
+            // An order ended by the owner or by Catervas ends its message with it, from that moment:
             // a send recorded later is no send.
             EventBody::PurchaseOrderRejected(body) if is_unattended(event) => {
                 close_orders_message(&mut mail, body.order.get());
@@ -312,11 +312,11 @@ mod tests {
         body
     }
 
-    /// Ivo drafts message `message` on FRK-1, in his session.
+    /// Ivo drafts message `message` on CTV-1, in his session.
     fn draft(board: &Board, minute: u32, message: u64, purpose: &str, order: Option<u64>) {
         board.session(
             at(10, minute),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-1",
             "seller_message.drafted",
@@ -324,7 +324,7 @@ mod tests {
         );
     }
 
-    /// The founder's or Farik's step: no task, no agent, no session.
+    /// The founder's or Catervas's step: no task, no agent, no session.
     fn unattended(board: &Board, minute: u32, kind: &str, body: Value) {
         board.put(at(10, minute), None, None, kind, body);
     }
@@ -349,7 +349,7 @@ mod tests {
     fn drafted_order(board: &Board, minute: u32, order: u64) {
         board.session(
             at(10, minute),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-1",
             "purchase_order.drafted",
@@ -427,7 +427,7 @@ mod tests {
             mail.messages[0].why.is_none(),
             "a sent message has no failure"
         );
-        assert_eq!(mail.messages[0].task_id.as_str(), "FRK-1");
+        assert_eq!(mail.messages[0].task_id.as_str(), "CTV-1");
         assert_eq!(mail.messages[0].agent_id, "ivo");
 
         // A failure a session records is not the mailbox's word: message 3 keeps no reason.
@@ -464,16 +464,16 @@ mod tests {
         // session, a session with no agent, or neither.
         let drafted = |message: u64| draft_body(message, "quote_request", None);
         let kind = "seller_message.drafted";
-        board.put(at(10, 17), Some("FRK-1"), Some("ivo"), kind, drafted(5));
+        board.put(at(10, 17), Some("CTV-1"), Some("ivo"), kind, drafted(5));
         board.put_with(
             at(10, 18),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             Some("s-1"),
             kind,
             drafted(6),
         );
-        board.put(at(10, 19), Some("FRK-1"), None, kind, drafted(7));
+        board.put(at(10, 19), Some("CTV-1"), None, kind, drafted(7));
         let mail = seller_mail(&board.log).expect("folds");
         let numbers: Vec<u64> = mail.messages.iter().map(|record| record.message).collect();
         assert_eq!(
@@ -485,7 +485,7 @@ mod tests {
         // A number is taken once: a second draft of message 1 is none, and the first stands.
         let mut again = draft_body(1, "question", None);
         again["subject"] = json!("Another subject");
-        board.session(at(10, 21), Some("FRK-1"), "ivo", "session-1", kind, again);
+        board.session(at(10, 21), Some("CTV-1"), "ivo", "session-1", kind, again);
         let mail = seller_mail(&board.log).expect("folds");
         assert_eq!(mail.messages.len(), 4);
         assert_eq!(
@@ -549,7 +549,7 @@ mod tests {
         draft(&board, 1, 1, "quote_request", None);
         draft(&board, 2, 2, "quote_request", None);
         unattended(&board, 11, "seller_message.sent", sent_body(1));
-        // Replies: one counts from Farik and one from a session does not; one is dismissed.
+        // Replies: one counts from Catervas and one from a session does not; one is dismissed.
         unattended(&board, 15, "seller_reply.received", reply_body(1, 1));
         board.session(
             at(10, 16),
@@ -587,7 +587,7 @@ mod tests {
         unattended(&board, 18, "seller_reply.dismissed", json!({ "reply": 1 }));
         let mail = seller_mail(&board.log).expect("folds");
         assert!(mail.replies[0].dismissed);
-        assert_eq!(mail.replies[0].task_id.as_str(), "FRK-1");
+        assert_eq!(mail.replies[0].task_id.as_str(), "CTV-1");
 
         // The day's count.
         let day = NaiveDate::from_ymd_opt(2026, 9, 28).expect("a day");
@@ -604,7 +604,7 @@ mod tests {
         draft(&board, 4, 2, "purchase_order", Some(13));
         board.put(
             at(10, 5),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "purchase_order.rejected",
             json!({ "order": 12, "note": "" }),
@@ -623,14 +623,14 @@ mod tests {
         // An order approved with its email: approved, sent, placed, in that order.
         board.put(
             at(10, 6),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "purchase_order.approved",
             json!({ "order": 13, "note": "" }),
         );
         board.put(
             at(10, 7),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "seller_message.sent",
             sent_body(2),

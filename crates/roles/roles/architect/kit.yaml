@@ -1,6 +1,6 @@
 # The Architect's kit: five skills and the services it only reads. Context7 signs in (route 1,
-# ADR 0035); Grep needs no account; OSV is Farik's own server, started by `farik connector osv`
-# (ADR 0038); GitHub is reached with a key the user pastes, until Farik Cloud signs users in
+# ADR 0035); Grep needs no account; OSV is Catervas's own server, started by `catervas connector osv`
+# (ADR 0038); GitHub is reached with a key the user pastes, until Catervas Cloud signs users in
 # (ADR 0044, step 07c), and its headers keep the server to code and pull requests, read only.
 # Tool lists are from each service's documentation and a probe on 2026-10-02 (step 07's plan) and,
 # for GitHub, its documentation of 2026-10-06; the live pin test compares them, except OSV's, whose
@@ -21,7 +21,7 @@ connectors:
     title: Context7
     about: "Current coding docs"
     why: "Checks how a library works today, in your version, before deciding. Read-only."
-    setup: "Sign in with a free Context7 account and allow Farik to use it. The questions your agent asks about a library go to Context7; the free plan allows about a thousand a month."
+    setup: "Sign in with a free Context7 account and allow Catervas to use it. The questions your agent asks about a library go to Context7; the free plan allows about a thousand a month."
     labels:
       resolve-library-id: "find a library"
       query-docs: "read a library's documentation"
@@ -41,12 +41,12 @@ connectors:
       searchGitHub: network
   - name: osv
     transport: stdio
-    command: farik
+    command: catervas
     args: [connector, osv]
     title: OSV
     about: "Known security flaws"
     why: "Checks your libraries for known flaws and the version that fixes them. Read-only."
-    setup: "Nothing to set up: Farik looks packages up in OSV itself, with no account. Farik sends OSV only the names and versions of the packages it checks."
+    setup: "Nothing to set up: Catervas looks packages up in OSV itself, with no account. Catervas sends OSV only the names and versions of the packages it checks."
     labels:
       query_package: "check a package for known flaws"
       query_packages: "check many packages at once"
@@ -63,7 +63,7 @@ connectors:
       X-MCP-Toolsets: "repos,pull_requests"
       X-MCP-Readonly: "true"
     credential_keys: [GITHUB_KEY]
-    key_page: "https://github.com/settings/personal-access-tokens/new?name=Farik+Architect&description=Farik%27s+Architect+reads+code+and+pull+requests+and+changes+nothing.&expires_in=366&contents=read&pull_requests=read"
+    key_page: "https://github.com/settings/personal-access-tokens/new?name=Catervas+Architect&description=Catervas%27s+Architect+reads+code+and+pull+requests+and+changes+nothing.&expires_in=366&contents=read&pull_requests=read"
     title: GitHub
     about: "Your code and issues"
     why: "Reads your repositories and pull requests, private ones too. Read-only."

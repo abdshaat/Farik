@@ -9,44 +9,45 @@
 .table caption {
 	text-align: left;
 	font:
-		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
-		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
-	padding-bottom: var(--farik-space-2);
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
+	padding-bottom: var(--catervas-space-2);
 }
 
 .table th,
 .table td {
-	padding: var(--farik-space-2) var(--farik-space-2) var(--farik-space-2) 0;
+	padding: var(--catervas-space-2) var(--catervas-space-2)
+		var(--catervas-space-2) 0;
 	text-align: left;
 	vertical-align: top;
-	border-bottom: 1px solid var(--farik-color-rule);
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .table thead th {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	font-weight: 400;
 }
 
 .agent {
 	display: flex;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	font-weight: 600;
 }
 
 .metrics {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	margin: 0;
 }
 
 .metrics div {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 }
 
 .metrics dt {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .metrics dd {
@@ -65,7 +66,7 @@
 }
 
 .made li + li {
-	margin-top: var(--farik-space-3);
+	margin-top: var(--catervas-space-3);
 }
 
 .made p {

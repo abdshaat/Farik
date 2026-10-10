@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -255,7 +255,7 @@ describe("chats", () => {
 			en.refuseAgentRetired,
 		);
 
-		// 4,000 characters, counted as Farik counts them, pass; 4,001 are refused before sending.
+		// 4,000 characters, counted as Catervas counts them, pass; 4,001 are refused before sending.
 		fireEvent.change(box, { target: { value: "😀".repeat(4000) } });
 		fireEvent.keyDown(box, { key: "Enter" });
 		await waitFor(() => expect(s.calls("command")).toHaveLength(3));
@@ -332,7 +332,7 @@ describe("chats", () => {
 	it("sends_a_proposal_as_a_request", async () => {
 		const sent = chat("mira", "Here is one.", {
 			request: { title: "Show sold-out items", text: "Grey them out." },
-			sent_as: "FRK-12",
+			sent_as: "CTV-12",
 		});
 		const reply = chat("mira", "Yes.", { request: APPLE });
 		const other = chat("mira", "And this.", { request: APPLE });
@@ -343,8 +343,8 @@ describe("chats", () => {
 		expect(await screen.findByText(t("chatsSuggested"))).toBeTruthy();
 		expect(screen.getByText("Show sold-out items")).toBeTruthy();
 		expect(
-			screen.getByRole("link", { name: "Sent as FRK-12" }).getAttribute("href"),
-		).toBe("/requests/FRK-12");
+			screen.getByRole("link", { name: "Sent as CTV-12" }).getAttribute("href"),
+		).toBe("/requests/CTV-12");
 
 		const boxes = screen.getAllByRole("textbox", {
 			name: t("chatsSuggests"),
@@ -369,18 +369,18 @@ describe("chats", () => {
 			text: "Pay with Apple Pay, please",
 			from_chat_message: reply.seq,
 		});
-		await s.fail(filed, -32005, "the request was already sent, as FRK-12");
+		await s.fail(filed, -32005, "the request was already sent, as CTV-12");
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			en.requestSentAs.replace("{id}", "FRK-12"),
+			en.requestSentAs.replace("{id}", "CTV-12"),
 		);
 		press();
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(2));
-		await s.reply(s.calls("request.file")[1] as never, { task_id: "FRK-13" });
+		await s.reply(s.calls("request.file")[1] as never, { task_id: "CTV-13" });
 		expect(
 			(
-				await screen.findByRole("link", { name: "Sent as FRK-13" })
+				await screen.findByRole("link", { name: "Sent as CTV-13" })
 			).getAttribute("href"),
-		).toBe("/requests/FRK-13");
+		).toBe("/requests/CTV-13");
 
 		// Sent from another tab: the event turns its box into the link.
 		live(
@@ -392,10 +392,10 @@ describe("chats", () => {
 				created_by: "human",
 				from_chat_message: other.seq,
 			},
-			{ task_id: "FRK-14", agent_id: undefined },
+			{ task_id: "CTV-14", agent_id: undefined },
 		);
 		expect(
-			await screen.findByRole("link", { name: "Sent as FRK-14" }),
+			await screen.findByRole("link", { name: "Sent as CTV-14" }),
 		).toBeTruthy();
 		expect(
 			screen.queryAllByRole("textbox", { name: t("chatsSuggests") }),
@@ -505,7 +505,7 @@ describe("chats", () => {
 				chat("mira", evil),
 				chat("mira", "See:", {
 					request: { title: evil, text: "x".repeat(20) },
-					sent_as: "FRK-1",
+					sent_as: "CTV-1",
 				}),
 			],
 		});
@@ -527,7 +527,7 @@ describe("chats", () => {
 			messages: [
 				chat("human", "Could customers also pay with Apple Pay?"),
 				chat("mira", "Yes.", { request: APPLE }),
-				chat("mira", "Done.", { request: APPLE, sent_as: "FRK-12" }),
+				chat("mira", "Done.", { request: APPLE, sent_as: "CTV-12" }),
 			],
 			waiting: { because: "day_spent" },
 		});

@@ -1,4 +1,4 @@
-//! What `farik serve` does for the first-run wizard before there is a project (`docs/SPEC.md`
+//! What `catervas serve` does for the first-run wizard before there is a project (`docs/SPEC.md`
 //! 4.1): the CLI's side of runtime's `SetupHost`, which opens or makes the project, keeps the
 //! credential, and says on a watch which project the wizard chose.
 
@@ -6,17 +6,17 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use farik_protocol::clock::Clock;
-use farik_protocol::event::EventBody;
-use farik_runtime::claude::CredentialKind;
-use farik_runtime::computer::on_path;
-use farik_runtime::connectors::ConnectorSecrets;
-use farik_runtime::credential::{
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::EventBody;
+use catervas_runtime::claude::CredentialKind;
+use catervas_runtime::computer::on_path;
+use catervas_runtime::connectors::ConnectorSecrets;
+use catervas_runtime::credential::{
     CredentialError, CredentialStore, Source, credential_of_kind, load_credential, save_credential,
 };
-use farik_runtime::daemon::{SETUP_PENDING, SetupError, SetupHost};
-use farik_store::files::{LocalSettings, Sandbox};
-use farik_store::requests::{
+use catervas_runtime::daemon::{SETUP_PENDING, SetupError, SetupHost};
+use catervas_store::files::{LocalSettings, Sandbox};
+use catervas_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_brief,
 };
 use tokio::sync::watch;
@@ -28,23 +28,23 @@ use crate::state::{make_state_dir, state_dir};
 use crate::{HUMAN, init};
 
 /// What `open` and `create` refuse a project another process drives with.
-const BUSY: &str = "another farik is already running this project";
+const BUSY: &str = "another catervas is already running this project";
 /// What `open` and `create` refuse with before a credential is kept.
 const NO_ACCOUNT: &str = "connect your AI account first";
 /// What `open` refuses a folder that already has a team with, while a project is being left, unless
 /// the user chose to replace it. The page recognises the prefix `has_team`.
-pub(crate) const HAS_TEAM: &str = "has_team: that folder already has a Farik team";
+pub(crate) const HAS_TEAM: &str = "has_team: that folder already has a Catervas team";
 /// What `open` refuses a folder outside home with.
 const OUTSIDE_HOME: &str = "that folder is outside your home folder";
-/// What `open` refuses home itself with: Farik's settings folder, `~/.config/farik`, would be in
+/// What `open` refuses home itself with: Catervas's settings folder, `~/.config/catervas`, would be in
 /// the project, where a commit could write it (re-review 2 m1).
 const HOME_ITSELF: &str = "your home folder itself cannot be a project; choose a folder inside it";
 
 /// The CLI's setup host.
 pub(crate) struct CliHost {
-    /// The environment `farik serve` was given.
+    /// The environment `catervas serve` was given.
     pub(crate) env: BTreeMap<String, String>,
-    /// Home: `HOME`, else where `farik serve` was run.
+    /// Home: `HOME`, else where `catervas serve` was run.
     pub(crate) home: PathBuf,
     /// The time the events it records are stamped with.
     pub(crate) clock: Arc<dyn Clock + Send + Sync>,
@@ -82,12 +82,12 @@ impl CliHost {
         }
     }
 
-    /// Makes `root` a Farik project when it is not one: `init`, then the old team carried while a
+    /// Makes `root` a Catervas project when it is not one: `init`, then the old team carried while a
     /// project is being left, else the team paused and the marker. Answers the project, and
     /// whether it was made.
     fn taken_on(&self, root: &Path, no_sandbox: bool) -> Result<(Project, bool), SetupError> {
         let now = self.clock.now();
-        let made = !root.join(".farik/team.yaml").exists();
+        let made = !root.join(".catervas/team.yaml").exists();
         if made {
             init::init(root, now).map_err(failed)?;
         }
@@ -117,21 +117,21 @@ impl CliHost {
         Ok((project, made))
     }
 
-    /// Removes the `.farik/` of the project at `root`, a canonical repository root inside home, for
-    /// a team taken on over it: a `.farik` that is a link goes as a link, never followed to what it
+    /// Removes the `.catervas/` of the project at `root`, a canonical repository root inside home, for
+    /// a team taken on over it: a `.catervas` that is a link goes as a link, never followed to what it
     /// points at. Then forgets the worktrees it held.
     fn clear(&self, root: &Path) -> Result<(), SetupError> {
-        let farik = root.join(".farik");
-        let gone = if std::fs::symlink_metadata(&farik)
-            .map_err(|error| failed(format!("{} cannot be read: {error}", farik.display())))?
+        let catervas = root.join(".catervas");
+        let gone = if std::fs::symlink_metadata(&catervas)
+            .map_err(|error| failed(format!("{} cannot be read: {error}", catervas.display())))?
             .file_type()
             .is_symlink()
         {
-            std::fs::remove_file(&farik)
+            std::fs::remove_file(&catervas)
         } else {
-            std::fs::remove_dir_all(&farik)
+            std::fs::remove_dir_all(&catervas)
         };
-        gone.map_err(|error| failed(format!("{} cannot be removed: {error}", farik.display())))?;
+        gone.map_err(|error| failed(format!("{} cannot be removed: {error}", catervas.display())))?;
         self.git(root, &["worktree", "prune"])
     }
 
@@ -141,11 +141,11 @@ impl CliHost {
         root
     }
 
-    /// Runs `git <args>` in `directory`, as farik, with `git` from the environment's `PATH`.
+    /// Runs `git <args>` in `directory`, as catervas, with `git` from the environment's `PATH`.
     fn git(&self, directory: &Path, args: &[&str]) -> Result<(), SetupError> {
         let program = on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
         let output = std::process::Command::new(program)
-            .args(farik_store::git::FARIK_IDENTITY)
+            .args(catervas_store::git::CATERVAS_IDENTITY)
             .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(directory)
@@ -203,12 +203,12 @@ impl SetupHost for CliHost {
         self.has_account()?;
         // Only while a project is being left: a folder with a team is the user's to replace.
         if self.leaving.is_some() {
-            if root.join(".farik/team.yaml").exists() {
+            if root.join(".catervas/team.yaml").exists() {
                 if !replace {
                     return Err(refused(HAS_TEAM));
                 }
                 self.clear(&root)?;
-            } else if std::fs::symlink_metadata(root.join(".farik")).is_ok() {
+            } else if std::fs::symlink_metadata(root.join(".catervas")).is_ok() {
                 // A leftover with no team: none of it may carry context into the new team.
                 self.clear(&root)?;
             }
@@ -334,20 +334,20 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use chrono::Utc;
-    use farik_core::criteria::fixtures::a_criteria_library_wire;
-    use farik_core::team::fixtures::an_agent_wire;
-    use farik_core::team::{AgentId, carried_team, validate_team};
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_runtime::claude::Secret;
-    use farik_runtime::connectors::{
+    use catervas_core::criteria::fixtures::a_criteria_library_wire;
+    use catervas_core::team::fixtures::an_agent_wire;
+    use catervas_core::team::{AgentId, carried_team, validate_team};
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_runtime::claude::Secret;
+    use catervas_runtime::connectors::{
         ConnectorEntry, ConnectorSecrets, MemoryConnectorSecrets, SecretAt, local_project_id,
     };
-    use farik_runtime::daemon::{SetupError, SetupHost};
-    use farik_store::EventQuery;
-    use farik_store::files::{LocalSettings, ProjectFiles, Sandbox};
-    use farik_store::git::fixtures::TempRepo;
+    use catervas_runtime::daemon::{SetupError, SetupHost};
+    use catervas_store::EventQuery;
+    use catervas_store::files::{LocalSettings, ProjectFiles, Sandbox};
+    use catervas_store::git::fixtures::TempRepo;
+    use chrono::Utc;
     use serde_json::{Value, json};
 
     use super::{BUSY, CliHost, HAS_TEAM, NO_ACCOUNT};
@@ -361,7 +361,8 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("farik-setup-{name}-{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("catervas-setup-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("a scratch folder");
         path
@@ -399,7 +400,7 @@ mod tests {
                 ),
             ]);
             Self {
-                state: state.join("farik"),
+                state: state.join("catervas"),
                 secrets: Arc::new(MemoryConnectorSecrets::default()),
                 env,
             }
@@ -525,11 +526,11 @@ mod tests {
         json!({ "name": name, "sha256": "b".repeat(64) })
     }
 
-    fn carried_of(old: &TempRepo) -> farik_core::team::Team {
+    fn carried_of(old: &TempRepo) -> catervas_core::team::Team {
         carried_team(&files_of(old).read_team().expect("old team")).expect("carried")
     }
 
-    const AVATAR: &str = ".farik/team/avatars/theo.png";
+    const AVATAR: &str = ".catervas/team/avatars/theo.png";
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -543,18 +544,18 @@ mod tests {
         write(&old.path, AVATAR, b"\x89PNG theo");
         write(
             &old.path,
-            ".farik/skills/team-skill/SKILL.md",
+            ".catervas/skills/team-skill/SKILL.md",
             b"team skill",
         );
         write(
             &old.path,
-            ".farik/agents/theo/skills/theo-skill/SKILL.md",
+            ".catervas/agents/theo/skills/theo-skill/SKILL.md",
             b"theo skill",
         );
         let mut library = a_criteria_library_wire();
         library["criteria"][0]["name"] = json!("only-in-the-old-project");
         files_of(&old)
-            .write_criteria(&farik_core::criteria::validate_criteria(&library).expect("library"))
+            .write_criteria(&catervas_core::criteria::validate_criteria(&library).expect("library"))
             .expect("written");
         files_of(&old)
             .write_settings(&LocalSettings {
@@ -576,8 +577,8 @@ mod tests {
         assert_eq!(ids, ["pm", "theo", "ada"]);
         assert_eq!(read(&chosen, AVATAR), read(&old.path, AVATAR));
         for skill in [
-            ".farik/skills/team-skill/SKILL.md",
-            ".farik/agents/theo/skills/theo-skill/SKILL.md",
+            ".catervas/skills/team-skill/SKILL.md",
+            ".catervas/agents/theo/skills/theo-skill/SKILL.md",
         ] {
             assert_eq!(read(&chosen, skill), read(&old.path, skill), "{skill}");
         }
@@ -592,7 +593,7 @@ mod tests {
                 .contains("only-in-the-old-project")
         );
         assert_eq!(new.files.read_memory(&theo).expect("memory"), "");
-        assert!(!chosen.join(".farik/local/setup-pending").exists());
+        assert!(!chosen.join(".catervas/local/setup-pending").exists());
         assert!(events(&chosen, EventKind::TeamPaused).is_empty());
         let EventBody::TeamUpdated(last) = events(&chosen, EventKind::TeamUpdated)
             .pop()
@@ -620,11 +621,11 @@ mod tests {
         let outside = TempRepo::new("links-outside");
         write(&outside.path, "secret.txt", b"outside secret");
         let secret = outside.path.join("secret.txt");
-        write(&old.path, ".farik/team/avatars/real.png", b"real");
-        write(&old.path, ".farik/skills/team-skill/SKILL.md", b"skill");
+        write(&old.path, ".catervas/team/avatars/real.png", b"real");
+        write(&old.path, ".catervas/skills/team-skill/SKILL.md", b"skill");
         let links = [
-            ".farik/team/avatars/link.png",
-            ".farik/skills/team-skill/link.md",
+            ".catervas/team/avatars/link.png",
+            ".catervas/skills/team-skill/link.md",
         ];
         for link in links {
             std::os::unix::fs::symlink(&secret, old.path.join(link)).expect("a link");
@@ -634,8 +635,11 @@ mod tests {
         let host = world.host(Some(&root_of(&old.path)));
         let chosen = host.open(&named(&fresh), false, false).expect("taken on");
 
-        assert_eq!(read(&chosen, ".farik/team/avatars/real.png"), b"real");
-        assert_eq!(read(&chosen, ".farik/skills/team-skill/SKILL.md"), b"skill");
+        assert_eq!(read(&chosen, ".catervas/team/avatars/real.png"), b"real");
+        assert_eq!(
+            read(&chosen, ".catervas/skills/team-skill/SKILL.md"),
+            b"skill"
+        );
         for link in links {
             assert!(
                 std::fs::symlink_metadata(chosen.join(link)).is_err(),
@@ -646,17 +650,17 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn leaving_clears_a_leftover_farik_folder_with_no_team() {
+    fn leaving_clears_a_leftover_catervas_folder_with_no_team() {
         let world = World::new("leftover");
         let old = a_project("leftover-old", |_| {});
         let target = TempRepo::new("leftover-new");
         let theo = AgentId::try_from("theo").expect("an id");
         write(
             &target.path,
-            ".farik/agents/theo/memory.md",
+            ".catervas/agents/theo/memory.md",
             b"stale context\n",
         );
-        assert!(!target.path.join(".farik/team.yaml").exists());
+        assert!(!target.path.join(".catervas/team.yaml").exists());
 
         let host = world.host(Some(&root_of(&old.path)));
         let chosen = host.open(&named(&target), false, false).expect("taken on");
@@ -667,16 +671,16 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn not_leaving_keeps_a_leftover_farik_folder_with_no_team() {
+    fn not_leaving_keeps_a_leftover_catervas_folder_with_no_team() {
         let world = World::new("leftover-kept");
         let target = TempRepo::new("leftover-kept-new");
-        write(&target.path, ".farik/agents/theo/memory.md", b"kept\n");
+        write(&target.path, ".catervas/agents/theo/memory.md", b"kept\n");
 
         let host = world.host(None);
         host.open(&named(&target), false, false).expect("taken on");
 
         assert_eq!(
-            read(&target.path, ".farik/agents/theo/memory.md"),
+            read(&target.path, ".catervas/agents/theo/memory.md"),
             b"kept\n"
         );
     }
@@ -696,12 +700,12 @@ mod tests {
         world.keep(&root, "", "procurement", "mail-password");
         write(
             &old.path,
-            ".farik/local/procurement/mail/mailbox.json",
+            ".catervas/local/procurement/mail/mailbox.json",
             br#"{"address":"buy@shop.test"}"#,
         );
         write(
             &old.path,
-            ".farik/local/procurement/mail/ledger.json",
+            ".catervas/local/procurement/mail/ledger.json",
             br#"{"last_uid":42}"#,
         );
         let fresh = TempRepo::new("keys-new");
@@ -716,15 +720,16 @@ mod tests {
         assert!(world.kept(&chosen, "", "procurement").is_some());
         assert!(world.kept(&root, "theo", "github").is_some(), "old stays");
         let note: Value =
-            serde_json::from_slice(&read(&chosen, ".farik/local/keys-copied.json")).expect("json");
+            serde_json::from_slice(&read(&chosen, ".catervas/local/keys-copied.json"))
+                .expect("json");
         assert_eq!(note["from"], json!(root.display().to_string()));
         assert_eq!(note["keys"].as_array().expect("keys").len(), 2, "{note}");
         for file in ["mailbox.json", "ledger.json"] {
-            let path = format!(".farik/local/procurement/mail/{file}");
+            let path = format!(".catervas/local/procurement/mail/{file}");
             assert_eq!(read(&chosen, &path), read(&root, &path), "{file}");
         }
         let new = open_project(&chosen, Utc::now()).expect("a project");
-        let mail = farik_store::seller_mail::seller_mail(&new.log).expect("mail");
+        let mail = catervas_store::seller_mail::seller_mail(&new.log).expect("mail");
         assert_eq!(mail.address.as_deref(), Some("buy@shop.test"));
         let connected = new
             .log
@@ -749,7 +754,7 @@ mod tests {
         world.keep(&root, "", "procurement", "mail-password");
         write(
             &old.path,
-            ".farik/local/procurement/mail/mailbox.json",
+            ".catervas/local/procurement/mail/mailbox.json",
             br#"{"address":"buy@shop.test"}"#,
         );
         let fresh = TempRepo::new("no-mailbox-new");
@@ -760,7 +765,7 @@ mod tests {
             .expect("taken on");
 
         assert!(world.kept(&chosen, "", "procurement").is_none());
-        assert!(!chosen.join(".farik/local/procurement/mail").exists());
+        assert!(!chosen.join(".catervas/local/procurement/mail").exists());
         assert!(events(&chosen, EventKind::MailboxConnected).is_empty());
     }
 
@@ -776,7 +781,7 @@ mod tests {
             .open(&named(&fresh), false, false)
             .expect("taken on");
 
-        assert!(!chosen.join(".farik/local/keys-copied.json").exists());
+        assert!(!chosen.join(".catervas/local/keys-copied.json").exists());
     }
 
     #[test]
@@ -791,13 +796,13 @@ mod tests {
         files_of(&target)
             .write_memory(&theirs, "their note\n")
             .expect("memory");
-        let before = read(&target.path, ".farik/team.yaml");
+        let before = read(&target.path, ".catervas/team.yaml");
         let host = world.host(Some(&root_of(&old.path)));
 
         let refused = host.open(&named(&target), false, false);
 
         assert_eq!(refused, Err(SetupError::Refused(HAS_TEAM.to_string())));
-        assert_eq!(read(&target.path, ".farik/team.yaml"), before);
+        assert_eq!(read(&target.path, ".catervas/team.yaml"), before);
         let chosen = host.open(&named(&target), false, true).expect("replaced");
         let new = open_project(&chosen, Utc::now()).expect("a project");
         assert_eq!(new.team, carried_of(&old));
@@ -808,7 +813,7 @@ mod tests {
             .output()
             .expect("git");
         for line in String::from_utf8_lossy(&status.stdout).lines() {
-            assert!(line.ends_with(".farik/"), "outside .farik/: {line}");
+            assert!(line.ends_with(".catervas/"), "outside .catervas/: {line}");
         }
     }
 
@@ -818,7 +823,7 @@ mod tests {
         let world = World::new("reopen");
         let old = a_project("reopen-old", |_| {});
         let root = root_of(&old.path);
-        let (team, count) = (read(&root, ".farik/team.yaml"), event_count(&root));
+        let (team, count) = (read(&root, ".catervas/team.yaml"), event_count(&root));
 
         let chosen = world
             .host(Some(&root))
@@ -826,9 +831,9 @@ mod tests {
             .expect("stays");
 
         assert_eq!(chosen, root);
-        assert_eq!(read(&root, ".farik/team.yaml"), team);
+        assert_eq!(read(&root, ".catervas/team.yaml"), team);
         assert_eq!(event_count(&root), count);
-        assert!(!root.join(".farik/local/keys-copied.json").exists());
+        assert!(!root.join(".catervas/local/keys-copied.json").exists());
     }
 
     #[test]
@@ -862,7 +867,7 @@ mod tests {
     fn leaving_creates_a_project_with_the_carried_team() {
         let world = World::new("create");
         let old = a_project("create-old", |_| {});
-        let parent = format!("farik-setup-create-parent-{}", std::process::id());
+        let parent = format!("catervas-setup-create-parent-{}", std::process::id());
         std::fs::create_dir_all(home().join(&parent)).expect("a parent");
 
         let chosen = world
@@ -878,21 +883,21 @@ mod tests {
         let new = open_project(&chosen, Utc::now()).expect("a project");
         assert_eq!(new.team, carried_of(&old));
         assert_eq!(new.files.list_contracts().expect("contracts").len(), 1);
-        assert!(!chosen.join(".farik/local/setup-pending").exists());
+        assert!(!chosen.join(".catervas/local/setup-pending").exists());
         assert!(events(&chosen, EventKind::TeamPaused).is_empty());
         std::fs::remove_dir_all(home().join(&parent)).expect("cleaned");
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn replacing_removes_a_linked_farik_folder_not_what_it_points_at() {
+    fn replacing_removes_a_linked_catervas_folder_not_what_it_points_at() {
         let world = World::new("linked");
         let old = a_project("linked-old", |_| {});
         let target = TempRepo::new("linked-new");
         let outside = scratch("linked-outside");
         std::fs::write(outside.join("team.yaml"), "name: elsewhere\n").expect("written");
         std::fs::write(outside.join("keep"), "keep me").expect("written");
-        std::os::unix::fs::symlink(&outside, target.path.join(".farik")).expect("a link");
+        std::os::unix::fs::symlink(&outside, target.path.join(".catervas")).expect("a link");
 
         let chosen = world
             .host(Some(&root_of(&old.path)))
@@ -904,7 +909,7 @@ mod tests {
             b"keep me"
         );
         assert!(outside.join("team.yaml").exists());
-        let meta = std::fs::symlink_metadata(chosen.join(".farik")).expect("a folder");
+        let meta = std::fs::symlink_metadata(chosen.join(".catervas")).expect("a folder");
         assert!(meta.is_dir() && !meta.file_type().is_symlink());
         let new = open_project(&chosen, Utc::now()).expect("a project");
         assert_eq!(new.team, carried_of(&old));
@@ -915,7 +920,7 @@ mod tests {
     fn opens_a_folder_with_a_team_as_before_when_not_leaving() {
         let world = World::new("not-leaving");
         let target = a_project("not-leaving-new", |_| {});
-        let before = read(&target.path, ".farik/team.yaml");
+        let before = read(&target.path, ".catervas/team.yaml");
 
         let chosen = world
             .host(None)
@@ -923,7 +928,7 @@ mod tests {
             .expect("opened");
 
         assert_eq!(chosen, root_of(&target.path));
-        assert_eq!(read(&target.path, ".farik/team.yaml"), before);
+        assert_eq!(read(&target.path, ".catervas/team.yaml"), before);
     }
 
     #[test]
@@ -937,7 +942,7 @@ mod tests {
         world.keep(&root, "", "procurement", "mail-password");
         write(
             &old.path,
-            ".farik/local/procurement/mail/mailbox.json",
+            ".catervas/local/procurement/mail/mailbox.json",
             br#"{"address":"not an address"}"#,
         );
         let fresh = TempRepo::new("bad-mailbox-new");
@@ -951,6 +956,6 @@ mod tests {
             panic!("a failure, not {failed:?}");
         };
         assert!(why.starts_with("the mailbox could not be carried"), "{why}");
-        assert!(!fresh.path.join(".farik/local/procurement/mail").exists());
+        assert!(!fresh.path.join(".catervas/local/procurement/mail").exists());
     }
 }

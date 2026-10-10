@@ -2,7 +2,7 @@
 //!
 //! A site is a host reached over `https`, in the ASCII form the `url` crate gives, with a host and
 //! its `www.` twin counted as one. The Procurement Specialist reads only the sites the owner
-//! allowed and the ones Farik ships (ADR 0039); every other role's web reading is open. Nothing
+//! allowed and the ones Catervas ships (ADR 0039); every other role's web reading is open. Nothing
 //! here reads the world: the approved set is passed in.
 
 use std::collections::BTreeSet;

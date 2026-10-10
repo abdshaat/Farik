@@ -46,7 +46,7 @@ The founder's decision of 2026-10-05 (ADR 0041): "the user can configure whether
 | An integration push or pull request; an agent's push (`git_remote`) | team policy, tier | same | 5.14, 5.6 |
 | Spending limits, the marketing budget, session limits, the 50-a-day cap | hold | hold | 5.5, 0042, 10f |
 | A deploy task's first deploy while it is in the running sprint, however it joined it | runs, `approved_by: sprint` | same | 0045, phase 11's 05b |
-| Any other `farik_deploy`: a retry, one after a send-back, one outside the running sprint, one with no sprint running | asks each time (Today's "Allow once") | runs, `approved_by: auto`; "Done on its own" reads "Lena put a1b2c3d live for FRK-40" (phase 11 step 05b's `deploy` kind) | 0041, 0045, phase 11's 05b |
+| Any other `farik_deploy`: a retry, one after a send-back, one outside the running sprint, one with no sprint running | asks each time (Today's "Allow once") | runs, `approved_by: auto`; "Done on its own" reads "Lena put a1b2c3d live for CTV-40" (phase 11 step 05b's `deploy` kind) | 0041, 0045, phase 11's 05b |
 | A deploy outside a deploy task's session, with no production settings, on a platform Farik cannot drive, while one runs, or before its work is in | refused, never asked | same | phase 11's 05b |
 | The DevOps Engineer's incident steps | phase 11 step 05d | phase 11 step 05d | out of scope |
 

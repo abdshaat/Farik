@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
@@ -78,7 +78,7 @@ describe("the raise of a marketing budget", () => {
 			google_ads: "500.00",
 			campaigns: [{ key: "near-me", budget: "200.00" }],
 		});
-		await s.reply(call, { task_id: "FRK-40" });
+		await s.reply(call, { task_id: "CTV-40" });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 

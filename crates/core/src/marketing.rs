@@ -45,7 +45,7 @@ pub fn parse_amount(text: &str) -> Option<Amount> {
     Some(Amount(whole.parse::<u64>().ok()? * 100 + hundredths))
 }
 
-/// A network a post slot names (the eleven of Buffer's that Farik plans for).
+/// A network a post slot names (the eleven of Buffer's that Catervas plans for).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PostChannel {
     /// Instagram.
@@ -762,7 +762,7 @@ pub const ZERO_DECIMAL: &[&str] = &[
 pub enum BudgetKind {
     /// One total for the campaign's run, which Google never bills past.
     Total,
-    /// A daily amount, which bounds Google's own charging while Farik is not running.
+    /// A daily amount, which bounds Google's own charging while Catervas is not running.
     Daily,
 }
 
@@ -777,7 +777,7 @@ impl BudgetKind {
     }
 }
 
-/// A Google Ads campaign Farik made for a plan campaign, as `marketing_campaign.created` says.
+/// A Google Ads campaign Catervas made for a plan campaign, as `marketing_campaign.created` says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatedCampaign {
     /// The plan it was made under, `MP-<n>`.
@@ -807,7 +807,7 @@ pub fn first_day(campaign: &PlanCampaign, today: NaiveDate) -> NaiveDate {
 /// Google never bills past one. The daemon asks with nothing spent, since a key has one campaign
 /// across a plan's whole lineage, so none of its budget was spent before the campaign is made. Any other run takes a daily budget,
 /// what is left divided by the days of the run and rounded down to the hundredth, which bounds
-/// Google's own charging while Farik is not running. In a currency of `ZERO_DECIMAL` the amount
+/// Google's own charging while Catervas is not running. In a currency of `ZERO_DECIMAL` the amount
 /// is whole units, rounded down.
 #[must_use]
 pub fn campaign_budget(
@@ -943,7 +943,7 @@ pub struct AdsPlanView<'a> {
     pub plan: &'a PlanProposal,
     /// The active plan and every plan it replaces, `replaces` followed through the whole chain.
     pub lineage: &'a [String],
-    /// Every campaign Farik made for any plan.
+    /// Every campaign Catervas made for any plan.
     pub created: &'a [CreatedCampaign],
     /// What each plan campaign's key has spent, in all the campaigns of the lineage.
     pub spent: &'a std::collections::BTreeMap<String, Amount>,
@@ -1008,7 +1008,7 @@ pub fn check_ads_write(view: &AdsPlanView<'_>, write: &AdsWrite) -> Result<(), S
                 .find(|made| made.campaign == *campaign && view.lineage.contains(&made.plan))
                 .ok_or_else(|| {
                     format!(
-                        "that campaign was not made for {} or a plan it replaces, so Farik \
+                        "that campaign was not made for {} or a plan it replaces, so Catervas \
                          leaves it alone",
                         view.plan_id
                     )
@@ -1076,7 +1076,7 @@ fn made_for_plan<'a>(
         })
         .ok_or_else(|| {
             format!(
-                "that campaign was not made for the active plan {}, so Farik leaves it alone",
+                "that campaign was not made for the active plan {}, so Catervas leaves it alone",
                 view.plan_id
             )
         })?;
@@ -1150,7 +1150,7 @@ fn check_new_budget(
 /// Running `campaign`: today within its dates, its spend below its budget and the plan's below
 /// the plan's, and what Google holds for it no more than the active plan gives its key: a plan
 /// that replaces another and lowers a key's budget, or shortens its dates, leaves the campaign's
-/// budget and end as the first plan made them, and Farik can lower the budget but not the end.
+/// budget and end as the first plan made them, and Catervas can lower the budget but not the end.
 fn check_enable(
     view: &AdsPlanView<'_>,
     campaign: &str,
@@ -1178,19 +1178,19 @@ fn check_enable(
     }
     let Some(ends_on) = held.ends_on else {
         return Err(format!(
-            "Farik could not read when {key} ends at Google, so it cannot check it against the plan"
+            "Catervas could not read when {key} ends at Google, so it cannot check it against the plan"
         ));
     };
     if ends_on > planned.ends_on {
         return Err(format!(
-            "{key} ends on {ends_on} at Google, after the {} the plan gives it, and Farik cannot \
+            "{key} ends on {ends_on} at Google, after the {} the plan gives it, and Catervas cannot \
              change a campaign's end",
             planned.ends_on
         ));
     }
     let Some(amount) = held.amount else {
         return Err(format!(
-            "Farik could not read the budget of {key} at Google, so it cannot check it against \
+            "Catervas could not read the budget of {key} at Google, so it cannot check it against \
              the plan"
         ));
     };
@@ -1206,7 +1206,7 @@ fn check_enable(
             // up to the daily amount each day.
             let Some(starts_on) = held.starts_on else {
                 return Err(format!(
-                    "Farik could not read when {key} starts at Google, so it cannot check it \
+                    "Catervas could not read when {key} starts at Google, so it cannot check it \
                      against the plan"
                 ));
             };
@@ -1224,7 +1224,7 @@ fn check_enable(
     }
 }
 
-/// What the campaigns Farik made for a plan's lineage have cost so far, in the plan's currency.
+/// What the campaigns Catervas made for a plan's lineage have cost so far, in the plan's currency.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanSpend {
     /// By the plan campaign's key, over every campaign of the lineage with that key.
@@ -1253,7 +1253,7 @@ impl CapScope {
     }
 }
 
-/// A budget that was reached, and the campaigns Farik pauses for it.
+/// A budget that was reached, and the campaigns Catervas pauses for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cap {
     /// What was reached.
@@ -1481,7 +1481,7 @@ pub fn caps_reached(
     caps
 }
 
-/// The campaigns an ended plan leaves running (ADR 0042): every campaign Farik made that the
+/// The campaigns an ended plan leaves running (ADR 0042): every campaign Catervas made that the
 /// active plan does not carry and that is not in `paused_for_end`, the resource names recorded
 /// paused for their plan's end. With no active plan, every one not paused.
 #[must_use]

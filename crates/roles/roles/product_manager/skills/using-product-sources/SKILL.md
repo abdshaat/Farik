@@ -36,7 +36,7 @@ mention it to the user.
 
 Amplitude, Linear and Notion only read. Never offer to update an issue, edit a page or change a
 chart there. When something there should change, tell the user what to change, in your note or with
-`farik_ask_human`; never make it a requirement, since no one on the team can change these services.
+`catervas_ask_human`; never make it a requirement, since no one on the team can change these services.
 
 On GitHub you may file an issue (`issue_write`, method `create`) or comment (`add_issue_comment`),
 only when the contract or the user asks for it.
@@ -50,9 +50,9 @@ only when the contract or the user asks for it.
   an unannounced plan in it.
 - If GitHub refuses a call ("Resource not accessible"), the key does not reach that repository or
   that permission, or an organisation has not approved it yet. Tell the user with
-  `farik_ask_human`, and never try another way.
+  `catervas_ask_human`, and never try another way.
 
 ## 5. When none is connected
 
 If no service is connected, or the one you need is not, ask the user for what you need with
-`farik_ask_human`. Do not guess a number you could not read.
+`catervas_ask_human`. Do not guess a number you could not read.

@@ -1,6 +1,6 @@
-//! `farik board`: the lifecycle, one line per task (F3).
+//! `catervas board`: the lifecycle, one line per task (F3).
 
-use farik_store::requests::board_json;
+use catervas_store::requests::board_json;
 
 use crate::Report;
 use crate::project::Project;
@@ -8,7 +8,7 @@ use crate::project::Project;
 /// Every task the log knows about, in the order the board keeps them.
 ///
 /// The board is read from the projections rather than from the contract files, because the log is
-/// what decides where a task is (`docs/SPEC.md` section 8.4); `farik doctor` is what says when the
+/// what decides where a task is (`docs/SPEC.md` section 8.4); `catervas doctor` is what says when the
 /// two disagree.
 ///
 /// # Errors
@@ -22,7 +22,7 @@ pub fn board(project: &Project) -> Result<Report, String> {
     if rows.is_empty() {
         return Ok(Report {
             lines: vec![
-                "no tasks yet: farik task create files one from a YAML contract".to_string(),
+                "no tasks yet: catervas task create files one from a YAML contract".to_string(),
             ],
             json: board_json(&rows),
             json_lines: None,

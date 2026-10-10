@@ -1,8 +1,8 @@
-//! `farik chat <agent>`: the human's one-to-one chat with one agent, from the log (`docs/SPEC.md`
+//! `catervas chat <agent>`: the human's one-to-one chat with one agent, from the log (`docs/SPEC.md`
 //! 4.3).
 
-use farik_protocol::event::EventBody;
-use farik_runtime::chat::chat_page;
+use catervas_protocol::event::EventBody;
+use catervas_runtime::chat::chat_page;
 use serde_json::{Value, json};
 
 use crate::Report;
@@ -45,7 +45,7 @@ pub fn chat(project: &Project, agent: &str) -> Result<Report, String> {
     }
     if lines.is_empty() {
         lines.push(format!(
-            "no messages yet: farik chat {agent} <text> sends one"
+            "no messages yet: catervas chat {agent} <text> sends one"
         ));
     }
     Ok(Report {

@@ -1,22 +1,22 @@
-//! The UI/UX Designer's plan gate (ADR 0026): `farik_propose_design_plan`, which ends the
-//! Designer's explore session with its plan, and `farik_decide_design_plan`, the Product Manager's
+//! The UI/UX Designer's plan gate (ADR 0026): `catervas_propose_design_plan`, which ends the
+//! Designer's explore session with its plan, and `catervas_decide_design_plan`, the Product Manager's
 //! approval or return of it. Both only write the log. Where a task's plan stands is read back from
 //! the log by the governor's checks, the orchestrator, and the browser.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use farik_core::contract::{Role, TaskId, TaskStatus};
-use farik_core::governor::gates::DesignerBrowser;
-use farik_core::governor::permissions::{PermissionTier, check_design_plan};
-use farik_core::team::Team;
-use farik_protocol::event::{
-    DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, EventBody, EventKind,
-    FarikEvent, PageCheckedBody, ReasonBody,
+use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::governor::gates::DesignerBrowser;
+use catervas_core::governor::permissions::{PermissionTier, check_design_plan};
+use catervas_core::team::Team;
+use catervas_protocol::event::{
+    CatervasEvent, DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, EventBody,
+    EventKind, PageCheckedBody, ReasonBody,
 };
-use farik_roles::builtin_connector;
-use farik_store::waiting::last_move_into;
-use farik_store::{EventLog, EventQuery, StoreError};
+use catervas_roles::builtin_connector;
+use catervas_store::waiting::last_move_into;
+use catervas_store::{EventLog, EventQuery, StoreError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,7 +31,7 @@ use crate::session::SessionPurpose;
 /// How long a plan may be, in characters.
 const PLAN_CHARS: std::ops::RangeInclusive<usize> = 200..=8_000;
 
-/// `farik_propose_design_plan`'s input.
+/// `catervas_propose_design_plan`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProposeDesignPlanInput {
@@ -41,7 +41,7 @@ pub(crate) struct ProposeDesignPlanInput {
     plan: String,
 }
 
-/// `farik_decide_design_plan`'s input.
+/// `catervas_decide_design_plan`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DecideDesignPlanInput {
@@ -73,7 +73,7 @@ pub(crate) struct DesignPlan {
 }
 
 /// The latest plan among a task's events, oldest first, with the decision that followed it.
-pub(crate) fn design_plan(history: &[FarikEvent]) -> Option<DesignPlan> {
+pub(crate) fn design_plan(history: &[CatervasEvent]) -> Option<DesignPlan> {
     let mut latest: Option<DesignPlan> = None;
     for event in history {
         let (state, reason) = match &event.body {
@@ -98,7 +98,7 @@ pub(crate) fn design_plan(history: &[FarikEvent]) -> Option<DesignPlan> {
 }
 
 /// How many times the task's plans were returned, which counts against its `max_iterations`.
-pub(crate) fn returns(history: &[FarikEvent]) -> u32 {
+pub(crate) fn returns(history: &[CatervasEvent]) -> u32 {
     let count = history
         .iter()
         .filter(|event| matches!(event.body, EventBody::DesignPlanReturned(_)))
@@ -107,7 +107,10 @@ pub(crate) fn returns(history: &[FarikEvent]) -> u32 {
 }
 
 /// The task's design-plan events, oldest first.
-pub(crate) fn plan_history(log: &EventLog, task: &TaskId) -> Result<Vec<FarikEvent>, StoreError> {
+pub(crate) fn plan_history(
+    log: &EventLog,
+    task: &TaskId,
+) -> Result<Vec<CatervasEvent>, StoreError> {
     log.read(&EventQuery {
         task_id: Some(task.clone()),
         kinds: vec![
@@ -229,7 +232,7 @@ pub(super) fn decide(call: &Call<'_>, input: DecideDesignPlanInput) -> Result<Va
     Ok(json!({ "seq": event.envelope.seq }))
 }
 
-/// `farik_check_page`'s input.
+/// `catervas_check_page`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CheckPageInput {
@@ -246,7 +249,7 @@ const VIOLATIONS_CAP_BYTES: usize = 16 * 1024;
 
 /// Where the screenshots of `task` are kept, under the project at `root`.
 pub(crate) fn screenshots(root: &Path, task: &TaskId) -> PathBuf {
-    root.join(".farik/local/screenshots").join(task.as_str())
+    root.join(".catervas/local/screenshots").join(task.as_str())
 }
 
 /// Checks a page of the task's preview, from the UI/UX Designer's session that has it open, and
@@ -272,7 +275,7 @@ pub(super) async fn check(call: &Call<'_>, input: CheckPageInput) -> Result<Valu
         .into());
     }
     let definition = builtin_connector("playwright").ok_or_else(|| ToolError::Failed {
-        detail: "Farik ships no playwright connector".to_string(),
+        detail: "Catervas ships no playwright connector".to_string(),
     })?;
     let folder = screenshots(call.deps().files.root(), task);
     std::fs::create_dir_all(&folder).map_err(super::failed)?;
@@ -310,7 +313,7 @@ pub(super) async fn check(call: &Call<'_>, input: CheckPageInput) -> Result<Valu
     }))
 }
 
-/// `farik_record_design_review`'s input.
+/// `catervas_record_design_review`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordDesignReviewInput {
@@ -332,7 +335,7 @@ const REVIEW_CHECKS: [(&str, &str); 4] = [
 /// Records `design_review.recorded`, from the UI/UX Designer's design review of the task (its
 /// `verify` session), once the session has checked a page at each width in each theme: the
 /// session's latest check of each is copied into the review, so that what the review says it saw
-/// is Farik's own measurement.
+/// is Catervas's own measurement.
 pub(super) fn record_review(
     call: &Call<'_>,
     input: RecordDesignReviewInput,
@@ -450,7 +453,7 @@ pub(crate) struct DesignReview {
 pub(crate) fn design_review(
     team: &Team,
     ui_change: bool,
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     browser: impl FnOnce() -> DesignerBrowser,
 ) -> DesignReview {
     let waiting = |state| DesignReview {
@@ -506,7 +509,7 @@ pub(crate) fn design_review(
 mod tests {
     use std::sync::Arc;
 
-    use farik_protocol::event::{EventBody, EventKind};
+    use catervas_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
     use crate::preview::fixtures::{CheckedPreview, SCREENSHOT, after};
@@ -524,7 +527,7 @@ mod tests {
 
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(name, &a_team_of_three(with_the_designer));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         project
     }
 
@@ -550,9 +553,9 @@ mod tests {
         call(
             project,
             agent,
-            Some("FRK-1"),
+            Some("CTV-1"),
             purpose,
-            "farik_propose_design_plan",
+            "catervas_propose_design_plan",
             json!({ "plan": plan }),
         )
     }
@@ -568,7 +571,7 @@ mod tests {
             agent,
             task,
             purpose,
-            "farik_decide_design_plan",
+            "catervas_decide_design_plan",
             json!({ "approve": true, "reason": "It keeps to the task's screens." }),
         )
     }
@@ -587,22 +590,22 @@ mod tests {
         assert_eq!(after(args, "--user"), ["1000:1000"]);
         assert_eq!(
             after(args, "--network"),
-            ["container:farik-preview-p-frk-1"]
+            ["container:catervas-preview-p-ctv-1"]
         );
         assert_eq!(
             after(args, "--label"),
-            ["farik.project=p", "farik.task=FRK-1"]
+            ["catervas.project=p", "catervas.task=CTV-1"]
         );
         // A missing image fails the check at once rather than pulling gigabytes unseen.
         assert_eq!(after(args, "--pull"), ["never"]);
-        // Named, so that a check Farik gives up on is removed by name, not left to its watchdog.
+        // Named, so that a check Catervas gives up on is removed by name, not left to its watchdog.
         let named = after(args, "--name");
         assert!(
-            named.len() == 1 && named[0].starts_with("farik-check-farik-preview-p-frk-1-"),
+            named.len() == 1 && named[0].starts_with("catervas-check-catervas-preview-p-ctv-1-"),
             "{args:?}"
         );
         assert_eq!(after(args, "--entrypoint"), ["node"]);
-        let definition = farik_roles::builtin_connector("playwright").expect("shipped");
+        let definition = catervas_roles::builtin_connector("playwright").expect("shipped");
         let image = args
             .iter()
             .position(|arg| *arg == definition.image)
@@ -617,17 +620,17 @@ mod tests {
     fn checks_a_page_through_the_runner() {
         let project = a_project("tools-check-page");
         let preview = Arc::new(CheckedPreview::printing(A_VIOLATION));
-        let mut context = project.context("iris", Some("FRK-1"));
+        let mut context = project.context("iris", Some("CTV-1"));
         context.preview = Some(preview.clone());
         let phone = run(
             &context,
-            "farik_check_page",
+            "catervas_check_page",
             json!({ "path": "/settings", "width": "phone", "theme": "dark" }),
         )
         .expect("the Designer checks a page of its task's preview");
         run(
             &context,
-            "farik_check_page",
+            "catervas_check_page",
             json!({ "path": "/", "width": "desktop", "theme": "light" }),
         )
         .expect("and another");
@@ -663,7 +666,7 @@ mod tests {
                     project
                         .repo
                         .path
-                        .join(".farik/local/screenshots/FRK-1")
+                        .join(".catervas/local/screenshots/CTV-1")
                         .join(file)
                 )
                 .expect("the screenshot is kept"),
@@ -689,11 +692,11 @@ mod tests {
             })
         );
         let ids = &checked[0].envelope.ids;
-        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
+        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("CTV-1"));
         assert_eq!(ids.agent_id.as_deref(), Some("iris"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
 
-        // The page's words reach the agent inside an untrusted block, Farik's own beside it.
+        // The page's words reach the agent inside an untrusted block, Catervas's own beside it.
         assert_eq!(phone["width"], "phone");
         assert_eq!(phone["theme"], "dark");
         assert_eq!(phone["path"], "/settings");
@@ -717,33 +720,33 @@ mod tests {
         let outside = "check_page_refused: only the UI/UX Designer checks a page, in a session \
                        of its task with the preview open";
 
-        let mut architect = project.context("ada", Some("FRK-1"));
+        let mut architect = project.context("ada", Some("CTV-1"));
         architect.purpose = SessionPurpose::Verify;
         architect.preview = Some(preview.clone());
         assert_eq!(
-            refused(run(&architect, "farik_check_page", page.clone())),
+            refused(run(&architect, "catervas_check_page", page.clone())),
             outside
         );
-        let without_preview = project.context("iris", Some("FRK-1"));
+        let without_preview = project.context("iris", Some("CTV-1"));
         assert_eq!(
-            refused(run(&without_preview, "farik_check_page", page.clone())),
+            refused(run(&without_preview, "catervas_check_page", page.clone())),
             outside
         );
         let mut without_task = project.context("iris", None);
         without_task.preview = Some(preview.clone());
         assert_eq!(
-            refused(run(&without_task, "farik_check_page", page)),
+            refused(run(&without_task, "catervas_check_page", page)),
             outside
         );
 
         // The path is the page's on the preview: anything else could name another host.
-        let mut designer = project.context("iris", Some("FRK-1"));
+        let mut designer = project.context("iris", Some("CTV-1"));
         designer.preview = Some(preview.clone());
         for path in ["@evil.test", "x"] {
             assert_eq!(
                 refused(run(
                     &designer,
-                    "farik_check_page",
+                    "catervas_check_page",
                     json!({ "path": path, "width": "phone", "theme": "light" })
                 )),
                 format!("check_page_refused: a page's path starts with /, and {path:?} does not")
@@ -758,12 +761,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn copies_the_latest_check_of_each_into_the_review() {
         let project = a_project("tools-design-review-latest");
-        let mut context = project.context("iris", Some("FRK-1"));
+        let mut context = project.context("iris", Some("CTV-1"));
         context.purpose = SessionPurpose::Verify;
         let check = |context: &crate::tools::ToolContext, width: &str, theme: &str| {
             run(
                 context,
-                "farik_check_page",
+                "catervas_check_page",
                 json!({ "path": "/", "width": width, "theme": theme }),
             )
             .expect("the Designer checks a page");
@@ -782,7 +785,7 @@ mod tests {
         }
         run(
             &context,
-            "farik_record_design_review",
+            "catervas_record_design_review",
             json!({ "pass": true, "reasons": "Reads well now." }),
         )
         .expect("the review records");
@@ -800,21 +803,21 @@ mod tests {
     fn refuses_an_incomplete_design_review() {
         let project = a_project("tools-design-review");
         let preview = Arc::new(CheckedPreview::printing(A_VIOLATION));
-        let mut context = project.context("iris", Some("FRK-1"));
+        let mut context = project.context("iris", Some("CTV-1"));
         context.purpose = SessionPurpose::Verify;
         context.preview = Some(preview);
         let review = json!({ "pass": false, "reasons": "The menu button has no name." });
         let check = |width: &str, theme: &str| {
             run(
                 &context,
-                "farik_check_page",
+                "catervas_check_page",
                 json!({ "path": "/", "width": width, "theme": theme }),
             )
             .expect("the Designer checks a page");
         };
         // A check of another session is not this review's.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "page.checked",
             &json!({
                 "width": "desktop", "theme": "dark", "path": "/", "violations": [],
@@ -827,7 +830,11 @@ mod tests {
         check("desktop", "light");
         check("phone", "light");
         assert_eq!(
-            refused(run(&context, "farik_record_design_review", review.clone())),
+            refused(run(
+                &context,
+                "catervas_record_design_review",
+                review.clone()
+            )),
             "design_review_incomplete: check each page at both widths in both themes first; \
              missing: desktop dark"
         );
@@ -838,7 +845,7 @@ mod tests {
         );
 
         check("desktop", "dark");
-        run(&context, "farik_record_design_review", review)
+        run(&context, "catervas_record_design_review", review)
             .expect("all four checks are in: the review records");
 
         let recorded = project.events(&[EventKind::DesignReviewRecorded]);
@@ -868,15 +875,15 @@ mod tests {
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
 
         // Only the Designer records one, in its design review of the task.
-        let mut implementing = project.context("iris", Some("FRK-1"));
+        let mut implementing = project.context("iris", Some("CTV-1"));
         implementing.purpose = SessionPurpose::Implement;
-        let mut architect = project.context("ada", Some("FRK-1"));
+        let mut architect = project.context("ada", Some("CTV-1"));
         architect.purpose = SessionPurpose::Verify;
         for outside in [implementing, architect] {
             assert!(
                 refused(run(
                     &outside,
-                    "farik_record_design_review",
+                    "catervas_record_design_review",
                     json!({ "pass": true, "reasons": "Fine." })
                 ))
                 .starts_with("design_review_refused: "),
@@ -885,7 +892,7 @@ mod tests {
         assert_eq!(
             refused(run(
                 &context,
-                "farik_record_design_review",
+                "catervas_record_design_review",
                 json!({ "pass": true, "reasons": " " })
             )),
             "blank_reason: a reason is recorded, and the log is where somebody reads it back"
@@ -952,7 +959,7 @@ mod tests {
         };
         assert_eq!(body.plan, a_plan(600, 8_000));
         let ids = &proposed[1].envelope.ids;
-        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
+        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("CTV-1"));
         assert_eq!(ids.agent_id.as_deref(), Some("iris"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
     }
@@ -962,7 +969,7 @@ mod tests {
     fn refuses_the_decision_but_from_the_product_manager() {
         let project = a_project("tools-design-decide");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.proposed",
             &json!({ "plan": a_plan(40, 400) }),
         );
@@ -972,7 +979,7 @@ mod tests {
             refused(decide(
                 &project,
                 "ada",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 SessionPurpose::Verify
             )),
             outside
@@ -980,7 +987,7 @@ mod tests {
         // The Designer never decides its own plan, in whatever session.
         for purpose in [SessionPurpose::Explore, SessionPurpose::Verify] {
             assert_eq!(
-                refused(decide(&project, "iris", Some("FRK-1"), purpose)),
+                refused(decide(&project, "iris", Some("CTV-1"), purpose)),
                 outside
             );
         }
@@ -988,7 +995,7 @@ mod tests {
             refused(decide(
                 &project,
                 "pm",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 SessionPurpose::Implement
             )),
             outside
@@ -999,7 +1006,7 @@ mod tests {
         );
         assert!(project.events(&[EventKind::DesignPlanApproved]).is_empty());
 
-        decide(&project, "pm", Some("FRK-1"), SessionPurpose::Verify)
+        decide(&project, "pm", Some("CTV-1"), SessionPurpose::Verify)
             .expect("the Product Manager decides, in its verify session of the task");
         let approved = project.events(&[EventKind::DesignPlanApproved]);
         assert_eq!(approved.len(), 1);
@@ -1014,14 +1021,14 @@ mod tests {
             refused(decide(
                 &project,
                 "pm",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 SessionPurpose::Verify
             )),
             "design_plan_refused: the task has no plan waiting for a decision"
         );
         // With the next plan waiting, a blank reason is still refused.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.proposed",
             &json!({ "plan": a_plan(40, 400) }),
         );
@@ -1029,9 +1036,9 @@ mod tests {
             refused(call(
                 &project,
                 "pm",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 SessionPurpose::Verify,
-                "farik_decide_design_plan",
+                "catervas_decide_design_plan",
                 json!({ "approve": false, "reason": " " }),
             )),
             "blank_reason: a reason is recorded, and the log is where somebody reads it back"

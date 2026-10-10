@@ -1,4 +1,4 @@
-import type { SocketLike } from "@farik/protocol-client";
+import type { SocketLike } from "@catervas/protocol-client";
 import { act } from "@testing-library/react";
 
 type Frame = { id: number; method: string; params: Record<string, unknown> };

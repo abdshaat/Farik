@@ -1,5 +1,5 @@
-//! Farik's own MCP server over `eBay`'s Browse API (`docs/SPEC.md` 6.7, ADR 0038, ADR 0043),
-//! started by `farik connector ebay` with the user's own `eBay` developer keys. It reads live
+//! Catervas's own MCP server over `eBay`'s Browse API (`docs/SPEC.md` 6.7, ADR 0038, ADR 0043),
+//! started by `catervas connector ebay` with the user's own `eBay` developer keys. It reads live
 //! fixed-price listings and their asking prices and nothing else: no bid, no purchase, and no
 //! seller's username. It speaks to one fixed address, follows no redirect and uses no proxy,
 //! checks every input before anything leaves, and asks for no address an answer names. The two
@@ -57,13 +57,13 @@ pub fn tool_names() -> Vec<&'static str> {
 
 /// How long one call to `eBay` may take.
 const TIMEOUT: Duration = Duration::from_secs(20);
-/// The most of an answer Farik reads.
+/// The most of an answer Catervas reads.
 const MAX_BODY: usize = 4 * 1024 * 1024;
 /// What the grant asks for: `eBay`'s public data, which the Browse API takes and nothing more.
 const SCOPE: &str = "https://api.ebay.com/oauth/api_scope";
 /// A grant is asked for again when less than this much of it remains.
 const EARLY: Duration = Duration::from_secs(60);
-/// The longest Farik believes a grant lasts; `eBay`'s last two hours.
+/// The longest Catervas believes a grant lasts; `eBay`'s last two hours.
 const LONGEST_GRANT: Duration = Duration::from_hours(24);
 /// The most characters a search's words hold: `eBay`'s own maximum.
 const MAX_WORDS: usize = 100;
@@ -111,7 +111,7 @@ enum Endpoint {
     Item,
 }
 
-/// A token `eBay` granted, and the moment Farik stops using it.
+/// A token `eBay` granted, and the moment Catervas stops using it.
 #[derive(Clone)]
 struct Grant {
     token: Secret,
@@ -158,7 +158,7 @@ impl Ebay {
         timeout: Duration,
     ) -> Result<Self, EbayError> {
         let client = reqwest::Client::builder()
-            // Nothing eBay answers sends Farik, or the keys, anywhere else, and nothing is sent
+            // Nothing eBay answers sends Catervas, or the keys, anywhere else, and nothing is sent
             // through a proxy.
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
@@ -356,7 +356,7 @@ impl Ebay {
             *self.grant.lock().await = None;
         }
         // Whatever it says other than a listing or listings, a redirect included, is one
-        // sentence of Farik's.
+        // sentence of Catervas's.
         if !response.status().is_success() {
             return Err(match (response.status().as_u16(), endpoint) {
                 (429, _) => LIMIT,
@@ -578,7 +578,7 @@ fn listing(item: &Value) -> Map<String, Value> {
 }
 
 /// The name the server gives itself.
-const SERVER_NAME: &str = "farik-ebay";
+const SERVER_NAME: &str = "catervas-ebay";
 
 /// Every tool, with what it takes.
 fn descriptors() -> Vec<Tool> {
@@ -656,7 +656,7 @@ impl ServerHandler for Ebay {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        // As Farik's own server answers: protocol 2026-07-28 wants a list's freshness said.
+        // As Catervas's own server answers: protocol 2026-07-28 wants a list's freshness said.
         std::future::ready(Ok(ListToolsResult::with_all_items(descriptors())
             .with_ttl_ms(0)
             .with_cache_scope(CacheScope::Private)))
@@ -876,7 +876,7 @@ mod tests {
         })
     }
 
-    /// A listing as the search gives it, with the fields Farik never reads among them.
+    /// A listing as the search gives it, with the fields Catervas never reads among them.
     fn a_summary(n: u32) -> Value {
         json!({
             "itemId": format!("v1|11000000{n:04}|0"), "title": format!("Baby car mirror {n}"),
@@ -1002,7 +1002,7 @@ mod tests {
             .expect("the server's answer to initialize");
         assert_eq!(
             info.server_info.as_ref().expect("a name").name,
-            "farik-ebay"
+            "catervas-ebay"
         );
         let tools = client.list_all_tools().await.expect("a list");
         let names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
@@ -2051,7 +2051,7 @@ mod tests {
     /// set to a fixture that records, asks a second fixture directly.
     #[tokio::test]
     async fn uses_no_proxy_from_the_environment() {
-        if let Ok(target) = std::env::var("FARIK_EBAY_PROXY_CHILD") {
+        if let Ok(target) = std::env::var("CATERVAS_EBAY_PROXY_CHILD") {
             let server = Ebay::new(&target, id(), secret()).expect("a server");
             server
                 .call("search_items", &search("mirror"))
@@ -2063,7 +2063,7 @@ mod tests {
         let target = Fixture::start(happy(7200)).await;
         let child = tokio::process::Command::new(std::env::current_exe().expect("this test"))
             .args(["--exact", "ebay::tests::uses_no_proxy_from_the_environment"])
-            .env("FARIK_EBAY_PROXY_CHILD", &target.address)
+            .env("CATERVAS_EBAY_PROXY_CHILD", &target.address)
             .env("HTTP_PROXY", &proxy.address)
             .env("http_proxy", &proxy.address)
             .env("HTTPS_PROXY", &proxy.address)
@@ -2087,7 +2087,7 @@ mod tests {
     /// call, a refused grant and a refused search with `--nocapture`, and its output is read.
     #[tokio::test]
     async fn writes_no_key_to_its_output() {
-        if std::env::var("FARIK_EBAY_QUIET_CHILD").is_ok() {
+        if std::env::var("CATERVAS_EBAY_QUIET_CHILD").is_ok() {
             let good = Fixture::start(happy(7200)).await;
             let server = asking(&good);
             let _ = server.call("search_items", &search("mirror")).await;
@@ -2117,7 +2117,7 @@ mod tests {
                 "ebay::tests::writes_no_key_to_its_output",
                 "--nocapture",
             ])
-            .env("FARIK_EBAY_QUIET_CHILD", "1")
+            .env("CATERVAS_EBAY_QUIET_CHILD", "1")
             .output()
             .await
             .expect("the child runs");

@@ -44,5 +44,5 @@ Commit your changes, write a completion note that opens with two or three plain 
 user and a blank line (then what changed, what you did not cover, and what the
 reviewer should check first), and request `verifying`. You publish or send only through a connected
 service: a social post in the owner's approved marketing plan goes out through
-`farik_schedule_post`, any other post waits for the owner, and an email is a draft the human sends;
+`catervas_schedule_post`, any other post waits for the owner, and an email is a draft the human sends;
 otherwise the human publishes.

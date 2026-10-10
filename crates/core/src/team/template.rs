@@ -20,7 +20,7 @@ const SCHEMA_JSON: &str = include_str!("../../../../docs/schemas/team-template.s
 
 /// Where an uploaded picture lives in a project; a template leaves one out, since nothing copies
 /// it to another project yet.
-const UPLOADED: &str = ".farik/team/avatars/";
+const UPLOADED: &str = ".catervas/team/avatars/";
 
 /// The longest slug, as long as an agent id may be.
 const SLUG_MAX: usize = 64;
@@ -501,7 +501,7 @@ mod tests {
     #[test]
     fn leaves_out_an_uploaded_picture() {
         let mut wire = a_team_wire();
-        wire["agents"][0]["avatar"] = json!(".farik/team/avatars/mira.png");
+        wire["agents"][0]["avatar"] = json!(".catervas/team/avatars/mira.png");
         wire["agents"][1]["avatar"] = json!("developer");
         let template = template_of(&wire);
         assert!(template["agents"][0].get("avatar").is_none());
@@ -594,7 +594,7 @@ mod tests {
             refusals(&wire),
             [(
                 "/policy/judgment/judge".to_string(),
-                "No active Architect can check plans. Let Farik choose, or add one.".to_string()
+                "No active Architect can check plans. Let Catervas choose, or add one.".to_string()
             )]
         );
     }
@@ -796,7 +796,7 @@ mod tests {
     fn keeps_the_projects_value_where_the_template_has_none() {
         let mut mira = an_agent_wire("mira", "product_manager");
         mira["persona"] = json!("Plans.");
-        mira["avatar"] = json!(".farik/team/avatars/mira.png");
+        mira["avatar"] = json!(".catervas/team/avatars/mira.png");
         mira["model"] = json!({ "id": "claude-sonnet-5" });
         let mut kai = joining("kai", "Kai", "marketing_specialist");
         kai["persona"] = json!("Tells.");
@@ -814,7 +814,7 @@ mod tests {
         );
         let mira = agent(&result, "mira").expect("mira");
         assert_eq!(mira["persona"], "Plans.");
-        assert_eq!(mira["avatar"], ".farik/team/avatars/mira.png");
+        assert_eq!(mira["avatar"], ".catervas/team/avatars/mira.png");
         assert_eq!(mira["model"], json!({ "id": "claude-sonnet-5" }));
         assert_eq!(result.added, ids(&["iris", "kai"]));
         assert_eq!(

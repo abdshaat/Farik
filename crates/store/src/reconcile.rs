@@ -1,10 +1,10 @@
 //! Where the files and the log disagree (`docs/SPEC.md` section 8.4).
 //!
-//! The log is the source of truth for what happened; the files under `.farik/` are the source of
+//! The log is the source of truth for what happened; the files under `.catervas/` are the source of
 //! truth for what the team knows. Two sources of truth about one project can come apart — a process
 //! stopped between a write and an append, a person edited a contract by hand, a file was restored
 //! from a backup — and this says where, without picking a side. Nothing here writes anything: a
-//! person decides what to do about a disagreement, and `farik doctor` is where they are told of one.
+//! person decides what to do about a disagreement, and `catervas doctor` is where they are told of one.
 //!
 //! Only what the log is authoritative about is a disagreement. A contract's `status`, its `locked`
 //! flag, and its `sprint` are all moved by events (5.2, 5.11), so a file that says something else is
@@ -15,7 +15,7 @@
 
 use std::fmt;
 
-use farik_core::contract::TaskId;
+use catervas_core::contract::TaskId;
 
 use crate::error::StoreError;
 use crate::files::{FilesError, ProjectFiles};
@@ -279,14 +279,14 @@ fn in_sprint(sprint: Option<&str>) -> &str {
 
 /// The number in a task id, for ordering, so that the tenth task does not come before the ninth.
 ///
-/// The parse cannot fail: a `TaskId` is `FRK-` and one to six digits, which is what let it be built.
-/// The number is not unique, though: the schema allows a leading zero, so `FRK-01` and `FRK-1` are
+/// The parse cannot fail: a `TaskId` is `CTV-` and one to six digits, which is what let it be built.
+/// The number is not unique, though: the schema allows a leading zero, so `CTV-01` and `CTV-1` are
 /// two spellings of one number, and the caller breaks that tie with the id itself the way the board's
 /// own order does.
 fn number_in(task_id: &TaskId) -> u64 {
     task_id
         .as_str()
-        .trim_start_matches("FRK-")
+        .trim_start_matches("CTV-")
         .parse()
         .unwrap_or_default()
 }

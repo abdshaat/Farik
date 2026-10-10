@@ -1,4 +1,4 @@
-import { Avatar, type AvatarKey, Button, Dialog, TextArea } from "@farik/ui";
+import { Avatar, type AvatarKey, Button, Dialog, TextArea } from "@catervas/ui";
 import { Fragment, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
@@ -45,7 +45,7 @@ type Campaign = {
 	startsOn: string;
 	endsOn: string;
 };
-/** The last spend Farik read of a plan's Google Ads, and the last read that failed (step 08g). */
+/** The last spend Catervas read of a plan's Google Ads, and the last read that failed (step 08g). */
 type Spend = {
 	readAt?: string;
 	total?: string;
@@ -62,7 +62,7 @@ type Reached = {
 	failed?: string;
 	at: string;
 };
-/** An ad Farik paused on its own, and why. */
+/** An ad Catervas paused on its own, and why. */
 type Paused = {
 	key: string;
 	name: string;
@@ -105,7 +105,7 @@ export type Plan = {
 		/** The plan that took its place. */
 		replacedBy?: string;
 	} | null;
-	/** What Farik's watch knows of the ads' spend; left out until it has tried. */
+	/** What Catervas's watch knows of the ads' spend; left out until it has tried. */
 	spend?: Spend;
 	reached?: Reached[];
 	paused?: Paused[];
@@ -154,7 +154,7 @@ export function MarketingPlan() {
 		)
 		.join(", ");
 	const ads = plan.campaigns.length;
-	// What Farik's watch last read of the ads' spend, and what it paused on its own.
+	// What Catervas's watch last read of the ads' spend, and what it paused on its own.
 	const ended = plan.state === "ended";
 	const spend = plan.spend;
 	const seen = spend?.total !== undefined && ads > 0;
@@ -950,7 +950,7 @@ export function EndPlan({
 	);
 }
 
-/** Where a campaign stands once Farik paused it, by why. */
+/** Where a campaign stands once Catervas paused it, by why. */
 const PAUSED_WORDS = {
 	budget_reached: "marketingPausedAtBudget",
 	plan_ended: "marketingPausedPlanEnded",
@@ -996,7 +996,7 @@ function Advertises({
 	);
 }
 
-/** When Farik read something: "today at 10:15" for a time today, else the day too. */
+/** When Catervas read something: "today at 10:15" for a time today, else the day too. */
 function readAt(time: string): string {
 	return time.slice(0, 10) === today()
 		? t("marketingTodayAt", { time: time.slice(11, 16) })
@@ -1063,7 +1063,7 @@ function SpendSection({
 	);
 }
 
-/** Each ad Farik paused on its own, newest first, with when and why. */
+/** Each ad Catervas paused on its own, newest first, with when and why. */
 function PausesSection({
 	plan,
 	paused,

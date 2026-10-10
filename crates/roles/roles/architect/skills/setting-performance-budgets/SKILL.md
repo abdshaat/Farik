@@ -18,7 +18,7 @@ project has no way, the first item in the note is the task that adds one.
 
 ## 3. Where it goes
 
-Write the budget in the design note or in the decision (`farik_write_decision`). Then propose it
+Write the budget in the design note or in the decision (`catervas_write_decision`). Then propose it
 to the Product Manager as an exit criterion of kind `command`, written in the note: you do not
 change a contract you are not writing.
 

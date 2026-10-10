@@ -13,15 +13,15 @@ use crate::text::listed;
 // `summary` of the `task.created` and `contract.written` events is another thing: the log's
 // one-line summary of the contract. The two share a name and nothing else.
 pub use crate::generated::task_contract::{
-    ExitCriterion, ExitCriterionVerification as VerificationWire,
-    FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
-    FarikTaskContractId as TaskId, FarikTaskContractKind as TaskKind,
-    FarikTaskContractNotes as Notes, FarikTaskContractRequirementsItem as Requirement,
-    FarikTaskContractRisk as Risk, FarikTaskContractStatus as TaskStatus, Role,
+    CatervasTaskContract as TaskContract, CatervasTaskContractBudget as Budget,
+    CatervasTaskContractId as TaskId, CatervasTaskContractKind as TaskKind,
+    CatervasTaskContractNotes as Notes, CatervasTaskContractRequirementsItem as Requirement,
+    CatervasTaskContractRisk as Risk, CatervasTaskContractStatus as TaskStatus, ExitCriterion,
+    ExitCriterionVerification as VerificationWire, Role,
 };
 
 /// A criterion's verification method with named variants. The generated wire enum names its
-/// variants by position; this is the one mapping `farik-core` keeps at its edge.
+/// variants by position; this is the one mapping `catervas-core` keeps at its edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verification {
     /// Run a command; pass on the expected exit code and output.
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn accepts_a_schema_valid_contract_and_applies_the_defaults() {
         let contract = validate_contract(&a_contract_wire()).expect("valid");
-        assert_eq!(contract.id.to_string(), "FRK-1");
+        assert_eq!(contract.id.to_string(), "CTV-1");
         assert_eq!(contract.scope.out_of_scope, vec!["password reset"]);
         assert_eq!(contract.budget.max_sessions.get(), 14);
         assert_eq!(contract.budget.max_iterations.get(), 3);
@@ -430,11 +430,13 @@ mod tests {
 
     #[test]
     fn refuses_a_task_id_that_does_not_match_the_pattern() {
-        let mut input = a_contract_wire();
-        input["id"] = json!("TASK-1");
-        let errors = refusal(&input);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].path, "/id");
+        for id in ["TASK-1", "FRK-1"] {
+            let mut input = a_contract_wire();
+            input["id"] = json!(id);
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{id}");
+            assert_eq!(errors[0].path, "/id");
+        }
     }
 
     #[test]
@@ -500,7 +502,7 @@ mod tests {
         assert!(contract.locked);
         assert_eq!(
             serde_json::to_value(&contract.parent).unwrap(),
-            json!("FRK-3")
+            json!("CTV-3")
         );
         assert_eq!(
             contract

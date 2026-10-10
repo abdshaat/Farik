@@ -7,10 +7,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::request::Parts;
-use farik_core::governor::permissions::ConnectorTag;
-use farik_core::team::{CustomServer, CustomTransport};
-use farik_runtime::claude::Secret;
-use farik_runtime::connectors::{ConnectorError, ListedTool, call_tool, list_tools};
+use catervas_core::governor::permissions::ConnectorTag;
+use catervas_core::team::{CustomServer, CustomTransport};
+use catervas_runtime::claude::Secret;
+use catervas_runtime::connectors::{ConnectorError, ListedTool, call_tool, list_tools};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
     InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams, ServerCapabilities,
@@ -47,7 +47,10 @@ done
 
 /// A fresh folder for one test.
 fn scratch(test: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("farik-fixture-mcp-{}-{test}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "catervas-fixture-mcp-{}-{test}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the folder is made");
     dir
@@ -103,7 +106,7 @@ async fn lists_a_stdio_servers_tools() {
         &BTreeMap::new(),
         None,
         &own_folder(),
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect("the tools are listed");
@@ -139,7 +142,7 @@ async fn the_server_sees_its_keys_and_not_the_model_key() {
         &keys(&[("API_KEY", "k")]),
         None,
         &folder,
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect("the tools are listed");
@@ -351,7 +354,7 @@ async fn fills_http_headers_from_keys() {
         &keys(&[("API_KEY", "k")]),
         None,
         &own_folder(),
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect("the tools are listed");
@@ -367,7 +370,7 @@ async fn fills_http_headers_from_keys() {
             &BTreeMap::new(),
             None,
             &own_folder(),
-            std::path::Path::new("farik")
+            std::path::Path::new("catervas")
         )
         .await,
         Err(ConnectorError::KeyMissing("API_KEY".to_string()))
@@ -382,7 +385,7 @@ async fn marks_a_tool_name_claude_code_would_rewrite() {
         &BTreeMap::new(),
         None,
         &own_folder(),
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect("the tools are listed");
@@ -409,7 +412,7 @@ async fn gives_up_after_thirty_seconds() {
             &no_keys,
             None,
             &folder,
-            std::path::Path::new("farik")
+            std::path::Path::new("catervas")
         ),
         tokio::task::spawn_blocking(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -464,7 +467,7 @@ async fn a_servers_own_error_text_is_not_repeated() {
         &keys(&[("API_KEY", "k-secret-value")]),
         None,
         &own_folder(),
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect_err("the listing fails");
@@ -503,7 +506,7 @@ async fn a_servers_refusal_at_connect_is_not_repeated() {
         &keys(&[("API_KEY", "k-secret-value")]),
         None,
         &own_folder(),
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect_err("the connection fails");
@@ -532,7 +535,7 @@ async fn calls_a_tool_and_reads_its_answer() {
                 &BTreeMap::new(),
                 None,
                 &own_folder(),
-                std::path::Path::new("farik"),
+                std::path::Path::new("catervas"),
                 tool,
                 no_arguments(),
             )
@@ -561,7 +564,7 @@ async fn a_tool_error_keeps_its_words_cut() {
             &BTreeMap::new(),
             None,
             &own_folder(),
-            std::path::Path::new("farik"),
+            std::path::Path::new("catervas"),
             tool,
             no_arguments(),
         )
@@ -601,7 +604,7 @@ async fn a_stdio_server_gets_only_its_keys() {
         &keys(&[("API_KEY", "k")]),
         None,
         &folder,
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
         "env",
         no_arguments(),
     )
@@ -624,7 +627,7 @@ async fn an_http_server_gets_the_bearer() {
         &BTreeMap::new(),
         Some(&Secret::new("tok-given".to_string())),
         &own_folder(),
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
         "authorization",
         no_arguments(),
     )
@@ -650,7 +653,7 @@ async fn a_call_gives_up_after_thirty_seconds() {
             &no_keys,
             None,
             &folder,
-            std::path::Path::new("farik"),
+            std::path::Path::new("catervas"),
             "sleeps",
             no_arguments(),
         ),
@@ -676,8 +679,8 @@ async fn a_call_gives_up_after_thirty_seconds() {
 
 /// The Developer's kit with the stdio fixture server as its one service, `fixture`, tagging
 /// `search`, `env` and `delete_repo`: what a kit's pins look like against a server that lists
-/// them (and `repo.delete`, a name no kit can tag, which Farik can't use).
-fn fixture_kit(test: &str) -> farik_roles::Kit {
+/// them (and `repo.delete`, a name no kit can tag, which Catervas can't use).
+fn fixture_kit(test: &str) -> catervas_roles::Kit {
     let script = scratch(test).join("server.sh");
     std::fs::write(&script, STDIO_SERVER).expect("the script is written");
     let file = serde_json::json!({
@@ -689,8 +692,8 @@ fn fixture_kit(test: &str) -> farik_roles::Kit {
             "tools": { "search": "network", "env": "external_effect", "delete_repo": "denied" },
         }],
     });
-    farik_roles::parse_fixture_kit(
-        farik_core::contract::Role::SoftwareDeveloper,
+    catervas_roles::parse_fixture_kit(
+        catervas_core::contract::Role::SoftwareDeveloper,
         &file.to_string(),
         &[],
         &[],
@@ -701,34 +704,34 @@ fn fixture_kit(test: &str) -> farik_roles::Kit {
 #[tokio::test]
 async fn pin_drift_is_empty_for_the_fixture_server() {
     let kit = fixture_kit("pins");
-    let Some(farik_roles::KitConnector::Server { entry, .. }) = kit.connectors.first() else {
+    let Some(catervas_roles::KitConnector::Server { entry, .. }) = kit.connectors.first() else {
         panic!("the fixture kit has a service");
     };
     let mut entry = entry.clone();
-    entry.source = farik_core::team::McpServerSource::Kit;
-    let server = farik_core::team::custom_server(&entry).expect("a kit entry");
+    entry.source = catervas_core::team::McpServerSource::Kit;
+    let server = catervas_core::team::custom_server(&entry).expect("a kit entry");
     let listed = list_tools(
         &server,
         &BTreeMap::new(),
         None,
         &own_folder(),
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect("the tools are listed");
-    // A tool whose name Claude Code would rewrite is not one Farik offers, so no pin names it.
+    // A tool whose name Claude Code would rewrite is not one Catervas offers, so no pin names it.
     let usable: Vec<String> = listed
         .iter()
         .filter(|tool| tool.usable)
         .map(|tool| tool.name.clone())
         .collect();
-    let drift = farik_roles::pin_drift(&server.tools, &usable);
+    let drift = catervas_roles::pin_drift(&server.tools, &usable);
     assert_eq!((drift.added, drift.removed), (Vec::new(), Vec::new()));
     // A pin the service does not list is dropped, and a tool it lists with no pin is added.
     let mut pins = server.tools.clone();
     pins.insert("sync_everything".to_string(), ConnectorTag::Denied);
     pins.remove("env");
-    let drift = farik_roles::pin_drift(&pins, &usable);
+    let drift = catervas_roles::pin_drift(&pins, &usable);
     assert_eq!(drift.removed, ["sync_everything"]);
     assert_eq!(drift.added, ["env"]);
 }

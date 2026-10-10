@@ -18,11 +18,11 @@ base64 = "=0.23.1"
 calamine = { version = "=0.36.1", default-features = false }
 chrono = { version = "=0.4.45", features = ["serde"] }
 clap = { version = "=4.6.7", features = ["derive"] }
-farik-core = { path = "crates/core" }
-farik-protocol = { path = "crates/protocol" }
-farik-roles = { path = "crates/roles" }
-farik-runtime = { path = "crates/runtime" }
-farik-store = { path = "crates/store" }
+catervas-core = { path = "crates/core" }
+catervas-protocol = { path = "crates/protocol" }
+catervas-roles = { path = "crates/roles" }
+catervas-runtime = { path = "crates/runtime" }
+catervas-store = { path = "crates/store" }
 futures-util = { version = "=0.3.34", default-features = false, features = ["sink"] }
 globset = { version = "=0.4.20", default-features = false }
 http = "=1.5.0"
@@ -34,7 +34,7 @@ jsonschema = { version = "=0.56.0", default-features = false }
 keyring = "=4.2.0"
 # Only for its in-memory mock store, standing in for the OS keychain in tests.
 keyring-core = "=1.0.0"
-# Already locked through rmcp; direct for Farik's own PKCE sign-in: the verifier, its S256 challenge and `state`.
+# Already locked through rmcp; direct for Catervas's own PKCE sign-in: the verifier, its S256 challenge and `state`.
 oauth2 = { version = "=5.0.0", default-features = false }
 regress = "=0.12.0"
 # Already locked through rmcp; direct for the https-only OAuth client and the token form POSTs.

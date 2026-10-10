@@ -1,4 +1,4 @@
-//! `farik connector google-ads` as the built binary: the kit's Google Ads entry, listed through the
+//! `catervas connector google-ads` as the built binary: the kit's Google Ads entry, listed through the
 //! same path the daemon uses, answers with exactly the tools the kit tags (ADR 0038, ADR 0042).
 //! Offline: the shim lists its ten tools itself and asks neither the daemon nor Google anything,
 //! since no ticket or address is in its environment.
@@ -6,10 +6,10 @@
 
 use std::collections::BTreeMap;
 
-use farik_core::contract::Role;
-use farik_core::team::custom_server;
-use farik_roles::{KitConnector, load_kit, pin_drift};
-use farik_runtime::connectors::list_tools;
+use catervas_core::contract::Role;
+use catervas_core::team::custom_server;
+use catervas_roles::{KitConnector, load_kit, pin_drift};
+use catervas_runtime::connectors::list_tools;
 
 #[tokio::test]
 async fn google_ads_server_lists_the_kits_tools() {
@@ -24,15 +24,15 @@ async fn google_ads_server_lists_the_kits_tools() {
             _ => None,
         })
         .expect("the Marketing Specialist's kit has google-ads");
-    // A name no `which farik` would find: only the executable `list_tools` was handed can answer.
+    // A name no `which catervas` would find: only the executable `list_tools` was handed can answer.
     let scratch = std::env::temp_dir().join(format!(
-        "farik-google-ads-under-test-{}",
+        "catervas-google-ads-under-test-{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&scratch).expect("a scratch folder");
     let under_test = scratch.join("google-ads-under-test");
     let _ = std::fs::remove_file(&under_test);
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_farik"), &under_test).expect("a symlink");
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_catervas"), &under_test).expect("a symlink");
 
     let listed = list_tools(&google_ads, &BTreeMap::new(), None, &scratch, &under_test)
         .await

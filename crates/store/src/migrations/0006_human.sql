@@ -2,7 +2,7 @@
 -- are still unanswered, counted up by `question.asked` and down by `question.answered`, and whether
 -- the contract waits for the human's approval, set by an escalation with reason `approval` or
 -- `risk_gate` and cleared by its next move. Both are read back from the log for a database an older
--- Farik wrote, because nothing else recorded them.
+-- Catervas wrote, because nothing else recorded them.
 ALTER TABLE task_projections ADD COLUMN open_questions INTEGER NOT NULL DEFAULT 0
     CHECK (open_questions >= 0);
 ALTER TABLE task_projections ADD COLUMN awaiting_approval INTEGER NOT NULL DEFAULT 0

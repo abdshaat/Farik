@@ -8,16 +8,16 @@
 .box textarea {
 	min-width: 0;
 	resize: vertical;
-	padding: var(--farik-space-2);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-page);
-	color: var(--farik-color-ink);
+	padding: var(--catervas-space-2);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-page);
+	color: var(--catervas-color-ink);
 	font: inherit;
 }
 
 .box textarea:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -28,23 +28,23 @@
 	left: 0;
 	z-index: 1;
 	min-width: 12rem;
-	margin: 0 0 var(--farik-space-1);
-	padding: var(--farik-space-1) 0;
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
+	margin: 0 0 var(--catervas-space-1);
+	padding: var(--catervas-space-1) 0;
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
 }
 
 .option {
-	padding: var(--farik-space-2) var(--farik-space-3);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
 	min-height: 44px;
 	box-sizing: border-box;
 	cursor: pointer;
 }
 
 .option[aria-selected="true"] {
-	background: var(--farik-color-band);
-	color: var(--farik-color-band-ink);
+	background: var(--catervas-color-band);
+	color: var(--catervas-color-band-ink);
 }
 
 /* Read by a screen reader only. */

@@ -1,4 +1,4 @@
-import { Button, Dialog, TextArea } from "@farik/ui";
+import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";

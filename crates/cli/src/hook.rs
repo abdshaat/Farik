@@ -1,4 +1,4 @@
-//! `farik hook pre-tool-use` and `farik hook post-tool-use` (`docs/SPEC.md` 8.2): Claude Code runs
+//! `catervas hook pre-tool-use` and `catervas hook post-tool-use` (`docs/SPEC.md` 8.2): Claude Code runs
 //! them around every tool call with the call's JSON on standard input, and they carry it to the
 //! daemon named by `--daemon` and its answer back.
 //!
@@ -53,7 +53,7 @@ pub fn pre_tool_use(daemon_file: &Path, io: &mut CliIo<'_>) -> i32 {
         Err(panic) => {
             let _ = writeln!(
                 io.stderr,
-                "farik hook pre-tool-use failed, so the call is blocked: {}",
+                "catervas hook pre-tool-use failed, so the call is blocked: {}",
                 panic_message(panic.as_ref())
             );
             BLOCKING

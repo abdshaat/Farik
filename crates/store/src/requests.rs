@@ -1,27 +1,27 @@
 //! Filing a request (F3, `docs/SPEC.md` section 5.16): one piece of code for the command line and
-//! for the agents' `farik_create_task`, so that a request is filed exactly one way whoever files it.
+//! for the agents' `catervas_create_task`, so that a request is filed exactly one way whoever files it.
 //! Beside it, the JSON the board, the rules, and the criterion library are shown as, for the same
-//! reason: `farik board --json` and `farik_read_board` say one thing.
+//! reason: `catervas board --json` and `catervas_read_board` say one thing.
 
 use std::fmt;
 use std::num::NonZeroU64;
 use std::sync::{Mutex, PoisonError};
 
-use chrono::{DateTime, Utc};
-use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
-use farik_core::criteria::{CriteriaLibrary, TemplateVerification};
-use farik_core::governor::gates::{
+use catervas_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
+use catervas_core::criteria::{CriteriaLibrary, TemplateVerification};
+use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteRefusal, FIELDS_FIXED_AT_CREATION,
     FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES, FIELDS_THE_STORE_OWNS,
     check_contract_write, check_human_triage,
 };
-use farik_core::governor::team_rules::TeamRules;
-use farik_core::governor::transition_table::TransitionActor;
-use farik_protocol::command::{Command, RequestSize, command_from_value};
-use farik_protocol::event::{
-    ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds, EventKind,
-    FarikEvent, RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
+use catervas_core::governor::team_rules::TeamRules;
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_protocol::command::{Command, RequestSize, command_from_value};
+use catervas_protocol::event::{
+    CatervasEvent, ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds,
+    EventKind, RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
 };
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::files::{FilesError, ProjectFiles};
@@ -119,7 +119,7 @@ pub fn request_from_text(text: &str, max_cost_usd: f64) -> Result<Value, String>
 /// Why a request was not filed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestError {
-    /// The request is not one Farik files, in words a person or an agent can act on.
+    /// The request is not one Catervas files, in words a person or an agent can act on.
     Refused {
         /// What is wrong with it.
         reason: String,
@@ -221,7 +221,7 @@ pub fn file_request(
 
 /// Files the request that raises the budget of marketing plan `plan` (ADR 0042, step 08g), as
 /// `file_request` files one for `created_by`: `task.created` names the plan in `raises`, so that
-/// the sprint policy never holds it, and `request.triaged { small }` follows at once, by `farik`,
+/// the sprint policy never holds it, and `request.triaged { small }` follows at once, by `catervas`,
 /// so that no triage session runs.
 ///
 /// # Errors
@@ -279,7 +279,7 @@ fn file(
     if !written.is_empty() {
         return Err(RequestError::Refused {
             reason: format!(
-                "sets {}, which a request does not: Farik assigns the id and the stamps, the \
+                "sets {}, which a request does not: Catervas assigns the id and the stamps, the \
                  governor writes the lifecycle, the lock is the human's lock to take, triage \
                  decides whether this is an epic, and a task's parent is set by the epic's \
                  assignee when it breaks the epic down (5.16)",
@@ -297,7 +297,7 @@ fn file(
     // id is not the author's and a rule about it is not one the author can break, so the contract
     // is checked under a stand-in and given its real id once it passes.
     let stamp = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    object.insert("id".to_string(), json!("FRK-0"));
+    object.insert("id".to_string(), json!("CTV-0"));
     object.insert("status".to_string(), json!("draft"));
     object.insert("created_by".to_string(), json!(created_by));
     object.insert("created_at".to_string(), json!(stamp));
@@ -313,7 +313,7 @@ fn file(
     }))
     .map_err(|errors| RequestError::Refused {
         reason: format!(
-            "is not a contract Farik can file: {}",
+            "is not a contract Catervas can file: {}",
             errors
                 .iter()
                 .map(|error| format!("{} {}", error.path, error.message))
@@ -329,15 +329,15 @@ fn file(
 
     // Past every contract the repository already holds as well as the counter: the log is
     // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
-    // would hand out FRK-1 again. `list_contracts` is in number order, so the last is the highest.
+    // would hand out CTV-1 again. `list_contracts` is in number order, so the last is the highest.
     // And past every task branch the repository holds, whatever its contracts say: a project
-    // whose `.farik/` was removed or carried elsewhere still has the branches of its old tasks. A
+    // whose `.catervas/` was removed or carried elsewhere still has the branches of its old tasks. A
     // folder whose refs cannot be listed counts as having none; a collision then shows when the
     // worktree is made.
     let contracts = files
         .list_contracts()?
         .last()
-        .and_then(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok())
+        .and_then(|id| id.as_str().trim_start_matches("CTV-").parse::<u64>().ok())
         .unwrap_or(0);
     let branches = Git::open(files.root().to_path_buf())
         .task_branch_numbers()
@@ -400,7 +400,7 @@ fn creation_bodies(
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
             size: RequestTriagedBodySize::Small,
             reason: format!("a raised marketing budget for {plan}"),
-            triaged_by: "farik".to_string(),
+            triaged_by: "catervas".to_string(),
         }));
     }
     Ok(bodies)
@@ -472,7 +472,7 @@ pub fn triage_by_human(
     reason: &str,
     now: DateTime<Utc>,
     ids: &EventIds,
-) -> Result<FarikEvent, RequestError> {
+) -> Result<CatervasEvent, RequestError> {
     // 5.16 says the triage records its decision with a reason, and the log is where a person reads
     // it back months later. The command schema says `reason` is a string and nothing more, so this
     // is the place that holds it to being written.
@@ -541,7 +541,7 @@ pub fn hold_contract(
     held: bool,
     now: DateTime<Utc>,
     ids: &EventIds,
-) -> Result<FarikEvent, RequestError> {
+) -> Result<CatervasEvent, RequestError> {
     let contract = files.read_contract(task_id)?;
     check_contract_write(
         contract.kind,
@@ -562,7 +562,7 @@ pub fn hold_contract(
                 "{} is already {}",
                 task_id.as_str(),
                 if held {
-                    "yours: farik contract unlock gives it back"
+                    "yours: catervas contract unlock gives it back"
                 } else {
                     "the team's"
                 }
@@ -596,7 +596,7 @@ fn status_on_board(
         .map(|row| row.status)
         .ok_or_else(|| RequestError::Refused {
             reason: format!(
-                "the log has never heard of {}, so there is nothing of it to change: farik \
+                "the log has never heard of {}, so there is nothing of it to change: catervas \
                  doctor says where the files and the log disagree",
                 task_id.as_str()
             ),
@@ -611,7 +611,7 @@ fn record(
     task_id: &TaskId,
     now: DateTime<Utc>,
     ids: &EventIds,
-) -> Result<FarikEvent, RequestError> {
+) -> Result<CatervasEvent, RequestError> {
     let ids = EventIds {
         task_id: Some(task_id.clone()),
         ..ids.clone()
@@ -631,7 +631,7 @@ pub fn contract_write(refusal: &ContractWriteRefusal) -> String {
     match refusal {
         ContractWriteRefusal::ContractLocked => {
             "the contract is held by the human, and a contract's content is the holder's alone \
-             (5.11): farik contract unlock gives it back to the team"
+             (5.11): catervas contract unlock gives it back to the team"
                 .to_string()
         }
         ContractWriteRefusal::ContractFrozen { fields } => format!(
@@ -655,7 +655,7 @@ pub fn contract_write(refusal: &ContractWriteRefusal) -> String {
             is_or_are(fields)
         ),
         ContractWriteRefusal::StoresFields { fields } => format!(
-            "{} {} the store's: Farik assigns the identifier and the stamps",
+            "{} {} the store's: Catervas assigns the identifier and the stamps",
             listed(fields),
             is_or_are(fields)
         ),
@@ -699,7 +699,7 @@ fn is_or_are(fields: &[String]) -> &'static str {
 /// # Panics
 ///
 /// Never: a contract's own kind, risk, status and title are the summary's, and both vocabularies
-/// come from `task-contract.schema.json`, which a test in `farik-protocol` holds to agreeing.
+/// come from `task-contract.schema.json`, which a test in `catervas-protocol` holds to agreeing.
 #[must_use]
 pub fn summary_of(contract: &TaskContract) -> ContractSummary {
     let mut value = json!({
@@ -715,11 +715,11 @@ pub fn summary_of(contract: &TaskContract) -> ContractSummary {
     }
     serde_json::from_value(value).expect(
         "a contract's own kind, risk, status and title are the summary's, and both vocabularies \
-         come from task-contract.schema.json, which a test in farik-protocol holds to agreeing",
+         come from task-contract.schema.json, which a test in catervas-protocol holds to agreeing",
     )
 }
 
-/// One board row as JSON, as `farik board --json` prints it.
+/// One board row as JSON, as `catervas board --json` prints it.
 #[must_use]
 pub fn board_row_json(row: &TaskProjection) -> Value {
     json!({
@@ -740,7 +740,7 @@ pub fn board_json(rows: &[TaskProjection]) -> Value {
     json!({ "tasks": rows.iter().map(board_row_json).collect::<Vec<_>>() })
 }
 
-/// The rules the governor applies as JSON, as `farik rules show --json` prints them.
+/// The rules the governor applies as JSON, as `catervas rules show --json` prints them.
 #[must_use]
 pub fn rules_json(rules: &TeamRules) -> Value {
     json!({
@@ -754,7 +754,7 @@ pub fn rules_json(rules: &TeamRules) -> Value {
     })
 }
 
-/// The criterion library as JSON, as `farik criteria list --json` prints it.
+/// The criterion library as JSON, as `catervas criteria list --json` prints it.
 #[must_use]
 pub fn criteria_json(library: &CriteriaLibrary) -> Value {
     json!({
@@ -801,17 +801,17 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
+    use catervas_core::contract::fixtures::a_contract_wire;
+    use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
+    use catervas_protocol::event::{EventBody, EventIds, EventKind, RequestTriagedBodySize};
     use chrono::{DateTime, TimeZone, Utc};
-    use farik_core::contract::fixtures::a_contract_wire;
-    use farik_core::contract::{TaskId, TaskKind, TaskStatus};
-    use farik_protocol::event::{EventBody, EventIds, EventKind, RequestTriagedBodySize};
     use serde_json::Value;
 
-    use farik_protocol::command::RequestSize;
-    use farik_protocol::event::{ContractLockedBody, event_from_value, fixtures::an_event_wire};
+    use catervas_protocol::command::RequestSize;
+    use catervas_protocol::event::{ContractLockedBody, event_from_value, fixtures::an_event_wire};
 
-    use farik_core::contract::validate_contract;
-    use farik_core::governor::team_rules::TeamRules;
+    use catervas_core::contract::validate_contract;
+    use catervas_core::governor::team_rules::TeamRules;
     use serde_json::json;
 
     use super::{
@@ -830,13 +830,13 @@ mod tests {
 
     fn ids() -> EventIds {
         EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             ..EventIds::default()
         }
     }
 
-    /// A request as its author writes it: the fixture contract without what Farik fills in.
+    /// A request as its author writes it: the fixture contract without what Catervas fills in.
     fn a_request() -> Value {
         let mut wire = a_contract_wire();
         let object = wire.as_object_mut().expect("the fixture is a mapping");
@@ -847,7 +847,7 @@ mod tests {
 
     fn a_project(name: &str) -> (TempProject, Arc<EventLog>) {
         let project = TempProject::new(name);
-        project.files().init(&a_team()).expect(".farik/ is made");
+        project.files().init(&a_team()).expect(".catervas/ is made");
         let log = Arc::new(open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens"));
         (project, log)
     }
@@ -884,7 +884,7 @@ mod tests {
         let mut request =
             request_from_brief("Add done.txt", &brief, budget).expect("a request is built");
         assert!(texts(&request).iter().all(|text| text == PLACEHOLDER));
-        request["id"] = json!("FRK-1");
+        request["id"] = json!("CTV-1");
         request["status"] = json!("draft");
         validate_contract(&request).expect("the store would file it");
 
@@ -908,22 +908,22 @@ mod tests {
         let (project, log) = a_project("requests-old-branch");
         let root = project.root.clone();
         git_in(&root, &["init", "-b", "main"]);
-        git_in(&root, &["config", "user.name", "Farik Test"]);
-        git_in(&root, &["config", "user.email", "test@farik.invalid"]);
+        git_in(&root, &["config", "user.name", "Catervas Test"]);
+        git_in(&root, &["config", "user.email", "test@catervas.invalid"]);
         git_in(&root, &["commit", "--allow-empty", "-m", "first"]);
-        git_in(&root, &["branch", "feature/FRK-7"]);
+        git_in(&root, &["branch", "feature/CTV-7"]);
         let files = project.files();
         let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
             .expect("the request is filed");
         assert_eq!(
             request.id.as_str(),
-            "FRK-8",
+            "CTV-8",
             "past the branch, with no contract"
         );
 
-        // FRK-8 is a contract now; one numbered above the branch still wins.
+        // CTV-8 is a contract now; one numbered above the branch still wins.
         let mut held = request.clone();
-        held.id = "FRK-10".parse().expect("a task id");
+        held.id = "CTV-10".parse().expect("a task id");
         files.create_contract(&held).expect("a contract is held");
         let fresh = Arc::new(open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens"));
         let next = file_request(
@@ -939,7 +939,7 @@ mod tests {
         .expect("the request is filed");
         assert_eq!(
             next.id.as_str(),
-            "FRK-11",
+            "CTV-11",
             "past the contract, with the lower branch"
         );
     }
@@ -952,7 +952,7 @@ mod tests {
         let files = project.files();
         let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
             .expect("the request is filed");
-        assert_eq!(request.id.as_str(), "FRK-1");
+        assert_eq!(request.id.as_str(), "CTV-1");
     }
 
     #[test]
@@ -962,7 +962,7 @@ mod tests {
         let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
             .expect("the request is filed");
 
-        assert_eq!(request.id.as_str(), "FRK-1");
+        assert_eq!(request.id.as_str(), "CTV-1");
         assert_eq!(request.status, TaskStatus::Draft);
         assert_eq!(
             files.read_contract(&request.id).expect("it is on disk"),
@@ -975,7 +975,7 @@ mod tests {
     fn files_a_child_as_a_triaged_task_of_its_epic() {
         let (project, log) = a_project("requests-child");
         let files = project.files();
-        let epic = TaskId::try_from("FRK-1").expect("an id");
+        let epic = TaskId::try_from("CTV-1").expect("an id");
         let request = file_request(
             &files,
             &log,
@@ -989,7 +989,7 @@ mod tests {
         .expect("the child is filed");
 
         assert_eq!(request.kind, TaskKind::Task);
-        assert_eq!(request.parent.as_ref().map(|p| p.as_str()), Some("FRK-1"));
+        assert_eq!(request.parent.as_ref().map(|p| p.as_str()), Some("CTV-1"));
         assert_eq!(request.status, TaskStatus::Draft);
         let events = log.read(&EventQuery::default()).expect("the log reads");
         assert_eq!(
@@ -1019,9 +1019,9 @@ mod tests {
         let (project, log) = a_project("requests-id");
         let files = project.files();
         let mut wire = a_request();
-        wire["id"] = serde_json::json!("FRK-9");
+        wire["id"] = serde_json::json!("CTV-9");
         let refused = file_request(&files, &log, wire, "human", None, at(), &ids(), None)
-            .expect_err("an id is Farik's to give");
+            .expect_err("an id is Catervas's to give");
 
         let RequestError::Refused { reason } = refused else {
             panic!("a refusal, not a failure: {refused:?}");
@@ -1034,7 +1034,7 @@ mod tests {
         );
     }
 
-    /// A project with one request the human filed, FRK-1, and the board over its log.
+    /// A project with one request the human filed, CTV-1, and the board over its log.
     fn a_filed_request(name: &str) -> (TempProject, Arc<EventLog>, Projections, TaskId) {
         let (project, log) = a_project(name);
         let request = file_request(
@@ -1052,15 +1052,15 @@ mod tests {
         (project, log, projections, request.id)
     }
 
-    /// Records FRK-1's move from `draft` to `to`, as the governor would.
+    /// Records CTV-1's move from `draft` to `to`, as the governor would.
     fn moved(log: &EventLog, projections: &Projections, to: &str) {
         let mut wire = an_event_wire(EventKind::TaskTransitioned);
-        wire["task_id"] = serde_json::json!("FRK-1");
+        wire["task_id"] = serde_json::json!("CTV-1");
         wire["body"]["from"] = serde_json::json!("draft");
         wire["body"]["to"] = serde_json::json!(to);
         let event = event_from_value(&wire).expect("the fixture is schema-valid");
         let recorded = log
-            .append(&farik_protocol::event::NewEvent {
+            .append(&catervas_protocol::event::NewEvent {
                 recorded_at: event.envelope.recorded_at,
                 ids: event.envelope.ids,
                 body: event.body,
@@ -1104,7 +1104,7 @@ mod tests {
         let row = projections
             .task(&id)
             .expect("the board reads")
-            .expect("FRK-1 is on it");
+            .expect("CTV-1 is on it");
         assert_eq!(row.kind, TaskKind::Epic);
         assert!(row.triaged);
     }
@@ -1137,7 +1137,7 @@ mod tests {
         );
         assert_eq!(kinds(&log).len(), before, "nothing is appended");
 
-        let unknown = TaskId::try_from("FRK-9").expect("an id");
+        let unknown = TaskId::try_from("CTV-9").expect("an id");
         let blank = triage_by_human(
             &files,
             &log,
@@ -1150,7 +1150,7 @@ mod tests {
         )
         .expect_err("a blank reason is no reason");
         let RequestError::Refused { reason } = blank else {
-            panic!("refused before FRK-9 is looked for: {blank:?}");
+            panic!("refused before CTV-9 is looked for: {blank:?}");
         };
         assert!(reason.contains("recorded with a reason"), "{reason}");
     }

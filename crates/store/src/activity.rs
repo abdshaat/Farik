@@ -4,13 +4,13 @@
 use std::collections::BTreeMap;
 use std::str::FromStr as _;
 
-use chrono::{DateTime, Utc};
-use farik_core::contract::{Role, TaskId, TaskStatus};
-use farik_core::marketing::{CapScope, network_name};
-use farik_core::team::{AgentStatus, Team};
-use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, MessageKind, SessionStartedBodyPurpose,
+use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::marketing::{CapScope, network_name};
+use catervas_core::team::{AgentStatus, Team};
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventKind, MessageKind, SessionStartedBodyPurpose,
 };
+use chrono::{DateTime, Utc};
 
 use crate::files::ProjectFiles;
 use crate::marketing::{
@@ -107,7 +107,7 @@ pub fn activity(
         .filter(|agent| agent.status != AgentStatus::Retired)
     {
         let id = agent.id.as_str();
-        let by_agent = |event: &&FarikEvent| event.envelope.ids.agent_id.as_deref() == Some(id);
+        let by_agent = |event: &&CatervasEvent| event.envelope.ids.agent_id.as_deref() == Some(id);
         let one = |state, line: String, task_id: Option<TaskId>, until| AgentActivity {
             agent_id: id.to_string(),
             state,
@@ -198,7 +198,7 @@ fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> Str
 /// The task in progress whose latest design plan `agent` proposed and nobody decided yet, with
 /// the line that says who it waits for.
 fn plan_waiting(
-    plans: &[FarikEvent],
+    plans: &[CatervasEvent],
     board: &[TaskProjection],
     team: &Team,
     agent: &str,
@@ -229,7 +229,7 @@ fn plan_waiting(
 /// What `agent` is doing in its session that has started and not ended, on which task, in which
 /// session, and why.
 fn at_work(
-    events: &[FarikEvent],
+    events: &[CatervasEvent],
     agent: &str,
     titles: &BTreeMap<TaskId, String>,
 ) -> Option<(String, Option<TaskId>, String, SessionStartedBodyPurpose)> {
@@ -307,7 +307,7 @@ pub fn moved_since(
     })?;
     let who = |id: &str| match id {
         "human" => "You".to_string(),
-        "governor" | "farik" => "Farik".to_string(),
+        "governor" | "catervas" => "Catervas".to_string(),
         id => name_of(team, id),
     };
     let mut moved: Vec<(u64, Moved)> = events
@@ -390,7 +390,7 @@ pub fn moved_since(
     Ok(moved.into_iter().map(|(_, moved)| moved).collect())
 }
 
-/// What Farik did with a marketing plan's ads on its own since `since`, one line each, with the
+/// What Catervas did with a marketing plan's ads on its own since `since`, one line each, with the
 /// event's sequence number and time: a budget it paused the ads at, or could not, and a campaign
 /// it paused for the plan's end, for Google Ads' removal, or for a budget reached.
 fn ad_moves(
@@ -398,7 +398,7 @@ fn ad_moves(
     who: &impl Fn(&str) -> String,
     since: DateTime<Utc>,
 ) -> Result<Vec<(u64, DateTime<Utc>, String)>, StoreError> {
-    let farik = who("farik");
+    let catervas = who("catervas");
     let plans = marketing_plans(log)?;
     let plan = |id: &str| {
         plans
@@ -424,10 +424,10 @@ fn ad_moves(
         };
         let line = match &reached.key {
             Some(key) if reached.scope == CapScope::Campaign => format!(
-                "{farik} {did} {title}'s campaign {} at its budget.",
+                "{catervas} {did} {title}'s campaign {} at its budget.",
                 campaign(&reached.plan, key)
             ),
-            _ => format!("{farik} {did} {title}'s ads at their budget."),
+            _ => format!("{catervas} {did} {title}'s ads at their budget."),
         };
         lines.push((reached.seq, reached.at, line));
     }
@@ -441,7 +441,7 @@ fn ad_moves(
             paused.seq,
             paused.at,
             format!(
-                "{farik} paused {}'s campaign {}: {why}.",
+                "{catervas} paused {}'s campaign {}: {why}.",
                 plan(&paused.plan),
                 campaign(&paused.plan, &paused.key)
             ),
@@ -468,7 +468,7 @@ fn post_line(moved: &PostMove, who: &impl Fn(&str) -> String) -> String {
     match moved.kind {
         PostMoveKind::Wrote => format!("{agent} wrote the {network} post for {time}."),
         PostMoveKind::Allowed => format!("You allowed {agent}'s {network} post for {time}."),
-        PostMoveKind::Sent => format!("Farik handed the {network} post for {time} to Buffer."),
+        PostMoveKind::Sent => format!("Catervas handed the {network} post for {time} to Buffer."),
         PostMoveKind::Failed => format!("Buffer did not take the {network} post for {time}."),
         PostMoveKind::Missed => format!("The {network} post for {time} did not go out."),
         PostMoveKind::Stopped => format!("You stopped the {network} post for {time}."),
@@ -476,7 +476,7 @@ fn post_line(moved: &PostMove, who: &impl Fn(&str) -> String) -> String {
             format!("You did not allow {agent}'s {network} post for {time}.")
         }
         PostMoveKind::PlanEnded => {
-            format!("Farik stopped the {network} post for {time}: its plan ended.")
+            format!("Catervas stopped the {network} post for {time}: its plan ended.")
         }
     }
 }
@@ -508,15 +508,15 @@ fn titles(projections: &Projections) -> Result<BTreeMap<TaskId, String>, StoreEr
 
 #[cfg(test)]
 mod tests {
-    use farik_core::team::validate_team;
+    use catervas_core::team::validate_team;
     use serde_json::json;
 
     use super::{ActivityState, activity, moved_since};
     use crate::waiting::fixtures::{Board, at};
 
     /// Ada, Linus, and Grace, with Mira and Theo beside them, Theo paused.
-    fn five() -> farik_core::team::Team {
-        let mut wire = farik_core::team::fixtures::a_team_wire();
+    fn five() -> catervas_core::team::Team {
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
         wire["agents"] = json!([
             { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
             { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
@@ -531,10 +531,10 @@ mod tests {
     fn an_agent_waiting_on_a_connector_call_is_asked_about_in_one_line() {
         let board = Board::new("activity-tool-approval");
         let team = five();
-        board.file("FRK-1", "Login form", |_| {});
+        board.file("CTV-1", "Login form", |_| {});
         board.put(
             at(9, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("linus"),
             "tool_approval.requested",
             json!({
@@ -558,7 +558,7 @@ mod tests {
             .expect("Linus");
         assert_eq!(linus.state, ActivityState::Waiting);
         assert_eq!(linus.line, "Waiting on you: may Linus use airtable?");
-        assert_eq!(linus.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
+        assert_eq!(linus.task_id.as_ref().map(|id| id.as_str()), Some("CTV-1"));
     }
 
     #[test]
@@ -569,17 +569,17 @@ mod tests {
     fn derives_each_agents_activity() {
         let board = Board::new("activity-states");
         let team = five();
-        board.file("FRK-1", "Login form", |_| {});
+        board.file("CTV-1", "Login form", |_| {});
         board.moved(
             at(9, 1),
-            "FRK-1",
+            "CTV-1",
             ("draft", "in_progress"),
             "linus",
             (Some("linus"), Some("grace")),
         );
         board.session(
             at(9, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "linus",
             "session-1",
             "session.started",
@@ -592,17 +592,17 @@ mod tests {
             "agent.slept",
             json!({ "until": at(14, 30).to_rfc3339(), "detail": "usage limit" }),
         );
-        board.file("FRK-2", "A plan", |_| {});
+        board.file("CTV-2", "A plan", |_| {});
         board.moved(
             at(9, 4),
-            "FRK-2",
+            "CTV-2",
             ("draft", "escalated"),
             "ada",
             (None, None),
         );
         board.put(
             at(9, 4),
-            Some("FRK-2"),
+            Some("CTV-2"),
             None,
             "escalation.raised",
             json!({ "reason": "approval", "detail": "waits" }),
@@ -636,14 +636,14 @@ mod tests {
                     "ada".to_string(),
                     ActivityState::Waiting,
                     "Waiting on you: Ada wrote a plan for you to approve".to_string(),
-                    Some("FRK-2".to_string()),
+                    Some("CTV-2".to_string()),
                     None
                 ),
                 (
                     "linus".to_string(),
                     ActivityState::Working,
                     "Building Login form".to_string(),
-                    Some("FRK-1".to_string()),
+                    Some("CTV-1".to_string()),
                     None
                 ),
                 (
@@ -673,7 +673,7 @@ mod tests {
         // Linus's session ends and Mira runs the standup; a nap past its time is over.
         board.session(
             at(9, 5),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "linus",
             "session-1",
             "session.ended",
@@ -720,17 +720,17 @@ mod tests {
     #[test]
     fn says_a_designer_explores_then_waits_for_its_plans_decision() {
         let board = Board::new("activity-designer");
-        let mut wire = farik_core::team::fixtures::a_team_wire();
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
         wire["agents"] = json!([
             { "id": "mira", "display_name": "Mira", "role": "product_manager", "status": "active" },
             { "id": "theo", "display_name": "Theo", "role": "software_developer", "status": "active" },
             { "id": "iris", "display_name": "Iris", "role": "ui_ux_designer", "status": "active" },
         ]);
         let team = validate_team(&wire).expect("the fixture is a team");
-        board.file("FRK-1", "A calmer menu page", |_| {});
+        board.file("CTV-1", "A calmer menu page", |_| {});
         board.moved(
             at(9, 1),
-            "FRK-1",
+            "CTV-1",
             ("draft", "in_progress"),
             "sol",
             (Some("iris"), Some("ada")),
@@ -752,7 +752,7 @@ mod tests {
         };
         board.session(
             at(9, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "iris",
             "session-1",
             "session.started",
@@ -761,7 +761,7 @@ mod tests {
         assert_eq!(iris(&board).1, "Planning A calmer menu page");
         board.session(
             at(9, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "iris",
             "session-1",
             "session.ended",
@@ -769,7 +769,7 @@ mod tests {
         );
         board.put(
             at(9, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("iris"),
             "design_plan.proposed",
             json!({ "plan": "A plan." }),
@@ -779,13 +779,13 @@ mod tests {
             (
                 ActivityState::Idle,
                 "Waiting for Mira to approve a plan".to_string(),
-                Some("FRK-1".to_string())
+                Some("CTV-1".to_string())
             )
         );
         // Once decided, the plan waits no more.
         board.put(
             at(9, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("mira"),
             "design_plan.returned",
             json!({ "reason": "Not yet." }),
@@ -799,40 +799,40 @@ mod tests {
         let team = five();
         // A request's first line often ends in a full stop, which the sentence drops; an
         // ellipsis stays.
-        board.file("FRK-1", "Add a login form.", |_| {});
-        board.file("FRK-2", "More photos...", |_| {});
+        board.file("CTV-1", "Add a login form.", |_| {});
+        board.file("CTV-2", "More photos...", |_| {});
         // Before `since`, and not shown.
         board.moved(
             at(9, 0),
-            "FRK-1",
+            "CTV-1",
             ("draft", "refining"),
             "ada",
             (None, None),
         );
         board.moved(
             at(10, 1),
-            "FRK-1",
+            "CTV-1",
             ("refining", "in_progress"),
             "linus",
             (Some("linus"), Some("grace")),
         );
         board.moved(
             at(10, 2),
-            "FRK-1",
+            "CTV-1",
             ("in_progress", "rejected"),
             "human",
             (Some("linus"), Some("grace")),
         );
         board.put(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "human.accepted",
             json!({ "subject": "result", "accepted_by": "human" }),
         );
         board.put(
             at(10, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "task.integrated",
             json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
@@ -853,7 +853,7 @@ mod tests {
         );
         board.put(
             at(10, 6),
-            Some("FRK-2"),
+            Some("CTV-2"),
             None,
             "human.accepted",
             json!({ "subject": "result", "accepted_by": "human" }),
@@ -861,7 +861,7 @@ mod tests {
         // A task the board has no title for is named by its id.
         board.put(
             at(10, 6),
-            Some("FRK-9"),
+            Some("CTV-9"),
             None,
             "task.integrated",
             json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
@@ -894,14 +894,14 @@ mod tests {
                 ),
                 (at(10, 6), "Mira posted the standup"),
                 (at(10, 6), "You accepted “More photos...”"),
-                (at(10, 6), "FRK-9 was added to the project"),
+                (at(10, 6), "CTV-9 was added to the project"),
             ]
         );
     }
 
     /// Ada, Linus and Kai, the Marketing Specialist.
-    fn with_kai() -> farik_core::team::Team {
-        let mut wire = farik_core::team::fixtures::a_team_wire();
+    fn with_kai() -> catervas_core::team::Team {
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
         wire["agents"] = json!([
             { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
             { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
@@ -926,7 +926,7 @@ mod tests {
     fn moved_tells_of_the_posts() {
         let board = Board::new("moved-posts");
         let team = with_kai();
-        board.file("FRK-1", "Spring posts", |_| {});
+        board.file("CTV-1", "Spring posts", |_| {});
         let writes = |minute: u32, channel: &str, going_out: &str| {
             let mut body = a_post(channel, going_out);
             body["approved_by"] = json!("plan");
@@ -935,7 +935,7 @@ mod tests {
             board
                 .session(
                     at(10, minute),
-                    Some("FRK-1"),
+                    Some("CTV-1"),
                     "kai",
                     "session-1",
                     "social_post.scheduled",
@@ -948,7 +948,7 @@ mod tests {
             board
                 .session(
                     at(10, minute),
-                    Some("FRK-1"),
+                    Some("CTV-1"),
                     "kai",
                     "session-1",
                     "social_post.requested",
@@ -997,7 +997,7 @@ mod tests {
         allowance["approved_by"] = json!("owner");
         board.put(
             at(10, 10),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "social_post.scheduled",
             allowance,
@@ -1010,7 +1010,7 @@ mod tests {
         // A move of the task between the posts' lines keeps its place among them.
         board.moved(
             at(10, 12),
-            "FRK-1",
+            "CTV-1",
             ("draft", "refining"),
             "ada",
             (None, None),
@@ -1026,7 +1026,7 @@ mod tests {
         let forged = writes(14, "facebook", "2026-09-28T19:00:00Z");
         board.session(
             at(10, 15),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "social_post.sent",
@@ -1037,7 +1037,7 @@ mod tests {
         // the post's own, so the line does not name it.
         board.session(
             at(23, 30),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "social_post.scheduled",
@@ -1061,7 +1061,7 @@ mod tests {
                 (at(10, 1), "Kai wrote the Instagram post for 13:00."),
                 (
                     at(10, 2),
-                    "Farik handed the Instagram post for 13:00 to Buffer."
+                    "Catervas handed the Instagram post for 13:00 to Buffer."
                 ),
                 (at(10, 3), "Kai wrote the X post for Sat 31 Oct at 09:00."),
                 (
@@ -1081,7 +1081,7 @@ mod tests {
                 (at(10, 10), "You allowed Kai's Threads post for 17:00."),
                 (
                     at(10, 11),
-                    "Farik stopped the Threads post for 17:00: its plan ended."
+                    "Catervas stopped the Threads post for 17:00: its plan ended."
                 ),
                 (at(10, 12), "Ada moved “Spring posts” to Planning"),
                 (
@@ -1102,9 +1102,9 @@ mod tests {
     fn says_what_moved_with_the_ads() {
         let board = Board::new("moved-ads");
         let team = with_kai();
-        board.file("FRK-1", "Autumn push", |_| {});
-        let mut plan = farik_protocol::event::fixtures::a_body_wire(
-            farik_protocol::event::EventKind::MarketingPlanProposed,
+        board.file("CTV-1", "Autumn push", |_| {});
+        let mut plan = catervas_protocol::event::fixtures::a_body_wire(
+            catervas_protocol::event::EventKind::MarketingPlanProposed,
         );
         plan["plan"] = json!("MP-1");
         plan["title"] = json!("Autumn at Corner Bakery");
@@ -1115,7 +1115,7 @@ mod tests {
         }]);
         board.session(
             at(8, 0),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "marketing_plan.proposed",
@@ -1192,7 +1192,7 @@ mod tests {
         // What an agent's session says it did moved nothing.
         board.session(
             at(10, 9),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "marketing_campaign.paused",
@@ -1211,38 +1211,38 @@ mod tests {
             vec![
                 (
                     at(10, 1),
-                    "Farik paused Autumn at Corner Bakery's ads at their budget."
+                    "Catervas paused Autumn at Corner Bakery's ads at their budget."
                 ),
                 (
                     at(10, 2),
-                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me at its budget."
+                    "Catervas paused Autumn at Corner Bakery's campaign Bakery near me at its budget."
                 ),
                 (
                     at(10, 3),
-                    "Farik could not pause Autumn at Corner Bakery's campaign Bakery near me at its \
+                    "Catervas could not pause Autumn at Corner Bakery's campaign Bakery near me at its \
                      budget."
                 ),
                 (
                     at(10, 4),
-                    "Farik could not pause Autumn at Corner Bakery's ads at their budget."
+                    "Catervas could not pause Autumn at Corner Bakery's ads at their budget."
                 ),
                 (
                     at(10, 5),
-                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: the plan ended."
+                    "Catervas paused Autumn at Corner Bakery's campaign Bakery near me: the plan ended."
                 ),
                 (
                     at(10, 6),
-                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: Google Ads was \
+                    "Catervas paused Autumn at Corner Bakery's campaign Bakery near me: Google Ads was \
                      removed."
                 ),
                 (
                     at(10, 7),
-                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: it reached its \
+                    "Catervas paused Autumn at Corner Bakery's campaign Bakery near me: it reached its \
                      budget."
                 ),
                 (
                     at(10, 8),
-                    "Farik paused Autumn at Corner Bakery's campaign gone: the plan ended."
+                    "Catervas paused Autumn at Corner Bakery's campaign gone: the plan ended."
                 ),
             ]
         );

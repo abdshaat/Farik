@@ -6,10 +6,10 @@ description: Use when the active marketing plan has Google Ads campaigns.
 # Running search ads
 
 Search ads spend the owner's money at Google. You run them inside the marketing plan the owner
-approved, with the tools of the Google Ads connector. Farik reads what the ads have cost every 15
+approved, with the tools of the Google Ads connector. Catervas reads what the ads have cost every 15
 minutes while it runs and pauses a campaign that reaches its budget, and never enables one again.
 Google reports cost up to about an hour late, so never count on that stop to keep a campaign inside
-its budget: the budget held at Google is the limit when Farik is not running. The budget is the
+its budget: the budget held at Google is the limit when Catervas is not running. The budget is the
 plan's, not yours: when the results say a campaign is wasting it, spend less.
 
 ## 1. Look before you make anything
@@ -22,10 +22,10 @@ the words the business already uses. Write what you found, with its day and sour
 ## 2. One campaign for each plan campaign
 
 Make it with `create_search_campaign`, giving the plan campaign's key as `plan_campaign`, and the
-numeric ids of Google's locations and languages you gave `keyword_ideas`. Farik makes it paused,
+numeric ids of Google's locations and languages you gave `keyword_ideas`. Catervas makes it paused,
 ending on the plan campaign's last day, with a budget inside the plan campaign's. Bid with
 `maximize_clicks`, and `max_cpc` as the most a click may cost. Use `maximize_conversions` only on an
-ad account that already tracks conversions: Farik never sets tracking up, and without it Google
+ad account that already tracks conversions: Catervas never sets tracking up, and without it Google
 has nothing to maximize.
 
 Prefer campaigns at a fixed price: 3 to 90 days, made at least two days before they start. Say in
@@ -42,7 +42,7 @@ descriptions of at most 90, and the address of a page of the business's own, ove
 ## 4. Turn it on last
 
 Run a campaign with `set_campaign_status` only when every ad group has its keywords and two or
-more ads, its negatives are in, and the page its ads lead to opens. Farik refuses outside the
+more ads, its negatives are in, and the page its ads lead to opens. Catervas refuses outside the
 campaign's dates and once its budget is spent.
 
 ## 5. Read, then change
@@ -52,13 +52,13 @@ After the first days read `report` for `search_terms` and for `campaigns`. Pause
 change a budget with `set_campaign_budget` only inside the plan's. Say in your note what you
 changed, why, and what the numbers were, and never claim a cause the numbers do not show.
 
-## 6. When Farik paused a campaign at its budget
+## 6. When Catervas paused a campaign at its budget
 
 The owner decides what comes next, on Today: to end the plan, or to raise the budget, which files
 you a request. Its words say which plan to replace, with what budgets, and end: Once the owner
 approves it, raise each paused campaign's budget at Google with set_campaign_budget, then enable it.
-Propose the new version first, with `farik_propose_marketing_plan`, and wait for the owner; change
-nothing at Google before they approve it. Farik allows each change only inside the new plan.
+Propose the new version first, with `catervas_propose_marketing_plan`, and wait for the owner; change
+nothing at Google before they approve it. Catervas allows each change only inside the new plan.
 
 ## 7. What you never do
 
@@ -67,7 +67,7 @@ by politics, health, religion or any other sensitive trait. Nothing here deletes
 touches billing, who may use the account or conversion tracking; if the task asks for one, say so
 in your note.
 
-## 8. When Farik refuses
+## 8. When Catervas refuses
 
 A refusal carries a code. `not_in_marketing_plan` says what the plan does not cover: change the
 call to fit, or say in your note why you could not. `no_active_marketing_plan` means no plan is

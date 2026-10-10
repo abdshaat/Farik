@@ -7,11 +7,12 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use chrono::{DateTime, SecondsFormat, Utc};
-use farik_core::contract::TaskId;
-use farik_protocol::event::{
-    EventEnvelope, EventKind, FarikEvent, NewEvent, body_to_value, event_from_value, event_to_value,
+use catervas_core::contract::TaskId;
+use catervas_protocol::event::{
+    CatervasEvent, EventEnvelope, EventKind, NewEvent, body_to_value, event_from_value,
+    event_to_value,
 };
+use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, TransactionBehavior, params_from_iter};
 use serde_json::{Map, Value};
@@ -23,7 +24,7 @@ use crate::migrations;
 pub mod fixtures;
 
 /// The prefix every task id this store hands out carries, from the contract schema's pattern.
-pub(crate) const TASK_ID_PREFIX: &str = "FRK";
+pub(crate) const TASK_ID_PREFIX: &str = "CTV";
 
 /// How many times a connection tries to put the file in write-ahead logging mode before it gives
 /// up, and how long it waits between tries. `busy_timeout` does not cover this one lock, so this is
@@ -37,7 +38,7 @@ const JOURNAL_MODE_WAIT: Duration = Duration::from_millis(20);
 /// Thirty seconds rather than five, raised 2026-09-21 after CI refused ten processes appending to
 /// one log with `database is locked`: `synchronous = FULL` makes every commit an fsync, and on a
 /// loaded runner ten of those queued behind one another take longer than five seconds. A command
-/// that waits is doing what a person would want; one that refuses because another `farik` was
+/// that waits is doing what a person would want; one that refuses because another `catervas` was
 /// mid-append is not, and 8.5 says two processes on one project is the ordinary case.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -51,7 +52,7 @@ pub const IN_MEMORY: &str = ":memory:";
 /// thread's. `append` takes `&self` so that the log can be shared.
 pub struct EventLog {
     connection: Mutex<Connection>,
-    subscribers: Mutex<Vec<Sender<FarikEvent>>>,
+    subscribers: Mutex<Vec<Sender<CatervasEvent>>>,
 }
 
 /// Which events to read. Every field left empty means "no filter"; `Default` reads the whole log.
@@ -122,7 +123,7 @@ impl EventLog {
     /// # Errors
     ///
     /// `InvalidEvent` when the event does not pass that check; `Sqlite` when the insert fails.
-    pub fn append(&self, event: &NewEvent) -> Result<FarikEvent, StoreError> {
+    pub fn append(&self, event: &NewEvent) -> Result<CatervasEvent, StoreError> {
         // Sequence zero is a placeholder that never reaches a row: the insert assigns the real one,
         // and the schema's `seq` allows zero only so that this check can be made before it exists.
         let checked = read_wire(&wire_of(event, 0)).map_err(|detail| StoreError::InvalidEvent {
@@ -155,7 +156,7 @@ impl EventLog {
                 detail: "the log's sequence number is negative, which no append can produce"
                     .to_string(),
             })?;
-        let appended = FarikEvent {
+        let appended = CatervasEvent {
             envelope: EventEnvelope {
                 seq,
                 ..checked.envelope
@@ -179,7 +180,7 @@ impl EventLog {
     /// # Errors
     ///
     /// `Sqlite` when the read fails; `InvalidEvent` when a row cannot be read back as an event.
-    pub fn read(&self, query: &EventQuery) -> Result<Vec<FarikEvent>, StoreError> {
+    pub fn read(&self, query: &EventQuery) -> Result<Vec<CatervasEvent>, StoreError> {
         let (sql, parameters) = statement_of(query);
         let connection = self.connection();
         let mut statement = connection.prepare(&sql)?;
@@ -209,7 +210,7 @@ impl EventLog {
     ///
     /// An event reaches a subscriber only once it is committed: a subscriber that acted on an
     /// append that then failed would have seen something that did not happen.
-    pub fn subscribe(&self) -> Receiver<FarikEvent> {
+    pub fn subscribe(&self) -> Receiver<CatervasEvent> {
         let (sender, receiver) = channel();
         self.subscribers_lock().push(sender);
         receiver
@@ -291,13 +292,13 @@ impl EventLog {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn subscribers_lock(&self) -> MutexGuard<'_, Vec<Sender<FarikEvent>>> {
+    fn subscribers_lock(&self) -> MutexGuard<'_, Vec<Sender<CatervasEvent>>> {
         self.subscribers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn announce(&self, event: &FarikEvent) {
+    fn announce(&self, event: &CatervasEvent) {
         self.subscribers_lock()
             .retain(|subscriber| subscriber.send(event.clone()).is_ok());
     }
@@ -309,7 +310,7 @@ impl EventLog {
 /// has one writer. A second one would drop a field added to the envelope later without anything
 /// noticing, because both sides of the round-trip test come from the same value.
 fn wire_of(event: &NewEvent, seq: u64) -> Value {
-    event_to_value(&FarikEvent {
+    event_to_value(&CatervasEvent {
         envelope: EventEnvelope {
             seq,
             recorded_at: event.recorded_at,
@@ -319,7 +320,7 @@ fn wire_of(event: &NewEvent, seq: u64) -> Value {
     })
 }
 
-fn read_wire(wire: &Value) -> Result<FarikEvent, String> {
+fn read_wire(wire: &Value) -> Result<CatervasEvent, String> {
     event_from_value(wire).map_err(|errors| {
         errors
             .iter()
@@ -333,7 +334,7 @@ fn read_wire(wire: &Value) -> Result<FarikEvent, String> {
 ///
 /// Changing the journal mode takes an exclusive lock on the file, and SQLite refuses that at once
 /// rather than waiting for `busy_timeout`, which every other statement here honours. So several
-/// `farik` commands opening one fresh log at the same moment cannot all perform the switch, and the
+/// `catervas` commands opening one fresh log at the same moment cannot all perform the switch, and the
 /// ones that lose have to wait by hand. What the log needs is the mode the file is in, not which
 /// connection put it there: a connection that finds the file already in it is done.
 ///
@@ -385,7 +386,7 @@ type Row = (
     String,
 );
 
-fn event_of_row(row: Row) -> Result<FarikEvent, StoreError> {
+fn event_of_row(row: Row) -> Result<CatervasEvent, StoreError> {
     let (seq, recorded_at, team_id, project_id, task_id, agent_id, session_id, kind, body) = row;
     let body: Value = serde_json::from_str(&body).map_err(|error| StoreError::InvalidEvent {
         detail: format!("the body of event {seq} is not JSON: {error}"),
@@ -479,12 +480,12 @@ mod tests {
     use std::sync::mpsc::TryRecvError;
     use std::time::Duration;
 
+    use catervas_protocol::event::fixtures::{a_new_event as an_event, an_event_wire};
+    use catervas_protocol::event::{EVERY_KIND, EventKind};
     use chrono::TimeZone;
-    use farik_protocol::event::fixtures::{a_new_event as an_event, an_event_wire};
-    use farik_protocol::event::{EVERY_KIND, EventKind};
 
     use super::{
-        DateTime, EventLog, EventQuery, FarikEvent, IN_MEMORY, Path, Receiver, StoreError, Utc,
+        CatervasEvent, DateTime, EventLog, EventQuery, IN_MEMORY, Path, Receiver, StoreError, Utc,
         body_to_value, event_from_value, open_event_log,
     };
     use crate::migrations;
@@ -582,7 +583,7 @@ mod tests {
             .lock()
             .expect("a fresh lock")
             .execute(
-                "INSERT INTO task_counters (prefix, next) VALUES ('FRK', ?1)
+                "INSERT INTO task_counters (prefix, next) VALUES ('CTV', ?1)
                  ON CONFLICT (prefix) DO UPDATE SET next = ?1",
                 (next,),
             )
@@ -590,13 +591,13 @@ mod tests {
     }
 
     /// The next event a subscriber is handed, waiting only as long as an announcement could take.
-    fn heard(stream: &Receiver<FarikEvent>, who: &str) -> FarikEvent {
+    fn heard(stream: &Receiver<CatervasEvent>, who: &str) -> CatervasEvent {
         stream
             .recv_timeout(Duration::from_secs(5))
             .unwrap_or_else(|refusal| panic!("{who} hears the append: {refusal}"))
     }
 
-    fn kinds_of(events: &[FarikEvent]) -> Vec<EventKind> {
+    fn kinds_of(events: &[CatervasEvent]) -> Vec<EventKind> {
         events.iter().map(|event| event.body.kind()).collect()
     }
 
@@ -633,7 +634,7 @@ mod tests {
             .execute(
                 "INSERT INTO events
                      (recorded_at, team_id, project_id, task_id, agent_id, session_id, kind, body)
-                 VALUES ('2026-09-17T10:00:00Z', 'farik', 'farik', NULL, NULL, NULL,
+                 VALUES ('2026-09-17T10:00:00Z', 'catervas', 'catervas', NULL, NULL, NULL,
                          'team.updated', '{}')",
                 (),
             )
@@ -673,7 +674,7 @@ mod tests {
         // The row keeps the envelope in columns and the body as JSON, so this is what says the two
         // halves go back together for every kind the phase emits.
         let log = a_log();
-        let appended: Vec<FarikEvent> = EVERY_KIND
+        let appended: Vec<CatervasEvent> = EVERY_KIND
             .into_iter()
             .map(|kind| log.append(&an_event(kind)).expect("appends"))
             .collect();
@@ -740,7 +741,7 @@ mod tests {
         // The fixture names the contract on every kind that is about one, and `team.updated` is
         // not about one, so it is the one the filter leaves out.
         let by_task = EventQuery {
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             ..EventQuery::default()
         };
         assert_eq!(
@@ -752,7 +753,7 @@ mod tests {
             ]
         );
         let other_task = EventQuery {
-            task_id: Some("FRK-2".parse().expect("a task id")),
+            task_id: Some("CTV-2".parse().expect("a task id")),
             ..EventQuery::default()
         };
         assert_eq!(log.read(&other_task).expect("reads"), Vec::new());
@@ -760,7 +761,7 @@ mod tests {
         // from the end asks for nothing and is told nothing, rather than refused.
         let everything = EventQuery {
             after_seq: Some(1),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             agent_id: None,
             kinds: vec![EventKind::ContractWritten],
             limit: Some(10),
@@ -848,10 +849,10 @@ mod tests {
         // its caller it stored.
         let log = a_log();
         let mut padded = an_event(EventKind::TeamUpdated);
-        padded.ids.team_id = " farik ".to_string();
+        padded.ids.team_id = " catervas ".to_string();
         padded.ids.agent_id = Some(" maya-chen ".to_string());
         let appended = log.append(&padded).expect("appends");
-        assert_eq!(appended.envelope.ids.team_id, "farik");
+        assert_eq!(appended.envelope.ids.team_id, "catervas");
         assert_eq!(appended.envelope.ids.agent_id.as_deref(), Some("maya-chen"));
         let by_agent = EventQuery {
             agent_id: Some("maya-chen".to_string()),
@@ -867,7 +868,7 @@ mod tests {
     #[test]
     fn refuses_a_row_that_is_not_an_event_rather_than_half_reading_it() {
         // Nothing this crate writes can produce such a row, so this is about the file having been
-        // changed by something else, or written by a Farik this one does not understand.
+        // changed by something else, or written by a Catervas this one does not understand.
         let log = a_log();
         let body = body_to_value(
             &event_from_value(&an_event_wire(EventKind::TaskCreated))
@@ -881,7 +882,7 @@ mod tests {
             .execute(
                 "INSERT INTO events
                      (recorded_at, team_id, project_id, task_id, agent_id, session_id, kind, body)
-                 VALUES ('2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-1', NULL, NULL,
+                 VALUES ('2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-1', NULL, NULL,
                          'contract.locked', ?1)",
                 (body,),
             )
@@ -953,7 +954,7 @@ mod tests {
         let ids: Vec<String> = (0..3)
             .map(|_| log.next_task_id().expect("an id").to_string())
             .collect();
-        assert_eq!(ids, ["FRK-1", "FRK-2", "FRK-3"]);
+        assert_eq!(ids, ["CTV-1", "CTV-2", "CTV-3"]);
     }
 
     #[test]
@@ -963,12 +964,12 @@ mod tests {
         let log = a_log();
         assert_eq!(
             log.next_task_id_above(4).expect("an id").to_string(),
-            "FRK-5"
+            "CTV-5"
         );
-        assert_eq!(log.next_task_id().expect("an id").to_string(), "FRK-6");
+        assert_eq!(log.next_task_id().expect("an id").to_string(), "CTV-6");
         assert_eq!(
             log.next_task_id_above(2).expect("an id").to_string(),
-            "FRK-7",
+            "CTV-7",
             "and a counter already past what is taken keeps counting"
         );
     }
@@ -978,16 +979,16 @@ mod tests {
         // A pull brings in contracts the counter has not seen: the counter's row already exists,
         // so this is the conflict branch, and it has to jump rather than count one on.
         let log = a_log();
-        assert_eq!(log.next_task_id().expect("an id").to_string(), "FRK-1");
+        assert_eq!(log.next_task_id().expect("an id").to_string(), "CTV-1");
         assert_eq!(
             log.next_task_id_above(10).expect("an id").to_string(),
-            "FRK-11"
+            "CTV-11"
         );
     }
 
     #[test]
     fn hands_out_the_last_id_the_contract_schema_can_spell_and_then_refuses() {
-        // The pattern is `^FRK-[0-9]{1,6}$`, so the counter has an end, and both sides of it matter:
+        // The pattern is `^CTV-[0-9]{1,6}$`, so the counter has an end, and both sides of it matter:
         // refusing a number early costs a project an id it was entitled to, and refusing none at
         // all hands back something that is not a task id.
         let log = a_log();
@@ -996,7 +997,7 @@ mod tests {
             log.next_task_id()
                 .expect("the last id there is")
                 .to_string(),
-            "FRK-999999"
+            "CTV-999999"
         );
         assert_eq!(
             log.next_task_id().expect_err("and none after it"),
@@ -1019,7 +1020,7 @@ mod tests {
             .execute(
                 "INSERT INTO events
                      (recorded_at, team_id, project_id, kind, body)
-                 VALUES ('2026-09-17T10:00:00Z', X'0001', 'farik', 'team.updated', '{}')",
+                 VALUES ('2026-09-17T10:00:00Z', X'0001', 'catervas', 'team.updated', '{}')",
                 (),
             )
             .expect_err("a blob is not a team id");
@@ -1029,7 +1030,7 @@ mod tests {
         );
         let not_a_number = connection
             .execute(
-                "INSERT INTO task_counters (prefix, next) VALUES ('FRK', 'the next one')",
+                "INSERT INTO task_counters (prefix, next) VALUES ('CTV', 'the next one')",
                 (),
             )
             .expect_err("a word is not a counter");
@@ -1052,7 +1053,7 @@ mod tests {
             .execute(
                 "INSERT INTO events
                      (recorded_at, team_id, project_id, kind, body)
-                 VALUES ('2026-09-17T10:00:00Z', 'farik', 'farik', 'team.updated',
+                 VALUES ('2026-09-17T10:00:00Z', 'catervas', 'catervas', 'team.updated',
                          'not json at all')",
                 (),
             )

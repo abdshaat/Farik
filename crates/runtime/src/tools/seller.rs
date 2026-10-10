@@ -2,12 +2,12 @@ use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::Path;
 
-use farik_core::contract::Role;
-use farik_core::governor::sites::site_of;
-use farik_core::team::private_folder;
-use farik_protocol::event::{EventBody, SellerMessageDraftedBody, SellerMessagePurpose};
-use farik_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
-use farik_store::seller_mail::{MessageState, SellerMail, seller_mail};
+use catervas_core::contract::Role;
+use catervas_core::governor::sites::site_of;
+use catervas_core::team::private_folder;
+use catervas_protocol::event::{EventBody, SellerMessageDraftedBody, SellerMessagePurpose};
+use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
+use catervas_store::seller_mail::{MessageState, SellerMail, seller_mail};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -33,8 +33,8 @@ const MOST_ADDRESS: usize = 254;
 const MOST_WAITING: usize = 20;
 /// What the agent whose message was written is told.
 const NEXT: &str = "nothing is sent: the owner reads it on Today and sends it when they choose; \
-    read what was sent and what came back with farik_read_seller_messages and \
-    farik_read_seller_replies, and go on with your task meanwhile";
+    read what was sent and what came back with catervas_read_seller_messages and \
+    catervas_read_seller_replies, and go on with your task meanwhile";
 
 /// Why a message is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -60,7 +60,7 @@ impl From<SellerPurpose> for SellerMessagePurpose {
     }
 }
 
-/// `farik_draft_seller_message`'s input.
+/// `catervas_draft_seller_message`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DraftSellerMessageInput {
@@ -70,7 +70,7 @@ pub(crate) struct DraftSellerMessageInput {
     to: String,
     /// The subject, 1 to 200 characters on one line.
     subject: String,
-    /// The message, 1 to 8000 characters of plain text; no HTML, no attachment. Farik adds the
+    /// The message, 1 to 8000 characters of plain text; no HTML, no attachment. Catervas adds the
     /// owner's signature and says an AI assistant wrote it.
     body: String,
     /// `quote_request`, `question` or `purchase_order`.
@@ -240,7 +240,7 @@ fn check_order(
                 return Err(refused(
                     "seller_order_message_waiting",
                     format!(
-                        "PO-{number} has a message that waits for the owner; read it with farik_read_seller_messages"
+                        "PO-{number} has a message that waits for the owner; read it with catervas_read_seller_messages"
                     ),
                 ));
             }
@@ -286,7 +286,7 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
     })
 }
 
-/// `farik_draft_seller_message`: writes `mail/out/<n>.txt` and records `seller_message.drafted`.
+/// `catervas_draft_seller_message`: writes `mail/out/<n>.txt` and records `seller_message.drafted`.
 /// Nothing is sent. Checked in this order, nothing written or recorded on any refusal: the role and
 /// the session, the seller and the subject, the address, the body, then, under the lock, the order
 /// the purpose names and the limit of messages waiting.
@@ -332,7 +332,7 @@ pub(super) fn draft_seller_message(
             "seller_drafts_full",
             format!(
                 "{MOST_WAITING} messages wait for the owner already; go on without another, and \
-                 read them with farik_read_seller_messages"
+                 read them with catervas_read_seller_messages"
             ),
         ));
     }
@@ -386,7 +386,7 @@ pub(super) fn draft_seller_message(
     Ok(json!({ "message": number, "state": "waiting", "next": NEXT }))
 }
 
-/// `farik_read_seller_replies`' input.
+/// `catervas_read_seller_replies`' input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadRepliesInput {
@@ -417,7 +417,7 @@ fn where_it_reads(call: &Call<'_>) -> Result<(), ToolError> {
     in_its_own_implement_session(call, "its messages to sellers", &refuse)
 }
 
-/// `farik_read_seller_messages`: every message of the project, oldest first, with its state, why
+/// `catervas_read_seller_messages`: every message of the project, oldest first, with its state, why
 /// the last try failed, whether the owner edited it, and the text: what the owner sent for a sent
 /// message, else the draft. Records nothing.
 ///
@@ -462,9 +462,9 @@ pub(super) fn read_seller_messages(call: &Call<'_>) -> Result<Value, ToolError> 
     Ok(json!({ "messages": rows }))
 }
 
-/// `farik_read_seller_replies`: the replies of the project, oldest first, or those to one message:
+/// `catervas_read_seller_replies`: the replies of the project, oldest first, or those to one message:
 /// what the seller wrote (the sender, the subject, the date, the text and the names of the files),
-/// all inside an untrusted block, and the paths of the files that were kept, which are Farik's
+/// all inside an untrusted block, and the paths of the files that were kept, which are Catervas's
 /// names. Records nothing.
 ///
 /// # Errors
@@ -546,8 +546,8 @@ pub(super) fn read_seller_replies(
 mod tests {
     use std::path::PathBuf;
 
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_store::seller_mail::seller_mail;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_store::seller_mail::seller_mail;
     use serde_json::{Value, json};
     use sha2::{Digest as _, Sha256};
 
@@ -559,7 +559,7 @@ mod tests {
     };
 
     /// A project with the Procurement Specialists `proc` and `proc-2` and the Finance Specialist
-    /// `fin`, each in progress on a task of its own: FRK-1, FRK-2 and FRK-3.
+    /// `fin`, each in progress on a task of its own: CTV-1, CTV-2 and CTV-3.
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(
             name,
@@ -569,16 +569,16 @@ mod tests {
                 wire["agents"]
                     .as_array_mut()
                     .expect("a list of agents")
-                    .push(farik_core::team::fixtures::an_agent_wire(
+                    .push(catervas_core::team::fixtures::an_agent_wire(
                         "proc-2",
                         "procurement_specialist",
                     ));
             }),
         );
         for (task, role, assignee) in [
-            ("FRK-1", "procurement_specialist", "proc"),
-            ("FRK-2", "finance_specialist", "fin"),
-            ("FRK-3", "procurement_specialist", "proc-2"),
+            ("CTV-1", "procurement_specialist", "proc"),
+            ("CTV-2", "finance_specialist", "fin"),
+            ("CTV-3", "procurement_specialist", "proc-2"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -610,12 +610,12 @@ mod tests {
         input
     }
 
-    /// `farik_draft_seller_message` as `proc` in its implement session of FRK-1.
+    /// `catervas_draft_seller_message` as `proc` in its implement session of CTV-1.
     fn draft(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
-            "farik_draft_seller_message",
+            Some("CTV-1"),
+            "catervas_draft_seller_message",
             input.clone(),
         )
     }
@@ -628,7 +628,10 @@ mod tests {
     }
 
     fn out_dir(project: &TestProject) -> PathBuf {
-        project.repo.path.join(".farik/local/procurement/mail/out")
+        project
+            .repo
+            .path
+            .join(".catervas/local/procurement/mail/out")
     }
 
     fn files_in(folder: &std::path::Path) -> Vec<String> {
@@ -668,7 +671,7 @@ mod tests {
 
     /// The owner's step on `order`: no agent, no session.
     fn owner_decides(project: &TestProject, kind: &str, body: &Value) {
-        project.record("FRK-1", kind, body);
+        project.record("CTV-1", kind, body);
     }
 
     /// A conversation: message 1 sent after the founder edited it and answered, message 2 that a
@@ -682,7 +685,7 @@ mod tests {
             .expect("a draft");
             assert_eq!(sent["message"], number);
         }
-        let mail = project.repo.path.join(".farik/local/procurement/mail");
+        let mail = project.repo.path.join(".catervas/local/procurement/mail");
         std::fs::write(
             mail.join("out/1.sent.txt"),
             "Quote number 1 (edited)\n\nPlease quote 500 boxes.\n\nCorner Bakery",
@@ -735,8 +738,8 @@ mod tests {
         let read = project
             .call(
                 "proc",
-                Some("FRK-1"),
-                "farik_read_seller_messages",
+                Some("CTV-1"),
+                "catervas_read_seller_messages",
                 json!({}),
             )
             .expect("the messages");
@@ -763,8 +766,8 @@ mod tests {
         let replies = project
             .call(
                 "proc",
-                Some("FRK-1"),
-                "farik_read_seller_replies",
+                Some("CTV-1"),
+                "catervas_read_seller_replies",
                 json!({}),
             )
             .expect("the replies");
@@ -789,13 +792,13 @@ mod tests {
         }
         // Nothing the seller wrote can end the block early, however it is spelled.
         assert_eq!(wrote.matches("</untrusted>").count(), 1, "{wrote}");
-        // The paths a read opens are Farik's own names, never the seller's.
+        // The paths a read opens are Catervas's own names, never the seller's.
         let month = crate::tools::fixtures::at().format("%Y-%m").to_string();
         assert_eq!(
             row["files"],
             json!([
                 { "index": 1, "kept": true,
-                  "path": format!(".farik/local/procurement/mail/in/{month}/1/1.pdf") },
+                  "path": format!(".catervas/local/procurement/mail/in/{month}/1/1.pdf") },
                 { "index": 2, "kept": false },
             ])
         );
@@ -803,8 +806,8 @@ mod tests {
         let none = project
             .call(
                 "proc",
-                Some("FRK-1"),
-                "farik_read_seller_replies",
+                Some("CTV-1"),
+                "catervas_read_seller_replies",
                 json!({ "message": 2 }),
             )
             .expect("the replies of message 2");
@@ -812,8 +815,8 @@ mod tests {
         let one = project
             .call(
                 "proc",
-                Some("FRK-1"),
-                "farik_read_seller_replies",
+                Some("CTV-1"),
+                "catervas_read_seller_replies",
                 json!({ "message": 1 }),
             )
             .expect("the replies of message 1");
@@ -825,11 +828,14 @@ mod tests {
     fn reads_nothing_but_in_the_procurement_specialist_s_task_and_chat() {
         let project = a_project("seller-read-where");
         a_conversation(&project);
-        for tool in ["farik_read_seller_messages", "farik_read_seller_replies"] {
+        for tool in [
+            "catervas_read_seller_messages",
+            "catervas_read_seller_replies",
+        ] {
             // Another role, and a verify session.
-            let reason = refusal_of(project.call("fin", Some("FRK-2"), tool, json!({})));
+            let reason = refusal_of(project.call("fin", Some("CTV-2"), tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
-            let mut context = project.context("proc", Some("FRK-1"));
+            let mut context = project.context("proc", Some("CTV-1"));
             context.purpose = SessionPurpose::Verify;
             let reason = refusal_of(run(&context, tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
@@ -841,7 +847,7 @@ mod tests {
             // Procurement Specialist's.
             let reason = refusal_of(project.call("proc", None, tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
-            let reason = refusal_of(project.call("proc", Some("FRK-3"), tool, json!({})));
+            let reason = refusal_of(project.call("proc", Some("CTV-3"), tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
         }
     }
@@ -869,7 +875,7 @@ mod tests {
 
     #[test]
     fn no_tool_of_an_agent_records_a_send_a_failure_a_discard_a_reply_or_a_mailbox() {
-        // Only the owner's commands and Farik's own checks record these: the one door that sends
+        // Only the owner's commands and Catervas's own checks record these: the one door that sends
         // is the owner's press, so a tool that could record one is a tool that could send.
         let mut found = Vec::new();
         sources_under(
@@ -932,7 +938,7 @@ mod tests {
         let ids = &events[0].envelope.ids;
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(ids.agent_id.as_deref(), Some("proc"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
@@ -969,17 +975,25 @@ mod tests {
         let project = a_project("seller-draft-session");
         // The Finance Specialist, the Procurement Specialist's chat and verify session, and its
         // implement session of another's task.
-        let reason =
-            refusal_of(project.call("fin", Some("FRK-2"), "farik_draft_seller_message", quote()));
+        let reason = refusal_of(project.call(
+            "fin",
+            Some("CTV-2"),
+            "catervas_draft_seller_message",
+            quote(),
+        ));
         assert!(reason.starts_with("seller_message_refused: "), "{reason}");
         for purpose in [SessionPurpose::Chat, SessionPurpose::Verify] {
-            let mut context = project.context("proc", Some("FRK-1"));
+            let mut context = project.context("proc", Some("CTV-1"));
             context.purpose = purpose;
-            let reason = refusal_of(run(&context, "farik_draft_seller_message", quote()));
+            let reason = refusal_of(run(&context, "catervas_draft_seller_message", quote()));
             assert!(reason.starts_with("seller_message_refused: "), "{reason}");
         }
-        let reason =
-            refusal_of(project.call("proc", Some("FRK-3"), "farik_draft_seller_message", quote()));
+        let reason = refusal_of(project.call(
+            "proc",
+            Some("CTV-3"),
+            "catervas_draft_seller_message",
+            quote(),
+        ));
         assert!(reason.starts_with("seller_message_refused: "), "{reason}");
         assert!(files_in(&out_dir(&project)).is_empty());
         assert!(
@@ -1123,10 +1137,10 @@ mod tests {
             input["purchase_order"] = order;
             input
         };
-        drafted_order(&project, "proc", "FRK-1", 12);
-        drafted_order(&project, "proc-2", "FRK-3", 13);
-        drafted_order(&project, "proc", "FRK-1", 14);
-        drafted_order(&project, "proc", "FRK-1", 15);
+        drafted_order(&project, "proc", "CTV-1", 12);
+        drafted_order(&project, "proc-2", "CTV-3", 13);
+        drafted_order(&project, "proc", "CTV-1", 14);
+        drafted_order(&project, "proc", "CTV-1", 15);
         owner_decides(
             &project,
             "purchase_order.approved",
@@ -1209,7 +1223,7 @@ mod tests {
 
         // An order's message whose order was rejected no longer counts.
         let project = a_project("seller-draft-twenty-order");
-        drafted_order(&project, "proc", "FRK-1", 12);
+        drafted_order(&project, "proc", "CTV-1", 12);
         let mut order_message = with(quote(), "purpose", json!("purchase_order"));
         order_message["purchase_order"] = json!(12);
         draft(&project, &order_message).expect("an order message");

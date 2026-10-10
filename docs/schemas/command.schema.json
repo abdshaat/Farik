@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/command.schema.json",
-  "title": "Farik Command",
-  "description": "A request for the daemon to change something. Shaped like an event: command names what is asked and body carries that command's arguments. The pairing of the two is checked by the reader, farik_protocol::command::command_from_value. A command carries no actor: who asked is the session the command arrived on, and the step that turns a command into an event takes the actor from there rather than from the caller's word for it.",
+  "$id": "https://catervas.dev/schemas/command.schema.json",
+  "title": "Catervas Command",
+  "description": "A request for the daemon to change something. Shaped like an event: command names what is asked and body carries that command's arguments. The pairing of the two is checked by the reader, catervas_protocol::command::command_from_value. A command carries no actor: who asked is the session the command arrived on, and the step that turns a command into an event takes the actor from there rather than from the caller's word for it.",
   "type": "object",
   "additionalProperties": false,
   "required": ["command", "body"],
@@ -110,7 +110,7 @@
       "properties": {
         "contract": {
           "type": "object",
-          "description": "A task contract. This schema says only that it is an object: one schema never references another, and the contract's rules, the repeated-id ones among them, belong to farik_core::contract::validate_contract, which the reader calls."
+          "description": "A task contract. This schema says only that it is an object: one schema never references another, and the contract's rules, the repeated-id ones among them, belong to catervas_core::contract::validate_contract, which the reader calls."
         }
       }
     },
@@ -120,7 +120,7 @@
       "additionalProperties": false,
       "required": ["task_id", "size", "reason"],
       "properties": {
-        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
         "size": { "type": "string", "enum": ["large", "small"] },
         "reason": { "type": "string" }
       }
@@ -132,7 +132,7 @@
       "additionalProperties": false,
       "required": ["task_id", "to", "reason"],
       "properties": {
-        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
         "to": { "$ref": "#/$defs/taskStatus" },
         "reason": { "type": "string" }
       }
@@ -144,7 +144,7 @@
       "additionalProperties": false,
       "required": ["task_id", "subject"],
       "properties": {
-        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
         "subject": { "type": "string", "enum": ["contract", "result"] },
         "message": { "type": "string" }
       }
@@ -156,7 +156,7 @@
       "additionalProperties": false,
       "required": ["task_id", "to", "message"],
       "properties": {
-        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
         "to": { "$ref": "#/$defs/taskStatus" },
         "message": { "type": "string" },
         "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 }
@@ -169,7 +169,7 @@
       "additionalProperties": false,
       "required": ["task_id", "subject", "message", "failed_criteria"],
       "properties": {
-        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
         "subject": { "type": "string", "enum": ["contract", "result"] },
         "message": { "type": "string" },
         "failed_criteria": { "type": "array", "items": { "type": "string" } }
@@ -193,7 +193,7 @@
       "additionalProperties": false,
       "required": ["task_id"],
       "properties": {
-        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+        "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
       }
     },
     "agentUpdateBody": {
@@ -239,7 +239,7 @@
     },
     "chatMessagePostBody": {
       "title": "Chat Message Post Body",
-      "description": "The human says something in their one-to-one chat with the agent agent_id (docs/SPEC.md 4.3; ADR 0026). There is no author: Farik writes human. Whether the agent exists and is not retired, and whether text is blank or longer than 4,000 code points, is the handler's to say, with the rule's own words.",
+      "description": "The human says something in their one-to-one chat with the agent agent_id (docs/SPEC.md 4.3; ADR 0026). There is no author: Catervas writes human. Whether the agent exists and is not retired, and whether text is blank or longer than 4,000 code points, is the handler's to say, with the rule's own words.",
       "type": "object",
       "additionalProperties": false,
       "required": ["agent_id", "text"],
@@ -285,7 +285,7 @@
     },
     "marketingPlanDecideBody": {
       "title": "Marketing Plan Decide Body",
-      "description": "The owner approves (decision approve) or sends back (decision return) the marketing plan plan, MP-<n> (docs/SPEC.md 6.5; ADR 0042). note is what the owner says to the agent: required for return, where it is the reason and Farik refuses it blank as marketing_plan_reason_needed, and optional for approve. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session. Refused unknown_marketing_plan when plan names none, marketing_plan_decided when it was decided before, and marketing_plan_expired when approving one whose ends_on is past. marketing_plan.approved or marketing_plan.returned is appended with the proposing task on its envelope; an approval also ends every approved plan the new one replaces.",
+      "description": "The owner approves (decision approve) or sends back (decision return) the marketing plan plan, MP-<n> (docs/SPEC.md 6.5; ADR 0042). note is what the owner says to the agent: required for return, where it is the reason and Catervas refuses it blank as marketing_plan_reason_needed, and optional for approve. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session. Refused unknown_marketing_plan when plan names none, marketing_plan_decided when it was decided before, and marketing_plan_expired when approving one whose ends_on is past. marketing_plan.approved or marketing_plan.returned is appended with the proposing task on its envelope; an approval also ends every approved plan the new one replaces.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "decision"],
@@ -308,7 +308,7 @@
     },
     "socialPostStopBody": {
       "title": "Social Post Stop Body",
-      "description": "The owner stops post post, which is going out or is with Buffer (docs/SPEC.md 6.5; ADR 0042): a scheduled post not yet with Buffer records social_post.stopped { by owner }; one Farik has given to Buffer is first deleted from Buffer by Farik's own delete_post, and only when Buffer takes it back is social_post.stopped { by owner, taken_back } recorded. Refused unknown_post when post names none; post_not_going_out for a post that was requested, stopped, missed or failed; post_being_handed_over while Farik is giving it to Buffer, to be tried again in a minute; post_already_out once its time has passed; post_not_taken_back when Buffer would not delete it, with nothing recorded. Only the owner stops a post: the command arrives behind the daemon's token or the browser's cookie, never from an agent's session.",
+      "description": "The owner stops post post, which is going out or is with Buffer (docs/SPEC.md 6.5; ADR 0042): a scheduled post not yet with Buffer records social_post.stopped { by owner }; one Catervas has given to Buffer is first deleted from Buffer by Catervas's own delete_post, and only when Buffer takes it back is social_post.stopped { by owner, taken_back } recorded. Refused unknown_post when post names none; post_not_going_out for a post that was requested, stopped, missed or failed; post_being_handed_over while Catervas is giving it to Buffer, to be tried again in a minute; post_already_out once its time has passed; post_not_taken_back when Buffer would not delete it, with nothing recorded. Only the owner stops a post: the command arrives behind the daemon's token or the browser's cookie, never from an agent's session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["post"],
@@ -318,7 +318,7 @@
     },
     "socialPostDecideBody": {
       "title": "Social Post Decide Body",
-      "description": "The owner allows (decision post) or does not allow (decision dont_post) post post, which the Marketing Specialist wrote outside the marketing plan (docs/SPEC.md 6.5; ADR 0042). Allowed, it is recorded as social_post.scheduled { approved_by owner } with the request's task and no agent, and Farik hands it to Buffer an hour before its time, or at once when that hour has passed. Not allowed, social_post.stopped { by declined } is recorded with note, the owner's words, which the agent reads as the owner's own. Refused unknown_post when post names none, post_decided when it was decided before, and post_in_the_past when its time has passed, or is within five minutes for one to allow, since Farik can no longer hand it to Buffer. Only the owner decides, under ask and auto alike.",
+      "description": "The owner allows (decision post) or does not allow (decision dont_post) post post, which the Marketing Specialist wrote outside the marketing plan (docs/SPEC.md 6.5; ADR 0042). Allowed, it is recorded as social_post.scheduled { approved_by owner } with the request's task and no agent, and Catervas hands it to Buffer an hour before its time, or at once when that hour has passed. Not allowed, social_post.stopped { by declined } is recorded with note, the owner's words, which the agent reads as the owner's own. Refused unknown_post when post names none, post_decided when it was decided before, and post_in_the_past when its time has passed, or is within five minutes for one to allow, since Catervas can no longer hand it to Buffer. Only the owner decides, under ask and auto alike.",
       "type": "object",
       "additionalProperties": false,
       "required": ["post", "decision"],
@@ -342,7 +342,7 @@
     },
     "siteAddBody": {
       "title": "Site Add Body",
-      "description": "The owner allows a site no agent asked for, or turns one of Farik's back on (docs/SPEC.md 6.10; ADR 0039). site is trimmed, has https:// put before it only when it holds no ://, and is then taken as the site its address names, a host and its www. twin being one: site.approved { host } is recorded with no task, and every request waiting for the site is allowed too. Refused site_invalid for a site Farik cannot open (an address that is not https, a port, a user name, an IP address, a name with no dot), and site_already_allowed for one that is approved.",
+      "description": "The owner allows a site no agent asked for, or turns one of Catervas's back on (docs/SPEC.md 6.10; ADR 0039). site is trimmed, has https:// put before it only when it holds no ://, and is then taken as the site its address names, a host and its www. twin being one: site.approved { host } is recorded with no task, and every request waiting for the site is allowed too. Refused site_invalid for a site Catervas cannot open (an address that is not https, a port, a user name, an IP address, a name with no dot), and site_already_allowed for one that is approved.",
       "type": "object",
       "additionalProperties": false,
       "required": ["site"],
@@ -352,7 +352,7 @@
     },
     "siteRemoveBody": {
       "title": "Site Remove Body",
-      "description": "The owner takes a site away from the Procurement Specialist, whether they allowed it or it is one of Farik's, which this turns off (docs/SPEC.md 6.10; ADR 0039). host is normalised as siteAddBody's site is: site.removed { host } is recorded with no task. Refused site_invalid for a host Farik cannot open, and site_not_allowed for one that is not approved now.",
+      "description": "The owner takes a site away from the Procurement Specialist, whether they allowed it or it is one of Catervas's, which this turns off (docs/SPEC.md 6.10; ADR 0039). host is normalised as siteAddBody's site is: site.removed { host } is recorded with no task. Refused site_invalid for a host Catervas cannot open, and site_not_allowed for one that is not approved now.",
       "type": "object",
       "additionalProperties": false,
       "required": ["host"],
@@ -362,7 +362,7 @@
     },
     "purchaseOrderDecideBody": {
       "title": "Purchase Order Decide Body",
-      "description": "The owner approves (decision approve: they will place and pay for the order themselves) or rejects (decision reject) the purchase order order, the n of PO-n (docs/SPEC.md 6.10; ADR 0039). note is what the owner says to the agent, whichever they decide, at most 600 characters. purchase_order.approved or purchase_order.rejected is appended with the order's task on its envelope and no agent and no session, its note empty when the owner said nothing. Refused unknown_purchase_order when order names no drafted order, purchase_order_decided when it was decided before, purchase_order_ended when it was received or closed, purchase_order_expired when Farik closed it by itself, and purchase_order_note_too_long past 600 characters. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session, and no tool of an agent records an approval.",
+      "description": "The owner approves (decision approve: they will place and pay for the order themselves) or rejects (decision reject) the purchase order order, the n of PO-n (docs/SPEC.md 6.10; ADR 0039). note is what the owner says to the agent, whichever they decide, at most 600 characters. purchase_order.approved or purchase_order.rejected is appended with the order's task on its envelope and no agent and no session, its note empty when the owner said nothing. Refused unknown_purchase_order when order names no drafted order, purchase_order_decided when it was decided before, purchase_order_ended when it was received or closed, purchase_order_expired when Catervas closed it by itself, and purchase_order_note_too_long past 600 characters. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session, and no tool of an agent records an approval.",
       "type": "object",
       "additionalProperties": false,
       "required": ["order", "decision"],
@@ -374,7 +374,7 @@
     },
     "sellerMessageSendBody": {
       "title": "Seller Message Send Body",
-      "description": "The owner presses Send on message message to a seller, with the subject and the body they saw (docs/SPEC.md 6.10; ADR 0039): Farik adds the owner's signature and the line saying an AI assistant wrote it, sends the message from the procurement mailbox and appends seller_message.sent, or seller_message.failed when a mail server refuses it, in which case the message waits to be tried again. subject is 1 to 200 characters on one line and body 1 to 8000 characters, with no control character but a line break and a tab. Refused unknown_seller_message, seller_message_sent (also for a send of it that is in flight), seller_message_discarded, seller_message_closed (an order's message whose order was decided without it), seller_message_is_an_order (an order's message goes with its order, by purchase_order_send), mailbox_not_connected, seller_message_field_invalid, seller_message_too_long, seller_send_limit (50 messages have gone today, UTC, orders' included) and seller_message_failed. Only the owner sends: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session, and no tool of an agent sends or records a send.",
+      "description": "The owner presses Send on message message to a seller, with the subject and the body they saw (docs/SPEC.md 6.10; ADR 0039): Catervas adds the owner's signature and the line saying an AI assistant wrote it, sends the message from the procurement mailbox and appends seller_message.sent, or seller_message.failed when a mail server refuses it, in which case the message waits to be tried again. subject is 1 to 200 characters on one line and body 1 to 8000 characters, with no control character but a line break and a tab. Refused unknown_seller_message, seller_message_sent (also for a send of it that is in flight), seller_message_discarded, seller_message_closed (an order's message whose order was decided without it), seller_message_is_an_order (an order's message goes with its order, by purchase_order_send), mailbox_not_connected, seller_message_field_invalid, seller_message_too_long, seller_send_limit (50 messages have gone today, UTC, orders' included) and seller_message_failed. Only the owner sends: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session, and no tool of an agent sends or records a send.",
       "type": "object",
       "additionalProperties": false,
       "required": ["message", "subject", "body"],
@@ -406,7 +406,7 @@
     },
     "purchaseOrderSendBody": {
       "title": "Purchase Order Send Body",
-      "description": "The owner presses Approve and send on a purchase order (docs/SPEC.md 6.10; ADR 0039, its amendment of 2026-10-07): Farik emails message, the order's own, with the order's workbook, orders/PO-<order>.xlsx, attached, to the seller, with the subject and body the owner saw, and only then appends purchase_order.approved (with note), seller_message.sent and purchase_order.placed (today, UTC), each with the order's task on its envelope and no agent and no session. A failed send appends seller_message.failed alone and the order still waits. The owner pays the seller outside Farik. Refused as purchase_order_decide refuses an order, and unknown_seller_message, seller_message_not_this_order (message is not this order's waiting message), and as seller_message_send refuses a message; a second send of the order's message while the first is in flight is refused seller_message_sent (purchase_order_sending is purchase_order_decide's, for an order being emailed). A message that sends an order is sent by this command alone, under ask and auto alike.",
+      "description": "The owner presses Approve and send on a purchase order (docs/SPEC.md 6.10; ADR 0039, its amendment of 2026-10-07): Catervas emails message, the order's own, with the order's workbook, orders/PO-<order>.xlsx, attached, to the seller, with the subject and body the owner saw, and only then appends purchase_order.approved (with note), seller_message.sent and purchase_order.placed (today, UTC), each with the order's task on its envelope and no agent and no session. A failed send appends seller_message.failed alone and the order still waits. The owner pays the seller outside Catervas. Refused as purchase_order_decide refuses an order, and unknown_seller_message, seller_message_not_this_order (message is not this order's waiting message), and as seller_message_send refuses a message; a second send of the order's message while the first is in flight is refused seller_message_sent (purchase_order_sending is purchase_order_decide's, for an order being emailed). A message that sends an order is sent by this command alone, under ask and auto alike.",
       "type": "object",
       "additionalProperties": false,
       "required": ["order", "message", "subject", "body"],
@@ -420,7 +420,7 @@
     },
     "purchaseOrderStepBody": {
       "title": "Purchase Order Step Body",
-      "description": "The body of purchase_order_place, purchase_order_receive and purchase_order_close (docs/SPEC.md 6.10; ADR 0039), which share one shape since `{ order }` fits all three and the schema's choice of bodies must match exactly one; the reader holds each command to its own fields. purchase_order_place: order is an approved order the owner placed and paid for themselves, placed_on the day (today, in UTC, when absent), paid what they paid if they know (a number such as 1450 or 1450.00, at most 10000000.00) and currency its currency (three capital letters, the order's when absent beside a paid). purchase_order_receive: the owner marks a placed order received on received_on (today when absent), with paid and currency if given here (the latest paid given, at placing or receiving, is what was paid) and renews_on, the day a subscription or anything paid for again renews. purchase_order_close: the owner closes a placed order that will not come (the seller cancelled or refunded it, or it was lost), with note, at most 600 characters. Refused unknown_purchase_order, purchase_order_expired, purchase_order_not_approved (placing an order not approved), purchase_order_placed (placing one placed), purchase_order_not_placed (receiving or closing one not placed), purchase_order_ended (any step on one received or closed), purchase_order_paid_invalid, purchase_order_currency_invalid and purchase_order_note_too_long. The events are appended with the order's task on the envelope and no agent and no session: no Farik tool records an order placed or received or what was paid.",
+      "description": "The body of purchase_order_place, purchase_order_receive and purchase_order_close (docs/SPEC.md 6.10; ADR 0039), which share one shape since `{ order }` fits all three and the schema's choice of bodies must match exactly one; the reader holds each command to its own fields. purchase_order_place: order is an approved order the owner placed and paid for themselves, placed_on the day (today, in UTC, when absent), paid what they paid if they know (a number such as 1450 or 1450.00, at most 10000000.00) and currency its currency (three capital letters, the order's when absent beside a paid). purchase_order_receive: the owner marks a placed order received on received_on (today when absent), with paid and currency if given here (the latest paid given, at placing or receiving, is what was paid) and renews_on, the day a subscription or anything paid for again renews. purchase_order_close: the owner closes a placed order that will not come (the seller cancelled or refunded it, or it was lost), with note, at most 600 characters. Refused unknown_purchase_order, purchase_order_expired, purchase_order_not_approved (placing an order not approved), purchase_order_placed (placing one placed), purchase_order_not_placed (receiving or closing one not placed), purchase_order_ended (any step on one received or closed), purchase_order_paid_invalid, purchase_order_currency_invalid and purchase_order_note_too_long. The events are appended with the order's task on the envelope and no agent and no session: no Catervas tool records an order placed or received or what was paid.",
       "type": "object",
       "additionalProperties": false,
       "required": ["order"],
@@ -472,11 +472,11 @@
     "skillLevel": {
       "type": "string",
       "enum": ["team", "agent"],
-      "description": "Whose skill: the team's (.farik/skills/<name>/) or one agent's (.farik/agents/<agent>/skills/<name>/). With agent, the agent is named in agent; with team there is no agent. The reader refuses both mismatches at /body/agent."
+      "description": "Whose skill: the team's (.catervas/skills/<name>/) or one agent's (.catervas/agents/<agent>/skills/<name>/). With agent, the agent is named in agent; with team there is no agent. The reader refuses both mismatches at /body/agent."
     },
     "skillSaveBody": {
       "title": "Skill Save Body",
-      "description": "Adds the skill whose folder is files to level, or replaces the one of its name (docs/SPEC.md 6.7; ADR 0034). files maps each path in the folder to its text, SKILL.md among them; the name is the one in SKILL.md's frontmatter. The handler holds it to check_skill and the counts, writes the folder, then the pin in the team file, then appends skill.added or skill.changed. A name Farik ships is refused skill_name_taken unless replace_shipped is true. The refusals are skill_* codes, agent_unknown and skill_limit_reached.",
+      "description": "Adds the skill whose folder is files to level, or replaces the one of its name (docs/SPEC.md 6.7; ADR 0034). files maps each path in the folder to its text, SKILL.md among them; the name is the one in SKILL.md's frontmatter. The handler holds it to check_skill and the counts, writes the folder, then the pin in the team file, then appends skill.added or skill.changed. A name Catervas ships is refused skill_name_taken unless replace_shipped is true. The refusals are skill_* codes, agent_unknown and skill_limit_reached.",
       "type": "object",
       "additionalProperties": false,
       "required": ["level", "files"],
@@ -526,7 +526,7 @@
     },
     "commandReply": {
       "title": "Command Reply",
-      "description": "What the daemon's POST /command answers once the token passes (docs/SPEC.md section 8.2): what the command did, as one sentence and the sequence numbers of the events it appended, or why it did nothing. A reply is what leaves a process, so it has a schema as a command does; farik_protocol::command::reply_from_value reads it against this definition.",
+      "description": "What the daemon's POST /command answers once the token passes (docs/SPEC.md section 8.2): what the command did, as one sentence and the sequence numbers of the events it appended, or why it did nothing. A reply is what leaves a process, so it has a schema as a command does; catervas_protocol::command::reply_from_value reads it against this definition.",
       "oneOf": [
         { "$ref": "#/$defs/commandDone" },
         { "$ref": "#/$defs/commandRefusal" }

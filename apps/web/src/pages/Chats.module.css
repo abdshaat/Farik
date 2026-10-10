@@ -2,13 +2,13 @@
 .wide {
 	display: grid;
 	grid-template-columns: 300px minmax(0, 1fr);
-	gap: var(--farik-space-6);
+	gap: var(--catervas-space-6);
 	align-items: start;
 }
 
 .narrow {
 	display: grid;
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 }
 
 .open {
@@ -18,7 +18,7 @@
 .list {
 	display: grid;
 	align-content: start;
-	border-right: 1px solid var(--farik-color-rule);
+	border-right: 1px solid var(--catervas-color-rule);
 }
 
 .list ul,
@@ -29,35 +29,35 @@
 }
 
 .title {
-	margin: 0 0 var(--farik-space-3);
+	margin: 0 0 var(--catervas-space-3);
 	font:
-		var(--farik-type-title-weight) var(--farik-type-title-size) /
-		var(--farik-type-title-line-height) var(--farik-type-title-family);
+		var(--catervas-type-title-weight) var(--catervas-type-title-size) /
+		var(--catervas-type-title-line-height) var(--catervas-type-title-family);
 }
 
 .row {
 	display: flex;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	min-height: 44px;
-	padding: var(--farik-space-3);
-	border-top: 1px solid var(--farik-color-rule);
-	color: var(--farik-color-ink);
+	padding: var(--catervas-space-3);
+	border-top: 1px solid var(--catervas-color-rule);
+	color: var(--catervas-color-ink);
 	text-decoration: none;
 }
 
 .row[aria-current="page"] {
-	background: var(--farik-color-surface);
+	background: var(--catervas-color-surface);
 }
 
 .row:focus-visible,
 .faces a:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: -2px;
 }
 
 .who {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	min-width: 0;
 	flex: 1;
 }
@@ -65,15 +65,15 @@
 .top {
 	display: flex;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	min-width: 0;
 }
 
 .role,
 .time,
 .last {
-	color: var(--farik-color-ink-muted);
-	font-size: var(--farik-type-small-size);
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
 }
 
 .role {
@@ -85,7 +85,7 @@
 
 .time {
 	margin-left: auto;
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 }
 
 .last {
@@ -95,9 +95,9 @@
 }
 
 .past {
-	margin: var(--farik-space-4) 0 var(--farik-space-2);
-	padding: 0 var(--farik-space-3);
-	font-size: var(--farik-type-small-size);
+	margin: var(--catervas-space-4) 0 var(--catervas-space-2);
+	padding: 0 var(--catervas-space-3);
+	font-size: var(--catervas-type-small-size);
 }
 
 .face {
@@ -107,8 +107,8 @@
 	justify-content: center;
 	width: 48px;
 	height: 48px;
-	background: var(--farik-color-band);
-	color: var(--farik-color-band-ink);
+	background: var(--catervas-color-band);
+	color: var(--catervas-color-band-ink);
 }
 
 /* An agent with no avatar keeps its place. */
@@ -121,38 +121,39 @@
 /* A phone: one scrolling row of faces, Team first, the open one underlined. */
 .faces ul {
 	display: flex;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	overflow-x: auto;
-	border-bottom: 1px solid var(--farik-color-rule);
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .faces a {
 	display: grid;
 	justify-items: center;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	min-width: 56px;
-	padding: var(--farik-space-1) var(--farik-space-1) var(--farik-space-2);
+	padding: var(--catervas-space-1) var(--catervas-space-1)
+		var(--catervas-space-2);
 	border-bottom: 2px solid transparent;
-	color: var(--farik-color-ink);
-	font-size: var(--farik-type-small-size);
+	color: var(--catervas-color-ink);
+	font-size: var(--catervas-type-small-size);
 	text-decoration: none;
 }
 
 .faces a[aria-current="page"] {
-	border-bottom-color: var(--farik-color-ink);
+	border-bottom-color: var(--catervas-color-ink);
 	font-weight: 600;
 }
 
 .none {
 	margin: 0;
 	font:
-		var(--farik-type-title-weight) var(--farik-type-title-size) /
-		var(--farik-type-title-line-height) var(--farik-type-title-family);
+		var(--catervas-type-title-weight) var(--catervas-type-title-size) /
+		var(--catervas-type-title-line-height) var(--catervas-type-title-family);
 }
 
 .chat {
 	display: grid;
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 	align-content: start;
 }
 
@@ -160,14 +161,14 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: flex-start;
-	gap: var(--farik-space-3) var(--farik-space-4);
-	padding-bottom: var(--farik-space-3);
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-3) var(--catervas-space-4);
+	padding-bottom: var(--catervas-space-3);
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .heading {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	flex: 1;
 	min-width: 0;
 }
@@ -175,7 +176,7 @@
 .titled {
 	display: flex;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .back {
@@ -193,9 +194,9 @@
 .waiting {
 	display: flex;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	margin: 0;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .waiting:empty {
@@ -204,12 +205,12 @@
 
 .proposal {
 	display: grid;
-	gap: var(--farik-space-2);
-	margin-top: var(--farik-space-2);
-	padding: var(--farik-space-3) var(--farik-space-4);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-raised);
+	gap: var(--catervas-space-2);
+	margin-top: var(--catervas-space-2);
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-raised);
 }
 
 .proposal p {
@@ -224,16 +225,16 @@
 	flex: 1;
 	min-width: 0;
 	resize: vertical;
-	padding: var(--farik-space-2);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-page);
-	color: var(--farik-color-ink);
+	padding: var(--catervas-space-2);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-page);
+	color: var(--catervas-color-ink);
 	font: inherit;
 }
 
 .input:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -241,5 +242,5 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }

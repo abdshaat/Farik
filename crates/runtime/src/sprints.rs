@@ -3,15 +3,15 @@
 
 use std::fmt;
 
-use farik_core::contract::{Role, TaskId, TaskKind, TaskStatus};
-use farik_core::governor::gates::{SprintHold, in_the_backlog};
-use farik_core::sprint::{Sprint, SprintStatus, validate_sprint};
-use farik_core::team::{SprintWork, Team};
-use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, SessionStartedBodyPurpose, Thread, new_event,
+use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
+use catervas_core::governor::gates::{SprintHold, in_the_backlog};
+use catervas_core::sprint::{Sprint, SprintStatus, validate_sprint};
+use catervas_core::team::{SprintWork, Team};
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventKind, SessionStartedBodyPurpose, Thread, new_event,
 };
-use farik_store::files::FilesError;
-use farik_store::{EventLog, EventQuery, SprintProjection, StoreError, TaskProjection};
+use catervas_store::files::FilesError;
+use catervas_store::{EventLog, EventQuery, SprintProjection, StoreError, TaskProjection};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
@@ -21,18 +21,18 @@ use crate::tools::ToolDeps;
 /// Who ended a sprint, as `sprint.ended` records it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndedBy {
-    /// Farik, when every task in it was accepted or cancelled.
+    /// Catervas, when every task in it was accepted or cancelled.
     Governor,
-    /// The human, with `farik sprint end`.
+    /// The human, with `catervas sprint end`.
     Human,
 }
 
 /// Who plans tasks into a sprint, as `sprint.planned` records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlannedBy {
-    /// The assigner, with `farik_plan_sprint`: every rule of a plan holds.
+    /// The assigner, with `catervas_plan_sprint`: every rule of a plan holds.
     Assigner(String),
-    /// Farik, putting a breakdown's task in its epic's sprint.
+    /// Catervas, putting a breakdown's task in its epic's sprint.
     Governor,
 }
 
@@ -51,7 +51,7 @@ pub enum SprintError {
         /// Why, starting with a `snake_case` kind and `: `.
         reason: String,
     },
-    /// A file under `.farik/` could not be read or written.
+    /// A file under `.catervas/` could not be read or written.
     Files(FilesError),
     /// The log or the board failed.
     Store(StoreError),
@@ -63,7 +63,7 @@ impl fmt::Display for SprintError {
             Self::AlreadyOpen { sprint_id } => {
                 write!(
                     formatter,
-                    "{sprint_id} is open; end it with farik sprint end"
+                    "{sprint_id} is open; end it with catervas sprint end"
                 )
             }
             Self::NoneOpen => write!(formatter, "no sprint is open"),
@@ -369,7 +369,7 @@ fn plan_sprint_racing(
     before_final_write();
     // Read the file again, right here, next to the write it guards: an end that finished after
     // the check above, while the contracts were being written, must not have this plan write its
-    // ended file back as open (n1). The contracts may already name the sprint; `farik doctor`
+    // ended file back as open (n1). The contracts may already name the sprint; `catervas doctor`
     // reports that mismatch (m1).
     if deps.files.read_sprint(&open.sprint_id)?.status != SprintStatus::Open {
         return Err(plan_refused(&format!("{} has ended", open.sprint_id)));
@@ -504,7 +504,7 @@ pub fn planning_session_spent(log: &EventLog, sprint_id: &str) -> Result<bool, S
 /// Whether `event` is the start of a sprint's planning: a `session.started` in the `planning`
 /// thread, or, as logs from before the ceremonies wrote it, one of purpose `plan` about no task
 /// and in no thread.
-pub(crate) fn is_planning(event: &FarikEvent) -> bool {
+pub(crate) fn is_planning(event: &CatervasEvent) -> bool {
     match &event.body {
         EventBody::SessionStarted(body) => {
             body.thread == Some(Thread::Planning)
@@ -516,7 +516,7 @@ pub(crate) fn is_planning(event: &FarikEvent) -> bool {
     }
 }
 
-/// A refusal of a plan, in the words `farik_plan_sprint` answers.
+/// A refusal of a plan, in the words `catervas_plan_sprint` answers.
 fn plan_refused(why: &str) -> SprintError {
     SprintError::Refused {
         reason: format!("sprint_plan_refused: {why}"),
@@ -595,7 +595,7 @@ mod tests {
         plan_sprint_racing, planning_session_spent, start_sprint,
     };
     use crate::tools::fixtures::{TestProject, a_team_of_three};
-    use farik_core::contract::TaskId;
+    use catervas_core::contract::TaskId;
 
     fn task(id: &str) -> TaskId {
         id.parse().expect("a task id")
@@ -605,7 +605,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_plan_that_lost_the_race_to_an_end() {
         let project = TestProject::new("sprints-plan-race", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "ready", "task", None);
+        project.filed("CTV-1", "ready", "task", None);
         let deps = &project.deps;
         start_sprint(deps, None, "human").expect("S1 starts");
 
@@ -613,7 +613,7 @@ mod tests {
         // end finishes: both its file and its event.
         let refused = plan_sprint_racing(
             deps,
-            &[task("FRK-1")],
+            &[task("CTV-1")],
             &PlannedBy::Assigner("pm".to_string()),
             || {
                 end_sprint(deps, EndedBy::Human).expect("S1 ends, winning the race");
@@ -648,7 +648,7 @@ mod tests {
         assert!(planning_session_spent(&project.deps.log, "S1").expect("the log reads"));
     }
 
-    /// Epic FRK-1 `in_progress` with its task FRK-2 `ready`, on a team with the policy `on`, and
+    /// Epic CTV-1 `in_progress` with its task CTV-2 `ready`, on a team with the policy `on`, and
     /// S1 started.
     fn an_epic_under_way(name: &str, on: bool) -> TestProject {
         let project = TestProject::new(
@@ -659,11 +659,11 @@ mod tests {
                 }
             }),
         );
-        project.filed("FRK-1", "ready", "epic", None);
+        project.filed("CTV-1", "ready", "epic", None);
         let people = serde_json::json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
-        project.moved("FRK-1", "ready", "assigned", &people);
-        project.moved("FRK-1", "assigned", "in_progress", &people);
-        project.filed("FRK-2", "ready", "task", Some("FRK-1"));
+        project.moved("CTV-1", "ready", "assigned", &people);
+        project.moved("CTV-1", "assigned", "in_progress", &people);
+        project.filed("CTV-2", "ready", "task", Some("CTV-1"));
         start_sprint(&project.deps, None, "human").expect("S1 starts");
         project
     }
@@ -674,7 +674,7 @@ mod tests {
         let on = an_epic_under_way("sprints-backlog-epic", true);
         let sprint = plan_sprint(
             &on.deps,
-            &[task("FRK-1")],
+            &[task("CTV-1")],
             &PlannedBy::Assigner("pm".to_string()),
         )
         .expect("the Backlog's epic is planned");
@@ -684,20 +684,20 @@ mod tests {
                 .iter()
                 .map(|id| id.as_str())
                 .collect::<Vec<_>>(),
-            ["FRK-1", "FRK-2"]
+            ["CTV-1", "CTV-2"]
         );
 
         let off = an_epic_under_way("sprints-backlog-epic-off", false);
         let refused = plan_sprint(
             &off.deps,
-            &[task("FRK-1")],
+            &[task("CTV-1")],
             &PlannedBy::Assigner("pm".to_string()),
         )
         .expect_err("off, only a ready epic is planned");
         assert_eq!(
             refused,
             plan_refused(
-                "FRK-1 is in_progress, and only a ready task or an approved epic is planned"
+                "CTV-1 is in_progress, and only a ready task or an approved epic is planned"
             )
         );
     }

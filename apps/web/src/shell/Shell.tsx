@@ -1,4 +1,5 @@
-import { Button } from "@farik/ui";
+import icon from "@catervas/brand/assets/icons/icon-48.png";
+import { Button } from "@catervas/ui";
 import { useSyncExternalStore } from "react";
 import {
 	Link,
@@ -44,7 +45,7 @@ export function Shell() {
 	const navigate = useNavigate();
 	const { data, again } = useQuery<ServeStatus>("serve.status", {});
 	const path = useLocation().pathname;
-	// Nothing shows, and nothing is asked of the project, until Farik says where it stands.
+	// Nothing shows, and nothing is asked of the project, until Catervas says where it stands.
 	if (!data) return null;
 	// During setup, every path goes where "/" would.
 	if (landing(data) !== "/") return <Navigate to={landing(data)} replace />;
@@ -77,7 +78,10 @@ export function Shell() {
 		<div className={wide ? styles.wide : styles.narrow}>
 			{wide ? (
 				<header className={styles.rail}>
-					<p className={styles.logo}>{t("brand")}</p>
+					<p className={styles.logo}>
+						<img src={icon} alt="" width="24" height="24" />
+						{t("brand")}
+					</p>
 					<nav aria-label={t("navRail")}>{places}</nav>
 					<div className={styles.foot}>
 						{name && (

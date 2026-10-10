@@ -26,10 +26,10 @@ it names.
 
 Search the web for the product, the maker and the seller's kind. If the search services are
 connected, `using-procurement-sources` says how to use them. Open a page only on a site you may
-read: call `farik_read_sites` first and read its answer, since a page on any other site is refused.
+read: call `catervas_read_sites` first and read its answer, since a page on any other site is refused.
 
 When a maker's or seller's site is not yet approved, ask for it before you end your turn, all in one
-call: `farik_request_sites`, each entry the first page you want and one line on what the site sells
+call: `catervas_request_sites`, each entry the first page you want and one line on what the site sells
 and why it matters. Then end your turn, since your task waits for the owner. Do not ask for a site
 you have no reason to read.
 

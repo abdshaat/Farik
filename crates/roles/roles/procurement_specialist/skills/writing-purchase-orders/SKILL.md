@@ -11,19 +11,19 @@ of yours records that an order was placed, received or paid.
 
 ## 1. The evaluation first, always
 
-An order rests on a comparison. Write it with `farik_write_evaluation` before you draft anything,
+An order rests on a comparison. Write it with `catervas_write_evaluation` before you draft anything,
 and name it in the order. The founder reads it from the order.
 
 ## 2. One order for each seller
 
-Draft it with `farik_draft_purchase_order`:
+Draft it with `catervas_draft_purchase_order`:
 - **Each line.** The item exactly as the seller names it, the quantity, the unit it is counted in
   and the unit price as the seller quoted it, with no rounding or converting. A bag of 50 mirrors
   is one line, not fifty; a software plan is one line, with `period` `month` or `year`.
 - **Delivery and terms.** As the seller agreed or published them, in the seller's words.
 - **`url`.** The seller's own page for these goods, on a site you may read, never a reseller's page,
   an advertisement or a shortened link. The tool refuses a page on another site: ask for it with
-  `farik_request_sites` first, and end your turn. Leave it empty for a seller who has no page, met
+  `catervas_request_sites` first, and end your turn. Leave it empty for a seller who has no page, met
   by phone or in person.
 - **`why`.** Two plain sentences on why this seller and these goods.
 
@@ -32,20 +32,20 @@ order from Today, and may reject it with a note: read the note before you sugges
 
 ## 3. At the start of a task about an order
 
-Read the outcomes with `farik_read_purchase_orders`: each order's state, the founder's notes, what
+Read the outcomes with `catervas_read_purchase_orders`: each order's state, the founder's notes, what
 was paid and its latest status.
 
 ## 4. Following up an order the founder placed
 
 When the founder marks an order placed, a follow-up task reads the seller's pages, only on sites
-you may read, and records what they say with `farik_update_purchase_order`:
+you may read, and records what they say with `catervas_update_purchase_order`:
 - `preparing`, when the seller is making or packing it;
 - `shipped`, when the page shows it on its way;
 - `delayed`, with the reason in `note` and the expected day in `expected_on`;
 - `problem`, with what is wrong in `note`, such as out of stock or a payment refused.
 
 Record what the page says and no more. The founder can correct any status. A problem that needs
-the founder goes to them with `farik_ask_human`. Never record an order as placed, received or paid:
+the founder goes to them with `catervas_ask_human`. Never record an order as placed, received or paid:
 only the founder does.
 
 ## 5. What you write

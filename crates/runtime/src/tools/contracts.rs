@@ -1,19 +1,21 @@
 //! Triage, contract writing, filing tasks, and planning a sprint: the tools that decide what a task
 //! is and when it is worked on.
 
-use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract};
-use farik_core::criteria::expand_criteria;
-use farik_core::governor::gates::{
+use catervas_core::contract::{
+    Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract,
+};
+use catervas_core::criteria::expand_criteria;
+use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteOutcome, ParentEpic, check_child_creation,
     check_contract_write,
 };
-use farik_core::governor::transition_table::TransitionActor;
-use farik_protocol::event::{
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_protocol::event::{
     ContractJudgedBody, ContractWrittenBody, EventBody, EventKind, JudgmentAnswer,
     RequestTriagedBody, RequestTriagedBodySize, Thread,
 };
-use farik_store::EventQuery;
-use farik_store::requests::{RequestError, file_request, summary_of};
+use catervas_store::EventQuery;
+use catervas_store::requests::{RequestError, file_request, summary_of};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -33,7 +35,7 @@ pub(crate) enum Size {
     Small,
 }
 
-/// `farik_triage_request`'s input.
+/// `catervas_triage_request`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TriageInput {
@@ -43,7 +45,7 @@ pub(crate) struct TriageInput {
     reason: String,
 }
 
-/// One answer of `farik_record_judgment`, to the question of the same number.
+/// One answer of `catervas_record_judgment`, to the question of the same number.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct JudgmentAnswerInput {
@@ -53,7 +55,7 @@ pub(crate) struct JudgmentAnswerInput {
     pub(crate) reason: String,
 }
 
-/// `farik_record_judgment`'s input.
+/// `catervas_record_judgment`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordJudgmentInput {
@@ -73,7 +75,7 @@ pub(crate) struct CriterionRef {
     name: String,
 }
 
-/// `farik_write_contract`'s input.
+/// `catervas_write_contract`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteContractInput {
@@ -85,7 +87,7 @@ pub(crate) struct WriteContractInput {
     criteria: Vec<CriterionRef>,
 }
 
-/// `farik_create_task`'s input.
+/// `catervas_create_task`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreateTaskInput {
@@ -95,7 +97,7 @@ pub(crate) struct CreateTaskInput {
     parent: Option<String>,
 }
 
-/// `farik_plan_sprint`'s input.
+/// `catervas_plan_sprint`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PlanSprintInput {
@@ -286,7 +288,7 @@ pub(super) fn write_contract(
     Ok(json!({ "task_id": task.as_str(), "changed": changed, "seq": event.envelope.seq }))
 }
 
-/// Files a new `draft` request as `farik task create` does, or with `parent` a task of that epic
+/// Files a new `draft` request as `catervas task create` does, or with `parent` a task of that epic
 /// once `check_child_creation` allows the caller. A `reviewer_role` left out is filled with the
 /// role the team can staff, when there is one.
 pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Value, ToolError> {
@@ -470,7 +472,7 @@ fn fill_reviewer_role(call: &Call<'_>, wire: &mut Map<String, Value>, kind: Task
     else {
         return;
     };
-    if let Some(reviewer) = farik_roles::default_reviewer_role(&call.team, kind, assignee_role) {
+    if let Some(reviewer) = catervas_roles::default_reviewer_role(&call.team, kind, assignee_role) {
         wire.insert("reviewer_role".to_string(), json!(reviewer.to_string()));
     }
 }
@@ -496,7 +498,7 @@ pub(crate) fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent, Thread};
+    use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, Thread};
     use serde_json::{Value, json};
 
     use crate::session::SessionPurpose;
@@ -524,12 +526,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn lets_the_product_manager_triage_a_draft_without_a_scrum_master() {
         let project = a_project("tools-triage-pm");
-        project.filed("FRK-1", "draft", "task", None);
+        project.filed("CTV-1", "draft", "task", None);
         project
-            .call("pm", Some("FRK-1"), "farik_triage_request", triage("large"))
+            .call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_triage_request",
+                triage("large"),
+            )
             .expect("the Product Manager triages when there is no Scrum Master");
 
-        assert_eq!(project.file("FRK-1")["kind"], "epic");
+        assert_eq!(project.file("CTV-1")["kind"], "epic");
         let triaged = project.events(&[EventKind::RequestTriaged]);
         assert_eq!(triaged.len(), 1);
         let EventBody::RequestTriaged(body) = &triaged[0].body else {
@@ -548,13 +555,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_triage_from_a_developer() {
         let project = a_project("tools-triage-dev");
-        project.filed("FRK-1", "draft", "task", None);
+        project.filed("CTV-1", "draft", "task", None);
         let before = project.event_count();
         refused_with(
             project.call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_triage_request",
+                Some("CTV-1"),
+                "catervas_triage_request",
                 triage("small"),
             ),
             "triage_not_allowed",
@@ -566,15 +573,20 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_small_on_a_refining_task() {
         let project = a_project("tools-triage-small");
-        project.filed("FRK-1", "refining", "task", None);
+        project.filed("CTV-1", "refining", "task", None);
         project.record(
-            "FRK-1",
+            "CTV-1",
             "request.triaged",
             &json!({ "size": "small", "reason": "one thing", "triaged_by": "human" }),
         );
         let before = project.event_count();
         refused_with(
-            project.call("pm", Some("FRK-1"), "farik_triage_request", triage("small")),
+            project.call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_triage_request",
+                triage("small"),
+            ),
             "triage_not_allowed",
         );
         assert_eq!(project.event_count(), before);
@@ -584,30 +596,40 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_to_triage_what_the_human_already_triaged() {
         let project = a_project("tools-triage-human");
-        project.filed("FRK-1", "draft", "task", None);
+        project.filed("CTV-1", "draft", "task", None);
         project.record(
-            "FRK-1",
+            "CTV-1",
             "request.triaged",
             &json!({ "size": "small", "reason": "one thing", "triaged_by": "human" }),
         );
         let before = project.event_count();
         refused_with(
-            project.call("pm", Some("FRK-1"), "farik_triage_request", triage("large")),
+            project.call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_triage_request",
+                triage("large"),
+            ),
             "triage_not_allowed",
         );
         assert_eq!(project.event_count(), before);
-        assert_eq!(project.file("FRK-1")["kind"], "task");
+        assert_eq!(project.file("CTV-1")["kind"], "task");
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_to_triage_a_child() {
         let project = a_project("tools-triage-child");
-        project.filed("FRK-1", "in_progress", "epic", None);
-        project.filed("FRK-2", "draft", "task", Some("FRK-1"));
+        project.filed("CTV-1", "in_progress", "epic", None);
+        project.filed("CTV-2", "draft", "task", Some("CTV-1"));
         let before = project.event_count();
         refused_with(
-            project.call("pm", Some("FRK-2"), "farik_triage_request", triage("small")),
+            project.call(
+                "pm",
+                Some("CTV-2"),
+                "catervas_triage_request",
+                triage("small"),
+            ),
             "triage_not_allowed",
         );
         assert_eq!(project.event_count(), before);
@@ -620,7 +642,7 @@ mod tests {
             name,
             &a_team_of_three(|wire| {
                 wire["agents"].as_array_mut().expect("agents").push(
-                    farik_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+                    catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
                 );
                 wire["policy"]["judgment"] = json!({ "required": "always" });
             }),
@@ -642,12 +664,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_one_answer_per_question() {
         let project = a_project_with_scrum_master("tools-judge-answers");
-        project.filed("FRK-1", "refining", "task", None);
+        project.filed("CTV-1", "refining", "task", None);
         project
             .call(
                 "sm",
-                Some("FRK-1"),
-                "farik_record_judgment",
+                Some("CTV-1"),
+                "catervas_record_judgment",
                 judgment(true, false, "It fits, but the checks miss the failure."),
             )
             .expect("the judge answers each question");
@@ -694,7 +716,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_the_wrong_number_of_answers() {
         let project = a_project_with_scrum_master("tools-judge-count");
-        project.filed("FRK-1", "refining", "task", None);
+        project.filed("CTV-1", "refining", "task", None);
         let before = project.event_count();
         for answers in [
             json!([{ "pass": true, "reason": "Fits." }]),
@@ -706,8 +728,8 @@ mod tests {
         ] {
             let refused = project.call(
                 "sm",
-                Some("FRK-1"),
-                "farik_record_judgment",
+                Some("CTV-1"),
+                "catervas_record_judgment",
                 json!({ "answers": answers, "reason": "One file." }),
             );
             assert!(
@@ -723,12 +745,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_a_judgment_by_the_scrum_master() {
         let project = a_project_with_scrum_master("tools-judge-sm");
-        project.filed("FRK-1", "refining", "task", None);
+        project.filed("CTV-1", "refining", "task", None);
         let result = project
             .call(
                 "sm",
-                Some("FRK-1"),
-                "farik_record_judgment",
+                Some("CTV-1"),
+                "catervas_record_judgment",
                 judgment(
                     true,
                     false,
@@ -760,14 +782,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_judgment_by_anyone_else() {
         let project = a_project_with_scrum_master("tools-judge-others");
-        project.filed("FRK-1", "refining", "task", None);
+        project.filed("CTV-1", "refining", "task", None);
         let before = project.event_count();
         for agent in ["pm", "dev-a"] {
             refused_with(
                 project.call(
                     agent,
-                    Some("FRK-1"),
-                    "farik_record_judgment",
+                    Some("CTV-1"),
+                    "catervas_record_judgment",
                     judgment(
                         true,
                         true,
@@ -784,13 +806,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_judgment_outside_refining() {
         let project = a_project_with_scrum_master("tools-judge-status");
-        project.filed("FRK-1", "ready", "task", None);
+        project.filed("CTV-1", "ready", "task", None);
         let before = project.event_count();
         refused_with(
             project.call(
                 "sm",
-                Some("FRK-1"),
-                "farik_record_judgment",
+                Some("CTV-1"),
+                "catervas_record_judgment",
                 judgment(
                     true,
                     true,
@@ -806,13 +828,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_blank_reason() {
         let project = a_project_with_scrum_master("tools-judge-blank");
-        project.filed("FRK-1", "refining", "task", None);
+        project.filed("CTV-1", "refining", "task", None);
         let before = project.event_count();
         refused_with(
             project.call(
                 "sm",
-                Some("FRK-1"),
-                "farik_record_judgment",
+                Some("CTV-1"),
+                "catervas_record_judgment",
                 judgment(true, true, "  "),
             ),
             "blank_reason",
@@ -824,12 +846,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn writes_contract_fields_and_expands_criteria_by_name() {
         let project = a_project("tools-write");
-        project.filed("FRK-1", "refining", "task", None);
+        project.filed("CTV-1", "refining", "task", None);
         project
             .call(
                 "pm",
-                Some("FRK-1"),
-                "farik_write_contract",
+                Some("CTV-1"),
+                "catervas_write_contract",
                 json!({
                     "fields": { "intent": "A person signs in and sees only their own work." },
                     "criteria": [{ "id": "C2", "name": "unit-tests" }]
@@ -837,7 +859,7 @@ mod tests {
             )
             .expect("the Product Manager writes a refining contract");
 
-        let file = project.file("FRK-1");
+        let file = project.file("CTV-1");
         assert_eq!(
             file["intent"],
             "A person signs in and sees only their own work."
@@ -860,16 +882,16 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_write_to_a_locked_contract() {
         let project = a_project("tools-write-locked");
-        project.filed_with("FRK-1", "refining", "task", None, |wire| {
+        project.filed_with("CTV-1", "refining", "task", None, |wire| {
             wire["locked"] = json!(true);
         });
-        project.record("FRK-1", "contract.locked", &json!({ "locked_by": "human" }));
+        project.record("CTV-1", "contract.locked", &json!({ "locked_by": "human" }));
         let before = project.event_count();
         refused_with(
             project.call(
                 "pm",
-                Some("FRK-1"),
-                "farik_write_contract",
+                Some("CTV-1"),
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             ),
             "contract_locked",
@@ -887,7 +909,7 @@ mod tests {
             .call(
                 "pm",
                 None,
-                "farik_create_task",
+                "catervas_create_task",
                 json!({ "contract": request }),
             )
             .expect("the request is filed");
@@ -902,7 +924,7 @@ mod tests {
             .call(
                 "pm",
                 Some(&task),
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({ "fields": { "assignee_role": "software_developer", "reviewer_role": "architect" } }),
             )
             .expect("a draft is the Product Manager's to write");
@@ -917,9 +939,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_contract_write_from_a_bystander() {
         let project = a_project("tools-write-bystander");
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-b", "reviewer": "pm" }),
@@ -927,8 +949,8 @@ mod tests {
         refused_with(
             project.call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_write_contract",
+                Some("CTV-1"),
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             ),
             "not_a_contract_writer",
@@ -939,17 +961,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_an_epic_write_while_a_question_is_unanswered() {
         let project = a_project("tools-write-question");
-        project.filed("FRK-1", "refining", "epic", None);
+        project.filed("CTV-1", "refining", "epic", None);
         project.record(
-            "FRK-1",
+            "CTV-1",
             "question.asked",
             &json!({ "question": "Who signs in?", "asked_by": "pm" }),
         );
         refused_with(
             project.call(
                 "pm",
-                Some("FRK-1"),
-                "farik_write_contract",
+                Some("CTV-1"),
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             ),
             "question_unanswered",
@@ -960,24 +982,24 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn lets_an_epic_be_written_once_its_question_is_answered() {
         let project = a_project("tools-write-answered");
-        project.filed("FRK-1", "refining", "epic", None);
+        project.filed("CTV-1", "refining", "epic", None);
         let question = project.record(
-            "FRK-1",
+            "CTV-1",
             "question.asked",
             &json!({ "question": "Who signs in?", "asked_by": "pm" }),
         );
         let write = || {
             project.call(
                 "pm",
-                Some("FRK-1"),
-                "farik_write_contract",
+                Some("CTV-1"),
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             )
         };
         refused_with(write(), "question_unanswered");
 
         project.record(
-            "FRK-1",
+            "CTV-1",
             "question.answered",
             &json!({
                 "question_id": question.envelope.seq,
@@ -987,7 +1009,7 @@ mod tests {
         );
         write().expect("the question is answered, so the epic is written");
         assert_eq!(
-            project.file("FRK-1")["intent"],
+            project.file("CTV-1")["intent"],
             "Something else entirely, and longer."
         );
     }
@@ -996,19 +1018,19 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn waits_for_every_question_before_an_epic_is_written() {
         let project = a_project("tools-write-two-questions");
-        project.filed("FRK-1", "refining", "epic", None);
+        project.filed("CTV-1", "refining", "epic", None);
         let asked = |question: &str| {
             project.record(
-                "FRK-1",
+                "CTV-1",
                 "question.asked",
                 &json!({ "question": question, "asked_by": "pm" }),
             )
         };
         let first = asked("Who signs in?");
         let second = asked("Do they stay signed in?");
-        let answer = |question: &FarikEvent| {
+        let answer = |question: &CatervasEvent| {
             project.record(
-                "FRK-1",
+                "CTV-1",
                 "question.answered",
                 &json!({
                     "question_id": question.envelope.seq,
@@ -1020,8 +1042,8 @@ mod tests {
         let write = || {
             project.call(
                 "pm",
-                Some("FRK-1"),
-                "farik_write_contract",
+                Some("CTV-1"),
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             )
         };
@@ -1035,9 +1057,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_a_request_from_the_channel() {
         let project = a_project("tools-channel-request");
-        project.filed("FRK-1", "in_progress", "epic", None);
+        project.filed("CTV-1", "in_progress", "epic", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "pm" }),
@@ -1047,19 +1069,19 @@ mod tests {
 
         let filed = run(
             &context,
-            "farik_create_task",
+            "catervas_create_task",
             json!({ "contract": a_request() }),
         )
         .expect("a request is filed from a conversation");
         assert_eq!(filed["status"], "draft");
-        assert_eq!(project.file("FRK-2")["parent"], Value::Null);
+        assert_eq!(project.file("CTV-2")["parent"], Value::Null);
 
         let before = project.event_count();
         refused_with(
             run(
                 &context,
-                "farik_create_task",
-                json!({ "contract": a_request(), "parent": "FRK-1" }),
+                "catervas_create_task",
+                json!({ "contract": a_request(), "parent": "CTV-1" }),
             ),
             "channel_limit",
         );
@@ -1070,9 +1092,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_a_child_of_an_epic_its_assignee_breaks_down() {
         let project = a_project("tools-child");
-        project.filed("FRK-1", "in_progress", "epic", None);
+        project.filed("CTV-1", "in_progress", "epic", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "pm" }),
@@ -1081,13 +1103,13 @@ mod tests {
             .call(
                 "pm",
                 None,
-                "farik_create_task",
-                json!({ "contract": a_request(), "parent": "FRK-1" }),
+                "catervas_create_task",
+                json!({ "contract": a_request(), "parent": "CTV-1" }),
             )
             .expect("the epic's assignee files its tasks");
-        assert_eq!(filed["task_id"], "FRK-2");
-        let child = project.file("FRK-2");
-        assert_eq!(child["parent"], "FRK-1");
+        assert_eq!(filed["task_id"], "CTV-2");
+        let child = project.file("CTV-2");
+        assert_eq!(child["parent"], "CTV-1");
         assert_eq!(child["kind"], "task");
         let board = project.deps.projections.board().expect("a board");
         assert!(board[1].triaged, "the board has the child, triaged");
@@ -1097,8 +1119,8 @@ mod tests {
             project.call(
                 "dev-a",
                 None,
-                "farik_create_task",
-                json!({ "contract": a_request(), "parent": "FRK-1" }),
+                "catervas_create_task",
+                json!({ "contract": a_request(), "parent": "CTV-1" }),
             ),
             "gate_failed",
         );
@@ -1112,19 +1134,23 @@ mod tests {
         });
     }
 
-    /// `agent` calls `farik_plan_sprint` of `tasks` from a planning ceremony session.
+    /// `agent` calls `catervas_plan_sprint` of `tasks` from a planning ceremony session.
     fn plan(project: &TestProject, agent: &str, tasks: &[&str]) -> Result<Value, ToolError> {
         let mut context = project.context(agent, None);
         context.purpose = SessionPurpose::Ceremony;
         context.thread = Some(Thread::Planning);
-        run(&context, "farik_plan_sprint", json!({ "task_ids": tasks }))
+        run(
+            &context,
+            "catervas_plan_sprint",
+            json!({ "task_ids": tasks }),
+        )
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_plan_outside_the_planning_ceremony() {
         let project = a_project_with_scrum_master("tools-plan-ceremony");
-        project.filed("FRK-1", "ready", "task", None);
+        project.filed("CTV-1", "ready", "task", None);
         project.open_sprint("S1", None, &[]);
         let before = project.event_count();
 
@@ -1133,8 +1159,8 @@ mod tests {
             context.purpose = purpose;
             let refused = run(
                 &context,
-                "farik_plan_sprint",
-                json!({ "task_ids": ["FRK-1"] }),
+                "catervas_plan_sprint",
+                json!({ "task_ids": ["CTV-1"] }),
             )
             .expect_err("only the planning ceremony plans");
             assert_eq!(
@@ -1148,7 +1174,7 @@ mod tests {
         }
 
         assert_eq!(project.event_count(), before, "nothing is recorded");
-        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+        assert_eq!(sprint_of(&project, "CTV-1"), Value::Null);
     }
 
     /// The sprint the contract file of `task` names.
@@ -1200,22 +1226,22 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn plans_ready_tasks_into_the_sprint() {
         let project = a_project_with_scrum_master("tools-plan");
-        project.filed("FRK-1", "ready", "task", None);
-        project.filed("FRK-2", "ready", "task", None);
+        project.filed("CTV-1", "ready", "task", None);
+        project.filed("CTV-2", "ready", "task", None);
         project.open_sprint("S1", None, &[]);
 
-        let answer = plan(&project, "sm", &["FRK-1", "FRK-2"]).expect("the Scrum Master plans");
+        let answer = plan(&project, "sm", &["CTV-1", "CTV-2"]).expect("the Scrum Master plans");
 
         assert_eq!(
             answer,
-            json!({ "sprint_id": "S1", "task_ids": ["FRK-1", "FRK-2"] })
+            json!({ "sprint_id": "S1", "task_ids": ["CTV-1", "CTV-2"] })
         );
-        assert_eq!(sprint_of(&project, "FRK-1"), "S1");
-        assert_eq!(sprint_of(&project, "FRK-2"), "S1");
-        assert_eq!(held_by(&project, "S1"), ["FRK-1", "FRK-2"]);
+        assert_eq!(sprint_of(&project, "CTV-1"), "S1");
+        assert_eq!(sprint_of(&project, "CTV-2"), "S1");
+        assert_eq!(held_by(&project, "S1"), ["CTV-1", "CTV-2"]);
         assert_eq!(
             planned(&project),
-            [json!({ "sprint_id": "S1", "task_ids": ["FRK-1", "FRK-2"], "planned_by": "sm" })]
+            [json!({ "sprint_id": "S1", "task_ids": ["CTV-1", "CTV-2"], "planned_by": "sm" })]
         );
     }
 
@@ -1223,143 +1249,143 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_plan_past_the_sprint_budget() {
         let project = a_project_with_scrum_master("tools-plan-budget");
-        filed_at(&project, "FRK-1", "ready", "task", 6.0);
-        filed_at(&project, "FRK-2", "ready", "task", 5.0);
-        project.open_sprint("S1", Some(10.0), &["FRK-1"]);
+        filed_at(&project, "CTV-1", "ready", "task", 6.0);
+        filed_at(&project, "CTV-2", "ready", "task", 5.0);
+        project.open_sprint("S1", Some(10.0), &["CTV-1"]);
 
-        plan_refused(&project, "sm", &["FRK-2"], &["budget", "S1"]);
+        plan_refused(&project, "sm", &["CTV-2"], &["budget", "S1"]);
 
-        assert_eq!(sprint_of(&project, "FRK-2"), Value::Null);
-        assert_eq!(held_by(&project, "S1"), ["FRK-1"]);
+        assert_eq!(sprint_of(&project, "CTV-2"), Value::Null);
+        assert_eq!(held_by(&project, "S1"), ["CTV-1"]);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_task_that_is_not_ready() {
         let project = a_project_with_scrum_master("tools-plan-not-ready");
-        project.filed("FRK-1", "refining", "task", None);
+        project.filed("CTV-1", "refining", "task", None);
         project.open_sprint("S1", None, &[]);
 
-        plan_refused(&project, "sm", &["FRK-1"], &["FRK-1", "refining"]);
-        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+        plan_refused(&project, "sm", &["CTV-1"], &["CTV-1", "refining"]);
+        assert_eq!(sprint_of(&project, "CTV-1"), Value::Null);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_task_with_a_parent() {
         let project = a_project_with_scrum_master("tools-plan-parent");
-        project.filed("FRK-1", "in_progress", "epic", None);
-        project.filed("FRK-2", "ready", "task", Some("FRK-1"));
+        project.filed("CTV-1", "in_progress", "epic", None);
+        project.filed("CTV-2", "ready", "task", Some("CTV-1"));
         project.open_sprint("S1", None, &[]);
 
-        plan_refused(&project, "sm", &["FRK-2"], &["FRK-2", "FRK-1"]);
+        plan_refused(&project, "sm", &["CTV-2"], &["CTV-2", "CTV-1"]);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_task_already_in_a_sprint() {
         let project = a_project_with_scrum_master("tools-plan-in-a-sprint");
-        project.filed("FRK-1", "ready", "task", None);
-        project.open_sprint("S1", None, &["FRK-1"]);
+        project.filed("CTV-1", "ready", "task", None);
+        project.open_sprint("S1", None, &["CTV-1"]);
 
-        plan_refused(&project, "sm", &["FRK-1"], &["FRK-1", "already in S1"]);
+        plan_refused(&project, "sm", &["CTV-1"], &["CTV-1", "already in S1"]);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_plan_by_anyone_but_the_assigner() {
         let project = a_project_with_scrum_master("tools-plan-assigner");
-        project.filed("FRK-1", "ready", "task", None);
+        project.filed("CTV-1", "ready", "task", None);
         project.open_sprint("S1", None, &[]);
 
-        plan_refused(&project, "dev-a", &["FRK-1"], &["dev-a"]);
-        plan_refused(&project, "pm", &["FRK-1"], &["pm", "Scrum Master"]);
-        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+        plan_refused(&project, "dev-a", &["CTV-1"], &["dev-a"]);
+        plan_refused(&project, "pm", &["CTV-1"], &["pm", "Scrum Master"]);
+        assert_eq!(sprint_of(&project, "CTV-1"), Value::Null);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_second_plan() {
         let project = a_project_with_scrum_master("tools-plan-second");
-        project.filed("FRK-1", "ready", "task", None);
-        project.filed("FRK-2", "ready", "task", None);
-        project.open_sprint("S1", None, &["FRK-1"]);
+        project.filed("CTV-1", "ready", "task", None);
+        project.filed("CTV-2", "ready", "task", None);
+        project.open_sprint("S1", None, &["CTV-1"]);
 
-        plan_refused(&project, "sm", &["FRK-2"], &["S1"]);
-        assert_eq!(sprint_of(&project, "FRK-2"), Value::Null);
+        plan_refused(&project, "sm", &["CTV-2"], &["S1"]);
+        assert_eq!(sprint_of(&project, "CTV-2"), Value::Null);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_plan_into_a_sprint_that_is_ending() {
         let project = a_project_with_scrum_master("tools-plan-ending");
-        project.filed("FRK-1", "ready", "task", None);
+        project.filed("CTV-1", "ready", "task", None);
         project.open_sprint("S1", None, &[]);
         // An end has written S1's file and not yet recorded `sprint.ended`.
-        let mut ending = farik_core::sprint::fixtures::an_open_sprint_wire();
+        let mut ending = catervas_core::sprint::fixtures::an_open_sprint_wire();
         ending["id"] = json!("S1");
         ending["status"] = json!("ended");
         ending["ended_at"] = json!("2026-09-24T01:00:00Z");
         project
             .deps
             .files
-            .write_sprint(&farik_core::sprint::validate_sprint(&ending).expect("a sprint"))
+            .write_sprint(&catervas_core::sprint::validate_sprint(&ending).expect("a sprint"))
             .expect("S1 is written");
 
-        plan_refused(&project, "sm", &["FRK-1"], &["S1", "ended"]);
-        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+        plan_refused(&project, "sm", &["CTV-1"], &["S1", "ended"]);
+        assert_eq!(sprint_of(&project, "CTV-1"), Value::Null);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn plans_an_epics_tasks_with_it() {
         let project = a_project_with_scrum_master("tools-plan-epic");
-        project.filed("FRK-1", "ready", "epic", None);
-        project.filed("FRK-3", "in_progress", "epic", None);
+        project.filed("CTV-1", "ready", "epic", None);
+        project.filed("CTV-3", "in_progress", "epic", None);
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "in_progress",
             &json!({ "assignee": "sm", "reviewer": "pm" }),
         );
-        project.filed("FRK-4", "ready", "task", Some("FRK-3"));
+        project.filed("CTV-4", "ready", "task", Some("CTV-3"));
         project.open_sprint("S1", None, &[]);
 
-        plan(&project, "sm", &["FRK-1"]).expect("an approved epic is planned");
+        plan(&project, "sm", &["CTV-1"]).expect("an approved epic is planned");
 
-        assert_eq!(held_by(&project, "S1"), ["FRK-1"]);
-        assert_eq!(sprint_of(&project, "FRK-4"), Value::Null);
+        assert_eq!(held_by(&project, "S1"), ["CTV-1"]);
+        assert_eq!(sprint_of(&project, "CTV-4"), Value::Null);
         // Work under an epic that began before the sprint goes on.
         project
             .call(
                 "sm",
                 None,
-                "farik_assign_task",
-                json!({ "task_id": "FRK-4", "assignee_id": "dev-a", "reviewer_id": "dev-b" }),
+                "catervas_assign_task",
+                json!({ "task_id": "CTV-4", "assignee_id": "dev-a", "reviewer_id": "dev-b" }),
             )
-            .expect("FRK-4 is assigned while S1 is open");
+            .expect("CTV-4 is assigned while S1 is open");
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn plans_an_epic_with_the_tasks_already_under_it() {
         let project = a_project_with_scrum_master("tools-plan-epic-children");
-        project.filed("FRK-1", "ready", "epic", None);
-        project.filed("FRK-2", "ready", "task", Some("FRK-1"));
+        project.filed("CTV-1", "ready", "epic", None);
+        project.filed("CTV-2", "ready", "task", Some("CTV-1"));
         project.open_sprint("S1", None, &[]);
 
-        let answer = plan(&project, "sm", &["FRK-1"]).expect("an approved epic is planned");
+        let answer = plan(&project, "sm", &["CTV-1"]).expect("an approved epic is planned");
 
         assert_eq!(
             answer,
-            json!({ "sprint_id": "S1", "task_ids": ["FRK-1", "FRK-2"] })
+            json!({ "sprint_id": "S1", "task_ids": ["CTV-1", "CTV-2"] })
         );
-        assert_eq!(held_by(&project, "S1"), ["FRK-1", "FRK-2"]);
-        assert_eq!(sprint_of(&project, "FRK-2"), "S1");
+        assert_eq!(held_by(&project, "S1"), ["CTV-1", "CTV-2"]);
+        assert_eq!(sprint_of(&project, "CTV-2"), "S1");
         let row = project
             .deps
             .projections
-            .task(&"FRK-2".parse().expect("a task id"))
+            .task(&"CTV-2".parse().expect("a task id"))
             .expect("the board reads")
             .expect("a row");
         assert_eq!(row.sprint.as_deref(), Some("S1"));
@@ -1369,36 +1395,36 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn puts_an_epics_new_task_in_its_sprint() {
         let project = a_project("tools-child-sprint");
-        project.filed("FRK-1", "in_progress", "epic", None);
+        project.filed("CTV-1", "in_progress", "epic", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "pm" }),
         );
-        project.open_sprint("S1", None, &["FRK-1"]);
+        project.open_sprint("S1", None, &["CTV-1"]);
 
         project
             .call(
                 "pm",
                 None,
-                "farik_create_task",
-                json!({ "contract": a_request(), "parent": "FRK-1" }),
+                "catervas_create_task",
+                json!({ "contract": a_request(), "parent": "CTV-1" }),
             )
             .expect("the epic's assignee files its tasks");
 
-        assert_eq!(sprint_of(&project, "FRK-2"), "S1");
+        assert_eq!(sprint_of(&project, "CTV-2"), "S1");
         let row = project
             .deps
             .projections
-            .task(&"FRK-2".parse().expect("a task id"))
+            .task(&"CTV-2".parse().expect("a task id"))
             .expect("the board reads")
             .expect("a row");
         assert_eq!(row.sprint.as_deref(), Some("S1"));
-        assert_eq!(held_by(&project, "S1"), ["FRK-1", "FRK-2"]);
+        assert_eq!(held_by(&project, "S1"), ["CTV-1", "CTV-2"]);
         assert_eq!(
             planned(&project).last(),
-            Some(&json!({ "sprint_id": "S1", "task_ids": ["FRK-2"], "planned_by": "governor" }))
+            Some(&json!({ "sprint_id": "S1", "task_ids": ["CTV-2"], "planned_by": "governor" }))
         );
     }
 
@@ -1406,45 +1432,45 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_a_task_whose_join_fails_and_says_so() {
         let project = a_project("tools-child-sprint-ending");
-        project.filed("FRK-1", "in_progress", "epic", None);
+        project.filed("CTV-1", "in_progress", "epic", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "pm" }),
         );
-        project.open_sprint("S1", None, &["FRK-1"]);
+        project.open_sprint("S1", None, &["CTV-1"]);
         // The human's end has written S1's file and not yet recorded `sprint.ended`.
-        let mut ending = farik_core::sprint::fixtures::an_open_sprint_wire();
+        let mut ending = catervas_core::sprint::fixtures::an_open_sprint_wire();
         ending["id"] = json!("S1");
-        ending["task_ids"] = json!(["FRK-1"]);
+        ending["task_ids"] = json!(["CTV-1"]);
         ending["status"] = json!("ended");
         ending["ended_at"] = json!("2026-09-24T01:00:00Z");
         project
             .deps
             .files
-            .write_sprint(&farik_core::sprint::validate_sprint(&ending).expect("a sprint"))
+            .write_sprint(&catervas_core::sprint::validate_sprint(&ending).expect("a sprint"))
             .expect("S1 is written");
 
         let answer = project
             .call(
                 "pm",
                 None,
-                "farik_create_task",
-                json!({ "contract": a_request(), "parent": "FRK-1" }),
+                "catervas_create_task",
+                json!({ "contract": a_request(), "parent": "CTV-1" }),
             )
             .expect("the task is filed though it joins no sprint");
 
-        assert_eq!(answer["task_id"], "FRK-2");
+        assert_eq!(answer["task_id"], "CTV-2");
         let warning = answer["warning"].as_str().expect("a warning");
         assert!(warning.contains("S1 has ended"), "{warning}");
-        assert_eq!(sprint_of(&project, "FRK-2"), Value::Null);
+        assert_eq!(sprint_of(&project, "CTV-2"), Value::Null);
         assert_eq!(planned(&project).len(), 1, "only the fixture's plan");
     }
 
     /// A request as its author writes it.
     fn a_request() -> serde_json::Map<String, Value> {
-        let mut wire = farik_core::contract::fixtures::a_contract_wire();
+        let mut wire = catervas_core::contract::fixtures::a_contract_wire();
         let object = wire.as_object_mut().expect("a mapping");
         object.remove("id");
         object.remove("status");

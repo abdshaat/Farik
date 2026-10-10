@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -41,7 +41,7 @@ const task = (
 	status: string,
 	more: Record<string, unknown> = {},
 ) => ({
-	task_id: `FRK-${id}`,
+	task_id: `CTV-${id}`,
 	kind: "task",
 	title,
 	status,
@@ -63,12 +63,12 @@ const task = (
 const TASKS = [
 	task(3, "Gift cards", "refining", { kind: "epic" }),
 	task(4, "Gift card page", "ready", {
-		parent: "FRK-3",
+		parent: "CTV-3",
 		assignee_id: "theo",
 		sprint: "S2",
 	}),
 	task(5, "Email a receipt", "accepted", {
-		parent: "FRK-3",
+		parent: "CTV-3",
 		assignee_id: "theo",
 	}),
 	task(6, "Holiday opening hours", "escalated", {
@@ -90,21 +90,21 @@ const TASKS = [
 ];
 const WAITING = [
 	{
-		task_id: "FRK-6",
+		task_id: "CTV-6",
 		kind: "approval",
 		agent_id: "mira",
 		title: "Holiday opening hours",
 		line: "",
 	},
 	{
-		task_id: "FRK-9",
+		task_id: "CTV-9",
 		kind: "acceptance",
 		agent_id: "theo",
 		title: "New checkout page",
 		line: "",
 	},
 	{
-		task_id: "FRK-12",
+		task_id: "CTV-12",
 		kind: "help",
 		agent_id: "kai",
 		title: "Opening sale",
@@ -116,8 +116,8 @@ const ACTIVITY = {
 		{
 			agent_id: "kai",
 			state: "working",
-			line: "Building FRK-7",
-			task_id: "FRK-7",
+			line: "Building CTV-7",
+			task_id: "CTV-7",
 			session_id: "s-1",
 			purpose: "implement",
 		},
@@ -174,7 +174,7 @@ const shown = () =>
 	screen
 		.getAllByRole("link")
 		.map((a) => a.getAttribute("href") ?? "")
-		.filter((href) => /^\/tasks\/FRK-\d+$/.test(href))
+		.filter((href) => /^\/tasks\/CTV-\d+$/.test(href))
 		.map((href) => href.slice("/tasks/".length))
 		.sort();
 
@@ -198,8 +198,8 @@ describe("board", () => {
 			within(review)
 				.getByRole("link", { name: "New checkout page" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-9");
-		expect(within(review).getByText("FRK-9")).toBeTruthy();
+		).toBe("/tasks/CTV-9");
+		expect(within(review).getByText("CTV-9")).toBeTruthy();
 		expect(within(review).getByText(en.statusWaiting)).toBeTruthy();
 
 		const working = lane(en.statusInProgress);
@@ -244,7 +244,7 @@ describe("board", () => {
 		});
 		fireEvent.click(tab);
 		expect(tab.getAttribute("aria-pressed")).toBe("true");
-		expect(shown()).toEqual(["FRK-9"]);
+		expect(shown()).toEqual(["CTV-9"]);
 		fireEvent.click(chip("Kai"));
 		expect(screen.getByText(en.laneEmpty)).toBeTruthy();
 		await expectNoAxeViolations(container);
@@ -254,7 +254,7 @@ describe("board", () => {
 		media.set(WIDE, true);
 		const exploring = {
 			activity: [
-				{ ...ACTIVITY.activity[0], line: "Planning FRK-7", purpose: "explore" },
+				{ ...ACTIVITY.activity[0], line: "Planning CTV-7", purpose: "explore" },
 			],
 		};
 		await board(undefined, TASKS, exploring);
@@ -293,8 +293,8 @@ describe("board", () => {
 				{
 					agent_id: "iris",
 					state: "working",
-					line: "Checking FRK-23",
-					task_id: "FRK-23",
+					line: "Checking CTV-23",
+					task_id: "CTV-23",
 					session_id: "s-2",
 					purpose: "verify",
 				},
@@ -330,54 +330,54 @@ describe("board", () => {
 		media.set(WIDE, true);
 		const { container } = await board();
 		const all = [
-			"FRK-11",
-			"FRK-12",
-			"FRK-13",
-			"FRK-14",
-			"FRK-3",
-			"FRK-4",
-			"FRK-5",
-			"FRK-6",
-			"FRK-7",
-			"FRK-8",
-			"FRK-9",
+			"CTV-11",
+			"CTV-12",
+			"CTV-13",
+			"CTV-14",
+			"CTV-3",
+			"CTV-4",
+			"CTV-5",
+			"CTV-6",
+			"CTV-7",
+			"CTV-8",
+			"CTV-9",
 		];
 		expect(shown()).toEqual(all);
 
 		fireEvent.click(chip("Kai"));
 		expect(chip("Kai").getAttribute("aria-pressed")).toBe("true");
-		expect(shown()).toEqual(["FRK-12", "FRK-7"]);
+		expect(shown()).toEqual(["CTV-12", "CTV-7"]);
 		fireEvent.click(chip(en.filterEveryone));
 		expect(shown()).toEqual(all);
 
 		fireEvent.click(chip(en.filterWaiting));
-		expect(shown()).toEqual(["FRK-12", "FRK-6", "FRK-9"]);
+		expect(shown()).toEqual(["CTV-12", "CTV-6", "CTV-9"]);
 		fireEvent.click(chip(en.filterWaiting));
 
 		fireEvent.click(chip("Gift cards"));
-		expect(shown()).toEqual(["FRK-3", "FRK-4", "FRK-5"]);
+		expect(shown()).toEqual(["CTV-3", "CTV-4", "CTV-5"]);
 		fireEvent.click(chip("Gift cards"));
 		expect(shown()).toEqual(all);
 
 		fireEvent.click(screen.getByText(en.filterMore));
 		const sprint = screen.getByLabelText(en.filterSprint);
 		fireEvent.change(sprint, { target: { value: "this" } });
-		expect(shown()).toEqual(["FRK-4", "FRK-7"]);
+		expect(shown()).toEqual(["CTV-4", "CTV-7"]);
 		fireEvent.change(sprint, { target: { value: "none" } });
 		expect(shown()).toEqual(
-			all.filter((id) => id !== "FRK-4" && id !== "FRK-7"),
+			all.filter((id) => id !== "CTV-4" && id !== "CTV-7"),
 		);
 		fireEvent.change(sprint, { target: { value: "all" } });
 
 		const risk = screen.getByLabelText(en.filterRisk);
 		fireEvent.change(risk, { target: { value: "high" } });
-		expect(shown()).toEqual(["FRK-7"]);
+		expect(shown()).toEqual(["CTV-7"]);
 		fireEvent.change(risk, { target: { value: "medium" } });
-		expect(shown()).toEqual(["FRK-11"]);
+		expect(shown()).toEqual(["CTV-11"]);
 		fireEvent.change(risk, { target: { value: "any" } });
 
 		fireEvent.click(screen.getByLabelText(en.filterCancelled));
-		expect(shown()).toEqual([...all, "FRK-10"].sort());
+		expect(shown()).toEqual([...all, "CTV-10"].sort());
 		expect(
 			within(screen.getByRole("region", { name: en.statusDone })).getByText(
 				en.statusCancelled,
@@ -391,7 +391,7 @@ describe("board", () => {
 		// A ready part of an epic is planned with its epic, not picked into a sprint.
 		const first = await board(null, [
 			...TASKS,
-			task(15, "Gift card email", "ready", { parent: "FRK-3" }),
+			task(15, "Gift card email", "ready", { parent: "CTV-3" }),
 		]);
 		expect(screen.getByText(en.sprintNone)).toBeTruthy();
 		fireEvent.click(screen.getByRole("button", { name: en.sprintStart }));
@@ -487,7 +487,7 @@ const WAITING_WORK = [
 	}),
 	...[17, 18, 19].map((id) =>
 		task(id, `Gift card part ${id}`, "ready", {
-			parent: "FRK-12",
+			parent: "CTV-12",
 			backlog: true,
 		}),
 	),
@@ -531,7 +531,7 @@ describe("the board's backlog", () => {
 		fireEvent.click(
 			screen.getByRole("button", { name: `${en.statusBacklog} 2` }),
 		);
-		expect(shown()).toEqual(["FRK-12", "FRK-14"]);
+		expect(shown()).toEqual(["CTV-12", "CTV-14"]);
 		await expectNoAxeViolations(first.container);
 		cleanup();
 
@@ -593,8 +593,8 @@ describe("the board's backlog", () => {
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
 		).toEqual([
-			"FRK-12Gift cards at checkoutEpic, 3 tasks",
-			"FRK-14Sold-out badge on the menuTask",
+			"CTV-12Gift cards at checkoutEpic, 3 tasks",
+			"CTV-14Sold-out badge on the menuTask",
 		]);
 		expect(
 			within(dialog).getByText(
@@ -609,7 +609,7 @@ describe("the board's backlog", () => {
 		// The board helper waits for the last row's link, which only the epic has.
 		const one = [
 			task(17, "Gift card part 17", "ready", {
-				parent: "FRK-12",
+				parent: "CTV-12",
 				backlog: true,
 			}),
 			task(12, "Gift cards at checkout", "in_progress", {
@@ -634,7 +634,7 @@ describe("the board's backlog", () => {
 			within(within(dialog).getByRole("list", { name: en.sprintStartBacklog }))
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
-		).toEqual(["FRK-12Gift cards at checkoutEpic, 1 task"]);
+		).toEqual(["CTV-12Gift cards at checkoutEpic, 1 task"]);
 		await expectNoAxeViolations(container);
 	});
 

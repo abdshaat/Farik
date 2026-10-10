@@ -1,19 +1,19 @@
 /* One post on Today: its network's badge, when it goes out, its words, its pictures and why it may. */
 .section {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .section h2 {
 	margin: 0;
 	font:
-		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
-		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
 }
 
 .rows {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -26,11 +26,11 @@ row's width. */
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-3);
-	padding: var(--farik-space-3);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	gap: var(--catervas-space-3);
+	padding: var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 }
 
 .row > img {
@@ -42,14 +42,14 @@ row's width. */
 	flex: 1 1 16rem;
 	min-width: 0;
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	overflow-wrap: anywhere;
 }
 
 /* A post on its own, inside a request's row or a dialog. */
 .card {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
@@ -59,8 +59,8 @@ its words are muted. */
 .over {
 	background: transparent;
 	border-style: dashed;
-	border-color: var(--farik-color-control-border);
-	color: var(--farik-color-ink-muted);
+	border-color: var(--catervas-color-control-border);
+	color: var(--catervas-color-ink-muted);
 }
 
 /* The network's badge: a dark tile with its letters. */
@@ -71,10 +71,10 @@ its words are muted. */
 	box-sizing: border-box;
 	width: 24px;
 	height: 24px;
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-ink);
-	color: var(--farik-color-page);
-	font-family: var(--farik-type-code-family);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-ink);
+	color: var(--catervas-color-page);
+	font-family: var(--catervas-type-code-family);
 	font-size: 11px;
 	font-weight: 600;
 }
@@ -82,23 +82,23 @@ its words are muted. */
 .head {
 	display: flex;
 	align-items: flex-start;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .when {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-2);
+	gap: var(--catervas-space-1) var(--catervas-space-2);
 	align-items: baseline;
 	min-width: 0;
 }
 
 .soon {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .state {
-	color: var(--farik-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 	font-weight: 600;
 }
 
@@ -120,24 +120,24 @@ its words are muted. */
 .pictures {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	align-items: flex-start;
 }
 
-/* A picture is a thumbnail, cropped to a square; a clip or a picture Farik will not show is a tile
+/* A picture is a thumbnail, cropped to a square; a clip or a picture Catervas will not show is a tile
 of the same size that opens it where it is. */
 .pictures img,
 .tile {
 	box-sizing: border-box;
 	width: 88px;
 	height: 88px;
-	border-radius: var(--farik-radius-control);
+	border-radius: var(--catervas-radius-control);
 }
 
 .pictures img {
 	display: block;
 	object-fit: cover;
-	border: 1px solid var(--farik-color-rule);
+	border: 1px solid var(--catervas-color-rule);
 }
 
 .tile {
@@ -145,11 +145,11 @@ of the same size that opens it where it is. */
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: var(--farik-space-1);
-	padding: var(--farik-space-1);
-	border: 1px solid var(--farik-color-control-border);
-	background: var(--farik-color-page);
-	color: var(--farik-color-ink);
+	gap: var(--catervas-space-1);
+	padding: var(--catervas-space-1);
+	border: 1px solid var(--catervas-color-control-border);
+	background: var(--catervas-color-page);
+	color: var(--catervas-color-ink);
 	font-size: 13px;
 	line-height: 18px;
 	text-align: center;
@@ -165,10 +165,10 @@ of the same size that opens it where it is. */
 
 .why {
 	margin: 0;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-small-family);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
 }
 
 /* "Stop" sits at the row's right end, centred on it; on a phone it runs the row's width. */
@@ -176,14 +176,14 @@ of the same size that opens it where it is. */
 	box-sizing: border-box;
 	min-height: 44px;
 	margin-inline-start: auto;
-	padding: var(--farik-space-2) var(--farik-space-4);
+	padding: var(--catervas-space-2) var(--catervas-space-4);
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-surface);
-	color: var(--farik-color-ink);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
 }
 
 @media not (min-width: 640px) {
@@ -194,7 +194,7 @@ of the same size that opens it where it is. */
 
 .dialog {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .dialog p {

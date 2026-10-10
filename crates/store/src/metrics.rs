@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
+use catervas_core::contract::{TaskId, Verification};
+use catervas_protocol::event::CostRecordedBodyPurpose;
 use chrono::{Datelike, NaiveDate};
-use farik_core::contract::{TaskId, Verification};
-use farik_protocol::event::CostRecordedBodyPurpose;
 
 use crate::error::StoreError;
 use crate::files::{FilesError, ProjectFiles};
@@ -32,7 +32,7 @@ pub struct HarnessMetrics {
     pub interventions_per_accepted_task: Option<f64>,
     /// Every cost recorded, over accepted tasks.
     pub cost_per_accepted_task_usd: Option<CostSplit>,
-    /// Exit criteria Farik runs, over every exit criterion of the accepted rows' contracts.
+    /// Exit criteria Catervas runs, over every exit criterion of the accepted rows' contracts.
     pub mechanically_verified_criteria_share: Option<f64>,
     /// The ISO weeks in which at least one session recorded a cost.
     pub active_weeks: u32,
@@ -51,7 +51,7 @@ pub struct MessageCounts {
     pub reply: u32,
     /// A line of a ceremony's thread.
     pub ceremony: u32,
-    /// Farik's line about a move by the governor or the human, or a refusal.
+    /// Catervas's line about a move by the governor or the human, or a refusal.
     pub system: u32,
     /// The human's line.
     pub human: u32,

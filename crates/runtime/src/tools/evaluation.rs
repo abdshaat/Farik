@@ -1,8 +1,8 @@
-//! `farik_write_evaluation` (`docs/SPEC.md` 6.10): the Procurement Specialist writes a comparison
+//! `catervas_write_evaluation` (`docs/SPEC.md` 6.10): the Procurement Specialist writes a comparison
 //! as a note, `evaluations/<name>.md`, in its private folder, keeping every previous version.
 
-use farik_core::contract::Role;
-use farik_core::team::private_folder;
+use catervas_core::contract::Role;
+use catervas_core::team::private_folder;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -16,7 +16,7 @@ const MOST_NAME: usize = 64;
 /// The most bytes an evaluation's text has.
 const MOST_TEXT: usize = 64 * 1024;
 
-/// `farik_write_evaluation`'s input.
+/// `catervas_write_evaluation`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteEvaluationInput {
@@ -24,7 +24,7 @@ pub(crate) struct WriteEvaluationInput {
     /// to 64 characters, such as `email-sending`. The note is `evaluations/<name>.md`.
     name: String,
     /// The comparison, as Markdown text of 1 byte to 64 KiB with no NUL. It replaces the note of
-    /// that name, and the previous version is kept. Farik never shows it as a page, so no link in
+    /// that name, and the previous version is kept. Catervas never shows it as a page, so no link in
     /// it runs.
     text: String,
 }
@@ -49,7 +49,7 @@ pub(super) fn is_a_name(name: &str) -> bool {
         })
 }
 
-/// `farik_write_evaluation`: writes `evaluations/<name>.md` in the Procurement Specialist's
+/// `catervas_write_evaluation`: writes `evaluations/<name>.md` in the Procurement Specialist's
 /// private folder, in its implement session of a task it is the assignee of, copying the note
 /// there already to `.history/` first, and answers the note's path, its bytes and whether it
 /// replaced one. It reports no path to the permission check and holds the folder line itself.
@@ -125,7 +125,7 @@ mod tests {
     };
 
     /// A project with the Finance Specialist `fin` and the Procurement Specialist `proc`, whose
-    /// task FRK-1 is in progress, a finance task FRK-2 and a Developer's task FRK-3.
+    /// task CTV-1 is in progress, a finance task CTV-2 and a Developer's task CTV-3.
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(
             name,
@@ -135,8 +135,8 @@ mod tests {
             }),
         );
         for (task, role, assignee, reviewer) in [
-            ("FRK-1", "procurement_specialist", "proc", "pm"),
-            ("FRK-2", "finance_specialist", "fin", "pm"),
+            ("CTV-1", "procurement_specialist", "proc", "pm"),
+            ("CTV-2", "finance_specialist", "fin", "pm"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -149,9 +149,9 @@ mod tests {
                 &json!({ "assignee": assignee, "reviewer": reviewer }),
             );
         }
-        project.filed("FRK-3", "assigned", "task", None);
+        project.filed("CTV-3", "assigned", "task", None);
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -160,15 +160,15 @@ mod tests {
     }
 
     fn folder(project: &TestProject) -> PathBuf {
-        project.repo.path.join(".farik/local/procurement")
+        project.repo.path.join(".catervas/local/procurement")
     }
 
-    /// `farik_write_evaluation` as `proc` in its implement session of FRK-1.
+    /// `catervas_write_evaluation` as `proc` in its implement session of CTV-1.
     fn write(project: &TestProject, name: &str, text: &str) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
-            "farik_write_evaluation",
+            Some("CTV-1"),
+            "catervas_write_evaluation",
             json!({ "name": name, "text": text }),
         )
     }
@@ -264,7 +264,12 @@ mod tests {
             json!({ "path": "vendors.xlsx", "sheets": [{ "name": "Vendors", "rows": [["a"]] }] });
         for _ in 0..2 {
             project
-                .call("proc", Some("FRK-1"), "farik_write_sheet", workbook.clone())
+                .call(
+                    "proc",
+                    Some("CTV-1"),
+                    "catervas_write_sheet",
+                    workbook.clone(),
+                )
                 .expect("the register is written");
         }
         let copies: Vec<String> = files_under(&folder(&project))
@@ -356,15 +361,15 @@ mod tests {
         for (who, context) in [
             (
                 "the Finance Specialist in its own task",
-                context("fin", Some("FRK-2"), SessionPurpose::Implement),
+                context("fin", Some("CTV-2"), SessionPurpose::Implement),
             ),
             (
                 "the Product Manager",
-                context("pm", Some("FRK-1"), SessionPurpose::Implement),
+                context("pm", Some("CTV-1"), SessionPurpose::Implement),
             ),
             (
                 "a Developer",
-                context("dev-a", Some("FRK-3"), SessionPurpose::Implement),
+                context("dev-a", Some("CTV-3"), SessionPurpose::Implement),
             ),
             (
                 "the Procurement Specialist in a chat, with no task",
@@ -372,7 +377,7 @@ mod tests {
             ),
             (
                 "the Procurement Specialist in a chat about its task",
-                context("proc", Some("FRK-1"), SessionPurpose::Chat),
+                context("proc", Some("CTV-1"), SessionPurpose::Chat),
             ),
             (
                 "the Procurement Specialist in a session about no task",
@@ -380,14 +385,14 @@ mod tests {
             ),
             (
                 "the Procurement Specialist in a task that is not its own",
-                context("proc", Some("FRK-3"), SessionPurpose::Implement),
+                context("proc", Some("CTV-3"), SessionPurpose::Implement),
             ),
             (
                 "the Procurement Specialist when it is a task's reviewer",
-                context("proc", Some("FRK-1"), SessionPurpose::Verify),
+                context("proc", Some("CTV-1"), SessionPurpose::Verify),
             ),
         ] {
-            let reason = refusal_of(run(&context, "farik_write_evaluation", input.clone()));
+            let reason = refusal_of(run(&context, "catervas_write_evaluation", input.clone()));
             assert!(
                 reason.starts_with("evaluation_refused: "),
                 "{who}: {reason}"

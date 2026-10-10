@@ -3,21 +3,21 @@
 
 use std::sync::Arc;
 
-use farik_core::contract::{
+use catervas_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
-use farik_core::governor::done::{CriterionResult, RunBy};
-use farik_core::governor::gates::fits_the_open_sprint;
-use farik_core::governor::readiness::{ReadinessRule, evaluate_readiness};
-use farik_core::governor::transition::TransitionRequest;
-use farik_core::governor::transition_table::TransitionActor;
-use farik_core::team::{Agent, Team};
-use farik_protocol::event::{
-    ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody,
-    EventKind, FarikEvent, NoteWrittenBodyKind, ReviewRecordedBody,
+use catervas_core::governor::done::{CriterionResult, RunBy};
+use catervas_core::governor::gates::fits_the_open_sprint;
+use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
+use catervas_core::governor::transition::TransitionRequest;
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::team::{Agent, Team};
+use catervas_protocol::event::{
+    CatervasEvent, ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy,
+    EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody,
 };
-use farik_store::TaskProjection;
-use farik_store::files::FilesError;
+use catervas_store::TaskProjection;
+use catervas_store::files::FilesError;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
@@ -271,7 +271,7 @@ fn judge(
 /// Whether the contract is judged now: written since refining began with no refusal by the
 /// governor since that write, or, with no such write, filed whole and not refused since refining
 /// began. A raw request is not judged: its brief would fail and spend one of the three attempts.
-fn is_to_be_judged(contract: &TaskContract, history: &[FarikEvent], began: u64) -> bool {
+fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u64) -> bool {
     let refused_after = |after: u64| {
         history.iter().any(|event| {
             event.envelope.seq > after
@@ -291,7 +291,7 @@ fn is_to_be_judged(contract: &TaskContract, history: &[FarikEvent], began: u64) 
 }
 
 /// The failures of the last Definition of Ready judged since refining began, when it failed.
-fn last_readiness_failures(history: &[FarikEvent], began: u64) -> Vec<String> {
+fn last_readiness_failures(history: &[CatervasEvent], began: u64) -> Vec<String> {
     history
         .iter()
         .rev()
@@ -528,7 +528,7 @@ pub(super) fn epic_assignee<'a>(
     active(team, epic.assignee_id.as_deref())
 }
 
-/// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Farik
+/// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Catervas
 /// runs each mechanical criterion it has not run in this verification, on the integration branch's
 /// head. Then, for an epic whose row names a reviewer (the Product Manager, fixed when the Scrum
 /// Master was assigned it, whatever the team is now), its review; for one the human reviews,
@@ -539,7 +539,7 @@ pub(super) async fn verifying_epic(
     team: &Team,
     row: &TaskProjection,
     contract: &TaskContract,
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     since: u64,
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
@@ -599,7 +599,7 @@ pub(super) async fn verifying_epic(
     Ok(Some(acted(row, pm, "verify", &end)))
 }
 
-/// Rule 5 for an epic the Product Manager reviews, once Farik's runs are recorded, judged on the
+/// Rule 5 for an epic the Product Manager reviews, once Catervas's runs are recorded, judged on the
 /// governor's own context for `verifying -> accepted`: the Product Manager's read-only `verify`
 /// session in the project root while there is no review note, after which its review is recorded;
 /// the rejection in its name when its results hold a failure; its review session again, told
@@ -611,7 +611,7 @@ async fn reviewed_by_the_product_manager(
     board: &[TaskProjection],
     row: &TaskProjection,
     contract: &TaskContract,
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(pm) = active(team, row.reviewer_id.as_deref()) else {
@@ -690,7 +690,7 @@ fn tasks_under(
         .collect()
 }
 
-/// What Farik's runs of an epic's criteria came to.
+/// What Catervas's runs of an epic's criteria came to.
 enum EpicRan {
     /// This many criteria were run and recorded.
     Criteria(usize),
@@ -722,11 +722,11 @@ async fn run_on_the_integration_branch(
         let worktree = tools
             .files
             .root()
-            .join(".farik/local/worktrees")
+            .join(".catervas/local/worktrees")
             .join(format!("{}-base", contract.id.as_str()));
         let unrunnable = |id: &str, error: &dyn std::fmt::Display| {
             EpicRan::Unrunnable(format!(
-                "Farik could not run {id} on the integration branch for its reviewer: {error}"
+                "Catervas could not run {id} on the integration branch for its reviewer: {error}"
             ))
         };
         if let Err(error) = remove_base_worktree(git, &worktree).and_then(|()| {
@@ -797,7 +797,7 @@ async fn run_on_the_integration_branch(
     .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))
 }
 
-/// Records one of Farik's runs of an epic's criterion as the reviewer's, recorded by the governor,
+/// Records one of Catervas's runs of an epic's criterion as the reviewer's, recorded by the governor,
 /// with no agent on its envelope, its evidence opening with the sha it ran at.
 fn record_governor_result(
     tools: &ToolDeps,
@@ -822,7 +822,7 @@ fn record_governor_result(
 
 /// The epic's `review.recorded`, once per verification, with the human as reviewer: the criteria
 /// with a reviewer's or the human's result, all passed, since the human accepted only once
-/// Farik's runs passed. The one review not recorded at a reviewer session's end.
+/// Catervas's runs passed. The one review not recorded at a reviewer session's end.
 fn record_epic_review(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -864,15 +864,15 @@ fn record_epic_review(
 mod tests {
     use std::sync::Arc;
 
-    use farik_core::contract::{TaskKind, TaskStatus};
-    use farik_core::team::{AgentStatus, Effort};
-    use farik_protocol::command::{AcceptSubject, Command, RequestSize};
-    use farik_protocol::event::{
-        CriterionRecordedBodyRunBy, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
-        NewEvent, NoteWrittenBodyKind, RequestTriagedBodySize, TransitionActorWire,
+    use catervas_core::contract::{TaskKind, TaskStatus};
+    use catervas_core::team::{AgentStatus, Effort};
+    use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
+    use catervas_protocol::event::{
+        CatervasEvent, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason, EventBody,
+        EventKind, NewEvent, NoteWrittenBodyKind, RequestTriagedBodySize, TransitionActorWire,
         event_from_value,
     };
-    use farik_store::git::fixtures::git_output_in;
+    use catervas_store::git::fixtures::git_output_in;
     use serde_json::{Value, json};
 
     use crate::exec::ExecError;
@@ -883,20 +883,20 @@ mod tests {
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
     use crate::prompt::JUDGMENT_INSTRUCTION;
     use crate::recorded::fixtures::{
-        accept_frk_1, implement_finishes_frk_1, judge_frk_1_by_architect, judge_frk_1_fails,
-        judge_frk_1_passes, plan_assigns_frk_1, plan_assigns_frk_2, plan_breaks_down_frk_1,
-        plan_closes_epic_frk_1, planning_ceremony_frk_1_frk_3, refine_asks_frk_1,
-        refine_writes_epic_frk_1, refine_writes_task_frk_1, replays_farik_read_board,
-        review_epic_fails_frk_1, review_epic_frk_1, triage_by_sm_frk_1, triage_frk_1_large,
+        accept_ctv_1, implement_finishes_ctv_1, judge_ctv_1_by_architect, judge_ctv_1_fails,
+        judge_ctv_1_passes, plan_assigns_ctv_1, plan_assigns_ctv_2, plan_breaks_down_ctv_1,
+        plan_closes_epic_ctv_1, planning_ceremony_ctv_1_ctv_3, refine_asks_ctv_1,
+        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, replays_catervas_read_board,
+        review_epic_ctv_1, review_epic_fails_ctv_1, triage_by_sm_ctv_1, triage_ctv_1_large,
     };
     use crate::session::SessionPurpose;
     use crate::tools::fixtures::at;
 
-    fn task(id: &str) -> farik_core::contract::TaskId {
+    fn task(id: &str) -> catervas_core::contract::TaskId {
         id.parse().expect("a task id")
     }
 
-    fn last(harness: &Harness, kind: EventKind) -> Option<FarikEvent> {
+    fn last(harness: &Harness, kind: EventKind) -> Option<CatervasEvent> {
         harness.events(&[kind]).pop()
     }
 
@@ -917,12 +917,12 @@ mod tests {
             .collect()
     }
 
-    /// A request filed by the human and sized by them, `size`, as `farik triage` does.
+    /// A request filed by the human and sized by them, `size`, as `catervas triage` does.
     async fn a_sized_request(harness: &Harness, orchestrator: &Orchestrator, size: RequestSize) {
         harness.a_request("Add done.txt and its check");
         orchestrator
             .handle(Command::RequestTriage {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 size,
                 reason: "Sized by the human.".to_string(),
             })
@@ -938,11 +938,11 @@ mod tests {
     ) -> TickReport {
         a_sized_request(harness, orchestrator, size).await;
         let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
         report
     }
 
-    /// Calls a Farik tool as `agent` on `task`, as a session of theirs would.
+    /// Calls a Catervas tool as `agent` on `task`, as a session of theirs would.
     async fn call(
         harness: &Harness,
         agent: &str,
@@ -959,8 +959,8 @@ mod tests {
         call(
             harness,
             "pm",
-            Some("FRK-1"),
-            "farik_write_contract",
+            Some("CTV-1"),
+            "catervas_write_contract",
             json!({ "fields": { "budget": { "max_cost_usd": 50 } } }),
         )
         .await
@@ -972,7 +972,7 @@ mod tests {
     async fn triages_a_request_on_the_cheaper_model() {
         let harness = Harness::new("req-triage", |_| {});
         harness.a_request("Add done.txt and its check");
-        let adapter = harness.recorded(vec![triage_frk_1_large()]);
+        let adapter = harness.recorded(vec![triage_ctv_1_large()]);
         let witness = Arc::new(ExecutorWitness::new(
             adapter.clone(),
             Arc::clone(&harness.daemon),
@@ -983,7 +983,7 @@ mod tests {
         // The daemon holds the session to its one tool, whatever the agent's tiers allow.
         assert_eq!(
             witness.given_tools(),
-            vec![vec!["farik_triage_request".to_string()]]
+            vec![vec!["catervas_triage_request".to_string()]]
         );
 
         let started = adapter.started();
@@ -993,10 +993,13 @@ mod tests {
         assert_eq!(spec.agent_id, "pm");
         assert_eq!(spec.model, TRIAGE_MODEL);
         assert_eq!(spec.effort, Effort::Low);
-        assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert_eq!(
+            spec.catervas_tools,
+            vec!["catervas_triage_request".to_string()]
+        );
         assert_eq!(
             listed_tools(&spec.system_prompt),
-            vec!["farik_triage_request"]
+            vec!["catervas_triage_request"]
         );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
@@ -1005,10 +1008,10 @@ mod tests {
         };
         assert_eq!(body.size, RequestTriagedBodySize::Large);
         assert_eq!(body.triaged_by, "pm");
-        assert_eq!(harness.row("FRK-1").kind, TaskKind::Epic);
+        assert_eq!(harness.row("CTV-1").kind, TaskKind::Epic);
     }
 
-    /// The Farik tools the prompt's `Your tools` section lists, in order.
+    /// The Catervas tools the prompt's `Your tools` section lists, in order.
     fn listed_tools(prompt: &str) -> Vec<&str> {
         let start = prompt.find("## Your tools\n").expect("a tools section");
         let section = &prompt[start + 1..];
@@ -1017,7 +1020,7 @@ mod tests {
             .lines()
             .filter_map(|line| line.strip_prefix("- "))
             .filter_map(|line| line.split(' ').next())
-            .filter(|name| name.starts_with("farik_"))
+            .filter(|name| name.starts_with("catervas_"))
             .collect()
     }
 
@@ -1053,13 +1056,13 @@ mod tests {
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
-                .push(farik_core::team::fixtures::an_agent_wire(
+                .push(catervas_core::team::fixtures::an_agent_wire(
                     "ari",
                     "architect",
                 ));
         });
         let adapter =
-            harness.recorded(vec![refine_writes_task_frk_1(), judge_frk_1_by_architect()]);
+            harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_by_architect()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
@@ -1070,8 +1073,8 @@ mod tests {
         assert_eq!(started.len(), 2);
         assert_eq!(started[1].agent_id, "ari");
         assert_eq!(
-            started[1].farik_tools,
-            vec!["farik_record_judgment".to_string()]
+            started[1].catervas_tools,
+            vec!["catervas_record_judgment".to_string()]
         );
         let judged = last(&harness, EventKind::ContractJudged).expect("the judgment");
         let EventBody::ContractJudged(body) = &judged.body else {
@@ -1080,7 +1083,7 @@ mod tests {
         assert_eq!(body.judged_by, "ari");
 
         orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
     }
 
     #[tokio::test]
@@ -1095,7 +1098,7 @@ mod tests {
             judging_with_a_scrum_master(wire);
             wire["policy"]["judgment"]["questions"] = json!(questions);
         });
-        let adapter = harness.recorded(vec![refine_writes_task_frk_1(), judge_frk_1_passes()]);
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
@@ -1118,13 +1121,13 @@ mod tests {
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
-                .push(farik_core::team::fixtures::an_agent_wire(
+                .push(catervas_core::team::fixtures::an_agent_wire(
                     "ari",
                     "architect",
                 ));
             wire["policy"]["judgment"] = json!({ "required": "never" });
         });
-        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
@@ -1133,7 +1136,7 @@ mod tests {
 
         assert_eq!(adapter.started().len(), 1);
         assert!(last(&harness, EventKind::ContractJudged).is_none());
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
     }
 
     #[tokio::test]
@@ -1141,7 +1144,7 @@ mod tests {
     async fn triages_with_the_scrum_master_when_there_is_one() {
         let harness = Harness::new("req-triage-sm", with_a_scrum_master);
         harness.a_request("Add done.txt and its check");
-        let adapter = harness.recorded(vec![triage_by_sm_frk_1()]);
+        let adapter = harness.recorded(vec![triage_by_sm_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -1152,10 +1155,13 @@ mod tests {
         assert_eq!(spec.purpose, SessionPurpose::Triage);
         assert_eq!(spec.agent_id, "sam");
         assert_eq!(spec.model, TRIAGE_MODEL);
-        assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert_eq!(
+            spec.catervas_tools,
+            vec!["catervas_triage_request".to_string()]
+        );
         assert_eq!(
             listed_tools(&spec.system_prompt),
-            vec!["farik_triage_request"]
+            vec!["catervas_triage_request"]
         );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
@@ -1217,11 +1223,11 @@ mod tests {
         let harness = Harness::new("req-paused-assignee", |wire| {
             wire["agents"][1]["status"] = json!("paused");
         });
-        harness.assigned("FRK-2", "dev-a", "dev-b");
+        harness.assigned("CTV-2", "dev-a", "dev-b");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         assert!(is_idle(&orchestrator.tick().await.expect("the tick runs")));
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Assigned);
         assert!(adapter.started().is_empty());
     }
 
@@ -1229,7 +1235,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn asks_first_when_refining_an_epic() {
         let harness = Harness::new("req-asks-first", |_| {});
-        let adapter = harness.recorded(vec![refine_asks_frk_1()]);
+        let adapter = harness.recorded(vec![refine_asks_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Large).await;
 
@@ -1239,12 +1245,12 @@ mod tests {
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Refine);
         assert!(
-            started[0].initial_prompt.contains("farik_ask_human"),
+            started[0].initial_prompt.contains("catervas_ask_human"),
             "{}",
             started[0].initial_prompt
         );
         assert!(last(&harness, EventKind::QuestionAsked).is_some());
-        assert!(harness.row("FRK-1").waiting_on_human);
+        assert!(harness.row("CTV-1").waiting_on_human);
         assert!(is_idle(&orchestrator.tick().await.expect("the tick runs")));
         assert_eq!(adapter.started().len(), 1);
     }
@@ -1254,9 +1260,9 @@ mod tests {
     async fn hands_the_answer_to_the_next_refine_session() {
         let harness = Harness::new("req-answer-handed", |_| {});
         let adapter = harness.recorded(vec![
-            refine_asks_frk_1(),
-            replays_farik_read_board(),
-            replays_farik_read_board(),
+            refine_asks_ctv_1(),
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Large).await;
@@ -1304,7 +1310,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn judges_a_written_contract_before_refining_again() {
         let harness = Harness::new("req-judges", |_| {});
-        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
@@ -1336,7 +1342,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn asks_the_scrum_master_to_judge_a_written_contract() {
         let harness = Harness::new("req-sm-judges", judging_with_a_scrum_master);
-        let adapter = harness.recorded(vec![refine_writes_task_frk_1(), judge_frk_1_passes()]);
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
@@ -1349,10 +1355,13 @@ mod tests {
         let spec = &started[1];
         assert_eq!(spec.agent_id, "sam");
         assert_eq!(spec.purpose, SessionPurpose::Refine);
-        assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
+        assert_eq!(
+            spec.catervas_tools,
+            vec!["catervas_record_judgment".to_string()]
+        );
         assert_eq!(
             listed_tools(&spec.system_prompt),
-            vec!["farik_record_judgment"]
+            vec!["catervas_record_judgment"]
         );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         // The Scrum Master's own model and effort, not triage's.
@@ -1366,11 +1375,11 @@ mod tests {
             spec.system_prompt
         );
         assert!(last(&harness, EventKind::ContractJudged).is_some());
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
         assert_eq!(adapter.started().len(), 2);
     }
 
@@ -1385,7 +1394,7 @@ mod tests {
                 .last_mut()
                 .expect("sam")["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
         });
-        let adapter = harness.recorded(vec![refine_writes_task_frk_1(), judge_frk_1_passes()]);
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
@@ -1405,9 +1414,9 @@ mod tests {
     async fn sends_a_badly_judged_contract_back_to_the_product_manager() {
         let harness = Harness::new("req-sm-judges-badly", judging_with_a_scrum_master);
         let adapter = harness.recorded(vec![
-            refine_writes_task_frk_1(),
-            judge_frk_1_fails(),
-            replays_farik_read_board(),
+            refine_writes_task_ctv_1(),
+            judge_ctv_1_fails(),
+            replays_catervas_read_board(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
@@ -1455,8 +1464,8 @@ mod tests {
         call(
             &harness,
             "pm",
-            Some("FRK-1"),
-            "farik_write_contract",
+            Some("CTV-1"),
+            "catervas_write_contract",
             json!({ "fields": { "scope": { "in_scope": ["done.txt"], "out_of_scope": [" "] } } }),
         )
         .await
@@ -1488,14 +1497,14 @@ mod tests {
     async fn readies_a_written_contract_whatever_the_day_cost_without_a_daily_budget() {
         let harness = Harness::new("req-no-day", |wire| wire["budgets"] = json!({}));
         harness.spent(None, "s-0", 25.0);
-        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
     }
 
     #[tokio::test]
@@ -1504,14 +1513,14 @@ mod tests {
         let harness = Harness::new("req-sprint-left", |_| {});
         // S1 has one dollar and holds nothing; the contract refined meanwhile asks for five.
         harness.project.open_sprint("S1", Some(1.0), &[]);
-        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
         let evaluated = last(&harness, EventKind::ContractEvaluated).expect("the judgement");
         assert!(
             matches!(&evaluated.body, EventBody::ContractEvaluated(body) if body.passed),
@@ -1532,7 +1541,7 @@ mod tests {
         let harness = Harness::new("req-failing", |wire| {
             wire["rules"]["max_task_budget_usd"] = json!(5);
         });
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         write_over_the_cap(&harness).await;
@@ -1553,7 +1562,7 @@ mod tests {
         assert!(adapter.started().is_empty());
         // A later judgement of another gate is not the contract's readiness.
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "contract.evaluated",
             &json!({ "gate": "definition_of_done", "passed": false, "failures": ["not done"] }),
         );
@@ -1616,7 +1625,7 @@ mod tests {
         refining(&harness, &orchestrator, RequestSize::Small).await;
         write_over_the_cap(&harness).await;
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "transition.refused",
             &json!({
                 "from": "refining",
@@ -1643,12 +1652,12 @@ mod tests {
         a_sized_request(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator
             .handle(Command::ContractLock {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
             })
             .await
             .expect("the human takes the contract");
         orchestrator.tick().await.expect("refining starts");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
 
         orchestrator.tick().await.expect("the tick runs");
 
@@ -1664,7 +1673,7 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
         a_sized_request(&harness, &orchestrator, RequestSize::Small).await;
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "transition.refused",
             &json!({
                 "from": "draft",
@@ -1679,7 +1688,7 @@ mod tests {
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(is_idle(&report), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Draft);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Draft);
         assert!(adapter.started().is_empty());
     }
 
@@ -1687,7 +1696,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_an_epic_for_approval_once_it_passes() {
         let harness = Harness::new("req-approval", |_| {});
-        let adapter = harness.recorded(vec![refine_writes_epic_frk_1()]);
+        let adapter = harness.recorded(vec![refine_writes_epic_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Large).await;
         orchestrator.tick().await.expect("the epic is written");
@@ -1695,7 +1704,7 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(
-            moves_of(&harness, "FRK-1").last().map(String::as_str),
+            moves_of(&harness, "CTV-1").last().map(String::as_str),
             Some("refining -> escalated")
         );
         let escalation = last(&harness, EventKind::EscalationRaised).expect("the escalation");
@@ -1708,7 +1717,7 @@ mod tests {
                 |event| matches!(&event.body, EventBody::ContractEvaluated(body) if body.passed)
             )
         );
-        assert!(harness.row("FRK-1").awaiting_approval);
+        assert!(harness.row("CTV-1").awaiting_approval);
         assert!(is_idle(&orchestrator.tick().await.expect("the tick runs")));
     }
 
@@ -1722,7 +1731,7 @@ mod tests {
         refining(&harness, &orchestrator, RequestSize::Small).await;
         for _ in 0..3 {
             harness.project.record(
-                "FRK-1",
+                "CTV-1",
                 "contract.evaluated",
                 &json!({ "gate": "definition_of_ready", "passed": false, "failures": ["no"] }),
             );
@@ -1737,7 +1746,7 @@ mod tests {
             EventBody::EscalationRaised(body)
                 if body.reason == EscalationRaisedBodyReason::ReadinessFailures
         ));
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
     }
 
     #[tokio::test]
@@ -1746,26 +1755,26 @@ mod tests {
         let harness = Harness::new("req-child-whole", |_| {});
         harness
             .project
-            .filed_with("FRK-1", "in_progress", "epic", None, |wire| {
+            .filed_with("CTV-1", "in_progress", "epic", None, |wire| {
                 wire["assignee_role"] = json!("product_manager");
                 wire["reviewer_role"] = json!("human");
                 wire["allowed_paths"] = json!(["done.txt"]);
             });
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "pm" }),
         );
-        // The call `plan_breaks_down_frk_1` makes, made here without its session.
+        // The call `plan_breaks_down_ctv_1` makes, made here without its session.
         let mut contract = Harness::request_fields("Add done.txt");
         contract["budget"] = json!({ "max_cost_usd": 2 });
         call(
             &harness,
             "pm",
             None,
-            "farik_create_task",
-            json!({ "parent": "FRK-1", "contract": contract }),
+            "catervas_create_task",
+            json!({ "parent": "CTV-1", "contract": contract }),
         )
         .await
         .expect("the epic's assignee files its task");
@@ -1776,14 +1785,14 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(
-            moves_of(&harness, "FRK-2"),
+            moves_of(&harness, "CTV-2"),
             ["draft -> refining", "refining -> ready"]
         );
         assert!(
             adapter
                 .started()
                 .iter()
-                .all(|spec| spec.task_id != Some(task("FRK-2")))
+                .all(|spec| spec.task_id != Some(task("CTV-2")))
         );
     }
 
@@ -1791,26 +1800,26 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn passes_over_a_task_waiting_on_the_human() {
         let harness = Harness::new("req-waiting", |_| {});
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "question.asked",
             &json!({ "question": "Which file?", "asked_by": "pm" }),
         );
-        harness.ready("FRK-2");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-2");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(adapter.started()[0].task_id, Some(task("FRK-2")));
+        assert_eq!(adapter.started()[0].task_id, Some(task("CTV-2")));
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn catches_up_with_another_process_before_each_tick() {
         let harness = Harness::new("req-catch-up", |_| {});
-        let adapter = harness.recorded(vec![refine_asks_frk_1(), replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![refine_asks_ctv_1(), replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Large).await;
         orchestrator.tick().await.expect("the question is asked");
@@ -1821,9 +1830,9 @@ mod tests {
         let wire = json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
-            "task_id": "FRK-1",
+            "team_id": "catervas",
+            "project_id": "catervas",
+            "task_id": "CTV-1",
             "kind": "question.answered",
             "body": { "question_id": n, "answer": "Yes.", "answered_by": "human" },
         });
@@ -1844,10 +1853,10 @@ mod tests {
         let started = adapter.started();
         assert_eq!(started.len(), 2);
         assert_eq!(started[1].purpose, SessionPurpose::Refine);
-        assert_eq!(started[1].task_id, Some(task("FRK-1")));
+        assert_eq!(started[1].task_id, Some(task("CTV-1")));
     }
 
-    /// Epic FRK-1 as the Product Manager wrote it for the human to review, filed in `status`: C1
+    /// Epic CTV-1 as the Product Manager wrote it for the human to review, filed in `status`: C1
     /// (`command`, `test -f done.txt`) and C2 (`review`), `done.txt` its one path, 5 dollars.
     fn an_epic(harness: &Harness, id: &str, status: &str, change: impl FnOnce(&mut Value)) {
         harness
@@ -1881,20 +1890,20 @@ mod tests {
             });
     }
 
-    /// Epic FRK-1 moved to `in_progress`, held by `pm`.
+    /// Epic CTV-1 moved to `in_progress`, held by `pm`.
     fn an_epic_in_progress(harness: &Harness, change: impl FnOnce(&mut Value)) {
-        an_epic(harness, "FRK-1", "ready", change);
+        an_epic(harness, "CTV-1", "ready", change);
         let people = json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
-        harness.project.moved("FRK-1", "ready", "assigned", &people);
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
         harness
             .project
-            .moved("FRK-1", "assigned", "in_progress", &people);
+            .moved("CTV-1", "assigned", "in_progress", &people);
     }
 
-    /// FRK-2 under FRK-1, filed `ready`, moved through to `status` as `dev-a`'s reviewed by
+    /// CTV-2 under CTV-1, filed `ready`, moved through to `status` as `dev-a`'s reviewed by
     /// `dev-b`, its worktree made when it is in progress.
     fn a_child(harness: &Harness, status: &str) {
-        harness.file_under("FRK-2", "ready", Some("FRK-1"), |wire| {
+        harness.file_under("CTV-2", "ready", Some("CTV-1"), |wire| {
             wire["title"] = json!("Add done.txt");
             wire["budget"] = json!({ "max_cost_usd": 2 });
         });
@@ -1906,54 +1915,54 @@ mod tests {
             if pair[0] == last {
                 break;
             }
-            harness.project.moved("FRK-2", pair[0], pair[1], &people);
+            harness.project.moved("CTV-2", pair[0], pair[1], &people);
             if pair[1] == "in_progress" {
                 harness
                     .project
                     .deps
                     .git
-                    .create_worktree(&harness.worktree("FRK-2"), &harness.branch("FRK-2"), "main")
+                    .create_worktree(&harness.worktree("CTV-2"), &harness.branch("CTV-2"), "main")
                     .expect("the child's worktree is made");
             }
         }
         if cancelled {
             harness
                 .project
-                .moved("FRK-2", "ready", "cancelled", &json!({}));
+                .moved("CTV-2", "ready", "cancelled", &json!({}));
         }
-        if matches!(status, "accepted" | "cancelled") && harness.worktree("FRK-2").exists() {
+        if matches!(status, "accepted" | "cancelled") && harness.worktree("CTV-2").exists() {
             harness
                 .project
                 .deps
                 .git
-                .remove_worktree(&harness.worktree("FRK-2"))
+                .remove_worktree(&harness.worktree("CTV-2"))
                 .expect("the child's worktree is removed");
         }
     }
 
-    /// FRK-2 recorded as integrated into `main`, with `done.txt` committed there when `with_done`.
+    /// CTV-2 recorded as integrated into `main`, with `done.txt` committed there when `with_done`.
     fn integrated(harness: &Harness, with_done: bool) {
         if with_done {
             harness.commit_at_root("done.txt", "", "Add done.txt");
         }
         harness.project.record(
-            "FRK-2",
+            "CTV-2",
             "task.integrated",
             &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
         );
     }
 
-    /// Epic FRK-1 `verifying` after its child FRK-2 was accepted, with its completion note.
+    /// Epic CTV-1 `verifying` after its child CTV-2 was accepted, with its completion note.
     fn an_epic_verifying(harness: &Harness, change: impl FnOnce(&mut Value)) {
         an_epic_in_progress(harness, change);
         a_child(harness, "accepted");
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
-            &json!({ "kind": "completion", "text": "FRK-2 added done.txt; nothing left out.", "written_by": "pm" }),
+            &json!({ "kind": "completion", "text": "CTV-2 added done.txt; nothing left out.", "written_by": "pm" }),
         );
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "in_progress",
             "verifying",
             &json!({ "actor": "assignee", "requested_by": "pm", "assignee": "pm" }),
@@ -1984,7 +1993,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assigns_an_approved_epic_to_its_product_manager() {
         let harness = Harness::new("epic-assigns", |_| {});
-        an_epic(&harness, "FRK-1", "ready", |_| {});
+        an_epic(&harness, "CTV-1", "ready", |_| {});
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -2003,10 +2012,10 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
         assert_eq!(
-            moves_of(&harness, "FRK-1").last().map(String::as_str),
+            moves_of(&harness, "CTV-1").last().map(String::as_str),
             Some("assigned -> in_progress")
         );
-        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!harness.worktree("CTV-1").exists());
         assert!(adapter.started().is_empty());
     }
 
@@ -2014,12 +2023,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn passes_over_an_epic_outside_the_open_sprint() {
         let harness = Harness::new("epic-outside-sprint", |_| {});
-        an_epic(&harness, "FRK-1", "ready", |_| {});
+        an_epic(&harness, "CTV-1", "ready", |_| {});
         harness.open_sprint("S1", &[]);
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         let scope = crate::orchestrator::TickScope {
-            task_id: Some(task("FRK-1")),
+            task_id: Some(task("CTV-1")),
             ..crate::orchestrator::TickScope::default()
         };
 
@@ -2032,7 +2041,7 @@ mod tests {
         }
 
         assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
         assert!(adapter.started().is_empty());
     }
 
@@ -2040,19 +2049,19 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_to_assign_a_second_epic_while_the_first_is_open() {
         let harness = Harness::new("epic-wip", |_| {});
-        an_epic(&harness, "FRK-1", "ready", |_| {});
-        an_epic(&harness, "FRK-2", "ready", |_| {});
+        an_epic(&harness, "CTV-1", "ready", |_| {});
+        an_epic(&harness, "CTV-2", "ready", |_| {});
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let first = orchestrator.tick().await.expect("the tick runs");
         let second = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
-        // FRK-1's breakdown has begun and its one task waits on a block, so rule 6 has nothing
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+        // CTV-1's breakdown has begun and its one task waits on a block, so rule 6 has nothing
         // to do for it, and rule 8 is reached.
-        harness.file_under("FRK-3", "ready", Some("FRK-1"), |_| {});
+        harness.file_under("CTV-3", "ready", Some("CTV-1"), |_| {});
         harness.project.moved(
-            "FRK-3",
+            "CTV-3",
             "in_progress",
             "blocked",
             &json!({
@@ -2063,17 +2072,17 @@ mod tests {
         );
         let third = orchestrator.tick().await.expect("the tick runs");
 
-        assert!(matches!(&first, TickReport::Acted { task_id, .. } if task_id.as_str() == "FRK-1"));
+        assert!(matches!(&first, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"));
         assert!(
-            matches!(&second, TickReport::Acted { task_id, .. } if task_id.as_str() == "FRK-1")
+            matches!(&second, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1")
         );
         assert!(is_idle(&third), "{third:?}");
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Ready);
         assert!(
             harness
                 .events(&[EventKind::TransitionRefused])
                 .iter()
-                .all(|event| event.envelope.ids.task_id != Some(task("FRK-2")))
+                .all(|event| event.envelope.ids.task_id != Some(task("CTV-2")))
         );
         assert!(adapter.started().is_empty());
     }
@@ -2083,7 +2092,7 @@ mod tests {
     async fn breaks_an_epic_down_in_a_plan_session() {
         let harness = Harness::new("epic-breakdown", |_| {});
         an_epic_in_progress(&harness, |_| {});
-        let adapter = harness.recorded(vec![plan_breaks_down_frk_1()]);
+        let adapter = harness.recorded(vec![plan_breaks_down_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -2091,15 +2100,15 @@ mod tests {
         let spec = &adapter.started()[0];
         assert_eq!(spec.purpose, SessionPurpose::Plan);
         assert_eq!(spec.agent_id, "pm");
-        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert_eq!(spec.task_id, Some(task("CTV-1")));
         assert_eq!(spec.cwd, harness.project.repo.path);
         assert!(
-            spec.initial_prompt.contains("farik_create_task"),
+            spec.initial_prompt.contains("catervas_create_task"),
             "{}",
             spec.initial_prompt
         );
-        let child = harness.row("FRK-2");
-        assert_eq!(child.parent, Some(task("FRK-1")));
+        let child = harness.row("CTV-2");
+        assert_eq!(child.parent, Some(task("CTV-1")));
         assert!(child.triaged);
         assert_eq!(child.status, TaskStatus::Draft);
     }
@@ -2110,7 +2119,7 @@ mod tests {
         let harness = Harness::new("epic-assigns-child", |_| {});
         an_epic_in_progress(&harness, |_| {});
         a_child(&harness, "ready");
-        let adapter = harness.recorded(vec![plan_assigns_frk_2()]);
+        let adapter = harness.recorded(vec![plan_assigns_ctv_2()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -2118,8 +2127,8 @@ mod tests {
         let spec = &adapter.started()[0];
         assert_eq!(spec.agent_id, "pm");
         assert_eq!(spec.purpose, SessionPurpose::Plan);
-        assert_eq!(spec.task_id, Some(task("FRK-2")));
-        let child = harness.row("FRK-2");
+        assert_eq!(spec.task_id, Some(task("CTV-2")));
+        let child = harness.row("CTV-2");
         assert_eq!(child.status, TaskStatus::Assigned);
         assert_eq!(child.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(child.reviewer_id.as_deref(), Some("dev-b"));
@@ -2131,19 +2140,19 @@ mod tests {
         let harness = Harness::new("epic-open-tasks", |_| {});
         an_epic_in_progress(&harness, |_| {});
         a_child(&harness, "in_progress");
-        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
-            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "FRK-2")
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-2")
         );
         assert!(
             adapter
                 .started()
                 .iter()
-                .all(|spec| spec.task_id != Some(task("FRK-1")))
+                .all(|spec| spec.task_id != Some(task("CTV-1")))
         );
     }
 
@@ -2154,16 +2163,16 @@ mod tests {
         an_epic_in_progress(&harness, |_| {});
         a_child(&harness, "accepted");
         integrated(&harness, true);
-        let adapter = harness.recorded(vec![plan_closes_epic_frk_1()]);
+        let adapter = harness.recorded(vec![plan_closes_epic_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
 
         let spec = &adapter.started()[0];
         assert_eq!(spec.purpose, SessionPurpose::Plan);
-        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert_eq!(spec.task_id, Some(task("CTV-1")));
         assert!(
-            spec.initial_prompt.contains("FRK-2") && spec.initial_prompt.contains("accepted"),
+            spec.initial_prompt.contains("CTV-2") && spec.initial_prompt.contains("accepted"),
             "{}",
             spec.initial_prompt
         );
@@ -2172,9 +2181,9 @@ mod tests {
             &note.body,
             EventBody::NoteWritten(body) if body.kind == NoteWrittenBodyKind::Completion
         ));
-        assert_eq!(note.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(note.envelope.ids.task_id, Some(task("CTV-1")));
         assert_eq!(
-            moves_of(&harness, "FRK-1").last().map(String::as_str),
+            moves_of(&harness, "CTV-1").last().map(String::as_str),
             Some("in_progress -> verifying")
         );
     }
@@ -2185,16 +2194,16 @@ mod tests {
         let harness = Harness::new("epic-breaks-down-again", |_| {});
         an_epic_in_progress(&harness, |_| {});
         a_child(&harness, "cancelled");
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
 
         let spec = &adapter.started()[0];
-        assert_eq!(spec.task_id, Some(task("FRK-1")));
-        // The breakdown's message, not the close-out's, which names `farik_create_task` too.
+        assert_eq!(spec.task_id, Some(task("CTV-1")));
+        // The breakdown's message, not the close-out's, which names `catervas_create_task` too.
         assert!(
-            spec.initial_prompt.starts_with("Break the epic FRK-1 down"),
+            spec.initial_prompt.starts_with("Break the epic CTV-1 down"),
             "{}",
             spec.initial_prompt
         );
@@ -2210,14 +2219,14 @@ mod tests {
     async fn waits_for_an_epics_tasks_to_be_integrated() {
         let harness = Harness::new("epic-waits-integration", |_| {});
         an_epic_verifying(&harness, |_| {});
-        assert!(harness.row("FRK-2").awaiting_integration);
+        assert!(harness.row("CTV-2").awaiting_integration);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(is_idle(&report), "{report:?}");
-        assert!(governor_runs(&harness, "FRK-1").is_empty());
-        assert!(!harness.worktree("FRK-1-base").exists());
+        assert!(governor_runs(&harness, "CTV-1").is_empty());
+        assert!(!harness.worktree("CTV-1-base").exists());
     }
 
     #[tokio::test]
@@ -2232,7 +2241,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        let runs = governor_runs(&harness, "FRK-1");
+        let runs = governor_runs(&harness, "CTV-1");
         assert_eq!(runs.len(), 1, "{runs:?}");
         assert_eq!((runs[0].0.as_str(), runs[0].1), ("C1", true));
         let recorded = last(&harness, EventKind::CriterionRecorded).expect("the run");
@@ -2240,10 +2249,10 @@ mod tests {
             &recorded.body,
             EventBody::CriterionRecorded(body) if body.run_by == CriterionRecordedBodyRunBy::Reviewer
         ));
-        assert_eq!(sandboxes.based("FRK-1"), 1);
-        assert!(!harness.worktree("FRK-1-base").exists());
+        assert_eq!(sandboxes.based("CTV-1"), 1);
+        assert!(!harness.worktree("CTV-1-base").exists());
         assert!(is_idle(&orchestrator.tick().await.expect("the tick runs")));
-        assert_eq!(governor_runs(&harness, "FRK-1").len(), 1);
+        assert_eq!(governor_runs(&harness, "CTV-1").len(), 1);
     }
 
     #[tokio::test]
@@ -2252,16 +2261,16 @@ mod tests {
         let harness = Harness::new("epic-accepted", |_| {});
         an_epic_verifying(&harness, |_| {});
         integrated(&harness, true);
-        let adapter = harness.recorded(vec![accept_frk_1()]);
+        let adapter = harness.recorded(vec![accept_ctv_1()]);
         let witness = Arc::new(ExecutorWitness::new(
             adapter.clone(),
             Arc::clone(&harness.daemon),
         ));
         let orchestrator = harness.orchestrator(witness.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .handle(Command::HumanAccept {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 subject: AcceptSubject::Result,
                 message: Some("Both look right.".to_string()),
             })
@@ -2283,19 +2292,19 @@ mod tests {
             "{}",
             spec.system_prompt
         );
-        let evidence = &governor_runs(&harness, "FRK-1")[0].2;
+        let evidence = &governor_runs(&harness, "CTV-1")[0].2;
         let results = spec
             .initial_prompt
             .find("<untrusted source=\"results\">")
-            .expect("Farik's results, marked");
+            .expect("Catervas's results, marked");
         assert!(
             spec.initial_prompt[results..].contains(evidence.as_str()),
             "{}",
             spec.initial_prompt
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
         let review = last(&harness, EventKind::ReviewRecorded).expect("the review");
-        assert_eq!(review.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(review.envelope.ids.task_id, Some(task("CTV-1")));
         assert!(matches!(
             &review.body,
             EventBody::ReviewRecorded(body)
@@ -2305,7 +2314,7 @@ mod tests {
             harness
                 .events(&[EventKind::TaskIntegrated])
                 .iter()
-                .all(|event| event.envelope.ids.task_id != Some(task("FRK-1")))
+                .all(|event| event.envelope.ids.task_id != Some(task("CTV-1")))
         );
     }
 
@@ -2327,7 +2336,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        let runs = governor_runs(&harness, "FRK-1");
+        let runs = governor_runs(&harness, "CTV-1");
         assert_eq!(runs.len(), 1, "{runs:?}");
         let (id, passed, evidence) = &runs[0];
         assert_eq!((id.as_str(), *passed), ("C1", true), "{evidence}");
@@ -2344,17 +2353,17 @@ mod tests {
         let harness = Harness::new("epic-failed", |_| {});
         an_epic_verifying(&harness, |_| {});
         integrated(&harness, false);
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         assert!(
-            !governor_runs(&harness, "FRK-1")[0].1,
+            !governor_runs(&harness, "CTV-1")[0].1,
             "done.txt is not on main"
         );
 
         let failed = orchestrator
             .handle(Command::HumanAccept {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 subject: AcceptSubject::Result,
                 message: Some("Looks right.".to_string()),
             })
@@ -2365,7 +2374,7 @@ mod tests {
         );
         orchestrator
             .handle(Command::TaskTransition {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 to: TaskStatus::Escalated,
                 reason: "C1 failed".to_string(),
             })
@@ -2373,7 +2382,7 @@ mod tests {
             .expect("the human escalates the epic");
         orchestrator
             .handle(Command::EscalationResolve {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 to: TaskStatus::InProgress,
                 message: "Add the missing file.".to_string(),
                 extra_tries: None,
@@ -2388,7 +2397,7 @@ mod tests {
             (spec.purpose, spec.agent_id.as_str()),
             (SessionPurpose::Plan, "pm")
         );
-        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert_eq!(spec.task_id, Some(task("CTV-1")));
         assert!(
             spec.system_prompt.contains("Add the missing file."),
             "{}",
@@ -2430,10 +2439,10 @@ mod tests {
         an_epic_in_progress(&harness, |_| {});
         a_child(&harness, "accepted");
         integrated(&harness, true);
-        harness.file_under("FRK-3", "ready", Some("FRK-1"), |_| {});
+        harness.file_under("CTV-3", "ready", Some("CTV-1"), |_| {});
         harness
             .project
-            .moved("FRK-3", "ready", "escalated", &json!({}));
+            .moved("CTV-3", "ready", "escalated", &json!({}));
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -2448,7 +2457,7 @@ mod tests {
     async fn assigns_an_epic_beside_work_the_product_manager_finished() {
         let harness = Harness::new("epic-wip-finished", |_| {});
         let people = json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
-        for (id, last) in [("FRK-2", "accepted"), ("FRK-3", "cancelled")] {
+        for (id, last) in [("CTV-2", "accepted"), ("CTV-3", "cancelled")] {
             an_epic(&harness, id, "ready", |_| {});
             harness.project.moved(id, "ready", "assigned", &people);
             harness
@@ -2456,17 +2465,17 @@ mod tests {
                 .moved(id, "assigned", "in_progress", &people);
             harness.project.moved(id, "in_progress", last, &people);
         }
-        an_epic(&harness, "FRK-4", "ready", |_| {});
+        an_epic(&harness, "CTV-4", "ready", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(moves_of(&harness, "FRK-4"), ["ready -> assigned"]);
+        assert_eq!(moves_of(&harness, "CTV-4"), ["ready -> assigned"]);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_an_epic_whose_criterion_farik_could_not_run() {
+    async fn escalates_an_epic_whose_criterion_catervas_could_not_run() {
         let harness = Harness::new("epic-unrunnable", |_| {});
         an_epic_verifying(&harness, |_| {});
         integrated(&harness, true);
@@ -2477,15 +2486,15 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         let escalation = last(&harness, EventKind::EscalationRaised).expect("the escalation");
         let EventBody::EscalationRaised(body) = &escalation.body else {
             panic!("an escalation");
         };
         assert!(body.detail.contains("C1"), "{}", body.detail);
         assert!(body.detail.contains("no shell"), "{}", body.detail);
-        assert!(governor_runs(&harness, "FRK-1").is_empty());
-        assert!(!harness.worktree("FRK-1-base").exists());
+        assert!(governor_runs(&harness, "CTV-1").is_empty());
+        assert!(!harness.worktree("CTV-1-base").exists());
     }
 
     #[tokio::test]
@@ -2504,13 +2513,15 @@ mod tests {
                 }));
         });
         integrated(&harness, true);
-        let adapter =
-            harness.recorded(vec![replays_farik_read_board(), replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
+        ]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .handle(Command::HumanAccept {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 subject: AcceptSubject::Result,
                 message: Some("All three hold.".to_string()),
             })
@@ -2530,10 +2541,10 @@ mod tests {
         ));
     }
 
-    /// Epic FRK-1 filed `ready` on a team with the active Scrum Master `sam`, for the Scrum Master
+    /// Epic CTV-1 filed `ready` on a team with the active Scrum Master `sam`, for the Scrum Master
     /// to hold and the Product Manager to review.
     fn a_scrum_masters_epic(harness: &Harness) {
-        an_epic(harness, "FRK-1", "ready", |wire| {
+        an_epic(harness, "CTV-1", "ready", |wire| {
             wire["assignee_role"] = json!("scrum_master");
             wire["reviewer_role"] = json!("product_manager");
         });
@@ -2544,14 +2555,14 @@ mod tests {
         json!({ "actor": "scrum_master", "requested_by": "sam", "assignee": "sam", "reviewer": "pm" })
     }
 
-    /// The Scrum Master's epic FRK-1 moved to `in_progress`.
+    /// The Scrum Master's epic CTV-1 moved to `in_progress`.
     fn a_scrum_masters_epic_in_progress(harness: &Harness) {
         a_scrum_masters_epic(harness);
         let people = the_scrum_masters();
-        harness.project.moved("FRK-1", "ready", "assigned", &people);
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
         harness
             .project
-            .moved("FRK-1", "assigned", "in_progress", &people);
+            .moved("CTV-1", "assigned", "in_progress", &people);
     }
 
     #[tokio::test]
@@ -2584,7 +2595,7 @@ mod tests {
     async fn breaks_an_epic_down_with_its_scrum_master() {
         let harness = Harness::new("epic-breakdown-sm", with_a_scrum_master);
         a_scrum_masters_epic_in_progress(&harness);
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -2594,39 +2605,39 @@ mod tests {
             (spec.purpose, spec.agent_id.as_str()),
             (SessionPurpose::Plan, "sam")
         );
-        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert_eq!(spec.task_id, Some(task("CTV-1")));
         assert!(
-            spec.initial_prompt.starts_with("Break the epic FRK-1 down"),
+            spec.initial_prompt.starts_with("Break the epic CTV-1 down"),
             "{}",
             spec.initial_prompt
         );
     }
 
-    /// The Scrum Master's epic FRK-1 `verifying` after its child FRK-2 was accepted, each with its
+    /// The Scrum Master's epic CTV-1 `verifying` after its child CTV-2 was accepted, each with its
     /// completion note.
     fn a_scrum_masters_epic_verifying(harness: &Harness) {
         a_scrum_masters_epic_in_progress(harness);
         a_child(harness, "accepted");
         harness.project.record(
-            "FRK-2",
+            "CTV-2",
             "note.written",
             &json!({ "kind": "completion", "text": "Wrote done.txt at the root.", "written_by": "dev-a" }),
         );
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
-            &json!({ "kind": "completion", "text": "FRK-2 added done.txt; nothing left out.", "written_by": "sam" }),
+            &json!({ "kind": "completion", "text": "CTV-2 added done.txt; nothing left out.", "written_by": "sam" }),
         );
         let mut people = the_scrum_masters();
         people["actor"] = json!("assignee");
         harness
             .project
-            .moved("FRK-1", "in_progress", "verifying", &people);
+            .moved("CTV-1", "in_progress", "verifying", &people);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn refuses_the_humans_acceptance_of_an_epic_before_farik_ran_its_criteria() {
+    async fn refuses_the_humans_acceptance_of_an_epic_before_catervas_ran_its_criteria() {
         let harness = Harness::new("epic-sm-accept-early", with_a_scrum_master);
         a_scrum_masters_epic_verifying(&harness);
         integrated(&harness, true);
@@ -2634,7 +2645,7 @@ mod tests {
 
         let refused = orchestrator
             .handle(Command::HumanAccept {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 subject: AcceptSubject::Result,
                 message: Some("Looks right.".to_string()),
             })
@@ -2653,15 +2664,15 @@ mod tests {
         let harness = Harness::new("epic-sm-review", with_a_scrum_master);
         a_scrum_masters_epic_verifying(&harness);
         integrated(&harness, true);
-        let adapter = harness.recorded(vec![review_epic_frk_1(), accept_frk_1()]);
+        let adapter = harness.recorded(vec![review_epic_ctv_1(), accept_ctv_1()]);
         let witness = Arc::new(ExecutorWitness::new(
             adapter.clone(),
             Arc::clone(&harness.daemon),
         ));
         let orchestrator = harness.orchestrator(witness.clone());
 
-        orchestrator.tick().await.expect("Farik runs C1");
-        let runs = governor_runs(&harness, "FRK-1");
+        orchestrator.tick().await.expect("Catervas runs C1");
+        let runs = governor_runs(&harness, "CTV-1");
         assert_eq!(runs.len(), 1, "{runs:?}");
         assert!(
             runs[0]
@@ -2676,10 +2687,10 @@ mod tests {
             (spec.purpose, spec.agent_id.as_str()),
             (SessionPurpose::Verify, "pm")
         );
-        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert_eq!(spec.task_id, Some(task("CTV-1")));
         assert_eq!(spec.cwd, harness.project.repo.path);
         assert_eq!(witness.had_executor(), vec![false]);
-        for held in ["FRK-2", "accepted", "Wrote done.txt at the root."] {
+        for held in ["CTV-2", "accepted", "Wrote done.txt at the root."] {
             assert!(
                 spec.initial_prompt.contains(held),
                 "{held}: {}",
@@ -2698,7 +2709,7 @@ mod tests {
         assert_eq!(adapter.started().len(), 1);
         orchestrator
             .handle(Command::HumanAccept {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 subject: AcceptSubject::Result,
                 message: Some("It reads right.".to_string()),
             })
@@ -2718,7 +2729,7 @@ mod tests {
             "{}",
             started[1].initial_prompt
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
         let reviews = harness.events(&[EventKind::ReviewRecorded]);
         assert_eq!(reviews.len(), 1, "{reviews:?}");
         assert!(matches!(
@@ -2734,9 +2745,12 @@ mod tests {
         let harness = Harness::new("epic-sm-rejects", with_a_scrum_master);
         a_scrum_masters_epic_verifying(&harness);
         integrated(&harness, true);
-        let adapter = harness.recorded(vec![review_epic_fails_frk_1(), replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![
+            review_epic_fails_ctv_1(),
+            replays_catervas_read_board(),
+        ]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .tick()
             .await
@@ -2758,7 +2772,7 @@ mod tests {
         assert_eq!(rejection.failed_criterion_ids, vec!["C2".to_string()]);
 
         orchestrator.tick().await.expect("the governor returns it");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
         orchestrator.tick().await.expect("the tick runs");
 
         let started = adapter.started();
@@ -2789,13 +2803,13 @@ mod tests {
         integrated(&harness, true);
         // The Product Manager's review note, with no result for the `review` criterion C2.
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
             &json!({ "kind": "review", "text": "It reads right.", "written_by": "pm" }),
         );
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
 
         orchestrator.tick().await.expect("the tick runs");
 
@@ -2816,7 +2830,7 @@ mod tests {
             "{}",
             spec.initial_prompt
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
     }
 
     #[tokio::test]
@@ -2833,9 +2847,9 @@ mod tests {
         });
         a_scrum_masters_epic_verifying(&harness);
         integrated(&harness, true);
-        let adapter = harness.recorded(vec![review_epic_frk_1()]);
+        let adapter = harness.recorded(vec![review_epic_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
 
         orchestrator.tick().await.expect("the tick runs");
 
@@ -2880,12 +2894,12 @@ mod tests {
         });
         an_epic_verifying(&harness, |_| {});
         integrated(&harness, true);
-        let adapter = harness.recorded(vec![accept_frk_1()]);
+        let adapter = harness.recorded(vec![accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .handle(Command::HumanAccept {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 subject: AcceptSubject::Result,
                 message: Some("Looks right.".to_string()),
             })
@@ -2921,13 +2935,13 @@ mod tests {
         integrated(&harness, true);
         // The Product Manager's review note, with no result yet for the `review` criterion C2.
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
             &json!({ "kind": "review", "text": "It reads right.", "written_by": "pm" }),
         );
-        let adapter = harness.recorded(vec![review_epic_frk_1()]);
+        let adapter = harness.recorded(vec![review_epic_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
 
         orchestrator.tick().await.expect("the re-ask answers C2");
 
@@ -2949,7 +2963,7 @@ mod tests {
         let people = the_scrum_masters();
         harness
             .project
-            .moved("FRK-1", "in_progress", "verifying", &people);
+            .moved("CTV-1", "in_progress", "verifying", &people);
         let mut rejected = people.clone();
         rejected["actor"] = json!("reviewer");
         rejected["requested_by"] = json!("pm");
@@ -2957,24 +2971,24 @@ mod tests {
             json!({ "failed_criterion_ids": ["C2"], "reasons": "done.txt is empty." });
         harness
             .project
-            .moved("FRK-1", "verifying", "rejected", &rejected);
+            .moved("CTV-1", "verifying", "rejected", &rejected);
         let mut returned = people.clone();
         returned["iteration"] = json!(1);
         harness
             .project
-            .moved("FRK-1", "rejected", "in_progress", &returned);
+            .moved("CTV-1", "rejected", "in_progress", &returned);
         // The fixing task, filed after the rejection and accepted.
-        harness.file_under("FRK-3", "ready", Some("FRK-1"), |_| {});
+        harness.file_under("CTV-3", "ready", Some("CTV-1"), |_| {});
         let child = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
-            harness.project.moved("FRK-3", pair[0], pair[1], &child);
+            harness.project.moved("CTV-3", pair[0], pair[1], &child);
         }
         harness.project.record(
-            "FRK-3",
+            "CTV-3",
             "task.integrated",
             &json!({ "sha": "abd", "into": "main", "integrated_by": "governor" }),
         );
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -2986,7 +3000,7 @@ mod tests {
         );
         assert!(
             spec.initial_prompt
-                .starts_with("Every task under the epic FRK-1 is done"),
+                .starts_with("Every task under the epic CTV-1 is done"),
             "{}",
             spec.initial_prompt
         );
@@ -3030,7 +3044,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_sleeping_scrum_master_to_judge() {
         let harness = Harness::new("req-sleep-judge", judging_with_a_scrum_master);
-        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter);
         refining(&harness, &orchestrator, RequestSize::Small).await;
         orchestrator.tick().await.expect("the contract is written");
@@ -3057,10 +3071,10 @@ mod tests {
         an_epic_verifying(&harness, |_| {});
         integrated(&harness, true);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .handle(Command::HumanAccept {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
                 subject: AcceptSubject::Result,
                 message: Some("Both look right.".to_string()),
             })
@@ -3078,7 +3092,7 @@ mod tests {
         a_scrum_masters_epic_verifying(&harness);
         integrated(&harness, true);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         harness.asleep("pm", in_an_hour());
 
         waits_for(&orchestrator, "pm", in_an_hour()).await;
@@ -3095,14 +3109,14 @@ mod tests {
     async fn breaks_an_epic_down_outside_a_sprint() {
         let harness = Harness::new("epic-sprints-breakdown", in_sprints_with_a_scrum_master);
         a_scrum_masters_epic(&harness);
-        let adapter = harness.recorded(vec![plan_breaks_down_frk_1()]);
+        let adapter = harness.recorded(vec![plan_breaks_down_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let assigned = orchestrator.tick().await.expect("the tick runs");
         let started = orchestrator.tick().await.expect("the tick runs");
         let broken_down = orchestrator.tick().await.expect("the tick runs");
         for (from, to) in [("draft", "refining"), ("refining", "ready")] {
-            harness.project.moved("FRK-2", from, to, &json!({}));
+            harness.project.moved("CTV-2", from, to, &json!({}));
         }
         let later = [
             orchestrator.tick().await.expect("the tick runs"),
@@ -3111,21 +3125,21 @@ mod tests {
 
         for report in [&assigned, &started, &broken_down] {
             assert!(
-                matches!(report, TickReport::Acted { task_id, .. } if task_id.as_str() == "FRK-1"),
+                matches!(report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
                 "{report:?}"
             );
         }
         assert_eq!(
-            moves_of(&harness, "FRK-1"),
+            moves_of(&harness, "CTV-1"),
             ["ready -> assigned", "assigned -> in_progress"]
         );
-        assert_eq!(harness.row("FRK-1").assignee_id.as_deref(), Some("sam"));
+        assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("sam"));
         let spec = &adapter.started()[0];
         assert_eq!(
             (spec.agent_id.as_str(), spec.purpose),
             ("sam", SessionPurpose::Plan)
         );
-        assert_eq!(harness.row("FRK-2").parent, Some(task("FRK-1")));
+        assert_eq!(harness.row("CTV-2").parent, Some(task("CTV-1")));
         for report in &later {
             assert_eq!(
                 report,
@@ -3135,7 +3149,7 @@ mod tests {
                 }
             );
         }
-        let child = harness.row("FRK-2");
+        let child = harness.row("CTV-2");
         assert_eq!((child.status, child.assignee_id), (TaskStatus::Ready, None));
         assert_eq!(adapter.started().len(), 1);
     }
@@ -3146,8 +3160,8 @@ mod tests {
         let harness = Harness::new("epic-sprints-plans-both", in_sprints_with_a_scrum_master);
         a_scrum_masters_epic_in_progress(&harness);
         a_child(&harness, "ready");
-        harness.ready("FRK-3");
-        let adapter = harness.recorded(vec![planning_ceremony_frk_1_frk_3()]);
+        harness.ready("CTV-3");
+        let adapter = harness.recorded(vec![planning_ceremony_ctv_1_ctv_3()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let waiting = orchestrator.tick().await.expect("the tick runs");
@@ -3169,18 +3183,18 @@ mod tests {
         assert!(
             prompt
                 .lines()
-                .any(|line| line.contains("FRK-1") && line.contains("1 task under it")),
+                .any(|line| line.contains("CTV-1") && line.contains("1 task under it")),
             "{prompt}"
         );
-        assert!(prompt.contains("FRK-3"), "{prompt}");
+        assert!(prompt.contains("CTV-3"), "{prompt}");
         // The epic's task is planned with its epic, not offered on its own.
         assert!(
             !prompt
                 .lines()
-                .any(|line| line.contains("FRK-2") && !line.contains("FRK-1")),
+                .any(|line| line.contains("CTV-2") && !line.contains("CTV-1")),
             "{prompt}"
         );
-        for id in ["FRK-1", "FRK-2", "FRK-3"] {
+        for id in ["CTV-1", "CTV-2", "CTV-3"] {
             assert_eq!(harness.row(id).sprint.as_deref(), Some("S1"), "{id}");
         }
     }

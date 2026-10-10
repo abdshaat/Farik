@@ -1,5 +1,5 @@
-import { toSnake } from "@farik/protocol-client";
-import { Button, Dialog, TextArea, uiStrings } from "@farik/ui";
+import { toSnake } from "@catervas/protocol-client";
+import { Button, Dialog, TextArea, uiStrings } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -93,7 +93,7 @@ export function yaml(value: unknown, pad = ""): string {
 		.join("\n");
 }
 
-/** A plan awaiting approval, read as a letter, with Farik's checks and the two answers. */
+/** A plan awaiting approval, read as a letter, with Catervas's checks and the two answers. */
 export function PlanPage() {
 	const { id = "" } = useParams();
 	const { client } = useConnection();

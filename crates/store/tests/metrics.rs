@@ -4,15 +4,15 @@
 
 use std::sync::Arc;
 
+use catervas_core::contract::fixtures::a_contract_wire;
+use catervas_core::contract::validate_contract;
+use catervas_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
+use catervas_protocol::event::{CostRecordedBodyPurpose, EventKind, NewEvent, event_from_value};
+use catervas_store::files::FilesError;
+use catervas_store::files::fixtures::TempProject;
+use catervas_store::metrics::{HarnessMetrics, MessageCounts, MetricsError};
+use catervas_store::{EventLog, Projections, open_event_log, open_projections};
 use chrono::{TimeZone, Utc};
-use farik_core::contract::fixtures::a_contract_wire;
-use farik_core::contract::validate_contract;
-use farik_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
-use farik_protocol::event::{CostRecordedBodyPurpose, EventKind, NewEvent, event_from_value};
-use farik_store::files::FilesError;
-use farik_store::files::fixtures::TempProject;
-use farik_store::metrics::{HarnessMetrics, MessageCounts, MetricsError};
-use farik_store::{EventLog, Projections, open_event_log, open_projections};
 use serde_json::{Value, json};
 
 /// A project with a log on disk and the projections of it, both empty.
@@ -30,7 +30,8 @@ impl Recorded {
             .single()
             .expect("a real hour");
         let log = Arc::new(
-            open_event_log(&project.root.join(".farik/local/farik.db"), at).expect("the log opens"),
+            open_event_log(&project.root.join(".catervas/local/catervas.db"), at)
+                .expect("the log opens"),
         );
         let projections = open_projections(Arc::clone(&log)).expect("the projections open");
         Self {
@@ -133,7 +134,7 @@ impl Recorded {
         }
         let session = self
             .log
-            .read(&farik_store::EventQuery::default())
+            .read(&catervas_store::EventQuery::default())
             .expect("the log reads")
             .len();
         wire["agent_id"] = json!("dev-a");
@@ -241,83 +242,83 @@ fn verified_once(recorded: &Recorded, task: &str) {
 fn recorded_project(name: &str) -> Recorded {
     let recorded = Recorded::new(name);
 
-    recorded.contract("FRK-1", &["command", "review"]);
-    recorded.created("FRK-1", "epic", None);
-    recorded.moved("FRK-1", "draft", "refining", "product_manager");
-    recorded.moved("FRK-1", "refining", "escalated", "governor");
-    recorded.escalated("FRK-1", "readiness_failures");
-    recorded.moved("FRK-1", "escalated", "refining", "human");
-    recorded.moved("FRK-1", "refining", "escalated", "governor");
-    recorded.escalated("FRK-1", "approval");
-    recorded.moved("FRK-1", "escalated", "ready", "human");
+    recorded.contract("CTV-1", &["command", "review"]);
+    recorded.created("CTV-1", "epic", None);
+    recorded.moved("CTV-1", "draft", "refining", "product_manager");
+    recorded.moved("CTV-1", "refining", "escalated", "governor");
+    recorded.escalated("CTV-1", "readiness_failures");
+    recorded.moved("CTV-1", "escalated", "refining", "human");
+    recorded.moved("CTV-1", "refining", "escalated", "governor");
+    recorded.escalated("CTV-1", "approval");
+    recorded.moved("CTV-1", "escalated", "ready", "human");
     recorded.record(
         EventKind::QuestionAsked,
-        Some("FRK-1"),
+        Some("CTV-1"),
         json!({ "question": "Which pages?", "asked_by": "pm" }),
     );
     recorded.record(
         EventKind::HumanAccepted,
-        Some("FRK-1"),
+        Some("CTV-1"),
         json!({ "subject": "contract", "accepted_by": "human" }),
     );
-    recorded.walked("FRK-1", &["ready", "assigned", "in_progress"]);
-    recorded.moved("FRK-1", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-1", "verifying", "accepted", "product_manager");
-    recorded.cost(Some("FRK-1"), "triage", 0.25, "2026-09-22");
-    recorded.cost(Some("FRK-1"), "refine", 0.5, "2026-09-22");
-    recorded.cost(Some("FRK-1"), "plan", 0.5, "2026-09-27");
+    recorded.walked("CTV-1", &["ready", "assigned", "in_progress"]);
+    recorded.moved("CTV-1", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-1", "verifying", "accepted", "product_manager");
+    recorded.cost(Some("CTV-1"), "triage", 0.25, "2026-09-22");
+    recorded.cost(Some("CTV-1"), "refine", 0.5, "2026-09-22");
+    recorded.cost(Some("CTV-1"), "plan", 0.5, "2026-09-27");
 
-    recorded.contract("FRK-2", &["command", "test"]);
-    recorded.created("FRK-2", "task", Some("FRK-1"));
-    verified_once(&recorded, "FRK-2");
-    recorded.cost(Some("FRK-2"), "implement", 0.5, "2026-09-28");
-    recorded.cost(Some("FRK-2"), "verify", 0.25, "2026-10-06");
+    recorded.contract("CTV-2", &["command", "test"]);
+    recorded.created("CTV-2", "task", Some("CTV-1"));
+    verified_once(&recorded, "CTV-2");
+    recorded.cost(Some("CTV-2"), "implement", 0.5, "2026-09-28");
+    recorded.cost(Some("CTV-2"), "verify", 0.25, "2026-10-06");
 
-    recorded.contract("FRK-3", &["artifact", "review"]);
-    recorded.created("FRK-3", "task", Some("FRK-1"));
-    recorded.walked("FRK-3", &TO_WORK);
-    recorded.moved("FRK-3", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-3", "verifying", "rejected", "reviewer");
-    recorded.moved("FRK-3", "rejected", "in_progress", "governor");
-    recorded.moved("FRK-3", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-3", "verifying", "accepted", "product_manager");
-    recorded.cost(Some("FRK-3"), "implement", 1.0, "2026-09-28");
-    recorded.cost(Some("FRK-3"), "verify", 0.5, "2026-10-06");
+    recorded.contract("CTV-3", &["artifact", "review"]);
+    recorded.created("CTV-3", "task", Some("CTV-1"));
+    recorded.walked("CTV-3", &TO_WORK);
+    recorded.moved("CTV-3", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-3", "verifying", "rejected", "reviewer");
+    recorded.moved("CTV-3", "rejected", "in_progress", "governor");
+    recorded.moved("CTV-3", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-3", "verifying", "accepted", "product_manager");
+    recorded.cost(Some("CTV-3"), "implement", 1.0, "2026-09-28");
+    recorded.cost(Some("CTV-3"), "verify", 0.5, "2026-10-06");
 
-    recorded.contract("FRK-4", &["command", "human"]);
-    recorded.created("FRK-4", "task", None);
-    recorded.moved("FRK-4", "draft", "refining", "product_manager");
-    recorded.moved("FRK-4", "refining", "escalated", "governor");
-    recorded.escalated("FRK-4", "risk_gate");
-    recorded.moved("FRK-4", "escalated", "ready", "human");
-    recorded.walked("FRK-4", &["ready", "assigned", "in_progress"]);
-    recorded.moved("FRK-4", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-4", "verifying", "accepted", "product_manager");
-    recorded.escalated("FRK-4", "integration");
-    recorded.cost(Some("FRK-4"), "implement", 1.0, "2026-09-29");
-    recorded.cost(Some("FRK-4"), "verify", 0.25, "2026-10-06");
+    recorded.contract("CTV-4", &["command", "human"]);
+    recorded.created("CTV-4", "task", None);
+    recorded.moved("CTV-4", "draft", "refining", "product_manager");
+    recorded.moved("CTV-4", "refining", "escalated", "governor");
+    recorded.escalated("CTV-4", "risk_gate");
+    recorded.moved("CTV-4", "escalated", "ready", "human");
+    recorded.walked("CTV-4", &["ready", "assigned", "in_progress"]);
+    recorded.moved("CTV-4", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-4", "verifying", "accepted", "product_manager");
+    recorded.escalated("CTV-4", "integration");
+    recorded.cost(Some("CTV-4"), "implement", 1.0, "2026-09-29");
+    recorded.cost(Some("CTV-4"), "verify", 0.25, "2026-10-06");
 
-    recorded.contract("FRK-5", &["review"]);
-    recorded.created("FRK-5", "task", None);
-    recorded.walked("FRK-5", &TO_WORK);
-    recorded.moved("FRK-5", "in_progress", "blocked", "assignee");
-    recorded.moved("FRK-5", "blocked", "escalated", "governor");
-    recorded.escalated("FRK-5", "blocker_age");
-    recorded.moved("FRK-5", "escalated", "cancelled", "human");
-    recorded.cost(Some("FRK-5"), "implement", 0.5, "2026-09-29");
+    recorded.contract("CTV-5", &["review"]);
+    recorded.created("CTV-5", "task", None);
+    recorded.walked("CTV-5", &TO_WORK);
+    recorded.moved("CTV-5", "in_progress", "blocked", "assignee");
+    recorded.moved("CTV-5", "blocked", "escalated", "governor");
+    recorded.escalated("CTV-5", "blocker_age");
+    recorded.moved("CTV-5", "escalated", "cancelled", "human");
+    recorded.cost(Some("CTV-5"), "implement", 0.5, "2026-09-29");
 
-    recorded.contract("FRK-6", &["command"]);
-    recorded.created("FRK-6", "task", None);
-    recorded.walked("FRK-6", &TO_WORK);
-    recorded.moved("FRK-6", "in_progress", "blocked", "assignee");
-    recorded.moved("FRK-6", "blocked", "in_progress", "human");
-    recorded.moved("FRK-6", "in_progress", "escalated", "human");
-    recorded.escalated("FRK-6", "explicit_request");
+    recorded.contract("CTV-6", &["command"]);
+    recorded.created("CTV-6", "task", None);
+    recorded.walked("CTV-6", &TO_WORK);
+    recorded.moved("CTV-6", "in_progress", "blocked", "assignee");
+    recorded.moved("CTV-6", "blocked", "in_progress", "human");
+    recorded.moved("CTV-6", "in_progress", "escalated", "human");
+    recorded.escalated("CTV-6", "explicit_request");
 
-    recorded.contract("FRK-7", &["command", "review"]);
-    recorded.created("FRK-7", "task", Some("FRK-1"));
-    verified_once(&recorded, "FRK-7");
-    recorded.cost(Some("FRK-7"), "refine", 0.5, "2026-09-22");
+    recorded.contract("CTV-7", &["command", "review"]);
+    recorded.created("CTV-7", "task", Some("CTV-1"));
+    verified_once(&recorded, "CTV-7");
+    recorded.cost(Some("CTV-7"), "refine", 0.5, "2026-09-22");
 
     recorded.cost(None, "conversation", 0.25, "2026-10-06");
     recorded
@@ -366,11 +367,11 @@ fn measures_cost_per_accepted_task_by_purpose() {
 #[test]
 fn counts_an_unpriced_report_as_a_session_at_no_cost() {
     let recorded = Recorded::new("unpriced");
-    recorded.contract("FRK-1", &["command"]);
-    recorded.created("FRK-1", "task", None);
-    verified_once(&recorded, "FRK-1");
-    recorded.cost(Some("FRK-1"), "implement", 2.0, "2026-09-22");
-    recorded.unpriced_cost(Some("FRK-1"), "verify", "2026-09-22");
+    recorded.contract("CTV-1", &["command"]);
+    recorded.created("CTV-1", "task", None);
+    verified_once(&recorded, "CTV-1");
+    recorded.cost(Some("CTV-1"), "implement", 2.0, "2026-09-22");
+    recorded.unpriced_cost(Some("CTV-1"), "verify", "2026-09-22");
 
     let metrics = metrics_of(&recorded);
     let split = metrics
@@ -387,10 +388,10 @@ fn counts_an_unpriced_report_as_a_session_at_no_cost() {
 #[test]
 fn leaves_chat_out_of_cost_per_accepted_task() {
     let recorded = Recorded::new("chat-cost");
-    recorded.contract("FRK-1", &["command"]);
-    recorded.created("FRK-1", "task", None);
-    verified_once(&recorded, "FRK-1");
-    recorded.cost(Some("FRK-1"), "implement", 2.0, "2026-09-22");
+    recorded.contract("CTV-1", &["command"]);
+    recorded.created("CTV-1", "task", None);
+    verified_once(&recorded, "CTV-1");
+    recorded.cost(Some("CTV-1"), "implement", 2.0, "2026-09-22");
     recorded.cost(None, "chat", 3.0, "2026-09-22");
 
     let split = metrics_of(&recorded)
@@ -415,15 +416,15 @@ fn counts_active_weeks() {
 #[test]
 fn says_none_for_every_rate_before_a_task_is_accepted() {
     let recorded = Recorded::new("none-yet");
-    recorded.contract("FRK-2", &["command"]);
-    recorded.created("FRK-2", "epic", None);
-    recorded.walked("FRK-2", &TO_WORK);
-    recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-2", "verifying", "accepted", "product_manager");
-    recorded.created("FRK-1", "task", None);
-    recorded.walked("FRK-1", &TO_WORK);
-    recorded.escalated("FRK-1", "iterations");
-    recorded.cost(Some("FRK-1"), "implement", 0.5, "2026-09-22");
+    recorded.contract("CTV-2", &["command"]);
+    recorded.created("CTV-2", "epic", None);
+    recorded.walked("CTV-2", &TO_WORK);
+    recorded.moved("CTV-2", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-2", "verifying", "accepted", "product_manager");
+    recorded.created("CTV-1", "task", None);
+    recorded.walked("CTV-1", &TO_WORK);
+    recorded.escalated("CTV-1", "iterations");
+    recorded.cost(Some("CTV-1"), "implement", 0.5, "2026-09-22");
     assert_eq!(
         metrics_of(&recorded),
         HarnessMetrics {
@@ -441,11 +442,11 @@ fn says_none_for_every_rate_before_a_task_is_accepted() {
 #[test]
 fn does_not_count_an_acceptance_without_a_verification_as_first_pass() {
     let recorded = Recorded::new("unverified");
-    recorded.contract("FRK-1", &["command"]);
-    recorded.created("FRK-1", "task", None);
-    recorded.walked("FRK-1", &TO_WORK);
-    recorded.moved("FRK-1", "in_progress", "escalated", "governor");
-    recorded.moved("FRK-1", "escalated", "accepted", "human");
+    recorded.contract("CTV-1", &["command"]);
+    recorded.created("CTV-1", "task", None);
+    recorded.walked("CTV-1", &TO_WORK);
+    recorded.moved("CTV-1", "in_progress", "escalated", "governor");
+    recorded.moved("CTV-1", "escalated", "accepted", "human");
     let metrics = metrics_of(&recorded);
     assert_eq!(metrics.accepted_tasks, 1);
     assert_eq!(metrics.first_pass_acceptance_rate, Some(0.0));
@@ -455,25 +456,25 @@ fn does_not_count_an_acceptance_without_a_verification_as_first_pass() {
 #[test]
 fn counts_neither_a_rejection_nor_a_second_verification_as_first_pass() {
     let recorded = Recorded::new("not-first-pass");
-    for task in ["FRK-1", "FRK-2", "FRK-3"] {
+    for task in ["CTV-1", "CTV-2", "CTV-3"] {
         recorded.contract(task, &["command"]);
         recorded.created(task, "task", None);
         recorded.walked(task, &TO_WORK);
     }
     // Verified once, rejected, and accepted by the human resolving the escalation.
-    recorded.moved("FRK-1", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-1", "verifying", "rejected", "reviewer");
-    recorded.moved("FRK-1", "rejected", "escalated", "governor");
-    recorded.moved("FRK-1", "escalated", "accepted", "human");
+    recorded.moved("CTV-1", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-1", "verifying", "rejected", "reviewer");
+    recorded.moved("CTV-1", "rejected", "escalated", "governor");
+    recorded.moved("CTV-1", "escalated", "accepted", "human");
     // Verified twice and never rejected.
-    recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-2", "verifying", "escalated", "governor");
-    recorded.moved("FRK-2", "escalated", "in_progress", "human");
-    recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-2", "verifying", "accepted", "product_manager");
+    recorded.moved("CTV-2", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-2", "verifying", "escalated", "governor");
+    recorded.moved("CTV-2", "escalated", "in_progress", "human");
+    recorded.moved("CTV-2", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-2", "verifying", "accepted", "product_manager");
     // Verified once and accepted: the one first pass.
-    recorded.moved("FRK-3", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-3", "verifying", "accepted", "product_manager");
+    recorded.moved("CTV-3", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-3", "verifying", "accepted", "product_manager");
 
     let metrics = metrics_of(&recorded);
     assert_eq!(metrics.accepted_tasks, 3);
@@ -494,30 +495,30 @@ fn counts_the_turn_of_a_year_as_one_week() {
 fn measures_one_sprint() {
     let recorded = Recorded::new("one-sprint");
 
-    recorded.contract("FRK-1", &["command"]);
-    recorded.created("FRK-1", "task", None);
-    recorded.walked("FRK-1", &TO_WORK);
+    recorded.contract("CTV-1", &["command"]);
+    recorded.created("CTV-1", "task", None);
+    recorded.walked("CTV-1", &TO_WORK);
     recorded.sprint_started("S1", None);
-    recorded.sprint_planned("S1", &["FRK-1"]);
-    recorded.moved("FRK-1", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-1", "verifying", "accepted", "product_manager");
-    recorded.cost(Some("FRK-1"), "implement", 1.0, "2026-09-22");
+    recorded.sprint_planned("S1", &["CTV-1"]);
+    recorded.moved("CTV-1", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-1", "verifying", "accepted", "product_manager");
+    recorded.cost(Some("CTV-1"), "implement", 1.0, "2026-09-22");
     // Spent during S1 by no task: the day's, not the sprint's.
     recorded.cost(None, "conversation", 5.0, "2026-09-22");
     recorded.sprint_ended("S1", &[]);
 
-    recorded.contract("FRK-2", &["human"]);
-    recorded.created("FRK-2", "task", None);
-    recorded.walked("FRK-2", &TO_WORK);
+    recorded.contract("CTV-2", &["human"]);
+    recorded.created("CTV-2", "task", None);
+    recorded.walked("CTV-2", &TO_WORK);
     recorded.sprint_started("S2", None);
-    recorded.sprint_planned("S2", &["FRK-2"]);
-    recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-2", "verifying", "rejected", "reviewer");
-    recorded.moved("FRK-2", "rejected", "in_progress", "governor");
-    recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
-    recorded.moved("FRK-2", "verifying", "accepted", "product_manager");
+    recorded.sprint_planned("S2", &["CTV-2"]);
+    recorded.moved("CTV-2", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-2", "verifying", "rejected", "reviewer");
+    recorded.moved("CTV-2", "rejected", "in_progress", "governor");
+    recorded.moved("CTV-2", "in_progress", "verifying", "assignee");
+    recorded.moved("CTV-2", "verifying", "accepted", "product_manager");
     // In the ISO week after S1's.
-    recorded.cost(Some("FRK-2"), "implement", 2.0, "2026-09-29");
+    recorded.cost(Some("CTV-2"), "implement", 2.0, "2026-09-29");
     recorded.sprint_ended("S2", &[]);
 
     let s1 = recorded
@@ -557,7 +558,7 @@ fn counts_messages_by_kind() {
     recorded.posted("dev-a", "reaction");
     recorded.posted("dev-b", "reaction");
     recorded.posted("dev-a", "ambient");
-    recorded.posted("farik", "system");
+    recorded.posted("catervas", "system");
     recorded.sprint_ended("S1", &[]);
     recorded.posted("dev-a", "reply");
     recorded.sprint_started("S2", None);
@@ -603,12 +604,12 @@ fn counts_messages_by_kind() {
 #[test]
 fn refuses_metrics_over_an_accepted_contract_it_cannot_read() {
     let recorded = recorded_project("unreadable");
-    std::fs::remove_file(recorded.project.root.join(".farik/contracts/FRK-2.yaml"))
+    std::fs::remove_file(recorded.project.root.join(".catervas/contracts/CTV-2.yaml"))
         .expect("the contract file is removed");
-    let refusal = recorded.metrics().expect_err("FRK-2's contract is gone");
+    let refusal = recorded.metrics().expect_err("CTV-2's contract is gone");
     assert!(
         matches!(&refusal, MetricsError::Files(FilesError::NotFound { path })
-            if path.ends_with("contracts/FRK-2.yaml")),
+            if path.ends_with("contracts/CTV-2.yaml")),
         "{refusal:?}"
     );
 }

@@ -1,4 +1,4 @@
-//! `farik contract new` (`docs/SPEC.md` 5.13): a request filed from a brief, its contract written
+//! `catervas contract new` (`docs/SPEC.md` 5.13): a request filed from a brief, its contract written
 //! with the Product Manager, and its questions asked at the terminal, driven by the recorded
 //! adapter through the harness's engine.
 //!
@@ -14,15 +14,15 @@ use std::io::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use farik::{Engine, Interrupts};
-use farik_protocol::command::{Command, RequestSize};
-use farik_protocol::event::{EventBody, EventKind};
-use farik_runtime::recorded::fixtures::{
-    refine_asks_frk_1, refine_writes_epic_frk_1, refine_writes_task_frk_1, tool_runner,
-    triage_frk_1_large,
+use catervas::{Engine, Interrupts};
+use catervas_protocol::command::{Command, RequestSize};
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_runtime::recorded::fixtures::{
+    refine_asks_ctv_1, refine_writes_epic_ctv_1, refine_writes_task_ctv_1, tool_runner,
+    triage_ctv_1_large,
 };
-use farik_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
-use farik_store::git::fixtures::TempRepo;
+use catervas_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
+use catervas_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
 use project::{
@@ -32,7 +32,7 @@ use project::{
 
 const BRIEF: &str = "Add done.txt and a check that it exists.";
 
-/// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
+/// An engine replaying `transcripts`, whose Catervas tool calls the driving process's daemon answers.
 fn recorded(transcripts: Vec<Transcript>) -> Engine {
     Engine::Given(Arc::new(move |daemon| {
         let adapter: Arc<dyn RuntimeAdapter> = Arc::new(RecordedAdapter::with_tools(
@@ -43,7 +43,7 @@ fn recorded(transcripts: Vec<Transcript>) -> Engine {
     }))
 }
 
-/// `farik contract new <args>` with `transcripts` and `stdin`.
+/// `catervas contract new <args>` with `transcripts` and `stdin`.
 fn contract_new(
     repository: &TempRepo,
     args: &[&str],
@@ -76,14 +76,14 @@ fn question_seq(repository: &TempRepo) -> u64 {
         .seq
 }
 
-/// `transcript` with every `FRK-1` in it naming `task` instead.
+/// `transcript` with every `CTV-1` in it naming `task` instead.
 fn about(transcript: &Transcript, task: &str) -> Transcript {
     Transcript::from_jsonl(
         &transcript
             .lines()
             .collect::<Vec<_>>()
             .join("\n")
-            .replace("FRK-1", task),
+            .replace("CTV-1", task),
     )
 }
 
@@ -91,7 +91,7 @@ fn about(transcript: &Transcript, task: &str) -> Transcript {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn writes_a_small_request_with_the_product_manager() {
     let repository = a_team("new-small");
-    // Two drafts besides the request: FRK-1, which triage would start a session for, and FRK-2,
+    // Two drafts besides the request: CTV-1, which triage would start a session for, and CTV-2,
     // whose question waits on the person. Neither is this command's to act on or to ask.
     filed(&repository, "Add done.txt first");
     let other = filed(&repository, "Add done.txt second");
@@ -105,7 +105,7 @@ fn writes_a_small_request_with_the_product_manager() {
     let ran = contract_new(
         &repository,
         &["--brief", BRIEF, "--size", "small"],
-        vec![about(&refine_writes_task_frk_1(), "FRK-3")],
+        vec![about(&refine_writes_task_ctv_1(), "CTV-3")],
         "",
     );
 
@@ -114,8 +114,8 @@ fn writes_a_small_request_with_the_product_manager() {
         in_order(
             &ran.out,
             &[
-                &format!("FRK-3 filed as a draft request: {BRIEF}"),
-                "FRK-3 sized small by you, so it is a standalone task",
+                &format!("CTV-3 filed as a draft request: {BRIEF}"),
+                "CTV-3 sized small by you, so it is a standalone task",
                 "contract.written",
                 "C1",
                 "readiness: passed",
@@ -125,7 +125,7 @@ fn writes_a_small_request_with_the_product_manager() {
         ran.out
     );
     assert!(!ran.out.contains("answer> "), "{}", ran.out);
-    assert_eq!(status_of(&repository, "FRK-3"), "ready");
+    assert_eq!(status_of(&repository, "CTV-3"), "ready");
     let started = events(&repository, &[EventKind::SessionStarted]);
     assert_eq!(started.len(), 1);
     assert_eq!(
@@ -135,13 +135,13 @@ fn writes_a_small_request_with_the_product_manager() {
             .task_id
             .as_ref()
             .map(|task| task.as_str()),
-        Some("FRK-3")
+        Some("CTV-3")
     );
     assert!(matches!(
         &started[0].body,
         EventBody::SessionStarted(body) if body.purpose.to_string() == "refine"
     ));
-    assert_eq!(status_of(&repository, "FRK-1"), "draft");
+    assert_eq!(status_of(&repository, "CTV-1"), "draft");
 }
 
 #[test]
@@ -149,9 +149,9 @@ fn writes_a_small_request_with_the_product_manager() {
 fn asks_its_questions_at_the_terminal() {
     let transcripts = || {
         vec![
-            triage_frk_1_large(),
-            refine_asks_frk_1(),
-            refine_writes_epic_frk_1(),
+            triage_ctv_1_large(),
+            refine_asks_ctv_1(),
+            refine_writes_epic_ctv_1(),
         ]
     };
     let repository = a_team("new-asks");
@@ -169,14 +169,14 @@ fn asks_its_questions_at_the_terminal() {
         "large by pm: A file and the check that it exists.",
         &format!("question {n} from pm: Should done.txt be empty?"),
         "readiness: passed the structural checks",
-        "FRK-1 awaits your approval",
+        "CTV-1 awaits your approval",
     ] {
         assert!(ran.out.contains(expected), "{expected:?} in {}", ran.out);
     }
     assert_eq!(ran.out.matches("answer> ").count(), 2, "{}", ran.out);
     // The blank line is asked again, not sent as an answer for handle to refuse.
     assert!(
-        !ran.err.lines().any(|line| line.starts_with("farik: ")),
+        !ran.err.lines().any(|line| line.starts_with("catervas: ")),
         "{}",
         ran.err
     );
@@ -186,7 +186,7 @@ fn asks_its_questions_at_the_terminal() {
         &answers[0].body,
         EventBody::QuestionAnswered(body) if body.answer == "No, one line."
     ));
-    assert_eq!(status_of(&repository, "FRK-1"), "escalated");
+    assert_eq!(status_of(&repository, "CTV-1"), "escalated");
 
     let quiet = a_team("new-asks-json");
     let ran = run_with(
@@ -212,7 +212,7 @@ fn leaves_the_question_open_when_input_ends() {
     let ran = contract_new(
         &repository,
         &["--brief", BRIEF],
-        vec![triage_frk_1_large(), refine_asks_frk_1()],
+        vec![triage_ctv_1_large(), refine_asks_ctv_1()],
         "",
     );
 
@@ -220,12 +220,12 @@ fn leaves_the_question_open_when_input_ends() {
     let n = question_seq(&repository);
     assert!(
         ran.out
-            .contains(&format!("the question stays open: farik answer {n}")),
+            .contains(&format!("the question stays open: catervas answer {n}")),
         "{}",
         ran.out
     );
     assert!(events(&repository, &[EventKind::QuestionAnswered]).is_empty());
-    assert_eq!(status_of(&repository, "FRK-1"), "refining");
+    assert_eq!(status_of(&repository, "CTV-1"), "refining");
 }
 
 #[test]
@@ -237,7 +237,7 @@ fn ends_at_the_prompt_on_an_interrupt() {
     let root = repository.path.clone();
     let running = std::thread::spawn(move || {
         run_with(&root, &["contract", "new", "--brief", BRIEF], |io| {
-            io.engine = recorded(vec![triage_frk_1_large(), refine_asks_frk_1()]);
+            io.engine = recorded(vec![triage_ctv_1_large(), refine_asks_ctv_1()]);
             io.stdin = Box::new(reader);
             io.interrupts = Interrupts::Channel(interrupts);
         })
@@ -255,7 +255,7 @@ fn ends_at_the_prompt_on_an_interrupt() {
     let n = question_seq(&repository);
     assert!(
         ran.out
-            .contains(&format!("the question stays open: farik answer {n}")),
+            .contains(&format!("the question stays open: catervas answer {n}")),
         "{}",
         ran.out
     );
@@ -291,10 +291,10 @@ fn a_spent_day(repository: &TempRepo) {
 fn says_why_it_stopped_before_a_contract() {
     let repository = a_team("new-day-spent");
     a_spent_day(&repository);
-    // A judgement from before FRK-1 last moved into refining, which says nothing of it now.
+    // A judgement from before CTV-1 last moved into refining, which says nothing of it now.
     record(
         &repository,
-        "FRK-1",
+        "CTV-1",
         "contract.evaluated",
         &json!({ "gate": "definition_of_ready", "passed": false, "failures": ["stale"] }),
     );
@@ -307,7 +307,7 @@ fn says_why_it_stopped_before_a_contract() {
     );
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert_eq!(status_of(&repository, "FRK-1"), "refining");
+    assert_eq!(status_of(&repository, "CTV-1"), "refining");
     assert!(
         ran.out
             .contains("readiness: not judged yet (the team's daily budget is spent)"),
@@ -334,25 +334,30 @@ fn locks_only_a_contract_the_product_manager_wrote() {
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     assert!(events(&repository, &[EventKind::ContractLocked]).is_empty());
     let contract = files_of(&repository)
-        .read_contract(&"FRK-1".parse().expect("a task id"))
+        .read_contract(&"CTV-1".parse().expect("a task id"))
         .expect("the contract reads");
     assert!(!contract.locked);
     assert!(
         ran.out.contains(
-            "not locked: the Product Manager has written no contract for FRK-1 yet: run farik \
-             contract lock FRK-1 once it has"
+            "not locked: the Product Manager has written no contract for CTV-1 yet: run catervas \
+             contract lock CTV-1 once it has"
         ),
         "{}",
         ran.out
     );
 }
 
-/// Nothing was filed and nothing is left running: the log as it was, no FRK-1, no daemon, and
+/// Nothing was filed and nothing is left running: the log as it was, no CTV-1, no daemon, and
 /// the run lock free.
 fn nothing_filed(repository: &TempRepo, before: usize) {
     assert_eq!(events(repository, &[]).len(), before);
-    assert!(!repository.path.join(".farik/contracts/FRK-1.yaml").exists());
-    assert!(!repository.path.join(".farik/local/daemon.json").exists());
+    assert!(
+        !repository
+            .path
+            .join(".catervas/contracts/CTV-1.yaml")
+            .exists()
+    );
+    assert!(!repository.path.join(".catervas/local/daemon.json").exists());
     the_run_lock_frees(repository);
 }
 
@@ -396,13 +401,13 @@ fn files_nothing_when_the_start_refuses() {
     let repository = a_team("new-start-refused-prices");
     let before = events(&repository, &[]).len();
     std::fs::write(
-        repository.path.join(".farik/prices.json"),
+        repository.path.join(".catervas/prices.json"),
         "{\"version\": 2}",
     )
     .expect("the override is written");
     let ran = contract_new(&repository, &["--brief", BRIEF], Vec::new(), "");
     assert_eq!(ran.code, 1, "{}", ran.out);
-    assert!(ran.err.contains(".farik/prices.json"), "{}", ran.err);
+    assert!(ran.err.contains(".catervas/prices.json"), "{}", ran.err);
     nothing_filed(&repository, before);
 }
 
@@ -414,7 +419,7 @@ fn locks_the_contract_it_wrote_when_asked() {
     let ran = contract_new(
         &repository,
         &["--brief", BRIEF, "--size", "small", "--lock"],
-        vec![refine_writes_task_frk_1()],
+        vec![refine_writes_task_ctv_1()],
         "",
     );
 
@@ -425,7 +430,7 @@ fn locks_the_contract_it_wrote_when_asked() {
         "{last:?}"
     );
     let contract = files_of(&repository)
-        .read_contract(&"FRK-1".parse().expect("a task id"))
+        .read_contract(&"CTV-1".parse().expect("a task id"))
         .expect("the contract reads");
     assert!(contract.locked);
     assert!(
@@ -445,8 +450,13 @@ fn refuses_a_brief_too_short_to_be_an_intent() {
 
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert_eq!(events(&repository, &[]).len(), before);
-    assert!(!repository.path.join(".farik/contracts/FRK-1.yaml").exists());
-    assert!(!repository.path.join(".farik/local/daemon.json").exists());
+    assert!(
+        !repository
+            .path
+            .join(".catervas/contracts/CTV-1.yaml")
+            .exists()
+    );
+    assert!(!repository.path.join(".catervas/local/daemon.json").exists());
 }
 
 #[test]
@@ -463,11 +473,16 @@ fn hands_the_request_to_the_driving_process() {
     );
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert!(repository.path.join(".farik/contracts/FRK-1.yaml").exists());
+    assert!(
+        repository
+            .path
+            .join(".catervas/contracts/CTV-1.yaml")
+            .exists()
+    );
     assert!(matches!(
         driver.commands().as_slice(),
         [Command::RequestTriage { task_id, size: RequestSize::Large, .. }]
-            if task_id.as_str() == "FRK-1"
+            if task_id.as_str() == "CTV-1"
     ));
     assert!(ran.out.contains("(pid "), "{}", ran.out);
     assert!(ran.out.contains("takes it from here"), "{}", ran.out);
@@ -477,5 +492,10 @@ fn hands_the_request_to_the_driving_process() {
     let ran = contract_new(&repository, &["--brief", BRIEF, "--lock"], Vec::new(), "");
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert_eq!(events(&repository, &[]).len(), before);
-    assert!(!repository.path.join(".farik/contracts/FRK-2.yaml").exists());
+    assert!(
+        !repository
+            .path
+            .join(".catervas/contracts/CTV-2.yaml")
+            .exists()
+    );
 }

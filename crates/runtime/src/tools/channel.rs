@@ -1,8 +1,8 @@
-//! `farik_post_message` (`docs/SPEC.md` 5.9): an agent says something in the team's channel from
-//! its session, and Farik decides what kind of message it is from the session's purpose.
+//! `catervas_post_message` (`docs/SPEC.md` 5.9): an agent says something in the team's channel from
+//! its session, and Catervas decides what kind of message it is from the session's purpose.
 
-use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind};
-use farik_store::EventQuery;
+use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, MessageKind};
+use catervas_store::EventQuery;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -12,7 +12,7 @@ use super::{Call, ToolError, failed};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::session::SessionPurpose;
 
-/// `farik_post_message`'s input.
+/// `catervas_post_message`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PostMessageInput {
@@ -124,7 +124,7 @@ fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
         .date_naive()
         .and_time(chrono::NaiveTime::MIN)
         .and_utc();
-    let in_window = |event: &FarikEvent| match started {
+    let in_window = |event: &CatervasEvent| match started {
         Some(seq) => event.envelope.seq > seq,
         None => event.envelope.recorded_at >= day,
     };
@@ -157,19 +157,19 @@ fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
 mod tests {
     use std::num::NonZeroU64;
 
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, MessageKind, Thread};
     use chrono::Duration;
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind, Thread};
     use serde_json::json;
 
     use crate::channel::{NewMessage, post};
     use crate::orchestrator::fixtures::Harness;
-    use crate::recorded::fixtures::implement_reacts_frk_1;
+    use crate::recorded::fixtures::implement_reacts_ctv_1;
     use crate::session::SessionPurpose;
     use crate::tools::ToolError;
     use crate::tools::fixtures::{TestProject, a_team_of_three, at, run};
 
-    fn kinds(messages: &[FarikEvent]) -> Vec<MessageKind> {
+    fn kinds(messages: &[CatervasEvent]) -> Vec<MessageKind> {
         messages
             .iter()
             .filter_map(|event| match &event.body {
@@ -182,8 +182,8 @@ mod tests {
     fn say(project: &TestProject, text: &str) -> Result<serde_json::Value, ToolError> {
         project.call(
             "dev-a",
-            Some("FRK-1"),
-            "farik_post_message",
+            Some("CTV-1"),
+            "catervas_post_message",
             json!({ "text": text }),
         )
     }
@@ -192,8 +192,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn posts_a_reaction_from_a_session() {
         let harness = Harness::new("channel-reaction", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![implement_reacts_frk_1()]);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_reacts_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the session runs");
@@ -212,7 +212,7 @@ mod tests {
                 .task_id
                 .as_ref()
                 .map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(messages[0].envelope.ids.agent_id.as_deref(), Some("dev-a"));
     }
@@ -221,10 +221,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn counts_a_second_post_as_ambient() {
         let project = TestProject::new("channel-ambient", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         project.open_sprint("S1", None, &[]);
 
-        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "CTV-1 is in review.").expect("the reaction");
         say(&project, "The login page is lovely.").expect("the ambient message");
         let before = project.event_count();
         let refused = say(&project, "And another thing.").expect_err("past the allowance");
@@ -244,7 +244,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn counts_the_allowance_per_day_without_a_sprint() {
         let project = TestProject::new("channel-day", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         post(
             &project.deps.log,
             &FixedClock::new(at() - Duration::days(1)),
@@ -263,7 +263,7 @@ mod tests {
         )
         .expect("posted");
 
-        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "CTV-1 is in review.").expect("the reaction");
         say(&project, "Today's.").expect("today's allowance is whole");
 
         assert_eq!(
@@ -302,7 +302,7 @@ mod tests {
     fn counts_the_allowance_per_sprint() {
         // Yesterday's message, inside the open sprint, spends today's allowance too.
         let project = TestProject::new("channel-sprint", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         project.open_sprint("S1", None, &[]);
         ambient_at(
             &project,
@@ -310,7 +310,7 @@ mod tests {
             "Yesterday's, in the sprint.",
         );
 
-        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "CTV-1 is in review.").expect("the reaction");
         let refused = say(&project, "Today's.").expect_err("the sprint's allowance is spent");
 
         assert!(
@@ -320,11 +320,11 @@ mod tests {
 
         // A message from before the sprint started, even today, spends nothing of it.
         let project = TestProject::new("channel-sprint-before", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         ambient_at(&project, at(), "Before the sprint.");
         project.open_sprint("S1", None, &[]);
 
-        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "CTV-1 is in review.").expect("the reaction");
         say(&project, "Today's.").expect("the sprint's allowance is whole");
     }
 
@@ -335,11 +335,11 @@ mod tests {
         let mut context = project.context("dev-a", None);
         context.purpose = SessionPurpose::Ceremony;
         context.thread = Some(Thread::Standup);
-        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
 
         for text in [
-            "FRK-1 moved.",
-            "FRK-2 is blocked.",
+            "CTV-1 moved.",
+            "CTV-2 is blocked.",
             "Nothing waits on the human.",
         ] {
             say(text).expect("a ceremony post");
@@ -363,7 +363,7 @@ mod tests {
         let mut context = project.context("dev-a", None);
         context.purpose = SessionPurpose::Ceremony;
         context.thread = Some(Thread::Retro);
-        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
         for text in ["One.", "Two.", "Three."] {
             say(text).expect("within the cap");
         }
@@ -384,7 +384,7 @@ mod tests {
         let project = TestProject::new("channel-reply", &a_team_of_three(|_| {}));
         let mut context = project.context("dev-a", None);
         context.purpose = SessionPurpose::Conversation;
-        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
 
         say("I can take it.").expect("the reply");
         let refused = say("And more.").expect_err("a conversation replies once");
@@ -406,7 +406,7 @@ mod tests {
         let mut context = project.context("dev-a", None);
         context.purpose = SessionPurpose::Conversation;
         context.in_reply_to = Some(7);
-        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
 
         say("On it.").expect("the reply");
         let before = project.event_count();

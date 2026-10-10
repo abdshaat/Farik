@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 #[must_use]
 pub fn a_contract_wire() -> Value {
     json!({
-        "id": "FRK-1",
+        "id": "CTV-1",
         "title": "Add a login page",
         "intent": "A user can sign in with an email and password so that their work is private.",
         "scope": { "in_scope": ["login form"], "out_of_scope": ["password reset"] },
@@ -42,9 +42,9 @@ pub fn a_full_contract_wire() -> Value {
           "verification": { "method": "human", "question": "Did you sign in successfully?" } }
     ]);
     contract["kind"] = json!("task");
-    contract["parent"] = json!("FRK-3");
+    contract["parent"] = json!("CTV-3");
     contract["constraints"] = json!(["Use the existing session store."]);
-    contract["dependencies"] = json!(["FRK-2"]);
+    contract["dependencies"] = json!(["CTV-2"]);
     contract["references"] = json!(["https://github.com/abdshaat/farik/issues/1"]);
     contract["budget"] = json!({ "max_cost_usd": 5.0, "max_sessions": 12, "max_iterations": 3 });
     contract["locked"] = json!(true);

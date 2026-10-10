@@ -6,10 +6,10 @@
 
 use std::path::PathBuf;
 
+use catervas_protocol::event::EventKind;
+use catervas_protocol::event::fixtures::a_new_event as an_event;
+use catervas_store::{EventQuery, open_event_log};
 use chrono::{DateTime, TimeZone, Utc};
-use farik_protocol::event::EventKind;
-use farik_protocol::event::fixtures::a_new_event as an_event;
-use farik_store::{EventQuery, open_event_log};
 
 /// A directory of its own, removed when the test ends however the test ends.
 struct TempDir {
@@ -19,7 +19,7 @@ struct TempDir {
 impl TempDir {
     fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "farik-store-{name}-{}-{:?}",
+            "catervas-store-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -29,7 +29,10 @@ impl TempDir {
     }
 
     fn db(&self) -> PathBuf {
-        self.path.join(".farik").join("local").join("farik.db")
+        self.path
+            .join(".catervas")
+            .join("local")
+            .join("catervas.db")
     }
 }
 
@@ -47,7 +50,7 @@ fn at(hour: u32) -> DateTime<Utc> {
 
 #[test]
 fn makes_the_directory_the_log_belongs_in() {
-    // `farik init` gives a path inside a repository that has no `.farik/` yet, so opening makes it.
+    // `catervas init` gives a path inside a repository that has no `.catervas/` yet, so opening makes it.
     let directory = TempDir::new("makes-the-directory");
     let log = open_event_log(&directory.db(), at(9)).expect("the log opens");
     assert!(directory.db().exists(), "the database file was made");
@@ -80,12 +83,12 @@ fn keeps_every_event_and_its_place_across_a_reopen() {
         .expect("appends");
     assert_eq!(third.envelope.seq, 3);
     // And the ids the store hands out carry on too.
-    assert_eq!(reopened.next_task_id().expect("an id").to_string(), "FRK-1");
+    assert_eq!(reopened.next_task_id().expect("an id").to_string(), "CTV-1");
 }
 
 #[test]
 fn keeps_two_logs_on_one_file_from_sharing_a_place_or_an_id() {
-    // Two commands can run at once, and `farik` is a separate process each time.
+    // Two commands can run at once, and `catervas` is a separate process each time.
     let directory = TempDir::new("two-logs");
     let first = open_event_log(&directory.db(), at(9)).expect("the first log opens");
     let second = open_event_log(&directory.db(), at(9)).expect("the second log opens");
@@ -112,7 +115,7 @@ fn keeps_two_logs_on_one_file_from_sharing_a_place_or_an_id() {
         second.next_task_id().expect("an id").to_string(),
         first.next_task_id().expect("an id").to_string(),
     ];
-    assert_eq!(ids, ["FRK-1", "FRK-2", "FRK-3"]);
+    assert_eq!(ids, ["CTV-1", "CTV-2", "CTV-3"]);
     // Both connections see the whole log, whichever of them wrote each event.
     assert_eq!(second.read(&EventQuery::default()).expect("reads").len(), 4);
 }
@@ -137,7 +140,7 @@ fn writes_ahead_of_the_database_file() {
     assert_eq!(mode.to_lowercase(), "wal");
 }
 
-/// How many `farik` commands the two tests below start at once.
+/// How many `catervas` commands the two tests below start at once.
 const PROCESSES: u32 = 16;
 
 /// Enough ids per process that a counter which read the number it had not yet written hands the
@@ -151,7 +154,7 @@ const OPENING_ATTEMPTS: u32 = 5;
 
 #[test]
 fn opens_one_log_from_several_processes_at_once() {
-    // Opening applies whatever migrations the file is missing, and several farik commands can start
+    // Opening applies whatever migrations the file is missing, and several catervas commands can start
     // on a fresh repository at the same moment. Each has to end up with a log it can use, rather
     // than one of them meeting another half way through the migration: the loser of that race sees
     // either "table events already exists" or "database is locked", because a transaction that
@@ -167,7 +170,7 @@ fn opens_one_log_from_several_processes_at_once() {
                         .unwrap_or_else(|refusal| panic!("the log opens: {refusal}"));
                     assert_eq!(
                         log.applied_migrations().expect("the ledger reads"),
-                        farik_store::migrations::known_versions()
+                        catervas_store::migrations::known_versions()
                     );
                 });
             }
@@ -177,7 +180,7 @@ fn opens_one_log_from_several_processes_at_once() {
 
 #[test]
 fn hands_two_processes_on_one_file_a_different_id_every_time() {
-    // Two farik commands run at once, each its own process with its own connection. The counter's
+    // Two catervas commands run at once, each its own process with its own connection. The counter's
     // read is its write statement, so neither can be handed a number the other has taken; reading
     // the number before writing it is the classic lost update, and two agents would start on one
     // contract.
@@ -206,7 +209,7 @@ fn hands_two_processes_on_one_file_a_different_id_every_time() {
     let mut numbers: Vec<u64> = taken
         .iter()
         .map(|id| {
-            id.strip_prefix("FRK-")
+            id.strip_prefix("CTV-")
                 .expect("every id carries the prefix")
                 .parse()
                 .expect("and a number")
@@ -229,8 +232,8 @@ fn keeps_the_board_and_its_place_in_the_log_across_a_reopen() {
     {
         let log =
             std::sync::Arc::new(open_event_log(&directory.db(), at(9)).expect("the log opens"));
-        let projections =
-            farik_store::open_projections(std::sync::Arc::clone(&log)).expect("projections open");
+        let projections = catervas_store::open_projections(std::sync::Arc::clone(&log))
+            .expect("projections open");
         for kind in [EventKind::TaskCreated, EventKind::RequestTriaged] {
             let appended = log.append(&an_event(kind)).expect("appends");
             projections.apply(&appended).expect("projects");
@@ -258,14 +261,14 @@ fn keeps_the_board_and_its_place_in_the_log_across_a_reopen() {
     let log =
         std::sync::Arc::new(open_event_log(&directory.db(), at(10)).expect("the log reopens"));
     let projections =
-        farik_store::open_projections(std::sync::Arc::clone(&log)).expect("projections reopen");
+        catervas_store::open_projections(std::sync::Arc::clone(&log)).expect("projections reopen");
     assert_eq!(projections.cursor().expect("the cursor reads"), 2);
     let board = projections.board().expect("the board reads");
     assert_eq!(board.len(), 1, "both events are about the one contract");
     assert!(board[0].triaged, "and the triage is still recorded");
 }
 
-/// How many `farik` commands the projection race below runs at once, and how much each does:
+/// How many `catervas` commands the projection race below runs at once, and how much each does:
 /// enough events that the four interleave many times over, and few enough that the whole race
 /// stays light on a loaded machine. Cut from 150 on 2026-09-23: an event handed over out of order
 /// has a deterministic test in `projections.rs`, so this race need not reproduce it every run.
@@ -274,7 +277,7 @@ const EVENTS_PER_PROCESS: u32 = 50;
 
 #[test]
 fn projects_every_event_when_several_processes_append_and_project_at_once() {
-    // Two farik commands run at once, each appending to the log and projecting what it appended.
+    // Two catervas commands run at once, each appending to the log and projecting what it appended.
     // Neither the append nor the projection may be refused, and the board has to end up holding
     // every contract the log holds — a board that quietly lags its log is worse than one that
     // refuses, because nothing downstream can tell.
@@ -289,14 +292,14 @@ fn projects_every_event_when_several_processes_append_and_project_at_once() {
                     let log = std::sync::Arc::new(
                         open_event_log(&directory.db(), at(9)).expect("the log opens"),
                     );
-                    let projections = farik_store::open_projections(std::sync::Arc::clone(&log))
+                    let projections = catervas_store::open_projections(std::sync::Arc::clone(&log))
                         .expect("the projections open");
                     ready.wait();
                     let mut refused = Vec::new();
                     for event in 0..EVENTS_PER_PROCESS {
                         let mut filed = an_event(EventKind::TaskCreated);
                         filed.ids.task_id = Some(
-                            format!("FRK-{}", process * EVENTS_PER_PROCESS + event + 1)
+                            format!("CTV-{}", process * EVENTS_PER_PROCESS + event + 1)
                                 .parse()
                                 .expect("a task id"),
                         );
@@ -323,9 +326,9 @@ fn projects_every_event_when_several_processes_append_and_project_at_once() {
     let log =
         std::sync::Arc::new(open_event_log(&directory.db(), at(10)).expect("the log reopens"));
     let projections =
-        farik_store::open_projections(std::sync::Arc::clone(&log)).expect("projections reopen");
+        catervas_store::open_projections(std::sync::Arc::clone(&log)).expect("projections reopen");
     let appended = log
-        .read(&farik_store::EventQuery::default())
+        .read(&catervas_store::EventQuery::default())
         .expect("the log reads")
         .len();
     let projected = projections.board().expect("the board reads").len();

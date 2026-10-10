@@ -1,5 +1,5 @@
 {
-	"name": "@farik/protocol-client",
+	"name": "@catervas/protocol-client",
 	"private": true,
 	"type": "module",
 	"scripts": {

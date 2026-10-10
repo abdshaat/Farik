@@ -1,17 +1,17 @@
-//! The repository Farik works in, driven through the `git` program rather than reimplemented
+//! The repository Catervas works in, driven through the `git` program rather than reimplemented
 //! (`docs/SPEC.md` sections 8.1 and 5.14).
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use farik_core::team::Team;
+use catervas_core::team::Team;
 
 /// Why a git operation did not happen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitError {
-    /// The path Farik was given is not inside a git repository. `farik init` is what reports this
-    /// to a user; nothing else in Farik can do anything useful without one.
+    /// The path Catervas was given is not inside a git repository. `catervas init` is what reports this
+    /// to a user; nothing else in Catervas can do anything useful without one.
     NotARepository,
     /// The `git` program could not be run at all.
     NotInstalled {
@@ -70,7 +70,7 @@ pub enum MergeOutcome {
 
 /// One repository, at a path.
 ///
-/// Every method runs `git` as a child process. Farik does not reimplement git: a repository is the
+/// Every method runs `git` as a child process. Catervas does not reimplement git: a repository is the
 /// user's own, and the only behaviour anyone can rely on is the program's.
 pub struct Git {
     root: PathBuf,
@@ -121,7 +121,7 @@ impl Git {
             .at_root(&["rev-parse", "--verify", "--quiet", "HEAD"])
             .is_err()
         {
-            // A repository with no commit is the ordinary state of one `farik init` has just made.
+            // A repository with no commit is the ordinary state of one `catervas init` has just made.
             return Ok(None);
         }
         let line = self.at_root(&["log", "-1", "--no-color", "--format=%H%x1f%cI%x1f%s"])?;
@@ -138,7 +138,7 @@ impl Git {
         self.require_repository()?;
         match self.at_root(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
             // A repository with no remote records its default branch nowhere at all, so the branch
-            // HEAD is on is the only answer available. `.farik/team.yaml` is where a team says
+            // HEAD is on is the only answer available. `.catervas/team.yaml` is where a team says
             // otherwise, and the integration branch is its to set (5.14).
             Err(_) => self.current_branch(),
             Ok(reference) => Ok(default_branch_of(&reference)),
@@ -275,7 +275,7 @@ impl Git {
     ///
     /// A file git ignores is not untracked and does not make a worktree dirty, deliberately: an
     /// ignore rule is how a person says a path is not content, and `.DS_Store` next to a task's
-    /// work is not the task's work. Farik counts what git counts.
+    /// work is not the task's work. Catervas counts what git counts.
     ///
     /// # Errors
     ///
@@ -422,7 +422,7 @@ impl Git {
     }
 
     /// The number of every branch, local or remote-tracking, named like a task's branch
-    /// (`feature/FRK-<n>`, `fix/FRK-<n>`, `docs/FRK-<n>`), in git's order. A new task is numbered
+    /// (`feature/CTV-<n>`, `fix/CTV-<n>`, `docs/CTV-<n>`), in git's order. A new task is numbered
     /// past them, so that its branch does not meet one a project's earlier life left behind.
     ///
     /// # Errors
@@ -438,14 +438,14 @@ impl Git {
         ])?;
         Ok(listed
             .lines()
-            .filter_map(farik_core::branch::task_number_of_branch)
+            .filter_map(catervas_core::branch::task_number_of_branch)
             .collect())
     }
 
     /// Every path the repository tracks, in git's own order.
     ///
     /// Through git rather than by walking the directory, so that `.gitignore` decides what is not
-    /// content without Farik having to know that `node_modules/` and `target/` exist. What git
+    /// content without Catervas having to know that `node_modules/` and `target/` exist. What git
     /// tracks is the index, so a repository with no commit yet lists what has been staged.
     ///
     /// # Errors
@@ -586,13 +586,18 @@ impl Git {
     }
 }
 
-/// Who Farik commits as when git knows nobody (`docs/SPEC.md` 5.14), as `-c` options before a
+/// Who Catervas commits as when git knows nobody (`docs/SPEC.md` 5.14), as `-c` options before a
 /// git command: a fresh computer, or a CI runner, has no `user.name` or `user.email`, and git then
 /// refuses every commit.
-pub const FARIK_IDENTITY: [&str; 4] = ["-c", "user.name=farik", "-c", "user.email=farik@localhost"];
+pub const CATERVAS_IDENTITY: [&str; 4] = [
+    "-c",
+    "user.name=catervas",
+    "-c",
+    "user.email=catervas@localhost",
+];
 
 /// `arguments`, a commit or a merge in `directory`, made as the person git knows there, or as
-/// `FARIK_IDENTITY` when git has no name or no email for them.
+/// `CATERVAS_IDENTITY` when git has no name or no email for them.
 fn as_someone<'a>(directory: &Path, arguments: &[&'a str]) -> Vec<&'a str> {
     // `git config <key>` exits 1 when the key is not set.
     let knows =
@@ -600,7 +605,7 @@ fn as_someone<'a>(directory: &Path, arguments: &[&'a str]) -> Vec<&'a str> {
     let mut with = if knows("user.name") && knows("user.email") {
         Vec::new()
     } else {
-        FARIK_IDENTITY.to_vec()
+        CATERVAS_IDENTITY.to_vec()
     };
     with.extend_from_slice(arguments);
     with
@@ -667,7 +672,7 @@ fn run_git_with(directory: &Path, arguments: &[&str], batch_ssh: bool) -> Result
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// What every git Farik runs is given in its environment. No git Farik runs has a person at a
+/// What every git Catervas runs is given in its environment. No git Catervas runs has a person at a
 /// terminal to answer it: a push or fetch that wants a credential fails with git's words instead of
 /// waiting on a prompt nobody sees. The empty `GIT_ASKPASS` stops git asking an askpass program
 /// instead (an editor's terminal sets one, and `core.askPass` or `SSH_ASKPASS` may name another); a
@@ -718,7 +723,7 @@ fn default_branch_of(reference: &str) -> String {
 
 /// A path as git takes it, refusing one that is not text.
 ///
-/// Every path Farik hands git it built itself, from `.farik/local/worktrees/` and a task id, so
+/// Every path Catervas hands git it built itself, from `.catervas/local/worktrees/` and a task id, so
 /// this is about a repository somewhere a user's own path is not UTF-8.
 fn path_argument(path: &Path) -> Result<String, GitError> {
     path.to_str()
@@ -865,8 +870,8 @@ mod tests {
                 detail: "No such file or directory (os error 2)".to_string(),
             },
             GitError::CommandFailed {
-                command: "branch farik/FRK-1 main".to_string(),
-                stderr: "fatal: a branch named 'farik/FRK-1' already exists".to_string(),
+                command: "branch catervas/CTV-1 main".to_string(),
+                stderr: "fatal: a branch named 'catervas/CTV-1' already exists".to_string(),
             },
         ]
         .iter()
@@ -877,7 +882,7 @@ mod tests {
             [
                 "there is no git repository here",
                 "git could not be run: No such file or directory (os error 2)",
-                "git branch farik/FRK-1 main refused: fatal: a branch named 'farik/FRK-1' already \
+                "git branch catervas/CTV-1 main refused: fatal: a branch named 'catervas/CTV-1' already \
                  exists",
             ]
         );
@@ -912,7 +917,7 @@ mod tests {
                 "{chosen}"
             );
         }
-        repository.git(&["config", "core.sshCommand", "ssh -i ~/.ssh/farik"]);
+        repository.git(&["config", "core.sshCommand", "ssh -i ~/.ssh/catervas"]);
         assert!(!wants_batch_ssh(&repository.path, nothing_set));
     }
 
@@ -922,10 +927,10 @@ mod tests {
         let repository = TempRepo::new("task-branch-numbers");
         let git = repository.adapter();
         assert_eq!(git.task_branch_numbers(), Ok(vec![]));
-        for branch in ["feature/FRK-4", "docs/FRK-9", "topic"] {
+        for branch in ["feature/CTV-4", "docs/CTV-9", "topic"] {
             repository.git(&["branch", branch]);
         }
-        repository.git(&["update-ref", "refs/remotes/origin/fix/FRK-11", "HEAD"]);
+        repository.git(&["update-ref", "refs/remotes/origin/fix/CTV-11", "HEAD"]);
         let mut numbers = git.task_branch_numbers().expect("the refs are listed");
         numbers.sort_unstable();
         assert_eq!(numbers, [4, 9, 11]);
@@ -935,21 +940,21 @@ mod tests {
     fn says_there_is_no_repository_before_it_runs_anything() {
         // Every method asks first, so that a user is told the one thing that is wrong rather than
         // whatever git prints about a directory it has never heard of.
-        let nowhere = Git::open(std::env::temp_dir().join("farik-not-a-repository-at-all"));
+        let nowhere = Git::open(std::env::temp_dir().join("catervas-not-a-repository-at-all"));
         assert!(!nowhere.is_repository());
         assert_eq!(nowhere.head_summary(), Err(GitError::NotARepository));
         assert_eq!(nowhere.default_branch(), Err(GitError::NotARepository));
         assert_eq!(nowhere.current_branch(), Err(GitError::NotARepository));
         assert_eq!(
-            nowhere.create_branch("farik/FRK-1", "main"),
+            nowhere.create_branch("catervas/CTV-1", "main"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.create_worktree(Path::new("worktrees/FRK-1"), "farik/FRK-1", "main"),
+            nowhere.create_worktree(Path::new("worktrees/CTV-1"), "catervas/CTV-1", "main"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.remove_worktree(Path::new("worktrees/FRK-1")),
+            nowhere.remove_worktree(Path::new("worktrees/CTV-1")),
             Err(GitError::NotARepository)
         );
         assert_eq!(
@@ -957,19 +962,19 @@ mod tests {
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.commit_count("main", "farik/FRK-1"),
+            nowhere.commit_count("main", "catervas/CTV-1"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.changed_paths("main", "farik/FRK-1"),
+            nowhere.changed_paths("main", "catervas/CTV-1"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.diff("main", "farik/FRK-1"),
+            nowhere.diff("main", "catervas/CTV-1"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.merge("main", "farik/FRK-1", "a message"),
+            nowhere.merge("main", "catervas/CTV-1", "a message"),
             Err(GitError::NotARepository)
         );
     }

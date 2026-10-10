@@ -11,13 +11,13 @@ pub fn an_event_wire(kind: EventKind) -> Value {
     let mut event = json!({
         "seq": 1,
         "recorded_at": "2026-09-17T10:00:00Z",
-        "team_id": "farik",
-        "project_id": "farik",
+        "team_id": "catervas",
+        "project_id": "catervas",
         "kind": kind.to_string(),
         "body": a_body_wire(kind)
     });
     if crate::event::is_about_one_contract(kind) {
-        event["task_id"] = json!("FRK-1");
+        event["task_id"] = json!("CTV-1");
     }
     event
 }
@@ -42,7 +42,7 @@ pub fn a_new_event(kind: EventKind) -> NewEvent {
 #[must_use]
 pub fn a_full_event_wire(kind: EventKind) -> Value {
     let mut event = an_event_wire(kind);
-    event["task_id"] = json!("FRK-1");
+    event["task_id"] = json!("CTV-1");
     event["agent_id"] = json!("maya-chen");
     event["session_id"] = json!("session-1");
     event
@@ -62,7 +62,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::ContractLocked | EventKind::ContractUnlocked => a_hold_body_wire(kind),
         EventKind::DriftDetected | EventKind::ProjectScanned => a_project_body_wire(kind),
         EventKind::TeamUpdated => json!({
-            "team_name": "Farik",
+            "team_name": "Catervas",
             "agent_ids": ["maya-chen", "sam-ortiz"],
             "updated_by": "human"
         }),
@@ -238,7 +238,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "pipeline": 7,
             "by": "human",
             "reason": "",
-            "request": "FRK-9"
+            "request": "CTV-9"
         }),
         EventKind::DataPipelineDeclined => json!({
             "pipeline": 7,
@@ -448,7 +448,7 @@ fn a_project_body_wire(kind: EventKind) -> Value {
     if kind == EventKind::DriftDetected {
         json!({
             "drift": "contract_without_events",
-            "detail": "FRK-1 has a contract file and no events."
+            "detail": "CTV-1 has a contract file and no events."
         })
     } else {
         json!({
@@ -503,12 +503,12 @@ fn a_human_body_wire(kind: EventKind) -> Value {
             json!({ "subject": "result", "accepted_by": "human", "message": "Both look right." })
         }
         EventKind::ChatMessagePosted => {
-            json!({ "chat": "dev-a", "author": "human", "text": "How is FRK-1?\nNo rush." })
+            json!({ "chat": "dev-a", "author": "human", "text": "How is CTV-1?\nNo rush." })
         }
         EventKind::MessagePosted => json!({
             "author": "human",
             "kind": "human",
-            "text": "@dev-a how is FRK-1?",
+            "text": "@dev-a how is CTV-1?",
             "mentions": ["dev-a"]
         }),
         _ => json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" }),
@@ -525,7 +525,7 @@ fn an_agent_body_wire(kind: EventKind) -> Value {
     }
 }
 
-/// A sprint's body: S1 started by the human with 20 dollars, FRK-1 planned into it by the Scrum
+/// A sprint's body: S1 started by the human with 20 dollars, CTV-1 planned into it by the Scrum
 /// Master, S1 ended by the governor with nothing left, or S1's retro appended by the Scrum Master.
 fn a_sprint_body_wire(kind: EventKind) -> Value {
     match kind {
@@ -533,7 +533,7 @@ fn a_sprint_body_wire(kind: EventKind) -> Value {
             json!({ "sprint_id": "S1", "budget_usd": 20.0, "started_by": "human" })
         }
         EventKind::SprintPlanned => {
-            json!({ "sprint_id": "S1", "task_ids": ["FRK-1"], "planned_by": "sam-ortiz" })
+            json!({ "sprint_id": "S1", "task_ids": ["CTV-1"], "planned_by": "sam-ortiz" })
         }
         EventKind::RetroAppended => {
             json!({ "sprint_id": "S1", "text": "Keep the tasks small.", "appended_by": "sam-ortiz" })
@@ -542,12 +542,12 @@ fn a_sprint_body_wire(kind: EventKind) -> Value {
     }
 }
 
-/// An integration body: FRK-1 merged into `main` by the governor, or its pull request 7 opened.
+/// An integration body: CTV-1 merged into `main` by the governor, or its pull request 7 opened.
 fn an_integration_body_wire(kind: EventKind) -> Value {
     if kind == EventKind::TaskIntegrated {
         json!({ "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "into": "main", "integrated_by": "governor" })
     } else {
-        json!({ "url": "https://github.com/o/r/pull/7", "number": 7, "branch": "farik/FRK-1" })
+        json!({ "url": "https://github.com/o/r/pull/7", "number": 7, "branch": "catervas/CTV-1" })
     }
 }
 

@@ -11,7 +11,7 @@ something. Your categories are for running the product, not for a tax return.
 ## 1. Read the categories before you choose
 
 The books keep their categories in the `Categories` sheet of `books.xlsx`, one to a row. Read it
-with `farik_read_sheet` before you write a row to `Expenses`. When the books or the sheet are not
+with `catervas_read_sheet` before you write a row to `Expenses`. When the books or the sheet are not
 there yet, write the few categories the user's costs call for first, such as hosting, software,
 payment fees and AI work, each with a plain sentence saying what belongs in it.
 
@@ -22,7 +22,7 @@ such as a hosting bill with a support plan on it, is two rows, not a mixed categ
 
 ## 3. The team's own AI spending
 
-Read it with `farik_read_costs` by `purpose`, for the dates the books cover, and write one row for
+Read it with `catervas_read_costs` by `purpose`, for the dates the books cover, and write one row for
 each purpose, so that what the team's AI work cost does not go in as one lump. Name the dates beside
 the row. Use the AI work's own category, and add one for it if the sheet has none.
 
@@ -39,5 +39,5 @@ be deducted. If the user asks, say that this is for an accountant to decide.
 
 ## 6. When nothing fits and you cannot say why
 
-Do not guess. Ask the user with `farik_ask_human`, with the cost, its source and the two categories
+Do not guess. Ask the user with `catervas_ask_human`, with the cost, its source and the two categories
 you cannot choose between.

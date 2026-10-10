@@ -1,4 +1,4 @@
-import { Button, Choice, Dialog, TextField } from "@farik/ui";
+import { Button, Choice, Dialog, TextField } from "@catervas/ui";
 import { useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { commandSaid } from "../../app/refusals.ts";

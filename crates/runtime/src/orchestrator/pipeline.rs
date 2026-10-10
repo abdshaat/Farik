@@ -1,11 +1,11 @@
 //! The Product Manager decides a data pipeline request (`docs/SPEC.md` 6.10, ADR 0039): one
 //! session about no task for the oldest request nobody decided or passed on, three tries at most,
-//! then Farik passes the request to the owner.
+//! then Catervas passes the request to the owner.
 
-use farik_core::contract::Role;
-use farik_core::team::Team;
-use farik_protocol::event::{DataPipelineEscalatedBody, EventBody};
-use farik_store::pipelines::{PipelineRecord, PipelineState, data_pipelines};
+use catervas_core::contract::Role;
+use catervas_core::team::Team;
+use catervas_protocol::event::{DataPipelineEscalatedBody, EventBody};
+use catervas_store::pipelines::{PipelineRecord, PipelineState, data_pipelines};
 
 use super::messages::decide_data_pipeline_message;
 use super::rules::{Waiting, asleep, day_is_spent, ran};
@@ -17,18 +17,18 @@ use crate::session::SessionPurpose;
 
 /// The one tool the Product Manager's decision session is given; a session given it alone closes
 /// with `PIPELINE_DECISION_INSTRUCTION`.
-pub(super) const DECIDE_PIPELINE_TOOL: &str = "farik_decide_data_pipeline";
+pub(super) const DECIDE_PIPELINE_TOOL: &str = "catervas_decide_data_pipeline";
 
-/// How many decision sessions a request is given before Farik passes it to the owner.
+/// How many decision sessions a request is given before Catervas passes it to the owner.
 const MOST_TRIES: usize = 3;
 
-/// What Farik says when it passes a request on because the Product Manager did not decide it.
+/// What Catervas says when it passes a request on because the Product Manager did not decide it.
 const DID_NOT_DECIDE: &str = "The Product Manager did not decide";
 
 /// The data pipeline rule, between the budget and channel rules and rule 3: each open request
-/// whose three decision sessions ended with no word is passed to the owner by Farik (an
+/// whose three decision sessions ended with no word is passed to the owner by Catervas (an
 /// `escalated` that names no agent and no session), and the oldest one left gets one `verify`
-/// session of the active Product Manager, about no task, given `farik_decide_data_pipeline` alone.
+/// session of the active Product Manager, about no task, given `catervas_decide_data_pipeline` alone.
 /// It is about no one task, so it runs only under `All` in a tick scoped to none. Nothing happens
 /// with no active Product Manager, and the session waits on a spent day or a sleeping manager, as
 /// a design plan's decision does.
@@ -97,7 +97,7 @@ pub(super) async fn decide_pipelines(
     }))
 }
 
-/// Records `data_pipeline.escalated` for `pipeline` as Farik, if it is still open when the lock
+/// Records `data_pipeline.escalated` for `pipeline` as Catervas, if it is still open when the lock
 /// is held.
 fn pass_to_the_owner(deps: &OrchestratorDeps, pipeline: u64) -> Result<(), OrchestratorError> {
     let tools = &deps.tools;
@@ -130,8 +130,8 @@ fn pass_to_the_owner(deps: &OrchestratorDeps, pipeline: u64) -> Result<(), Orche
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_store::CostScope;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_store::CostScope;
     use serde_json::json;
 
     use super::decide_pipelines;
@@ -146,7 +146,7 @@ mod tests {
     /// A reason of a good length.
     const REASON: &str = "The plain pages answer this question, so the team needs no more.";
 
-    /// A harness with the Procurement Specialist `proc`, whose FRK-1 waits for the owner.
+    /// A harness with the Procurement Specialist `proc`, whose CTV-1 waits for the owner.
     fn a_harness(name: &str) -> Harness {
         let harness = Harness::new(name, |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(2);
@@ -154,18 +154,18 @@ mod tests {
         });
         // The task waits for the owner: no rule has anything to do for it, and a request is
         // decided whatever its task has become.
-        harness.procurement_task("FRK-1", Some("escalated"));
+        harness.procurement_task("CTV-1", Some("escalated"));
         harness
     }
 
-    /// `proc`'s request for `name` on FRK-1, which costs money; answers its number.
+    /// `proc`'s request for `name` on CTV-1, which costs money; answers its number.
     fn requested(harness: &Harness, name: &str) -> u64 {
         harness
             .project
             .record_in(
                 Some("proc"),
                 Some("session-proc"),
-                "FRK-1",
+                "CTV-1",
                 "data_pipeline.requested",
                 &json!({
                     "name": name,
@@ -181,7 +181,7 @@ mod tests {
             .seq
     }
 
-    /// The (sessions, dollars) the cost projection holds for FRK-1.
+    /// The (sessions, dollars) the cost projection holds for CTV-1.
     fn spent_on_the_task(harness: &Harness) -> (u32, f64) {
         harness
             .project
@@ -190,7 +190,7 @@ mod tests {
             .costs(CostScope::Task)
             .expect("the costs read")
             .iter()
-            .find(|cost| cost.key == "FRK-1")
+            .find(|cost| cost.key == "CTV-1")
             .map_or((0, 0.0), |cost| (cost.sessions, cost.usd))
     }
 
@@ -224,7 +224,7 @@ mod tests {
         // A tick scoped to a task, or running the planning rules alone, decides nothing.
         for scope in [
             TickScope {
-                task_id: Some("FRK-1".parse().expect("a task id")),
+                task_id: Some("CTV-1".parse().expect("a task id")),
                 ..TickScope::default()
             },
             TickScope {
@@ -240,7 +240,7 @@ mod tests {
                 adapter
                     .started()
                     .iter()
-                    .all(|spec| spec.farik_tools != ["farik_decide_data_pipeline"]),
+                    .all(|spec| spec.catervas_tools != ["catervas_decide_data_pipeline"]),
                 "{:?}",
                 adapter.started()
             );
@@ -256,7 +256,7 @@ mod tests {
         let TickReport::Acted { task_id, what } = &report else {
             panic!("a request was decided: {report:?}");
         };
-        assert_eq!(task_id.as_str(), "FRK-1");
+        assert_eq!(task_id.as_str(), "CTV-1");
         assert!(
             what.contains("pm's data pipeline decision session"),
             "{what}"
@@ -264,7 +264,7 @@ mod tests {
         let started = adapter.started();
         let decisions: Vec<_> = started
             .iter()
-            .filter(|spec| spec.farik_tools == ["farik_decide_data_pipeline"])
+            .filter(|spec| spec.catervas_tools == ["catervas_decide_data_pipeline"])
             .collect();
         assert_eq!(decisions.len(), 1, "{started:?}");
         let spec = decisions[0];
@@ -327,7 +327,7 @@ mod tests {
             adapter
                 .started()
                 .iter()
-                .filter(|spec| spec.farik_tools == ["farik_decide_data_pipeline"])
+                .filter(|spec| spec.catervas_tools == ["catervas_decide_data_pipeline"])
                 .count(),
             1
         );
@@ -466,7 +466,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
         assert_eq!(harness.events(&[EventKind::DataPipelineEscalated]).len(), 1);
-        // Neither the manager's session nor Farik's rule asks again.
+        // Neither the manager's session nor Catervas's rule asks again.
         orchestrator.tick().await.expect("the tick runs");
         assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
         assert!(
@@ -502,8 +502,8 @@ mod tests {
         // it between the file's reading and the rule.
         let mut team = orchestrator.deps.tools.files.read_team().expect("the team");
         for agent in &mut team.agents {
-            if agent.role == farik_core::team::RoleWire::ProductManager {
-                agent.status = farik_core::team::AgentStatus::Retired;
+            if agent.role == catervas_core::team::RoleWire::ProductManager {
+                agent.status = catervas_core::team::AgentStatus::Retired;
             }
         }
 

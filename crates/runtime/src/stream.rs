@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use catervas_core::pricing::Usage;
 use chrono::{DateTime, Utc};
-use farik_core::pricing::Usage;
 use serde_json::Value;
 
 use crate::session::{EndReason, RuntimeError, SessionEvent};
@@ -300,8 +300,8 @@ fn tool_output(content: Option<&Value>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use catervas_core::pricing::Usage;
     use chrono::DateTime;
-    use farik_core::pricing::Usage;
     use serde_json::json;
 
     use super::StreamParser;
@@ -578,7 +578,7 @@ mod tests {
         assert!(
             events.contains(&SessionEvent::ToolDenied {
                 tool: "Write".to_string(),
-                reason: "farik says no".to_string(),
+                reason: "catervas says no".to_string(),
             }),
             "{events:?}"
         );

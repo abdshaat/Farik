@@ -7,7 +7,7 @@ description: Use when a test fails or the app misbehaves and the cause is not pl
 
 ## 1. Reproduce it first
 
-Find one command that shows the problem, and run it with `farik_exec`. Read the whole error, not
+Find one command that shows the problem, and run it with `catervas_exec`. Read the whole error, not
 its first line. A problem you cannot reproduce is not yet one you can fix.
 
 ## 2. One hypothesis at a time
@@ -25,5 +25,5 @@ other places that use the same code. Write a test that fails without the fix and
 ## 4. When it will not give
 
 After three tries that found nothing, stop guessing. Say what you tried and what you saw in the
-completion note, or, when you cannot go on, declare the task blocked with `farik_declare_blocked`,
+completion note, or, when you cannot go on, declare the task blocked with `catervas_declare_blocked`,
 saying what you need.

@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { en } from "../strings/en.ts";
@@ -27,16 +27,16 @@ const question = (
 	choices: object[] = [],
 ) => ({
 	question_id,
-	task_id: "FRK-3",
+	task_id: "CTV-3",
 	agent_id: "mira",
 	text,
 	choices,
 	answer,
 });
 
-/** The questions page for FRK-3, with the team and `questions` answered. */
+/** The questions page for CTV-3, with the team and `questions` answered. */
 async function opened(questions: object[]) {
-	const { container, socket } = await renderApp("/tasks/FRK-3/questions");
+	const { container, socket } = await renderApp("/tasks/CTV-3/questions");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team: TEAM });
@@ -73,7 +73,7 @@ describe("questions page", () => {
 		expect(
 			s.calls("query").find((q) => q.params.name === "questions.list")?.params
 				.params,
-		).toEqual({ task_id: "FRK-3" });
+		).toEqual({ task_id: "CTV-3" });
 		expect(screen.getByText("$25, $50 and $100")).toBeTruthy();
 		expect(screen.getByText("Cards keep their value forever.")).toBeTruthy();
 		await expectNoAxeViolations(container);

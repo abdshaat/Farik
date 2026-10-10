@@ -1,4 +1,4 @@
-import { RpcError } from "@farik/protocol-client";
+import { RpcError } from "@catervas/protocol-client";
 import { describe, expect, it } from "vitest";
 import { en } from "../strings/en.ts";
 import { commandSaid, refusalsOf, said } from "./refusals.ts";

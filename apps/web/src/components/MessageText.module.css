@@ -1,11 +1,11 @@
 .mention {
 	padding: 0 3px;
-	background: var(--farik-color-surface);
-	color: var(--farik-color-ink);
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
 	font-weight: 600;
-	border-bottom: 2px solid var(--farik-color-status-waiting);
+	border-bottom: 2px solid var(--catervas-color-status-waiting);
 }
 
 .waiting {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }

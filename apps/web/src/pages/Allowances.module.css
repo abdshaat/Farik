@@ -1,7 +1,7 @@
 .fields {
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -10,14 +10,14 @@
 .field {
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 }
 
 .label {
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
-	color: var(--farik-color-ink);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
+	color: var(--catervas-color-ink);
 	font-weight: 600;
 }
 
@@ -26,13 +26,13 @@
 .error {
 	margin: 0;
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-small-family);
-	color: var(--farik-color-ink-muted);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
+	color: var(--catervas-color-ink-muted);
 }
 
 .error {
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 	font-weight: 600;
 }
 
@@ -40,19 +40,19 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .input {
 	width: 7rem;
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-surface);
-	color: var(--farik-color-ink);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
 }
 
 .invalid {
@@ -60,14 +60,14 @@
 }
 
 .input:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
 .lines {
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	margin: 0;
 	padding: 0;
 	list-style: none;

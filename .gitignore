@@ -32,8 +32,8 @@ coverage/
 !.vscode/extensions.json
 !.vscode/settings.json
 
-# farik project-local state (see SPEC 8.6)
-.farik/local/
+# catervas project-local state (see SPEC 8.6)
+.catervas/local/
 
 # logs
 *.log

@@ -1,13 +1,13 @@
 //! What the team's ceremonies are told (`docs/SPEC.md` section 5.9): the facts each is given,
 //! read from the log and the board.
 
-use chrono::{DateTime, NaiveTime, Utc};
-use farik_core::contract::{TaskId, TaskStatus};
-use farik_protocol::event::{
-    BudgetExhaustedBodyScope, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
+use catervas_core::contract::{TaskId, TaskStatus};
+use catervas_protocol::event::{
+    BudgetExhaustedBodyScope, CatervasEvent, EscalationRaisedBodyReason, EventBody, EventKind,
     SessionEndedBodyReason, Thread,
 };
-use farik_store::{EventLog, EventQuery, Projections, StoreError};
+use catervas_store::{EventLog, EventQuery, Projections, StoreError};
+use chrono::{DateTime, NaiveTime, Utc};
 
 use crate::sprints::is_planning;
 use crate::transitions::is_move_into;
@@ -146,7 +146,10 @@ const CEREMONY_SESSIONS: usize = 3;
 /// whose `session.ended` says it completed, was aborted, or failed, or three such starts whatever
 /// their ends. One that stopped at a limit or at its model provider's limit is asked again, but not
 /// for ever.
-pub(crate) fn has_run(events: &[FarikEvent], is_ceremony: impl Fn(&FarikEvent) -> bool) -> bool {
+pub(crate) fn has_run(
+    events: &[CatervasEvent],
+    is_ceremony: impl Fn(&CatervasEvent) -> bool,
+) -> bool {
     let mut started: Vec<Option<&str>> = Vec::new();
     for event in events {
         let session_id = event.envelope.ids.session_id.as_deref();
@@ -187,7 +190,7 @@ pub fn standup_moves(
     sprint_id: &str,
     in_sprint: &[TaskId],
     now: DateTime<Utc>,
-) -> Result<Vec<FarikEvent>, StoreError> {
+) -> Result<Vec<CatervasEvent>, StoreError> {
     let events = log.read(&EventQuery {
         kinds: vec![
             EventKind::SprintStarted,
@@ -319,7 +322,7 @@ pub fn sprint_events(
     log: &EventLog,
     sprint: &EndedSprint,
     task_id: &TaskId,
-) -> Result<Vec<FarikEvent>, StoreError> {
+) -> Result<Vec<CatervasEvent>, StoreError> {
     Ok(log
         .read(&EventQuery {
             task_id: Some(task_id.clone()),
@@ -332,12 +335,12 @@ pub fn sprint_events(
 }
 
 /// Whether `event` is the start of a ceremony session in `thread`.
-fn in_thread(event: &FarikEvent, thread: Thread) -> bool {
+fn in_thread(event: &CatervasEvent, thread: Thread) -> bool {
     matches!(&event.body, EventBody::SessionStarted(body) if body.thread == Some(thread))
 }
 
 /// Whether `event` is the start of a standup: a `session.started` in the `standup` thread.
-fn is_standup(event: &FarikEvent) -> bool {
+fn is_standup(event: &CatervasEvent) -> bool {
     in_thread(event, Thread::Standup)
 }
 
@@ -359,44 +362,44 @@ mod tests {
     fn lists_the_open_escalations() {
         let project = TestProject::new("ceremonies-open", &a_team_of_three(|_| {}));
         let raised = |task: &str, reason: &str| json!({ "reason": reason, "detail": format!("{task} waits") });
-        // FRK-1 escalated at its iterations, thirty hours ago.
+        // CTV-1 escalated at its iterations, thirty hours ago.
         let long_ago = at() - Duration::hours(30);
-        project.filed("FRK-1", "rejected", "task", None);
-        project.moved_at(long_ago, "FRK-1", "rejected", "escalated", &json!({}));
+        project.filed("CTV-1", "rejected", "task", None);
+        project.moved_at(long_ago, "CTV-1", "rejected", "escalated", &json!({}));
         project.record_at(
             long_ago,
-            "FRK-1",
+            "CTV-1",
             "escalation.raised",
-            &raised("FRK-1", "iterations"),
+            &raised("CTV-1", "iterations"),
         );
-        // FRK-2 accepted, its integration failed and not landed since.
-        project.filed("FRK-2", "verifying", "task", None);
-        project.moved("FRK-2", "verifying", "accepted", &json!({}));
+        // CTV-2 accepted, its integration failed and not landed since.
+        project.filed("CTV-2", "verifying", "task", None);
+        project.moved("CTV-2", "verifying", "accepted", &json!({}));
         project.record(
-            "FRK-2",
+            "CTV-2",
             "escalation.raised",
-            &raised("FRK-2", "integration"),
+            &raised("CTV-2", "integration"),
         );
-        // FRK-3 escalated, then resolved by the human.
-        project.filed("FRK-3", "in_progress", "task", None);
-        project.moved("FRK-3", "in_progress", "escalated", &json!({}));
-        project.record("FRK-3", "escalation.raised", &raised("FRK-3", "budget"));
+        // CTV-3 escalated, then resolved by the human.
+        project.filed("CTV-3", "in_progress", "task", None);
+        project.moved("CTV-3", "in_progress", "escalated", &json!({}));
+        project.record("CTV-3", "escalation.raised", &raised("CTV-3", "budget"));
         project.record(
-            "FRK-3",
+            "CTV-3",
             "escalation.resolved",
             &json!({ "to": "in_progress", "message": "go on", "resolved_by": "human" }),
         );
-        project.moved("FRK-3", "escalated", "in_progress", &json!({}));
-        // FRK-4 accepted, its integration failed, then landed.
-        project.filed("FRK-4", "verifying", "task", None);
-        project.moved("FRK-4", "verifying", "accepted", &json!({}));
+        project.moved("CTV-3", "escalated", "in_progress", &json!({}));
+        // CTV-4 accepted, its integration failed, then landed.
+        project.filed("CTV-4", "verifying", "task", None);
+        project.moved("CTV-4", "verifying", "accepted", &json!({}));
         project.record(
-            "FRK-4",
+            "CTV-4",
             "escalation.raised",
-            &raised("FRK-4", "integration"),
+            &raised("CTV-4", "integration"),
         );
         project.record(
-            "FRK-4",
+            "CTV-4",
             "task.integrated",
             &json!({ "sha": "abc123", "into": "main", "integrated_by": "human" }),
         );
@@ -418,8 +421,8 @@ mod tests {
         assert_eq!(
             listed,
             vec![
-                ("FRK-1", "iterations", "FRK-1 waits", long_ago),
-                ("FRK-2", "integration", "FRK-2 waits", at()),
+                ("CTV-1", "iterations", "CTV-1 waits", long_ago),
+                ("CTV-2", "integration", "CTV-2 waits", at()),
             ]
         );
         assert_eq!(open[0].title, "Add a login page");

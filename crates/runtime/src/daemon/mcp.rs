@@ -1,5 +1,5 @@
-//! Farik's tools over MCP, for the session the request's headers name: an axum middleware
-//! resolves `X-Farik-Session` to its registration, and the handler reads it back from the HTTP
+//! Catervas's tools over MCP, for the session the request's headers name: an axum middleware
+//! resolves `X-Catervas-Session` to its registration, and the handler reads it back from the HTTP
 //! request parts `rmcp` puts in each request's context.
 
 use std::sync::Arc;
@@ -25,31 +25,31 @@ use crate::tools::design::screenshots;
 use crate::tools::refusal::Refusal;
 use crate::tools::{ToolContext, call_tool, tool_descriptors};
 
-/// The header naming the Farik session a request to `/mcp` comes from.
-pub(crate) const SESSION_HEADER: &str = "x-farik-session";
-/// The name of the permission-prompt tool, `mcp__farik__permission` to Claude Code.
+/// The header naming the Catervas session a request to `/mcp` comes from.
+pub(crate) const SESSION_HEADER: &str = "x-catervas-session";
+/// The name of the permission-prompt tool, `mcp__catervas__permission` to Claude Code.
 const PERMISSION_TOOL: &str = "permission";
 /// What the permission-prompt tool answers, to everything.
 const PERMISSION_MESSAGE: &str =
-    "farik decides tool calls in its PreToolUse hook; this one was not allowed there";
+    "catervas decides tool calls in its PreToolUse hook; this one was not allowed there";
 
 /// What the tools of the session a request comes from are called with, as
-/// `DaemonState::tool_context` built it, and the Farik tools the session was given, put in the
+/// `DaemonState::tool_context` built it, and the Catervas tools the session was given, put in the
 /// request's extensions by `require_session`.
 #[derive(Clone)]
 pub(crate) struct CallingSession {
     context: Arc<ToolContext>,
-    farik_tools: Arc<Vec<String>>,
+    catervas_tools: Arc<Vec<String>>,
 }
 
 impl CallingSession {
-    /// Whether the session was given the Farik tool `name`.
+    /// Whether the session was given the Catervas tool `name`.
     fn was_given(&self, name: &str) -> bool {
-        self.farik_tools.iter().any(|given| given == name)
+        self.catervas_tools.iter().any(|given| given == name)
     }
 }
 
-/// Answers 403 for a request whose `X-Farik-Session` names no registered session, and passes
+/// Answers 403 for a request whose `X-Catervas-Session` names no registered session, and passes
 /// the registration on otherwise.
 pub(crate) async fn require_session(
     State(state): State<Arc<DaemonState>>,
@@ -64,7 +64,7 @@ pub(crate) async fn require_session(
     let calling = named.and_then(|session_id| {
         Some(CallingSession {
             context: Arc::new(state.tool_context(&session_id)?),
-            farik_tools: Arc::new(state.farik_tools(&session_id)?),
+            catervas_tools: Arc::new(state.catervas_tools(&session_id)?),
         })
     });
     match calling {
@@ -80,16 +80,16 @@ pub(crate) async fn require_session(
     }
 }
 
-/// Farik's MCP server: `list_tools` and `call_tool` over the session's own tools of
+/// Catervas's MCP server: `list_tools` and `call_tool` over the session's own tools of
 /// `tool_descriptors` and `call_tool`, and the permission-prompt tool. The session a call comes
 /// from, and the project it works on, are the request's.
 #[derive(Clone)]
-pub(crate) struct FarikMcp;
+pub(crate) struct CatervasMcp;
 
-impl ServerHandler for FarikMcp {
+impl ServerHandler for CatervasMcp {
     fn get_info(&self) -> InitializeResult {
         let mut info = InitializeResult::new(ServerCapabilities::builder().enable_tools().build());
-        info.server_info = Implementation::new("farik", env!("CARGO_PKG_VERSION"));
+        info.server_info = Implementation::new("catervas", env!("CARGO_PKG_VERSION"));
         info
     }
 
@@ -132,9 +132,9 @@ impl ServerHandler for FarikMcp {
     }
 }
 
-/// The screenshot `farik_check_page` answered with, as an image block the agent sees.
+/// The screenshot `catervas_check_page` answered with, as an image block the agent sees.
 fn screenshot_of(context: &ToolContext, tool: &str, answer: &Value) -> Option<ContentBlock> {
-    if tool != "farik_check_page" {
+    if tool != "catervas_check_page" {
         return None;
     }
     let file = answer.get("screenshot")?.as_str()?;
@@ -151,11 +151,11 @@ fn calling_session(context: &RequestContext<RoleServer>) -> Result<CallingSessio
         .and_then(|parts| parts.extensions.get::<CallingSession>())
         .cloned()
         .ok_or_else(|| {
-            ErrorData::invalid_request("the request names no session Farik answers for", None)
+            ErrorData::invalid_request("the request names no session Catervas answers for", None)
         })
 }
 
-/// The Farik tools the session was given, and the permission-prompt tool.
+/// The Catervas tools the session was given, and the permission-prompt tool.
 ///
 /// Protocol `2026-07-28` requires a list result to say how long it stays fresh and who may
 /// cache it, and Claude Code 2.1.280 drops every tool of a list without them. The list is the
@@ -170,7 +170,7 @@ fn listed(calling: &CallingSession) -> ListToolsResult {
         .collect();
     tools.push(Tool::new(
         PERMISSION_TOOL,
-        "Answers Claude Code's permission prompts: every one is denied, because Farik decides \
+        "Answers Claude Code's permission prompts: every one is denied, because Catervas decides \
              tool calls in its PreToolUse hook.",
         object(json!({
             "type": "object",
@@ -192,7 +192,7 @@ fn listed(calling: &CallingSession) -> ListToolsResult {
 pub(crate) fn listed_names(state: &Arc<DaemonState>, session_id: &str) -> Option<Vec<String>> {
     let calling = CallingSession {
         context: Arc::new(state.tool_context(session_id)?),
-        farik_tools: Arc::new(state.farik_tools(session_id)?),
+        catervas_tools: Arc::new(state.catervas_tools(session_id)?),
     };
     Some(
         listed(&calling)
@@ -218,12 +218,12 @@ mod tests {
     use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
-    use farik_protocol::event::EventKind;
+    use catervas_protocol::event::EventKind;
     use serde_json::{Value, json};
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
 
-    use farik_core::budget::DEFAULT_SESSION_LIMITS;
+    use catervas_core::budget::DEFAULT_SESSION_LIMITS;
 
     use std::sync::Arc;
 
@@ -246,17 +246,17 @@ mod tests {
     /// the protocol version on every request instead.
     struct Client {
         app: Router,
-        farik_session: String,
+        catervas_session: String,
         mcp_session: Option<String>,
         next_id: u64,
         modern: bool,
     }
 
     impl Client {
-        fn new(daemon: &TestDaemon, farik_session: &str) -> Self {
+        fn new(daemon: &TestDaemon, catervas_session: &str) -> Self {
             Self {
                 app: router(daemon.state.clone(), TOKEN, CancellationToken::new()),
-                farik_session: farik_session.to_string(),
+                catervas_session: catervas_session.to_string(),
                 mcp_session: None,
                 next_id: 1,
                 modern: false,
@@ -264,10 +264,10 @@ mod tests {
         }
 
         /// A client of protocol `2026-07-28`.
-        fn modern(daemon: &TestDaemon, farik_session: &str) -> Self {
+        fn modern(daemon: &TestDaemon, catervas_session: &str) -> Self {
             Self {
                 modern: true,
-                ..Self::new(daemon, farik_session)
+                ..Self::new(daemon, catervas_session)
             }
         }
 
@@ -277,7 +277,7 @@ mod tests {
                 .header("Accept", "application/json, text/event-stream")
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {TOKEN}"))
-                .header("X-Farik-Session", &self.farik_session);
+                .header("X-Catervas-Session", &self.catervas_session);
             if let Some(session) = &self.mcp_session {
                 request = request
                     .header("Mcp-Session-Id", session)
@@ -397,7 +397,7 @@ mod tests {
         client.initialize().await;
         let answer = client
             .call(
-                "farik_ask_human",
+                "catervas_ask_human",
                 json!({ "question": "Should the login page remember the user?" }),
             )
             .await;
@@ -417,7 +417,7 @@ mod tests {
                 .as_ref()
                 .map(|id| id.to_string())
                 .as_deref(),
-            Some("FRK-1")
+            Some("CTV-1")
         );
     }
 
@@ -427,9 +427,12 @@ mod tests {
         let daemon = TestDaemon::new("mcp-error", |_| {});
         let mut client = Client::new(&daemon, DEV_SESSION);
         client.initialize().await;
-        let answer = client.call("farik_no_such_tool", json!({})).await;
+        let answer = client.call("catervas_no_such_tool", json!({})).await;
         assert_eq!(answer["result"]["isError"], json!(true), "{answer}");
-        assert!(text_of(&answer).contains("farik_no_such_tool"), "{answer}");
+        assert!(
+            text_of(&answer).contains("catervas_no_such_tool"),
+            "{answer}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -465,7 +468,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn lists_every_farik_tool_and_the_permission_tool() {
+    async fn lists_every_catervas_tool_and_the_permission_tool() {
         let daemon = TestDaemon::new("mcp-list", |_| {});
         let mut client = Client::new(&daemon, DEV_SESSION);
         client.initialize().await;
@@ -505,14 +508,14 @@ mod tests {
         );
         assert_eq!(listed["result"]["ttlMs"], json!(0), "{listed}");
         assert_eq!(listed["result"]["cacheScope"], json!("private"), "{listed}");
-        let called = client.call("farik_read_board", json!({})).await;
+        let called = client.call("catervas_read_board", json!({})).await;
         assert_eq!(
             called["result"]["resultType"],
             json!("complete"),
             "{called}"
         );
         assert_ne!(called["result"]["isError"], json!(true), "{called}");
-        assert!(text_of(&called).contains("FRK-1"), "{called}");
+        assert!(text_of(&called).contains("CTV-1"), "{called}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -522,9 +525,9 @@ mod tests {
         daemon.register_with_tools(
             "session-triage",
             "pm",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
-            &["farik_triage_request"],
+            &["catervas_triage_request"],
         );
         let mut client = Client::new(&daemon, "session-triage");
         client.initialize().await;
@@ -535,16 +538,16 @@ mod tests {
             .iter()
             .filter_map(|tool| tool["name"].as_str())
             .collect();
-        assert_eq!(names, ["farik_triage_request", "permission"]);
+        assert_eq!(names, ["catervas_triage_request", "permission"]);
         let refused = client
             .call(
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "More." } }),
             )
             .await;
         assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
         assert!(
-            text_of(&refused).starts_with("tool_not_in_session: farik_write_contract"),
+            text_of(&refused).starts_with("tool_not_in_session: catervas_write_contract"),
             "{refused}"
         );
         assert!(daemon.events(EventKind::ContractWritten).is_empty());
@@ -560,13 +563,13 @@ mod tests {
             .expect("the Designer joins");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-iris".to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "iris".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: vec!["farik_check_page".to_string()],
+            catervas_tools: vec!["catervas_check_page".to_string()],
             tiers: tiers_of(deps, "iris"),
             connectors: Vec::new(),
             preview: Some(Arc::new(CheckedPreview::printing(r#"{"violations":[]}"#))),
@@ -580,7 +583,7 @@ mod tests {
         client.initialize().await;
         let answer = client
             .call(
-                "farik_check_page",
+                "catervas_check_page",
                 json!({ "path": "/", "width": "phone", "theme": "light" }),
             )
             .await;
@@ -601,10 +604,10 @@ mod tests {
         let daemon = TestDaemon::new("mcp-call", |_| {});
         let mut client = Client::new(&daemon, DEV_SESSION);
         client.initialize().await;
-        let answer = client.call("farik_read_board", json!({})).await;
+        let answer = client.call("catervas_read_board", json!({})).await;
         assert_ne!(answer["result"]["isError"], json!(true), "{answer}");
         let board: Value = serde_json::from_str(&text_of(&answer)).expect("the board is JSON");
-        assert!(board.to_string().contains("FRK-1"), "{board}");
+        assert!(board.to_string().contains("CTV-1"), "{board}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -644,7 +647,7 @@ mod tests {
             said,
             json!({
                 "behavior": "deny",
-                "message": "farik decides tool calls in its PreToolUse hook; this one was not allowed there"
+                "message": "catervas decides tool calls in its PreToolUse hook; this one was not allowed there"
             })
         );
     }

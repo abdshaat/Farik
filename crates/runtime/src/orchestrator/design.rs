@@ -2,10 +2,10 @@
 //! then implement. The task's latest `design_plan.*` event decides which session runs, read afresh
 //! at every tick, so that a session which ends without its one answer is simply started again.
 
-use farik_core::contract::{Role, TaskContract, TaskStatus};
-use farik_core::team::{Agent, Team};
-use farik_protocol::event::EventKind;
-use farik_store::{EventQuery, TaskProjection};
+use catervas_core::contract::{Role, TaskContract, TaskStatus};
+use catervas_core::team::{Agent, Team};
+use catervas_protocol::event::EventKind;
+use catervas_store::{EventQuery, TaskProjection};
 
 use super::messages::{decide_design_plan_message, explore_message};
 use super::rules::{Waiting, acted, asleep, governor_moves, refused_since_entering, spent};
@@ -16,35 +16,35 @@ use crate::session::SessionPurpose;
 use crate::tools::design::{DesignPlan, PlanState, design_plan, plan_history, returns};
 use crate::transitions::TransitionOutcome;
 
-/// The Farik tools an explore session is offered: the five reading tools, the plan, and the page
+/// The Catervas tools an explore session is offered: the five reading tools, the plan, and the page
 /// check when the preview is open for it (step 12).
 pub(super) const EXPLORE_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_read_decisions",
-    "farik_propose_design_plan",
-    "farik_check_page",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_read_decisions",
+    "catervas_propose_design_plan",
+    "catervas_check_page",
 ];
 
-/// The Farik tools the Designer's design review of a Developer's UI change is offered (D9): the
+/// The Catervas tools the Designer's design review of a Developer's UI change is offered (D9): the
 /// five reading tools, the page check, and its one answer.
 pub(super) const DESIGN_REVIEW_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_read_decisions",
-    "farik_check_page",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_read_decisions",
+    "catervas_check_page",
     RECORD_DESIGN_REVIEW_TOOL,
 ];
 
 /// The design review's one answer, offered to that session alone.
-pub(super) const RECORD_DESIGN_REVIEW_TOOL: &str = "farik_record_design_review";
+pub(super) const RECORD_DESIGN_REVIEW_TOOL: &str = "catervas_record_design_review";
 
 /// The one tool the Product Manager's decision session is given.
-pub(super) const DECIDE_TOOL: &str = "farik_decide_design_plan";
+pub(super) const DECIDE_TOOL: &str = "catervas_decide_design_plan";
 
 /// Where a Designer's task stands before its implement session.
 pub(super) enum Stage {
@@ -208,10 +208,10 @@ async fn decide(
 mod tests {
     use std::collections::BTreeSet;
 
-    use farik_core::contract::TaskStatus;
-    use farik_core::governor::permissions::PermissionTier;
-    use farik_protocol::command::Command;
-    use farik_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
+    use catervas_core::contract::TaskStatus;
+    use catervas_core::governor::permissions::PermissionTier;
+    use catervas_protocol::command::Command;
+    use catervas_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
     use serde_json::{Value, json};
 
     use crate::claude::allowed_builtins;
@@ -220,8 +220,8 @@ mod tests {
     use crate::prompt::DESIGN_DECISION_INSTRUCTION;
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
-        decide_design_plan_approves_frk_1, decide_design_plan_returns_frk_1, explore_plans_frk_1,
-        implement_by_iris_frk_1, replays_farik_read_board, review_writes_note,
+        decide_design_plan_approves_ctv_1, decide_design_plan_returns_ctv_1, explore_plans_ctv_1,
+        implement_by_iris_ctv_1, replays_catervas_read_board, review_writes_note,
     };
     use crate::session::{SessionPurpose, SessionSpec};
     use crate::tools::fixtures::{browsing, with_the_designer};
@@ -231,7 +231,7 @@ mod tests {
     /// Why the Product Manager returns the plan.
     const RETURNED: &str = "Say what the page looks like in the dark theme too.";
 
-    /// FRK-1 in progress, held by the UI/UX Designer `iris` and reviewed by the Architect `ada`,
+    /// CTV-1 in progress, held by the UI/UX Designer `iris` and reviewed by the Architect `ada`,
     /// with its worktree made, and `change` applied to its contract.
     fn a_designers_task(name: &str, change: impl FnOnce(&mut Value)) -> Harness {
         a_designers_task_in(name, with_the_designer, change)
@@ -244,21 +244,21 @@ mod tests {
         change: impl FnOnce(&mut Value),
     ) -> Harness {
         let harness = Harness::new(name, team);
-        harness.file("FRK-1", "ready", |wire| {
+        harness.file("CTV-1", "ready", |wire| {
             wire["assignee_role"] = json!("ui_ux_designer");
             wire["reviewer_role"] = json!("architect");
             change(wire);
         });
         let people = json!({ "assignee": "iris", "reviewer": "ada" });
-        harness.project.moved("FRK-1", "ready", "assigned", &people);
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
         harness
             .project
-            .moved("FRK-1", "assigned", "in_progress", &people);
+            .moved("CTV-1", "assigned", "in_progress", &people);
         harness
             .project
             .deps
             .git
-            .create_worktree(&harness.worktree("FRK-1"), &harness.branch("FRK-1"), "main")
+            .create_worktree(&harness.worktree("CTV-1"), &harness.branch("CTV-1"), "main")
             .expect("the task's worktree is made");
         harness
     }
@@ -301,7 +301,7 @@ mod tests {
         let harness = a_designers_task("design-flow-order", |_| {});
         let started = ticked(
             &harness,
-            vec![explore_plans_frk_1(), decide_design_plan_approves_frk_1()],
+            vec![explore_plans_ctv_1(), decide_design_plan_approves_ctv_1()],
             2,
         )
         .await;
@@ -315,23 +315,23 @@ mod tests {
         );
         let explore = &started[0];
         assert_eq!(
-            explore.farik_tools,
+            explore.catervas_tools,
             [
-                "farik_read_task",
-                "farik_read_board",
-                "farik_read_rules",
-                "farik_read_criteria",
-                "farik_read_decisions",
-                "farik_propose_design_plan",
+                "catervas_read_task",
+                "catervas_read_board",
+                "catervas_read_rules",
+                "catervas_read_criteria",
+                "catervas_read_decisions",
+                "catervas_propose_design_plan",
             ]
         );
         assert_eq!(
             explore.builtin_tools,
             allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
         );
-        assert_eq!(explore.cwd, harness.worktree("FRK-1"));
+        assert_eq!(explore.cwd, harness.worktree("CTV-1"));
         let decision = &started[1];
-        assert_eq!(decision.farik_tools, ["farik_decide_design_plan"]);
+        assert_eq!(decision.catervas_tools, ["catervas_decide_design_plan"]);
         assert!(
             decision.system_prompt.contains(DESIGN_DECISION_INSTRUCTION),
             "{}",
@@ -349,7 +349,7 @@ mod tests {
         );
         assert_eq!(harness.events(&[EventKind::DesignPlanProposed]).len(), 1);
         assert_eq!(harness.events(&[EventKind::DesignPlanApproved]).len(), 1);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
     }
 
     #[tokio::test]
@@ -357,20 +357,20 @@ mod tests {
     async fn explores_with_the_browser() {
         let mut harness = a_designers_task_in("design-flow-browser", browsing, |_| {});
         harness.previews = std::sync::Arc::new(FakePreviews::ready());
-        let started = ticked(&harness, vec![explore_plans_frk_1()], 1).await;
+        let started = ticked(&harness, vec![explore_plans_ctv_1()], 1).await;
 
         assert_eq!(who(&started), [("iris", SessionPurpose::Explore)]);
         let explore = &started[0];
         assert_eq!(
-            explore.farik_tools,
+            explore.catervas_tools,
             [
-                "farik_read_task",
-                "farik_read_board",
-                "farik_read_rules",
-                "farik_read_criteria",
-                "farik_read_decisions",
-                "farik_propose_design_plan",
-                "farik_check_page",
+                "catervas_read_task",
+                "catervas_read_board",
+                "catervas_read_rules",
+                "catervas_read_criteria",
+                "catervas_read_decisions",
+                "catervas_propose_design_plan",
+                "catervas_check_page",
             ]
         );
         let servers: Vec<&str> = explore
@@ -385,7 +385,7 @@ mod tests {
             explore.initial_prompt
         );
         assert!(
-            explore.initial_prompt.contains("`farik_check_page`"),
+            explore.initial_prompt.contains("`catervas_check_page`"),
             "{}",
             explore.initial_prompt
         );
@@ -404,7 +404,7 @@ mod tests {
             },
             |_| {},
         );
-        let adapter = harness.recorded(vec![explore_plans_frk_1()]);
+        let adapter = harness.recorded(vec![explore_plans_ctv_1()]);
         let witness = std::sync::Arc::new(ExecutorWitness::new(
             adapter.clone(),
             std::sync::Arc::clone(&harness.daemon),
@@ -423,9 +423,9 @@ mod tests {
         let started = ticked(
             &harness,
             vec![
-                explore_plans_frk_1(),
-                decide_design_plan_approves_frk_1(),
-                implement_by_iris_frk_1(),
+                explore_plans_ctv_1(),
+                decide_design_plan_approves_ctv_1(),
+                implement_by_iris_ctv_1(),
             ],
             3,
         )
@@ -446,7 +446,7 @@ mod tests {
             implement.initial_prompt
         );
         assert!(!started[0].initial_prompt.contains(PLAN_WORDS));
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
     }
 
     #[tokio::test]
@@ -456,9 +456,9 @@ mod tests {
         let started = ticked(
             &harness,
             vec![
-                explore_plans_frk_1(),
-                decide_design_plan_returns_frk_1(),
-                explore_plans_frk_1(),
+                explore_plans_ctv_1(),
+                decide_design_plan_returns_ctv_1(),
+                explore_plans_ctv_1(),
             ],
             3,
         )
@@ -492,12 +492,12 @@ mod tests {
         for _ in 0..2 {
             harness
                 .project
-                .record("FRK-1", "design_plan.proposed", &plan);
+                .record("CTV-1", "design_plan.proposed", &plan);
             harness
                 .project
-                .record("FRK-1", "design_plan.returned", &returned);
+                .record("CTV-1", "design_plan.returned", &returned);
         }
-        let adapter = harness.recorded(vec![explore_plans_frk_1()]);
+        let adapter = harness.recorded(vec![explore_plans_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         // Two returns of three: the Designer explores again.
@@ -507,10 +507,10 @@ mod tests {
 
         harness
             .project
-            .record("FRK-1", "design_plan.returned", &returned);
+            .record("CTV-1", "design_plan.returned", &returned);
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             [EscalationRaisedBodyReason::Iterations]
@@ -533,20 +533,20 @@ mod tests {
         for _ in 0..3 {
             harness
                 .project
-                .record("FRK-1", "design_plan.proposed", &plan);
+                .record("CTV-1", "design_plan.proposed", &plan);
             harness
                 .project
-                .record("FRK-1", "design_plan.returned", &returned);
+                .record("CTV-1", "design_plan.returned", &returned);
         }
-        let adapter = harness.recorded(vec![explore_plans_frk_1()]);
+        let adapter = harness.recorded(vec![explore_plans_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert!(adapter.started().is_empty());
 
         orchestrator
             .handle(Command::EscalationResolve {
-                task_id: "FRK-1".parse().expect("a task id"),
+                task_id: "CTV-1".parse().expect("a task id"),
                 to: TaskStatus::InProgress,
                 message: "Two more plans, then.".to_string(),
                 extra_tries: Some(2),
@@ -585,11 +585,11 @@ mod tests {
             |_| {},
         );
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.proposed",
             &json!({ "plan": "A plan." }),
         );
-        let started = ticked(&harness, vec![decide_design_plan_approves_frk_1()], 1).await;
+        let started = ticked(&harness, vec![decide_design_plan_approves_ctv_1()], 1).await;
 
         assert_eq!(who(&started), [("pm-2", SessionPurpose::Verify)]);
         let approved = harness.events(&[EventKind::DesignPlanApproved]);
@@ -604,10 +604,10 @@ mod tests {
             wire["budget"]["max_sessions"] = json!(4);
         });
         let adapter = harness.recorded(vec![
-            replays_farik_read_board(),
-            replays_farik_read_board(),
-            replays_farik_read_board(),
-            replays_farik_read_board(),
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -615,7 +615,7 @@ mod tests {
             orchestrator.tick().await.expect("the tick runs");
         }
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.proposed",
             &json!({ "plan": "A plan." }),
         );
@@ -631,10 +631,10 @@ mod tests {
                 ("pm", SessionPurpose::Verify),
             ]
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
 
         orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             [EscalationRaisedBodyReason::Sessions]
@@ -649,9 +649,9 @@ mod tests {
         let started = ticked(
             &harness,
             vec![
-                explore_plans_frk_1(),
-                decide_design_plan_approves_frk_1(),
-                implement_by_iris_frk_1(),
+                explore_plans_ctv_1(),
+                decide_design_plan_approves_ctv_1(),
+                implement_by_iris_ctv_1(),
                 review_writes_note(),
             ],
             4,

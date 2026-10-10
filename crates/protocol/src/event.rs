@@ -1,4 +1,4 @@
-//! Farik's events: `docs/schemas/event.schema.json` as Rust types, the reader that turns an
+//! Catervas's events: `docs/schemas/event.schema.json` as Rust types, the reader that turns an
 //! untrusted value into one, and the writer that turns one back.
 
 use std::str::FromStr;
@@ -9,7 +9,7 @@ use jsonschema::Validator;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub use farik_core::contract::{TaskId, ValidationError};
+pub use catervas_core::contract::{TaskId, ValidationError};
 
 pub use crate::generated::event::{
     AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
@@ -43,7 +43,7 @@ pub use crate::generated::event::{
     TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
-/// that they cannot be mistaken for `farik-core`'s own types of the same name.
+/// that they cannot be mistaken for `catervas-core`'s own types of the same name.
 pub use crate::generated::event::{
     BlockerWire, GateId as GateWire, RejectionWire, TaskStatus as TaskStatusWire,
     TransitionActor as TransitionActorWire,
@@ -82,7 +82,7 @@ pub use crate::generated::event::{
     SocialPostStoppedBody, SocialPostStoppedBodyBy,
 };
 
-use crate::generated::event::FarikEvent as EventWire;
+use crate::generated::event::CatervasEvent as EventWire;
 
 /// Builders for test events, usable by every crate's tests.
 pub mod fixtures;
@@ -301,23 +301,23 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 
 /// The field naming who acted, for the kinds that name one, and nothing for `drift.detected`,
 /// `project.scanned`, `cost.recorded`, `budget.exhausted`, `escalation.raised`,
-/// `contract.evaluated`, and `pull_request.opened`, which record what Farik itself found, counted,
+/// `contract.evaluated`, and `pull_request.opened`, which record what Catervas itself found, counted,
 /// judged, or did; the move or the refusal they come with names who asked. `task.integrated` and
 /// `sprint.ended` name who acted in a closed vocabulary, `governor` or `human`, which cannot be
 /// blank. Nor for the three `tool.` kinds, the two `session.` kinds, and `agent.slept`, whose
-/// envelope names the agent and the session; Farik observed the sleep, and nobody asked for it.
+/// envelope names the agent and the session; Catervas observed the sleep, and nobody asked for it.
 /// Nor for `escalation.aged`: the human left it waiting, and nobody acted. `team.paused` and
 /// `team.resumed` name the human in a closed vocabulary, which cannot be blank. The three
 /// `design_plan.` kinds name no one in the body: their envelope names the agent and the session.
 /// Nor do the five kinds of step 12: `design_review.recorded` and `page.checked`, whose envelope
 /// names the Designer and the session, and `preview.prepared`, `preview.started` and
-/// `preview.stopped`, which record what Farik itself did with the task's preview. Nor the two
+/// `preview.stopped`, which record what Catervas itself did with the task's preview. Nor the two
 /// `connector.` kinds: only the human connects a server, and `agent` names whose it is, not who
 /// acted. `marketing_plan.proposed` names the Marketing Specialist in `proposed_by`; the other
 /// three `marketing_plan.` kinds name no one in the body: the owner decided or ended a plan, or
-/// Farik ended one by its dates, and their envelope names no agent and no session. The six
+/// Catervas ended one by its dates, and their envelope names no agent and no session. The six
 /// `social_post.` kinds name no one in the body either: the agent that wrote a post is on the
-/// envelope of `scheduled` and `requested`, and the other four are the owner's or Farik's. Nor
+/// envelope of `scheduled` and `requested`, and the other four are the owner's or Catervas's. Nor
 /// do the four `site.` kinds: the agent that asked is on the envelope of `site.requested`, and the
 /// other three are the owner's. Nor do the four `data_pipeline.` kinds: the agent that asked is on
 /// the envelope of `data_pipeline.requested`, and `by` of an approval or a decline says whether
@@ -652,7 +652,7 @@ pub enum EventBody {
     /// An accepted task's branch reached the integration branch.
     #[serde(rename = "task.integrated")]
     TaskIntegrated(TaskIntegratedBody),
-    /// Farik opened a pull request for an accepted task.
+    /// Catervas opened a pull request for an accepted task.
     #[serde(rename = "pull_request.opened")]
     PullRequestOpened(PullRequestOpenedBody),
     /// The human answered a question.
@@ -713,16 +713,16 @@ pub enum EventBody {
     /// The UI/UX Designer recorded its design review of a Developer's UI change.
     #[serde(rename = "design_review.recorded")]
     DesignReviewRecorded(DesignReviewRecordedBody),
-    /// Farik ran the preview's `prepare` for the task.
+    /// Catervas ran the preview's `prepare` for the task.
     #[serde(rename = "preview.prepared")]
     PreviewPrepared(PreviewPreparedBody),
-    /// Farik started the task's preview and it answered.
+    /// Catervas started the task's preview and it answered.
     #[serde(rename = "preview.started")]
     PreviewStarted(PreviewStartedBody),
-    /// Farik stopped the task's preview.
+    /// Catervas stopped the task's preview.
     #[serde(rename = "preview.stopped")]
     PreviewStopped(ReasonBody),
-    /// `farik_check_page` checked one page at one width and theme.
+    /// `catervas_check_page` checked one page at one width and theme.
     #[serde(rename = "page.checked")]
     PageChecked(PageCheckedBody),
     /// The user or an agent said something in their one-to-one chat.
@@ -774,7 +774,7 @@ pub enum EventBody {
     /// The Marketing Specialist wrote a post outside the plan, which waits for the owner.
     #[serde(rename = "social_post.requested")]
     SocialPostRequested(SocialPostRequestedBody),
-    /// Farik handed a post to Buffer.
+    /// Catervas handed a post to Buffer.
     #[serde(rename = "social_post.sent")]
     SocialPostSent(SocialPostSentBody),
     /// A post will not go out: the owner stopped or did not allow it, or its plan ended.
@@ -786,13 +786,13 @@ pub enum EventBody {
     /// Buffer did not take a post.
     #[serde(rename = "social_post.failed")]
     SocialPostFailed(SocialPostFailedBody),
-    /// Farik made a Google Ads campaign, paused, for a plan campaign of the active plan.
+    /// Catervas made a Google Ads campaign, paused, for a plan campaign of the active plan.
     #[serde(rename = "marketing_campaign.created")]
     MarketingCampaignCreated(MarketingCampaignCreatedBody),
-    /// A budget of the active marketing plan was reached, and Farik paused the campaigns itself.
+    /// A budget of the active marketing plan was reached, and Catervas paused the campaigns itself.
     #[serde(rename = "marketing_budget.reached")]
     MarketingBudgetReached(MarketingBudgetReachedBody),
-    /// Farik paused a campaign it made, on its own.
+    /// Catervas paused a campaign it made, on its own.
     #[serde(rename = "marketing_campaign.paused")]
     MarketingCampaignPaused(MarketingCampaignPausedBody),
     /// The Procurement Specialist asked to read a site that is not approved.
@@ -804,7 +804,7 @@ pub enum EventBody {
     /// The owner did not allow a site an agent asked for.
     #[serde(rename = "site.declined")]
     SiteDeclined(SiteDecisionBody),
-    /// The owner took a site away: one they allowed, or one of Farik's.
+    /// The owner took a site away: one they allowed, or one of Catervas's.
     #[serde(rename = "site.removed")]
     SiteRemoved(SiteDecisionBody),
     /// The Procurement Specialist set up an order for the owner to approve or reject.
@@ -828,16 +828,16 @@ pub enum EventBody {
     /// The owner closed a placed order that will not come.
     #[serde(rename = "purchase_order.closed")]
     PurchaseOrderClosed(PurchaseOrderDecisionBody),
-    /// Farik closed an order nobody decided or placed within 30 days.
+    /// Catervas closed an order nobody decided or placed within 30 days.
     #[serde(rename = "purchase_order.expired")]
     PurchaseOrderExpired(PurchaseOrderExpiredBody),
-    /// Farik found a renewal whose decision date is two weeks off or nearer.
+    /// Catervas found a renewal whose decision date is two weeks off or nearer.
     #[serde(rename = "renewal.flagged")]
     RenewalFlagged(RenewalFlaggedBody),
     /// The owner dismissed a renewal.
     #[serde(rename = "renewal.dismissed")]
     RenewalDismissed(RenewalDismissedBody),
-    /// Farik read the vendors register for the day.
+    /// Catervas read the vendors register for the day.
     #[serde(rename = "renewal.checked")]
     RenewalChecked(RenewalCheckedBody),
     /// The Procurement Specialist asked for a source of data it lacks.
@@ -853,7 +853,7 @@ pub enum EventBody {
     /// A data pipeline request was declined.
     #[serde(rename = "data_pipeline.declined")]
     DataPipelineDeclined(DataPipelineDeclinedBody),
-    /// The owner connected a mailbox, and Farik logged in to both of its servers.
+    /// The owner connected a mailbox, and Catervas logged in to both of its servers.
     #[serde(rename = "mailbox.connected")]
     MailboxConnected(MailboxConnectedBody),
     /// The owner disconnected a mailbox.
@@ -862,7 +862,7 @@ pub enum EventBody {
     /// The Procurement Specialist drafted a message to a seller.
     #[serde(rename = "seller_message.drafted")]
     SellerMessageDrafted(SellerMessageDraftedBody),
-    /// Farik sent a message to a seller on the owner's press.
+    /// Catervas sent a message to a seller on the owner's press.
     #[serde(rename = "seller_message.sent")]
     SellerMessageSent(SellerMessageSentBody),
     /// A mail server refused a message the owner pressed Send on.
@@ -871,7 +871,7 @@ pub enum EventBody {
     /// The owner discarded a message to a seller.
     #[serde(rename = "seller_message.discarded")]
     SellerMessageDiscarded(SellerMessageDiscardedBody),
-    /// Farik read a seller's reply in the procurement mailbox.
+    /// Catervas read a seller's reply in the procurement mailbox.
     #[serde(rename = "seller_reply.received")]
     SellerReplyReceived(SellerReplyReceivedBody),
     /// The owner dismissed a seller's reply on Today.
@@ -992,7 +992,7 @@ impl EventBody {
 
 /// One record of the log.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct FarikEvent {
+pub struct CatervasEvent {
     /// Where the event belongs and when it was recorded.
     #[serde(flatten)]
     pub envelope: EventEnvelope,
@@ -1001,7 +1001,7 @@ pub struct FarikEvent {
     pub body: EventBody,
 }
 
-/// An event that has not been appended yet: everything a `FarikEvent` has except the sequence
+/// An event that has not been appended yet: everything a `CatervasEvent` has except the sequence
 /// number, which the store assigns on append.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewEvent {
@@ -1085,7 +1085,7 @@ fn named(value: &str, field: &str) -> Result<String, EventError> {
 /// `/body` when the body does not fit the kind; one error at `/team_id` or `/project_id` for a
 /// blank id; one at `/task_id` for an id the contract's pattern refuses; or one error at the root
 /// when the schema passes but the typed event cannot be built.
-pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError>> {
+pub fn event_from_value(input: &Value) -> Result<CatervasEvent, Vec<ValidationError>> {
     let errors = schema_errors(input);
     if !errors.is_empty() {
         return Err(errors);
@@ -1136,7 +1136,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
         }
         *actor = named.to_string();
     }
-    Ok(FarikEvent { envelope, body })
+    Ok(CatervasEvent { envelope, body })
 }
 
 /// What is wrong with a `site.` event's body for its kind, which the schema cannot say because the
@@ -1261,7 +1261,7 @@ fn pointer(path: &str) -> String {
 ///
 /// Never: serialising derived strings, numbers and timestamps under string keys cannot fail.
 #[must_use]
-pub fn event_to_value(event: &FarikEvent) -> Value {
+pub fn event_to_value(event: &CatervasEvent) -> Value {
     serde_json::to_value(event).expect(
         "an event serialises: every field is a derived string, number or timestamp under a string \
          key, which serde_json cannot refuse",
@@ -1303,7 +1303,7 @@ mod tests {
             let event = event_from_value(&an_event_wire(kind)).expect("valid");
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event.envelope.seq, 1);
-            assert_eq!(event.envelope.ids.team_id, "farik");
+            assert_eq!(event.envelope.ids.team_id, "catervas");
             assert_eq!(
                 event.envelope.ids.task_id.is_some(),
                 super::is_about_one_contract(kind),
@@ -1317,7 +1317,7 @@ mod tests {
         let event = event_from_value(&a_full_event_wire(EventKind::TaskCreated)).expect("valid");
         assert_eq!(
             event.envelope.ids.task_id.as_ref().map(|id| id.to_string()),
-            Some("FRK-1".to_string())
+            Some("CTV-1".to_string())
         );
         assert_eq!(event.envelope.ids.agent_id.as_deref(), Some("maya-chen"));
         assert_eq!(event.envelope.ids.session_id.as_deref(), Some("session-1"));
@@ -1545,11 +1545,13 @@ mod tests {
 
     #[test]
     fn refuses_a_task_id_that_is_not_one() {
-        let mut input = an_event_wire(EventKind::TaskCreated);
-        input["task_id"] = json!("TASK-1");
-        let errors = refusal(&input);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].path, "/task_id");
+        for id in ["TASK-1", "FRK-1"] {
+            let mut input = an_event_wire(EventKind::TaskCreated);
+            input["task_id"] = json!(id);
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{id}");
+            assert_eq!(errors[0].path, "/task_id");
+        }
     }
 
     #[test]
@@ -1573,11 +1575,11 @@ mod tests {
     #[test]
     fn trims_the_ids_and_forgets_an_optional_one_that_is_blank() {
         let mut input = a_full_event_wire(EventKind::TaskCreated);
-        input["team_id"] = json!("  farik  ");
+        input["team_id"] = json!("  catervas  ");
         input["agent_id"] = json!("  maya-chen  ");
         input["session_id"] = json!("   ");
         let event = event_from_value(&input).expect("valid");
-        assert_eq!(event.envelope.ids.team_id, "farik");
+        assert_eq!(event.envelope.ids.team_id, "catervas");
         assert_eq!(event.envelope.ids.agent_id.as_deref(), Some("maya-chen"));
         assert!(event.envelope.ids.session_id.is_none());
     }
@@ -1586,7 +1588,7 @@ mod tests {
     fn reads_a_summary_that_names_a_parent() {
         let mut input = an_event_wire(EventKind::ContractWritten);
         let mut summary = a_contract_summary_wire();
-        summary["parent"] = json!("FRK-3");
+        summary["parent"] = json!("CTV-3");
         input["body"]["summary"] = summary;
         let event = event_from_value(&input).expect("valid");
         let EventBody::ContractWritten(body) = event.body else {
@@ -1594,7 +1596,7 @@ mod tests {
         };
         assert_eq!(
             body.summary.parent.as_ref().map(|id| id.to_string()),
-            Some("FRK-3".to_string())
+            Some("CTV-3".to_string())
         );
     }
 
@@ -1670,7 +1672,7 @@ mod tests {
     #[test]
     fn writes_a_summary_and_its_parent() {
         let mut input = an_event_wire(EventKind::ContractWritten);
-        input["body"]["summary"]["parent"] = json!("FRK-3");
+        input["body"]["summary"]["parent"] = json!("CTV-3");
         let event = event_from_value(&input).expect("valid");
         assert_eq!(event_to_value(&event), input);
     }
@@ -1687,8 +1689,8 @@ mod tests {
 
     fn some_ids() -> EventIds {
         EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             task_id: None,
             agent_id: None,
             session_id: None,
@@ -1709,8 +1711,8 @@ mod tests {
     #[test]
     fn stamps_a_body_with_the_time_and_the_ids_it_belongs_to() {
         let new = new_event(a_body(), at(), some_ids()).expect("stamped");
-        assert_eq!(new.ids.team_id, "farik");
-        assert_eq!(new.ids.project_id, "farik");
+        assert_eq!(new.ids.team_id, "catervas");
+        assert_eq!(new.ids.project_id, "catervas");
         assert_eq!(new.recorded_at, at());
         assert_eq!(new.body.kind(), EventKind::ProjectScanned);
         assert!(new.ids.task_id.is_none());
@@ -1719,15 +1721,15 @@ mod tests {
     #[test]
     fn stamps_every_id_trimmed_and_forgets_an_optional_one_that_is_blank() {
         let ids = EventIds {
-            team_id: "  farik  ".to_string(),
-            project_id: "  farik  ".to_string(),
+            team_id: "  catervas  ".to_string(),
+            project_id: "  catervas  ".to_string(),
             agent_id: Some("  maya-chen  ".to_string()),
             session_id: Some("   ".to_string()),
             ..some_ids()
         };
         let new = new_event(a_body(), at(), ids).expect("stamped");
-        assert_eq!(new.ids.team_id, "farik");
-        assert_eq!(new.ids.project_id, "farik");
+        assert_eq!(new.ids.team_id, "catervas");
+        assert_eq!(new.ids.project_id, "catervas");
         assert_eq!(new.ids.agent_id.as_deref(), Some("maya-chen"));
         assert!(new.ids.session_id.is_none());
     }
@@ -2159,7 +2161,7 @@ mod tests {
             .remove("request");
         assert!(!refusal(&approved).is_empty(), "an approval without it");
         let mut declined = an_event_wire(EventKind::DataPipelineDeclined);
-        declined["body"]["request"] = json!("FRK-9");
+        declined["body"]["request"] = json!("CTV-9");
         assert!(!refusal(&declined).is_empty(), "a decline with one");
         // Two deciders: the Product Manager and the owner. `auto` is phase 9 step 01's.
         for kind in [
@@ -2171,7 +2173,7 @@ mod tests {
                 wire["body"]["by"] = json!(by);
                 event_from_value(&wire).expect("a decider");
             }
-            for by in ["auto", "farik", "agent"] {
+            for by in ["auto", "catervas", "agent"] {
                 let mut wire = an_event_wire(kind);
                 wire["body"]["by"] = json!(by);
                 assert!(!refusal(&wire).is_empty(), "{kind} by {by}");
@@ -2220,7 +2222,7 @@ mod tests {
             let event = event_from_value(&wire).expect("a valid budget event");
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
-            // Farik records it, about no contract: it needs no task on its envelope.
+            // Catervas records it, about no contract: it needs no task on its envelope.
             assert!(
                 !is_about_one_contract(kind),
                 "{kind} is about no one contract"

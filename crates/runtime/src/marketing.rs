@@ -8,15 +8,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use farik_core::marketing::{
+use catervas_core::marketing::{
     Amount, BudgetKind, CapScope, CreatedCampaign, EndReason, Lineage, PlanRecord, PlanSpend,
     PostDetails, PriceKind, is_carried, plans_to_end, price_kind,
 };
-use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
-use farik_store::marketing::{
+use catervas_protocol::event::{CatervasEvent, EventBody, EventIds, new_event};
+use catervas_store::marketing::{
     MarketingPlan, PlanState, PostState, SocialPost, budgets_reached, marketing_plans, social_posts,
 };
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde_json::{Map, Value, json};
 
 pub mod ads;
@@ -29,7 +29,7 @@ use crate::tools::ToolDeps;
 /// Held by whoever decides a plan or ends one. One lock for every plan: decisions are rare.
 static PLANS: Mutex<()> = Mutex::new(());
 
-/// The posts Farik is handing to Buffer this moment, each as the project's log (by where it is in
+/// The posts Catervas is handing to Buffer this moment, each as the project's log (by where it is in
 /// memory: one process may hold several projects, as a test run does) and the post's number. A post
 /// in it is claimed: a stop of it is refused, and the end of its plan leaves it alone. Taken only
 /// while `PLANS` is held.
@@ -104,13 +104,13 @@ fn find<'a>(plans: &'a [MarketingPlan], plan: &str) -> Result<&'a MarketingPlan,
         })
 }
 
-/// Records `body` as the owner's or Farik's own act: the task on the envelope when it names one,
+/// Records `body` as the owner's or Catervas's own act: the task on the envelope when it names one,
 /// no agent, no session.
 pub(crate) fn append(
     tools: &ToolDeps,
-    task: Option<farik_core::contract::TaskId>,
+    task: Option<catervas_core::contract::TaskId>,
     body: EventBody,
-) -> Result<FarikEvent, String> {
+) -> Result<CatervasEvent, String> {
     let ids = EventIds {
         task_id: task,
         ..tools.ids.clone()
@@ -258,7 +258,7 @@ pub(crate) fn record_plan_end(
     why: EndReason,
     replaced_by: Option<&str>,
     note: Option<String>,
-) -> Result<Vec<FarikEvent>, String> {
+) -> Result<Vec<CatervasEvent>, String> {
     let plans = marketing_plans(&tools.log).map_err(|error| error.to_string())?;
     let due = plans
         .iter()
@@ -288,7 +288,7 @@ pub(crate) fn record_plan_end(
 /// Stops the posts of the plan `plan` that its end takes with it, each as `plan_ended`: a post
 /// scheduled and not yet with Buffer, when the owner ended the plan, or when a newer plan replaced
 /// it and the post's slot falls on or after the newer plan's first day. Never when the plan only
-/// ran out (each post was checked against a slot day inside the plan), and never a post Farik is
+/// ran out (each post was checked against a slot day inside the plan), and never a post Catervas is
 /// handing to Buffer this moment, which goes out as one already with Buffer, with its Stop.
 fn stop_posts(
     held: &PlansHeld,
@@ -296,7 +296,7 @@ fn stop_posts(
     plan: &str,
     why: EndReason,
     replaced_by: Option<&str>,
-) -> Result<Vec<FarikEvent>, String> {
+) -> Result<Vec<CatervasEvent>, String> {
     let plans = marketing_plans(&tools.log).map_err(|error| error.to_string())?;
     let slot_day = |slot: &str| {
         plans
@@ -351,7 +351,7 @@ fn when_words(post: &SocialPost) -> String {
     post.at.format("%a %-d %b %H:%M").to_string()
 }
 
-/// Records the owner's Stop of post `post`, `taken_back` when Farik first took it back from Buffer.
+/// Records the owner's Stop of post `post`, `taken_back` when Catervas first took it back from Buffer.
 fn record_stop(
     tools: &ToolDeps,
     post: u64,
@@ -387,7 +387,7 @@ fn begin_stop(tools: &ToolDeps, post: u64) -> Result<Beginning, CommandError> {
     let found = find_post(tools, post)?;
     match found.state {
         PostState::Scheduled if is_being_handed_over(&held, tools, post) => Err(refused(
-            "post_being_handed_over: Farik is giving it to Buffer now; stop it again in a minute"
+            "post_being_handed_over: Catervas is giving it to Buffer now; stop it again in a minute"
                 .to_string(),
         )),
         PostState::Scheduled => record_stop(tools, post, false).map(Beginning::Done),
@@ -427,9 +427,9 @@ fn end_take_back(tools: &ToolDeps, post: u64, taken: bool) -> Result<CommandRepo
 }
 
 /// Stops post `post`, as the owner (`social_post_stop`): a scheduled post that is not with Buffer
-/// is stopped, one that is has Farik's own `delete_post` first and is stopped only when Buffer took
+/// is stopped, one that is has Catervas's own `delete_post` first and is stopped only when Buffer took
 /// it back. Refused `unknown_post`; `post_not_going_out` for a post requested, stopped, missed or
-/// failed; `post_being_handed_over` for one Farik is giving to Buffer this moment;
+/// failed; `post_being_handed_over` for one Catervas is giving to Buffer this moment;
 /// `post_already_out` once its time has passed; `post_not_taken_back` when Buffer would not.
 pub(crate) async fn stop_post(
     deps: &OrchestratorDeps,
@@ -474,7 +474,7 @@ fn request_body(post: &SocialPost) -> Value {
 /// at its time; not allowing it records `stopped { by: declined }` with the owner's words. Refused
 /// `unknown_post`, `post_decided` for a post that is not waiting for the owner and
 /// `post_in_the_past` once the request's time is near: allowing needs it more than five minutes
-/// ahead, since Farik cannot hand it to Buffer in time, and not allowing it needs it still ahead.
+/// ahead, since Catervas cannot hand it to Buffer in time, and not allowing it needs it still ahead.
 pub(crate) fn decide_post(
     tools: &ToolDeps,
     post: u64,
@@ -504,7 +504,7 @@ pub(crate) fn decide_post(
     };
     if out_of_time {
         return Err(too_late(&format!(
-            "post {post} is for {}, too near for Farik to hand it to Buffer, or past",
+            "post {post} is for {}, too near for Catervas to hand it to Buffer, or past",
             when_words(&found)
         )));
     }
@@ -654,8 +654,8 @@ fn written_posts(plan: &str, posts: &[SocialPost]) -> Vec<Value> {
         .collect()
 }
 
-/// The budget kind of the campaign Farik already made for each key `plan` carries (`is_carried`:
-/// made under a plan of its lineage, in its ad account), from `made`, every campaign Farik made,
+/// The budget kind of the campaign Catervas already made for each key `plan` carries (`is_carried`:
+/// made under a plan of its lineage, in its ad account), from `made`, every campaign Catervas made,
 /// oldest first. A campaign keeps the kind of budget it was made with, so `whole` prices it by
 /// that, not by the dates a raised version gives it.
 #[must_use]
@@ -766,7 +766,7 @@ pub fn whole(
     })
 }
 
-/// What Farik knows of what the ads of `plan` have cost, for a raise and for Today's row: the last
+/// What Catervas knows of what the ads of `plan` have cost, for a raise and for Today's row: the last
 /// spend the watch read, kept in memory, else what the caps recorded for the plan say, which a
 /// restart leaves (a campaign's cap, its key's spend, and the plan's, the total, falling back to
 /// the sum of the campaigns' when no cap is the plan's).
@@ -778,7 +778,7 @@ pub(crate) fn known_spend(
     state: &crate::daemon::DaemonState,
     tools: &ToolDeps,
     plan: &str,
-) -> Result<PlanSpend, farik_store::StoreError> {
+) -> Result<PlanSpend, catervas_store::StoreError> {
     if let Some((spend, _)) = state
         .spend_reads()
         .get(plan)
@@ -808,7 +808,8 @@ pub(crate) fn known_spend(
 #[must_use]
 pub fn states_today(plans: &[MarketingPlan], today: chrono::NaiveDate) -> Vec<PlanState> {
     let records: Vec<PlanRecord> = plans.iter().map(|plan| plan.record.clone()).collect();
-    let active = farik_core::marketing::active_plan(&records, today).map(|plan| plan.id.as_str());
+    let active =
+        catervas_core::marketing::active_plan(&records, today).map(|plan| plan.id.as_str());
     plans.iter().map(|plan| plan.state(active)).collect()
 }
 
@@ -818,9 +819,9 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
+    use catervas_protocol::command::Command;
+    use catervas_protocol::event::EventKind;
     use chrono::Duration as Minutes;
-    use farik_protocol::command::Command;
-    use farik_protocol::event::EventKind;
     use serde_json::{Value, json};
 
     use super::{decide_plan, end_plan, hold_plans};
@@ -840,10 +841,10 @@ mod tests {
             "plans-lock",
             crate::tools::fixtures::with_the_marketing_specialist,
         );
-        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("CTV-1", "kai", "pm");
         harness
             .project
-            .plan_proposed("FRK-1", "MP-1", "2026-09-22", "2026-10-20");
+            .plan_proposed("CTV-1", "MP-1", "2026-09-22", "2026-10-20");
         let deps = Arc::clone(&harness.project.deps);
         let recorded = |kind| harness.project.events(&[kind]).len();
 
@@ -898,7 +899,7 @@ mod tests {
     fn the_body(handing: &Handing, kind: EventKind) -> Value {
         let events = handing.events(kind);
         assert_eq!(events.len(), 1, "{kind:?}: {events:?}");
-        farik_protocol::event::event_to_value(&events[0])["body"].clone()
+        catervas_protocol::event::event_to_value(&events[0])["body"].clone()
     }
 
     async fn stop(handing: &Handing, post: u64) -> Result<CommandReport, CommandError> {
@@ -1078,7 +1079,7 @@ mod tests {
 
         assert_eq!(
             refused,
-            "post_being_handed_over: Farik is giving it to Buffer now; stop it again in a minute"
+            "post_being_handed_over: Catervas is giving it to Buffer now; stop it again in a minute"
         );
         assert_eq!(
             the_body(&handing, EventKind::SocialPostSent),
@@ -1170,7 +1171,7 @@ mod tests {
             .ids;
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.to_string()).as_deref(),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert!(
             ids.agent_id.is_none() && ids.session_id.is_none(),

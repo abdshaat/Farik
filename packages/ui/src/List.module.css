@@ -3,13 +3,13 @@
 	padding: 0;
 	list-style: none;
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
 }
 
 .row {
-	padding: var(--farik-space-3) 0;
-	border-bottom: 1px solid var(--farik-color-rule);
+	padding: var(--catervas-space-3) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .row:last-child {

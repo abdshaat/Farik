@@ -5,27 +5,27 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use farik_core::branch::task_branch;
-use farik_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
-use farik_core::contract::{Role, TaskContract, TaskStatus};
-use farik_core::governor::gates::DesignerBrowser;
-use farik_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
-use farik_core::governor::sites::{WebAccess, web_access};
-use farik_core::governor::transition::TransitionRequest;
-use farik_core::governor::transition_table::TransitionActor;
-use farik_core::pricing::Usage;
-use farik_core::team::{
+use catervas_core::branch::task_branch;
+use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
+use catervas_core::contract::{Role, TaskContract, TaskStatus};
+use catervas_core::governor::gates::DesignerBrowser;
+use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
+use catervas_core::governor::sites::{WebAccess, web_access};
+use catervas_core::governor::transition::TransitionRequest;
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::pricing::Usage;
+use catervas_core::team::{
     Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
     private_folder,
 };
-use farik_protocol::event::{
+use catervas_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
     PreviewPreparedBody, PreviewStartedBody, ReasonBody, TeamPausedBody, TeamPausedBodyBy,
     TeamPausedBodyReason, Thread,
 };
-use farik_roles::{ConnectorDefinition, builtin_connector, load_role};
-use farik_store::EventQuery;
+use catervas_roles::{ConnectorDefinition, builtin_connector, load_role};
+use catervas_store::EventQuery;
+use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
 use super::design::{DECIDE_TOOL, RECORD_DESIGN_REVIEW_TOOL};
@@ -52,15 +52,15 @@ use crate::session::{
 };
 use crate::sessions::{record_session_ended, record_session_started};
 use crate::skills::{SessionSkills, confirmed_skills, session_skills};
-use crate::tools::{FarikTool, tool_descriptors};
+use crate::tools::{CatervasTool, tool_descriptors};
 use crate::transitions::TransitionAsk;
 
 /// The one tool a triage session is given.
-pub(super) const TRIAGE_TOOL: &str = "farik_triage_request";
+pub(super) const TRIAGE_TOOL: &str = "catervas_triage_request";
 
 /// The one tool the Scrum Master's judgment session is given; a session given it alone closes
 /// with `JUDGMENT_INSTRUCTION`.
-pub(super) const JUDGMENT_TOOL: &str = "farik_record_judgment";
+pub(super) const JUDGMENT_TOOL: &str = "catervas_record_judgment";
 
 /// What a rule asks a session for.
 pub(super) struct SessionAsk<'a> {
@@ -74,14 +74,14 @@ pub(super) struct SessionAsk<'a> {
     pub(super) cwd: PathBuf,
     /// Where its commands run, when it runs any.
     pub(super) executor: Option<Arc<dyn Executor>>,
-    /// Whether it gets the read tier's built-ins alone, whatever the agent's tiers, and no Farik
+    /// Whether it gets the read tier's built-ins alone, whatever the agent's tiers, and no Catervas
     /// tool that runs a command or writes to git: a verify session reads the work and does not
     /// change it.
     pub(super) read_only: bool,
-    /// The one Farik tool it is given, when it is given one alone and no built-in tool: triage's
-    /// `farik_triage_request`, the judgment's `farik_record_judgment`.
+    /// The one Catervas tool it is given, when it is given one alone and no built-in tool: triage's
+    /// `catervas_triage_request`, the judgment's `catervas_record_judgment`.
     pub(super) only_tool: Option<&'static str>,
-    /// The Farik tools it is offered, when it is offered a list of them rather than every tool:
+    /// The Catervas tools it is offered, when it is offered a list of them rather than every tool:
     /// each still only when the agent's tiers allow it.
     pub(super) tools: Option<&'static [&'static str]>,
     /// The seq of the message a conversation session answers, which its reply names and its
@@ -171,7 +171,7 @@ pub(super) async fn run_session(
         cwd: spec.cwd.clone(),
         executor: ask.executor,
         limits: spec.limits,
-        farik_tools: spec.farik_tools.clone(),
+        catervas_tools: spec.catervas_tools.clone(),
         tiers,
         connectors,
         preview: browser.clone(),
@@ -200,7 +200,7 @@ pub(super) async fn run_session(
     // connects the account again or resumes (5.5). A team the human paused meanwhile stays theirs.
     if end.reason == EndReason::CredentialRefused && !crate::pause::paused(&deps.tools.log)? {
         let body = TeamPausedBody {
-            by: TeamPausedBodyBy::Farik,
+            by: TeamPausedBodyBy::Catervas,
             reason: Some(TeamPausedBodyReason::CredentialRefused),
             detail: Some(end.detail.clone()),
         };
@@ -223,7 +223,7 @@ pub(super) async fn run_session(
 ///
 /// `kit` is the agent's role's kit: the tools it marks as approved by the owner's marketing plan
 /// (ADR 0042) go to the entry that is exactly the kit's, and to no other.
-fn session_connector(server: CustomServer, kit: Option<&farik_roles::Kit>) -> SessionConnector {
+fn session_connector(server: CustomServer, kit: Option<&catervas_roles::Kit>) -> SessionConnector {
     let plan_tools = kit
         .map(|kit| crate::daemon::plan_tools_of(kit, &server))
         .unwrap_or_default();
@@ -288,12 +288,12 @@ async fn give_browser(
         Ok(running) => running,
         Err(error) => return preview_failed(deps, team, contract, spec, ids, &error).map(Err),
     };
-    // The browser's own folder, apart from the page check's screenshots, which only Farik writes.
+    // The browser's own folder, apart from the page check's screenshots, which only Catervas writes.
     let output = deps
         .tools
         .files
         .root()
-        .join(".farik/local/browser")
+        .join(".catervas/local/browser")
         .join(contract.id.as_str())
         .join(&spec.session_id);
     if let Err(error) = std::fs::create_dir_all(&output) {
@@ -363,7 +363,7 @@ async fn refresh_signed_in(
         deps.tools.clock.now(),
     )
     .map_or(
-        farik_core::budget::DEFAULT_SESSION_LIMITS.max_wall_clock,
+        catervas_core::budget::DEFAULT_SESSION_LIMITS.max_wall_clock,
         |budget| budget.session_limits.max_wall_clock,
     );
     for server in custom_servers(ask.agent).filter(|server| server.oauth().is_some()) {
@@ -490,7 +490,7 @@ async fn open_preview(
     let cache = tools
         .files
         .root()
-        .join(".farik/local/previews")
+        .join(".catervas/local/previews")
         .join(format!("{}.json", contract.id.as_str()));
     let key = preview.prepare.as_ref().map(|prepare| {
         crate::daemon::hex(&Sha256::digest(format!("{tree}\n{prepare}").as_bytes()))
@@ -650,7 +650,7 @@ fn sleep(
             detail: end.detail.clone(),
         }),
     )?;
-    // A sleeping agent says nothing, so Farik says why it is quiet (5.9).
+    // A sleeping agent says nothing, so Catervas says why it is quiet (5.9).
     post_system(
         &tools.log,
         tools.clock.as_ref(),
@@ -669,7 +669,7 @@ fn sleep(
 }
 
 /// Who writes the note a session that stopped at its own limit leaves.
-const FARIK: &str = "farik";
+const CATERVAS: &str = "catervas";
 
 /// Leaves one progress note on the task of an implement session that ended at a limit, at its
 /// model provider's limit, or past one of its own budgets, naming each and quoting the agent's own
@@ -747,7 +747,7 @@ fn leave_note(
         EventBody::NoteWritten(NoteWrittenBody {
             kind: NoteWrittenBodyKind::Progress,
             text,
-            written_by: FARIK.to_string(),
+            written_by: CATERVAS.to_string(),
         }),
     )
 }
@@ -771,7 +771,7 @@ fn skill_registration(
 }
 
 /// The skills `ask`'s session loads on demand: its agent's confirmed ones, in every session not
-/// given one Farik tool alone, which has no `Skill` tool, and only where there is a state folder
+/// given one Catervas tool alone, which has no `Skill` tool, and only where there is a state folder
 /// to write the session's plugin folder in (ADR 0034).
 fn session_skills_of(
     deps: &OrchestratorDeps,
@@ -790,7 +790,7 @@ fn session_skills_of(
         ],
         ..EventQuery::default()
     })?;
-    // The kit's skills are Farik's own: loaded on demand beside the agent's and the team's.
+    // The kit's skills are Catervas's own: loaded on demand beside the agent's and the team's.
     let kit = (deps.tools.kits)(Role::from(ask.agent.role))?;
     Ok(session_skills(
         deps.tools.files.root(),
@@ -802,55 +802,55 @@ fn session_skills_of(
 }
 
 /// The tool that checks a page of the task's preview.
-pub(super) const CHECK_PAGE_TOOL: &str = "farik_check_page";
+pub(super) const CHECK_PAGE_TOOL: &str = "catervas_check_page";
 
 /// The one tool that writes in a chat, offered in a chat session alone.
-const CHAT_REPLY_TOOL: &str = "farik_chat_reply";
+const CHAT_REPLY_TOOL: &str = "catervas_chat_reply";
 
 /// The tool that proposes a marketing plan, offered in the Marketing Specialist's implement
 /// session about a task alone (ADR 0042).
-const PROPOSE_MARKETING_PLAN_TOOL: &str = "farik_propose_marketing_plan";
+const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
 /// The tool that schedules a social post, the Marketing Specialist's alone (ADR 0042).
-const SCHEDULE_POST_TOOL: &str = "farik_schedule_post";
+const SCHEDULE_POST_TOOL: &str = "catervas_schedule_post";
 
 /// The Finance Specialist's tools (step 09b, `docs/SPEC.md` 6.6): the team's AI spending, which is
-/// its alone, and a private folder's workbooks, which `farik_write_sheet` writes and
-/// `farik_read_sheet` reads, for each role with a folder (step 10b).
-const READ_COSTS_TOOL: &str = "farik_read_costs";
-const READ_SHEET_TOOL: &str = "farik_read_sheet";
-const WRITE_SHEET_TOOL: &str = "farik_write_sheet";
+/// its alone, and a private folder's workbooks, which `catervas_write_sheet` writes and
+/// `catervas_read_sheet` reads, for each role with a folder (step 10b).
+const READ_COSTS_TOOL: &str = "catervas_read_costs";
+const READ_SHEET_TOOL: &str = "catervas_read_sheet";
+const WRITE_SHEET_TOOL: &str = "catervas_write_sheet";
 /// The tool that writes a comparison as a note, the Procurement Specialist's alone (step 10b).
-const WRITE_EVALUATION_TOOL: &str = "farik_write_evaluation";
+const WRITE_EVALUATION_TOOL: &str = "catervas_write_evaluation";
 /// The Procurement Specialist's request for a site, and the list of what it may read.
-const REQUEST_SITES_TOOL: &str = "farik_request_sites";
-const READ_SITES_TOOL: &str = "farik_read_sites";
+const REQUEST_SITES_TOOL: &str = "catervas_request_sites";
+const READ_SITES_TOOL: &str = "catervas_read_sites";
 /// The tool that suggests a purchase order, the Procurement Specialist's alone (ADR 0039).
-const DRAFT_PURCHASE_ORDER_TOOL: &str = "farik_draft_purchase_order";
+const DRAFT_PURCHASE_ORDER_TOOL: &str = "catervas_draft_purchase_order";
 /// The tool that reads every purchase order: the Procurement Specialist's, in the implement session
 /// of a task and in its chat.
-const READ_PURCHASE_ORDERS_TOOL: &str = "farik_read_purchase_orders";
+const READ_PURCHASE_ORDERS_TOOL: &str = "catervas_read_purchase_orders";
 /// The tool that records a placed order's follow-up status, the Procurement Specialist's alone.
-const UPDATE_PURCHASE_ORDER_TOOL: &str = "farik_update_purchase_order";
+const UPDATE_PURCHASE_ORDER_TOOL: &str = "catervas_update_purchase_order";
 /// The tool that asks for a data pipeline, the Procurement Specialist's alone, in the implement
 /// session of a task.
-const REQUEST_DATA_PIPELINE_TOOL: &str = "farik_request_data_pipeline";
+const REQUEST_DATA_PIPELINE_TOOL: &str = "catervas_request_data_pipeline";
 /// The tool that reads the data pipeline requests: the Procurement Specialist's, in the implement
 /// session of a task and in its chat.
-const READ_DATA_PIPELINES_TOOL: &str = "farik_read_data_pipelines";
+const READ_DATA_PIPELINES_TOOL: &str = "catervas_read_data_pipelines";
 /// The tool that drafts a message to a seller, the Procurement Specialist's alone, in the
 /// implement session of a task (step 10f).
-const DRAFT_SELLER_MESSAGE_TOOL: &str = "farik_draft_seller_message";
+const DRAFT_SELLER_MESSAGE_TOOL: &str = "catervas_draft_seller_message";
 /// The tools that read the messages to sellers and their replies: the Procurement Specialist's, in
 /// the implement session of a task and in its chat.
-const READ_SELLER_MESSAGES_TOOL: &str = "farik_read_seller_messages";
-const READ_SELLER_REPLIES_TOOL: &str = "farik_read_seller_replies";
+const READ_SELLER_MESSAGES_TOOL: &str = "catervas_read_seller_messages";
+const READ_SELLER_REPLIES_TOOL: &str = "catervas_read_seller_replies";
 
-/// The Farik tools a read-only session is not offered: the command runner, which has no
+/// The Catervas tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
-const NOT_FOR_READ_ONLY: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_git_push"];
+const NOT_FOR_READ_ONLY: [&str; 3] = ["catervas_exec", "catervas_git_commit", "catervas_git_push"];
 
-/// The Farik tools `ask`'s session is offered, before its tiers are applied.
-fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<FarikTool> {
+/// The Catervas tools `ask`'s session is offered, before its tiers are applied.
+fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<CatervasTool> {
     // The page check is the Designer's, in a session that has the preview open (step 12).
     let checks_pages = ask.agent.role == RoleWire::UiUxDesigner
         && ask.contract.is_some()
@@ -1008,7 +1008,7 @@ fn session_spec_without(
     };
     let tools = offered_tools(deps, team, ask);
     // A session given one tool has it whatever the agent's tiers.
-    let farik_tools = tools
+    let catervas_tools = tools
         .iter()
         .filter(|tool| ask.only_tool.is_some() || tiers.contains(&tool.tier))
         .map(|tool| tool.name.to_string())
@@ -1066,7 +1066,7 @@ fn session_spec_without(
         system_prompt,
         model,
         effort,
-        farik_tools,
+        catervas_tools,
         builtin_tools,
         mcp_servers: custom.iter().map(custom_config).collect(),
         disallowed_tools: custom.iter().flat_map(denied_tools).collect(),
@@ -1320,15 +1320,15 @@ async fn read_to_end(
 mod tests {
     use std::sync::Arc;
 
-    use farik_core::governor::permissions::PermissionTier;
+    use catervas_core::governor::permissions::PermissionTier;
     use serde_json::json;
 
     use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
-    use crate::recorded::fixtures::implement_finishes_frk_1;
+    use crate::recorded::fixtures::implement_finishes_ctv_1;
     use crate::session::SessionPurpose;
 
-    use farik_core::team::Effort;
-    use farik_protocol::event::{EventBody, EventKind, MessageKind, Thread};
+    use catervas_core::team::Effort;
+    use catervas_protocol::event::{EventBody, EventKind, MessageKind, Thread};
 
     use super::{
         SessionAsk, SessionEnd, TRIAGE_TOOL, offered_connector, run_session, session_spec, sleep,
@@ -1337,9 +1337,9 @@ mod tests {
     use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
 
-    /// The tiers and Farik's tools the Developer's implement session of FRK-1 was given, on a team
-    /// whose permission answers `answers` sets. Commands and pushes go through Farik's tools
-    /// (`farik_exec`, `farik_git_push`); no built-in runs either.
+    /// The tiers and Catervas's tools the Developer's implement session of CTV-1 was given, on a team
+    /// whose permission answers `answers` sets. Commands and pushes go through Catervas's tools
+    /// (`catervas_exec`, `catervas_git_push`); no built-in runs either.
     async fn implementing_under(
         name: &str,
         answers: serde_json::Value,
@@ -1347,8 +1347,8 @@ mod tests {
         let harness = Harness::new(name, |wire| {
             wire["policy"]["permissions"] = answers.clone();
         });
-        harness.assigned("FRK-1", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1()]);
         let witness = Arc::new(ExecutorWitness::new(
             adapter.clone(),
             Arc::clone(&harness.daemon),
@@ -1360,13 +1360,13 @@ mod tests {
         assert_eq!(started[0].purpose, SessionPurpose::Implement);
         (
             witness.given_tiers().remove(0),
-            started[0].farik_tools.clone(),
+            started[0].catervas_tools.clone(),
         )
     }
 
     use crate::tools::fixtures::browsing;
 
-    fn agent<'a>(team: &'a farik_core::team::Team, id: &str) -> &'a farik_core::team::Agent {
+    fn agent<'a>(team: &'a catervas_core::team::Team, id: &str) -> &'a catervas_core::team::Agent {
         team.agents
             .iter()
             .find(|agent| agent.id.as_str() == id)
@@ -1375,7 +1375,7 @@ mod tests {
 
     #[test]
     fn offers_the_connector_only_where_the_design_says() {
-        use farik_core::governor::gates::DesignerBrowser;
+        use catervas_core::governor::gates::DesignerBrowser;
 
         let team = crate::tools::fixtures::a_team_of_three(browsing);
         let (iris, ada, dev) = (
@@ -1439,22 +1439,22 @@ mod tests {
         // The whole definition, the one confined browser of the Designer's kit, not only its name.
         assert_eq!(
             offered_connector(dev, SessionPurpose::Implement, browser),
-            farik_roles::builtin_connector("playwright")
+            catervas_roles::builtin_connector("playwright")
         );
         assert!(offered_connector(iris, SessionPurpose::Verify, browser).is_none());
     }
 
-    /// Iris's explore session of FRK-1, in its worktree.
+    /// Iris's explore session of CTV-1, in its worktree.
     fn exploring<'a>(
         harness: &Harness,
-        team: &'a farik_core::team::Team,
-        contract: &'a farik_core::contract::TaskContract,
+        team: &'a catervas_core::team::Team,
+        contract: &'a catervas_core::contract::TaskContract,
     ) -> SessionAsk<'a> {
         SessionAsk {
             agent: agent(team, "iris"),
             contract: Some(contract),
             purpose: SessionPurpose::Explore,
-            cwd: harness.worktree("FRK-1"),
+            cwd: harness.worktree("CTV-1"),
             executor: None,
             read_only: true,
             only_tool: None,
@@ -1474,7 +1474,7 @@ mod tests {
         let mut harness = Harness::new("preview-once-per-tree", browsing);
         let previews = Arc::new(FakePreviews::ready());
         harness.previews = previews.clone();
-        harness.in_progress("FRK-1", "iris", "ada");
+        harness.in_progress("CTV-1", "iris", "ada");
         let adapter = harness.recorded(vec![
             crate::recorded::fixtures::reads_a_file(),
             crate::recorded::fixtures::reads_a_file(),
@@ -1490,7 +1490,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
 
         for _ in 0..2 {
@@ -1498,10 +1498,10 @@ mod tests {
                 .await
                 .expect("the session runs");
         }
-        let worktree = harness.worktree("FRK-1");
+        let worktree = harness.worktree("CTV-1");
         std::fs::write(worktree.join("site.txt"), "two").expect("written");
-        farik_store::git::fixtures::git_in(&worktree, &["add", "site.txt"]);
-        farik_store::git::fixtures::git_in(&worktree, &["commit", "-q", "-m", "A new page"]);
+        catervas_store::git::fixtures::git_in(&worktree, &["add", "site.txt"]);
+        catervas_store::git::fixtures::git_in(&worktree, &["commit", "-q", "-m", "A new page"]);
         run_session(deps, &team, exploring(&harness, &team, &contract))
             .await
             .expect("the session runs");
@@ -1553,7 +1553,7 @@ mod tests {
                 .expect("the output folder is mounted");
             let screenshots = crate::tools::design::screenshots(
                 deps.tools.files.root(),
-                &"FRK-1".parse().expect("an id"),
+                &"CTV-1".parse().expect("an id"),
             );
             assert!(
                 !std::path::Path::new(source).starts_with(&screenshots),
@@ -1573,11 +1573,11 @@ mod tests {
         );
     }
 
-    /// `agent`'s session of FRK-1 for `purpose`, in its worktree.
+    /// `agent`'s session of CTV-1 for `purpose`, in its worktree.
     fn a_session<'a>(
         harness: &Harness,
-        team: &'a farik_core::team::Team,
-        contract: &'a farik_core::contract::TaskContract,
+        team: &'a catervas_core::team::Team,
+        contract: &'a catervas_core::contract::TaskContract,
         agent_id: &str,
         purpose: SessionPurpose,
     ) -> SessionAsk<'a> {
@@ -1598,7 +1598,7 @@ mod tests {
 
         let mut harness = Harness::new("preview-network-tier", browsing);
         harness.previews = Arc::new(FakePreviews::ready());
-        harness.in_progress("FRK-1", "iris", "ada");
+        harness.in_progress("CTV-1", "iris", "ada");
         let adapter = harness.recorded(vec![
             crate::recorded::fixtures::reads_a_file(),
             crate::recorded::fixtures::reads_a_file(),
@@ -1614,7 +1614,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
 
         for (who, purpose) in [
@@ -1645,14 +1645,14 @@ mod tests {
         let checks = |name: &str, previews: Arc<dyn crate::preview::PreviewFactory>| {
             let mut harness = Harness::new(name, browsing);
             harness.previews = previews;
-            harness.in_progress("FRK-1", "iris", "ada");
+            harness.in_progress("CTV-1", "iris", "ada");
             let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
             let deps = &orchestrator.deps;
             let team = deps.tools.files.read_team().expect("the team");
             let contract = deps
                 .tools
                 .files
-                .read_contract(&"FRK-1".parse().expect("an id"))
+                .read_contract(&"CTV-1".parse().expect("an id"))
                 .expect("the contract");
             [
                 ("iris", SessionPurpose::Implement),
@@ -1668,9 +1668,9 @@ mod tests {
                     &a_session(&harness, &team, &contract, who, purpose),
                 )
                 .expect("the spec")
-                .farik_tools
+                .catervas_tools
                 .iter()
-                .any(|tool| tool == "farik_check_page")
+                .any(|tool| tool == "catervas_check_page")
             })
         };
 
@@ -1691,7 +1691,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_preview_that_fails() {
-        use farik_protocol::event::EscalationRaisedBodyReason;
+        use catervas_protocol::event::EscalationRaisedBodyReason;
 
         use crate::preview::PreviewError;
         use crate::preview::fixtures::FakePreviews;
@@ -1721,7 +1721,7 @@ mod tests {
         ] {
             let mut harness = Harness::new(name, browsing);
             harness.previews = Arc::new(FakePreviews::failing(error));
-            harness.in_progress("FRK-1", "iris", "ada");
+            harness.in_progress("CTV-1", "iris", "ada");
             let adapter = harness.recorded(Vec::new());
             let orchestrator = harness.orchestrator(adapter.clone());
             let deps = &orchestrator.deps;
@@ -1729,7 +1729,7 @@ mod tests {
             let contract = deps
                 .tools
                 .files
-                .read_contract(&"FRK-1".parse().expect("an id"))
+                .read_contract(&"CTV-1".parse().expect("an id"))
                 .expect("the contract");
 
             run_session(deps, &team, exploring(&harness, &team, &contract))
@@ -1738,8 +1738,8 @@ mod tests {
 
             assert!(adapter.started().is_empty(), "{name}: no session starts");
             assert_eq!(
-                harness.row("FRK-1").status,
-                farik_core::contract::TaskStatus::Escalated,
+                harness.row("CTV-1").status,
+                catervas_core::contract::TaskStatus::Escalated,
                 "{name}"
             );
             let raised = harness.events(&[EventKind::EscalationRaised]);
@@ -1769,8 +1769,8 @@ mod tests {
         .await;
         assert!(!tiers.contains(&PermissionTier::Execute), "{tiers:?}");
         assert!(tiers.contains(&PermissionTier::GitRemote), "{tiers:?}");
-        assert!(!has(&tools, "farik_exec"), "{tools:?}");
-        assert!(has(&tools, "farik_git_push"), "{tools:?}");
+        assert!(!has(&tools, "catervas_exec"), "{tools:?}");
+        assert!(has(&tools, "catervas_git_push"), "{tools:?}");
 
         let (tiers, tools) = implementing_under(
             "session-answers-yes",
@@ -1779,22 +1779,22 @@ mod tests {
         .await;
         assert!(tiers.contains(&PermissionTier::Execute), "{tiers:?}");
         assert!(!tiers.contains(&PermissionTier::GitRemote), "{tiers:?}");
-        assert!(has(&tools, "farik_exec"), "{tools:?}");
-        assert!(!has(&tools, "farik_git_push"), "{tools:?}");
+        assert!(has(&tools, "catervas_exec"), "{tools:?}");
+        assert!(!has(&tools, "catervas_git_push"), "{tools:?}");
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_no_post_to_a_one_tool_session() {
         let harness = Harness::new("session-no-post", |_| {});
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let pm = team.active_agents().next().expect("an agent");
         let spec = |purpose, only_tool| {
@@ -1822,14 +1822,14 @@ mod tests {
         let triage = spec(SessionPurpose::Triage, Some(TRIAGE_TOOL));
         let refine = spec(SessionPurpose::Refine, None);
 
-        assert_eq!(triage.farik_tools, vec![TRIAGE_TOOL.to_string()]);
+        assert_eq!(triage.catervas_tools, vec![TRIAGE_TOOL.to_string()]);
         assert!(
             refine
-                .farik_tools
+                .catervas_tools
                 .iter()
-                .any(|tool| tool == "farik_post_message"),
+                .any(|tool| tool == "catervas_post_message"),
             "{:?}",
-            refine.farik_tools
+            refine.catervas_tools
         );
     }
 
@@ -1837,14 +1837,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_no_memory_to_a_one_tool_session() {
         let harness = Harness::new("session-no-memory", |_| {});
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let pm = team.active_agents().next().expect("an agent");
         let spec = |purpose, only_tool| {
@@ -1874,19 +1874,19 @@ mod tests {
 
         assert!(
             !triage
-                .farik_tools
+                .catervas_tools
                 .iter()
-                .any(|tool| tool == "farik_write_memory"),
+                .any(|tool| tool == "catervas_write_memory"),
             "{:?}",
-            triage.farik_tools
+            triage.catervas_tools
         );
         assert!(
             refine
-                .farik_tools
+                .catervas_tools
                 .iter()
-                .any(|tool| tool == "farik_write_memory"),
+                .any(|tool| tool == "catervas_write_memory"),
             "{:?}",
-            refine.farik_tools
+            refine.catervas_tools
         );
     }
 
@@ -1894,14 +1894,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn gives_a_one_tool_session_that_tool_alone() {
         let harness = Harness::new("session-one-tool", |_| {});
-        harness.file("FRK-1", "refining", |_| {});
+        harness.file("CTV-1", "refining", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let pm = team.active_agents().next().expect("an agent");
 
@@ -1915,7 +1915,7 @@ mod tests {
                 cwd: deps.tools.files.root().to_path_buf(),
                 executor: None,
                 read_only: false,
-                only_tool: Some("farik_record_judgment"),
+                only_tool: Some("catervas_record_judgment"),
                 tools: None,
                 in_reply_to: None,
                 thread: None,
@@ -1925,7 +1925,10 @@ mod tests {
         )
         .expect("the spec");
 
-        assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
+        assert_eq!(
+            spec.catervas_tools,
+            vec!["catervas_record_judgment".to_string()]
+        );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
     }
 
@@ -1968,16 +1971,16 @@ mod tests {
             "{}",
             spec.system_prompt
         );
-        assert!(closing.contains("`farik_post_message`"), "{closing}");
-        assert!(closing.contains("`farik_create_task`"), "{closing}");
+        assert!(closing.contains("`catervas_post_message`"), "{closing}");
+        assert!(closing.contains("`catervas_create_task`"), "{closing}");
     }
 
     /// `agent`'s session for `purpose`, about `contract` when there is one, asked as a rule asks.
     fn asked<'a>(
         deps: &crate::orchestrator::OrchestratorDeps,
-        agent: &'a farik_core::team::Agent,
+        agent: &'a catervas_core::team::Agent,
         purpose: SessionPurpose,
-        contract: Option<&'a farik_core::contract::TaskContract>,
+        contract: Option<&'a catervas_core::contract::TaskContract>,
     ) -> SessionAsk<'a> {
         SessionAsk {
             agent,
@@ -2002,31 +2005,31 @@ mod tests {
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
-                .push(farik_core::team::fixtures::an_agent_wire(
+                .push(catervas_core::team::fixtures::an_agent_wire(
                     "kai",
                     "marketing_specialist",
                 ));
         });
-        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("CTV-1", "kai", "pm");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let offered = |name: &str, who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
             session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools
+                .catervas_tools
                 .iter()
                 .any(|tool| tool == name)
         };
 
-        for name in ["farik_propose_marketing_plan", "farik_schedule_post"] {
+        for name in ["catervas_propose_marketing_plan", "catervas_schedule_post"] {
             assert!(offered(
                 name,
                 "kai",
@@ -2054,32 +2057,32 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_the_seller_tools_to_procurement_alone() {
         const SELLER: [&str; 3] = [
-            "farik_draft_seller_message",
-            "farik_read_seller_messages",
-            "farik_read_seller_replies",
+            "catervas_draft_seller_message",
+            "catervas_read_seller_messages",
+            "catervas_read_seller_replies",
         ];
         let harness = Harness::with_procurement("session-seller-tools");
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.ready("FRK-2");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.ready("CTV-2");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let procurement = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let developers = deps
             .tools
             .files
-            .read_contract(&"FRK-2".parse().expect("an id"))
+            .read_contract(&"CTV-2".parse().expect("an id"))
             .expect("the contract");
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
             let given = session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools;
+                .catervas_tools;
             SELLER
                 .iter()
                 .copied()
@@ -2093,7 +2096,10 @@ mod tests {
         );
         assert_eq!(
             offered("proc", SessionPurpose::Chat, None),
-            ["farik_read_seller_messages", "farik_read_seller_replies"]
+            [
+                "catervas_read_seller_messages",
+                "catervas_read_seller_replies"
+            ]
         );
         // Not an implement session about no task, nor a verify session of its task.
         assert!(offered("proc", SessionPurpose::Implement, None).is_empty());
@@ -2115,33 +2121,33 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn procurement_is_offered_its_tools() {
         let harness = Harness::with_procurement("session-procurement-offer");
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let procurement = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let offered = |who: &str, purpose: SessionPurpose, about, tools: &[&'static str]| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
             let given = session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools;
+                .catervas_tools;
             tools
                 .iter()
                 .copied()
                 .filter(|tool| given.iter().any(|one| one == tool))
                 .collect::<Vec<_>>()
         };
-        let sheets = ["farik_read_sheet", "farik_write_sheet"];
+        let sheets = ["catervas_read_sheet", "catervas_write_sheet"];
         let not_for_it = [
-            "farik_read_costs",
-            "farik_exec",
-            "farik_git_commit",
-            "farik_git_push",
+            "catervas_read_costs",
+            "catervas_exec",
+            "catervas_git_commit",
+            "catervas_git_push",
         ];
 
         // Its task's implement session reads and writes workbooks, and is given none of the
@@ -2175,7 +2181,7 @@ mod tests {
         ] {
             assert_eq!(
                 offered("proc", purpose, about, &sheets),
-                ["farik_read_sheet"],
+                ["catervas_read_sheet"],
                 "{what}"
             );
             assert_eq!(
@@ -2188,7 +2194,7 @@ mod tests {
         // is given neither.
         assert_eq!(
             offered("pm", SessionPurpose::Verify, Some(&procurement), &sheets),
-            ["farik_read_sheet"]
+            ["catervas_read_sheet"]
         );
         for (who, purpose) in [
             ("dev-a", SessionPurpose::Implement),
@@ -2206,9 +2212,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_evaluations_to_procurement_alone() {
         let harness = Harness::with_procurement("session-evaluation-offer");
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.finance_task("FRK-2", Some("in_progress"));
-        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.finance_task("CTV-2", Some("in_progress"));
+        harness.in_progress("CTV-3", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2218,15 +2224,15 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
             session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools
+                .catervas_tools
                 .iter()
-                .any(|tool| tool == "farik_write_evaluation")
+                .any(|tool| tool == "catervas_write_evaluation")
         };
 
         assert!(
@@ -2279,17 +2285,17 @@ mod tests {
             with_the_marketing_specialist(wire);
         });
         // A finance task `fin` holds and `pm` reviews, and a Developer's task.
-        harness.file("FRK-1", "ready", |wire| {
+        harness.file("CTV-1", "ready", |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("product_manager");
         });
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "ready",
             "assigned",
             &json!({ "assignee": "fin", "reviewer": "pm" }),
         );
-        harness.in_progress("FRK-2", "dev-a", "dev-b");
+        harness.in_progress("CTV-2", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2299,14 +2305,18 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (finance, developers) = (read("FRK-1"), read("FRK-2"));
-        let sheet_tools = ["farik_read_costs", "farik_read_sheet", "farik_write_sheet"];
+        let (finance, developers) = (read("CTV-1"), read("CTV-2"));
+        let sheet_tools = [
+            "catervas_read_costs",
+            "catervas_read_sheet",
+            "catervas_write_sheet",
+        ];
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
             let given = session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools;
+                .catervas_tools;
             sheet_tools
                 .into_iter()
                 .filter(|tool| given.iter().any(|one| one == tool))
@@ -2334,7 +2344,7 @@ mod tests {
         ] {
             assert_eq!(
                 offered("fin", purpose, about),
-                ["farik_read_costs", "farik_read_sheet"],
+                ["catervas_read_costs", "catervas_read_sheet"],
                 "{what}: costs and sheets are read in any session, and written in none"
             );
         }
@@ -2342,7 +2352,7 @@ mod tests {
         for who in ["pm", "dev-b"] {
             assert_eq!(
                 offered(who, SessionPurpose::Verify, Some(&finance)),
-                ["farik_read_sheet"],
+                ["catervas_read_sheet"],
                 "{who}"
             );
         }
@@ -2376,9 +2386,9 @@ mod tests {
             with_the_marketing_specialist(wire);
             with_the_procurement_specialist(wire);
         });
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.finance_task("FRK-2", Some("in_progress"));
-        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.finance_task("CTV-2", Some("in_progress"));
+        harness.in_progress("CTV-3", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2388,14 +2398,14 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
-        let site_tools = ["farik_read_sites", "farik_request_sites"];
+        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
+        let site_tools = ["catervas_read_sites", "catervas_request_sites"];
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
             let given = session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools;
+                .catervas_tools;
             site_tools
                 .into_iter()
                 .filter(|tool| given.iter().any(|one| one == tool))
@@ -2409,7 +2419,7 @@ mod tests {
         );
         assert_eq!(
             offered("proc", SessionPurpose::Chat, None),
-            ["farik_read_sites"],
+            ["catervas_read_sites"],
             "its chat reads the list and asks for nothing"
         );
         for (who, purpose, about, what) in [
@@ -2479,9 +2489,9 @@ mod tests {
             with_the_marketing_specialist(wire);
             with_the_procurement_specialist(wire);
         });
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.finance_task("FRK-2", Some("in_progress"));
-        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.finance_task("CTV-2", Some("in_progress"));
+        harness.in_progress("CTV-3", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2491,18 +2501,18 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
         let order_tools = [
-            "farik_draft_purchase_order",
-            "farik_read_purchase_orders",
-            "farik_update_purchase_order",
+            "catervas_draft_purchase_order",
+            "catervas_read_purchase_orders",
+            "catervas_update_purchase_order",
         ];
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
             let given = session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools;
+                .catervas_tools;
             order_tools
                 .into_iter()
                 .filter(|tool| given.iter().any(|one| one == tool))
@@ -2516,7 +2526,7 @@ mod tests {
         );
         assert_eq!(
             offered("proc", SessionPurpose::Chat, None),
-            ["farik_read_purchase_orders"],
+            ["catervas_read_purchase_orders"],
             "its chat reads the orders and changes none"
         );
         for (who, purpose, about, what) in [
@@ -2584,9 +2594,9 @@ mod tests {
             with_the_marketing_specialist(wire);
             with_the_procurement_specialist(wire);
         });
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.finance_task("FRK-2", Some("in_progress"));
-        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.finance_task("CTV-2", Some("in_progress"));
+        harness.in_progress("CTV-3", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2596,20 +2606,23 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
-        let asked_and_read = ["farik_request_data_pipeline", "farik_read_data_pipelines"];
+        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
+        let asked_and_read = [
+            "catervas_request_data_pipeline",
+            "catervas_read_data_pipelines",
+        ];
         // The decision is offered to none of them: only the Product Manager's decision session.
         let pipeline_tools = [
-            "farik_request_data_pipeline",
-            "farik_read_data_pipelines",
-            "farik_decide_data_pipeline",
+            "catervas_request_data_pipeline",
+            "catervas_read_data_pipelines",
+            "catervas_decide_data_pipeline",
         ];
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
             let given = session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools;
+                .catervas_tools;
             pipeline_tools
                 .into_iter()
                 .filter(|tool| given.iter().any(|one| one == tool))
@@ -2623,7 +2636,7 @@ mod tests {
         );
         assert_eq!(
             offered("proc", SessionPurpose::Chat, None),
-            ["farik_read_data_pipelines"],
+            ["catervas_read_data_pipelines"],
             "its chat reads the requests and asks for none"
         );
         for (who, purpose, about, what) in [
@@ -2675,12 +2688,12 @@ mod tests {
         }
         let mut decision = asked(deps, agent(&team, "pm"), SessionPurpose::Verify, None);
         decision.read_only = true;
-        decision.only_tool = Some("farik_decide_data_pipeline");
+        decision.only_tool = Some("catervas_decide_data_pipeline");
         assert_eq!(
             session_spec(deps, &team, &decision)
                 .expect("the spec")
-                .farik_tools,
-            ["farik_decide_data_pipeline"],
+                .catervas_tools,
+            ["catervas_decide_data_pipeline"],
             "the Product Manager's decision session is given that tool alone"
         );
     }
@@ -2689,20 +2702,20 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_the_reply_only_in_a_chat() {
         let harness = Harness::new("session-chat-reply-only", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let (dev_a, dev_b) = (agent(&team, "dev-a"), agent(&team, "dev-b"));
         let tools = |ask: SessionAsk<'_>| {
             session_spec(deps, &team, &ask)
                 .expect("the spec")
-                .farik_tools
+                .catervas_tools
         };
 
         for (purpose, who, about) in [
@@ -2712,13 +2725,13 @@ mod tests {
         ] {
             let given = tools(asked(deps, who, purpose, about));
             assert!(
-                !given.iter().any(|tool| tool == "farik_chat_reply"),
+                !given.iter().any(|tool| tool == "catervas_chat_reply"),
                 "{purpose:?}: {given:?}"
             );
         }
         let chat = tools(asked(deps, dev_a, SessionPurpose::Chat, None));
         assert!(
-            chat.iter().any(|tool| tool == "farik_chat_reply"),
+            chat.iter().any(|tool| tool == "catervas_chat_reply"),
             "{chat:?}"
         );
     }
@@ -2727,7 +2740,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn prompts_with_the_chat_alone() {
         let harness = Harness::new("session-chat-prompt", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let deps = &harness.project.deps;
         let chat = |agent: &str, author: &str, text: String| {
             crate::chat::post_chat(
@@ -2790,13 +2803,13 @@ mod tests {
             .map(|(_, text)| *text)
             .expect("an entry");
         assert!(prompt.trim_end().ends_with(closing), "{prompt}");
-        assert!(closing.contains("`farik_chat_reply`"), "{closing}");
+        assert!(closing.contains("`catervas_chat_reply`"), "{closing}");
 
         // Its task sessions are shown none of its chats.
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let implement = session_spec(
             deps,
@@ -2813,7 +2826,7 @@ mod tests {
     /// The Product Manager's ceremony in `thread`, as a rule would ask for it.
     fn a_ceremony<'a>(
         deps: &crate::orchestrator::OrchestratorDeps,
-        pm: &'a farik_core::team::Agent,
+        pm: &'a catervas_core::team::Agent,
         thread: Thread,
     ) -> SessionAsk<'a> {
         SessionAsk {
@@ -2869,7 +2882,7 @@ mod tests {
             .orchestrator(harness.recorded(vec![crate::recorded::fixtures::credential_refused()]));
         let deps = &orchestrator.deps;
         orchestrator
-            .handle(farik_protocol::command::Command::TeamPause)
+            .handle(catervas_protocol::command::Command::TeamPause)
             .await
             .expect("the pause is handled");
         let team = deps.tools.files.read_team().expect("the team");
@@ -3010,7 +3023,7 @@ mod tests {
     fn connect(
         harness: &Harness,
         connected: &[&str],
-        change: impl Fn(&mut farik_core::team::CustomServer),
+        change: impl Fn(&mut catervas_core::team::CustomServer),
     ) {
         use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
 
@@ -3022,7 +3035,7 @@ mod tests {
                 .mcp_servers
                 .iter()
                 .flatten()
-                .filter_map(farik_core::team::custom_server)
+                .filter_map(catervas_core::team::custom_server)
                 .filter(|server| connected.contains(&server.name.as_str()))
                 .map(move |server| (owner.id.to_string(), server))
         }) {
@@ -3033,7 +3046,7 @@ mod tests {
                 .secret_at(deps.files.root(), &owner, &server.name)
                 .expect("an address");
             let entry = ConnectorEntry {
-                spec_sha256: farik_core::team::spec_sha256(&kept),
+                spec_sha256: catervas_core::team::spec_sha256(&kept),
                 keys: [(
                     "API_KEY".to_string(),
                     crate::claude::Secret::new(KEY_VALUE.to_string()),
@@ -3046,11 +3059,11 @@ mod tests {
         assert!(harness.daemon.set_connector_secrets(store));
     }
 
-    /// `dev-a`'s session of FRK-1 for `purpose`, with `only_tool` and `thread`.
+    /// `dev-a`'s session of CTV-1 for `purpose`, with `only_tool` and `thread`.
     fn dev_asks<'a>(
         harness: &Harness,
-        team: &'a farik_core::team::Team,
-        contract: &'a farik_core::contract::TaskContract,
+        team: &'a catervas_core::team::Team,
+        contract: &'a catervas_core::contract::TaskContract,
         purpose: SessionPurpose,
         only_tool: Option<&'static str>,
     ) -> SessionAsk<'a> {
@@ -3076,7 +3089,7 @@ mod tests {
         let text = format!("---\nname: {name}\ndescription: Use when {name}.\n---\n{body}");
         let files =
             std::collections::BTreeMap::from([("SKILL.md".to_string(), text.clone().into_bytes())]);
-        let sha = farik_core::skill::skill_sha256(&files);
+        let sha = catervas_core::skill::skill_sha256(&files);
         (json!({ "name": name, "sha256": sha }), text)
     }
 
@@ -3088,7 +3101,7 @@ mod tests {
             .deps
             .files
             .root()
-            .join(".farik/skills")
+            .join(".catervas/skills")
             .join(name);
         std::fs::create_dir_all(&folder).expect("a skill folder");
         std::fs::write(folder.join("SKILL.md"), text).expect("a SKILL.md");
@@ -3104,7 +3117,7 @@ mod tests {
     /// What a Developer's session loads: `own` (the team's and the agent's skills), then the
     /// Developer's kit, which ships its skills with the binary.
     fn with_kit(own: &[&str]) -> Vec<String> {
-        let kit = farik_roles::load_kit(farik_core::contract::Role::SoftwareDeveloper)
+        let kit = catervas_roles::load_kit(catervas_core::contract::Role::SoftwareDeveloper)
             .expect("the Developer's kit");
         own.iter()
             .map(ToString::to_string)
@@ -3124,7 +3137,7 @@ mod tests {
     fn one_tool_sessions_get_no_skills() {
         let (pin, text) = a_skill_pin("api-style", "ZEBRA-STYLE-BODY");
         let harness = Harness::new("session-skills-which", |wire| wire["skills"] = json!([pin]));
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "api-style",
@@ -3138,7 +3151,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let skills = |purpose, only_tool| {
             let spec = session_spec(
@@ -3187,7 +3200,7 @@ mod tests {
         let harness = Harness::new("session-skills-prompt", |wire| {
             wire["skills"] = json!([pin]);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "api-style",
@@ -3201,7 +3214,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3232,7 +3245,7 @@ mod tests {
         let harness = Harness::new("session-skills-replaced", |wire| {
             wire["skills"] = json!([pin]);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "writing-task-contracts",
@@ -3253,7 +3266,7 @@ mod tests {
         // The agent's replacement stands in for the role's skill, and the kit's skills follow it.
         let mut wanted = vec!["writing-task-contracts".to_string()];
         wanted.extend(
-            farik_roles::load_kit(farik_core::contract::Role::ProductManager)
+            catervas_roles::load_kit(catervas_core::contract::Role::ProductManager)
                 .expect("the kit")
                 .skills
                 .into_iter()
@@ -3311,7 +3324,7 @@ mod tests {
         let harness = Harness::new("session-skills-register", |wire| {
             wire["skills"] = json!([pin]);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "api-style",
@@ -3325,7 +3338,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3355,7 +3368,7 @@ mod tests {
         let harness = Harness::new("session-skills-removed", |wire| {
             wire["skills"] = json!([pin]);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "api-style",
@@ -3374,7 +3387,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3390,7 +3403,7 @@ mod tests {
     async fn a_session_is_registered_with_its_skills() {
         let (pin, text) = a_skill_pin("api-style", "x");
         let harness = Harness::new("session-skills-hook", |wire| wire["skills"] = json!([pin]));
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         put_skill(
             &harness,
             "api-style",
@@ -3398,10 +3411,10 @@ mod tests {
             pin["sha256"].as_str().expect("a hash"),
             true,
         );
-        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1()]);
         let witness = Arc::new(
             ExecutorWitness::probing(adapter.clone(), Arc::clone(&harness.daemon), &["Skill"])
-                .with_input(json!({ "skill": "farik:api-style" })),
+                .with_input(json!({ "skill": "catervas:api-style" })),
         );
         let orchestrator = harness.orchestrator(witness.clone());
         orchestrator.tick().await.expect("the task starts");
@@ -3426,7 +3439,7 @@ mod tests {
             let harness = Harness::new(&format!("session-skills-kind-{n}"), |wire| {
                 wire["skills"] = json!([pin]);
             });
-            harness.file("FRK-1", "draft", |_| {});
+            harness.file("CTV-1", "draft", |_| {});
             put_skill(
                 &harness,
                 "api-style",
@@ -3445,7 +3458,7 @@ mod tests {
             let contract = deps
                 .tools
                 .files
-                .read_contract(&"FRK-1".parse().expect("a task id"))
+                .read_contract(&"CTV-1".parse().expect("a task id"))
                 .expect("the contract");
             let spec = session_spec(
                 deps,
@@ -3465,7 +3478,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn gives_custom_servers_to_task_sessions_only() {
         let harness = Harness::new("session-custom-which", with_custom_servers);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         connect(&harness, &["github", "linear"], |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
@@ -3473,7 +3486,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let servers = |purpose, only_tool| {
             let spec = session_spec(
@@ -3516,7 +3529,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn mcp_json_holds_no_secret() {
         let harness = Harness::new("session-custom-mcp-json", with_custom_servers);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         connect(&harness, &["github", "linear"], |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
@@ -3524,7 +3537,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3535,16 +3548,16 @@ mod tests {
         let root = deps.tools.files.root();
         let config = crate::claude::ClaudeConfig {
             claude_path: "/usr/local/bin/claude".into(),
-            hook_command: "/usr/local/bin/farik".into(),
-            daemon_file: root.join(".farik/local/daemon.json"),
+            hook_command: "/usr/local/bin/catervas".into(),
+            daemon_file: root.join(".catervas/local/daemon.json"),
             daemon: crate::daemon::DaemonInfo {
                 port: 47_123,
                 token: "the-daemon-token".to_string(),
                 pid: 1,
             },
-            sessions_dir: root.join(".farik/local/sessions"),
+            sessions_dir: root.join(".catervas/local/sessions"),
             skills_dir: root.join("skills-state"),
-            team_file: root.join(".farik/team.yaml"),
+            team_file: root.join(".catervas/team.yaml"),
             env: std::collections::BTreeMap::new(),
         };
         let dir = config.sessions_dir.join(&spec.session_id);
@@ -3553,7 +3566,7 @@ mod tests {
         let file: serde_json::Value = serde_json::from_str(&text).expect("JSON");
 
         let github = &file["mcpServers"]["github"];
-        assert_eq!(github["command"], "/usr/local/bin/farik", "{github}");
+        assert_eq!(github["command"], "/usr/local/bin/catervas", "{github}");
         assert_eq!(github["args"][0], "connector", "{github}");
         assert_eq!(github["args"][1], "run", "{github}");
         let linear = &file["mcpServers"]["linear"];
@@ -3583,7 +3596,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn denied_tools_join_disallowed_tools() {
         let harness = Harness::new("session-custom-denied", with_custom_servers);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         connect(&harness, &["github", "linear"], |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
@@ -3591,7 +3604,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3605,16 +3618,16 @@ mod tests {
         let root = deps.tools.files.root();
         let config = crate::claude::ClaudeConfig {
             claude_path: "/usr/local/bin/claude".into(),
-            hook_command: "/usr/local/bin/farik".into(),
-            daemon_file: root.join(".farik/local/daemon.json"),
+            hook_command: "/usr/local/bin/catervas".into(),
+            daemon_file: root.join(".catervas/local/daemon.json"),
             daemon: crate::daemon::DaemonInfo {
                 port: 47_123,
                 token: "the-daemon-token".to_string(),
                 pid: 1,
             },
-            sessions_dir: root.join(".farik/local/sessions"),
+            sessions_dir: root.join(".catervas/local/sessions"),
             skills_dir: root.join("skills-state"),
-            team_file: root.join(".farik/team.yaml"),
+            team_file: root.join(".catervas/team.yaml"),
             env: std::collections::BTreeMap::new(),
         };
         let args =
@@ -3633,8 +3646,8 @@ mod tests {
 
     #[test]
     fn registers_each_connectors_allowances() {
-        use farik_core::governor::permissions::ConnectorTag;
-        use farik_core::team::{CustomServer, CustomTransport};
+        use catervas_core::governor::permissions::ConnectorTag;
+        use catervas_core::team::{CustomServer, CustomTransport};
 
         let server = CustomServer {
             name: "higgsfield".to_string(),
@@ -3656,12 +3669,12 @@ mod tests {
         );
     }
 
-    /// A fixture kit whose Farik connector `osv` marks `look` as approved by the marketing plan.
-    fn a_kit_that_marks_a_tool() -> farik_roles::Kit {
+    /// A fixture kit whose Catervas connector `osv` marks `look` as approved by the marketing plan.
+    fn a_kit_that_marks_a_tool() -> catervas_roles::Kit {
         let kit = json!({
             "role": "marketing_specialist", "skills": [],
             "connectors": [{
-                "name": "osv", "transport": "stdio", "command": "farik",
+                "name": "osv", "transport": "stdio", "command": "catervas",
                 "args": ["connector", "osv"],
                 "title": "Lookups", "about": "Looks things up.", "why": "To look.",
                 "setup": "Nothing to do.",
@@ -3669,8 +3682,8 @@ mod tests {
                 "plan_approved": ["look"]
             }]
         });
-        farik_roles::parse_fixture_kit(
-            farik_core::contract::Role::MarketingSpecialist,
+        catervas_roles::parse_fixture_kit(
+            catervas_core::contract::Role::MarketingSpecialist,
             &kit.to_string(),
             &[],
             &[],
@@ -3680,10 +3693,10 @@ mod tests {
 
     #[test]
     fn a_custom_entry_gets_no_plan_mark() {
-        use farik_core::team::{McpServerSource, custom_server};
+        use catervas_core::team::{McpServerSource, custom_server};
 
         let kit = a_kit_that_marks_a_tool();
-        let farik_roles::KitConnector::Server { entry, .. } = &kit.connectors[0] else {
+        let catervas_roles::KitConnector::Server { entry, .. } = &kit.connectors[0] else {
             panic!("a server");
         };
         let entry_as = |source: McpServerSource| {
@@ -3705,7 +3718,7 @@ mod tests {
         let mut widened = entry_as(McpServerSource::Kit);
         widened.tools.insert(
             "read".to_string(),
-            farik_core::governor::permissions::ConnectorTag::ExternalEffect,
+            catervas_core::governor::permissions::ConnectorTag::ExternalEffect,
         );
         assert!(
             super::session_connector(widened, Some(&kit))
@@ -3725,7 +3738,7 @@ mod tests {
         use crate::tools::fixtures::a_developer_kit;
 
         let harness = Harness::new("session-kit-stale", with_a_kit_server);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         harness
             .project
             .set_kit(a_developer_kit(&[], Some("network")));
@@ -3736,7 +3749,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let given = || {
             let spec = session_spec(
@@ -3778,7 +3791,7 @@ mod tests {
         use crate::tools::fixtures::a_developer_kit;
 
         let harness = Harness::new("session-kit-given", with_a_kit_server);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         harness
             .project
             .set_kit(a_developer_kit(&[], Some("network")));
@@ -3789,7 +3802,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3802,16 +3815,16 @@ mod tests {
         let root = deps.tools.files.root();
         let config = crate::claude::ClaudeConfig {
             claude_path: "/usr/local/bin/claude".into(),
-            hook_command: "/usr/local/bin/farik".into(),
-            daemon_file: root.join(".farik/local/daemon.json"),
+            hook_command: "/usr/local/bin/catervas".into(),
+            daemon_file: root.join(".catervas/local/daemon.json"),
             daemon: crate::daemon::DaemonInfo {
                 port: 47_123,
                 token: "the-daemon-token".to_string(),
                 pid: 1,
             },
-            sessions_dir: root.join(".farik/local/sessions"),
+            sessions_dir: root.join(".catervas/local/sessions"),
             skills_dir: root.join("skills-state"),
-            team_file: root.join(".farik/team.yaml"),
+            team_file: root.join(".catervas/team.yaml"),
             env: std::collections::BTreeMap::new(),
         };
         let dir = config.sessions_dir.join(&spec.session_id);
@@ -3820,7 +3833,7 @@ mod tests {
         let file: serde_json::Value = serde_json::from_str(&text).expect("JSON");
         assert_eq!(
             file["mcpServers"]["github"]["command"],
-            "/usr/local/bin/farik"
+            "/usr/local/bin/catervas"
         );
         assert_eq!(file["mcpServers"]["github"]["args"][1], "run");
         assert!(
@@ -3832,12 +3845,12 @@ mod tests {
             .agents
             .iter()
             .flat_map(|held| held.mcp_servers.iter().flatten())
-            .find_map(farik_core::team::custom_server)
+            .find_map(catervas_core::team::custom_server)
             .expect("a kit entry");
         assert!(server.kit);
         assert_eq!(
             server.tools["search"],
-            farik_core::governor::permissions::ConnectorTag::Network
+            catervas_core::governor::permissions::ConnectorTag::Network
         );
     }
 
@@ -3848,7 +3861,7 @@ mod tests {
 
         let (pin, text) = a_skill_pin("launch-plans", "THE-TEAMS-LAUNCH-PLANS");
         let harness = Harness::new("session-kit-skills", |wire| wire["skills"] = json!([pin]));
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         harness.project.set_kit(a_developer_kit(
             &[("launch-plans", "THE-KITS-LAUNCH-PLANS")],
             None,
@@ -3859,7 +3872,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let loaded = || {
             let spec = session_spec(
@@ -3900,7 +3913,7 @@ mod tests {
         );
         // With no skill of the name on the team, the kit's loads.
         let bare = Harness::new("session-kit-skills-bare", |_| {});
-        bare.file("FRK-1", "draft", |_| {});
+        bare.file("CTV-1", "draft", |_| {});
         bare.project.set_kit(a_developer_kit(
             &[("launch-plans", "THE-KITS-LAUNCH-PLANS")],
             None,
@@ -3911,7 +3924,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3974,11 +3987,11 @@ mod tests {
                 .expect("a list")
                 .truncate(1);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         let store = Arc::new(Flaky::default());
         let deps = &harness.project.deps;
         let team = deps.files.read_team().expect("the team");
-        let github = farik_core::team::custom_server(
+        let github = catervas_core::team::custom_server(
             &agent(&team, "dev-a").mcp_servers.as_ref().expect("servers")[0],
         )
         .expect("a custom server");
@@ -3989,7 +4002,7 @@ mod tests {
                     .secret_at(deps.files.root(), "dev-a", "github")
                     .expect("an address"),
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&github),
+                    spec_sha256: catervas_core::team::spec_sha256(&github),
                     keys: [(
                         "API_KEY".to_string(),
                         crate::claude::Secret::new(KEY_VALUE.to_string()),
@@ -4017,7 +4030,7 @@ mod tests {
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let contract = deps
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let given = || {
             let spec = session_spec(
@@ -4064,10 +4077,10 @@ mod tests {
             servers.push(jira);
             servers.push(asana);
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         // `linear` was connected at another address than the team file now names.
         connect(&harness, &["github", "linear", "asana"], |server| {
-            if let farik_core::team::CustomTransport::Http { url, .. } = &mut server.transport
+            if let catervas_core::team::CustomTransport::Http { url, .. } = &mut server.transport
                 && server.name == "linear"
             {
                 *url = "https://mcp.linear.example/old".to_string();
@@ -4081,7 +4094,7 @@ mod tests {
                 .mcp_servers
                 .iter()
                 .flatten()
-                .filter_map(farik_core::team::custom_server)
+                .filter_map(catervas_core::team::custom_server)
                 .find(|server| server.name == "asana")
                 .expect("asana");
             harness
@@ -4093,7 +4106,7 @@ mod tests {
                         .secret_at(deps.files.root(), "dev-a", "asana")
                         .expect("an address"),
                     &ConnectorEntry {
-                        spec_sha256: farik_core::team::spec_sha256(&asana),
+                        spec_sha256: catervas_core::team::spec_sha256(&asana),
                         keys: std::collections::BTreeMap::new(),
                         oauth: None,
                     },
@@ -4117,7 +4130,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         run_session(
             deps,
@@ -4161,7 +4174,7 @@ mod tests {
         harness: &Harness,
         fixture: &crate::oauth_fixture::Fixture,
         expires_in: chrono::Duration,
-        change: impl Fn(&mut farik_core::team::CustomServer),
+        change: impl Fn(&mut catervas_core::team::CustomServer),
     ) -> crate::sign_in::OAuthGrant {
         use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
 
@@ -4171,7 +4184,7 @@ mod tests {
             .mcp_servers
             .iter()
             .flatten()
-            .find_map(farik_core::team::custom_server)
+            .find_map(catervas_core::team::custom_server)
             .expect("notion");
         change(&mut server);
         let now = chrono::Utc::now();
@@ -4199,7 +4212,7 @@ mod tests {
             .save(
                 &at,
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    spec_sha256: catervas_core::team::spec_sha256(&server),
                     keys: std::collections::BTreeMap::new(),
                     oauth: Some(grant.clone()),
                 },
@@ -4237,7 +4250,7 @@ mod tests {
         let harness = Harness::new("session-signed-refresh", |wire| {
             signed_in_server(wire, &fixture.mcp_url, &json!({}));
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         // Ten minutes left, and the session may run thirty.
         let old = keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
@@ -4247,7 +4260,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         run_session(
             deps,
@@ -4283,7 +4296,7 @@ mod tests {
         let harness = Harness::new("session-signed-lapsed", |wire| {
             signed_in_server(wire, &fixture.mcp_url, &json!({}));
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
         let witness = Arc::new(ExecutorWitness::probing(
@@ -4297,7 +4310,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         run_session(
             deps,
@@ -4322,18 +4335,18 @@ mod tests {
         );
     }
 
-    /// `dev-a`'s one custom server, Farik's own connector `osv`, signed in to with `Google test`.
-    fn signed_in_farik_connector(wire: &mut serde_json::Value) {
+    /// `dev-a`'s one custom server, Catervas's own connector `osv`, signed in to with `Google test`.
+    fn signed_in_catervas_connector(wire: &mut serde_json::Value) {
         wire["agents"][1]["mcp_servers"] = json!([{
             "name": "osv", "source": "custom", "transport": "stdio",
-            "command": "farik", "args": ["connector", "osv"], "oauth": {},
+            "command": "catervas", "args": ["connector", "osv"], "oauth": {},
             "tools": { "search": "network" }
         }]);
     }
 
     /// Keeps a grant of `Google test` for `osv` that the fixture honours and that expires
     /// `expires_in` from now, and answers it. The daemon signs in with `Google test`.
-    fn keep_signed_in_farik(
+    fn keep_signed_in_catervas(
         harness: &Harness,
         fixture: &crate::oauth_fixture::Fixture,
         expires_in: chrono::Duration,
@@ -4351,7 +4364,7 @@ mod tests {
             .mcp_servers
             .iter()
             .flatten()
-            .find_map(farik_core::team::custom_server)
+            .find_map(catervas_core::team::custom_server)
             .expect("osv");
         let now = chrono::Utc::now();
         let (access, refresh) = fixture.mint();
@@ -4378,7 +4391,7 @@ mod tests {
             .save(
                 &at,
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    spec_sha256: catervas_core::team::spec_sha256(&server),
                     keys: std::collections::BTreeMap::new(),
                     oauth: Some(grant.clone()),
                 },
@@ -4398,9 +4411,9 @@ mod tests {
         // before the session is given the server.
         let fixture = runtime.block_on(crate::oauth_fixture::Fixture::start());
         fixture.set(|flags| flags.client_secret = Some(secret.to_string()));
-        let harness = Harness::new("session-farik-refresh", signed_in_farik_connector);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        let old = keep_signed_in_farik(&harness, &fixture, chrono::Duration::minutes(10));
+        let harness = Harness::new("session-catervas-refresh", signed_in_catervas_connector);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let old = keep_signed_in_catervas(&harness, &fixture, chrono::Duration::minutes(10));
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let deps = &orchestrator.deps;
@@ -4408,7 +4421,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         runtime
             .block_on(run_session(
@@ -4440,9 +4453,9 @@ mod tests {
             flags.client_secret = Some(secret.to_string());
             flags.refresh_error = Some((400, "invalid_grant".to_string()));
         });
-        let harness = Harness::new("session-farik-lapsed", signed_in_farik_connector);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        keep_signed_in_farik(&harness, &fixture, chrono::Duration::minutes(10));
+        let harness = Harness::new("session-catervas-lapsed", signed_in_catervas_connector);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        keep_signed_in_catervas(&harness, &fixture, chrono::Duration::minutes(10));
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let deps = &orchestrator.deps;
@@ -4450,7 +4463,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         runtime
             .block_on(run_session(
@@ -4483,7 +4496,7 @@ mod tests {
             let harness = Harness::new(&format!("session-signed-errs-{minutes}"), |wire| {
                 signed_in_server(wire, &fixture.mcp_url, &json!({}));
             });
-            harness.in_progress("FRK-1", "dev-a", "dev-b");
+            harness.in_progress("CTV-1", "dev-a", "dev-b");
             keep_signed_in(
                 &harness,
                 &fixture,
@@ -4497,7 +4510,7 @@ mod tests {
             let contract = deps
                 .tools
                 .files
-                .read_contract(&"FRK-1".parse().expect("a task id"))
+                .read_contract(&"CTV-1".parse().expect("a task id"))
                 .expect("the contract");
             run_session(
                 deps,
@@ -4518,7 +4531,7 @@ mod tests {
         let harness = Harness::new("session-signed-slow", |wire| {
             signed_in_server(wire, &fixture.mcp_url, &json!({}));
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         // Ten minutes left, a session of thirty, and the service not answering the refresh.
         let old = keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
         fixture.hold("token");
@@ -4529,7 +4542,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         run_session(
             deps,
@@ -4573,13 +4586,13 @@ mod tests {
                 &json!({ "scopes": ["read", "write"] }),
             );
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         keep_signed_in(
             &harness,
             &fixture,
             chrono::Duration::minutes(120),
             |server| {
-                if let farik_core::team::CustomTransport::Http {
+                if let catervas_core::team::CustomTransport::Http {
                     oauth: Some(oauth), ..
                 } = &mut server.transport
                 {
@@ -4593,7 +4606,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -4625,7 +4638,7 @@ mod tests {
                 .push(github);
         });
         harness.previews = Arc::new(FakePreviews::ready());
-        harness.in_progress("FRK-1", "dev-a", "ada");
+        harness.in_progress("CTV-1", "dev-a", "ada");
         connect(&harness, &["github"], |_| {});
         let adapter = harness.recorded(vec![
             crate::recorded::fixtures::reads_a_file(),
@@ -4642,7 +4655,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let without_network = agent(&team, "dev-a").tiers(&team.permissions());
         assert!(!without_network.contains(&PermissionTier::Network));
@@ -4685,7 +4698,7 @@ mod tests {
             );
         }
     }
-    /// dev-a's implement session of FRK-1, given `github`, whose start calls each of `probes`.
+    /// dev-a's implement session of CTV-1, given `github`, whose start calls each of `probes`.
     async fn probed_session(
         harness: &Harness,
         probes: &[&str],
@@ -4711,7 +4724,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let end = run_session(
             deps,
@@ -4727,7 +4740,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn an_external_effect_call_asks_and_stops() {
         let harness = Harness::new("session-approval-asks", with_custom_servers);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         connect(&harness, &["github"], |_| {});
         let (witness, end) = probed_session(&harness, &["mcp__github__create_issue"]).await;
 
@@ -4741,7 +4754,7 @@ mod tests {
         assert_eq!(body.input, input.to_string());
         assert_eq!(
             body.input_sha256.as_str(),
-            farik_core::governor::permissions::input_sha256(&input)
+            catervas_core::governor::permissions::input_sha256(&input)
         );
         let decided = &witness.decided()[0];
         assert_eq!(
@@ -4767,9 +4780,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn an_approval_stop_is_not_a_failed_try() {
         let harness = Harness::new("session-approval-try", with_custom_servers);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         connect(&harness, &["github"], |_| {});
-        let before = harness.row("FRK-1");
+        let before = harness.row("CTV-1");
         let adapter = harness.recorded(vec![
             crate::recorded::fixtures::reads_a_file(),
             crate::recorded::fixtures::reads_a_file(),
@@ -4784,7 +4797,7 @@ mod tests {
         assert_eq!(adapter.started().len(), 1);
         assert_eq!(harness.events(&[EventKind::ToolApprovalRequested]).len(), 1);
 
-        let after = harness.row("FRK-1");
+        let after = harness.row("CTV-1");
         assert_eq!(
             (after.status, after.iteration),
             (before.status, before.iteration)
@@ -4795,10 +4808,10 @@ mod tests {
             .project
             .deps
             .projections
-            .costs(farik_store::CostScope::Task)
+            .costs(catervas_store::CostScope::Task)
             .expect("the costs read")
             .into_iter()
-            .find(|row| row.key == "FRK-1")
+            .find(|row| row.key == "CTV-1")
             .map(|row| row.sessions);
         assert_eq!(sessions, Some(1), "max_sessions counts it");
         // While it waits, no session starts for it.
@@ -4810,7 +4823,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_next_session_is_told_and_runs_the_call_once() {
         let harness = Harness::new("session-approval-granted", with_custom_servers);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         connect(&harness, &["github"], |_| {});
         let create = "mcp__github__create_issue";
         probed_session(&harness, &[create]).await;
@@ -4819,7 +4832,7 @@ mod tests {
             .seq;
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator
-            .handle(farik_protocol::command::Command::ToolApprove {
+            .handle(catervas_protocol::command::Command::ToolApprove {
                 approval,
                 note: None,
             })
@@ -4861,7 +4874,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_next_session_is_shown_the_input_and_replays_it_through() {
         let harness = Harness::new("session-approval-replay", with_custom_servers);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         connect(&harness, &["github"], |_| {});
         let create = "mcp__github__create_issue";
         // Keys out of order, a line break, a quote, and a non-ASCII letter: what an agent could not write again from memory.
@@ -4876,7 +4889,7 @@ mod tests {
             .seq;
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator
-            .handle(farik_protocol::command::Command::ToolApprove {
+            .handle(catervas_protocol::command::Command::ToolApprove {
                 approval,
                 note: Some("only this".to_string()),
             })
@@ -4894,7 +4907,7 @@ mod tests {
             .await
             .expect("the tick runs");
         let prompt = &adapter.started()[0].system_prompt;
-        let canonical = farik_core::team::canonical_json(&asked);
+        let canonical = catervas_core::team::canonical_json(&asked);
         assert!(
             prompt.contains(&format!(
                 "<untrusted source=\"tool_input\">\n{canonical}\n</untrusted>"

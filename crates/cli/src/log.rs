@@ -1,9 +1,9 @@
-//! `farik log`: the event log, filtered, and the export F11 asks for.
+//! `catervas log`: the event log, filtered, and the export F11 asks for.
 
 use std::str::FromStr;
 
-use farik_protocol::event::{EVERY_KIND, EventKind, event_to_value};
-use farik_store::EventQuery;
+use catervas_protocol::event::{EVERY_KIND, EventKind, event_to_value};
+use catervas_store::EventQuery;
 use serde_json::json;
 
 use crate::Report;

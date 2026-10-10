@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sentCommand } from "../../test/gate.ts";
@@ -58,7 +58,7 @@ describe("a reply from a seller, read", () => {
 		).toBeTruthy();
 		expect(
 			within(dialog).getByText(
-				"“tool.exe” was not kept: Farik keeps only PDFs and pictures of 10 MB or less.",
+				"“tool.exe” was not kept: Catervas keeps only PDFs and pictures of 10 MB or less.",
 			),
 		).toBeTruthy();
 	});
@@ -73,7 +73,7 @@ describe("a reply from a seller, read", () => {
 		const dialog = await screen.findByRole("dialog", {
 			name: "Reply from Packaging\\u{202e} Express",
 		});
-		// From, the subject Farik sent, the reply's subject and words, and both file names.
+		// From, the subject Catervas sent, the reply's subject and words, and both file names.
 		showsWhatItHides(dialog);
 		expect(s.calls("command")).toHaveLength(0);
 	});
@@ -99,13 +99,13 @@ describe("a reply from a seller, read", () => {
 		) as HTMLTextAreaElement;
 		// The draft is the owner's words and quotes nothing the seller wrote.
 		expect(text.value).toBe(
-			"Compare the sellers’ replies for FRK-31 Find a supplier for 500 pie boxes, and tell me which offer is best.",
+			"Compare the sellers’ replies for CTV-31 Find a supplier for 500 pie boxes, and tell me which offer is best.",
 		);
 		fireEvent.click(
 			within(asking).getByRole("button", { name: "Send to the team" }),
 		);
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(1));
-		await s.reply(s.calls("request.file")[0] as never, { task_id: "FRK-40" });
+		await s.reply(s.calls("request.file")[0] as never, { task_id: "CTV-40" });
 		const dismissed = await sentCommand(s);
 		expect(dismissed.params).toEqual({
 			command: { command: "seller_reply_dismiss", body: { reply: 7 } },

@@ -9,7 +9,7 @@ You recommend a budget. The user decides it, and you cannot set one.
 
 ## 1. Start from the forecast
 
-Read the team's AI spending with `farik_read_costs` for the last weeks, by `day` and by `sprint`,
+Read the team's AI spending with `catervas_read_costs` for the last weeks, by `day` and by `sprint`,
 and make or read a forecast of the next sprint and the next days. Do not recommend a number you
 cannot trace to a forecast.
 

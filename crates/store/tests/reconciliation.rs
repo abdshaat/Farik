@@ -4,15 +4,15 @@
 
 use std::sync::Arc;
 
-use chrono::{TimeZone, Utc};
-use farik_core::contract::{TaskContract, TaskId, TaskStatus, validate_contract};
-use farik_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
-use farik_protocol::event::{EventKind, NewEvent, event_from_value};
-use farik_store::files::ProjectFiles;
-use farik_store::files::fixtures::TempProject;
-use farik_store::{
+use catervas_core::contract::{TaskContract, TaskId, TaskStatus, validate_contract};
+use catervas_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
+use catervas_protocol::event::{EventKind, NewEvent, event_from_value};
+use catervas_store::files::ProjectFiles;
+use catervas_store::files::fixtures::TempProject;
+use catervas_store::{
     Drift, EventLog, IN_MEMORY, Projections, ReconcileError, open_event_log, open_projections,
 };
+use chrono::{TimeZone, Utc};
 use serde_json::json;
 
 /// A log and the projections of it, both empty.
@@ -67,7 +67,7 @@ fn on_the_board(
 
 /// A contract of that id, at that status, held or not.
 fn a_contract(id: &str, status: TaskStatus, locked: bool) -> TaskContract {
-    let mut wire = farik_core::contract::fixtures::a_contract_wire();
+    let mut wire = catervas_core::contract::fixtures::a_contract_wire();
     wire["id"] = json!(id);
     wire["status"] = json!(status.to_string());
     wire["locked"] = json!(locked);
@@ -79,7 +79,7 @@ fn an_id(id: &str) -> TaskId {
 }
 
 fn drifts(files: &ProjectFiles, projections: &Projections) -> Vec<Drift> {
-    farik_store::reconcile(files, projections).expect("it reconciles")
+    catervas_store::reconcile(files, projections).expect("it reconciles")
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn a_project_whose_files_and_log_agree_has_nothing_to_report() {
     let project = TempProject::new("reconcile-agree");
     let files = project.files();
     let (log, projections) = a_board();
-    for id in ["FRK-1", "FRK-2"] {
+    for id in ["CTV-1", "CTV-2"] {
         on_the_board(&log, &projections, id, "ready", false);
         files
             .write_contract(&a_contract(id, TaskStatus::Ready, false))
@@ -102,7 +102,7 @@ fn says_when_there_is_a_contract_the_log_has_never_heard_of() {
     let files = project.files();
     let (_log, projections) = a_board();
     files
-        .write_contract(&a_contract("FRK-7", TaskStatus::Draft, false))
+        .write_contract(&a_contract("CTV-7", TaskStatus::Draft, false))
         .expect("written");
 
     let found = drifts(&files, &projections);
@@ -110,14 +110,14 @@ fn says_when_there_is_a_contract_the_log_has_never_heard_of() {
     let Drift::ContractWithoutEvents { task_id, detail } = &found[0] else {
         panic!("a file nothing created: {found:?}");
     };
-    assert_eq!(task_id, &an_id("FRK-7"));
+    assert_eq!(task_id, &an_id("CTV-7"));
     assert!(detail.contains("never heard of this task"), "{detail}");
     // What a person is shown, which is `Drift`'s own two accessors and its `Display`.
-    assert_eq!(found[0].task_id(), &an_id("FRK-7"));
+    assert_eq!(found[0].task_id(), &an_id("CTV-7"));
     assert_eq!(found[0].detail(), detail);
     assert_eq!(
         found[0].to_string(),
-        "FRK-7: there is a contract file and the log has never heard of this task, so no transition \
+        "CTV-7: there is a contract file and the log has never heard of this task, so no transition \
          of it was ever governed"
     );
 }
@@ -127,14 +127,14 @@ fn says_when_the_log_knows_a_task_with_no_contract_to_work_from() {
     let project = TempProject::new("reconcile-orphan-log");
     let files = project.files();
     let (log, projections) = a_board();
-    on_the_board(&log, &projections, "FRK-3", "assigned", false);
+    on_the_board(&log, &projections, "CTV-3", "assigned", false);
 
     let found = drifts(&files, &projections);
     assert_eq!(found.len(), 1, "{found:?}");
     let Drift::EventsWithoutContract { task_id, detail } = &found[0] else {
         panic!("a task with no contract: {found:?}");
     };
-    assert_eq!(task_id, &an_id("FRK-3"));
+    assert_eq!(task_id, &an_id("CTV-3"));
     assert!(detail.contains("assigned"), "{detail}");
     assert!(detail.contains("no contract file"), "{detail}");
 }
@@ -144,9 +144,9 @@ fn says_when_the_file_and_the_log_disagree_about_where_a_task_is() {
     let project = TempProject::new("reconcile-status");
     let files = project.files();
     let (log, projections) = a_board();
-    on_the_board(&log, &projections, "FRK-1", "accepted", false);
+    on_the_board(&log, &projections, "CTV-1", "accepted", false);
     files
-        .write_contract(&a_contract("FRK-1", TaskStatus::InProgress, false))
+        .write_contract(&a_contract("CTV-1", TaskStatus::InProgress, false))
         .expect("written");
 
     let found = drifts(&files, &projections);
@@ -154,7 +154,7 @@ fn says_when_the_file_and_the_log_disagree_about_where_a_task_is() {
     let Drift::StatusMismatch { task_id, detail } = &found[0] else {
         panic!("two answers about one task: {found:?}");
     };
-    assert_eq!(task_id, &an_id("FRK-1"));
+    assert_eq!(task_id, &an_id("CTV-1"));
     assert_eq!(
         detail, "the log has it at accepted and the file says in_progress",
         "the log's answer first, because transitions are what the log records"
@@ -168,9 +168,9 @@ fn says_when_the_file_and_the_log_disagree_about_who_holds_a_contract() {
     let project = TempProject::new("reconcile-lock");
     let files = project.files();
     let (log, projections) = a_board();
-    on_the_board(&log, &projections, "FRK-1", "ready", true);
+    on_the_board(&log, &projections, "CTV-1", "ready", true);
     files
-        .write_contract(&a_contract("FRK-1", TaskStatus::Ready, false))
+        .write_contract(&a_contract("CTV-1", TaskStatus::Ready, false))
         .expect("written");
 
     let found = drifts(&files, &projections);
@@ -178,7 +178,7 @@ fn says_when_the_file_and_the_log_disagree_about_who_holds_a_contract() {
     let Drift::LockMismatch { task_id, detail } = &found[0] else {
         panic!("two answers about who holds it: {found:?}");
     };
-    assert_eq!(task_id, &an_id("FRK-1"));
+    assert_eq!(task_id, &an_id("CTV-1"));
     assert_eq!(
         detail,
         "the log has it held by the human and the file says not held"
@@ -192,7 +192,7 @@ fn says_when_the_file_and_the_log_disagree_about_a_tasks_sprint() {
     let project = TempProject::new("reconcile-sprint");
     let files = project.files();
     let (log, projections) = a_board();
-    for id in ["FRK-1", "FRK-2"] {
+    for id in ["CTV-1", "CTV-2"] {
         on_the_board(&log, &projections, id, "ready", false);
     }
     for (kind, body) in [
@@ -202,7 +202,7 @@ fn says_when_the_file_and_the_log_disagree_about_a_tasks_sprint() {
         ),
         (
             EventKind::SprintPlanned,
-            json!({ "sprint_id": "S1", "task_ids": ["FRK-2"], "planned_by": "pm" }),
+            json!({ "sprint_id": "S1", "task_ids": ["CTV-2"], "planned_by": "pm" }),
         ),
     ] {
         let mut wire = an_event_wire(kind);
@@ -218,11 +218,11 @@ fn says_when_the_file_and_the_log_disagree_about_a_tasks_sprint() {
             .apply(&log.append(&new).expect("appends"))
             .expect("projects");
     }
-    let mut in_s1 = a_contract("FRK-1", TaskStatus::Ready, false);
+    let mut in_s1 = a_contract("CTV-1", TaskStatus::Ready, false);
     in_s1.sprint = Some("S1".to_string());
     files.write_contract(&in_s1).expect("written");
     files
-        .write_contract(&a_contract("FRK-2", TaskStatus::Ready, false))
+        .write_contract(&a_contract("CTV-2", TaskStatus::Ready, false))
         .expect("written");
 
     let found = drifts(&files, &projections);
@@ -230,11 +230,11 @@ fn says_when_the_file_and_the_log_disagree_about_a_tasks_sprint() {
         found,
         [
             Drift::SprintMismatch {
-                task_id: an_id("FRK-1"),
+                task_id: an_id("CTV-1"),
                 detail: "the log has it in no sprint and the file says in S1".to_string(),
             },
             Drift::SprintMismatch {
-                task_id: an_id("FRK-2"),
+                task_id: an_id("CTV-2"),
                 detail: "the log has it in S1 and the file says in no sprint".to_string(),
             },
         ]
@@ -248,17 +248,17 @@ fn reports_a_contract_it_cannot_read_rather_than_stopping_at_it() {
     let project = TempProject::new("reconcile-broken");
     let files = project.files();
     let (log, projections) = a_board();
-    on_the_board(&log, &projections, "FRK-1", "ready", false);
-    on_the_board(&log, &projections, "FRK-2", "accepted", false);
+    on_the_board(&log, &projections, "CTV-1", "ready", false);
+    on_the_board(&log, &projections, "CTV-2", "accepted", false);
     files
-        .write_contract(&a_contract("FRK-1", TaskStatus::Ready, false))
+        .write_contract(&a_contract("CTV-1", TaskStatus::Ready, false))
         .expect("written");
     files
-        .write_contract(&a_contract("FRK-2", TaskStatus::Ready, false))
+        .write_contract(&a_contract("CTV-2", TaskStatus::Ready, false))
         .expect("written");
     std::fs::write(
-        project.root.join(".farik/contracts/FRK-1.yaml"),
-        "id: FRK-1\ntitle: half a contract\n",
+        project.root.join(".catervas/contracts/CTV-1.yaml"),
+        "id: CTV-1\ntitle: half a contract\n",
     )
     .expect("a person edits one");
 
@@ -267,10 +267,13 @@ fn reports_a_contract_it_cannot_read_rather_than_stopping_at_it() {
     let Drift::ContractUnreadable { task_id, detail } = &found[0] else {
         panic!("the broken one, and then the other: {found:?}");
     };
-    assert_eq!(task_id, &an_id("FRK-1"));
-    assert!(detail.contains(".farik/contracts/FRK-1.yaml"), "{detail}");
+    assert_eq!(task_id, &an_id("CTV-1"));
     assert!(
-        matches!(&found[1], Drift::StatusMismatch { task_id, .. } if task_id == &an_id("FRK-2")),
+        detail.contains(".catervas/contracts/CTV-1.yaml"),
+        "{detail}"
+    );
+    assert!(
+        matches!(&found[1], Drift::StatusMismatch { task_id, .. } if task_id == &an_id("CTV-2")),
         "{found:?}"
     );
 }
@@ -280,7 +283,7 @@ fn says_what_it_could_not_compare_and_why() {
     assert_eq!(
         [
             ReconcileError::Files {
-                detail: ".farik/contracts could not be used: Permission denied (os error 13)"
+                detail: ".catervas/contracts could not be used: Permission denied (os error 13)"
                     .to_string()
             }
             .to_string(),
@@ -290,7 +293,7 @@ fn says_what_it_could_not_compare_and_why() {
             .to_string(),
         ],
         [
-            "the files could not be read: .farik/contracts could not be used: Permission denied \
+            "the files could not be read: .catervas/contracts could not be used: Permission denied \
              (os error 13)",
             "the board could not be read: sqlite refused: database is locked",
         ]
@@ -303,20 +306,20 @@ fn reports_everything_it_found_in_an_order_two_runs_agree_on() {
     let files = project.files();
     let (log, projections) = a_board();
     for (id, status) in [
-        ("FRK-10", "ready"),
-        ("FRK-2", "accepted"),
-        ("FRK-9", "ready"),
+        ("CTV-10", "ready"),
+        ("CTV-2", "accepted"),
+        ("CTV-9", "ready"),
     ] {
         on_the_board(&log, &projections, id, status, false);
     }
     files
-        .write_contract(&a_contract("FRK-2", TaskStatus::Draft, true))
+        .write_contract(&a_contract("CTV-2", TaskStatus::Draft, true))
         .expect("written");
     files
-        .write_contract(&a_contract("FRK-10", TaskStatus::Ready, false))
+        .write_contract(&a_contract("CTV-10", TaskStatus::Ready, false))
         .expect("written");
     files
-        .write_contract(&a_contract("FRK-11", TaskStatus::Draft, false))
+        .write_contract(&a_contract("CTV-11", TaskStatus::Draft, false))
         .expect("written");
 
     let found = drifts(&files, &projections);
@@ -326,10 +329,10 @@ fn reports_everything_it_found_in_an_order_two_runs_agree_on() {
             .map(|drift| (drift.task_id().as_str().to_string(), name_of(drift)))
             .collect::<Vec<_>>(),
         [
-            ("FRK-2".to_string(), "StatusMismatch"),
-            ("FRK-2".to_string(), "LockMismatch"),
-            ("FRK-9".to_string(), "EventsWithoutContract"),
-            ("FRK-11".to_string(), "ContractWithoutEvents"),
+            ("CTV-2".to_string(), "StatusMismatch"),
+            ("CTV-2".to_string(), "LockMismatch"),
+            ("CTV-9".to_string(), "EventsWithoutContract"),
+            ("CTV-11".to_string(), "ContractWithoutEvents"),
         ],
         "by the number in the id, so the tenth task does not come before the ninth, and then in one \
          fixed order per task"
@@ -346,12 +349,12 @@ fn orders_two_spellings_of_one_number_by_the_id_itself() {
     let project = TempProject::new("reconcile-two-spellings");
     let files = project.files();
     let (log, projections) = a_board();
-    // `FRK-01` and `FRK-1` are two spellings of one number, and each is found by a different loop:
+    // `CTV-01` and `CTV-1` are two spellings of one number, and each is found by a different loop:
     // the board knows the first and the files hold the second. Nothing but a tie-break decides
     // which comes out first, and "whichever loop got there" is not an order a person can diff.
-    on_the_board(&log, &projections, "FRK-01", "ready", false);
+    on_the_board(&log, &projections, "CTV-01", "ready", false);
     files
-        .write_contract(&a_contract("FRK-1", TaskStatus::Draft, false))
+        .write_contract(&a_contract("CTV-1", TaskStatus::Draft, false))
         .expect("written");
 
     assert_eq!(
@@ -360,15 +363,15 @@ fn orders_two_spellings_of_one_number_by_the_id_itself() {
             .map(|drift| (drift.task_id().as_str().to_string(), name_of(drift)))
             .collect::<Vec<_>>(),
         [
-            ("FRK-01".to_string(), "EventsWithoutContract"),
-            ("FRK-1".to_string(), "ContractWithoutEvents"),
+            ("CTV-01".to_string(), "EventsWithoutContract"),
+            ("CTV-1".to_string(), "ContractWithoutEvents"),
         ],
         "the id breaks the tie, the way the board's own order does"
     );
 }
 
 #[test]
-fn a_project_with_no_farik_directory_at_all_has_nothing_to_report() {
+fn a_project_with_no_catervas_directory_at_all_has_nothing_to_report() {
     let project = TempProject::new("reconcile-nothing");
     let (_log, projections) = a_board();
     assert_eq!(drifts(&project.files(), &projections), []);

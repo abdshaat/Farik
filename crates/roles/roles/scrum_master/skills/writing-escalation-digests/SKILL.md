@@ -20,5 +20,5 @@ retell the history; name the task so they can open it. Then one line for each bu
 
 ## 3. Send it
 
-Post the digest with `farik_post_message`, beside the plan and within the planning's three posts.
+Post the digest with `catervas_post_message`, beside the plan and within the planning's three posts.
 Nothing already answered goes in it.

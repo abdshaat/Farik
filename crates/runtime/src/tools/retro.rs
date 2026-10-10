@@ -1,7 +1,7 @@
-//! `farik_append_retro` (`docs/SPEC.md` 5.9): the retro ceremony records what the next planning
-//! should know, in `.farik/team/retro.md` and the log.
+//! `catervas_append_retro` (`docs/SPEC.md` 5.9): the retro ceremony records what the next planning
+//! should know, in `.catervas/team/retro.md` and the log.
 
-use farik_protocol::event::{EventBody, Thread};
+use catervas_protocol::event::{EventBody, Thread};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -10,7 +10,7 @@ use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 use crate::ceremonies::ended_sprint;
 
-/// `farik_append_retro`'s input.
+/// `catervas_append_retro`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AppendRetroInput {
@@ -71,7 +71,7 @@ fn refused(why: &str) -> ToolError {
 mod tests {
     use serde_json::json;
 
-    use farik_protocol::event::Thread;
+    use catervas_protocol::event::Thread;
 
     use crate::session::SessionPurpose;
     use crate::tools::ToolError;
@@ -81,14 +81,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_retro_outside_a_retro_ceremony() {
         let project = TestProject::new("retro-outside", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         let before = project.event_count();
 
         let refused = project
             .call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_append_retro",
+                Some("CTV-1"),
+                "catervas_append_retro",
                 json!({ "text": "Keep the tasks small." }),
             )
             .expect_err("an implement session writes no retro");
@@ -126,14 +126,18 @@ mod tests {
         let (first, second) = (retro_session("s-retro-1"), retro_session("s-retro-2"));
         run(
             &first,
-            "farik_append_retro",
+            "catervas_append_retro",
             json!({ "text": "Keep them small." }),
         )
         .expect("the sprint's retro");
         let before = project.event_count();
 
-        let refused = run(&second, "farik_append_retro", json!({ "text": "Again." }))
-            .expect_err("a sprint gets one retro");
+        let refused = run(
+            &second,
+            "catervas_append_retro",
+            json!({ "text": "Again." }),
+        )
+        .expect_err("a sprint gets one retro");
 
         assert_eq!(
             refused,
@@ -160,7 +164,7 @@ mod tests {
         let before = project.event_count();
 
         for text in [" \n ".to_string(), "x".repeat(4_001)] {
-            let refused = run(&context, "farik_append_retro", json!({ "text": text }))
+            let refused = run(&context, "catervas_append_retro", json!({ "text": text }))
                 .expect_err("not a retro");
             assert!(
                 matches!(&refused, ToolError::Refused { reason } if reason.starts_with("retro_refused: ")),
@@ -175,7 +179,7 @@ mod tests {
         );
         run(
             &context,
-            "farik_append_retro",
+            "catervas_append_retro",
             json!({ "text": "é".repeat(4_000) }),
         )
         .expect("4,000 characters are a retro");

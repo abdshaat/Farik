@@ -1,4 +1,4 @@
-import { Button, uiStrings } from "@farik/ui";
+import { Button, uiStrings } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";

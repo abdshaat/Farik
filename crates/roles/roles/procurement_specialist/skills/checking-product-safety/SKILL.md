@@ -26,8 +26,8 @@ Without it, or for a product sold elsewhere, look on an official agency's own pu
 - the maker's own recall or safety-notice page;
 - in another country, that country's consumer safety agency.
 
-None of these is on Farik's list of sites you may read. Ask for the one you need before you end
-your turn, with `farik_request_sites`: the first page you want and why, such as "the official list
+None of these is on Catervas's list of sites you may read. Ask for the one you need before you end
+your turn, with `catervas_request_sites`: the first page you want and why, such as "the official list
 of product recalls, to check this product". Your task then waits for the owner. If the owner
 declines, or you cannot wait, say in your note that the recalls were not checked.
 

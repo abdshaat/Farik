@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import icon from "@catervas/brand/assets/icons/icon-48.png";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	fireEvent,
@@ -236,5 +237,19 @@ describe("shell", () => {
 					.getAttribute("aria-current"),
 			).toBe("page"),
 		);
+	});
+
+	it("shows Catervas's mark beside its name in the rail", async () => {
+		media.set(WIDE, true);
+		const { socket } = await renderApp("/");
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false);
+		const line = within(screen.getByRole("banner")).getByText(en.brand);
+		const img = line.querySelector("img");
+		expect(img?.getAttribute("src")).toBe(icon);
+		expect(img?.alt).toBe("");
+		expect(img?.getAttribute("width")).toBe("24");
+		expect(img?.getAttribute("height")).toBe("24");
+		expect(line.textContent).toBe(en.brand);
 	});
 });

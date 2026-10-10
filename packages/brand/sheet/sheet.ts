@@ -48,9 +48,9 @@ function themeColumn(theme: ThemeName): HTMLElement {
 				"p",
 				{
 					"data-type": name,
-					style: `color:${c.ink};font:${t.weight} ${t.size}px/${t.lineHeight}px var(--farik-type-${name}-family)`,
+					style: `color:${c.ink};font:${t.weight} ${t.size}px/${t.lineHeight}px var(--catervas-type-${name}-family)`,
 				},
-				`${name}, ${t.size}/${t.lineHeight}, ${t.weight}: Farik runs your team`,
+				`${name}, ${t.size}/${t.lineHeight}, ${t.weight}: Catervas runs your team`,
 			),
 		);
 	}
@@ -127,10 +127,12 @@ function themeColumn(theme: ThemeName): HTMLElement {
 						? `background:${c.band};padding:${tokens.space["4"]}px;border-radius:${tokens.radius.raised}px`
 						: "",
 			},
-			img(asset("logo-mark-1254.png"), "Farik logo mark", {
+			img(asset("logo-mark-1254.png"), "Catervas logo mark", {
 				class: "mark",
 			}),
-			img(asset("wordmark-1024.png"), "Farik wordmark", { class: "wordmark" }),
+			img(asset("wordmark-1024.png"), "Catervas wordmark", {
+				class: "wordmark",
+			}),
 		),
 		el("h3", {}, "Type scale"),
 		scale,
@@ -169,7 +171,7 @@ export function renderSheet(root: HTMLElement): void {
 	}
 
 	root.replaceChildren(
-		el("h1", {}, "Farik brand sheet"),
+		el("h1", {}, "Catervas brand sheet"),
 		el("div", { class: "themes" }, ...THEMES.map(themeColumn)),
 		el(
 			"section",

@@ -132,7 +132,7 @@ export const GOING_OUT = {
 
 /** The row `waiting.list` gives while Kai's post outside the plan waits on the owner. */
 export const POST_ROW = {
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	kind: "social_post",
 	agent_id: "kai",
 	title: "Autumn marketing plan",

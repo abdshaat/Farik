@@ -1,19 +1,19 @@
-//! `farik_draft_purchase_order` (`docs/SPEC.md` 6.10, ADR 0039): the Procurement Specialist
+//! `catervas_draft_purchase_order` (`docs/SPEC.md` 6.10, ADR 0039): the Procurement Specialist
 //! suggests a purchase order and never places, pays for, confirms or cancels one. The order is a
-//! record and a document, not a gate: Farik writes its workbook, `orders/PO-<n>.xlsx` in the
+//! record and a document, not a gate: Catervas writes its workbook, `orders/PO-<n>.xlsx` in the
 //! role's private folder, and records `purchase_order.drafted`; the task goes on, and the order
-//! waits for the owner alone. The agent cannot write that folder with `farik_write_sheet`.
+//! waits for the owner alone. The agent cannot write that folder with `catervas_write_sheet`.
 
 use std::fs;
 use std::path::Path;
 
-use farik_core::contract::Role;
-use farik_core::governor::sites::site_of;
-use farik_core::marketing::{Amount, parse_amount};
-use farik_core::order::{OrderError, OrderLine, line_total, order_total};
-use farik_core::team::private_folder;
-use farik_protocol::event::{EventBody, PurchaseOrderDraftedBody, PurchaseOrderUpdatedBody};
-use farik_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
+use catervas_core::contract::Role;
+use catervas_core::governor::sites::site_of;
+use catervas_core::marketing::{Amount, parse_amount};
+use catervas_core::order::{OrderError, OrderLine, line_total, order_total};
+use catervas_core::team::private_folder;
+use catervas_protocol::event::{EventBody, PurchaseOrderDraftedBody, PurchaseOrderUpdatedBody};
+use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -38,7 +38,7 @@ const MOST_URL: usize = 2_000;
 /// The folder, in the role's private folder, that holds each order's workbook.
 const ORDERS_FOLDER: &str = "orders";
 
-/// `farik_draft_purchase_order`'s input.
+/// `catervas_draft_purchase_order`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DraftPurchaseOrderInput {
@@ -63,13 +63,13 @@ pub(crate) struct DraftPurchaseOrderInput {
     #[serde(default)]
     terms: String,
     /// The seller's page for these goods, an address that starts with https:// on a site the
-    /// owner allowed (`farik_read_sites` lists them; `farik_request_sites` asks for another),
+    /// owner allowed (`catervas_read_sites` lists them; `catervas_request_sites` asks for another),
     /// at most 2000 characters. Leave it empty for a seller with no page, met by phone or in
     /// person.
     #[serde(default)]
     url: String,
     /// The comparison this order rests on: `evaluations/<name>.md`, written with
-    /// `farik_write_evaluation`.
+    /// `catervas_write_evaluation`.
     evaluation: String,
     /// Why this seller and these goods, 20 to 600 characters, in your own words. The owner reads
     /// it beside the order.
@@ -253,7 +253,7 @@ fn check_page(call: &Call<'_>, url: &str) -> Result<(), ToolError> {
         return Err(refused(
             "purchase_order_site_not_approved",
             format!(
-                "{host} is not a site the owner allowed; ask for it with farik_request_sites \
+                "{host} is not a site the owner allowed; ask for it with catervas_request_sites \
                  first, then end your turn"
             ),
         ));
@@ -272,7 +272,7 @@ fn check_evaluation(call: &Call<'_>, folder: &str, evaluation: &str) -> Result<(
             "purchase_order_evaluation_invalid",
             format!(
                 "{} is not a comparison: write evaluations/<name>.md, the name of a note made \
-                 with farik_write_evaluation",
+                 with catervas_write_evaluation",
                 shown(evaluation)
             ),
         ));
@@ -283,7 +283,7 @@ fn check_evaluation(call: &Call<'_>, folder: &str, evaluation: &str) -> Result<(
         return Err(refused(
             "evaluation_missing",
             format!(
-                "there is no comparison at {evaluation}; write it with farik_write_evaluation \
+                "there is no comparison at {evaluation}; write it with catervas_write_evaluation \
                  first"
             ),
         ));
@@ -372,7 +372,7 @@ fn workbook(
     vec![SheetInput::new("Order", rows)]
 }
 
-/// `farik_draft_purchase_order`: checks the order, numbers it, writes `orders/PO-<n>.xlsx` as a
+/// `catervas_draft_purchase_order`: checks the order, numbers it, writes `orders/PO-<n>.xlsx` as a
 /// new file and records `purchase_order.drafted`, in the Procurement Specialist's implement
 /// session of a task it is the assignee of. The order waits for the owner; the task goes on. A
 /// call is refused whole, with nothing written or recorded, for the first fault in this order: the
@@ -450,7 +450,7 @@ pub(super) fn draft_purchase_order(
             "too_many_purchase_orders",
             format!(
                 "{MOST_WAITING} orders wait for the owner already; read them with \
-                 farik_read_purchase_orders, and go on without another"
+                 catervas_read_purchase_orders, and go on without another"
             ),
         ));
     }
@@ -536,7 +536,7 @@ fn drafted_body(
     .map_err(failed)
 }
 
-/// `farik_update_purchase_order`'s input.
+/// `catervas_update_purchase_order`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct UpdatePurchaseOrderInput {
@@ -557,7 +557,7 @@ pub(crate) struct UpdatePurchaseOrderInput {
     expected_on: Option<String>,
 }
 
-/// `farik_read_purchase_orders`: every order of the project, oldest first, with its state, lines
+/// `catervas_read_purchase_orders`: every order of the project, oldest first, with its state, lines
 /// and total, the owner's notes as they wrote them, when it was placed, what was paid and in
 /// which currency, when it was received and when it renews, its latest follow-up status with who
 /// recorded it, and whether it is overdue. Records nothing.
@@ -584,7 +584,7 @@ pub(super) fn read_purchase_orders(call: &Call<'_>) -> Result<Value, ToolError> 
     }))
 }
 
-/// `farik_update_purchase_order`: records what a follow-up learned about an order the owner
+/// `catervas_update_purchase_order`: records what a follow-up learned about an order the owner
 /// placed, as `purchase_order.updated` with the agent's envelope and the order's task, so that it
 /// never counts as the owner's. Only the agent that drafted the order records one, in the
 /// implement session of a task it is the assignee of, which is its follow-up task; it sends
@@ -664,8 +664,8 @@ mod tests {
     use std::path::PathBuf;
 
     use calamine::{Data, DataType as _, Range, Reader as _, Xlsx, open_workbook};
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_roles::sites::farik_sites;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_roles::sites::catervas_sites;
     use serde_json::{Value, json};
 
     use crate::session::SessionPurpose;
@@ -676,7 +676,7 @@ mod tests {
     };
 
     /// A project with the Finance Specialist `fin` and the Procurement Specialist `proc`, whose
-    /// tasks FRK-1 and FRK-4 are in progress, a finance task FRK-2 and a Developer's task FRK-3,
+    /// tasks CTV-1 and CTV-4 are in progress, a finance task CTV-2 and a Developer's task CTV-3,
     /// and the comparison `evaluations/mirrors.md` written.
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(
@@ -687,9 +687,9 @@ mod tests {
             }),
         );
         for (task, role, assignee) in [
-            ("FRK-1", "procurement_specialist", "proc"),
-            ("FRK-2", "finance_specialist", "fin"),
-            ("FRK-4", "procurement_specialist", "proc"),
+            ("CTV-1", "procurement_specialist", "proc"),
+            ("CTV-2", "finance_specialist", "fin"),
+            ("CTV-4", "procurement_specialist", "proc"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -702,9 +702,9 @@ mod tests {
                 &json!({ "assignee": assignee, "reviewer": "pm" }),
             );
         }
-        project.filed("FRK-3", "assigned", "task", None);
+        project.filed("CTV-3", "assigned", "task", None);
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -712,8 +712,8 @@ mod tests {
         project
             .call(
                 "proc",
-                Some("FRK-1"),
-                "farik_write_evaluation",
+                Some("CTV-1"),
+                "catervas_write_evaluation",
                 json!({ "name": "mirrors", "text": "# Baby car mirrors\n\nAcme is the cheapest." }),
             )
             .expect("the comparison is written");
@@ -721,17 +721,17 @@ mod tests {
     }
 
     fn folder(project: &TestProject) -> PathBuf {
-        project.repo.path.join(".farik/local/procurement")
+        project.repo.path.join(".catervas/local/procurement")
     }
 
-    /// One of Farik's own hosts, taken from the shipped list so that the launch review edits the
+    /// One of Catervas's own hosts, taken from the shipped list so that the launch review edits the
     /// YAML alone.
-    fn a_farik_host() -> &'static str {
-        &farik_sites()[0].host
+    fn a_catervas_host() -> &'static str {
+        &catervas_sites()[0].host
     }
 
     /// An order for three mirrors and a kit, 59.98 USD, from `seller`, with its page on a site
-    /// Farik ships.
+    /// Catervas ships.
     fn an_order(seller: &str) -> Value {
         json!({
             "seller": seller,
@@ -744,18 +744,18 @@ mod tests {
             "period": "once",
             "delivery": "Ships in 3 days",
             "terms": "Net 30",
-            "url": format!("https://www.{}/mirrors", a_farik_host()),
+            "url": format!("https://www.{}/mirrors", a_catervas_host()),
             "evaluation": "evaluations/mirrors.md",
             "why": "It is the cheapest seller that ships to us with a safety mark."
         })
     }
 
-    /// `farik_draft_purchase_order` as `proc` in its implement session of FRK-1.
+    /// `catervas_draft_purchase_order` as `proc` in its implement session of CTV-1.
     fn draft(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
-            "farik_draft_purchase_order",
+            Some("CTV-1"),
+            "catervas_draft_purchase_order",
             input.clone(),
         )
     }
@@ -801,7 +801,7 @@ mod tests {
         let ids = &drafted[0].envelope.ids;
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(ids.agent_id.as_deref(), Some("proc"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
@@ -825,7 +825,7 @@ mod tests {
         assert_eq!(body.terms.to_string(), "Net 30");
         assert_eq!(
             body.url.to_string(),
-            format!("https://www.{}/mirrors", a_farik_host()),
+            format!("https://www.{}/mirrors", a_catervas_host()),
             "the address is kept exactly as the agent wrote it"
         );
         assert_eq!(body.evaluation.to_string(), "evaluations/mirrors.md");
@@ -911,7 +911,7 @@ mod tests {
         project.record_by(
             Some("proc"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.drafted",
             &json!({
                 "order": 9, "seller": "Old", "seller_contact": "",
@@ -950,7 +950,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn leaves_no_workbook_when_the_log_refuses_the_order() {
         let project = a_project("po-log-refuses");
-        farik_store::event_log::fixtures::refuse_appends_of(
+        catervas_store::event_log::fixtures::refuse_appends_of(
             &project.deps.log,
             EventKind::PurchaseOrderDrafted,
         );
@@ -973,7 +973,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn keeps_the_workbook_of_an_order_the_log_took() {
         let project = a_project("po-projection-refused");
-        farik_store::event_log::fixtures::refuse_projecting(&project.deps.log);
+        catervas_store::event_log::fixtures::refuse_projecting(&project.deps.log);
 
         let result = draft(&project, &an_order("Acme"));
 
@@ -1048,29 +1048,33 @@ mod tests {
 
         let mut chat = project.context("proc", None);
         chat.purpose = SessionPurpose::Chat;
-        let mut verify = project.context("proc", Some("FRK-1"));
+        let mut verify = project.context("proc", Some("CTV-1"));
         verify.purpose = SessionPurpose::Verify;
-        let mut chat_about_a_task = project.context("proc", Some("FRK-1"));
+        let mut chat_about_a_task = project.context("proc", Some("CTV-1"));
         chat_about_a_task.purpose = SessionPurpose::Chat;
         for (what, context) in [
             (
                 "the Finance Specialist",
-                project.context("fin", Some("FRK-2")),
+                project.context("fin", Some("CTV-2")),
             ),
-            ("a Developer", project.context("dev-a", Some("FRK-3"))),
+            ("a Developer", project.context("dev-a", Some("CTV-3"))),
             ("the Procurement Specialist's chat", chat),
             ("a chat about its task", chat_about_a_task),
             ("a verify session of its task", verify),
             (
                 "an implement session of a task another agent has",
-                project.context("proc", Some("FRK-3")),
+                project.context("proc", Some("CTV-3")),
             ),
             (
                 "an implement session of no task",
                 project.context("proc", None),
             ),
         ] {
-            let reason = refusal_of(run(&context, "farik_draft_purchase_order", input.clone()));
+            let reason = refusal_of(run(
+                &context,
+                "catervas_draft_purchase_order",
+                input.clone(),
+            ));
             assert!(
                 reason.starts_with("purchase_order_refused:"),
                 "{what}: {reason}"
@@ -1297,7 +1301,7 @@ mod tests {
         let url = "purchase_order_url_invalid";
         let evaluation = "purchase_order_evaluation_invalid";
         let why = "purchase_order_why_invalid";
-        let head = format!("https://{}/", a_farik_host());
+        let head = format!("https://{}/", a_catervas_host());
         refuses_each(
             "po-page",
             &[
@@ -1398,7 +1402,7 @@ mod tests {
         let answer = draft(&project, &edges).expect("every limit may be reached");
         assert_eq!(answer["total"], "10000000.00");
         // An address of 2,000 characters is the longest taken.
-        let head = format!("https://{}/", a_farik_host());
+        let head = format!("https://{}/", a_catervas_host());
         let mut long_page = an_order("Long page");
         long_page["url"] = json!(format!("{head}{}", "x".repeat(2_000 - head.len())));
         draft(&project, &long_page).expect("an address of 2,000 characters");
@@ -1425,7 +1429,7 @@ mod tests {
             "{reason}"
         );
         assert!(reason.contains("acme.example"), "{reason}");
-        assert!(reason.contains("farik_request_sites"), "{reason}");
+        assert!(reason.contains("catervas_request_sites"), "{reason}");
         assert_eq!(project.event_count(), before);
         assert!(!folder(&project).join("orders").exists());
 
@@ -1435,13 +1439,13 @@ mod tests {
         input["url"] = json!("https://www.acme.example/x");
         draft(&project, &input).expect("an allowed site's page is taken");
 
-        // A page on a site Farik ships is taken; once the owner turned that site off, it is not.
+        // A page on a site Catervas ships is taken; once the owner turned that site off, it is not.
         let mut shipped = an_order("Bolt");
-        shipped["url"] = json!(format!("https://{}/p", a_farik_host()));
-        draft(&project, &shipped).expect("a site Farik ships is taken");
-        project.record("", "site.removed", &json!({ "host": a_farik_host() }));
+        shipped["url"] = json!(format!("https://{}/p", a_catervas_host()));
+        draft(&project, &shipped).expect("a site Catervas ships is taken");
+        project.record("", "site.removed", &json!({ "host": a_catervas_host() }));
         let mut turned_off = an_order("Cog");
-        turned_off["url"] = json!(format!("https://{}/p", a_farik_host()));
+        turned_off["url"] = json!(format!("https://{}/p", a_catervas_host()));
         let reason = refusal_of(draft(&project, &turned_off));
         assert!(
             reason.starts_with("purchase_order_site_not_approved:"),
@@ -1466,13 +1470,13 @@ mod tests {
 
         // Approved, and then placed, it is open still.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.approved",
             &json!({ "order": 1, "note": "" }),
         );
         assert!(refusal_of(draft(&project, &an_order("ACME"))).starts_with("purchase_order_open:"));
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.placed",
             &json!({ "order": 1, "placed_on": "2026-09-22" }),
         );
@@ -1482,8 +1486,8 @@ mod tests {
         let other = project
             .call(
                 "proc",
-                Some("FRK-4"),
-                "farik_draft_purchase_order",
+                Some("CTV-4"),
+                "catervas_draft_purchase_order",
                 an_order("Acme"),
             )
             .expect("another task may draft for the same seller");
@@ -1504,11 +1508,11 @@ mod tests {
             } else {
                 json!({ "order": number, "note": "" })
             };
-            project.record("FRK-1", kind, &body);
+            project.record("CTV-1", kind, &body);
             draft(&project, &an_order(seller)).expect("a new order once it ended");
         }
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.received",
             &json!({ "order": 1, "received_on": "2026-09-23" }),
         );
@@ -1518,18 +1522,18 @@ mod tests {
         let drafted = draft(&project, &an_order("Dot")).expect("a new seller");
         let number = drafted["order"].as_u64().expect("a number");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.approved",
             &json!({ "order": number, "note": "" }),
         );
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.placed",
             &json!({ "order": number, "placed_on": "2026-09-22" }),
         );
         assert!(refusal_of(draft(&project, &an_order("Dot"))).starts_with("purchase_order_open:"));
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.closed",
             &json!({ "order": number, "note": "It did not come." }),
         );
@@ -1548,7 +1552,7 @@ mod tests {
         let reason = refusal_of(draft(&project, &an_order("Seller 21")));
         assert!(reason.starts_with("too_many_purchase_orders:"), "{reason}");
         assert!(
-            reason.contains("farik_read_purchase_orders"),
+            reason.contains("catervas_read_purchase_orders"),
             "it names the tool that reads the orders: {reason}"
         );
         assert_eq!(project.event_count(), before);
@@ -1556,7 +1560,7 @@ mod tests {
 
         // Orders approved are no longer waiting for the owner.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.approved",
             &json!({ "order": 1, "note": "" }),
         );
@@ -1582,15 +1586,15 @@ mod tests {
 
     /// Records the owner's step on order `number`: an event with the order's task and no agent.
     fn owner(project: &TestProject, kind: &str, body: &Value) {
-        project.record("FRK-1", kind, body);
+        project.record("CTV-1", kind, body);
     }
 
-    /// `farik_read_purchase_orders` as `proc` in its implement session of FRK-1.
+    /// `catervas_read_purchase_orders` as `proc` in its implement session of CTV-1.
     fn read_orders(project: &TestProject) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
-            "farik_read_purchase_orders",
+            Some("CTV-1"),
+            "catervas_read_purchase_orders",
             json!({}),
         )
     }
@@ -1637,7 +1641,7 @@ mod tests {
         project.record_by(
             Some("proc"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.updated",
             &json!({ "order": 4, "status": "shipped", "note": "Left the depot." }),
         );
@@ -1694,7 +1698,7 @@ mod tests {
         assert_eq!(first["lines"][0]["item"], "Baby car mirror");
         assert_eq!(first["lines"][0]["quantity"], 3);
         assert_eq!(first["lines"][0]["line_total"], "59.97");
-        assert_eq!(first["task_id"], "FRK-1");
+        assert_eq!(first["task_id"], "CTV-1");
         assert_eq!(first["overdue"], false);
         assert!(
             first.get("note").is_none() && first.get("status").is_none(),
@@ -1738,11 +1742,15 @@ mod tests {
         draft(&project, &an_order("Acme")).expect("an order is drafted");
         let mut chat = project.context("proc", None);
         chat.purpose = SessionPurpose::Chat;
-        let answer = run(&chat, "farik_read_purchase_orders", json!({})).expect("a chat reads");
+        let answer = run(&chat, "catervas_read_purchase_orders", json!({})).expect("a chat reads");
         assert_eq!(answer["orders"].as_array().map(Vec::len), Some(1));
-        for (who, task) in [("fin", "FRK-2"), ("dev-a", "FRK-3"), ("pm", "FRK-1")] {
-            let reason =
-                refusal_of(project.call(who, Some(task), "farik_read_purchase_orders", json!({})));
+        for (who, task) in [("fin", "CTV-2"), ("dev-a", "CTV-3"), ("pm", "CTV-1")] {
+            let reason = refusal_of(project.call(
+                who,
+                Some(task),
+                "catervas_read_purchase_orders",
+                json!({}),
+            ));
             assert!(
                 reason.starts_with("purchase_order_refused:"),
                 "{who}: {reason}"
@@ -1750,8 +1758,8 @@ mod tests {
         }
     }
 
-    /// A project with a second Procurement Specialist, `proc-b`, whose task FRK-5 is in progress,
-    /// and the orders 1 to 5 of `proc` on FRK-1 in the states a follow-up meets: 1 drafted, 2
+    /// A project with a second Procurement Specialist, `proc-b`, whose task CTV-5 is in progress,
+    /// and the orders 1 to 5 of `proc` on CTV-1 in the states a follow-up meets: 1 drafted, 2
     /// approved, 3 placed, 4 received, 5 closed.
     fn a_project_with_orders(name: &str) -> TestProject {
         let project = TestProject::new(
@@ -1762,17 +1770,17 @@ mod tests {
                 wire["agents"]
                     .as_array_mut()
                     .expect("a list of agents")
-                    .push(farik_core::team::fixtures::an_agent_wire(
+                    .push(catervas_core::team::fixtures::an_agent_wire(
                         "proc-b",
                         "procurement_specialist",
                     ));
             }),
         );
         for (task, role, assignee) in [
-            ("FRK-1", "procurement_specialist", "proc"),
-            ("FRK-4", "procurement_specialist", "proc"),
-            ("FRK-5", "procurement_specialist", "proc-b"),
-            ("FRK-2", "finance_specialist", "fin"),
+            ("CTV-1", "procurement_specialist", "proc"),
+            ("CTV-4", "procurement_specialist", "proc"),
+            ("CTV-5", "procurement_specialist", "proc-b"),
+            ("CTV-2", "finance_specialist", "fin"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -1788,8 +1796,8 @@ mod tests {
         project
             .call(
                 "proc",
-                Some("FRK-1"),
-                "farik_write_evaluation",
+                Some("CTV-1"),
+                "catervas_write_evaluation",
                 json!({ "name": "mirrors", "text": "# Mirrors" }),
             )
             .expect("the comparison is written");
@@ -1823,12 +1831,12 @@ mod tests {
         project
     }
 
-    /// `farik_update_purchase_order` as `proc` in its implement session of its follow-up task FRK-4.
+    /// `catervas_update_purchase_order` as `proc` in its implement session of its follow-up task CTV-4.
     fn follow_up(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-4"),
-            "farik_update_purchase_order",
+            Some("CTV-4"),
+            "catervas_update_purchase_order",
             input.clone(),
         )
     }
@@ -1855,7 +1863,7 @@ mod tests {
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         let EventBody::PurchaseOrderUpdated(body) = &updated[0].body else {
             panic!("a purchase_order.updated event carries its body");
@@ -1948,8 +1956,8 @@ mod tests {
         // Another Procurement Specialist's order is not this one's to follow up.
         let reason = refusal_of(project.call(
             "proc-b",
-            Some("FRK-5"),
-            "farik_update_purchase_order",
+            Some("CTV-5"),
+            "catervas_update_purchase_order",
             json!({ "order": 3, "status": "shipped", "note": "" }),
         ));
         assert!(reason.starts_with("purchase_order_not_yours:"), "{reason}");
@@ -1960,17 +1968,17 @@ mod tests {
             ("its chat", chat),
             (
                 "the Finance Specialist",
-                project.context("fin", Some("FRK-2")),
+                project.context("fin", Some("CTV-2")),
             ),
             (
                 "a task another agent has",
-                project.context("proc", Some("FRK-5")),
+                project.context("proc", Some("CTV-5")),
             ),
             ("no task", project.context("proc", None)),
         ] {
             let reason = refusal_of(run(
                 &context,
-                "farik_update_purchase_order",
+                "catervas_update_purchase_order",
                 json!({ "order": 3, "status": "shipped", "note": "" }),
             ));
             assert!(

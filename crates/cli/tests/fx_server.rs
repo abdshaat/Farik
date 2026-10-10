@@ -1,14 +1,14 @@
-//! `farik connector fx` as the built binary: the kit's `fx` entry, listed through the same path the
+//! `catervas connector fx` as the built binary: the kit's `fx` entry, listed through the same path the
 //! daemon uses, answers with exactly the tools the kit tags (ADR 0038). Offline: the server lists
 //! its tools without asking Frankfurter anything.
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
 
-use farik_core::contract::Role;
-use farik_core::team::custom_server;
-use farik_roles::{KitConnector, load_kit, pin_drift};
-use farik_runtime::connectors::list_tools;
+use catervas_core::contract::Role;
+use catervas_core::team::custom_server;
+use catervas_roles::{KitConnector, load_kit, pin_drift};
+use catervas_runtime::connectors::list_tools;
 
 #[tokio::test]
 async fn fx_server_lists_the_kits_tools() {
@@ -21,12 +21,13 @@ async fn fx_server_lists_the_kits_tools() {
             _ => None,
         })
         .expect("the Procurement Specialist's kit has fx");
-    // A name no `which farik` would find: only the executable `list_tools` was handed can answer.
-    let scratch = std::env::temp_dir().join(format!("farik-fx-under-test-{}", std::process::id()));
+    // A name no `which catervas` would find: only the executable `list_tools` was handed can answer.
+    let scratch =
+        std::env::temp_dir().join(format!("catervas-fx-under-test-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).expect("a scratch folder");
     let under_test = scratch.join("fx-under-test");
     let _ = std::fs::remove_file(&under_test);
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_farik"), &under_test).expect("a symlink");
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_catervas"), &under_test).expect("a symlink");
 
     let listed = list_tools(&fx, &BTreeMap::new(), None, &scratch, &under_test)
         .await

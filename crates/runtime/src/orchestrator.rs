@@ -1,4 +1,4 @@
-//! The orchestrator (`docs/SPEC.md` sections 5.2 and 5.5, F6): Farik running its team on its own.
+//! The orchestrator (`docs/SPEC.md` sections 5.2 and 5.5, F6): Catervas running its team on its own.
 //! Each tick reads the board, does the first thing on it that needs doing, running at most one
 //! session to its end, and says what it did.
 
@@ -8,17 +8,17 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use catervas_core::contract::{Role, TaskContract, TaskId};
+use catervas_core::governor::permissions::PermissionTier;
+use catervas_core::governor::sites::{WebAccess, web_access};
+use catervas_core::team::{Team, task_private_folder};
+use catervas_protocol::clock::IdSource;
+use catervas_protocol::command::{Command, CommandReply, ReplyKind};
+use catervas_roles::{KitError, RoleError};
+use catervas_store::baseline::{folder_in, make_private_directory};
+use catervas_store::files::FilesError;
+use catervas_store::{GitError, StoreError};
 use chrono::{DateTime, Utc};
-use farik_core::contract::{Role, TaskContract, TaskId};
-use farik_core::governor::permissions::PermissionTier;
-use farik_core::governor::sites::{WebAccess, web_access};
-use farik_core::team::{Team, task_private_folder};
-use farik_protocol::clock::IdSource;
-use farik_protocol::command::{Command, CommandReply, ReplyKind};
-use farik_roles::{KitError, RoleError};
-use farik_store::baseline::{folder_in, make_private_directory};
-use farik_store::files::FilesError;
-use farik_store::{GitError, StoreError};
 
 use crate::channel::ChannelError;
 use crate::cost::CostError;
@@ -78,7 +78,7 @@ pub struct OrchestratorDeps {
 pub enum OrchestratorError {
     /// The log or the board failed.
     Store(StoreError),
-    /// A file under `.farik/` could not be read or written.
+    /// A file under `.catervas/` could not be read or written.
     Files(FilesError),
     /// Git failed.
     Git(GitError),
@@ -273,7 +273,7 @@ pub enum Waited {
 }
 
 /// The longest `wait_until` sleeps before the board is ticked again: work filed straight into the
-/// store while a run waits, such as `farik task create` writing the store directly, does not
+/// store while a run waits, such as `catervas task create` writing the store directly, does not
 /// notify `commands` and would otherwise sit until the sleeping agent wakes.
 const RECHECK: chrono::Duration = chrono::Duration::seconds(60);
 
@@ -281,15 +281,15 @@ const RECHECK: chrono::Duration = chrono::Duration::seconds(60);
 /// refining ones.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TickRules {
-    /// Every rule, as `farik run` ticks.
+    /// Every rule, as `catervas run` ticks.
     #[default]
     All,
-    /// Plan without doing, as `farik plan` ticks: triage and `draft -> refining` (rule 10),
+    /// Plan without doing, as `catervas plan` ticks: triage and `draft -> refining` (rule 10),
     /// refining and the governor's judgment (rule 9), the plan sessions that assign and an
     /// approved epic's assignment (rule 8), and an epic's breakdown and close-out (rule 6 for an
     /// epic alone). No cleanup, integration, criterion run, worktree, or start of work.
     Planning,
-    /// Triage and refining alone (rules 9 and 10), as `farik contract new` ticks.
+    /// Triage and refining alone (rules 9 and 10), as `catervas contract new` ticks.
     Refining,
 }
 
@@ -421,7 +421,7 @@ pub struct RecoveryReport {
     pub tasks_resumed: u32,
 }
 
-/// Farik running a project's team. ponytail: one session at a time, a session pool when a team
+/// Catervas running a project's team. ponytail: one session at a time, a session pool when a team
 /// outgrows a WIP limit of one.
 pub struct Orchestrator {
     deps: OrchestratorDeps,
@@ -472,7 +472,7 @@ impl Orchestrator {
         // start no session, so a paused team has them too (ADR 0042).
         if scope.task_id.is_none() {
             rules::end_marketing_plans(&self.deps).await?;
-            // Posts go to Buffer between sessions, with no model, so under Farik's own pause
+            // Posts go to Buffer between sessions, with no model, so under Catervas's own pause
             // for a refused key too, and the owner's pause alone holds them (ADR 0042).
             rules::hand_over_posts(&self.deps).await?;
             // The orders nobody decided in time, and the renewals coming up, close and flag with
@@ -491,7 +491,7 @@ impl Orchestrator {
                 return Ok(report);
             }
             return Ok(TickReport::Idle {
-                why: "the team is paused; farik resume starts it again".to_string(),
+                why: "the team is paused; catervas resume starts it again".to_string(),
                 until: None,
             });
         }
@@ -548,7 +548,7 @@ impl Orchestrator {
         }
     }
 
-    /// Integrates an accepted task now, as the human asks (`farik integrate`), whatever
+    /// Integrates an accepted task now, as the human asks (`catervas integrate`), whatever
     /// escalations it carries: under `manual` a merge into the integration branch with no push,
     /// under `auto_merge` the merge and the push to `origin` when there is one, under
     /// `pull_request` a pull request opened when none was since acceptance, else the recorded one
@@ -729,17 +729,17 @@ pub fn result_of(reply: CommandReply) -> Result<CommandReport, CommandError> {
     }
 }
 
-/// A task's worktree, `.farik/local/worktrees/<id>` (5.14).
+/// A task's worktree, `.catervas/local/worktrees/<id>` (5.14).
 fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
     deps.tools
         .files
         .root()
-        .join(".farik/local/worktrees")
+        .join(".catervas/local/worktrees")
         .join(task_id.as_str())
 }
 
-/// Where a task's sessions work: its private folder, `.farik/local/finance` for a Finance
-/// Specialist's task and `.farik/local/procurement` for a Procurement Specialist's, made for its
+/// Where a task's sessions work: its private folder, `.catervas/local/finance` for a Finance
+/// Specialist's task and `.catervas/local/procurement` for a Procurement Specialist's, made for its
 /// owner alone when it is not there (6.6, 6.10); any other task's worktree (5.14). A session in a
 /// folder has no worktree, no branch and no sandbox.
 ///
@@ -760,24 +760,24 @@ fn session_dir(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Utc};
-    use farik_core::contract::TaskStatus;
-    use farik_protocol::event::{
+    use catervas_core::contract::TaskStatus;
+    use catervas_protocol::event::{
         CriterionRecordedBodyRunBy, EventBody, EventKind, NoteWrittenBodyKind,
         SessionStartedBodyPurpose,
     };
+    use chrono::{DateTime, Utc};
 
-    use farik_store::git::fixtures::git_output_in;
+    use catervas_store::git::fixtures::git_output_in;
 
-    use farik_core::contract::{TaskId, TaskKind};
-    use farik_protocol::command::{AcceptSubject, Command, RequestSize};
-    use farik_protocol::event::EscalationRaisedBodyReason;
+    use catervas_core::contract::{TaskId, TaskKind};
+    use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
+    use catervas_protocol::event::EscalationRaisedBodyReason;
 
     use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
     use crate::recorded::fixtures::{
-        accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
-        plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
-        refine_writes_epic_frk_1, refine_writes_task_frk_1, review_writes_note, triage_frk_1_large,
+        accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1, plan_assigns_ctv_2,
+        plan_breaks_down_ctv_1, plan_closes_epic_ctv_1, refine_asks_ctv_1,
+        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, review_writes_note, triage_ctv_1_large,
     };
     use crate::tools::fixtures::at;
 
@@ -850,14 +850,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_sleeping_agent_then_goes_on() {
         let harness = Harness::new("orch-wait", |_| {});
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let until = at() + chrono::Duration::hours(1);
         harness.asleep("dev-a", until);
         let adapter = harness.recorded(vec![
-            plan_assigns_frk_1(),
-            implement_finishes_frk_1(),
+            plan_assigns_ctv_1(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = std::sync::Arc::new(harness.orchestrator_at(adapter.clone(), at()));
 
@@ -874,7 +874,7 @@ mod tests {
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
             ]
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
     }
 
     /// Waits until `until` on `orchestrator`, failing the test rather than hanging when the wait
@@ -918,7 +918,7 @@ mod tests {
                 tokio::task::yield_now().await;
                 orchestrator
                     .handle(Command::RequestTriage {
-                        task_id: "FRK-1".parse().expect("a task id"),
+                        task_id: "CTV-1".parse().expect("a task id"),
                         size: RequestSize::Small,
                         reason: "Sized by the human.".to_string(),
                     })
@@ -964,12 +964,12 @@ mod tests {
         let harness = Harness::new("orch-one-task", |wire| {
             wire["policy"]["integration"] = serde_json::json!("auto_merge");
         });
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let adapter = harness.recorded(vec![
-            plan_assigns_frk_1(),
-            implement_finishes_frk_1(),
+            plan_assigns_ctv_1(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let base = git_output_in(&harness.project.repo.path, &["rev-parse", "main"]);
@@ -979,9 +979,9 @@ mod tests {
             .await
             .expect("the run ends idle");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
         let git = &harness.project.deps.git;
-        let branch = harness.branch("FRK-1");
+        let branch = harness.branch("CTV-1");
         assert_eq!(git.commit_count(&base, &branch).expect("git counts"), 1);
         assert_eq!(
             git.changed_paths(&base, &branch).expect("git lists"),
@@ -1037,7 +1037,7 @@ mod tests {
         for cost in &costs {
             assert_eq!(
                 cost.envelope.ids.task_id.as_ref().map(|task| task.as_str()),
-                Some("FRK-1")
+                Some("CTV-1")
             );
         }
         assert_eq!(adapter.started().len(), 4);
@@ -1051,17 +1051,17 @@ mod tests {
             ),
             "{integrated:?}"
         );
-        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!harness.worktree("CTV-1").exists());
         assert_eq!(
             git_output_in(&harness.project.repo.path, &["branch", "--list", &branch]).trim(),
             branch
         );
     }
 
-    /// The Product Manager's triage of FRK-1 as `small`, a task: `triage_frk_1_large` with its
+    /// The Product Manager's triage of CTV-1 as `small`, a task: `triage_ctv_1_large` with its
     /// size changed, since the size is the only thing a replayed triage decides.
-    fn triage_frk_1_small() -> crate::recorded::Transcript {
-        let large = triage_frk_1_large().lines().collect::<Vec<_>>().join("\n");
+    fn triage_ctv_1_small() -> crate::recorded::Transcript {
+        let large = triage_ctv_1_large().lines().collect::<Vec<_>>().join("\n");
         assert!(
             large.contains(r#""size":"large""#),
             "the triage names a size"
@@ -1077,12 +1077,12 @@ mod tests {
         let harness = Harness::new("orch-one-request-task", |_| {});
         harness.a_request("Add done.txt and its check");
         let adapter = harness.recorded(vec![
-            triage_frk_1_small(),
-            refine_writes_task_frk_1(),
-            plan_assigns_frk_1(),
-            implement_finishes_frk_1(),
+            triage_ctv_1_small(),
+            refine_writes_task_ctv_1(),
+            plan_assigns_ctv_1(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -1102,7 +1102,7 @@ mod tests {
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
             ]
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
         assert!(
             harness.events(&[EventKind::BudgetExhausted]).is_empty(),
             "no budget ran out"
@@ -1112,7 +1112,7 @@ mod tests {
             .project
             .deps
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract reads");
         assert_eq!(
             contract.budget.max_sessions.get(),
@@ -1135,7 +1135,7 @@ mod tests {
                     .map(|task| task.as_str().to_string())
                     .unwrap_or_default();
                 Some(match &event.body {
-                    EventBody::RequestTriaged(_) if task == "FRK-1" => {
+                    EventBody::RequestTriaged(_) if task == "CTV-1" => {
                         "request.triaged".to_string()
                     }
                     EventBody::QuestionAsked(_) => "question.asked".to_string(),
@@ -1146,15 +1146,15 @@ mod tests {
                         "escalation.raised approval".to_string()
                     }
                     EventBody::HumanAccepted(body) => format!("human.accepted {}", body.subject),
-                    EventBody::TaskTransitioned(body) if task == "FRK-1" => {
-                        format!("FRK-1 {} -> {}", body.from, body.to)
+                    EventBody::TaskTransitioned(body) if task == "CTV-1" => {
+                        format!("CTV-1 {} -> {}", body.from, body.to)
                     }
-                    EventBody::TaskCreated(_) if task == "FRK-2" => "FRK-2 created".to_string(),
+                    EventBody::TaskCreated(_) if task == "CTV-2" => "CTV-2 created".to_string(),
                     EventBody::TaskIntegrated(_) => format!("{task} integrated"),
                     EventBody::CriterionRecorded(body)
-                        if task == "FRK-1" && body.recorded_by == "governor" =>
+                        if task == "CTV-1" && body.recorded_by == "governor" =>
                     {
-                        format!("FRK-1 {} run by the governor", body.criterion_id)
+                        format!("CTV-1 {} run by the governor", body.criterion_id)
                     }
                     _ => return None,
                 })
@@ -1230,31 +1230,31 @@ mod tests {
         });
         harness.a_request("Add done.txt and its check");
         let adapter = harness.recorded(vec![
-            triage_frk_1_large(),
-            refine_asks_frk_1(),
-            refine_writes_epic_frk_1(),
-            plan_breaks_down_frk_1(),
-            plan_assigns_frk_2(),
-            implement_finishes_frk_1(),
+            triage_ctv_1_large(),
+            refine_asks_ctv_1(),
+            refine_writes_epic_ctv_1(),
+            plan_breaks_down_ctv_1(),
+            plan_assigns_ctv_2(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
-            plan_closes_epic_frk_1(),
-            accept_frk_1(),
+            accept_ctv_1(),
+            plan_closes_epic_ctv_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        let epic: TaskId = "FRK-1".parse().expect("a task id");
+        let epic: TaskId = "CTV-1".parse().expect("a task id");
 
         drive_one_request(&harness, &orchestrator, &epic).await;
 
-        let frk_1 = harness.row("FRK-1");
+        let ctv_1 = harness.row("CTV-1");
         assert_eq!(
-            (frk_1.kind, frk_1.status),
+            (ctv_1.kind, ctv_1.status),
             (TaskKind::Epic, TaskStatus::Accepted)
         );
-        let frk_2 = harness.row("FRK-2");
-        assert_eq!(frk_2.parent, Some(epic.clone()));
-        assert_eq!(frk_2.status, TaskStatus::Accepted);
-        assert!(!frk_2.awaiting_integration);
+        let ctv_2 = harness.row("CTV-2");
+        assert_eq!(ctv_2.parent, Some(epic.clone()));
+        assert_eq!(ctv_2.status, TaskStatus::Accepted);
+        assert!(!ctv_2.awaiting_integration);
         assert!(
             git_output_in(
                 &harness.project.repo.path,
@@ -1266,16 +1266,16 @@ mod tests {
         );
         let started = sessions_with_tasks(&harness);
         let expected: Vec<(SessionStartedBodyPurpose, String, String)> = [
-            (SessionStartedBodyPurpose::Triage, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Refine, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Refine, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Plan, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Plan, "pm", "FRK-2"),
-            (SessionStartedBodyPurpose::Implement, "dev-a", "FRK-2"),
-            (SessionStartedBodyPurpose::Verify, "dev-b", "FRK-2"),
-            (SessionStartedBodyPurpose::Verify, "pm", "FRK-2"),
-            (SessionStartedBodyPurpose::Plan, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Verify, "pm", "FRK-1"),
+            (SessionStartedBodyPurpose::Triage, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Refine, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Refine, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Plan, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Plan, "pm", "CTV-2"),
+            (SessionStartedBodyPurpose::Implement, "dev-a", "CTV-2"),
+            (SessionStartedBodyPurpose::Verify, "dev-b", "CTV-2"),
+            (SessionStartedBodyPurpose::Verify, "pm", "CTV-2"),
+            (SessionStartedBodyPurpose::Plan, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Verify, "pm", "CTV-1"),
         ]
         .into_iter()
         .map(|(purpose, agent, task)| (purpose, agent.to_string(), task.to_string()))
@@ -1285,21 +1285,21 @@ mod tests {
             milestones(&harness),
             [
                 "request.triaged",
-                "FRK-1 draft -> refining",
+                "CTV-1 draft -> refining",
                 "question.asked",
                 "question.answered",
-                "FRK-1 refining -> escalated",
+                "CTV-1 refining -> escalated",
                 "escalation.raised approval",
                 "human.accepted contract",
-                "FRK-1 escalated -> ready",
-                "FRK-1 ready -> assigned",
-                "FRK-1 assigned -> in_progress",
-                "FRK-2 created",
-                "FRK-2 integrated",
-                "FRK-1 in_progress -> verifying",
-                "FRK-1 C1 run by the governor",
+                "CTV-1 escalated -> ready",
+                "CTV-1 ready -> assigned",
+                "CTV-1 assigned -> in_progress",
+                "CTV-2 created",
+                "CTV-2 integrated",
+                "CTV-1 in_progress -> verifying",
+                "CTV-1 C1 run by the governor",
                 "human.accepted result",
-                "FRK-1 verifying -> accepted",
+                "CTV-1 verifying -> accepted",
             ]
         );
         assert!(
@@ -1318,13 +1318,13 @@ mod tests {
 
         // A session in a folder that is a link would work where the link points (5.6, 6.6).
         let harness = Harness::with_finance("orch-session-dir-link");
-        harness.finance_task("FRK-1", None);
+        harness.finance_task("CTV-1", None);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let contract = orchestrator
             .deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let folder = harness.finance_folder();
         let outside = harness

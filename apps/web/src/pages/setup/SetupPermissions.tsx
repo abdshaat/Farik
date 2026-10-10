@@ -1,4 +1,4 @@
-import { Button, Choice } from "@farik/ui";
+import { Button, Choice } from "@catervas/ui";
 import { useNavigate } from "react-router";
 import { useQuery } from "../../app/store.ts";
 import type { en } from "../../strings/en.ts";
@@ -114,7 +114,7 @@ export function PermissionChoices({
 	);
 }
 
-/** Setup's sixth step: the two questions Farik asks before anything runs. */
+/** Setup's sixth step: the two questions Catervas asks before anything runs. */
 export function SetupPermissions() {
 	const navigate = useNavigate();
 	const { draft, change } = useSetup();

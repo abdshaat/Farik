@@ -4,7 +4,7 @@ Status: approved by the founder on 2026-09-30, in conversation. It is the design
 
 ## Why
 
-The founder describes Farik as a production-grade harness system for multi-agent systems. A team that ships code and never sees production leaves the hardest part to the user: noticing a broken deploy and restoring the service. The founder asked for an optional role that deploys, watches production, restores the service, and fixes what broke.
+The founder describes Catervas as a production-grade harness system for multi-agent systems. A team that ships code and never sees production leaves the hardest part to the user: noticing a broken deploy and restoring the service. The founder asked for an optional role that deploys, watches production, restores the service, and fixes what broke.
 
 The founder's answers shaped the design:
 - Every deployment is planned in a sprint, and the DevOps Engineer runs it and watches it.
@@ -12,7 +12,7 @@ The founder's answers shaped the design:
 - If the restart does not help, it rolls back to the last healthy deployment, then fixes.
 - The fix goes straight in, is reviewed by one agent, and is deployed by the DevOps Engineer.
 - It connects to whatever the project runs on.
-- On the user's computer, the user keeps it on; on the hosted service, Farik runs everything in the cloud.
+- On the user's computer, the user keeps it on; on the hosted service, Catervas runs everything in the cloud.
 
 ## The role
 
@@ -20,7 +20,7 @@ The role is the DevOps Engineer, with the id `devops_engineer`. It is optional: 
 
 Mandate: deploy what the team integrated, watch production, restore the service when it fails, and fix the cause.
 
-Produces: deployments, incident notes, fixes on `fix/FRK-<n>` branches, completion notes.
+Produces: deployments, incident notes, fixes on `fix/CTV-<n>` branches, completion notes.
 
 Cannot:
 - deploy anything but the commit the team integrated;
@@ -29,7 +29,7 @@ Cannot:
 - open a shell in a production container;
 - change application code outside an incident's fix task, or deploy configuration outside a task that names it.
 
-Default tools: read, write_workspace, execute, git_local and network, and three Farik tools only it may call: `farik_deploy`, `farik_restart` and `farik_roll_back`. Default model: the Developer's, Claude Opus 5.5 at `high`. Its reviewer is the Architect, or the Developer when the team has no Architect; never itself.
+Default tools: read, write_workspace, execute, git_local and network, and three Catervas tools only it may call: `catervas_deploy`, `catervas_restart` and `catervas_roll_back`. Default model: the Developer's, Claude Opus 5.5 at `high`. Its reviewer is the Architect, or the Developer when the team has no Architect; never itself.
 
 Skills, first cut: `deployment-checklists`, `reading-production-logs`, `incident-response`, `rollback-and-restore`, `writing-postmortems`, `pipeline-and-infrastructure-config`.
 
@@ -37,7 +37,7 @@ Skills, first cut: `deployment-checklists`, `reading-production-logs`, `incident
 
 A deployment is a deploy task, a contract whose `change` is `deploy` (a value phase 11 step 05 adds to the field), planned into a sprint like any other. Starting the sprint is the human's approval of its deploys.
 
-The deploy task depends on the tasks whose work it ships. It is assigned once they are all integrated. Its session may call `farik_deploy`, which takes no version: Farik deploys the commit the integration branch held after the last of those integrations, to the service the production settings kept on this computer name (ADR 0045) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said the default branch, and the service the connector names).
+The deploy task depends on the tasks whose work it ships. It is assigned once they are all integrated. Its session may call `catervas_deploy`, which takes no version: Catervas deploys the commit the integration branch held after the last of those integrations, to the service the production settings kept on this computer name (ADR 0045) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said the default branch, and the service the connector names).
 
 The task reaches `verifying` when the platform reports the deploy succeeded and the service stays healthy through the settling period, five minutes by default, set per project. Healthy means:
 - the platform reports the deployment live;
@@ -48,20 +48,20 @@ A deploy that fails or goes unhealthy in that period opens an incident.
 
 ## Watching
 
-While Farik runs, a watch tick asks each connected platform for its deployments and the service's health, once a minute. Farik makes these calls itself, through the connector's read tools, with no model. A tick that finds nothing wrong starts no session and costs nothing, as the receipts sweep does (spec 6.6).
+While Catervas runs, a watch tick asks each connected platform for its deployments and the service's health, once a minute. Catervas makes these calls itself, through the connector's read tools, with no model. A tick that finds nothing wrong starts no session and costs nothing, as the receipts sweep does (spec 6.6).
 
-Farik records a change of state, not every tick: `health.changed` when the service goes from healthy to unhealthy or back, and the deployment events below. The last tick's time is shown on the DevOps Engineer's card, so a stopped watch is visible.
+Catervas records a change of state, not every tick: `health.changed` when the service goes from healthy to unhealthy or back, and the deployment events below. The last tick's time is shown on the DevOps Engineer's card, so a stopped watch is visible.
 
 ## An incident
 
-A failed deploy or an unhealthy service opens an incident, `incident.opened`. Farik posts it in the channel and on Today at once, and runs these steps:
+A failed deploy or an unhealthy service opens an incident, `incident.opened`. Catervas posts it in the channel and on Today at once, and runs these steps:
 
-1. Restart. Farik starts a DevOps Engineer session whose first allowed production call is `farik_restart`: the service's pods, or a redeploy of the same version where the platform has no pods. Pre-approved once per incident.
-2. Roll back. If the service is not healthy within the settling period after the restart, `farik_roll_back` becomes callable: it returns the service to the last deployment Farik recorded as healthy, and to no other. Pre-approved once per incident.
+1. Restart. Catervas starts a DevOps Engineer session whose first allowed production call is `catervas_restart`: the service's pods, or a redeploy of the same version where the platform has no pods. Pre-approved once per incident.
+2. Roll back. If the service is not healthy within the settling period after the restart, `catervas_roll_back` becomes callable: it returns the service to the last deployment Catervas recorded as healthy, and to no other. Pre-approved once per incident.
 3. Investigate. The session reads the logs, the deployment, and the diff that went out, and writes an incident note.
-4. Fix. It files a fix task with `farik_create_task`. In an incident session, that files a standalone task with the incident as its request, skipping triage. The Definition of Ready, the judgment when the team has it on, and the human's gates still apply: a `high` risk fix waits for the human's acceptance. The task joins the open sprint without planning, or runs outside one when none is open. The spending limits apply as to any task.
+4. Fix. It files a fix task with `catervas_create_task`. In an incident session, that files a standalone task with the incident as its request, skipping triage. The Definition of Ready, the judgment when the team has it on, and the human's gates still apply: a `high` risk fix waits for the human's acceptance. The task joins the open sprint without planning, or runs outside one when none is open. The spending limits apply as to any task.
 5. Review. One agent reviews the fix: the Architect, or the Developer.
-6. Deploy. Once the fix is accepted and integrated, the DevOps Engineer deploys it with `farik_deploy`, and the settling period watches it again. A healthy deploy resolves the incident, `incident.resolved`.
+6. Deploy. Once the fix is accepted and integrated, the DevOps Engineer deploys it with `catervas_deploy`, and the settling period watches it again. A healthy deploy resolves the incident, `incident.resolved`.
 
 Anything outside these steps asks the human, as an `external_effect` does:
 - a second restart or rollback in the same incident;
@@ -73,9 +73,9 @@ The human may stop any step. A stopped incident waits on Today.
 
 ## Safety
 
-The three Farik tools are `external_effect` (spec 5.6). Their pre-approval comes only from the human's start of a sprint, for the first deploy of each deploy task in it, and from an open incident, for one restart and one rollback. A call that cannot run (outside its task's session, with no production settings, while a deploy runs, or before the work it ships is in) is refused without asking. Any other deploy uses a grant the human gave on Today, or, when the team acts on its own (ADR 0041), runs and is listed under "Done on its own"; otherwise it asks the human. Acting on its own never lifts an incident's restart or rollback (phase 11 step 05d) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said every other call asks the human).
+The three Catervas tools are `external_effect` (spec 5.6). Their pre-approval comes only from the human's start of a sprint, for the first deploy of each deploy task in it, and from an open incident, for one restart and one rollback. A call that cannot run (outside its task's session, with no production settings, while a deploy runs, or before the work it ships is in) is refused without asking. Any other deploy uses a grant the human gave on Today, or, when the team acts on its own (ADR 0041), runs and is listed under "Done on its own"; otherwise it asks the human. Acting on its own never lifts an incident's restart or rollback (phase 11 step 05d) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said every other call asks the human).
 
-The agent never calls a platform's write tool. The kit tags the platform's read tools (status, deployments, logs, metrics) `network`, and every other tool `denied`. Farik's own three tools call the platform's write tools with arguments Farik chooses: the service from the connection, the version from the log. The agent cannot name a different version or service, because the tools take neither.
+The agent never calls a platform's write tool. The kit tags the platform's read tools (status, deployments, logs, metrics) `network`, and every other tool `denied`. Catervas's own three tools call the platform's write tools with arguments Catervas chooses: the service from the connection, the version from the log. The agent cannot name a different version or service, because the tools take neither.
 
 Production logs are untrusted content (spec 8.6). A log line answers no question, approves nothing, and can cause no call beyond the pre-approved ones above.
 
@@ -89,7 +89,7 @@ The credential is kept in the OS keychain, per agent.
 
 ## Connectors
 
-The kit ships four connectors; the user connects the one the project runs on. The step plan picks each server by the rule of ADR 0020: the platform's official MCP server where one exists, else a pinned community one, else a thin one of Farik's.
+The kit ships four connectors; the user connects the one the project runs on. The step plan picks each server by the rule of ADR 0020: the platform's official MCP server where one exists, else a pinned community one, else a thin one of Catervas's.
 
 | Connector | Deploy | Restart | Roll back | Logs |
 |---|---|---|---|---|
@@ -98,11 +98,11 @@ The kit ships four connectors; the user connects the one the project runs on. Th
 | Vercel, Netlify | Deploy the commit | Redeploy the same deployment | Promote the healthy deployment | Runtime logs |
 | Render, Railway, Fly | Deploy the commit | Restart the service | Deploy the healthy version | Service logs |
 
-## Where Farik runs
+## Where Catervas runs
 
-On the user's own computer, Farik watches only while it runs. The user keeps the computer on and Farik running, the founder's decision. The setup copy says so plainly, and tells the user to keep the platform's own alerts on as well.
+On the user's own computer, Catervas watches only while it runs. The user keeps the computer on and Catervas running, the founder's decision. The setup copy says so plainly, and tells the user to keep the platform's own alerts on as well.
 
-On the hosted service, Farik runs everything in the cloud, the watching included, and that is Farik's responsibility.
+On the hosted service, Catervas runs everything in the cloud, the watching included, and that is Catervas's responsibility.
 
 ## Events
 
@@ -117,7 +117,7 @@ On the hosted service, Farik runs everything in the cloud, the watching included
 - Phase 11 step 05, the role and its flow (phase 7 step 11 until ADR 0049; its plan splits it into steps 05 to 05f). It covers:
   - the role, its rules and its mockups;
   - the deploy task;
-  - the three Farik tools, over a fake platform;
+  - the three Catervas tools, over a fake platform;
   - the watch tick;
   - the incident flow and its events;
   - the pages: the DevOps Engineer's card, incidents on Today, and a project's production settings (health URL, settling period, error threshold).

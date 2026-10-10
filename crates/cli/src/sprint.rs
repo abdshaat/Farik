@@ -1,8 +1,8 @@
-//! `farik sprint show`: one sprint and how it went (`docs/SPEC.md` sections 3 and 5.5).
+//! `catervas sprint show`: one sprint and how it went (`docs/SPEC.md` sections 3 and 5.5).
 
-use farik_core::sprint::{Sprint, SprintStatus};
-use farik_runtime::sprints::planning_session_spent;
-use farik_store::CostScope;
+use catervas_core::sprint::{Sprint, SprintStatus};
+use catervas_runtime::sprints::planning_session_spent;
+use catervas_store::CostScope;
 use serde_json::{Value, json};
 
 use crate::Report;
@@ -28,7 +28,7 @@ pub fn show(project: &Project, sprint_id: Option<&str>) -> Result<Report, String
             .files
             .read_sprint(&id)
             .map_err(|error| match error {
-                farik_store::files::FilesError::NotFound { .. } => {
+                catervas_store::files::FilesError::NotFound { .. } => {
                     format!("{id} is not in this project")
                 }
                 other => other.to_string(),
@@ -42,7 +42,7 @@ pub fn show(project: &Project, sprint_id: Option<&str>) -> Result<Report, String
             Some(latest) => latest,
             None => {
                 return Ok(Report {
-                    lines: vec!["no sprint yet: farik sprint start starts one".to_string()],
+                    lines: vec!["no sprint yet: catervas sprint start starts one".to_string()],
                     json: json!({ "sprint": null }),
                     json_lines: None,
                 });
@@ -74,7 +74,7 @@ pub fn show(project: &Project, sprint_id: Option<&str>) -> Result<Report, String
         && planning_session_spent(&project.log, id).map_err(|error| error.to_string())?;
     let mut lines = lines(&sprint, spent, &tasks);
     if waits_for_its_end {
-        lines.push("empty: end it with farik sprint end".to_string());
+        lines.push("empty: end it with catervas sprint end".to_string());
     }
     Ok(Report {
         lines,

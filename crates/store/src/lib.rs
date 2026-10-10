@@ -1,5 +1,5 @@
-//! Farik's memory: the append-only event log, the projections read from it, and the files under
-//! `.farik/` (`docs/SPEC.md` sections 5.1 and 8.4).
+//! Catervas's memory: the append-only event log, the projections read from it, and the files under
+//! `.catervas/` (`docs/SPEC.md` sections 5.1 and 8.4).
 
 /// What each agent does, and what moved.
 pub mod activity;
@@ -11,9 +11,9 @@ pub mod diff;
 pub mod error;
 /// The event log.
 pub mod event_log;
-/// The files under `.farik/`.
+/// The files under `.catervas/`.
 pub mod files;
-/// The repository Farik works in.
+/// The repository Catervas works in.
 pub mod git;
 /// The marketing plans the log holds.
 pub mod marketing;
@@ -29,7 +29,7 @@ pub mod projections;
 pub mod purchase_orders;
 /// Where the files and the log disagree.
 pub mod reconcile;
-/// The renewals Farik flagged for the owner.
+/// The renewals Catervas flagged for the owner.
 pub mod renewals;
 /// Filing a request, for every caller.
 pub mod requests;

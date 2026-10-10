@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -24,7 +24,7 @@ const GATE = [
 	"waiting.list",
 ];
 const opened = (contract?: object, waiting?: object[]) =>
-	openedGate("/tasks/FRK-1/accept", GATE, contract, waiting);
+	openedGate("/tasks/CTV-1/accept", GATE, contract, waiting);
 
 const designer = (id: string, name: string) => ({
 	id,
@@ -41,7 +41,7 @@ const reviewedTwice = (
 	designReview: object = { state: "passed", reasons: PASSED, checks: [] },
 	lastPasses = true,
 ) =>
-	openedGate("/tasks/FRK-1/accept", [...GATE, "task.get"], TASK, ACCEPTING, {
+	openedGate("/tasks/CTV-1/accept", [...GATE, "task.get"], TASK, ACCEPTING, {
 		"team.get": {
 			team: {
 				...TEAM,
@@ -96,7 +96,7 @@ describe("acceptance gate", () => {
 			await screen.findByRole("heading", { name: "Accept Gift cards" }),
 		).toBeTruthy();
 		expect(
-			screen.getByText("FRK-1. The work waits for you to accept it."),
+			screen.getByText("CTV-1. The work waits for you to accept it."),
 		).toBeTruthy();
 
 		// The two signed summaries, the builder's first, each its note's first paragraph.
@@ -116,8 +116,10 @@ describe("acceptance gate", () => {
 		).toBeTruthy();
 		expect(within(reviewed).getByText(REVIEW)).toBeTruthy();
 
-		// Then Farik's checks, after both summaries.
-		const checked = screen.getByRole("region", { name: "What Farik checked" });
+		// Then Catervas's checks, after both summaries.
+		const checked = screen.getByRole("region", {
+			name: "What Catervas checked",
+		});
 		expect(
 			reviewed.compareDocumentPosition(checked) &
 				Node.DOCUMENT_POSITION_FOLLOWING,
@@ -156,13 +158,13 @@ describe("acceptance gate", () => {
 			within(about)
 				.getByRole("link", { name: "See the whole history" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-1");
+		).toBe("/tasks/CTV-1");
 		await expectNoAxeViolations(container);
 	});
 
 	it("a_finance_tasks_gate_says_where_its_books_are", async () => {
 		await openedGate(
-			"/tasks/FRK-1/accept",
+			"/tasks/CTV-1/accept",
 			GATE,
 			{
 				...TASK,
@@ -193,7 +195,7 @@ describe("acceptance gate", () => {
 	});
 
 	it("says_one_changed_file_in_the_singular", async () => {
-		await openedGate("/tasks/FRK-1/accept", GATE, TASK, undefined, {
+		await openedGate("/tasks/CTV-1/accept", GATE, TASK, undefined, {
 			"task.diff": { diff: "", files: ["done.txt"], added: 1, removed: 0 },
 		});
 		expect(
@@ -212,14 +214,14 @@ describe("acceptance gate", () => {
 		expect(accept.params).toEqual({
 			command: {
 				command: "human_accept",
-				body: { task_id: "FRK-1", subject: "result" },
+				body: { task_id: "CTV-1", subject: "result" },
 			},
 		});
 		await s.reply(accept, {
 			error: {
 				kind: "refused",
 				detail:
-					"not_waiting_for_the_human: FRK-1 is done, and its result does not wait for the human",
+					"not_waiting_for_the_human: CTV-1 is done, and its result does not wait for the human",
 			},
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
@@ -242,7 +244,7 @@ describe("acceptance gate", () => {
 			command: {
 				command: "human_accept",
 				body: {
-					task_id: "FRK-1",
+					task_id: "CTV-1",
 					subject: "result",
 					message: "I bought a $25 card and used it.",
 				},
@@ -267,11 +269,11 @@ describe("acceptance gate", () => {
 	it("adds_accepted_work_to_the_project", async () => {
 		const { container, s } = await opened({ ...TASK, status: "accepted" }, [
 			{
-				task_id: "FRK-1",
+				task_id: "CTV-1",
 				kind: "integration",
 				agent_id: null,
 				title: "Gift cards",
-				line: "Farik could not add it to your project",
+				line: "Catervas could not add it to your project",
 			},
 		]);
 		const add = await screen.findByRole("button", { name: "Add to project" });
@@ -283,7 +285,7 @@ describe("acceptance gate", () => {
 		).toBeNull();
 		fireEvent.click(add);
 		expect((await sentCommand(s)).params).toEqual({
-			command: { command: "task_integrate", body: { task_id: "FRK-1" } },
+			command: { command: "task_integrate", body: { task_id: "CTV-1" } },
 		});
 		await expectNoAxeViolations(container);
 	});
@@ -292,7 +294,7 @@ describe("acceptance gate", () => {
 		const LOOKED =
 			"I opened the page on a phone and on a computer, in the light and dark themes. All four pass.";
 		const { container } = await openedGate(
-			"/tasks/FRK-1/accept",
+			"/tasks/CTV-1/accept",
 			[...GATE, "task.get"],
 			TASK,
 			ACCEPTING,
@@ -390,7 +392,7 @@ describe("acceptance gate", () => {
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
 		).toEqual([
-			"Farik ran its checks",
+			"Catervas ran its checks",
 			"Iris sent the screens back",
 			"Kai checked the screens",
 			"Ada reviewed the code",
@@ -433,7 +435,7 @@ describe("acceptance gate", () => {
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
 		).toEqual([
-			"Farik ran its checks",
+			"Catervas ran its checks",
 			"Iris sent the screens back",
 			"Ada sent the code back",
 			"Kai checked the screens",

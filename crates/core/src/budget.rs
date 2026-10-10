@@ -105,7 +105,7 @@ pub enum BudgetScope {
 /// What happens when a budget is exhausted (`docs/SPEC.md` section 5.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BudgetConsequence {
-    /// The session ends and Farik leaves a note on the task saying where it stopped; the next
+    /// The session ends and Catervas leaves a note on the task saying where it stopped; the next
     /// session resumes from the note.
     EndSessionWithNote,
     /// The task goes to `escalated`.

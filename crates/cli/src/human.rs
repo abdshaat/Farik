@@ -2,19 +2,19 @@
 //! answer, integrate, resolve, cancel, and stop, each one `Orchestrator::handle` command, reaching
 //! the process driving the project from any terminal (ADR 0014).
 
-use farik_core::contract::TaskId;
-use farik_protocol::command::Command;
-use farik_protocol::event::{EventBody, EventKind};
-use farik_runtime::orchestrator::{CommandError, CommandReport};
-use farik_store::EventQuery;
+use catervas_core::contract::TaskId;
+use catervas_protocol::command::Command;
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_runtime::orchestrator::{CommandError, CommandReport};
+use catervas_store::EventQuery;
 use serde_json::json;
 
 use crate::Report;
 use crate::project::Project;
 use crate::start::{send, try_lock};
 
-/// `farik stop`: the run, or with `target` one session, in the process driving the project. A
-/// `FRK-<n>` names the task's last session started and not ended.
+/// `catervas stop`: the run, or with `target` one session, in the process driving the project. A
+/// `CTV-<n>` names the task's last session started and not ended.
 ///
 /// # Errors
 ///
@@ -24,7 +24,7 @@ pub fn stop(project: &Project, target: Option<&str>) -> Result<Report, String> {
     if let Some(lock) = try_lock(&project.root)? {
         drop(lock);
         return Err(
-            "no farik process is driving this project, so there is nothing to stop".to_string(),
+            "no catervas process is driving this project, so there is nothing to stop".to_string(),
         );
     }
     let command = match target {
@@ -79,7 +79,7 @@ pub fn said(outcome: Result<CommandReport, CommandError>) -> Result<Report, Stri
     })
 }
 
-/// A `CommandError` in the words a person reads after `farik: `.
+/// A `CommandError` in the words a person reads after `catervas: `.
 #[must_use]
 pub fn refusal(error: &CommandError) -> String {
     match error {

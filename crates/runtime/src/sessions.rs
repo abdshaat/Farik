@@ -2,13 +2,13 @@
 
 use std::num::NonZeroU64;
 
-use farik_core::team::Effort;
-use farik_protocol::clock::Clock;
-use farik_protocol::event::{
+use catervas_core::team::Effort;
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::{
     DataPipelineNumber, EventBody, EventIds, SessionEndedBody, SessionEndedBodyReason,
     SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyPurpose, Thread, new_event,
 };
-use farik_store::{EventLog, StoreError};
+use catervas_store::{EventLog, StoreError};
 
 use crate::session::{EndReason, SessionPurpose, SessionSpec};
 
@@ -139,11 +139,11 @@ fn effort_wire(effort: Effort) -> SessionStartedBodyEffort {
 mod tests {
     use std::path::Path;
 
+    use catervas_core::team::Effort;
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::{CatervasEvent, EventBody, EventIds, SessionEndedBodyReason};
+    use catervas_store::{EventLog, EventQuery, IN_MEMORY, open_event_log};
     use chrono::{DateTime, Utc};
-    use farik_core::team::Effort;
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::{EventBody, EventIds, FarikEvent, SessionEndedBodyReason};
-    use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 
     use super::{record_session_ended, record_session_started};
     use crate::recorded::fixtures::a_session_spec;
@@ -160,22 +160,22 @@ mod tests {
 
     fn spec() -> SessionSpec {
         SessionSpec {
-            task_id: Some("FRK-7".parse().expect("a task id")),
+            task_id: Some("CTV-7".parse().expect("a task id")),
             ..a_session_spec()
         }
     }
 
     fn ids(spec: &SessionSpec) -> EventIds {
         EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             task_id: spec.task_id.clone(),
             agent_id: Some(spec.agent_id.clone()),
             session_id: None,
         }
     }
 
-    fn everything(log: &EventLog) -> Vec<FarikEvent> {
+    fn everything(log: &EventLog) -> Vec<CatervasEvent> {
         log.read(&EventQuery::default()).expect("the log reads")
     }
 

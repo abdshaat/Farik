@@ -3,9 +3,9 @@
 //! Every test here needs the `git` program, so every one is `#[ignore]`d and run by
 //! `cargo xtask check --integration`, as `git.rs` is and for the same reasons.
 
+use catervas_store::git::fixtures::{TempRepo, git_in};
+use catervas_store::{Git, ScanError, scan_project};
 use chrono::{DateTime, Utc};
-use farik_store::git::fixtures::{TempRepo, git_in};
-use farik_store::{Git, ScanError, scan_project};
 
 /// A moment to scan at, so that "last commit today" is an answer rather than a guess.
 fn now() -> DateTime<Utc> {
@@ -108,7 +108,7 @@ fn reads_the_project_own_scripts_rather_than_guessing_them() {
             ("the-types-check", "npm run typecheck".to_string()),
         ],
         "a script the project has becomes a criterion; one it does not have does not, and neither \
-         does one Farik has no name for"
+         does one Catervas has no name for"
     );
     assert_eq!(scan.read_back, "JavaScript, npm, last commit today");
 }
@@ -193,7 +193,7 @@ fn reads_back_a_repository_it_recognises_nothing_in() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_a_directory_that_is_not_a_repository() {
-    let plain = std::env::temp_dir().join(format!("farik-scan-plain-{}", std::process::id()));
+    let plain = std::env::temp_dir().join(format!("catervas-scan-plain-{}", std::process::id()));
     std::fs::create_dir_all(&plain).expect("a plain directory");
     let refused = scan_project(&Git::open(plain.clone()), now());
     let _ = std::fs::remove_dir_all(&plain);
@@ -202,7 +202,7 @@ fn refuses_a_directory_that_is_not_a_repository() {
         Err(ScanError::NotARepository {
             path: plain.display().to_string()
         }),
-        "a project is a git repository plus .farik/, and this is neither"
+        "a project is a git repository plus .catervas/, and this is neither"
     );
 }
 
@@ -234,9 +234,9 @@ fn refuses_a_tree_that_is_missing_a_file_it_tracks() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn says_what_git_said_about_a_repository_with_no_working_tree() {
     // A bare repository is a repository, so `is_repository` says yes, and it has nothing to scan.
-    // Saying that better needs a refusal of its own, which step 08's `farik doctor` row records; what
+    // Saying that better needs a refusal of its own, which step 08's `catervas doctor` row records; what
     // this step promises is that git's own sentence reaches the person rather than being swallowed.
-    let bare = std::env::temp_dir().join(format!("farik-scan-bare-{}.git", std::process::id()));
+    let bare = std::env::temp_dir().join(format!("catervas-scan-bare-{}.git", std::process::id()));
     let _ = std::fs::remove_dir_all(&bare);
     std::fs::create_dir_all(&bare).expect("a directory");
     git_in(&bare, &["init", "--bare", "-q"]);
@@ -330,11 +330,11 @@ fn refuses_a_directory_inside_a_repository_rather_than_scanning_a_subtree() {
 fn refuses_to_list_what_a_directory_that_is_not_a_repository_tracks() {
     // `tracked_paths` promises this, and `scan_project` asks `is_repository` before it, so nothing
     // else would notice if the adapter stopped checking.
-    let plain = std::env::temp_dir().join(format!("farik-tracked-plain-{}", std::process::id()));
+    let plain = std::env::temp_dir().join(format!("catervas-tracked-plain-{}", std::process::id()));
     std::fs::create_dir_all(&plain).expect("a plain directory");
     let refused = Git::open(plain.clone()).tracked_paths();
     let _ = std::fs::remove_dir_all(&plain);
-    assert_eq!(refused, Err(farik_store::GitError::NotARepository));
+    assert_eq!(refused, Err(catervas_store::GitError::NotARepository));
 }
 
 #[test]
@@ -342,18 +342,21 @@ fn refuses_to_list_what_a_directory_that_is_not_a_repository_tracks() {
 fn refuses_to_say_where_a_directory_that_is_not_a_repository_begins() {
     // `top_level` promises this too, and `scan_project` asks `is_repository` first, so the pair of
     // this test and the one above is what holds both refusals.
-    let plain = std::env::temp_dir().join(format!("farik-toplevel-plain-{}", std::process::id()));
+    let plain =
+        std::env::temp_dir().join(format!("catervas-toplevel-plain-{}", std::process::id()));
     std::fs::create_dir_all(&plain).expect("a plain directory");
     let refused = Git::open(plain.clone()).top_level();
     let _ = std::fs::remove_dir_all(&plain);
-    assert_eq!(refused, Err(farik_store::GitError::NotARepository));
+    assert_eq!(refused, Err(catervas_store::GitError::NotARepository));
 }
 
 /// The command a template's verification runs, whichever method it is.
-fn command_of(verification: &farik_core::criteria::TemplateVerification) -> String {
+fn command_of(verification: &catervas_core::criteria::TemplateVerification) -> String {
     match verification {
-        farik_core::criteria::TemplateVerification::Variant0 { command, .. }
-        | farik_core::criteria::TemplateVerification::Variant1 { command, .. } => command.clone(),
+        catervas_core::criteria::TemplateVerification::Variant0 { command, .. }
+        | catervas_core::criteria::TemplateVerification::Variant1 { command, .. } => {
+            command.clone()
+        }
         other => panic!("a criterion the scan found runs a command: {other:?}"),
     }
 }

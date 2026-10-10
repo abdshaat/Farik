@@ -1,6 +1,6 @@
 # Workflow
 
-How a change gets into the Farik repository, from idea to merged commit. This document governs how Farik is built. It is not the product's harness; that lives in `docs/SPEC.md` section 5 and governs the agent teams Farik runs for its users. The two are kept deliberately similar in spirit, and if a rule here would be embarrassing to apply to our users' teams it does not belong here either, but they are separate documents about separate things.
+How a change gets into the Catervas repository, from idea to merged commit. This document governs how Catervas is built. It is not the product's harness; that lives in `docs/SPEC.md` section 5 and governs the agent teams Catervas runs for its users. The two are kept deliberately similar in spirit, and if a rule here would be embarrassing to apply to our users' teams it does not belong here either, but they are separate documents about separate things.
 
 The process applies to humans and to AI agents alike.
 

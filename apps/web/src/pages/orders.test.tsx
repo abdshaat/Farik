@@ -1,5 +1,5 @@
-import { uiStrings } from "@farik/ui";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { uiStrings } from "@catervas/ui";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -71,7 +71,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 			screen.getByRole("heading", { name: en.sitesTitle }).closest("section"),
 		);
 		expect(section.textContent).toContain(
-			"Ivo suggests and tracks orders. Farik never orders or pays: you place each, then mark it placed and received.",
+			"Ivo suggests and tracks orders. Catervas never orders or pays: you place each, then mark it placed and received.",
 		);
 
 		// An approved order waits for the owner to place it, with the day it closes by itself.
@@ -379,7 +379,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 			return frames[1];
 		});
 		expect(s.calls("command")).toHaveLength(2);
-		await s.reply(again as never, { task_id: "FRK-50" });
+		await s.reply(again as never, { task_id: "CTV-50" });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
@@ -520,7 +520,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 		expect((filed as { params: object }).params).toEqual({
 			text: "Update the register for PO-11 from Northfield Mill: it came on 26 October, and I paid 190.00 EUR. It renews on 26 October 2027.",
 		});
-		await s.reply(filed as never, { task_id: "FRK-51" });
+		await s.reply(filed as never, { task_id: "CTV-51" });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		await waitFor(() => expect(asked(s)).toBe(before + 1));
 	});
@@ -851,7 +851,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 		expect((filed as { params: object }).params).toEqual({
 			text: "Follow up on PO-11 from Northfield Mill: where is it, and when will it come?",
 		});
-		await s.reply(filed as never, { task_id: "FRK-52" });
+		await s.reply(filed as never, { task_id: "CTV-52" });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		expect(s.calls("command")).toHaveLength(0);
 	});

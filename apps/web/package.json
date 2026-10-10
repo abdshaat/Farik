@@ -1,5 +1,5 @@
 {
-	"name": "@farik/web",
+	"name": "@catervas/web",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -10,9 +10,9 @@
 		"e2e": "playwright test -c e2e"
 	},
 	"dependencies": {
-		"@farik/brand": "workspace:*",
-		"@farik/protocol-client": "workspace:*",
-		"@farik/ui": "workspace:*",
+		"@catervas/brand": "workspace:*",
+		"@catervas/protocol-client": "workspace:*",
+		"@catervas/ui": "workspace:*",
 		"react": "19.3.0",
 		"react-dom": "19.3.0",
 		"react-router": "8.4.0"

@@ -2,10 +2,10 @@
 
 use std::collections::BTreeSet;
 
-use farik_core::contract::TaskStatus;
-use farik_core::pricing::Usage;
-use farik_protocol::event::{EventBody, EventIds, EventKind, SessionStartedBodyPurpose};
-use farik_store::EventQuery;
+use catervas_core::contract::TaskStatus;
+use catervas_core::pricing::Usage;
+use catervas_protocol::event::{EventBody, EventIds, EventKind, SessionStartedBodyPurpose};
+use catervas_store::EventQuery;
 
 use super::integrate::remove_workspace;
 use super::{Orchestrator, OrchestratorError, RecoveryReport};
@@ -14,7 +14,7 @@ use crate::session::{EndReason, SessionPurpose};
 use crate::sessions::record_session_ended;
 
 /// What a session a stopped run left open is recorded as ending with.
-const INTERRUPTED: &str = "interrupted: farik stopped before the session ended";
+const INTERRUPTED: &str = "interrupted: catervas stopped before the session ended";
 
 /// `Orchestrator::recover`.
 pub(super) fn recover(orchestrator: &Orchestrator) -> Result<RecoveryReport, OrchestratorError> {
@@ -115,33 +115,33 @@ fn purpose(wire: SessionStartedBodyPurpose) -> SessionPurpose {
 mod tests {
     use std::sync::Arc;
 
-    use farik_protocol::event::{
-        CostRecordedBodyPurpose, EventBody, EventKind, FarikEvent, SessionEndedBodyReason,
+    use catervas_protocol::event::{
+        CatervasEvent, CostRecordedBodyPurpose, EventBody, EventKind, SessionEndedBodyReason,
     };
-    use farik_store::git::fixtures::git_output_in;
+    use catervas_store::git::fixtures::git_output_in;
     use serde_json::json;
 
     use crate::orchestrator::RecoveryReport;
     use crate::orchestrator::fixtures::{CountingSandboxFactory, Harness};
     use crate::recorded::fixtures::implement_stops_early;
 
-    /// A run killed with `dev-a`'s session on FRK-2 open, FRK-1 accepted with its worktree left,
-    /// and FRK-2 in progress with a commit on its branch; answers that commit.
+    /// A run killed with `dev-a`'s session on CTV-2 open, CTV-1 accepted with its worktree left,
+    /// and CTV-2 in progress with a commit on its branch; answers that commit.
     fn a_killed_run(name: &str) -> (Harness, String) {
         let harness = Harness::new(name, |wire| {
             wire["policy"]["wip_limit_per_agent"] = serde_json::json!(2);
         });
-        harness.accepted_with_worktree("FRK-1");
-        harness.in_progress("FRK-2", "dev-a", "dev-b");
-        let worktree = harness.worktree("FRK-2");
+        harness.accepted_with_worktree("CTV-1");
+        harness.in_progress("CTV-2", "dev-a", "dev-b");
+        let worktree = harness.worktree("CTV-2");
         std::fs::write(worktree.join("done.txt"), "").expect("written");
         let git = &harness.project.deps.git;
         git.commit(&worktree, "Add done.txt", &["done.txt".to_string()])
             .expect("committed");
-        harness.started_session("FRK-2", "dev-a", "session-killed", "implement");
+        harness.started_session("CTV-2", "dev-a", "session-killed", "implement");
         let sha = git_output_in(
             &harness.project.repo.path,
-            &["rev-parse", &harness.branch("FRK-2")],
+            &["rev-parse", &harness.branch("CTV-2")],
         );
         (harness, sha)
     }
@@ -188,12 +188,12 @@ mod tests {
             }
             other => panic!("a cost.recorded, got {other:?}"),
         }
-        assert!(!harness.worktree("FRK-1").exists());
-        assert!(harness.worktree("FRK-2").exists());
+        assert!(!harness.worktree("CTV-1").exists());
+        assert!(harness.worktree("CTV-2").exists());
     }
 
     /// The events of `kind` about `session`.
-    fn of_session(harness: &Harness, kind: EventKind, session: &str) -> Vec<FarikEvent> {
+    fn of_session(harness: &Harness, kind: EventKind, session: &str) -> Vec<CatervasEvent> {
         harness
             .events(&[kind])
             .into_iter()
@@ -205,10 +205,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_each_interrupted_session_against_its_task_agent_and_purpose() {
         let (harness, _) = a_killed_run("recover-attribution");
-        harness.started_session("FRK-2", "dev-b", "session-review", "verify");
+        harness.started_session("CTV-2", "dev-b", "session-review", "verify");
         // A session whose cost was recorded before the run stopped, and whose end was not.
-        harness.started_session("FRK-2", "dev-a", "session-costed", "implement");
-        harness.spent(Some("FRK-2"), "session-costed", 0.5);
+        harness.started_session("CTV-2", "dev-a", "session-costed", "implement");
+        harness.spent(Some("CTV-2"), "session-costed", 0.5);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.recover().expect("recovery runs");
@@ -230,7 +230,7 @@ mod tests {
                 let ids = &event.envelope.ids;
                 assert_eq!(
                     ids.task_id.as_ref().map(|task| task.as_str()),
-                    Some("FRK-2"),
+                    Some("CTV-2"),
                     "{session}"
                 );
                 assert_eq!(ids.agent_id.as_deref(), Some(agent), "{session}");
@@ -255,9 +255,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn removes_the_worktree_of_a_cancelled_task() {
         let harness = Harness::new("recover-cancelled", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "in_progress",
             "cancelled",
             &json!({ "actor": "human", "requested_by": "human" }),
@@ -267,7 +267,7 @@ mod tests {
         let report = orchestrator.recover().expect("recovery runs");
 
         assert_eq!(report.worktrees_removed, 1);
-        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!harness.worktree("CTV-1").exists());
     }
 
     #[tokio::test]
@@ -281,8 +281,8 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(sandboxes.created("FRK-2"), 1);
-        assert_eq!(sandboxes.created("FRK-1"), 0);
+        assert_eq!(sandboxes.created("CTV-2"), 1);
+        assert_eq!(sandboxes.created("CTV-1"), 0);
         let started = adapter.started();
         assert_eq!(started.len(), 1);
         assert!(

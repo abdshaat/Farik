@@ -1,4 +1,4 @@
-//! The files under `.farik/` (`docs/SPEC.md` sections 3, 5.8, 5.12, 5.13 and 8.4).
+//! The files under `.catervas/` (`docs/SPEC.md` sections 3, 5.8, 5.12, 5.13 and 8.4).
 //!
 //! The event log is the source of truth for what happened; these files are the source of truth for
 //! what the team knows. They are what travels with the repository, so every one of them is text a
@@ -9,14 +9,14 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use catervas_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
+use catervas_core::criteria::{CriteriaLibrary, validate_criteria};
+use catervas_core::governor::paths::normalise;
+use catervas_core::pricing::prices::PRICE_TABLE;
+use catervas_core::pricing::{PriceTable, validate_price_table};
+use catervas_core::sprint::{Sprint, validate_sprint};
+use catervas_core::team::{AgentId, Team, TeamTemplate, validate_team, validate_template};
 use chrono::NaiveDate;
-use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
-use farik_core::criteria::{CriteriaLibrary, validate_criteria};
-use farik_core::governor::paths::normalise;
-use farik_core::pricing::prices::PRICE_TABLE;
-use farik_core::pricing::{PriceTable, validate_price_table};
-use farik_core::sprint::{Sprint, validate_sprint};
-use farik_core::team::{AgentId, Team, TeamTemplate, validate_team, validate_template};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -67,7 +67,7 @@ impl fmt::Display for FilesError {
 
 impl std::error::Error for FilesError {}
 
-/// One decision under `.farik/decisions/`, as its file names it and says it (5.8).
+/// One decision under `.catervas/decisions/`, as its file names it and says it (5.8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionEntry {
     /// Its number, which its file name starts with.
@@ -108,19 +108,19 @@ impl Default for LocalSettings {
     }
 }
 
-/// The `.farik/` directory of one project, at the root of its git repository.
+/// The `.catervas/` directory of one project, at the root of its git repository.
 pub struct ProjectFiles {
     root: PathBuf,
 }
 
-/// What `.farik/local/.gitignore` holds: everything under it, including itself.
+/// What `.catervas/local/.gitignore` holds: everything under it, including itself.
 ///
-/// A task's worktree lives at `.farik/local/worktrees/FRK-<n>` (5.14) and the event log at
-/// `.farik/local/farik.db` (8.4). Without this, every repository Farik touches is dirty for good
+/// A task's worktree lives at `.catervas/local/worktrees/CTV-<n>` (5.14) and the event log at
+/// `.catervas/local/catervas.db` (8.4). Without this, every repository Catervas touches is dirty for good
 /// and `Git::is_clean` on the root never answers true again.
 const LOCAL_GITIGNORE: &str = "*\n";
 
-/// Where that file lives, relative to `.farik/`.
+/// Where that file lives, relative to `.catervas/`.
 const LOCAL_GITIGNORE_PATH: &str = "local/.gitignore";
 
 /// How many files this process has written beside another.
@@ -128,12 +128,12 @@ const LOCAL_GITIGNORE_PATH: &str = "local/.gitignore";
 /// The rename that publishes a file is all or nothing; what is in the file being renamed is not. So
 /// two writers that shared it could publish a file holding half of each, or an empty one, or fail
 /// the rename outright because the other had already renamed it away. This and the process id make
-/// the name a writer's own, which is what the promise needs: `farik` and the daemon are different
+/// the name a writer's own, which is what the promise needs: `catervas` and the daemon are different
 /// processes on one project (8.5), and tasks run at the same time (5.14).
 static WRITES_BESIDE: AtomicU64 = AtomicU64::new(0);
 
 impl ProjectFiles {
-    /// The `.farik/` directory of the repository at `root`. Nothing is read and nothing is written
+    /// The `.catervas/` directory of the repository at `root`. Nothing is read and nothing is written
     /// until a method is called.
     #[must_use]
     pub fn open(root: PathBuf) -> Self {
@@ -146,11 +146,11 @@ impl ProjectFiles {
         &self.root
     }
 
-    /// Makes `.farik/` and everything under it that a project starts with, and writes the team.
+    /// Makes `.catervas/` and everything under it that a project starts with, and writes the team.
     ///
-    /// Nothing that is already there is overwritten: a second `farik init` on a project that has a
+    /// Nothing that is already there is overwritten: a second `catervas init` on a project that has a
     /// team is a command that has nothing to do, not one that throws the team away. The directories
-    /// are made whether or not they hold anything yet, so that a person opening `.farik/` sees where
+    /// are made whether or not they hold anything yet, so that a person opening `.catervas/` sees where
     /// things go.
     ///
     /// # Errors
@@ -167,7 +167,7 @@ impl ProjectFiles {
             "product",
             "local",
         ] {
-            self.make_directory(&self.farik().join(directory))?;
+            self.make_directory(&self.catervas().join(directory))?;
         }
         self.write_if_absent(LOCAL_GITIGNORE_PATH, LOCAL_GITIGNORE)?;
         if self.path_of(TEAM).exists() {
@@ -250,7 +250,7 @@ impl ProjectFiles {
     }
 
     /// Writes a sprint to the file its own id names, after holding it to the same rules.
-    /// `.farik/sprints/` is made on the first write; `init` does not make it.
+    /// `.catervas/sprints/` is made on the first write; `init` does not make it.
     ///
     /// # Errors
     ///
@@ -272,14 +272,14 @@ impl ProjectFiles {
     /// # Errors
     ///
     /// `Invalid` when a file named `S<n>.yaml` is not one `validate_sprint` accepts, `Io` when
-    /// the directory cannot be read. A project with no `.farik/sprints/` has no sprints, which is
+    /// the directory cannot be read. A project with no `.catervas/sprints/` has no sprints, which is
     /// not an error.
     pub fn list_sprints(&self) -> Result<Vec<Sprint>, FilesError> {
-        let directory = self.farik().join(SPRINTS);
+        let directory = self.catervas().join(SPRINTS);
         if !directory.is_dir() {
             return Ok(Vec::new());
         }
-        let named = format!(".farik/{SPRINTS}");
+        let named = format!(".catervas/{SPRINTS}");
         let entries = std::fs::read_dir(&directory).map_err(|error| FilesError::Io {
             path: named.clone(),
             detail: error.to_string(),
@@ -375,21 +375,21 @@ impl ProjectFiles {
     ///
     /// # Errors
     ///
-    /// `Io` when the directory cannot be read. A project with no `.farik/` has no contracts, which
+    /// `Io` when the directory cannot be read. A project with no `.catervas/` has no contracts, which
     /// is not an error.
     pub fn list_contracts(&self) -> Result<Vec<TaskId>, FilesError> {
-        let directory = self.farik().join("contracts");
+        let directory = self.catervas().join("contracts");
         if !directory.is_dir() {
             return Ok(Vec::new());
         }
         let entries = std::fs::read_dir(&directory).map_err(|error| FilesError::Io {
-            path: ".farik/contracts".to_string(),
+            path: ".catervas/contracts".to_string(),
             detail: error.to_string(),
         })?;
         let mut ids: Vec<TaskId> = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| FilesError::Io {
-                path: ".farik/contracts".to_string(),
+                path: ".catervas/contracts".to_string(),
                 detail: error.to_string(),
             })?;
             let name = entry.file_name();
@@ -406,14 +406,14 @@ impl ProjectFiles {
             }
         }
         // By the number in the id, so that the tenth task does not come before the ninth, and then
-        // by the id itself, because the schema's pattern allows a leading zero: `FRK-01` and `FRK-1`
+        // by the id itself, because the schema's pattern allows a leading zero: `CTV-01` and `CTV-1`
         // are two spellings of one number, and without the second key the order between them is
         // whatever `read_dir` gave, which is stable on one filesystem and not across a fresh clone.
         // `projections` broke this tie in step 03 and `reconcile` in step 07. The parse cannot fail:
-        // `TaskId` is `FRK-` and one to six digits, which is what let it be built at all.
+        // `TaskId` is `CTV-` and one to six digits, which is what let it be built at all.
         ids.sort_by_key(|id| {
             (
-                id.as_str().trim_start_matches("FRK-").parse::<u64>().ok(),
+                id.as_str().trim_start_matches("CTV-").parse::<u64>().ok(),
                 id.as_str().to_string(),
             )
         });
@@ -575,7 +575,7 @@ impl ProjectFiles {
         date: NaiveDate,
     ) -> Result<DecisionEntry, FilesError> {
         // ponytail: a check before the link, so two writers inside the same instant can still both
-        // pass it; today one `farik run` writes at a time. Take a lock around list-then-link when
+        // pass it; today one `catervas run` writes at a time. Take a lock around list-then-link when
         // sessions run concurrently.
         if let Some((_, taken)) = self
             .decision_files()?
@@ -611,7 +611,7 @@ impl ProjectFiles {
     /// # Errors
     ///
     /// `Io` when the directory or a decision cannot be read. A project with no
-    /// `.farik/decisions/` has no decisions, which is not an error.
+    /// `.catervas/decisions/` has no decisions, which is not an error.
     pub fn list_decisions(&self) -> Result<Vec<DecisionEntry>, FilesError> {
         let mut decisions = Vec::new();
         for (number, slug) in self.decision_files()? {
@@ -621,7 +621,7 @@ impl ProjectFiles {
                     .find_map(|line| line.strip_prefix(prefix))
                     .map(str::trim)
             };
-            // `# 0001. Title` as Farik writes it; a heading written by hand may have no number.
+            // `# 0001. Title` as Catervas writes it; a heading written by hand may have no number.
             let title = line("# ").map_or_else(
                 || slug.clone(),
                 |heading| {
@@ -732,7 +732,7 @@ impl ProjectFiles {
             .map_err(|errors| refused(PRICES, &errors))
     }
 
-    /// The prices this project's costs are computed with: its `.farik/prices.json` as a whole when
+    /// The prices this project's costs are computed with: its `.catervas/prices.json` as a whole when
     /// there is one, else the shipped table. Never a merge of the two, because 5.5 calls the file
     /// an override, and a model the user took out of it would still be priced by a merge.
     ///
@@ -773,7 +773,7 @@ impl ProjectFiles {
     }
 }
 
-/// Where each file lives, relative to `.farik/`. One place, so that a reader of this module can see
+/// Where each file lives, relative to `.catervas/`. One place, so that a reader of this module can see
 /// the whole layout at once and a change to it is one line.
 const TEAM: &str = "team.yaml";
 const CRITERIA: &str = "team/criteria.yaml";
@@ -784,14 +784,14 @@ const PROJECT_SCAN: &str = "project.md";
 const PRICES: &str = "prices.json";
 const SETTINGS: &str = "local/settings.json";
 const CHANNEL_SUMMARY: &str = "local/channel-summary.md";
-/// What a refusal of a team template names it: it lives in the state folder, not under `.farik/`.
+/// What a refusal of a team template names it: it lives in the state folder, not under `.catervas/`.
 const TEMPLATE: &str = "template";
 
 /// How a file a person edits by hand is read.
 ///
 /// `strict_booleans` is the one setting that matters for such a file: YAML 1.1 resolves an unquoted
 /// `no`, `y` or `off` to a boolean, so a Norwegian country code or an agent id written that way
-/// would reach the validator as `false` rather than as what the person typed. What Farik itself
+/// would reach the validator as `false` rather than as what the person typed. What Catervas itself
 /// writes is quoted either way.
 fn yaml_options() -> serde_saphyr::Options {
     let mut options = serde_saphyr::Options::default();
@@ -802,10 +802,10 @@ fn yaml_options() -> serde_saphyr::Options {
 /// The wire value one piece of YAML holds, named by the path it came from so that a refusal says
 /// which file it is about.
 ///
-/// This is the one place the YAML a project holds or a person hands Farik is parsed, whatever
-/// directory it came from: a contract a person hands `farik task create` is held to the same dialect
-/// as the files under `.farik/` — no duplicate mapping key, no second document, the alias budget,
-/// and `true` spelled `true` (ADR 0007). The other place is `farik-roles`, which reads the role
+/// This is the one place the YAML a project holds or a person hands Catervas is parsed, whatever
+/// directory it came from: a contract a person hands `catervas task create` is held to the same dialect
+/// as the files under `.catervas/` — no duplicate mapping key, no second document, the alias budget,
+/// and `true` spelled `true` (ADR 0007). The other place is `catervas-roles`, which reads the role
 /// files embedded in the binary with the same options, because it cannot depend on this crate.
 ///
 /// Read the way a file a person edits by hand should be. `UserMessageFormatter` is the crate's own
@@ -853,7 +853,7 @@ pub fn criteria_yaml(library: &CriteriaLibrary) -> Result<String, FilesError> {
 
 /// A team template as the YAML its file holds (ADR 0026 C), after holding it to the rules a
 /// template read back is held to, so that what is saved can be read again. It lives in the user's
-/// state folder, not under `.farik/`, so a refusal names it `template`.
+/// state folder, not under `.catervas/`, so a refusal names it `template`.
 ///
 /// # Errors
 ///
@@ -930,7 +930,7 @@ fn slug(title: &str) -> String {
 
 /// A product document's path, or a refusal when it climbs out of `product/`.
 ///
-/// The path comes from a tool call, so it is a string an agent chose. `farik-core`'s own path rule
+/// The path comes from a tool call, so it is a string an agent chose. `catervas-core`'s own path rule
 /// is what answers: empty, absolute, or holding a `..` segment is refused, and `.` segments and
 /// backslashes are dropped on the way. Everything else is somewhere under `product/`, which is the
 /// only place 5.6 lets a product document be written.
@@ -1002,20 +1002,20 @@ fn resolved(path: &Path) -> Result<PathBuf, std::io::Error> {
 }
 
 impl ProjectFiles {
-    /// `.farik/`, where everything this module touches lives.
-    fn farik(&self) -> PathBuf {
-        self.root.join(".farik")
+    /// `.catervas/`, where everything this module touches lives.
+    fn catervas(&self) -> PathBuf {
+        self.root.join(".catervas")
     }
 
     /// One file's whole path, from its place in the layout.
     fn path_of(&self, relative: &str) -> PathBuf {
-        self.farik().join(relative)
+        self.catervas().join(relative)
     }
 
     /// The path as a person reads it in a refusal: from the project root, with `/` separators
     /// whatever the machine uses.
     fn named(relative: &str) -> String {
-        format!(".farik/{relative}")
+        format!(".catervas/{relative}")
     }
 
     fn make_directory(&self, path: &Path) -> Result<(), FilesError> {
@@ -1049,17 +1049,17 @@ impl ProjectFiles {
     ///
     /// `product_path` answers what the text says; this answers where it lands. A directory under
     /// `product/` may be a symlink pointing anywhere, and following one would put a tool call's
-    /// chosen path outside `.farik/` entirely — the string rule alone cannot see that, because
+    /// chosen path outside `.catervas/` entirely — the string rule alone cannot see that, because
     /// there is no `..` in it. So the path and `product/` itself are each resolved as far as they
     /// exist, and the one has to be under the other.
     ///
     /// Nothing is made here, not even the directory the answer is about. A read that conjured
-    /// `.farik/` would make a project of whatever directory it was pointed at.
+    /// `.catervas/` would make a project of whatever directory it was pointed at.
     ///
     /// The answer is about the file system as it was when the question was asked. Nothing in this
     /// module makes a symlink, so no caller can move the ground under itself, but a `git checkout`
     /// or another program could between this and the write. What that costs is bounded by who can
-    /// write inside `.farik/` at all, which is the person whose project it is.
+    /// write inside `.catervas/` at all, which is the person whose project it is.
     fn inside_product(&self, path: &str) -> Result<String, FilesError> {
         let relative = product_path(path)?;
         let refuse = |detail: String| FilesError::Invalid {
@@ -1163,7 +1163,7 @@ impl ProjectFiles {
         }
     }
 
-    /// One YAML file under `.farik/` as an untrusted value, for a validator to hold to its rules.
+    /// One YAML file under `.catervas/` as an untrusted value, for a validator to hold to its rules.
     fn read_yaml(&self, relative: &str) -> Result<Value, FilesError> {
         let text = self.read_text(relative)?;
         yaml_value(&text, &Self::named(relative))
@@ -1177,8 +1177,8 @@ impl ProjectFiles {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::TaskId;
-    use farik_core::team::AgentId;
+    use catervas_core::contract::TaskId;
+    use catervas_core::team::AgentId;
 
     use chrono::NaiveDate;
 
@@ -1190,13 +1190,14 @@ mod tests {
 
     #[test]
     fn round_trips_through_yaml() {
-        let template =
-            farik_core::team::validate_template(&farik_core::team::fixtures::a_template_wire())
-                .expect("the fixture is a template");
+        let template = catervas_core::team::validate_template(
+            &catervas_core::team::fixtures::a_template_wire(),
+        )
+        .expect("the fixture is a template");
         let text = template_yaml(&template).expect("a template is written");
         let value = yaml_value(&text, "template").expect("the text is YAML");
         assert_eq!(
-            farik_core::team::validate_template(&value).expect("and a template again"),
+            catervas_core::team::validate_template(&value).expect("and a template again"),
             template
         );
         let mut one_agent = template;
@@ -1211,14 +1212,14 @@ mod tests {
     fn says_what_it_could_not_use_and_why_in_plain_words() {
         let said: Vec<String> = [
             FilesError::NotFound {
-                path: ".farik/team.yaml".to_string(),
+                path: ".catervas/team.yaml".to_string(),
             },
             FilesError::Invalid {
-                path: ".farik/team.yaml".to_string(),
+                path: ".catervas/team.yaml".to_string(),
                 detail: "/agents an agent id names one agent".to_string(),
             },
             FilesError::Io {
-                path: ".farik/team.yaml".to_string(),
+                path: ".catervas/team.yaml".to_string(),
                 detail: "Permission denied (os error 13)".to_string(),
             },
         ]
@@ -1228,9 +1229,9 @@ mod tests {
         assert_eq!(
             said,
             [
-                "there is no .farik/team.yaml",
-                ".farik/team.yaml is not usable: /agents an agent id names one agent",
-                ".farik/team.yaml could not be used: Permission denied (os error 13)",
+                "there is no .catervas/team.yaml",
+                ".catervas/team.yaml is not usable: /agents an agent id names one agent",
+                ".catervas/team.yaml could not be used: Permission denied (os error 13)",
             ]
         );
     }
@@ -1238,8 +1239,8 @@ mod tests {
     #[test]
     fn names_the_file_a_contract_lives_in() {
         assert_eq!(
-            contract_path(&TaskId::try_from("FRK-12").expect("an id")),
-            "contracts/FRK-12.yaml"
+            contract_path(&TaskId::try_from("CTV-12").expect("an id")),
+            "contracts/CTV-12.yaml"
         );
     }
 
@@ -1289,7 +1290,7 @@ mod tests {
             else {
                 panic!("{path:?} climbs out: {refused:?}");
             };
-            assert_eq!(named, format!(".farik/product/{path}"));
+            assert_eq!(named, format!(".catervas/product/{path}"));
             assert!(detail.contains("climbs out of it"), "{detail}");
         }
     }
@@ -1335,7 +1336,7 @@ mod tests {
             std::fs::read_to_string(
                 project
                     .root
-                    .join(".farik/decisions/0001-use-sqlite-for-the-log.md")
+                    .join(".catervas/decisions/0001-use-sqlite-for-the-log.md")
             )
             .expect("the first file"),
             "# 0001. Use SQLite for the log\n\nDate: 2026-09-24\nBy: arch\n\nOne file, no server.\n"
@@ -1344,7 +1345,7 @@ mod tests {
         assert!(
             project
                 .root
-                .join(".farik/decisions/0002-keep-the-log-append-only.md")
+                .join(".catervas/decisions/0002-keep-the-log-append-only.md")
                 .is_file()
         );
         assert_eq!(
@@ -1357,7 +1358,7 @@ mod tests {
     fn never_overwrites_a_decision() {
         let project = TempProject::new("decision-immutable");
         let files = project.files();
-        let decisions = project.root.join(".farik/decisions");
+        let decisions = project.root.join(".catervas/decisions");
         std::fs::create_dir_all(&decisions).expect("the directory");
         std::fs::write(decisions.join("0003-x.md"), "placed by hand").expect("a file");
 
@@ -1370,7 +1371,7 @@ mod tests {
         assert_eq!(
             clash,
             Err(FilesError::Exists {
-                path: ".farik/decisions/0004-next.md".to_string()
+                path: ".catervas/decisions/0004-next.md".to_string()
             })
         );
         assert!(
@@ -1411,7 +1412,7 @@ mod tests {
         assert_eq!(
             clash,
             Err(FilesError::Exists {
-                path: ".farik/decisions/0001-a.md".to_string()
+                path: ".catervas/decisions/0001-a.md".to_string()
             })
         );
         assert_eq!(
@@ -1430,7 +1431,7 @@ mod tests {
     fn refuses_a_decision_past_9999() {
         let project = TempProject::new("decision-past-9999");
         let files = project.files();
-        let decisions = project.root.join(".farik/decisions");
+        let decisions = project.root.join(".catervas/decisions");
         std::fs::create_dir_all(&decisions).expect("the directory");
         std::fs::write(decisions.join("9998-x.md"), "placed by hand").expect("a file");
 
@@ -1443,7 +1444,7 @@ mod tests {
         assert_eq!(
             refused,
             Err(FilesError::Invalid {
-                path: ".farik/decisions".to_string(),
+                path: ".catervas/decisions".to_string(),
                 detail: "the project has 9999 decisions".to_string(),
             })
         );
@@ -1464,7 +1465,7 @@ mod tests {
     fn lists_a_decision_written_by_hand() {
         let project = TempProject::new("decision-by-hand");
         let files = project.files();
-        let decisions = project.root.join(".farik/decisions");
+        let decisions = project.root.join(".catervas/decisions");
         std::fs::create_dir_all(&decisions).expect("the directory");
         std::fs::write(decisions.join("0005-x.md"), "hello").expect("a file");
         std::fs::write(decisions.join("README.md"), "not a decision").expect("a file");
@@ -1484,7 +1485,7 @@ mod tests {
         assert_eq!(
             files.read_decision(9),
             Err(FilesError::NotFound {
-                path: ".farik/decisions/0009-*.md".to_string()
+                path: ".catervas/decisions/0009-*.md".to_string()
             })
         );
     }

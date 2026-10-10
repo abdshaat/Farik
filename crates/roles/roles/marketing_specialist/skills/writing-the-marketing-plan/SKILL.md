@@ -43,11 +43,11 @@ the plan's text what each campaign advertises, and which campaigns are not at a 
 
 ## 6. Propose it and end your turn
 
-Propose the plan with `farik_propose_marketing_plan`: a title, a summary, the full text, its
+Propose the plan with `catervas_propose_marketing_plan`: a title, a summary, the full text, its
 dates (at most 92 days), the currency, the budget, the campaigns, the post slots and the measures.
-Farik checks the numbers and the dates and answers every fault at once, so fix them all. When it
+Catervas checks the numbers and the dates and answers every fault at once, so fix them all. When it
 accepts the plan, end your turn: the owner's decision starts your next session. Do not ask for
-`verifying` while the plan waits; Farik refuses it.
+`verifying` while the plan waits; Catervas refuses it.
 
 ## 7. What the owner sees
 

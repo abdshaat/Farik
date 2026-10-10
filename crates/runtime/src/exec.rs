@@ -84,7 +84,7 @@ pub(crate) fn workspace_relative(cwd: &str) -> Result<Option<String>, ExecError>
     {
         return Ok(None);
     }
-    farik_core::governor::paths::normalise(cwd)
+    catervas_core::governor::paths::normalise(cwd)
         .map(Some)
         .ok_or_else(|| ExecError::OutsideWorkspace {
             cwd: cwd.to_owned(),

@@ -4,21 +4,21 @@
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
-use farik_core::contract::Role;
-use farik_core::governor::permissions::{
+use catervas_core::contract::Role;
+use catervas_core::governor::permissions::{
     AgentGrants, ApprovalKey, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext,
     ToolCallRequest, ToolDescriptor, evaluate_connector_call, evaluate_tool_call, input_sha256,
 };
-use farik_core::governor::sites::{WebAccess, check_site_urls, site_of};
-use farik_core::marketing::active_plan;
-use farik_core::team::{AgentStatus, Team};
-use farik_protocol::event::{
+use catervas_core::governor::sites::{WebAccess, check_site_urls, site_of};
+use catervas_core::marketing::active_plan;
+use catervas_core::team::{AgentStatus, Team};
+use catervas_protocol::event::{
     ConnectorTagWire, EventBody, EventIds, EventKind, ToolApprovalRequestedBody, ToolCalledBody,
     ToolDeniedBody, ToolReturnedBody, new_event,
 };
-use farik_store::EventQuery;
-use farik_store::marketing::marketing_plans;
-use farik_store::waiting::open_grants;
+use catervas_store::EventQuery;
+use catervas_store::marketing::marketing_plans;
+use catervas_store::waiting::open_grants;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 
@@ -30,10 +30,10 @@ use crate::tools::refusal::Refusal;
 use crate::tools::sites::{approved_set, shown};
 use crate::tools::{ToolDeps, ToolError, paths_of, tool_descriptors};
 
-/// What Claude Code sends a hook on its standard input, the fields Farik reads.
+/// What Claude Code sends a hook on its standard input, the fields Catervas reads.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct HookRequest {
-    /// The `--session-id` Farik started the session with.
+    /// The `--session-id` Catervas started the session with.
     pub session_id: String,
     /// The directory the session runs in, as Claude Code reports it.
     pub cwd: PathBuf,
@@ -69,7 +69,7 @@ impl HookDecision {
     }
 }
 
-/// Claude Code's `hookSpecificOutput` shape, which is its format and not Farik's.
+/// Claude Code's `hookSpecificOutput` shape, which is its format and not Catervas's.
 impl Serialize for HookDecision {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         json!({
@@ -92,8 +92,8 @@ const SKILL_TOOL: &str = "Skill";
 /// Claude Code's tool for reading a page, which a session held to approved sites may point only at
 /// one.
 const FETCH_TOOL: &str = "WebFetch";
-/// The prefix Claude Code gives the tools of Farik's own MCP server.
-const FARIK_PREFIX: &str = "mcp__farik__";
+/// The prefix Claude Code gives the tools of Catervas's own MCP server.
+const CATERVAS_PREFIX: &str = "mcp__catervas__";
 /// The largest integer a JSON number holds exactly, and the schema's ceiling for one.
 const JSON_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 /// Why an allowed call was allowed.
@@ -105,11 +105,11 @@ const SESSION_STOPPED: &str = "session_stopped";
 pub(crate) const APPROVAL_NEEDED: &str = "approval_needed";
 
 /// The tier a Claude Code built-in tool needs, or `None` for one no session may call: `Bash`
-/// above all, because a session's shell is `farik_exec` (ADR 0004).
+/// above all, because a session's shell is `catervas_exec` (ADR 0004).
 #[must_use]
 pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
     match tool {
-        // `ToolSearch` only lists tools, and may be how Claude Code reaches Farik's.
+        // `ToolSearch` only lists tools, and may be how Claude Code reaches Catervas's.
         "Read" | "Glob" | "Grep" | "LS" | "ToolSearch" => Some(PermissionTier::Read),
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => Some(PermissionTier::WriteWorkspace),
         "WebFetch" | "WebSearch" => Some(PermissionTier::Network),
@@ -120,8 +120,8 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// Decides one `PreToolUse` hook and records the decision, `tool.called` or `tool.denied`. It
 /// refuses, in this order: a session the daemon does not know (`unknown_session`); an agent that
 /// is not active (`agent_not_active`); a session at its `max_tool_calls` (`tool_call_limit`); a
-/// `Skill` call that is not `farik:<name>` of one of the session's skills (`skill_not_in_session`); a
-/// tool that is neither Farik's nor a built-in with a tier (`tool_not_allowed`); a Farik tool the
+/// `Skill` call that is not `catervas:<name>` of one of the session's skills (`skill_not_in_session`); a
+/// tool that is neither Catervas's nor a built-in with a tier (`tool_not_allowed`); a Catervas tool the
 /// session was not given (`tool_not_in_session`); a built-in's path
 /// outside the session's worktree (`path_outside_workspace`); whatever `evaluate_tool_call`
 /// refuses; and, for a session held to approved sites, a `WebFetch` of any other site
@@ -300,7 +300,8 @@ fn judge(
             .map_err(Denial::from);
     }
     // A connector's call is judged by its tag alone, whatever the session's tiers (5.6).
-    if !request.tool_name.starts_with(FARIK_PREFIX) && connector_tool(&request.tool_name).is_some()
+    if !request.tool_name.starts_with(CATERVAS_PREFIX)
+        && connector_tool(&request.tool_name).is_some()
     {
         return judge_connector(request, registration, deps, state, &team);
     }
@@ -309,7 +310,7 @@ fn judge(
         .map_err(Denial::from)
 }
 
-/// Whether an active agent's call of a Farik tool or a built-in may go ahead, or the reason it may
+/// Whether an active agent's call of a Catervas tool or a built-in may go ahead, or the reason it may
 /// not: by the tiers the session started with (spec 4.4).
 fn judge_call(
     request: &HookRequest,
@@ -317,11 +318,16 @@ fn judge_call(
     deps: &ToolDeps,
     team: &Team,
 ) -> Result<(), String> {
-    let (tier, paths) = match request.tool_name.strip_prefix(FARIK_PREFIX) {
-        // A Farik tool is asked with the paths its input names, as `call_tool` asks again: a
+    let (tier, paths) = match request.tool_name.strip_prefix(CATERVAS_PREFIX) {
+        // A Catervas tool is asked with the paths its input names, as `call_tool` asks again: a
         // `write_workspace` call with none is refused.
         Some(name) => match tool_descriptors().iter().find(|tool| tool.name == name) {
-            Some(_) if !registration.farik_tools.iter().any(|given| given == name) => {
+            Some(_)
+                if !registration
+                    .catervas_tools
+                    .iter()
+                    .any(|given| given == name) =>
+            {
                 return Err(Refusal::ToolNotInSession {
                     tool: name.to_string(),
                 }
@@ -381,16 +387,16 @@ fn judge_call(
 }
 
 /// How a session held to approved sites is told to get another: in the implement session of a
-/// task, the one that can wait for the owner, it asks with `farik_request_sites`; no other can.
+/// task, the one that can wait for the owner, it asks with `catervas_request_sites`; no other can.
 fn how_to_ask(registration: &SessionRegistration) -> &'static str {
     if registration.purpose == SessionPurpose::Implement && registration.task_id.is_some() {
-        "ask with farik_request_sites, then end your turn"
+        "ask with catervas_request_sites, then end your turn"
     } else {
         "you can ask for it only while working on a task"
     }
 }
 
-/// The sites a held session may read now, from the log at this call: Farik's, and the owner's.
+/// The sites a held session may read now, from the log at this call: Catervas's, and the owner's.
 /// A log that cannot be read denies.
 fn approved_now(deps: &ToolDeps) -> Result<BTreeSet<String>, String> {
     approved_set(&deps.log).map_err(|error| format!("sites_unreadable: {error}"))
@@ -442,10 +448,10 @@ fn judge_sites_of_call(
     })
 }
 
-/// Whether a `Skill` call names one of the session's skills as `farik:<name>` and holds nothing
+/// Whether a `Skill` call names one of the session's skills as `catervas:<name>` and holds nothing
 /// but that and an optional string `args` holding no `@`, which Claude Code would attach as a file
 /// past this hook (ADR 0034): a bare name would load Claude Code's own
-/// skill of that name, and any other field is not one Farik has judged.
+/// skill of that name, and any other field is not one Catervas has judged.
 fn judge_skill(input: &Value, registration: &SessionRegistration) -> Result<(), String> {
     let named = input.as_object().is_some_and(|fields| {
         fields.keys().all(|key| key == "skill" || key == "args")
@@ -455,14 +461,14 @@ fn judge_skill(input: &Value, registration: &SessionRegistration) -> Result<(), 
             && fields
                 .get("skill")
                 .and_then(Value::as_str)
-                .and_then(|skill| skill.strip_prefix("farik:"))
+                .and_then(|skill| skill.strip_prefix("catervas:"))
                 .is_some_and(|name| registration.skills.iter().any(|given| given == name))
     });
     if named {
         return Ok(());
     }
     Err(format!(
-        "skill_not_in_session: a session uses its own skills as farik:<name> with nothing but an \
+        "skill_not_in_session: a session uses its own skills as catervas:<name> with nothing but an \
          optional args without @, and this one has {}",
         if registration.skills.is_empty() {
             "none".to_string()
@@ -530,7 +536,7 @@ fn plan_gate(
 
 /// A connector's tool name, `mcp__<server>__<tool>`, as its server and its tool; `None` for any
 /// other name. A server's name holds no `_` (the team file's rule), so the first `__` ends it.
-/// Farik's own tools are told apart before this is asked.
+/// Catervas's own tools are told apart before this is asked.
 fn connector_tool(name: &str) -> Option<(&str, &str)> {
     name.strip_prefix("mcp__")?.split_once("__")
 }
@@ -658,7 +664,7 @@ fn calls_made(
     tool: &str,
 ) -> Result<u32, Denial> {
     let unreadable =
-        |error: farik_store::StoreError| Denial::from(format!("allowance_unreadable: {error}"));
+        |error: catervas_store::StoreError| Denial::from(format!("allowance_unreadable: {error}"));
     let period =
         allowance_period(&deps.log, &deps.projections, deps.clock.now()).map_err(unreadable)?;
     state
@@ -763,7 +769,7 @@ fn ask(
 
 fn not_allowed(tool: &str) -> String {
     format!(
-        "tool_not_allowed: {tool} is neither a Farik tool nor a built-in tool with a tier, and no \
+        "tool_not_allowed: {tool} is neither a Catervas tool nor a built-in tool with a tier, and no \
          other tool is served to a session"
     )
 }
@@ -938,9 +944,9 @@ fn cut(text: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::budget::DEFAULT_SESSION_LIMITS;
-    use farik_core::budget::SessionLimits;
-    use farik_protocol::event::{EventBody, EventKind};
+    use catervas_core::budget::DEFAULT_SESSION_LIMITS;
+    use catervas_core::budget::SessionLimits;
+    use catervas_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
     use super::{HookDecision, HookRequest, cut, decide_pre_tool_use, record_post_tool_use};
@@ -1000,7 +1006,7 @@ mod tests {
         assert_eq!(ids.agent_id.as_deref(), Some("dev-a"));
         assert_eq!(
             ids.task_id.as_ref().map(|id| id.to_string()).as_deref(),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         let EventBody::ToolCalled(body) = &called[0].body else {
             panic!("a tool.called event carries a tool.called body");
@@ -1164,14 +1170,14 @@ mod tests {
         let daemon = TestDaemon::new("hook-home", |_| {});
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["allowed_paths"] = json!(["**"]);
                 wire["assignee"] = json!("dev-a");
             });
         daemon.register(
             "session-all",
             "dev-a",
-            Some("FRK-2"),
+            Some("CTV-2"),
             DEFAULT_SESSION_LIMITS,
         );
         for (tool, input) in [
@@ -1252,20 +1258,24 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn denies_a_farik_tool_the_agent_has_no_tier_for() {
+    fn denies_a_catervas_tool_the_agent_has_no_tier_for() {
         let daemon = TestDaemon::new("hook-tier", |_| {});
         daemon.register("session-pm", "pm", None, DEFAULT_SESSION_LIMITS);
         let decision = decide_pre_tool_use(
             &daemon.call(
                 "session-pm",
-                "mcp__farik__farik_exec",
+                "mcp__catervas__catervas_exec",
                 &json!({ "command": "true" }),
             ),
             &daemon.state,
         );
         denied_for(&decision, "tier_not_granted");
         let read = decide_pre_tool_use(
-            &daemon.call("session-pm", "mcp__farik__farik_read_board", &json!({})),
+            &daemon.call(
+                "session-pm",
+                "mcp__catervas__catervas_read_board",
+                &json!({}),
+            ),
             &daemon.state,
         );
         assert!(read.allow, "{read:?}");
@@ -1273,31 +1283,31 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn judges_a_farik_tool_that_writes_by_the_path_it_will_write() {
-        // A write_workspace tool of Farik's names the file it writes (here, a plan in the plans
+    fn judges_a_catervas_tool_that_writes_by_the_path_it_will_write() {
+        // A write_workspace tool of Catervas's names the file it writes (here, a plan in the plans
         // folder), so the hook checks that path against the contract as `call_tool` does, instead
         // of finding the call names none.
-        let daemon = TestDaemon::new("hook-farik-write", |_| {});
+        let daemon = TestDaemon::new("hook-catervas-write", |_| {});
         let outside = decide_pre_tool_use(
-            &daemon.dev_call("mcp__farik__farik_propose_marketing_plan", &json!({})),
+            &daemon.dev_call("mcp__catervas__catervas_propose_marketing_plan", &json!({})),
             &daemon.state,
         );
         denied_for(&outside, "path_outside_allowed");
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["allowed_paths"] = json!(["docs/marketing/**"]);
             });
         daemon.register(
             "session-docs",
             "dev-a",
-            Some("FRK-2"),
+            Some("CTV-2"),
             DEFAULT_SESSION_LIMITS,
         );
         let inside = decide_pre_tool_use(
             &daemon.call(
                 "session-docs",
-                "mcp__farik__farik_propose_marketing_plan",
+                "mcp__catervas__catervas_propose_marketing_plan",
                 &json!({}),
             ),
             &daemon.state,
@@ -1307,29 +1317,32 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn denies_a_farik_tool_the_session_was_not_given() {
+    fn denies_a_catervas_tool_the_session_was_not_given() {
         let daemon = TestDaemon::new("hook-session-tools", |_| {});
         daemon.register_with_tools(
             "session-triage",
             "pm",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
-            &["farik_triage_request"],
+            &["catervas_triage_request"],
         );
         let write = decide_pre_tool_use(
             &daemon.call(
                 "session-triage",
-                "mcp__farik__farik_write_contract",
+                "mcp__catervas__catervas_write_contract",
                 &json!({ "fields": { "intent": "More." } }),
             ),
             &daemon.state,
         );
         denied_for(&write, "tool_not_in_session");
-        assert!(write.reason.contains("farik_write_contract"), "{write:?}");
+        assert!(
+            write.reason.contains("catervas_write_contract"),
+            "{write:?}"
+        );
         let triage = decide_pre_tool_use(
             &daemon.call(
                 "session-triage",
-                "mcp__farik__farik_triage_request",
+                "mcp__catervas__catervas_triage_request",
                 &json!({ "size": "small", "reason": "One file." }),
             ),
             &daemon.state,
@@ -1339,14 +1352,14 @@ mod tests {
         daemon.register_with_tools(
             "session-board",
             "dev-a",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
-            &["farik_read_board"],
+            &["catervas_read_board"],
         );
         let note = decide_pre_tool_use(
             &daemon.call(
                 "session-board",
-                "mcp__farik__farik_write_note",
+                "mcp__catervas__catervas_write_note",
                 &json!({ "kind": "progress", "text": "Half done." }),
             ),
             &daemon.state,
@@ -1449,7 +1462,7 @@ mod tests {
             .expect("the team is written");
         let exec = json!({ "command": "true" });
         let running = decide_pre_tool_use(
-            &daemon.dev_call("mcp__farik__farik_exec", &exec),
+            &daemon.dev_call("mcp__catervas__catervas_exec", &exec),
             &daemon.state,
         );
         assert!(running.allow, "{running:?}");
@@ -1459,7 +1472,7 @@ mod tests {
             .expect("the session is registered");
         // Past the tier check: the fixture's session has no sandbox to run the command in.
         assert_eq!(
-            crate::tools::fixtures::run(&context, "farik_exec", exec.clone()),
+            crate::tools::fixtures::run(&context, "catervas_exec", exec.clone()),
             Err(crate::tools::ToolError::Failed {
                 detail: "this session has no sandbox to run a command in".to_string()
             })
@@ -1467,11 +1480,11 @@ mod tests {
         daemon.register(
             "session-next",
             "dev-a",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
         );
         let next = decide_pre_tool_use(
-            &daemon.call("session-next", "mcp__farik__farik_exec", &exec),
+            &daemon.call("session-next", "mcp__catervas__catervas_exec", &exec),
             &daemon.state,
         );
         denied_for(&next, "tier_not_granted");
@@ -1501,7 +1514,7 @@ mod tests {
         std::fs::write(plugin.join(".claude-plugin/plugin.json"), "{}").expect("a file");
         daemon.state.register_session(SessionRegistration {
             session_id: session.to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose,
@@ -1512,7 +1525,7 @@ mod tests {
             cwd: cwd.to_path_buf(),
             executor: None,
             limits,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
             connectors: Vec::new(),
             preview: None,
@@ -1538,8 +1551,8 @@ mod tests {
             )
         };
         for input in [
-            json!({ "skill": "farik:api-style" }),
-            json!({ "skill": "farik:api-style", "args": "x" }),
+            json!({ "skill": "catervas:api-style" }),
+            json!({ "skill": "catervas:api-style", "args": "x" }),
         ] {
             let allowed = call(input.clone());
             assert!(allowed.allow, "{input}: {allowed:?}");
@@ -1556,22 +1569,22 @@ mod tests {
         for input in [
             json!({ "skill": "api-style" }),
             json!({ "skill": "deep-research" }),
-            json!({ "skill": "farik:other" }),
+            json!({ "skill": "catervas:other" }),
             json!({ "skill": 3 }),
             json!({}),
-            json!({ "skill": "farik:api-style", "extra": 1 }),
-            json!({ "skill": "farik:api-style", "args": 5 }),
-            json!({ "skill": "farik:api-style", "args": "@~/.ssh/id_rsa" }),
-            json!({ "skill": "farik:api-style", "args": "see @x" }),
-            json!({ "skill": "farik:api-style", "args": "x\u{3002}@y" }),
-            json!({ "skill": "farik:api-style", "args": "ana@example.com" }),
-            json!("farik:api-style"),
+            json!({ "skill": "catervas:api-style", "extra": 1 }),
+            json!({ "skill": "catervas:api-style", "args": 5 }),
+            json!({ "skill": "catervas:api-style", "args": "@~/.ssh/id_rsa" }),
+            json!({ "skill": "catervas:api-style", "args": "see @x" }),
+            json!({ "skill": "catervas:api-style", "args": "x\u{3002}@y" }),
+            json!({ "skill": "catervas:api-style", "args": "ana@example.com" }),
+            json!("catervas:api-style"),
         ] {
             denied_for(&call(input.clone()), "skill_not_in_session");
         }
         // A session with no skills is denied even the plugin's name.
         let denied = decide_pre_tool_use(
-            &daemon.dev_call("Skill", &json!({ "skill": "farik:api-style" })),
+            &daemon.dev_call("Skill", &json!({ "skill": "catervas:api-style" })),
             &daemon.state,
         );
         denied_for(&denied, "skill_not_in_session");
@@ -1591,7 +1604,7 @@ mod tests {
             &daemon.call(
                 "session-limited",
                 "Skill",
-                &json!({ "skill": "farik:api-style" }),
+                &json!({ "skill": "catervas:api-style" }),
             ),
             &daemon.state,
         );
@@ -1600,7 +1613,7 @@ mod tests {
             &daemon.call(
                 "session-limited",
                 "Skill",
-                &json!({ "skill": "farik:api-style" }),
+                &json!({ "skill": "catervas:api-style" }),
             ),
             &daemon.state,
         );
@@ -1610,9 +1623,9 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_session_in_a_private_folder_reaches_nothing_outside_it() {
-        // A finance task's session works in `.farik/local/finance`, with that folder as its
+        // A finance task's session works in `.catervas/local/finance`, with that folder as its
         // working directory (6.6): the hook judges every path against it, so the folder is all
-        // it reaches, and no exception to the protected `.farik/local/**` is needed. The hook
+        // it reaches, and no exception to the protected `.catervas/local/**` is needed. The hook
         // reads no role, so `dev-a`, who holds `write_workspace`, stands in for the Finance
         // Specialist's session, registered about a finance task whose contract it loads.
         use crate::daemon::SessionRegistration;
@@ -1620,10 +1633,10 @@ mod tests {
         let daemon = TestDaemon::new("hook-private-folder", |_| {});
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["assignee_role"] = json!("finance_specialist");
                 wire["reviewer_role"] = json!("product_manager");
-                wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+                wire["allowed_paths"] = json!([".catervas/local/finance/**"]);
                 wire["exit_criteria"] = json!([{
                     "id": "C1",
                     "text": "The books exist.",
@@ -1632,16 +1645,16 @@ mod tests {
                 }]);
             });
         let root = daemon.project.repo.path.clone();
-        let folder = root.join(".farik/local/finance");
+        let folder = root.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
-        std::fs::write(root.join(".farik/local/settings.json"), "{}").expect("written");
+        std::fs::write(root.join(".catervas/local/settings.json"), "{}").expect("written");
         std::fs::write(daemon.worktree.join("x"), "another task's").expect("written");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-folder".to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-2".parse().expect("a task id")),
+            task_id: Some("CTV-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1650,7 +1663,7 @@ mod tests {
             cwd: folder.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
             connectors: Vec::new(),
             preview: None,
@@ -1670,12 +1683,14 @@ mod tests {
         assert!(allowed.allow, "{allowed:?}");
         // Another task's worktree, the project's database, and the files above the folder are not.
         for file in [
-            "../worktrees/FRK-1/x".to_string(),
+            "../worktrees/CTV-1/x".to_string(),
             daemon.worktree.join("x").display().to_string(),
-            root.join(".farik/local/farik.db").display().to_string(),
+            root.join(".catervas/local/catervas.db")
+                .display()
+                .to_string(),
             "../../settings.json".to_string(),
             root.join("README.md").display().to_string(),
-            "../finance/../../farik.db".to_string(),
+            "../finance/../../catervas.db".to_string(),
         ] {
             denied_for(
                 &hook("Read", json!({ "file_path": file })),
@@ -1688,17 +1703,17 @@ mod tests {
         );
         // The copy of the folder taken for the task cannot be written over, so what the task
         // changed is always judged against the state it started from.
-        std::fs::create_dir_all(folder.join(".history/FRK-2")).expect("the copy is made");
-        std::fs::write(folder.join(".history/FRK-2/books.xlsx"), "books").expect("written");
+        std::fs::create_dir_all(folder.join(".history/CTV-2")).expect("the copy is made");
+        std::fs::write(folder.join(".history/CTV-2/books.xlsx"), "books").expect("written");
         for tool in ["Write", "Edit"] {
             let refused = hook(
                 tool,
-                json!({ "file_path": ".history/FRK-2/books.xlsx", "content": "changed" }),
+                json!({ "file_path": ".history/CTV-2/books.xlsx", "content": "changed" }),
             );
             denied_for(&refused, "path_outside_allowed");
         }
         assert_eq!(
-            std::fs::read_to_string(folder.join(".history/FRK-2/books.xlsx")).ok(),
+            std::fs::read_to_string(folder.join(".history/CTV-2/books.xlsx")).ok(),
             Some("books".to_string())
         );
     }
@@ -1706,7 +1721,7 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn procurement_cannot_climb_out() {
-        // A procurement task's session works in `.farik/local/procurement` (6.10), beside the
+        // A procurement task's session works in `.catervas/local/procurement` (6.10), beside the
         // finance folder. The hook reads no role: the working directory holds the session, as it
         // holds a finance one, so the finance books are as far away as the project's database.
         use crate::daemon::SessionRegistration;
@@ -1714,10 +1729,10 @@ mod tests {
         let daemon = TestDaemon::new("hook-procurement-folder", |_| {});
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["assignee_role"] = json!("procurement_specialist");
                 wire["reviewer_role"] = json!("product_manager");
-                wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+                wire["allowed_paths"] = json!([".catervas/local/procurement/**"]);
                 wire["exit_criteria"] = json!([{
                     "id": "C1",
                     "text": "The comparison is written.",
@@ -1726,17 +1741,17 @@ mod tests {
                 }]);
             });
         let root = daemon.project.repo.path.clone();
-        let folder = root.join(".farik/local/procurement");
-        let finance = root.join(".farik/local/finance");
+        let folder = root.join(".catervas/local/procurement");
+        let finance = root.join(".catervas/local/finance");
         std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
         std::fs::create_dir_all(&finance).expect("the finance folder is made");
         std::fs::write(folder.join("evaluations/email-sending.md"), "a note").expect("written");
         std::fs::write(finance.join("books.xlsx"), "books").expect("written");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-procurement".to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-2".parse().expect("a task id")),
+            task_id: Some("CTV-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1745,7 +1760,7 @@ mod tests {
             cwd: folder.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
             connectors: Vec::new(),
             preview: None,
@@ -1768,15 +1783,15 @@ mod tests {
             assert!(allowed.allow, "{file}: {allowed:?}");
         }
         // So is the copy taken when the task was assigned, which a reviewer reads a note beside.
-        std::fs::create_dir_all(folder.join(".history/FRK-2/evaluations")).expect("the copy");
+        std::fs::create_dir_all(folder.join(".history/CTV-2/evaluations")).expect("the copy");
         std::fs::write(
-            folder.join(".history/FRK-2/evaluations/email-sending.md"),
+            folder.join(".history/CTV-2/evaluations/email-sending.md"),
             "the note at assignment",
         )
         .expect("written");
         let allowed = hook(
             "Read",
-            json!({ "file_path": ".history/FRK-2/evaluations/email-sending.md" }),
+            json!({ "file_path": ".history/CTV-2/evaluations/email-sending.md" }),
         );
         assert!(allowed.allow, "{allowed:?}");
         // The finance folder is not, by a path that climbs, an absolute one, or one from the root.
@@ -1784,7 +1799,7 @@ mod tests {
             "../finance/books.xlsx".to_string(),
             "../../local/finance/books.xlsx".to_string(),
             finance.join("books.xlsx").display().to_string(),
-            ".farik/local/finance/books.xlsx".to_string(),
+            ".catervas/local/finance/books.xlsx".to_string(),
         ] {
             let refused = hook("Read", json!({ "file_path": file }));
             assert!(!refused.allow, "{file}: {refused:?}");
@@ -1877,9 +1892,9 @@ mod tests {
                 denied_for(&hook(tool, input.clone()), "path_outside_workspace");
             }
             // The session's own prompt and MCP config, in the project, stay unreadable: outside the
-            // task's worktree, or under the protected `.farik/local/**` in the root.
+            // task's worktree, or under the protected `.catervas/local/**` in the root.
             let mcp = root
-                .join(".farik/local/sessions")
+                .join(".catervas/local/sessions")
                 .join(session)
                 .join("mcp.json");
             let refused = hook("Read", json!({ "file_path": mcp.display().to_string() }));
@@ -1890,19 +1905,19 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn denies_a_connector_call_outside_the_rules() {
-        use farik_core::governor::permissions::{PermissionTier, SessionConnector};
-        use farik_protocol::event::ConnectorTagWire;
+        use catervas_core::governor::permissions::{PermissionTier, SessionConnector};
+        use catervas_protocol::event::ConnectorTagWire;
 
         use crate::daemon::SessionRegistration;
         use crate::session::SessionPurpose;
 
         let daemon = TestDaemon::new("hook-connector", |_| {});
-        let definition = farik_roles::builtin_connector("playwright").expect("shipped");
+        let definition = catervas_roles::builtin_connector("playwright").expect("shipped");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-browser".to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1911,7 +1926,7 @@ mod tests {
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: vec![PermissionTier::Read, PermissionTier::Network],
             connectors: vec![SessionConnector {
                 server: "playwright".to_string(),
@@ -2002,10 +2017,10 @@ mod tests {
         github_session(daemon, "session-github", "dev-a");
     }
 
-    /// Registers `session`, of `agent` on FRK-1, as `with_github` describes, and records its
+    /// Registers `session`, of `agent` on CTV-1, as `with_github` describes, and records its
     /// `session.started`.
     fn github_session(daemon: &TestDaemon, session: &str, agent: &str) {
-        task_session(daemon, session, agent, "FRK-1");
+        task_session(daemon, session, agent, "CTV-1");
     }
 
     /// `github_session` on `task`. `github` also has `close_issue`, and the session is given
@@ -2034,7 +2049,9 @@ mod tests {
         calls: Option<u32>,
         plan_tools: &[&str],
     ) {
-        use farik_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
+        use catervas_core::governor::permissions::{
+            ConnectorTag, PermissionTier, SessionConnector,
+        };
 
         use crate::daemon::SessionRegistration;
         use crate::session::SessionPurpose;
@@ -2052,7 +2069,7 @@ mod tests {
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: vec![PermissionTier::Read],
             connectors: vec![
                 SessionConnector {
@@ -2092,9 +2109,9 @@ mod tests {
         );
     }
 
-    /// Appends an event of `session`, of `agent` on FRK-1.
+    /// Appends an event of `session`, of `agent` on CTV-1.
     fn session_event(daemon: &TestDaemon, session: &str, agent: &str, kind: &str, body: &Value) {
-        task_event(daemon, "FRK-1", session, agent, kind, body);
+        task_event(daemon, "CTV-1", session, agent, kind, body);
     }
 
     /// Appends an event of `session`, of `agent` on `task`.
@@ -2106,11 +2123,11 @@ mod tests {
         kind: &str,
         body: &Value,
     ) {
-        use farik_protocol::event::{NewEvent, event_from_value};
+        use catervas_protocol::event::{NewEvent, event_from_value};
 
         let event = event_from_value(&json!({
-            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "farik",
-            "project_id": "farik", "task_id": task, "agent_id": agent, "session_id": session,
+            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "catervas",
+            "project_id": "catervas", "task_id": task, "agent_id": agent, "session_id": session,
             "kind": kind, "body": body,
         }))
         .expect("schema-valid");
@@ -2150,7 +2167,7 @@ mod tests {
     /// The human allows `approval`, as the command records it.
     fn grant(daemon: &TestDaemon, approval: u64) {
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "tool_approval.granted",
             &json!({ "approval": approval }),
         );
@@ -2181,7 +2198,7 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn the_hook_judges_any_connector_the_session_has() {
-        use farik_protocol::event::ConnectorTagWire;
+        use catervas_protocol::event::ConnectorTagWire;
 
         let daemon = TestDaemon::new("hook-custom", |_| {});
         with_github(&daemon);
@@ -2264,7 +2281,7 @@ mod tests {
         assert_eq!(ids.session_id.as_deref(), Some("session-github"));
         assert_eq!(
             ids.task_id.as_ref().map(|id| id.to_string()).as_deref(),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         let EventBody::ToolApprovalRequested(body) = &requested[0].body else {
             panic!("a tool_approval.requested body");
@@ -2274,7 +2291,7 @@ mod tests {
         assert_eq!(body.input, input.to_string(), "whole, never cut");
         assert_eq!(
             body.input_sha256.as_str(),
-            farik_core::governor::permissions::input_sha256(&input)
+            catervas_core::governor::permissions::input_sha256(&input)
         );
         assert_eq!(
             daemon.state.stop_reason("session-github"),
@@ -2335,12 +2352,12 @@ mod tests {
         assert_eq!(daemon.state.stop_reason("session-iris"), None);
         // Once the plan is approved, it asks.
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.proposed",
             &json!({ "plan": "A plan." }),
         );
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.approved",
             &json!({ "reason": "Go ahead." }),
         );
@@ -2403,7 +2420,7 @@ mod tests {
 
     /// `dev-a`'s `session-github`, allowed `calls` of `create_issue` each period unasked.
     fn allowing_github(daemon: &TestDaemon, calls: u32) {
-        allowing_session(daemon, "session-github", "dev-a", "FRK-1", Some(calls));
+        allowing_session(daemon, "session-github", "dev-a", "CTV-1", Some(calls));
     }
 
     /// The `allowance` the last `tool.called` ran inside.
@@ -2432,25 +2449,25 @@ mod tests {
         daemon.project.record_by(
             Some(agent),
             when,
-            "FRK-1",
+            "CTV-1",
             "tool.called",
             &json!({ "tool": tool, "input": "{}", "server": server, "tag": "external_effect" }),
         );
     }
 
-    /// `session`, of `kai` on FRK-1, given `server` as the kit wrote it for the agent, and its
+    /// `session`, of `kai` on CTV-1, given `server` as the kit wrote it for the agent, and its
     /// `session.started` recorded.
-    fn kai_session(daemon: &TestDaemon, session: &str, server: &farik_core::team::CustomServer) {
-        use farik_core::governor::permissions::{PermissionTier, SessionConnector};
+    fn kai_session(daemon: &TestDaemon, session: &str, server: &catervas_core::team::CustomServer) {
+        use catervas_core::governor::permissions::{PermissionTier, SessionConnector};
 
         use crate::daemon::SessionRegistration;
         use crate::session::SessionPurpose;
 
         daemon.state.register_session(SessionRegistration {
             session_id: session.to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "kai".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -2459,7 +2476,7 @@ mod tests {
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: vec![PermissionTier::Read],
             connectors: vec![SessionConnector {
                 server: server.name.clone(),
@@ -2472,7 +2489,7 @@ mod tests {
         });
         task_event(
             daemon,
-            "FRK-1",
+            "CTV-1",
             session,
             "kai",
             "session.started",
@@ -2488,9 +2505,9 @@ mod tests {
     fn higgsfields_images_run_inside_their_allowance_then_ask() {
         use std::collections::BTreeMap;
 
-        use farik_core::contract::Role;
-        use farik_core::team::fixtures::an_agent_wire;
-        use farik_protocol::event::ConnectorTagWire;
+        use catervas_core::contract::Role;
+        use catervas_core::team::fixtures::an_agent_wire;
+        use catervas_protocol::event::ConnectorTagWire;
 
         let daemon = TestDaemon::new("hook-higgsfield-allowance", |_| {});
         let team = a_team_of_three(|wire| {
@@ -2505,7 +2522,7 @@ mod tests {
             .files
             .write_team(&team)
             .expect("the team is written");
-        let kit = farik_roles::load_kit(Role::MarketingSpecialist)
+        let kit = catervas_roles::load_kit(Role::MarketingSpecialist)
             .expect("the Marketing Specialist's kit");
         let (_, server) =
             crate::daemon::team::kit_entry(&kit, &team, "kai", "higgsfield", &BTreeMap::new())
@@ -2598,7 +2615,7 @@ mod tests {
             &daemon,
             "session-github",
             "dev-a",
-            "FRK-1",
+            "CTV-1",
             Some(5),
             &["close_issue"],
         );
@@ -2607,7 +2624,7 @@ mod tests {
         denied_for(&close(&daemon), "no_active_marketing_plan");
         daemon
             .project
-            .plan_proposed("FRK-1", "MP-1", "2026-09-20", "2026-10-10");
+            .plan_proposed("CTV-1", "MP-1", "2026-09-20", "2026-10-10");
         denied_for(&close(&daemon), "no_active_marketing_plan");
         assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
         assert!(daemon.events(EventKind::ToolCalled).is_empty());
@@ -2615,7 +2632,7 @@ mod tests {
 
         // Approved and in its dates: it runs, naming the plan, with no grant and no allowance,
         // and nothing is asked.
-        daemon.project.plan_approved("FRK-1", "MP-1", "");
+        daemon.project.plan_approved("CTV-1", "MP-1", "");
         let allowed = close(&daemon);
         assert!(allowed.allow, "{allowed:?}");
         assert_eq!(ran_for_plan(&daemon), Some("MP-1".to_string()));
@@ -2695,7 +2712,7 @@ mod tests {
         // The calls before the sprint started are not its.
         daemon.project.open_sprint("S1", None, &[]);
         // The ask stopped that session; the agent's next one makes its calls.
-        allowing_session(&daemon, "session-next", "dev-a", "FRK-1", Some(2));
+        allowing_session(&daemon, "session-next", "dev-a", "CTV-1", Some(2));
         let next = |n: u32| create_issue(&daemon, "session-next", &json!({ "title": n }));
         assert!(next(4).allow);
         assert!(next(5).allow);
@@ -2841,7 +2858,7 @@ mod tests {
         let asked_for = json!({ "title": 3 });
         let approval = asked(&daemon, "session-github", &asked_for);
         grant(&daemon, approval);
-        allowing_session(&daemon, "session-next", "dev-a", "FRK-1", Some(3));
+        allowing_session(&daemon, "session-next", "dev-a", "CTV-1", Some(3));
         let allowed = create_issue(&daemon, "session-next", &asked_for);
         assert!(allowed.allow, "{allowed:?}");
         assert_eq!(used(&daemon), Some(approval));
@@ -2924,16 +2941,16 @@ mod tests {
         let daemon = TestDaemon::new("hook-grant-key", |_| {});
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["assignee"] = json!("dev-a");
             });
         with_github(&daemon);
         let input = json!({ "title": "x" });
         let approval = asked(&daemon, "session-github", &input);
         grant(&daemon, approval);
-        task_session(&daemon, "session-frk-2", "dev-a", "FRK-2");
+        task_session(&daemon, "session-ctv-2", "dev-a", "CTV-2");
         denied_for(
-            &create_issue(&daemon, "session-frk-2", &input),
+            &create_issue(&daemon, "session-ctv-2", &input),
             "approval_needed",
         );
         for (session, tool) in [
@@ -3037,7 +3054,7 @@ mod tests {
         let input = json!({ "title": "x" });
         let approval = asked(&daemon, "session-github", &input);
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "tool_approval.refused",
             &json!({ "approval": approval }),
         );
@@ -3073,7 +3090,7 @@ mod tests {
         daemon.register(
             "session-iris",
             "iris",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
         );
         let edit = json!({
@@ -3104,24 +3121,24 @@ mod tests {
             Some(("design_plan.returned", &returned)),
         ] {
             if let Some((kind, body)) = before {
-                daemon.project.record("FRK-1", kind, body);
+                daemon.project.record("CTV-1", kind, body);
             }
             denied_for(&hook("Edit", &edit), "design_plan_not_approved");
             denied_for(
-                &hook("mcp__farik__farik_exec", &exec),
+                &hook("mcp__catervas__catervas_exec", &exec),
                 "design_plan_not_approved",
             );
             denied_for(
-                &hook("mcp__farik__farik_git_status", &json!({})),
+                &hook("mcp__catervas__catervas_git_status", &json!({})),
                 "design_plan_not_approved",
             );
             denied_for(
-                &hook("mcp__farik__farik_git_push", &json!({})),
+                &hook("mcp__catervas__catervas_git_push", &json!({})),
                 "design_plan_not_approved",
             );
-            not_approved(called("farik_exec", exec.clone()));
-            not_approved(called("farik_git_status", json!({})));
-            not_approved(called("farik_git_push", json!({})));
+            not_approved(called("catervas_exec", exec.clone()));
+            not_approved(called("catervas_git_status", json!({})));
+            not_approved(called("catervas_git_push", json!({})));
             let read = hook("Read", &json!({ "file_path": daemon.inside("src/a.rs") }));
             assert!(read.allow, "{read:?}");
         }
@@ -3131,19 +3148,19 @@ mod tests {
 
         daemon
             .project
-            .record("FRK-1", "design_plan.proposed", &proposed);
+            .record("CTV-1", "design_plan.proposed", &proposed);
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.approved",
             &json!({ "reason": "Go ahead." }),
         );
         let approved = hook("Edit", &edit);
         assert!(approved.allow, "{approved:?}");
-        let exec_approved = hook("mcp__farik__farik_exec", &exec);
+        let exec_approved = hook("mcp__catervas__catervas_exec", &exec);
         assert!(exec_approved.allow, "{exec_approved:?}");
         // Past the plan gate: the fixture's session has no sandbox to run the command in.
         assert_eq!(
-            called("farik_exec", exec.clone()),
+            called("catervas_exec", exec.clone()),
             Err(crate::tools::ToolError::Failed {
                 detail: "this session has no sandbox to run a command in".to_string()
             })
@@ -3160,14 +3177,14 @@ mod tests {
         };
         // (Its `Edit` is refused before the gate: a session with no task has no allowed paths.)
         denied_for(
-            &none("mcp__farik__farik_exec", &exec),
+            &none("mcp__catervas__catervas_exec", &exec),
             "design_plan_not_approved",
         );
         let no_task = daemon
             .state
             .tool_context("session-iris-none")
             .expect("the session is registered");
-        not_approved(crate::tools::fixtures::run(&no_task, "farik_exec", exec));
+        not_approved(crate::tools::fixtures::run(&no_task, "catervas_exec", exec));
     }
 
     #[test]
@@ -3177,7 +3194,7 @@ mod tests {
         daemon.register(
             DEV_SESSION,
             "dev-a",
-            Some("FRK-1"),
+            Some("CTV-1"),
             SessionLimits {
                 max_tool_calls: 2,
                 ..DEFAULT_SESSION_LIMITS
@@ -3277,7 +3294,7 @@ mod tests {
         daemon
     }
 
-    /// `session` of `agent`, on FRK-1 or on no task, registered as a session of `purpose`.
+    /// `session` of `agent`, on CTV-1 or on no task, registered as a session of `purpose`.
     fn browsing(
         daemon: &TestDaemon,
         session: &str,
@@ -3307,24 +3324,24 @@ mod tests {
         )
     }
 
-    /// One of Farik's own hosts, from the shipped list, so that the launch review edits the YAML
+    /// One of Catervas's own hosts, from the shipped list, so that the launch review edits the YAML
     /// alone.
-    fn a_farik_host() -> String {
-        farik_roles::sites::farik_sites()[0].host.clone()
+    fn a_catervas_host() -> String {
+        catervas_roles::sites::catervas_sites()[0].host.clone()
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn a_farik_site_is_open_from_the_start() {
+    fn a_catervas_site_is_open_from_the_start() {
         use crate::session::SessionPurpose::Implement;
 
-        let daemon = with_buyers("hook-sites-farik");
-        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
-        let farik = a_farik_host();
+        let daemon = with_buyers("hook-sites-catervas");
+        browsing(&daemon, "session-proc", "proc", Some("CTV-1"), Implement);
+        let catervas = a_catervas_host();
 
         for address in [
-            format!("https://www.{farik}/"),
-            format!("https://{farik}/x?y=1"),
+            format!("https://www.{catervas}/"),
+            format!("https://{catervas}/x?y=1"),
         ] {
             let allowed = fetch(&daemon, "session-proc", &address);
             assert!(allowed.allow, "{address}: {allowed:?}");
@@ -3345,7 +3362,7 @@ mod tests {
         use crate::session::SessionPurpose::Implement;
 
         let daemon = with_buyers("hook-sites-approved");
-        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-proc", "proc", Some("CTV-1"), Implement);
         daemon
             .project
             .record("", "site.approved", &json!({ "host": "shop.example" }));
@@ -3362,7 +3379,7 @@ mod tests {
                 .contains("other.example is not a site the owner allowed")
                 && other
                     .reason
-                    .ends_with("ask with farik_request_sites, then end your turn"),
+                    .ends_with("ask with catervas_request_sites, then end your turn"),
             "{other:?}"
         );
         assert_eq!(
@@ -3403,7 +3420,7 @@ mod tests {
         daemon.project.record_by(
             Some("proc"),
             at(),
-            "FRK-1",
+            "CTV-1",
             "site.approved",
             &json!({ "host": "agent.example" }),
         );
@@ -3419,20 +3436,20 @@ mod tests {
             &fetch(&daemon, "session-proc", "https://shop.example/prices"),
             "site_not_approved",
         );
-        // So does turning off one of Farik's, and turning it on again.
-        let farik = a_farik_host();
-        assert!(fetch(&daemon, "session-proc", &format!("https://{farik}/")).allow);
+        // So does turning off one of Catervas's, and turning it on again.
+        let catervas = a_catervas_host();
+        assert!(fetch(&daemon, "session-proc", &format!("https://{catervas}/")).allow);
         daemon
             .project
-            .record("", "site.removed", &json!({ "host": farik }));
+            .record("", "site.removed", &json!({ "host": catervas }));
         denied_for(
-            &fetch(&daemon, "session-proc", &format!("https://{farik}/")),
+            &fetch(&daemon, "session-proc", &format!("https://{catervas}/")),
             "site_not_approved",
         );
         daemon
             .project
-            .record("", "site.approved", &json!({ "host": farik }));
-        assert!(fetch(&daemon, "session-proc", &format!("https://{farik}/")).allow);
+            .record("", "site.approved", &json!({ "host": catervas }));
+        assert!(fetch(&daemon, "session-proc", &format!("https://{catervas}/")).allow);
     }
 
     #[test]
@@ -3455,7 +3472,7 @@ mod tests {
             fetch(
                 &daemon,
                 "session-chat",
-                &format!("https://{}/", a_farik_host())
+                &format!("https://{}/", a_catervas_host())
             )
             .allow
         );
@@ -3471,7 +3488,7 @@ mod tests {
             &daemon,
             "session-about",
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             Conversation,
         );
         assert!(
@@ -3488,7 +3505,7 @@ mod tests {
 
         // A guard: the Marketing Specialist holds `network` and no list of sites.
         let daemon = with_buyers("hook-sites-others");
-        browsing(&daemon, "session-kai", "kai", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-kai", "kai", Some("CTV-1"), Implement);
         for address in [
             "https://shop.example/",
             "https://anything.example/a?b=c",
@@ -3506,7 +3523,7 @@ mod tests {
 
         // A guard: a search reaches the one service Claude Code uses, whatever the list holds.
         let daemon = with_buyers("hook-sites-search");
-        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-proc", "proc", Some("CTV-1"), Implement);
         let search = decide_pre_tool_use(
             &daemon.call(
                 "session-proc",
@@ -3523,14 +3540,14 @@ mod tests {
     fn the_site_request_is_not_held_to_the_sites() {
         use crate::session::SessionPurpose::Implement;
 
-        // A guard: `farik_request_sites` names the addresses it asks about, which are not yet
-        // approved, and a Farik tool is no connector.
+        // A guard: `catervas_request_sites` names the addresses it asks about, which are not yet
+        // approved, and a Catervas tool is no connector.
         let daemon = with_buyers("hook-sites-request");
-        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-proc", "proc", Some("CTV-1"), Implement);
         let asked = decide_pre_tool_use(
             &daemon.call(
                 "session-proc",
-                "mcp__farik__farik_request_sites",
+                "mcp__catervas__catervas_request_sites",
                 &json!({ "sites": [{ "url": "https://new.example/", "why": "A maker." }] }),
             ),
             &daemon.state,
@@ -3542,11 +3559,11 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_connector_s_addresses_are_held_too() {
         let daemon = with_buyers("hook-sites-connector");
-        let farik = a_farik_host();
-        let approved = format!("https://www.{farik}/boxes");
+        let catervas = a_catervas_host();
+        let approved = format!("https://www.{catervas}/boxes");
         // A user's server given to the Procurement Specialist, and the same to a Developer.
-        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
-        registering(&daemon, "session-dev", "dev-a", "FRK-1", None, &[]);
+        registering(&daemon, "session-proc", "proc", "CTV-1", None, &[]);
+        registering(&daemon, "session-dev", "dev-a", "CTV-1", None, &[]);
         let call = |session: &str, tool: &str, input: &Value| {
             decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
         };
@@ -3562,7 +3579,7 @@ mod tests {
         );
         for input in [
             json!({ "url": approved }),
-            json!({ "urls": [approved, format!("https://{farik}/")] }),
+            json!({ "urls": [approved, format!("https://{catervas}/")] }),
             json!({ "q": "no address at all" }),
             json!({ "deep": [{ "url": approved }] }),
         ] {
@@ -3609,7 +3626,7 @@ mod tests {
         // A guard (step 10d): SerpApi fetches `image_url` and a lens `url` itself, so an address it
         // is given off the approved sites is refused before the connector is looked up.
         let daemon = with_buyers("hook-sites-serpapi");
-        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        registering(&daemon, "session-proc", "proc", "CTV-1", None, &[]);
         for params in [
             json!({ "engine": "google_reverse_image", "image_url": "https://unapproved.example/a.jpg" }),
             json!({ "engine": "google_lens", "url": "https://unapproved.example/a.jpg" }),
@@ -3647,14 +3664,14 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_approved_address_goes_to_serpapi_whatever_it_redirects_to() {
-        use farik_core::governor::permissions::{ConnectorTag, SessionConnector};
+        use catervas_core::governor::permissions::{ConnectorTag, SessionConnector};
 
         // A guard that pins a decision (the founder, 2026-10-08, "Keep it, say so"; spec 8.6): the
         // hook judges the site the agent named, and SerpApi fetches that address on its own
-        // servers, where a redirect from an approved shop to another site is out of Farik's sight.
+        // servers, where a redirect from an approved shop to another site is out of Catervas's sight.
         // The address is allowed, and the spec says what it leaves open.
         let daemon = with_buyers("hook-sites-serpapi-redirect");
-        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        registering(&daemon, "session-proc", "proc", "CTV-1", None, &[]);
         daemon
             .state
             .sessions()
@@ -3671,7 +3688,7 @@ mod tests {
             });
         let redirect = format!(
             "https://www.{}/gp/redirect.html?location=https://unapproved.example/a.jpg",
-            a_farik_host()
+            a_catervas_host()
         );
         for params in [
             json!({ "engine": "google_reverse_image", "image_url": redirect }),
@@ -3693,9 +3710,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_external_call_to_an_unapproved_address_asks_for_nothing() {
         let daemon = with_buyers("hook-sites-external");
-        let farik = a_farik_host();
-        let approved = format!("https://www.{farik}/boxes");
-        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        let catervas = a_catervas_host();
+        let approved = format!("https://www.{catervas}/boxes");
+        registering(&daemon, "session-proc", "proc", "CTV-1", None, &[]);
         let call = |session: &str, tool: &str, input: &Value| {
             decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
         };
@@ -3711,7 +3728,7 @@ mod tests {
         daemon.register(
             "session-open",
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
         );
         daemon
@@ -3720,18 +3737,18 @@ mod tests {
             .get_mut("session-open")
             .expect("registered")
             .registration
-            .web = farik_core::governor::sites::WebAccess::Open;
-        registering(&daemon, "session-asking", "proc", "FRK-1", None, &[]);
+            .web = catervas_core::governor::sites::WebAccess::Open;
+        registering(&daemon, "session-asking", "proc", "CTV-1", None, &[]);
         daemon
             .state
             .sessions()
             .get_mut("session-asking")
             .expect("registered")
             .registration
-            .web = farik_core::governor::sites::WebAccess::Open;
+            .web = catervas_core::governor::sites::WebAccess::Open;
         let approval = asked(&daemon, "session-asking", &input);
         grant(&daemon, approval);
-        registering(&daemon, "session-held", "proc", "FRK-1", Some(5), &[]);
+        registering(&daemon, "session-held", "proc", "CTV-1", Some(5), &[]);
         let still_refused = call("session-held", "mcp__github__create_issue", &input);
         denied_for(&still_refused, "site_not_approved");
         assert_eq!(
@@ -3773,11 +3790,11 @@ mod tests {
         for (tool, input) in [
             (
                 "WebFetch",
-                json!({ "url": format!("https://{}/", a_farik_host()), "prompt": "read" }),
+                json!({ "url": format!("https://{}/", a_catervas_host()), "prompt": "read" }),
             ),
             (
                 "mcp__github__search_issues",
-                json!({ "url": format!("https://{}/", a_farik_host()) }),
+                json!({ "url": format!("https://{}/", a_catervas_host()) }),
             ),
         ] {
             let request = daemon.call("session-proc", tool, &input);

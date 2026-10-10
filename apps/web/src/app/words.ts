@@ -1,5 +1,5 @@
-import type { Command, Event } from "@farik/protocol-client";
-import { uiStrings } from "@farik/ui";
+import type { Command, Event } from "@catervas/protocol-client";
+import { uiStrings } from "@catervas/ui";
 import type { Agent } from "../pages/setup/TeamSetup.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
@@ -48,7 +48,7 @@ const WORDS: Record<TaskStatus, keyof typeof en> = {
 /** Whether `word` is one of the lifecycle's statuses. */
 export const isStatus = (word: string): word is TaskStatus => word in WORDS;
 
-/** A move as the task's History tab words it: "Mira moved it to Done.", "Ada sent FRK-2 back." */
+/** A move as the task's History tab words it: "Mira moved it to Done.", "Ada sent CTV-2 back." */
 export const movedWords = (who: string, to: TaskStatus, task = t("toldIt")) =>
 	t(to === "rejected" ? "toldSentBack" : "toldMoved", {
 		who,

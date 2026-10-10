@@ -10,10 +10,10 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-use farik_core::contract::TaskId;
-use farik_core::team::Preview;
-use farik_roles::{ConnectorDefinition, builtin_connector};
-use farik_runtime::{
+use catervas_core::contract::TaskId;
+use catervas_core::team::Preview;
+use catervas_roles::{ConnectorDefinition, builtin_connector};
+use catervas_runtime::{
     CheckTheme, CheckWidth, DockerPreviewFactory, McpTransport, PreviewFactory, RunningPreview,
     browser_container, check_page, connector_server,
 };
@@ -25,15 +25,15 @@ const PORT: u16 = 4401;
 const ANSWER: Duration = Duration::from_secs(90);
 
 fn playwright() -> ConnectorDefinition {
-    builtin_connector("playwright").expect("Farik ships it")
+    builtin_connector("playwright").expect("Catervas ships it")
 }
 
 fn project(test: &str) -> String {
-    format!("farik-test-{}-{test}", std::process::id())
+    format!("catervas-test-{}-{test}", std::process::id())
 }
 
 fn task() -> TaskId {
-    TaskId::try_from("FRK-1").expect("an id")
+    TaskId::try_from("CTV-1").expect("an id")
 }
 
 fn docker(args: &[&str]) -> (bool, String) {
@@ -68,7 +68,7 @@ struct Cleanup(String);
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
-        let filter = format!("label=farik.project={}", self.0);
+        let filter = format!("label=catervas.project={}", self.0);
         let (_, ids) = docker(&["ps", "-a", "-q", "--filter", &filter]);
         for id in ids.lines() {
             let _ = docker(&["rm", "-f", id]);
@@ -80,7 +80,7 @@ impl Drop for Cleanup {
 /// `http://example.com/`, and busybox's `httpd`. Alpine 3.22's own busybox leaves `httpd` out, so
 /// it is taken from its `busybox-extras` package once, by a container with the network on.
 fn worktree(test: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("farik-preview-{}-{test}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("catervas-preview-{}-{test}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let site = root.join("site");
     std::fs::create_dir_all(site.join("cgi-bin")).expect("the site is made");
@@ -167,14 +167,14 @@ impl Mcp {
             &json!({
                 "protocolVersion": "2025-06-18",
                 "capabilities": {},
-                "clientInfo": { "name": "farik-test", "version": "0" }
+                "clientInfo": { "name": "catervas-test", "version": "0" }
             }),
         );
         mcp.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
         mcp
     }
 
-    fn of(server: &farik_runtime::McpServerConfig) -> Mcp {
+    fn of(server: &catervas_runtime::McpServerConfig) -> Mcp {
         let McpTransport::Stdio { command, args } = &server.transport else {
             panic!("the browser is a child process");
         };
@@ -274,14 +274,14 @@ impl RunningPreview for BridgePreview {
     }
 
     fn labels(&self) -> Vec<String> {
-        vec![format!("farik.project={}", self.project)]
+        vec![format!("catervas.project={}", self.project)]
     }
 
     fn user(&self) -> String {
         user()
     }
 
-    fn stop(&self, _reason: &str) -> Result<(), farik_runtime::PreviewError> {
+    fn stop(&self, _reason: &str) -> Result<(), catervas_runtime::PreviewError> {
         let _ = docker(&["rm", "-f", &self.name, &browser_container(&self.name)]);
         Ok(())
     }
@@ -303,9 +303,9 @@ fn sink_requests(sink: &str) -> Vec<String> {
 
 /// The connector's arguments with one confinement flag, and its value, left out.
 fn without(
-    server: &farik_runtime::McpServerConfig,
+    server: &catervas_runtime::McpServerConfig,
     flags: &[&str],
-) -> farik_runtime::McpServerConfig {
+) -> catervas_runtime::McpServerConfig {
     let McpTransport::Stdio { command, args } = &server.transport else {
         panic!("the browser is a child process");
     };
@@ -320,7 +320,7 @@ fn without(
             kept.push(arg.clone());
         }
     }
-    farik_runtime::McpServerConfig {
+    catervas_runtime::McpServerConfig {
         transport: McpTransport::Stdio {
             command: command.clone(),
             args: kept,
@@ -357,8 +357,8 @@ fn browse(
 /// The sink, which stands in for the internet: on the bridge network, answering any request.
 /// Answers its name and the `--add-host` that makes `example.com` it.
 fn a_sink(root: &Path, project: &str) -> (String, String) {
-    let sink = format!("farik-sink-{project}");
-    let label = format!("farik.project={project}");
+    let sink = format!("catervas-sink-{project}");
+    let label = format!("catervas.project={project}");
     let site = format!("type=bind,src={},dst=/w", root.join("site").display());
     let bin = format!("type=bind,src={},dst=/b", root.display());
     let (ran, said) = docker(&[
@@ -399,8 +399,8 @@ fn a_sink(root: &Path, project: &str) -> (String, String) {
 /// A preview the test runs itself on the bridge network, `example` making `example.com` the sink,
 /// so that only the browser's own flags stand between it and the sink.
 fn on_the_bridge(root: &Path, project: &str, barrier: &str, example: &str) -> BridgePreview {
-    let name = format!("farik-preview-{project}-{barrier}");
-    let label = format!("farik.project={project}");
+    let name = format!("catervas-preview-{project}-{barrier}");
+    let label = format!("catervas.project={project}");
     let mount = format!("type=bind,src={},dst=/workspace", root.display());
     let (ran, said) = docker(&[
         "run",
@@ -548,7 +548,7 @@ fn stop_leaves_no_container() {
 #[test]
 #[ignore = "needs docker"]
 fn the_task_cleanup_removes_the_preview() {
-    use farik_runtime::{DockerSandboxFactory, SandboxFactory};
+    use catervas_runtime::{DockerSandboxFactory, SandboxFactory};
 
     let root = worktree("cleanup");
     let project = project("cleanup");
@@ -673,7 +673,7 @@ fn refuses_to_start_without_the_browser_image() {
     let _cleanup = Cleanup(project.clone());
     let refused = DockerPreviewFactory::new(
         ALPINE.to_owned(),
-        "farik-test/no-such-browser:absent".to_owned(),
+        "catervas-test/no-such-browser:absent".to_owned(),
     )
     .start(&project, &task(), &root, &serving(), "tree")
     .err()
@@ -682,7 +682,7 @@ fn refuses_to_start_without_the_browser_image() {
     let said = refused.to_string();
     assert!(said.contains("browser"), "{said}");
     assert!(said.contains("Fetch it"), "{said}");
-    let filter = format!("label=farik.project={project}");
+    let filter = format!("label=catervas.project={project}");
     assert_eq!(
         docker(&["ps", "-a", "-q", "--filter", &filter])
             .1

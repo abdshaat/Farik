@@ -1,5 +1,5 @@
-//! Farik's own MCP server over the open vulnerability database (`docs/SPEC.md` 6.7, ADR 0038),
-//! started by `farik connector osv`. It speaks to one fixed address, follows no redirect and uses
+//! Catervas's own MCP server over the open vulnerability database (`docs/SPEC.md` 6.7, ADR 0038),
+//! started by `catervas connector osv`. It speaks to one fixed address, follows no redirect and uses
 //! no proxy, checks every input before it leaves, and sends OSV only a package's name, ecosystem
 //! and version, or an advisory's id. What OSV answers is data the agent reads under the
 //! untrusted-content notice.
@@ -49,7 +49,7 @@ pub fn tool_names() -> Vec<&'static str> {
 
 /// How long one call to OSV may take, which OSV may spend up to twenty seconds of before it pages.
 const TIMEOUT: Duration = Duration::from_secs(25);
-/// The most of an answer Farik reads.
+/// The most of an answer Catervas reads.
 const MAX_BODY: usize = 4 * 1024 * 1024;
 /// The most advisories `query_package` answers with.
 const MAX_ADVISORIES: usize = 50;
@@ -159,7 +159,7 @@ impl Osv {
 
     fn with_timeout(api: &str, timeout: Duration) -> Result<Self, OsvError> {
         let client = reqwest::Client::builder()
-            // Nothing OSV answers sends Farik anywhere else, and nothing is sent through a proxy.
+            // Nothing OSV answers sends Catervas anywhere else, and nothing is sent through a proxy.
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
             .timeout(timeout)
@@ -399,7 +399,7 @@ fn same_package(ecosystem: &str, listed: &str, asked: &str) -> bool {
 }
 
 /// The name the server gives itself.
-const SERVER_NAME: &str = "farik-osv";
+const SERVER_NAME: &str = "catervas-osv";
 
 /// Every tool, with what it takes.
 fn descriptors() -> Vec<Tool> {
@@ -461,7 +461,7 @@ impl ServerHandler for Osv {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        // As Farik's own server answers: protocol 2026-07-28 wants a list's freshness said.
+        // As Catervas's own server answers: protocol 2026-07-28 wants a list's freshness said.
         std::future::ready(Ok(ListToolsResult::with_all_items(descriptors())
             .with_ttl_ms(0)
             .with_cache_scope(CacheScope::Private)))
@@ -642,7 +642,7 @@ mod tests {
     /// Over MCP, as a client sees it: the name it gives, the tools it lists, an answer, and a
     /// refusal that is a tool error.
     #[tokio::test]
-    async fn answers_over_mcp_as_farik_osv() {
+    async fn answers_over_mcp_as_catervas_osv() {
         use rmcp::ServiceExt as _;
         use rmcp::model::CallToolRequestParams;
 
@@ -659,7 +659,10 @@ mod tests {
         let info = client
             .peer_info()
             .expect("the server's answer to initialize");
-        assert_eq!(info.server_info.as_ref().expect("a name").name, "farik-osv");
+        assert_eq!(
+            info.server_info.as_ref().expect("a name").name,
+            "catervas-osv"
+        );
         let tools = client.list_all_tools().await.expect("a list");
         let names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
         assert_eq!(names, tool_names());
@@ -1019,7 +1022,7 @@ mod tests {
     /// to a fixture that records, asks a second fixture directly.
     #[tokio::test]
     async fn uses_no_proxy_from_the_environment() {
-        if let Ok(target) = std::env::var("FARIK_OSV_PROXY_CHILD") {
+        if let Ok(target) = std::env::var("CATERVAS_OSV_PROXY_CHILD") {
             Osv::new(&target)
                 .expect("a server")
                 .call("query_package", &lodash())
@@ -1032,7 +1035,7 @@ mod tests {
         let through = proxy.address.trim_end_matches("/v1").to_string();
         let child = tokio::process::Command::new(std::env::current_exe().expect("this test"))
             .args(["--exact", "osv::tests::uses_no_proxy_from_the_environment"])
-            .env("FARIK_OSV_PROXY_CHILD", &target.address)
+            .env("CATERVAS_OSV_PROXY_CHILD", &target.address)
             .env("HTTP_PROXY", &through)
             .env("http_proxy", &through)
             .env("ALL_PROXY", &through)

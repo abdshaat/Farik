@@ -1,4 +1,4 @@
-import { Button, InfoTip } from "@farik/ui";
+import { Button, InfoTip } from "@catervas/ui";
 import { useState } from "react";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";

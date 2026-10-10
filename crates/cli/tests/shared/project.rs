@@ -1,4 +1,4 @@
-//! What the tests of the human's commands, of driving the team, and of `farik contract new` share:
+//! What the tests of the human's commands, of driving the team, and of `catervas contract new` share:
 //! a project with a team, the command line run in it, the log read and written behind its back,
 //! and a stand-in for another process driving the project.
 //!
@@ -11,21 +11,21 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
+use catervas::{CliIo, Engine, run_cli};
+use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+use catervas_core::team::validate_team;
+use catervas_protocol::clock::{Clock, FixedClock};
+use catervas_protocol::command::Command;
+use catervas_protocol::event::{CatervasEvent, EventIds, EventKind, NewEvent, event_from_value};
+use catervas_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, serve};
+use catervas_runtime::orchestrator::{CommandError, CommandReport};
+use catervas_runtime::recorded::fixtures::tool_runner;
+use catervas_runtime::transitions::Transitions;
+use catervas_runtime::{RecordedAdapter, RuntimeAdapter, ToolDeps, Transcript};
+use catervas_store::files::{LocalSettings, ProjectFiles, Sandbox};
+use catervas_store::git::fixtures::TempRepo;
+use catervas_store::{EventLog, EventQuery, open_event_log, open_projections};
 use chrono::{DateTime, Utc};
-use farik::{CliIo, Engine, run_cli};
-use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-use farik_core::team::validate_team;
-use farik_protocol::clock::{Clock, FixedClock};
-use farik_protocol::command::Command;
-use farik_protocol::event::{EventIds, EventKind, FarikEvent, NewEvent, event_from_value};
-use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, serve};
-use farik_runtime::orchestrator::{CommandError, CommandReport};
-use farik_runtime::recorded::fixtures::tool_runner;
-use farik_runtime::transitions::Transitions;
-use farik_runtime::{RecordedAdapter, RuntimeAdapter, ToolDeps, Transcript};
-use farik_store::files::{LocalSettings, ProjectFiles, Sandbox};
-use farik_store::git::fixtures::TempRepo;
-use farik_store::{EventLog, EventQuery, open_event_log, open_projections};
 use serde_json::{Value, json};
 
 /// The moment every test in a run is stamped with: the day's budget is read against it.
@@ -43,12 +43,12 @@ pub struct Ran {
     pub err: String,
 }
 
-/// Runs `farik <args>` in `cwd` on `CliIo::new`.
+/// Runs `catervas <args>` in `cwd` on `CliIo::new`.
 pub fn run(cwd: &Path, args: &[&str]) -> Ran {
     run_with(cwd, args, |_| {})
 }
 
-/// Runs `farik <args>` in `cwd` on `CliIo::new`, with `set` applied to the harness first.
+/// Runs `catervas <args>` in `cwd` on `CliIo::new`, with `set` applied to the harness first.
 pub fn run_with(cwd: &Path, args: &[&str], set: impl FnOnce(&mut CliIo<'_>)) -> Ran {
     let mut out = Vec::new();
     let mut err = Vec::new();
@@ -60,7 +60,7 @@ pub fn run_with(cwd: &Path, args: &[&str], set: impl FnOnce(&mut CliIo<'_>)) -> 
             Arc::new(FixedClock::new(at())),
         );
         set(&mut io);
-        let arguments: Vec<String> = std::iter::once("farik")
+        let arguments: Vec<String> = std::iter::once("catervas")
             .chain(args.iter().copied())
             .map(ToString::to_string)
             .collect();
@@ -73,14 +73,14 @@ pub fn run_with(cwd: &Path, args: &[&str], set: impl FnOnce(&mut CliIo<'_>)) -> 
     }
 }
 
-/// A repository made a Farik project by `farik init`, its team saying `plan_in_sprints: false` so
+/// A repository made a Catervas project by `catervas init`, its team saying `plan_in_sprints: false` so
 /// that work flows without a sprint, as before ADR 0028.
 pub fn a_project(name: &str) -> TempRepo {
     let repository = TempRepo::new(name);
     let ran = run(&repository.path, &["init"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     let files = files_of(&repository);
-    let mut team = files.read_team().expect("farik init wrote a team");
+    let mut team = files.read_team().expect("catervas init wrote a team");
     team.policy.plan_in_sprints = Some(false);
     files.write_team(&team).expect("the team is written");
     repository
@@ -112,7 +112,7 @@ pub fn a_team_with(name: &str, change: impl FnOnce(&mut Value)) -> TempRepo {
     repository
 }
 
-/// Says in `.farik/local/settings.json` that this machine runs no sandbox.
+/// Says in `.catervas/local/settings.json` that this machine runs no sandbox.
 pub fn no_sandbox(repository: &TempRepo) {
     files_of(repository)
         .write_settings(&LocalSettings {
@@ -127,11 +127,12 @@ pub fn files_of(repository: &TempRepo) -> ProjectFiles {
 
 /// The project's log, opened as another process would.
 pub fn log_of(repository: &TempRepo) -> EventLog {
-    open_event_log(&repository.path.join(".farik/local/farik.db"), at()).expect("the log opens")
+    open_event_log(&repository.path.join(".catervas/local/catervas.db"), at())
+        .expect("the log opens")
 }
 
 /// Every event of these kinds, oldest first; every event when `kinds` is empty.
-pub fn events(repository: &TempRepo, kinds: &[EventKind]) -> Vec<FarikEvent> {
+pub fn events(repository: &TempRepo, kinds: &[EventKind]) -> Vec<CatervasEvent> {
     log_of(repository)
         .read(&EventQuery {
             kinds: kinds.to_vec(),
@@ -154,7 +155,7 @@ pub fn status_of(repository: &TempRepo, task: &str) -> String {
 
 /// Appends one event about `task` (or none when `task` is empty), stamped with the project's ids,
 /// as a command in another process would.
-pub fn record(repository: &TempRepo, task: &str, kind: &str, body: &Value) -> FarikEvent {
+pub fn record(repository: &TempRepo, task: &str, kind: &str, body: &Value) -> CatervasEvent {
     record_as(repository, task, None, kind, body)
 }
 
@@ -165,7 +166,7 @@ pub fn record_as(
     session: Option<(&str, &str)>,
     kind: &str,
     body: &Value,
-) -> FarikEvent {
+) -> CatervasEvent {
     record_on(repository, task, session, kind, body, at())
 }
 
@@ -177,7 +178,7 @@ pub fn record_on(
     kind: &str,
     body: &Value,
     recorded_at: DateTime<Utc>,
-) -> FarikEvent {
+) -> CatervasEvent {
     let log = log_of(repository);
     let first = log
         .read(&EventQuery {
@@ -275,7 +276,7 @@ allowed_paths:
     )
 }
 
-/// Files `a_request(title)` with `farik task create`, and answers the id it was given.
+/// Files `a_request(title)` with `catervas task create`, and answers the id it was given.
 pub fn filed(repository: &TempRepo, title: &str) -> String {
     let path = repository.path.join(format!("{}.yaml", title.len()));
     std::fs::write(&path, a_request(title)).expect("the request is written");
@@ -331,7 +332,7 @@ pub fn a_high_risk_task_verifying(repository: &TempRepo, title: &str) -> String 
 
 /// Holds this project's run lock for as long as it lives, as a process driving it does.
 pub fn hold_the_run_lock(repository: &TempRepo) -> File {
-    let path = repository.path.join(".farik/local/run.lock");
+    let path = repository.path.join(".catervas/local/run.lock");
     let file = File::options()
         .create(true)
         .truncate(false)
@@ -360,7 +361,7 @@ const RUN_LOCK_FREES_DEADLINE: std::time::Duration = std::time::Duration::from_s
 /// thread is left to block on the file it opened; it is never joined, so it costs nothing once
 /// this function has returned or panicked.
 pub fn the_run_lock_frees(repository: &TempRepo) {
-    let path = repository.path.join(".farik/local/run.lock");
+    let path = repository.path.join(".catervas/local/run.lock");
     let (locked, waits) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let taken = File::options()
@@ -377,7 +378,7 @@ pub fn the_run_lock_frees(repository: &TempRepo) {
         Ok(Err(detail)) => panic!("the run lock cannot be taken: {detail}"),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!(
             "the run lock is still held after {RUN_LOCK_FREES_DEADLINE:?}: something left \
-             `.farik/local/run.lock` locked"
+             `.catervas/local/run.lock` locked"
         ),
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
             panic!("the thread taking the run lock panicked before it could say so")
@@ -424,12 +425,12 @@ pub fn tool_deps(repository: &TempRepo) -> Arc<ToolDeps> {
         git: repository.adapter(),
         clock,
         ids,
-        kits: Arc::new(farik_roles::load_kit),
+        kits: Arc::new(catervas_roles::load_kit),
     })
 }
 
 /// Another process driving the project: it holds the run lock and serves a daemon on
-/// `.farik/local/daemon.json` whose handler records each command and answers `handled by the
+/// `.catervas/local/daemon.json` whose handler records each command and answers `handled by the
 /// run`.
 pub struct LiveDriver {
     pub commands: Arc<Mutex<Vec<Command>>>,
@@ -475,8 +476,8 @@ impl LiveDriver {
         let handle = runtime
             .block_on(serve(
                 DaemonConfig {
-                    port: farik_runtime::daemon::PortChoice::Any,
-                    daemon_file: Some(repository.path.join(".farik/local/daemon.json")),
+                    port: catervas_runtime::daemon::PortChoice::Any,
+                    daemon_file: Some(repository.path.join(".catervas/local/daemon.json")),
                 },
                 Arc::clone(&state),
             ))
@@ -523,7 +524,7 @@ pub fn a_bare_env() -> BTreeMap<String, String> {
 /// A directory of its own under the temporary directory, removed first.
 pub fn scratch(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "farik-cli-{name}-{}-{:?}",
+        "catervas-cli-{name}-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     ));
@@ -573,7 +574,7 @@ pub fn joined<T>(handle: std::thread::JoinHandle<T>, what: &str) -> T {
     handle.join().unwrap_or_else(|_| panic!("{what} panicked"))
 }
 
-/// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
+/// An engine replaying `transcripts`, whose Catervas tool calls the driving process's daemon answers.
 pub fn recorded(transcripts: Vec<Transcript>) -> Engine {
     Engine::Given(Arc::new(move |daemon| {
         let adapter: Arc<dyn RuntimeAdapter> = Arc::new(RecordedAdapter::with_tools(

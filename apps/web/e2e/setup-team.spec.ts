@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { farik, startServe } from "./fixtures/serve.ts";
+import { catervas, startServe } from "./fixtures/serve.ts";
 import { narrow } from "./fixtures/shots.ts";
 
 const shots = new URL("./screenshots/", import.meta.url).pathname;
@@ -34,7 +34,7 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		project: true,
 		setupPending: true,
 	});
-	const marker = join(serve.project, ".farik/local/setup-pending");
+	const marker = join(serve.project, ".catervas/local/setup-pending");
 	try {
 		await page.goto(serve.url);
 		await expect(page).toHaveURL(/\/setup\/scan$/);
@@ -64,11 +64,14 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		await page.getByRole("button", { name: "Continue", exact: true }).click();
 
 		await expect(page).toHaveURL(/\/setup\/finish$/);
-		await page.getByLabel(/^Farik adds it for me/).check();
+		await page.getByLabel(/^Catervas adds it for me/).check();
 		await page.getByRole("button", { name: "Start the team" }).click();
 		await expect(page).toHaveURL(/:\d+\/$/);
 
-		const yaml = readFileSync(join(serve.project, ".farik/team.yaml"), "utf8");
+		const yaml = readFileSync(
+			join(serve.project, ".catervas/team.yaml"),
+			"utf8",
+		);
 		for (const id of ["mira", "sol", "ada", "theo", "kai"])
 			expect(yaml).toMatch(new RegExp(`id: ${id}\\b`));
 		expect(yaml).not.toMatch(/id: iris\b/);
@@ -76,7 +79,7 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		expect(yaml).toMatch(/daily_usd: 10\b/);
 		expect(yaml).toMatch(/run_commands: true/);
 
-		const kinds = farik(serve.project, ["--json", "log"])
+		const kinds = catervas(serve.project, ["--json", "log"])
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line).kind);
@@ -100,7 +103,9 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		await screenshots(page, "settings");
 		await finish.getByRole("button", { name: "Save changes" }).click();
 		await expect
-			.poll(() => readFileSync(join(serve.project, ".farik/team.yaml"), "utf8"))
+			.poll(() =>
+				readFileSync(join(serve.project, ".catervas/team.yaml"), "utf8"),
+			)
 			.toMatch(/integration: manual/);
 		await expect(
 			page

@@ -1,4 +1,4 @@
-//! The Marketing Specialist's tools (ADR 0042): `farik_propose_marketing_plan`, which ends its
+//! The Marketing Specialist's tools (ADR 0042): `catervas_propose_marketing_plan`, which ends its
 //! session with a plan for the owner to approve. It acts on the task's worktree; a module of its
 //! own keeps the files it writes under `docs/marketing/` together.
 
@@ -7,14 +7,14 @@ use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
-use chrono::NaiveDate;
-use farik_core::contract::{Role, TaskId};
-use farik_core::marketing::{
+use catervas_core::contract::{Role, TaskId};
+use catervas_core::marketing::{
     Amount, PlanCampaign, PlanProposal, PostChannel, PostSlot, ProposalRefusal, check_proposal,
     parse_amount,
 };
-use farik_protocol::event::{EventBody, MarketingPlanProposedBody};
-use farik_store::marketing::{MarketingPlan, marketing_plans};
+use catervas_protocol::event::{EventBody, MarketingPlanProposedBody};
+use catervas_store::marketing::{MarketingPlan, marketing_plans};
+use chrono::NaiveDate;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -24,7 +24,7 @@ use super::refusal::Refusal;
 use super::{Call, TOOLS, ToolError, failed};
 use crate::session::SessionPurpose;
 
-/// `farik_propose_marketing_plan`'s input.
+/// `catervas_propose_marketing_plan`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProposeMarketingPlanInput {
@@ -33,7 +33,7 @@ pub struct ProposeMarketingPlanInput {
     /// Two or three plain sentences for the owner, 20 to 600 characters: what the plan does, what
     /// it costs and what they get. The owner reads this first.
     summary: String,
-    /// The plan in full, 200 to 16,000 characters. Farik also writes it to
+    /// The plan in full, 200 to 16,000 characters. Catervas also writes it to
     /// docs/marketing/plans/MP-<n>.md.
     text: String,
     /// The first day, as YYYY-MM-DD in UTC: yesterday's date or later.
@@ -122,7 +122,7 @@ pub(super) fn plan_file(number: u32) -> String {
 }
 
 /// The tool's name.
-const PROPOSE_TOOL: &str = "farik_propose_marketing_plan";
+const PROPOSE_TOOL: &str = "catervas_propose_marketing_plan";
 
 /// Held from taking a plan's number to recording it, so that two sessions in one daemon never take
 /// the same number. A second daemon on the same project would need the files' own check, which
@@ -137,7 +137,7 @@ fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
     .into()
 }
 
-/// A fault of the plan that Farik, not the checks of `farik_core`, found.
+/// A fault of the plan that Catervas, not the checks of `catervas_core`, found.
 fn fault(code: &'static str, field: &str, message: impl Into<String>) -> ProposalRefusal {
     ProposalRefusal {
         code,
@@ -146,7 +146,7 @@ fn fault(code: &'static str, field: &str, message: impl Into<String>) -> Proposa
     }
 }
 
-/// `farik_propose_marketing_plan`: checks the plan, numbers it, writes its text to the task's
+/// `catervas_propose_marketing_plan`: checks the plan, numbers it, writes its text to the task's
 /// worktree and records `marketing_plan.proposed`, from the Marketing Specialist's implement
 /// session about a task. The task then waits on the owner.
 pub(crate) fn propose_plan(
@@ -190,7 +190,7 @@ pub(crate) fn propose_plan(
                 "replaces",
                 format!("{replaced} is not an approved plan that is still in force"),
             )),
-            // The campaigns Farik made for the old plan hold its amounts in its currency, which
+            // The campaigns Catervas made for the old plan hold its amounts in its currency, which
             // the new plan's figures would be read as (ADR 0042, SPEC 6.7): a plan in another
             // currency is a new plan, started when the old one has ended.
             Some(plan) if plan.proposal.currency != proposal.currency => found.push(fault(
@@ -536,8 +536,8 @@ fn body_of(
 mod tests {
     use std::path::PathBuf;
 
-    use farik_core::team::fixtures::an_agent_wire;
-    use farik_protocol::event::{EventBody, EventKind};
+    use catervas_core::team::fixtures::an_agent_wire;
+    use catervas_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
     use crate::tools::fixtures::{TestProject, a_team_of_three};
@@ -569,7 +569,11 @@ mod tests {
             "in_progress",
             &json!({ "assignee": "kai", "reviewer": "pm" }),
         );
-        let worktree = project.repo.path.join(".farik/local/worktrees").join(task);
+        let worktree = project
+            .repo
+            .path
+            .join(".catervas/local/worktrees")
+            .join(task);
         project
             .deps
             .git
@@ -613,7 +617,7 @@ mod tests {
         project.call(
             "kai",
             Some(task),
-            "farik_propose_marketing_plan",
+            "catervas_propose_marketing_plan",
             plan.clone(),
         )
     }
@@ -633,18 +637,18 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn proposes_a_plan_and_writes_its_text() {
         let project = a_marketing_project("tools-plan-proposes");
-        let worktree = works_on(&project, "FRK-1");
+        let worktree = works_on(&project, "CTV-1");
         assert!(
             !project
                 .deps
                 .projections
-                .task(&"FRK-1".parse().expect("an id"))
+                .task(&"CTV-1".parse().expect("an id"))
                 .expect("reads")
                 .expect("a row")
                 .waiting_on_human
         );
 
-        let answer = propose(&project, "FRK-1", &a_plan()).expect("the plan is proposed");
+        let answer = propose(&project, "CTV-1", &a_plan()).expect("the plan is proposed");
 
         assert_eq!(answer["plan"], "MP-1");
         assert!(
@@ -693,7 +697,7 @@ mod tests {
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.to_string()),
-            Some("FRK-1".to_string())
+            Some("CTV-1".to_string())
         );
 
         let file = std::fs::read_to_string(worktree.join("docs/marketing/plans/MP-1.md"))
@@ -714,7 +718,7 @@ mod tests {
         let row = project
             .deps
             .projections
-            .task(&"FRK-1".parse().expect("an id"))
+            .task(&"CTV-1".parse().expect("an id"))
             .expect("the board reads")
             .expect("a row");
         assert!(row.waiting_on_human, "the task waits on the owner");
@@ -728,28 +732,28 @@ mod tests {
         let committed = project.repo.path.join("docs/marketing/plans");
         std::fs::create_dir_all(&committed).expect("a directory");
         std::fs::write(committed.join("MP-4.md"), "# MP-4\n").expect("a file");
-        works_on(&project, "FRK-1");
+        works_on(&project, "CTV-1");
         assert_eq!(
-            propose(&project, "FRK-1", &a_plan()).expect("proposed")["plan"],
+            propose(&project, "CTV-1", &a_plan()).expect("proposed")["plan"],
             "MP-5"
         );
 
         // The log's own plans count too, though no file of this task's worktree carries them.
-        let other = works_on(&project, "FRK-2");
+        let other = works_on(&project, "CTV-2");
         assert_eq!(
-            propose(&project, "FRK-2", &a_plan()).expect("proposed")["plan"],
+            propose(&project, "CTV-2", &a_plan()).expect("proposed")["plan"],
             "MP-6"
         );
         assert!(other.join("docs/marketing/plans/MP-6.md").is_file());
 
         // And so does a file already in the task's own worktree.
-        let third = works_on(&project, "FRK-3");
+        let third = works_on(&project, "CTV-3");
         std::fs::create_dir_all(third.join("docs/marketing/plans")).expect("a directory");
         std::fs::write(third.join("docs/marketing/plans/MP-9.md"), "# MP-9\n").expect("a file");
         std::fs::write(third.join("docs/marketing/plans/notes.md"), "not a plan\n")
             .expect("a file");
         assert_eq!(
-            propose(&project, "FRK-3", &a_plan()).expect("proposed")["plan"],
+            propose(&project, "CTV-3", &a_plan()).expect("proposed")["plan"],
             "MP-10"
         );
     }
@@ -758,7 +762,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_bad_proposal_with_every_reason() {
         let project = a_marketing_project("tools-plan-faults");
-        let worktree = works_on(&project, "FRK-1");
+        let worktree = works_on(&project, "CTV-1");
         let before = project.event_count();
         let mut plan = a_plan();
         plan["title"] = json!("ab");
@@ -766,7 +770,7 @@ mod tests {
         plan["posts"][0]["topic"] = json!("");
         plan["budget"]["google_ads"] = json!("2500");
 
-        let reason = refused(propose(&project, "FRK-1", &plan).expect_err("a plan with faults"));
+        let reason = refused(propose(&project, "CTV-1", &plan).expect_err("a plan with faults"));
 
         for code in [
             "marketing_plan_text",
@@ -791,7 +795,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn the_tool_asks_what_each_campaign_advertises() {
         let project = a_marketing_project("tools-plan-advertises");
-        works_on(&project, "FRK-1");
+        works_on(&project, "CTV-1");
 
         // A campaign that does not say what it advertises is not a campaign this tool takes.
         let mut plan = a_plan();
@@ -799,7 +803,7 @@ mod tests {
             .as_object_mut()
             .expect("a campaign")
             .remove("advertises");
-        match propose(&project, "FRK-1", &plan).expect_err("no advertises") {
+        match propose(&project, "CTV-1", &plan).expect_err("no advertises") {
             ToolError::InvalidInput { detail } => {
                 assert!(detail.contains("advertises"), "{detail}");
             }
@@ -809,7 +813,7 @@ mod tests {
 
         // One that says too little is refused by the plan's checks, by its field.
         plan["campaigns"][0]["advertises"] = json!("ab");
-        let reason = refused(propose(&project, "FRK-1", &plan).expect_err("too short"));
+        let reason = refused(propose(&project, "CTV-1", &plan).expect_err("too short"));
         assert!(
             reason.starts_with("marketing_plan_campaign: campaigns[0].advertises:"),
             "{reason}"
@@ -818,7 +822,7 @@ mod tests {
 
         // And what it says is recorded as the agent wrote it.
         plan["campaigns"][0]["advertises"] = json!("Handmade candles");
-        propose(&project, "FRK-1", &plan).expect("proposed");
+        propose(&project, "CTV-1", &plan).expect("proposed");
         let events = project.events(&[EventKind::MarketingPlanProposed]);
         let EventBody::MarketingPlanProposed(body) = &events[0].body else {
             panic!("a marketing plan was proposed");
@@ -833,7 +837,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reports_a_figure_it_cannot_read_by_its_field() {
         let project = a_marketing_project("tools-plan-figures");
-        works_on(&project, "FRK-1");
+        works_on(&project, "CTV-1");
         let mut plan = a_plan();
         plan["budget"]["total"] = json!("1,000");
         plan["starts_on"] = json!("next Monday");
@@ -841,7 +845,7 @@ mod tests {
         plan["campaigns"][0]["channel"] = json!("tiktok_ads");
         plan["posts"][0]["channel"] = json!("telegram");
 
-        let reason = refused(propose(&project, "FRK-1", &plan).expect_err("unreadable figures"));
+        let reason = refused(propose(&project, "CTV-1", &plan).expect_err("unreadable figures"));
 
         for (code, field) in [
             ("marketing_plan_budget", "budget.total"),
@@ -863,26 +867,26 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_plan_to_replace_that_is_not_approved() {
         let project = a_marketing_project("tools-plan-replaces");
-        works_on(&project, "FRK-1");
+        works_on(&project, "CTV-1");
         let mut plan = a_plan();
         plan["replaces"] = json!("MP-7");
-        let reason = refused(propose(&project, "FRK-1", &plan).expect_err("no such plan"));
+        let reason = refused(propose(&project, "CTV-1", &plan).expect_err("no such plan"));
         assert!(reason.contains("marketing_plan_unknown"), "{reason}");
         assert!(reason.contains("replaces"), "{reason}");
 
         // A plan the owner approved can be replaced.
-        let first = propose(&project, "FRK-1", &a_plan()).expect("proposed");
+        let first = propose(&project, "CTV-1", &a_plan()).expect("proposed");
         assert_eq!(first["plan"], "MP-1");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.approved",
             &json!({ "plan": "MP-1", "note": "" }),
         );
-        works_on(&project, "FRK-2");
+        works_on(&project, "CTV-2");
         let mut newer = a_plan();
         newer["replaces"] = json!("MP-1");
         assert_eq!(
-            propose(&project, "FRK-2", &newer).expect("replaces")["plan"],
+            propose(&project, "CTV-2", &newer).expect("replaces")["plan"],
             "MP-2"
         );
     }
@@ -891,19 +895,19 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_plan_that_replaces_one_in_another_currency() {
         let project = a_marketing_project("tools-plan-currency");
-        works_on(&project, "FRK-1");
-        propose(&project, "FRK-1", &a_plan()).expect("a plan in dollars");
+        works_on(&project, "CTV-1");
+        propose(&project, "CTV-1", &a_plan()).expect("a plan in dollars");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.approved",
             &json!({ "plan": "MP-1", "note": "" }),
         );
-        works_on(&project, "FRK-2");
+        works_on(&project, "CTV-2");
         let mut yen = a_plan();
         yen["currency"] = json!("JPY");
         yen["replaces"] = json!("MP-1");
 
-        let reason = refused(propose(&project, "FRK-2", &yen).expect_err("another currency"));
+        let reason = refused(propose(&project, "CTV-2", &yen).expect_err("another currency"));
 
         assert!(
             reason.contains("marketing_plan_currency: currency"),
@@ -918,7 +922,7 @@ mod tests {
         // The same plan in the same currency replaces it.
         yen["currency"] = json!("USD");
         assert_eq!(
-            propose(&project, "FRK-2", &yen).expect("the same currency")["plan"],
+            propose(&project, "CTV-2", &yen).expect("the same currency")["plan"],
             "MP-2"
         );
     }
@@ -927,11 +931,11 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_second_plan_on_the_task() {
         let project = a_marketing_project("tools-plan-waiting");
-        works_on(&project, "FRK-1");
-        propose(&project, "FRK-1", &a_plan()).expect("the first plan");
+        works_on(&project, "CTV-1");
+        propose(&project, "CTV-1", &a_plan()).expect("the first plan");
 
         let reason =
-            refused(propose(&project, "FRK-1", &a_plan()).expect_err("one plan waits already"));
+            refused(propose(&project, "CTV-1", &a_plan()).expect_err("one plan waits already"));
 
         assert!(
             reason.starts_with("marketing_plan_waiting: MP-1 waits for the owner; end your turn"),
@@ -944,27 +948,27 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_another_role_or_session() {
         let project = a_marketing_project("tools-plan-refused");
-        works_on(&project, "FRK-1");
+        works_on(&project, "CTV-1");
         // A Developer allowed to write there passes the tier and path checks and meets the gate.
-        project.filed_with("FRK-2", "in_progress", "task", None, |wire| {
+        project.filed_with("CTV-2", "in_progress", "task", None, |wire| {
             wire["allowed_paths"] = json!(["docs/marketing/**"]);
         });
         let kai = |purpose: crate::session::SessionPurpose, task: Option<&str>| {
             let mut context: ToolContext = project.context("kai", task);
             context.purpose = purpose;
-            crate::tools::fixtures::run(&context, "farik_propose_marketing_plan", a_plan())
+            crate::tools::fixtures::run(&context, "catervas_propose_marketing_plan", a_plan())
         };
 
         let developer = project.call(
             "dev-a",
-            Some("FRK-2"),
-            "farik_propose_marketing_plan",
+            Some("CTV-2"),
+            "catervas_propose_marketing_plan",
             a_plan(),
         );
         assert!(refused(developer.expect_err("a Developer")).starts_with("marketing_plan_refused"),);
         for (purpose, task) in [
-            (crate::session::SessionPurpose::Verify, Some("FRK-1")),
-            (crate::session::SessionPurpose::Chat, Some("FRK-1")),
+            (crate::session::SessionPurpose::Verify, Some("CTV-1")),
+            (crate::session::SessionPurpose::Chat, Some("CTV-1")),
         ] {
             let reason =
                 refused(kai(purpose, task).expect_err("not an implement session of a task"));
@@ -984,7 +988,8 @@ mod tests {
 
     #[test]
     fn refuses_to_write_over_a_plan_that_is_there() {
-        let folder = std::env::temp_dir().join(format!("farik-plan-file-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("catervas-plan-file-{}", std::process::id()));
         let file = folder.join("docs/marketing/plans/MP-3.md");
         super::write_new(&file, "# MP-3: First\n").expect("a new file is written");
         let reason =
@@ -1002,12 +1007,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_path_the_contract_does_not_allow() {
         let project = a_marketing_project("tools-plan-paths");
-        project.filed_with("FRK-1", "in_progress", "task", None, |wire| {
+        project.filed_with("CTV-1", "in_progress", "task", None, |wire| {
             wire["allowed_paths"] = json!(["docs/marketing/research/**"]);
             wire["assignee_role"] = json!("marketing_specialist");
         });
         let reason = refused(
-            propose(&project, "FRK-1", &a_plan()).expect_err("the plans folder is not allowed"),
+            propose(&project, "CTV-1", &a_plan()).expect_err("the plans folder is not allowed"),
         );
         assert!(reason.starts_with("path_outside_allowed"), "{reason}");
         assert_eq!(proposed_events(&project), 0);

@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn carries_the_task_the_reason_what_was_tried_and_the_options() {
         let escalation = Escalation {
-            task_id: "FRK-7".parse().expect("a task id"),
+            task_id: "CTV-7".parse().expect("a task id"),
             reason: EscalationReason::Budget,
             tried: "Two sessions; the second ran out of tokens.".to_string(),
             options: vec![
@@ -321,7 +321,7 @@ mod tests {
                 "Split the task.".to_string(),
             ],
         };
-        assert_eq!(escalation.task_id.to_string(), "FRK-7");
+        assert_eq!(escalation.task_id.to_string(), "CTV-7");
         assert_eq!(escalation.options.len(), 2);
         assert_eq!(escalation.reason, EscalationReason::Budget);
     }

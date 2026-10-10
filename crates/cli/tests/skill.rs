@@ -1,4 +1,4 @@
-//! `farik skill` (`docs/SPEC.md` 6.7, ADR 0034): a skill is shown whole before it is added, and
+//! `catervas skill` (`docs/SPEC.md` 6.7, ADR 0034): a skill is shown whole before it is added, and
 //! added, confirmed or removed through the command that the driving process handles, or here.
 //!
 //! Every test here needs the `git` program, and is `#[ignore]`d and run by
@@ -12,11 +12,11 @@ use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-use farik_core::skill::skill_sha256;
-use farik_protocol::command::{Command, SkillScope};
-use farik_protocol::event::EventKind;
-use farik_runtime::skills::read_skill_folder;
-use farik_store::git::fixtures::TempRepo;
+use catervas_core::skill::skill_sha256;
+use catervas_protocol::command::{Command, SkillScope};
+use catervas_protocol::event::EventKind;
+use catervas_runtime::skills::read_skill_folder;
+use catervas_store::git::fixtures::TempRepo;
 
 use project::{LiveDriver, a_team, events, files_of, run, run_with, scratch};
 
@@ -37,7 +37,7 @@ fn hash_of(folder: &Path) -> String {
     skill_sha256(&read_skill_folder(folder).expect("a readable folder"))
 }
 
-/// Runs `farik skill <args>` with `answer` on standard input, at a terminal when `terminal`.
+/// Runs `catervas skill <args>` with `answer` on standard input, at a terminal when `terminal`.
 fn skill(repository: &TempRepo, args: &[&str], answer: &str, terminal: bool) -> project::Ran {
     let answer = answer.to_string();
     let mut all = vec!["skill"];
@@ -62,17 +62,17 @@ fn pinned(repository: &TempRepo, agent: &str) -> Vec<String> {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_skill_show_refuses_a_linked_skills_folder() {
+fn catervas_skill_show_refuses_a_linked_skills_folder() {
     let repository = a_team("skill-show-linked");
     let outside = a_skill("skill-show-linked", "api-style", "OUTSIDE");
-    let skills = repository.path.join(".farik/skills");
+    let skills = repository.path.join(".catervas/skills");
     std::fs::create_dir_all(&skills).expect("a folder");
     std::os::unix::fs::symlink(&outside, skills.join("api-style")).expect("a link");
     let ran = skill(&repository, &["show", "api-style", "--team"], "", false);
     assert_ne!(ran.code, 0, "{}{}", ran.out, ran.err);
     assert!(!ran.out.contains("OUTSIDE"), "{}", ran.out);
     assert!(
-        ran.err.contains("skill_path_invalid") || ran.err.contains(".farik/skills/api-style"),
+        ran.err.contains("skill_path_invalid") || ran.err.contains(".catervas/skills/api-style"),
         "{}",
         ran.err
     );
@@ -80,7 +80,7 @@ fn farik_skill_show_refuses_a_linked_skills_folder() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_skill_add_escapes_a_skills_control_characters() {
+fn catervas_skill_add_escapes_a_skills_control_characters() {
     let repository = a_team("skill-add-escapes");
     let folder = a_skill("skill-add-escapes", "api-style", "\u{1b}[2Jhidden");
     let args = ["add", folder.to_str().expect("a path"), "--agent", "dev-a"];
@@ -100,7 +100,7 @@ fn farik_skill_add_escapes_a_skills_control_characters() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_skill_add_shows_then_asks() {
+fn catervas_skill_add_shows_then_asks() {
     let repository = a_team("skill-add-asks");
     let folder = a_skill("skill-add-asks", "api-style", "THE WHOLE BODY");
     let sha = hash_of(&folder);
@@ -125,7 +125,12 @@ fn farik_skill_add_shows_then_asks() {
     );
     assert!(events(&repository, &[EventKind::SkillAdded]).is_empty());
     assert!(pinned(&repository, "dev-a").is_empty());
-    assert!(!repository.path.join(".farik/agents/dev-a/skills").exists());
+    assert!(
+        !repository
+            .path
+            .join(".catervas/agents/dev-a/skills")
+            .exists()
+    );
 
     // Answering y sends skill_save to the process driving the project.
     let driver = LiveDriver::new(&repository);
@@ -165,14 +170,18 @@ fn farik_skill_add_shows_then_asks() {
     assert_eq!(pinned(&repository, "dev-a"), ["api-style"]);
     assert_eq!(events(&repository, &[EventKind::SkillAdded]).len(), 1);
     assert_eq!(
-        hash_of(&repository.path.join(".farik/agents/dev-a/skills/api-style")),
+        hash_of(
+            &repository
+                .path
+                .join(".catervas/agents/dev-a/skills/api-style")
+        ),
         sha
     );
 }
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_skill_add_needs_yes_without_a_terminal() {
+fn catervas_skill_add_needs_yes_without_a_terminal() {
     let repository = a_team("skill-add-yes");
     let folder = a_skill("skill-add-yes", "api-style", "body");
     let path = folder.to_str().expect("a path");
@@ -255,7 +264,7 @@ fn farik_skill_add_needs_yes_without_a_terminal() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_skill_confirm_takes_a_prefix() {
+fn catervas_skill_confirm_takes_a_prefix() {
     let repository = a_team("skill-confirm");
     let folder = a_skill("skill-confirm", "api-style", "first");
     let ran = skill(
@@ -266,7 +275,7 @@ fn farik_skill_confirm_takes_a_prefix() {
     );
     assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
     // A pull changes the folder and the pin together.
-    let placed = repository.path.join(".farik/skills/api-style");
+    let placed = repository.path.join(".catervas/skills/api-style");
     std::fs::write(placed.join("references/a.md"), "changed by a pull").expect("an edit");
     let sha = hash_of(&placed);
     let confirm = |given: &str| {
@@ -315,7 +324,9 @@ fn farik_skill_confirm_takes_a_prefix() {
         "",
         false,
     );
-    let placed = repository.path.join(".farik/skills/writing-task-contracts");
+    let placed = repository
+        .path
+        .join(".catervas/skills/writing-task-contracts");
     let sha = hash_of(&placed);
     let ran = confirm_named(&repository, "writing-task-contracts", &sha[..12], &[]);
     assert_eq!(ran.code, 1, "{}", ran.out);
@@ -340,7 +351,7 @@ fn confirm_named(repository: &TempRepo, name: &str, given: &str, extra: &[&str])
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_skill_list_shows_levels_and_states() {
+fn catervas_skill_list_shows_levels_and_states() {
     let repository = a_team("skill-list");
     for (name, whom) in [
         ("api-style", ["--team"].as_slice()),
@@ -357,7 +368,7 @@ fn farik_skill_list_shows_levels_and_states() {
     std::fs::write(
         repository
             .path
-            .join(".farik/agents/dev-a/skills/notes/references/a.md"),
+            .join(".catervas/agents/dev-a/skills/notes/references/a.md"),
         "edited",
     )
     .expect("an edit");
@@ -390,7 +401,7 @@ fn farik_skill_list_shows_levels_and_states() {
     let value: serde_json::Value = serde_json::from_str(&json.out).expect("JSON");
     assert_eq!(value["skills"][8]["state"], "review");
     // A missing and a replaced state read as the words say.
-    std::fs::remove_dir_all(repository.path.join(".farik/skills/api-style")).expect("gone");
+    std::fs::remove_dir_all(repository.path.join(".catervas/skills/api-style")).expect("gone");
     let ran = skill(&repository, &["list"], "", false);
     assert_eq!(
         ran.out.lines().collect::<Vec<_>>(),
@@ -431,7 +442,7 @@ fn farik_skill_list_shows_levels_and_states() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_skill_show_prints_every_file_escaped_and_remove_removes() {
+fn catervas_skill_show_prints_every_file_escaped_and_remove_removes() {
     let repository = a_team("skill-show");
     let folder = a_skill("skill-show", "api-style", "line\u{1b}[31mred");
     skill(
@@ -440,7 +451,7 @@ fn farik_skill_show_prints_every_file_escaped_and_remove_removes() {
         "",
         false,
     );
-    let placed = repository.path.join(".farik/skills/api-style");
+    let placed = repository.path.join(".catervas/skills/api-style");
     let ran = skill(&repository, &["show", "api-style", "--team"], "", false);
     assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
     assert!(
@@ -475,11 +486,11 @@ fn farik_skill_show_prints_every_file_escaped_and_remove_removes() {
 }
 
 /// The Software Developer's kit with one skill, `launch-plans`.
-fn a_kit_with_launch_plans() -> farik_roles::Kit {
+fn a_kit_with_launch_plans() -> catervas_roles::Kit {
     let text = "---\nname: launch-plans\ndescription: Use when planning a launch.\n---\nSteps.\n";
     let file = serde_json::json!({ "role": "software_developer", "skills": ["launch-plans"], "connectors": [] });
-    farik_roles::parse_kit(
-        farik_core::contract::Role::SoftwareDeveloper,
+    catervas_roles::parse_kit(
+        catervas_core::contract::Role::SoftwareDeveloper,
         &file.to_string(),
         &[],
         &[("launch-plans", &[("SKILL.md", text)])],
@@ -489,7 +500,7 @@ fn a_kit_with_launch_plans() -> farik_roles::Kit {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_skill_add_and_confirm_refuse_a_kit_skills_name_without_replace() {
+fn catervas_skill_add_and_confirm_refuse_a_kit_skills_name_without_replace() {
     let repository = a_team("skill-kit-name");
     let mine = a_skill("skill-kit-name", "launch-plans", "mine");
     let mine = mine.to_str().expect("a path");
@@ -499,10 +510,10 @@ fn farik_skill_add_and_confirm_refuse_a_kit_skills_name_without_replace() {
         all.extend_from_slice(args);
         run_with(&repository.path, &all, move |io| {
             io.kits = std::sync::Arc::new(move |role| {
-                if role == farik_core::contract::Role::SoftwareDeveloper {
+                if role == catervas_core::contract::Role::SoftwareDeveloper {
                     Ok(kit.clone())
                 } else {
-                    farik_roles::load_kit(role)
+                    catervas_roles::load_kit(role)
                 }
             });
         })
@@ -517,7 +528,7 @@ fn farik_skill_add_and_confirm_refuse_a_kit_skills_name_without_replace() {
     // Without the kit, the name is free: it is the kit's presence that takes it.
     let free = skill(&repository, &["add", mine, "--team", "--yes"], "", false);
     assert_eq!(free.code, 0, "{}{}", free.out, free.err);
-    let hash = hash_of(&repository.path.join(".farik/skills/launch-plans"));
+    let hash = hash_of(&repository.path.join(".catervas/skills/launch-plans"));
     let ran = with_the_kit(&["confirm", "launch-plans", "--team", &hash]);
     assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
     assert!(ran.err.contains("--replace"), "{}", ran.err);

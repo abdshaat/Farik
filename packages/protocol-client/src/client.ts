@@ -1,5 +1,5 @@
-import type { FarikCommand } from "./generated/command.ts";
-import type { FarikEvent } from "./generated/event.ts";
+import type { CatervasCommand } from "./generated/command.ts";
+import type { CatervasEvent } from "./generated/event.ts";
 import type { QueryRequest } from "./generated/rpc.ts";
 import { toCamel, toSnake } from "./mapping.ts";
 
@@ -15,9 +15,9 @@ type CamelKey<S extends string> = S extends `${infer A}_${infer B}`
 	: S;
 
 /** An event as the browser sees it: the wire's fields in camelCase. */
-export type Event = Camel<FarikEvent>;
+export type Event = Camel<CatervasEvent>;
 /** A command as the browser writes it: the wire's fields in camelCase. */
-export type Command = Camel<FarikCommand>;
+export type Command = Camel<CatervasCommand>;
 export type QueryName = QueryRequest["params"]["name"];
 export type CommandReply =
 	| { said: string; events: number[] }

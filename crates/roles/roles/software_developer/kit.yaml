@@ -17,7 +17,7 @@ connectors:
     title: Context7
     about: "Current coding docs"
     why: "Writes code for the library version you use, not an old one. Read-only."
-    setup: "Sign in with a free Context7 account and allow Farik to use it. The questions your agent asks about a library go to Context7; the free plan allows about a thousand a month."
+    setup: "Sign in with a free Context7 account and allow Catervas to use it. The questions your agent asks about a library go to Context7; the free plan allows about a thousand a month."
     labels:
       resolve-library-id: "find a library"
       query-docs: "read a library's documentation"

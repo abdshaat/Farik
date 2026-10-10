@@ -1,6 +1,6 @@
-# Contributing to Farik
+# Contributing to Catervas
 
-Thank you for considering it. Farik holds itself to the same discipline it imposes on the agent teams it runs, so the process is stricter than most open-source projects of its size. The standards are short; please read them before your first change.
+Thank you for considering it. Catervas holds itself to the same discipline it imposes on the agent teams it runs, so the process is stricter than most open-source projects of its size. The standards are short; please read them before your first change.
 
 1. [Workflow](docs/standards/workflow.md): how a change moves from idea to `main`. Brainstorm, plan, test-driven execution, verification with evidence, review, finish.
 2. [Code](docs/standards/code.md): naming, style, and the toolchain.
@@ -8,7 +8,7 @@ Thank you for considering it. Farik holds itself to the same discipline it impos
 
 ## If you use Claude Code
 
-Install the [superpowers](https://github.com/obra/superpowers) plugin; its skills implement the workflow above and trigger on their own. The repository's `CLAUDE.md` carries the Farik-specific rules. Check the plugin's README for the current install command.
+Install the [superpowers](https://github.com/obra/superpowers) plugin; its skills implement the workflow above and trigger on their own. The repository's `CLAUDE.md` carries the Catervas-specific rules. Check the plugin's README for the current install command.
 
 They diverge in one place. The plugin's planning skill writes the implementation into the plan, which `docs/standards/workflow.md` stage 2 stopped asking for in ADR 0008. Edit a drafted plan down to its decisions, signatures, file map and test list before sending it for review; the document wins over the plugin.
 

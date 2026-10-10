@@ -4,19 +4,19 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use farik_core::contract::{TaskStatus, validate_contract};
-use farik_core::team::AgentStatus;
+use catervas_core::contract::{TaskStatus, validate_contract};
+use catervas_core::team::AgentStatus;
 use jsonschema::Validator;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
+pub use catervas_core::contract::{TaskContract, TaskId, ValidationError};
 
 pub use crate::generated::command::CommandName;
 use crate::generated::command::{
-    AgentUpdateBody, ChatMessagePostBody, ConnectorConnectBody, ConnectorDisconnectBody,
-    DataPipelineDecideBody, DataPipelineDecideBodyDecision, EmptyBody, EscalationResolveBody,
-    FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
+    AgentUpdateBody, CatervasCommand as CommandWire, ChatMessagePostBody, ConnectorConnectBody,
+    ConnectorDisconnectBody, DataPipelineDecideBody, DataPipelineDecideBodyDecision, EmptyBody,
+    EscalationResolveBody, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
     HumanSendBackBodySubject, MarketingPlanDecideBody, MarketingPlanDecideBodyDecision,
     MarketingPlanEndBody, MessagePostBody, PurchaseOrderDecideBody,
     PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody, PurchaseOrderStepBody,
@@ -302,12 +302,12 @@ pub enum Command {
         /// What the owner says to the agent.
         note: Option<String>,
     },
-    /// Allow a site no agent asked for, or turn one of Farik's back on (ADR 0039).
+    /// Allow a site no agent asked for, or turn one of Catervas's back on (ADR 0039).
     SiteAdd {
         /// A name like `shop.com`, or the address of any page on the site.
         site: String,
     },
-    /// Take a site away from the Procurement Specialist: one the owner allowed, or one of Farik's
+    /// Take a site away from the Procurement Specialist: one the owner allowed, or one of Catervas's
     /// (ADR 0039).
     SiteRemove {
         /// The site, as a name or as the address of a page on it.
@@ -329,7 +329,7 @@ pub enum Command {
         /// The subject, as the owner saw it and may have edited it.
         subject: String,
         /// The body, as the owner saw it and may have edited it, without the signature and the
-        /// line Farik adds.
+        /// line Catervas adds.
         body: String,
     },
     /// Discard message `message` to a seller: nothing is sent (ADR 0039).
@@ -343,7 +343,7 @@ pub enum Command {
         reply: u64,
     },
     /// Approve an order and email it, with its workbook, to its seller in one press, which records
-    /// it placed: the owner pays the seller outside Farik (ADR 0039).
+    /// it placed: the owner pays the seller outside Catervas (ADR 0039).
     PurchaseOrderSend {
         /// The order's number, the n of PO-n.
         order: u64,
@@ -427,7 +427,7 @@ pub enum Command {
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
 /// typed command. The contract inside `task_create` goes through
-/// `farik_core::contract::validate_contract`, so that a contract arriving inside a command is held
+/// `catervas_core::contract::validate_contract`, so that a contract arriving inside a command is held
 /// to exactly the rules one arriving alone is, the repeated id rules among them.
 ///
 /// # Errors
@@ -1433,11 +1433,11 @@ fn pointer(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::fixtures::{a_contract_wire, a_full_contract_wire};
+    use catervas_core::contract::fixtures::{a_contract_wire, a_full_contract_wire};
     use serde_json::{Value, json};
 
-    use farik_core::contract::TaskStatus;
-    use farik_core::team::AgentStatus;
+    use catervas_core::contract::TaskStatus;
+    use catervas_core::team::AgentStatus;
 
     use std::collections::BTreeMap;
 
@@ -1453,7 +1453,7 @@ mod tests {
     fn a_request_triage_wire() -> Value {
         json!({
             "command": "request_triage",
-            "body": { "task_id": "FRK-1", "size": "large", "reason": "Three deliverables." }
+            "body": { "task_id": "CTV-1", "size": "large", "reason": "Three deliverables." }
         })
     }
 
@@ -1468,7 +1468,7 @@ mod tests {
         else {
             panic!("a task_create command carries a contract");
         };
-        assert_eq!(contract.id.to_string(), "FRK-1");
+        assert_eq!(contract.id.to_string(), "CTV-1");
         // The validator applied the schema's defaults, which is the proof it was the one used.
         assert_eq!(contract.budget.max_sessions.get(), 14);
     }
@@ -1503,7 +1503,7 @@ mod tests {
         else {
             panic!("a request_triage command carries a size");
         };
-        assert_eq!(task_id.to_string(), "FRK-1");
+        assert_eq!(task_id.to_string(), "CTV-1");
         assert_eq!(size, RequestSize::Large);
         assert_eq!(reason, "Three deliverables.");
     }
@@ -1571,8 +1571,8 @@ mod tests {
             .unwrap_or_else(|errors| panic!("{command} reads: {errors:?}"))
     }
 
-    fn frk(number: u32) -> super::TaskId {
-        format!("FRK-{number}").parse().expect("a task id")
+    fn ctv(number: u32) -> super::TaskId {
+        format!("CTV-{number}").parse().expect("a task id")
     }
 
     #[test]
@@ -1580,10 +1580,10 @@ mod tests {
         assert_eq!(
             read(
                 "task_transition",
-                &json!({ "task_id": "FRK-3", "to": "blocked", "reason": "Key missing." })
+                &json!({ "task_id": "CTV-3", "to": "blocked", "reason": "Key missing." })
             ),
             Command::TaskTransition {
-                task_id: frk(3),
+                task_id: ctv(3),
                 to: TaskStatus::Blocked,
                 reason: "Key missing.".to_string()
             }
@@ -1591,10 +1591,10 @@ mod tests {
         assert_eq!(
             read(
                 "human_accept",
-                &json!({ "task_id": "FRK-3", "subject": "result", "message": "Looks right." })
+                &json!({ "task_id": "CTV-3", "subject": "result", "message": "Looks right." })
             ),
             Command::HumanAccept {
-                task_id: frk(3),
+                task_id: ctv(3),
                 subject: AcceptSubject::Result,
                 message: Some("Looks right.".to_string())
             }
@@ -1602,10 +1602,10 @@ mod tests {
         assert_eq!(
             read(
                 "human_accept",
-                &json!({ "task_id": "FRK-3", "subject": "contract" })
+                &json!({ "task_id": "CTV-3", "subject": "contract" })
             ),
             Command::HumanAccept {
-                task_id: frk(3),
+                task_id: ctv(3),
                 subject: AcceptSubject::Contract,
                 message: None
             }
@@ -1613,10 +1613,10 @@ mod tests {
         assert_eq!(
             read(
                 "escalation_resolve",
-                &json!({ "task_id": "FRK-3", "to": "refining", "message": "Split it by page." })
+                &json!({ "task_id": "CTV-3", "to": "refining", "message": "Split it by page." })
             ),
             Command::EscalationResolve {
-                task_id: frk(3),
+                task_id: ctv(3),
                 to: TaskStatus::Refining,
                 message: "Split it by page.".to_string(),
                 extra_tries: None
@@ -1633,14 +1633,14 @@ mod tests {
             }
         );
         for (name, command) in [
-            ("contract_lock", Command::ContractLock { task_id: frk(3) }),
+            ("contract_lock", Command::ContractLock { task_id: ctv(3) }),
             (
                 "contract_unlock",
-                Command::ContractUnlock { task_id: frk(3) },
+                Command::ContractUnlock { task_id: ctv(3) },
             ),
-            ("task_integrate", Command::TaskIntegrate { task_id: frk(3) }),
+            ("task_integrate", Command::TaskIntegrate { task_id: ctv(3) }),
         ] {
-            assert_eq!(read(name, &json!({ "task_id": "FRK-3" })), command);
+            assert_eq!(read(name, &json!({ "task_id": "CTV-3" })), command);
         }
         assert_eq!(
             read(
@@ -1671,9 +1671,9 @@ mod tests {
         );
         assert_eq!(read("sprint_end", &json!({})), Command::SprintEnd);
         assert_eq!(
-            read("message_post", &json!({ "text": "@dev-a how is FRK-1?" })),
+            read("message_post", &json!({ "text": "@dev-a how is CTV-1?" })),
             Command::MessagePost {
-                text: "@dev-a how is FRK-1?".to_string()
+                text: "@dev-a how is CTV-1?".to_string()
             }
         );
     }
@@ -1698,7 +1698,7 @@ mod tests {
     fn refuses_a_body_that_is_another_commands() {
         let errors = refusal(&json!({
             "command": "question_answer",
-            "body": { "task_id": "FRK-3" }
+            "body": { "task_id": "CTV-3" }
         }));
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].path, "/body");
@@ -1712,7 +1712,7 @@ mod tests {
 
         let errors = refusal(&json!({
             "command": "human_accept",
-            "body": { "task_id": "FRK-3", "subject": "approve" }
+            "body": { "task_id": "CTV-3", "subject": "approve" }
         }));
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].path, "/body");
@@ -1726,20 +1726,20 @@ mod tests {
             json!({ "command": "task_create", "body": { "contract": a_full_contract_wire() } }),
             a_request_triage_wire(),
             json!({ "command": "task_transition",
-                    "body": { "task_id": "FRK-3", "to": "blocked", "reason": "Key missing." } }),
+                    "body": { "task_id": "CTV-3", "to": "blocked", "reason": "Key missing." } }),
             json!({ "command": "human_accept",
-                    "body": { "task_id": "FRK-3", "subject": "result", "message": "Looks right." } }),
-            json!({ "command": "human_accept", "body": { "task_id": "FRK-3", "subject": "contract" } }),
+                    "body": { "task_id": "CTV-3", "subject": "result", "message": "Looks right." } }),
+            json!({ "command": "human_accept", "body": { "task_id": "CTV-3", "subject": "contract" } }),
             json!({ "command": "escalation_resolve",
-                    "body": { "task_id": "FRK-3", "to": "refining", "message": "Split it by page." } }),
+                    "body": { "task_id": "CTV-3", "to": "refining", "message": "Split it by page." } }),
             json!({ "command": "escalation_resolve",
-                    "body": { "task_id": "FRK-3", "to": "in_progress", "message": "Go.", "extra_tries": 2 } }),
+                    "body": { "task_id": "CTV-3", "to": "in_progress", "message": "Go.", "extra_tries": 2 } }),
             json!({ "command": "human_send_back",
-                    "body": { "task_id": "FRK-3", "subject": "result", "message": "Too small.", "failed_criteria": ["C1"] } }),
+                    "body": { "task_id": "CTV-3", "subject": "result", "message": "Too small.", "failed_criteria": ["C1"] } }),
             json!({ "command": "question_answer", "body": { "question_id": 12, "answer": "Yes." } }),
-            json!({ "command": "contract_lock", "body": { "task_id": "FRK-3" } }),
-            json!({ "command": "contract_unlock", "body": { "task_id": "FRK-3" } }),
-            json!({ "command": "task_integrate", "body": { "task_id": "FRK-3" } }),
+            json!({ "command": "contract_lock", "body": { "task_id": "CTV-3" } }),
+            json!({ "command": "contract_unlock", "body": { "task_id": "CTV-3" } }),
+            json!({ "command": "task_integrate", "body": { "task_id": "CTV-3" } }),
             json!({ "command": "agent_update", "body": { "agent_id": "dev-a", "status": "paused" } }),
             json!({ "command": "session_stop", "body": { "session_id": "session-7" } }),
             json!({ "command": "run_stop", "body": {} }),

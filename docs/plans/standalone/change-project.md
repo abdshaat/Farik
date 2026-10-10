@@ -14,7 +14,7 @@ The founder approved `docs/design/change-project.md` on 2026-10-09; it is the so
 
 ## Decisions
 
-- One process drives one project at a time and can switch it from the browser: ADR 0051, amending ADR 0021 decision 2 ("One process serves one project"). Rejected: a second `farik serve` per project (two ports, two links, the design's single tab).
+- One process drives one project at a time and can switch it from the browser: ADR 0053, amending ADR 0021 decision 2 ("One process serves one project"). Rejected: a second `farik serve` per project (two ports, two links, the design's single tab).
 - `project.leave` stops the orchestrator through `Command::RunStop` (`daemon.rs` `handled`), as `farik stop` does, after setting `WebState.leaving` to the project root. serve reads it with `DaemonState::left()` before `finish`. Rejected: a new orchestrator state or a channel to serve (the stop path and `ticks`' `Ended::Stopped` already exist).
 - `WebState.leaving: Mutex<Option<PathBuf>>` is one field for both modes: drive mode sets it on `project.leave`; serve sets it on the wizard's web state, as it sets `take_on_error`; `serve.status` reports it as `leaving` in both. Rejected: a `SetupHost::leaving()` method (two sources for one fact).
 - serve's `Mode::Setup` becomes `Setup { waiting, leaving }`; `drive` answers `Driven::Ended(code)` or `Driven::Left(root)`, `Left` only when `left()` is set and `finish` answered 0 (Ctrl-C during a leave still exits 130). A take-on that fails keeps `leaving`, so **Stay on** still works. On a leave, `drive` moves `driver.interrupts` back into `io.interrupts` (`Interrupts::Channel`) before `finish`, as `start_holding` does on a refusal: `start_holding` left `never()` there, and the receiver `finish` drops is the only one Ctrl-C reaches, so without it the wizard after a leave would never hear Ctrl-C. The run lock is `Driver::_lock`, dropped when `finish` returns, so the old root is unlocked before the wizard's `open` calls `try_lock` on it.
@@ -62,7 +62,7 @@ apps/web/src/shell/Shell.tsx, Shell.module.css, Shell.test.tsx  modifies/tests (
 apps/web/src/pages/Settings.tsx, pages.test.tsx modifies/tests (Task 9)
 apps/web/src/pages/setup/SetupProject.tsx, setup.test.tsx  modifies/tests (Task 9)
 apps/web/src/strings/en.ts                      modifies: Task 8's keys, Task 9's keys
-docs/SPEC.md, docs/decisions/0051-*.md, docs/decisions/0021-*.md, this plan  (Task 10)
+docs/SPEC.md, docs/decisions/0053-*.md, docs/decisions/0021-*.md, this plan  (Task 10)
 ```
 
 ## Interfaces
@@ -216,7 +216,7 @@ Files: modified `apps/web/src/pages/Settings.tsx`, `pages/pages.test.tsx`, `page
 
 ### Task 10: docs
 
-Files: `docs/SPEC.md` (header: "Revision 0.80 (2026-10-09) records changing the project from the web app (standalone plan `change-project`, ADR 0051)…"; 8.4, the sentence on task ids past every committed contract: a new task's number is past every committed contract and every `feature|fix|docs/FRK-<n>` branch, local or remote; 4.1: the project page while a project is being left, Stay on, `has_team` and `replace`, the carried take-on with no setup screens; 4.4: Change project, what is carried and what is not (the criteria are not: the new repository keeps its own), connector keys copied with the refresh-token caveat, the copied-keys notice; 8.1, web UI paragraph: `project.leave`, `keys_copied.dismiss`, `serve.status` `leaving` and `keys_copied`); created `docs/decisions/0051-one-process-drives-one-project-at-a-time.md` (Context, Decision, Consequences; Status: accepted, the founder, 2026-10-09, approving `docs/design/change-project.md`; amends ADR 0021); `docs/decisions/0021-*.md` gains an "Amended 2026-10-09 by ADR 0051" line; this plan's checkboxes and Status.
+Files: `docs/SPEC.md` (header: "Revision 0.83 (2026-10-10) records changing the project from the web app (standalone plan `change-project`, ADR 0053)…"; 8.4, the sentence on task ids past every committed contract: a new task's number is past every committed contract and every `feature|fix|docs/FRK-<n>` branch, local or remote; 4.1: the project page while a project is being left, Stay on, `has_team` and `replace`, the carried take-on with no setup screens; 4.4: Change project, what is carried and what is not (the criteria are not: the new repository keeps its own), connector keys copied with the refresh-token caveat, the copied-keys notice; 8.1, web UI paragraph: `project.leave`, `keys_copied.dismiss`, `serve.status` `leaving` and `keys_copied`); created `docs/decisions/0053-one-process-drives-one-project-at-a-time.md` (Context, Decision, Consequences; Status: accepted, the founder, 2026-10-09, approving `docs/design/change-project.md`; amends ADR 0021); `docs/decisions/0021-*.md` gains an "Amended 2026-10-09 by ADR 0053" line; this plan's checkboxes and Status.
 
 - [x] `docs: record changing the project from the web app`
 

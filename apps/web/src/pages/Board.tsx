@@ -4,7 +4,7 @@ import {
 	Button,
 	KanbanColumn,
 	StatusWord,
-} from "@farik/ui";
+} from "@catervas/ui";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { LANES, type Lane, laneOf, type TaskRow } from "../app/lanes.ts";

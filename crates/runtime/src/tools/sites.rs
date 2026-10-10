@@ -1,17 +1,17 @@
-//! `farik_request_sites` and `farik_read_sites` (`docs/SPEC.md` 6.10, ADR 0039): the Procurement
-//! Specialist reads only Farik's approved sites and the sites its owner allowed, asks for another
+//! `catervas_request_sites` and `catervas_read_sites` (`docs/SPEC.md` 6.10, ADR 0039): the Procurement
+//! Specialist reads only Catervas's approved sites and the sites its owner allowed, asks for another
 //! with its reason and ends its turn, and reads where it may read.
 
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
+use catervas_core::contract::TaskId;
+use catervas_core::governor::sites::{WebAccess, site_of, web_access};
+use catervas_protocol::event::{EventBody, SiteRequestedBody};
+use catervas_roles::sites::catervas_sites;
+use catervas_store::sites::{CatervasEntry, approved_sites, declined_sites, site_requests};
+use catervas_store::{EventLog, StoreError};
 use chrono::{DateTime, SecondsFormat, Utc};
-use farik_core::contract::TaskId;
-use farik_core::governor::sites::{WebAccess, site_of, web_access};
-use farik_protocol::event::{EventBody, SiteRequestedBody};
-use farik_roles::sites::farik_sites;
-use farik_store::sites::{FarikEntry, approved_sites, declined_sites, site_requests};
-use farik_store::{EventLog, StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -35,7 +35,7 @@ const NEXT: &str = "end your turn: the owner's decision starts the next session"
 /// Held while a request's place is counted and taken, one lock for every project in the process.
 static ASKING: Mutex<()> = Mutex::new(());
 
-/// `farik_request_sites`'s input.
+/// `catervas_request_sites`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RequestSitesInput {
@@ -43,7 +43,7 @@ pub(crate) struct RequestSitesInput {
     sites: Vec<SiteAsk>,
 }
 
-/// One site `farik_request_sites` asks the owner to allow.
+/// One site `catervas_request_sites` asks the owner to allow.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SiteAsk {
@@ -62,39 +62,42 @@ fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
     .into()
 }
 
-/// Farik's own hosts, from the list the running release ships.
-fn farik_hosts() -> BTreeSet<String> {
-    farik_sites().iter().map(|site| site.host.clone()).collect()
+/// Catervas's own hosts, from the list the running release ships.
+fn catervas_hosts() -> BTreeSet<String> {
+    catervas_sites()
+        .iter()
+        .map(|site| site.host.clone())
+        .collect()
 }
 
-/// The sites a held role may read now: Farik's, and the owner's, from the project's log.
+/// The sites a held role may read now: Catervas's, and the owner's, from the project's log.
 ///
 /// # Errors
 ///
 /// What the log refused.
 pub(crate) fn approved_set(log: &EventLog) -> Result<BTreeSet<String>, StoreError> {
-    approved_sites(log, &farik_hosts())
+    approved_sites(log, &catervas_hosts())
 }
 
-/// The sites as `sites.list` and `farik site list --json` answer: Farik's with whether each is on
+/// The sites as `sites.list` and `catervas site list --json` answer: Catervas's with whether each is on
 /// and when the owner last turned it off or on, the owner's own, and the requests that wait.
 ///
 /// # Errors
 ///
 /// What the log refused.
 pub fn site_list(log: &EventLog) -> Result<Value, StoreError> {
-    let entries: Vec<FarikEntry> = farik_sites()
+    let entries: Vec<CatervasEntry> = catervas_sites()
         .iter()
-        .map(|site| FarikEntry {
+        .map(|site| CatervasEntry {
             host: site.host.clone(),
             shop: site.shop.clone(),
             category: site.category.to_string(),
         })
         .collect();
-    let list = farik_store::sites::site_list(log, &entries)?;
+    let list = catervas_store::sites::site_list(log, &entries)?;
     let time = |at: DateTime<Utc>| at.to_rfc3339_opts(SecondsFormat::AutoSi, true);
-    let farik: Vec<Value> = list
-        .farik
+    let catervas: Vec<Value> = list
+        .catervas
         .iter()
         .map(|row| {
             let mut wire = json!({
@@ -128,7 +131,7 @@ pub fn site_list(log: &EventLog) -> Result<Value, StoreError> {
             })
         })
         .collect();
-    Ok(json!({ "farik": farik, "owner": owner, "waiting": waiting }))
+    Ok(json!({ "catervas": catervas, "owner": owner, "waiting": waiting }))
 }
 
 /// An address cut for an answer or a refusal, so that what an agent wrote never fills the log.
@@ -165,7 +168,7 @@ fn checked(ask: &SiteAsk) -> Result<String, ToolError> {
     Ok(host)
 }
 
-/// `farik_request_sites`: answers each entry, in order, `allowed` for a site that is approved,
+/// `catervas_request_sites`: answers each entry, in order, `allowed` for a site that is approved,
 /// `waiting` for one this task asked for already, `declined` (with the owner's note) for one the
 /// owner did not allow for this task, `full` for one that would be the twenty-first to wait in the
 /// project, and otherwise records `site.requested` and answers `asked` with its number. A call is
@@ -254,7 +257,7 @@ pub(super) fn request_sites(
             "too_many_site_requests",
             format!(
                 "{MOST_WAITING} requests wait for the owner already, so none was recorded; read \
-                 farik_read_sites for what you may read, and go on without the rest"
+                 catervas_read_sites for what you may read, and go on without the rest"
             ),
         ));
     }
@@ -265,7 +268,7 @@ pub(super) fn request_sites(
     Ok(answer)
 }
 
-/// `farik_read_sites`: the sites the held role may read, Farik's with their shop and category and
+/// `catervas_read_sites`: the sites the held role may read, Catervas's with their shop and category and
 /// then the owner's; and, for the session's task, the sites waiting for the owner and those the
 /// owner did not allow, with their notes. Records nothing.
 ///
@@ -282,7 +285,7 @@ pub(super) fn read_sites(call: &Call<'_>) -> Result<Value, ToolError> {
     }
     let log = &call.deps().log;
     let approved = approved_set(log).map_err(failed)?;
-    let mut listed: Vec<Value> = farik_sites()
+    let mut listed: Vec<Value> = catervas_sites()
         .iter()
         .filter(|site| approved.contains(&site.host))
         .map(|site| {
@@ -293,11 +296,11 @@ pub(super) fn read_sites(call: &Call<'_>) -> Result<Value, ToolError> {
             })
         })
         .collect();
-    let farik = farik_hosts();
+    let catervas = catervas_hosts();
     listed.extend(
         approved
             .iter()
-            .filter(|host| !farik.contains(*host))
+            .filter(|host| !catervas.contains(*host))
             .map(|host| json!({ "host": host })),
     );
     let (waiting, declined) = match &call.context.task_id {
@@ -347,9 +350,9 @@ pub(super) fn refuse_while_waiting(call: &Call<'_>, task: &TaskId) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::Role;
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_roles::sites::farik_sites;
+    use catervas_core::contract::Role;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_roles::sites::catervas_sites;
     use serde_json::{Value, json};
 
     use crate::session::SessionPurpose;
@@ -362,8 +365,8 @@ mod tests {
     const NEXT: &str = "end your turn: the owner's decision starts the next session";
 
     /// A project with the Finance Specialist `fin`, the Marketing Specialist `kai` and the
-    /// Procurement Specialist `proc`, whose tasks FRK-1 and FRK-4 are in progress, a finance task
-    /// FRK-2 and a Developer's task FRK-3.
+    /// Procurement Specialist `proc`, whose tasks CTV-1 and CTV-4 are in progress, a finance task
+    /// CTV-2 and a Developer's task CTV-3.
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(
             name,
@@ -374,9 +377,9 @@ mod tests {
             }),
         );
         for (task, role, assignee) in [
-            ("FRK-1", "procurement_specialist", "proc"),
-            ("FRK-2", "finance_specialist", "fin"),
-            ("FRK-4", "procurement_specialist", "proc"),
+            ("CTV-1", "procurement_specialist", "proc"),
+            ("CTV-2", "finance_specialist", "fin"),
+            ("CTV-4", "procurement_specialist", "proc"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -389,9 +392,9 @@ mod tests {
                 &json!({ "assignee": assignee, "reviewer": "pm" }),
             );
         }
-        project.filed("FRK-3", "assigned", "task", None);
+        project.filed("CTV-3", "assigned", "task", None);
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -399,7 +402,7 @@ mod tests {
         project
     }
 
-    /// `farik_request_sites` as `proc` in its implement session of FRK-1.
+    /// `catervas_request_sites` as `proc` in its implement session of CTV-1.
     fn request(project: &TestProject, sites: &[(&str, &str)]) -> Result<Value, ToolError> {
         let sites: Vec<Value> = sites
             .iter()
@@ -407,8 +410,8 @@ mod tests {
             .collect();
         project.call(
             "proc",
-            Some("FRK-1"),
-            "farik_request_sites",
+            Some("CTV-1"),
+            "catervas_request_sites",
             json!({ "sites": sites }),
         )
     }
@@ -430,10 +433,10 @@ mod tests {
             .collect()
     }
 
-    /// One of Farik's own hosts, taken from the shipped list so that the launch review edits the
+    /// One of Catervas's own hosts, taken from the shipped list so that the launch review edits the
     /// YAML alone.
-    fn a_farik_host() -> &'static str {
-        &farik_sites()[0].host
+    fn a_catervas_host() -> &'static str {
+        &catervas_sites()[0].host
     }
 
     #[test]
@@ -441,13 +444,13 @@ mod tests {
     fn asks_for_each_new_site() {
         let project = a_project("sites-ask");
         project.record("", "site.approved", &json!({ "host": "owner.example" }));
-        let farik = format!("https://www.{}/", a_farik_host());
+        let catervas = format!("https://www.{}/", a_catervas_host());
 
         let answer = request(
             &project,
             &[
                 ("https://owner.example/prices", "It sells the boxes."),
-                (&farik, "A big shop."),
+                (&catervas, "A big shop."),
                 ("https://shop.example/boxes", "A maker of boxes."),
                 ("https://WWW.New.example/Boxes?x=1", "Another maker."),
             ],
@@ -460,7 +463,7 @@ mod tests {
             let ids = &event.envelope.ids;
             assert_eq!(
                 ids.task_id.as_ref().map(|task| task.as_str()),
-                Some("FRK-1")
+                Some("CTV-1")
             );
             assert_eq!(ids.agent_id.as_deref(), Some("proc"));
             assert_eq!(ids.session_id.as_deref(), Some("session-1"));
@@ -477,7 +480,7 @@ mod tests {
         assert_eq!(second.why.to_string(), "Another maker.");
         assert_eq!(answers(&answer), ["allowed", "allowed", "asked", "asked"]);
         assert_eq!(answer["sites"][0]["host"], "owner.example");
-        assert_eq!(answer["sites"][1]["host"], a_farik_host());
+        assert_eq!(answer["sites"][1]["host"], a_catervas_host());
         assert_eq!(answer["sites"][2]["request"], asked[0].envelope.seq);
         assert_eq!(answer["sites"][3]["request"], asked[1].envelope.seq);
         assert_eq!(answer["next"], NEXT);
@@ -492,7 +495,7 @@ mod tests {
         let answer = request(
             &project,
             &[(
-                &format!("https://{}/", a_farik_host()),
+                &format!("https://{}/", a_catervas_host()),
                 "It is on the list.",
             )],
         )
@@ -505,13 +508,16 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn asks_for_a_farik_site_the_owner_turned_off() {
+    fn asks_for_a_catervas_site_the_owner_turned_off() {
         let project = a_project("sites-ask-turned-off");
-        project.record("", "site.removed", &json!({ "host": a_farik_host() }));
+        project.record("", "site.removed", &json!({ "host": a_catervas_host() }));
 
         let answer = request(
             &project,
-            &[(&format!("https://{}/", a_farik_host()), "I need it again.")],
+            &[(
+                &format!("https://{}/", a_catervas_host()),
+                "I need it again.",
+            )],
         )
         .expect("the request is taken");
 
@@ -531,7 +537,7 @@ mod tests {
             .as_u64()
             .expect("a number");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "site.declined",
             &json!({ "request": other, "host": "other.example", "note": "Not that one." }),
         );
@@ -624,8 +630,8 @@ mod tests {
         let project = a_project("sites-count");
         let none = refusal_of(project.call(
             "proc",
-            Some("FRK-1"),
-            "farik_request_sites",
+            Some("CTV-1"),
+            "catervas_request_sites",
             json!({ "sites": [] }),
         ));
         assert!(none.starts_with("site_count_invalid: "), "{none}");
@@ -642,9 +648,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn caps_the_requests_waiting() {
         let project = a_project("sites-cap");
-        // Nineteen wait in the project: ten on FRK-1 and nine on FRK-4.
+        // Nineteen wait in the project: ten on CTV-1 and nine on CTV-4.
         for number in 0..19 {
-            let task = if number < 10 { "FRK-1" } else { "FRK-4" };
+            let task = if number < 10 { "CTV-1" } else { "CTV-4" };
             project.record_by(
                 Some("proc"),
                 at(),
@@ -680,7 +686,7 @@ mod tests {
             &project,
             &[
                 ("https://w3.example/", "Already waiting."),
-                (&format!("https://{}/", a_farik_host()), "On the list."),
+                (&format!("https://{}/", a_catervas_host()), "On the list."),
             ],
         )
         .expect("nothing is asked, so nothing is full");
@@ -688,7 +694,7 @@ mod tests {
         // Deciding one makes room.
         let seq = project.events(&[EventKind::SiteRequested])[0].envelope.seq;
         project.record(
-            "FRK-1",
+            "CTV-1",
             "site.declined",
             &json!({ "request": seq, "host": "w0.example", "note": "" }),
         );
@@ -700,10 +706,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_where_it_may_read() {
         let project = a_project("sites-read");
-        let farik = farik_sites();
-        // The owner turned off one of Farik's, allowed one of their own, and the task asked for
+        let catervas = catervas_sites();
+        // The owner turned off one of Catervas's, allowed one of their own, and the task asked for
         // one, was refused one, and a second task asked for another.
-        project.record("", "site.removed", &json!({ "host": farik[1].host }));
+        project.record("", "site.removed", &json!({ "host": catervas[1].host }));
         project.record("", "site.approved", &json!({ "host": "owner.example" }));
         request(
             &project,
@@ -715,26 +721,26 @@ mod tests {
         .expect("asked");
         let no = project.events(&[EventKind::SiteRequested])[1].envelope.seq;
         project.record(
-            "FRK-1",
+            "CTV-1",
             "site.declined",
             &json!({ "request": no, "host": "no.example", "note": "Too many bad reviews." }),
         );
         project.record_by(
             Some("proc"),
             at(),
-            "FRK-4",
+            "CTV-4",
             "site.requested",
             &json!({ "host": "else.example", "url": "https://else.example/", "why": "Elsewhere." }),
         );
 
         let read = project
-            .call("proc", Some("FRK-1"), "farik_read_sites", json!({}))
+            .call("proc", Some("CTV-1"), "catervas_read_sites", json!({}))
             .expect("read");
 
         let approved = read["approved"].as_array().expect("a list");
-        let expected: Vec<Value> = farik
+        let expected: Vec<Value> = catervas
             .iter()
-            .filter(|site| site.host != farik[1].host)
+            .filter(|site| site.host != catervas[1].host)
             .map(|site| {
                 json!({ "host": site.host, "shop": site.shop, "category": site.category.to_string() })
             })
@@ -749,7 +755,7 @@ mod tests {
         // A chat has no task, so nothing waits or was refused for it.
         let mut chat = project.context("proc", None);
         chat.purpose = SessionPurpose::Chat;
-        let read = run(&chat, "farik_read_sites", json!({})).expect("read in a chat");
+        let read = run(&chat, "catervas_read_sites", json!({})).expect("read in a chat");
         assert_eq!(
             read["approved"].as_array().map(Vec::len),
             Some(expected.len())
@@ -775,7 +781,7 @@ mod tests {
             ),
             (
                 "the role's chat about its task",
-                context("proc", Some("FRK-1"), SessionPurpose::Chat),
+                context("proc", Some("CTV-1"), SessionPurpose::Chat),
             ),
             (
                 "the role in a session about no task",
@@ -783,30 +789,30 @@ mod tests {
             ),
             (
                 "the role in a task that is not its own",
-                context("proc", Some("FRK-3"), SessionPurpose::Implement),
+                context("proc", Some("CTV-3"), SessionPurpose::Implement),
             ),
             (
                 "the role reviewing its task",
-                context("proc", Some("FRK-1"), SessionPurpose::Verify),
+                context("proc", Some("CTV-1"), SessionPurpose::Verify),
             ),
             (
                 "a Finance Specialist in its own task",
-                context("fin", Some("FRK-2"), SessionPurpose::Implement),
+                context("fin", Some("CTV-2"), SessionPurpose::Implement),
             ),
             (
                 "a Marketing Specialist",
-                context("kai", Some("FRK-1"), SessionPurpose::Implement),
+                context("kai", Some("CTV-1"), SessionPurpose::Implement),
             ),
             (
                 "a Developer in its own task",
-                context("dev-a", Some("FRK-3"), SessionPurpose::Implement),
+                context("dev-a", Some("CTV-3"), SessionPurpose::Implement),
             ),
             (
                 "the Product Manager",
-                context("pm", Some("FRK-1"), SessionPurpose::Implement),
+                context("pm", Some("CTV-1"), SessionPurpose::Implement),
             ),
         ] {
-            let reason = refusal_of(run(&context, "farik_request_sites", input.clone()));
+            let reason = refusal_of(run(&context, "catervas_request_sites", input.clone()));
             assert!(
                 reason.starts_with("site_request_refused: "),
                 "{who}: {reason}"
@@ -815,12 +821,12 @@ mod tests {
         assert_eq!(project.events(&[EventKind::SiteRequested]).len(), 0);
         // Another role reads no list of sites either.
         for who in ["fin", "kai", "dev-a", "pm"] {
-            let reason = refusal_of(project.call(who, None, "farik_read_sites", json!({})));
+            let reason = refusal_of(project.call(who, None, "catervas_read_sites", json!({})));
             assert!(reason.starts_with("sites_refused: "), "{who}: {reason}");
         }
         assert_eq!(
-            farik_core::governor::sites::web_access(Role::ProcurementSpecialist),
-            farik_core::governor::sites::WebAccess::ApprovedSites
+            catervas_core::governor::sites::web_access(Role::ProcurementSpecialist),
+            catervas_core::governor::sites::WebAccess::ApprovedSites
         );
     }
 }

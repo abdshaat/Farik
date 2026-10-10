@@ -1,4 +1,4 @@
-import { Button, type Role } from "@farik/ui";
+import { Button, type Role } from "@catervas/ui";
 import { type CSSProperties, useState } from "react";
 import { Outlet, useNavigate, useOutletContext } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
@@ -77,7 +77,7 @@ export type Draft = {
 	team: Team;
 	/**
 	 * Every suggested or added agent, whether it is on the team, its row's own key, and whether it
-	 * is a role Farik does not suggest, offered under "More roles".
+	 * is a role Catervas does not suggest, offered under "More roles".
 	 */
 	members: { agent: Agent; on: boolean; key: number; more: boolean }[];
 	criteria: Library;
@@ -118,7 +118,7 @@ const SPARE = ["Noor", "Ivo", "Lena", "Sami", "Rui"];
  * extra-5 the Procurement Specialist's (F10).
  */
 const EXTRAS = ["extra-2", "extra-3"];
-/** The roles Farik does not suggest, offered under "More roles" in the order the Team page lists them. */
+/** The roles Catervas does not suggest, offered under "More roles" in the order the Team page lists them. */
 const MORE_ROLES = ["finance_specialist", "procurement_specialist"] as const;
 
 /** The team the draft stands for: the agents on it, each with an id from its name. */
@@ -171,7 +171,7 @@ export function unavailableRoles(proposed: Proposed): Agent["role"][] {
  * The draft a start makes from the suggested team: its six; a saved team's agents, each field the
  * template leaves out the role's, with its four answers; or a Product Manager and a Developer,
  * unnamed. A saved team never goes through `template.preview`: setup replaces the starter team.
- * After them, whatever the start, a row for each role Farik does not suggest that none of them
+ * After them, whatever the start, a row for each role Catervas does not suggest that none of them
  * holds, unticked, to be offered under "More roles", each named from the spare names the rows
  * above it leave.
  */
@@ -321,7 +321,7 @@ export function useStart() {
 	return { start, busy, refused };
 }
 
-/** What putting a setting back puts back (SPEC 10): the values `farik init` writes. */
+/** What putting a setting back puts back (SPEC 10): the values `catervas init` writes. */
 export type Defaults = {
 	budgets: Team["budgets"];
 	/** The permission answers always come with the defaults, so the page keeps no fallback of its own. */
@@ -371,6 +371,6 @@ export function roleName(role: Role): string {
 export function ringOf(role: Role): CSSProperties {
 	const token = role === "software_developer" ? "developer" : role;
 	return {
-		"--ring": `var(--farik-color-role-${token.replaceAll("_", "-")})`,
+		"--ring": `var(--catervas-color-role-${token.replaceAll("_", "-")})`,
 	} as CSSProperties;
 }

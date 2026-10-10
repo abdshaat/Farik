@@ -3,8 +3,8 @@
 
 use std::path::PathBuf;
 
-use farik_core::branch::task_branch;
-use farik_core::contract::TaskId;
+use catervas_core::branch::task_branch;
+use catervas_core::contract::TaskId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -17,7 +17,7 @@ use crate::transitions::integration_branch;
 /// The remote a task branch is pushed to.
 const REMOTE: &str = "origin";
 
-/// `farik_git_commit`'s input.
+/// `catervas_git_commit`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CommitInput {
@@ -27,7 +27,7 @@ pub(crate) struct CommitInput {
     paths: Vec<String>,
 }
 
-/// `farik_git_status`: what is uncommitted in the task's worktree, and whether nothing is.
+/// `catervas_git_status`: what is uncommitted in the task's worktree, and whether nothing is.
 pub(super) fn status(call: &Call<'_>) -> Result<Value, ToolError> {
     let status = call
         .deps()
@@ -37,7 +37,7 @@ pub(super) fn status(call: &Call<'_>) -> Result<Value, ToolError> {
     Ok(json!({ "clean": status.is_empty(), "status": status }))
 }
 
-/// `farik_git_diff`: what the task branch changed since the integration branch, as a patch.
+/// `catervas_git_diff`: what the task branch changed since the integration branch, as a patch.
 pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
     let task = call.task()?;
     let git = &call.deps().git;
@@ -46,7 +46,7 @@ pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
     Ok(json!({ "diff": diff }))
 }
 
-/// `farik_git_commit`: commits the named paths of the task's worktree on the task branch, for the
+/// `catervas_git_commit`: commits the named paths of the task's worktree on the task branch, for the
 /// task's assignee alone. A path that is a directory is refused rather than staged whole: the path
 /// checks of 5.6 judged the directory's name, not the files under it, and a protected one among
 /// them would be committed.
@@ -75,7 +75,7 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
     }
 }
 
-/// `farik_git_push`: pushes the task branch to `origin`, for the task's assignee alone. It spells
+/// `catervas_git_push`: pushes the task branch to `origin`, for the task's assignee alone. It spells
 /// `refs/heads/<branch>`, as integration does, so that a tag of the same name cannot make the push
 /// ambiguous.
 pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
@@ -103,12 +103,12 @@ fn assignees_task<'a>(call: &'a Call<'_>) -> Result<&'a TaskId, ToolError> {
     .into())
 }
 
-/// The task's worktree, `.farik/local/worktrees/<id>` (5.14).
+/// The task's worktree, `.catervas/local/worktrees/<id>` (5.14).
 pub(super) fn worktree(call: &Call<'_>, task: &TaskId) -> PathBuf {
     call.deps()
         .files
         .root()
-        .join(".farik/local/worktrees")
+        .join(".catervas/local/worktrees")
         .join(task.as_str())
 }
 
@@ -129,43 +129,43 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn commits_through_the_tool_on_the_tasks_worktree() {
         let project = TestProject::new("tools-git-commit", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "assigned", "task", None);
+        project.filed("CTV-1", "assigned", "task", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
         );
-        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
         project
             .deps
             .git
-            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
             .expect("the task's worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
 
         let status = project
-            .call("dev-a", Some("FRK-1"), "farik_git_status", json!({}))
+            .call("dev-a", Some("CTV-1"), "catervas_git_status", json!({}))
             .expect("the status reads");
         assert_eq!(status["clean"], false);
         let committed = project
             .call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_git_commit",
+                Some("CTV-1"),
+                "catervas_git_commit",
                 json!({ "message": "add the login form", "paths": ["src/login/form.ts"] }),
             )
             .expect("the assignee commits");
-        let head = farik_store::git::fixtures::git_output_in(&worktree, &["rev-parse", "HEAD"]);
+        let head = catervas_store::git::fixtures::git_output_in(&worktree, &["rev-parse", "HEAD"]);
         assert_eq!(committed["sha"], head);
 
         let status = project
-            .call("dev-a", Some("FRK-1"), "farik_git_status", json!({}))
+            .call("dev-a", Some("CTV-1"), "catervas_git_status", json!({}))
             .expect("the status reads");
         assert_eq!(status["clean"], true, "{status}");
         let diff = project
-            .call("dev-a", Some("FRK-1"), "farik_git_diff", json!({}))
+            .call("dev-a", Some("CTV-1"), "catervas_git_diff", json!({}))
             .expect("the diff reads");
         assert!(
             diff["diff"]
@@ -181,27 +181,27 @@ mod tests {
     fn says_in_the_channel_why_a_commit_failed() {
         // A commit that fails leaves the task in `in_progress` with nothing for verification to
         // check, so the user is told why as well as the agent.
-        use farik_protocol::event::{EventBody, EventKind, MessageKind};
+        use catervas_protocol::event::{EventBody, EventKind, MessageKind};
         let project = TestProject::new("tools-git-commit-fails", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "assigned", "task", None);
+        project.filed("CTV-1", "assigned", "task", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
         );
-        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
         project
             .deps
             .git
-            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
             .expect("the task's worktree is made");
 
         let refused = project
             .call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_git_commit",
+                Some("CTV-1"),
+                "catervas_git_commit",
                 json!({ "message": "add the login form", "paths": ["src/login/form.ts"] }),
             )
             .expect_err("there is nothing at that path to commit");
@@ -217,13 +217,13 @@ mod tests {
         let EventBody::MessagePosted(body) = &line.body else {
             panic!("a message: {line:?}");
         };
-        assert_eq!(body.author, "farik");
+        assert_eq!(body.author, "catervas");
         assert_eq!(body.kind, MessageKind::System);
         assert_eq!(
             line.envelope.ids.task_id.as_ref().map(|id| id.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
-        assert_eq!(body.text, format!("FRK-1 could not be committed: {detail}"));
+        assert_eq!(body.text, format!("CTV-1 could not be committed: {detail}"));
     }
 
     #[test]
@@ -231,34 +231,34 @@ mod tests {
     fn diffs_the_tasks_branch_through_the_tool() {
         // A fix works on `fix/<id>` (5.14), so the diff is of that branch.
         let project = TestProject::new("tools-git-diff-fix", &a_team_of_three(|_| {}));
-        project.filed_with("FRK-1", "assigned", "task", None, |wire| {
+        project.filed_with("CTV-1", "assigned", "task", None, |wire| {
             wire["change"] = json!("fix");
         });
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
         );
-        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
         project
             .deps
             .git
-            .create_worktree(&worktree, "fix/FRK-1", "main")
+            .create_worktree(&worktree, "fix/CTV-1", "main")
             .expect("the task's worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
         project
             .call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_git_commit",
+                Some("CTV-1"),
+                "catervas_git_commit",
                 json!({ "message": "fix the login form", "paths": ["src/login/form.ts"] }),
             )
             .expect("the assignee commits");
 
         let diff = project
-            .call("dev-a", Some("FRK-1"), "farik_git_diff", json!({}))
+            .call("dev-a", Some("CTV-1"), "catervas_git_diff", json!({}))
             .expect("the diff reads");
         assert!(
             diff["diff"]
@@ -274,7 +274,7 @@ mod tests {
     fn pushes_the_tasks_branch_through_the_tool() {
         // A fix pushes `fix/<id>` (5.14). A tag of the same name makes a push that does not spell
         // `refs/heads/` ambiguous, as integration found (integrate.rs).
-        use farik_store::git::fixtures::{git_in, git_output_in};
+        use catervas_store::git::fixtures::{git_in, git_output_in};
         let project = TestProject::new(
             "tools-git-push",
             &a_team_of_three(|wire| wire["agents"][1]["grants"] = json!(["git_remote"])),
@@ -288,45 +288,45 @@ mod tests {
             root,
             &["remote", "add", "origin", origin.to_str().expect("a path")],
         );
-        project.filed_with("FRK-1", "assigned", "task", None, |wire| {
+        project.filed_with("CTV-1", "assigned", "task", None, |wire| {
             wire["change"] = json!("fix");
         });
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
         );
-        let worktree = root.join(".farik/local/worktrees/FRK-1");
+        let worktree = root.join(".catervas/local/worktrees/CTV-1");
         project
             .deps
             .git
-            .create_worktree(&worktree, "fix/FRK-1", "main")
+            .create_worktree(&worktree, "fix/CTV-1", "main")
             .expect("the task's worktree is made");
-        git_in(root, &["tag", "fix/FRK-1"]);
+        git_in(root, &["tag", "fix/CTV-1"]);
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
         project
             .call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_git_commit",
+                Some("CTV-1"),
+                "catervas_git_commit",
                 json!({ "message": "fix the login form", "paths": ["src/login/form.ts"] }),
             )
             .expect("the assignee commits");
 
         let pushed = project
-            .call("dev-a", Some("FRK-1"), "farik_git_push", json!({}))
+            .call("dev-a", Some("CTV-1"), "catervas_git_push", json!({}))
             .expect("the assignee pushes");
 
-        assert_eq!(pushed, json!({ "remote": "origin", "branch": "fix/FRK-1" }));
+        assert_eq!(pushed, json!({ "remote": "origin", "branch": "fix/CTV-1" }));
         let head = git_output_in(&worktree, &["rev-parse", "HEAD"]);
         let heads = git_output_in(&origin, &["for-each-ref", "refs/heads"]);
         assert!(
-            heads.contains(&format!("{head} commit\trefs/heads/fix/FRK-1")),
+            heads.contains(&format!("{head} commit\trefs/heads/fix/CTV-1")),
             "{heads}"
         );
-        assert!(!heads.contains("farik/FRK-1"), "{heads}");
+        assert!(!heads.contains("catervas/CTV-1"), "{heads}");
     }
 
     #[test]
@@ -335,18 +335,18 @@ mod tests {
         // `src/login/**` is allowed and `**/*.pem` protected (5.12's default), so the directory
         // passes both path checks while git would stage the key under it.
         let project = TestProject::new("tools-git-directory", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "assigned", "task", None);
+        project.filed("CTV-1", "assigned", "task", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
         );
-        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
         project
             .deps
             .git
-            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
             .expect("the task's worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
@@ -355,8 +355,8 @@ mod tests {
         for path in ["src/login", "src/login/"] {
             match project.call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_git_commit",
+                Some("CTV-1"),
+                "catervas_git_commit",
                 json!({ "message": "add the login form", "paths": [path] }),
             ) {
                 Err(ToolError::Refused { reason }) => assert_eq!(
@@ -368,20 +368,20 @@ mod tests {
         }
         let git = &project.deps.git;
         assert_eq!(
-            git.commit_count("main", &project.branch("FRK-1"))
+            git.commit_count("main", &project.branch("CTV-1"))
                 .expect("git counts"),
             0
         );
         project
             .call(
                 "dev-a",
-                Some("FRK-1"),
-                "farik_git_commit",
+                Some("CTV-1"),
+                "catervas_git_commit",
                 json!({ "message": "add the login form", "paths": ["src/login/form.ts"] }),
             )
             .expect("the file itself is committed");
         assert_eq!(
-            git.changed_paths("main", &project.branch("FRK-1"))
+            git.changed_paths("main", &project.branch("CTV-1"))
                 .expect("git lists the paths"),
             ["src/login/form.ts"]
         );
@@ -400,18 +400,18 @@ mod tests {
                 wire["agents"][2]["grants"] = json!(["git_remote"]);
             }),
         );
-        project.filed("FRK-1", "assigned", "task", None);
+        project.filed("CTV-1", "assigned", "task", None);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
         );
-        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
         project
             .deps
             .git
-            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
             .expect("the task's worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
@@ -419,10 +419,10 @@ mod tests {
 
         for agent in ["dev-b", "pm"] {
             for (name, input) in [
-                ("farik_git_commit", commit.clone()),
-                ("farik_git_push", json!({})),
+                ("catervas_git_commit", commit.clone()),
+                ("catervas_git_push", json!({})),
             ] {
-                match project.call(agent, Some("FRK-1"), name, input) {
+                match project.call(agent, Some("CTV-1"), name, input) {
                     Err(ToolError::Refused { reason }) => {
                         assert!(
                             reason.starts_with("not_the_named_agent: "),
@@ -435,15 +435,15 @@ mod tests {
         }
         let git = &project.deps.git;
         assert_eq!(
-            git.commit_count("main", &project.branch("FRK-1"))
+            git.commit_count("main", &project.branch("CTV-1"))
                 .expect("git counts"),
             0
         );
         project
-            .call("dev-a", Some("FRK-1"), "farik_git_commit", commit)
+            .call("dev-a", Some("CTV-1"), "catervas_git_commit", commit)
             .expect("the assignee commits");
         assert_eq!(
-            git.commit_count("main", &project.branch("FRK-1"))
+            git.commit_count("main", &project.branch("CTV-1"))
                 .expect("git counts"),
             1
         );
@@ -458,13 +458,13 @@ mod tests {
             &a_team_of_three(|wire| wire["agents"][1]["grants"] = json!(["git_remote"])),
         );
         for (name, input) in [
-            ("farik_git_status", json!({})),
-            ("farik_git_diff", json!({})),
+            ("catervas_git_status", json!({})),
+            ("catervas_git_diff", json!({})),
             (
-                "farik_git_commit",
+                "catervas_git_commit",
                 json!({ "message": "m", "paths": ["a"] }),
             ),
-            ("farik_git_push", json!({})),
+            ("catervas_git_push", json!({})),
         ] {
             match project.call("dev-a", None, name, input) {
                 Err(ToolError::Refused { reason }) => {

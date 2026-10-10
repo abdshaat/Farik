@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -61,7 +61,7 @@ describe("the sites on the Procurement Specialist's page", () => {
 			"Searches the whole web; opens pages only on these sites. Asks you on Today for others.",
 		);
 		expect(
-			within(section).getByRole("heading", { name: en.sitesFarikTitle }),
+			within(section).getByRole("heading", { name: en.sitesCatervasTitle }),
 		).toBeTruthy();
 
 		// A closed category names its shops: all of three, and the first three of more.

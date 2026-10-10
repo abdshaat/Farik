@@ -17,7 +17,7 @@ anything goes out. Add a number you hope for only if there is a reason for it.
 
 Write down what the measure was before the campaign: last month's orders, the usual visits per
 week. Without a baseline a result means nothing. If no one knows it, ask the user with
-`farik_ask_human`, and say so in the plan if it is a guess.
+`catervas_ask_human`, and say so in the plan if it is a guess.
 
 ## 3. Read the result from a real source
 

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	cleanup,
 	fireEvent,
@@ -75,25 +75,25 @@ const moved = (seq: number, to: string, by: string) => ({
 	recorded_at: "2026-09-24T11:00:00Z",
 	team_id: "t",
 	project_id: "p",
-	task_id: "FRK-1",
+	task_id: "CTV-1",
 	kind: "task.transitioned",
 	body: { from: "ready", to, requested_by: by },
 });
 const integration = {
-	task_id: "FRK-1",
+	task_id: "CTV-1",
 	kind: "integration",
 	agent_id: null,
 	title: "Gift cards",
-	line: "Farik could not add it to your project",
+	line: "Catervas could not add it to your project",
 };
 
-/** The task page for FRK-1, with `contract`, `waiting` and any other answer `overrides` gives. */
+/** The task page for CTV-1, with `contract`, `waiting` and any other answer `overrides` gives. */
 const opened = (
 	contract: object = CONTRACT,
 	waiting: object[] = [],
 	overrides: Record<string, unknown> = {},
 ) =>
-	openedGate("/tasks/FRK-1", PAGE, contract, waiting, {
+	openedGate("/tasks/CTV-1", PAGE, contract, waiting, {
 		"task.checks": {
 			checks: [
 				{ criterion_id: "C1", text: "", passed: true, evidence: "3 passed" },
@@ -194,7 +194,7 @@ describe("task detail", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByText(
-				"FRK-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 		const tabs = screen.getAllByRole("tab");
@@ -234,7 +234,9 @@ describe("task detail", () => {
 		fireEvent.click(screen.getByRole("tab", { name: "History" }));
 		const lines = within(panel()).getAllByRole("listitem");
 		expect(lines).toHaveLength(HISTORY.length + 1);
-		expect(lines[0]?.textContent).toContain("Farik moved it to In progress.");
+		expect(lines[0]?.textContent).toContain(
+			"Catervas moved it to In progress.",
+		);
 		expect(lines[0]?.textContent).toContain("task.transitioned");
 		expect(lines.at(-1)?.textContent).toContain("You asked for it.");
 		expect(lines.at(-1)?.textContent).toContain("task.created");
@@ -259,7 +261,7 @@ describe("task detail", () => {
 		fireEvent.click(screen.getByRole("tab", { name: "Code changes" }));
 		expect(
 			within(panel()).getByText(
-				"3 files, +142 −18, on the branch feature/FRK-1.",
+				"3 files, +142 −18, on the branch feature/CTV-1.",
 			),
 		).toBeTruthy();
 		expect(
@@ -301,10 +303,10 @@ describe("task detail", () => {
 				{ from: "ready", to: "in_progress", actor: "governor" },
 			],
 			["escalation.aged", { raised_seq: 10, hours: 24 }],
-			["pull_request.opened", { url: "u", number: 3, branch: "feature/FRK-1" }],
+			["pull_request.opened", { url: "u", number: 3, branch: "feature/CTV-1" }],
 			[
 				"sprint.planned",
-				{ sprint_id: "S2", task_ids: ["FRK-1"], planned_by: "mira" },
+				{ sprint_id: "S2", task_ids: ["CTV-1"], planned_by: "mira" },
 			],
 			["drift.detected", { drift: "lock_mismatch", detail: "d" }],
 			[
@@ -332,7 +334,7 @@ describe("task detail", () => {
 		expect(told).toHaveLength(KINDS.length);
 		expect(told).not.toContain(en.toldOther);
 		expect(told).toContain("You locked the plan.");
-		expect(told).toContain("Farik stopped a step Theo tried.");
+		expect(told).toContain("Catervas stopped a step Theo tried.");
 		expect(told).toContain("Ada sent it back.");
 		expect(new Set(told).size).toBe(KINDS.length);
 	});
@@ -405,7 +407,7 @@ describe("task detail", () => {
 		// The lead counts the Designer's plans, in place of the tries.
 		expect(
 			screen.getByText(
-				"FRK-1 in sprint 2. Iris is doing it, and Ada reviews it. First plan.",
+				"CTV-1 in sprint 2. Iris is doing it, and Ada reviews it. First plan.",
 			),
 		).toBeTruthy();
 		let plan = await toPlan();
@@ -438,7 +440,7 @@ describe("task detail", () => {
 		expect(within(panel()).getByText("Iris wrote a plan.")).toBeTruthy();
 		fireEvent.click(screen.getByRole("tab", { name: "Code changes" }));
 		expect(
-			within(panel()).getByText(/on the branch feature\/FRK-1\./),
+			within(panel()).getByText(/on the branch feature\/CTV-1\./),
 		).toBeTruthy();
 		cleanup();
 
@@ -494,7 +496,7 @@ describe("task detail", () => {
 		).toBeTruthy();
 		expect(
 			within(plan).getByText(
-				"Plans sent back: 1 of 3. If a third is sent back, Farik stops the task and asks you.",
+				"Plans sent back: 1 of 3. If a third is sent back, Catervas stops the task and asks you.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(returned.container);
@@ -535,7 +537,7 @@ describe("task detail", () => {
 		);
 		expect(
 			await screen.findByText(
-				"FRK-1 in sprint 2. Iris is doing it, and Ada reviews it. Second plan.",
+				"CTV-1 in sprint 2. Iris is doing it, and Ada reviews it. Second plan.",
 			),
 		).toBeTruthy();
 		plan = await toPlan();
@@ -853,7 +855,7 @@ describe("task detail", () => {
 						agent_id: "theo",
 						state: "working",
 						line: "Theo is building Receipts",
-						task_id: "FRK-9",
+						task_id: "CTV-9",
 						session_id: "s-9",
 						purpose: "implement",
 					},
@@ -892,7 +894,7 @@ describe("task detail", () => {
 			command: {
 				command: "task_transition",
 				body: {
-					task_id: "FRK-1",
+					task_id: "CTV-1",
 					to: "cancelled",
 					reason: "Not needed any more.",
 				},
@@ -908,7 +910,7 @@ describe("task detail", () => {
 						agent_id: "theo",
 						state: "working",
 						line: "Theo is building Gift cards",
-						task_id: "FRK-1",
+						task_id: "CTV-1",
 						session_id: "s-7",
 						purpose: "implement",
 					},
@@ -932,15 +934,15 @@ describe("task detail", () => {
 			screen.queryByRole("button", { name: "Cancel this task" }),
 		).toBeNull();
 		expect((await sentCommand(page.s)).params).toEqual({
-			command: { command: "task_integrate", body: { task_id: "FRK-1" } },
+			command: { command: "task_integrate", body: { task_id: "CTV-1" } },
 		});
 		cleanup();
 
-		// Accepted and being added by Farik on its own, or through a pull request.
+		// Accepted and being added by Catervas on its own, or through a pull request.
 		await opened({ ...CONTRACT, status: "accepted" });
 		expect(
 			await screen.findByText(
-				"Accepted. Farik adds it to your project on its own.",
+				"Accepted. Catervas adds it to your project on its own.",
 			),
 		).toBeTruthy();
 		cleanup();
@@ -951,7 +953,7 @@ describe("task detail", () => {
 		});
 		expect(
 			await screen.findByText(
-				"Accepted. Farik opens a pull request for it, for you to merge.",
+				"Accepted. Catervas opens a pull request for it, for you to merge.",
 			),
 		).toBeTruthy();
 		cleanup();
@@ -965,7 +967,7 @@ describe("task detail", () => {
 						...moved(11, "accepted", "human"),
 						kind: "task.integrated",
 						recorded_at: "2026-09-26T10:00:00Z",
-						body: { commit: "abc", branch: "feature/FRK-1" },
+						body: { commit: "abc", branch: "feature/CTV-1" },
 					},
 				],
 			},
@@ -993,7 +995,7 @@ describe("task detail", () => {
 		expect((await sentCommand(page.s)).params).toEqual({
 			command: {
 				command: "escalation_resolve",
-				body: { task_id: "FRK-1", to: "cancelled", message: "Too costly." },
+				body: { task_id: "CTV-1", to: "cancelled", message: "Too costly." },
 			},
 		});
 		cleanup();

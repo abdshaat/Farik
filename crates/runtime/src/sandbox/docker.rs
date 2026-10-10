@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 use std::time::Duration;
 
-use farik_core::contract::TaskId;
+use catervas_core::contract::TaskId;
 
 use crate::exec::{ExecError, ExecResult, Executor, Finished, supervise, workspace_relative};
 use crate::preview::docker::container_name as preview_container;
@@ -78,8 +78,8 @@ impl DockerSandbox {
         docker(&["rm", "-f", &name])?;
         let user = format!("{}:{}", id("-u")?, id("-g")?);
         let mount = format!("type=bind,src={},dst=/workspace", worktree.display());
-        let project_label = format!("farik.project={project_id}");
-        let task_label = format!("farik.task={}", task_id.as_str());
+        let project_label = format!("catervas.project={project_id}");
+        let task_label = format!("catervas.task={}", task_id.as_str());
         let output = docker(&[
             "run",
             "-d",
@@ -110,7 +110,7 @@ impl DockerSandbox {
         Ok(DockerSandbox { name })
     }
 
-    /// The container's name, `farik-<project>-<task_id>` in Docker's alphabet.
+    /// The container's name, `catervas-<project>-<task_id>` in Docker's alphabet.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -232,15 +232,15 @@ impl SandboxFactory for DockerSandboxFactory {
     }
 }
 
-/// `farik-<project>-<task_id>-base`: the task's own name with a suffix, so the base run never
+/// `catervas-<project>-<task_id>-base`: the task's own name with a suffix, so the base run never
 /// replaces the container the verify session is holding.
 fn base_container_name(project_id: &str, task_id: &TaskId) -> String {
     format!("{}-base", container_name(project_id, task_id))
 }
 
-/// `farik-<project>-<task_id>`, lowercased with everything outside `[a-z0-9_.-]` made `-`.
+/// `catervas-<project>-<task_id>`, lowercased with everything outside `[a-z0-9_.-]` made `-`.
 fn container_name(project_id: &str, task_id: &TaskId) -> String {
-    docker_name(&format!("farik-{project_id}-{}", task_id.as_str()))
+    docker_name(&format!("catervas-{project_id}-{}", task_id.as_str()))
 }
 
 /// `raw` lowercased with everything outside `[a-z0-9_.-]` made `-`: Docker's alphabet for names.
@@ -303,7 +303,7 @@ pub(crate) fn stderr_of(output: &Output) -> String {
 mod tests {
     use std::time::Duration;
 
-    use farik_core::contract::TaskId;
+    use catervas_core::contract::TaskId;
 
     use std::collections::BTreeMap;
     use std::os::unix::process::ExitStatusExt;
@@ -323,10 +323,10 @@ mod tests {
             stdout: Vec::new(),
             stderr: stderr.as_bytes().to_vec(),
         };
-        let missing = "Error response from daemon: No such container: farik-p-frk-1\n";
+        let missing = "Error response from daemon: No such container: catervas-p-ctv-1\n";
         assert_eq!(removed(&answer(missing)), Ok(()));
         // A `--rm` container whose process just ended is being removed by Docker itself.
-        let going = "Error response from daemon: removal of container farik-browser-p-frk-1 is \
+        let going = "Error response from daemon: removal of container catervas-browser-p-ctv-1 is \
                      already in progress\n";
         assert_eq!(removed(&answer(going)), Ok(()));
         let refused = "Error response from daemon: could not kill: permission denied\n";
@@ -340,14 +340,14 @@ mod tests {
 
     #[test]
     fn refuses_a_worktree_the_mount_cannot_name() {
-        let task = TaskId::try_from("FRK-1").expect("an id");
+        let task = TaskId::try_from("CTV-1").expect("an id");
         for worktree in ["/tmp/a,b", "relative/worktree"] {
             let refused = DockerSandbox::create(
                 "p",
                 &task,
                 Path::new(worktree),
                 false,
-                "farik/no-such-image:0",
+                "catervas/no-such-image:0",
             );
             match refused.err() {
                 Some(SandboxError::ContainerFailed { detail }) => {
@@ -362,7 +362,7 @@ mod tests {
     fn takes_the_longest_timeout_without_overflowing() {
         assert_eq!(whole_seconds(Duration::MAX), u64::MAX);
         let sandbox = DockerSandbox {
-            name: format!("farik-no-such-container-{}", std::process::id()),
+            name: format!("catervas-no-such-container-{}", std::process::id()),
         };
         // Whatever docker answers here (it may not even be installed), `run` must not panic.
         let _ = sandbox.run("true", "", Duration::MAX, &BTreeMap::new());
@@ -381,35 +381,35 @@ mod tests {
 
     #[test]
     fn tells_docker_saying_the_container_is_gone_from_a_command_saying_it() {
-        let missing = "Error response from daemon: No such container: farik-p-frk-1";
+        let missing = "Error response from daemon: No such container: catervas-p-ctv-1";
         let stopped = "Error response from daemon: container 0123abcd is not running";
         assert!(is_container_gone(&with_stderr(missing)));
         assert!(is_container_gone(&with_stderr(&format!(
             "noise\n{stopped}\n"
         ))));
-        let own = "No such container: frk-1\nthe server is not running\n";
+        let own = "No such container: ctv-1\nthe server is not running\n";
         assert!(!is_container_gone(&with_stderr(own)));
         assert!(!is_container_gone(&with_stderr("")));
     }
 
     #[test]
     fn names_the_base_container_apart_from_the_task_s_own() {
-        let task = TaskId::try_from("FRK-12").expect("an id");
+        let task = TaskId::try_from("CTV-12").expect("an id");
         assert_eq!(
             base_container_name("My Project/1", &task),
-            "farik-my-project-1-frk-12-base"
+            "catervas-my-project-1-ctv-12-base"
         );
         assert_ne!(base_container_name("p", &task), container_name("p", &task));
     }
 
     #[test]
     fn names_a_container_by_docker_rule_and_rounds_the_timeout_up() {
-        let task = TaskId::try_from("FRK-12").expect("an id");
+        let task = TaskId::try_from("CTV-12").expect("an id");
         assert_eq!(
             container_name("My Project/1", &task),
-            "farik-my-project-1-frk-12"
+            "catervas-my-project-1-ctv-12"
         );
-        assert_eq!(container_name("a_b.c-d", &task), "farik-a_b.c-d-frk-12");
+        assert_eq!(container_name("a_b.c-d", &task), "catervas-a_b.c-d-ctv-12");
         assert_eq!(whole_seconds(Duration::from_millis(200)), 1);
         assert_eq!(whole_seconds(Duration::ZERO), 1);
         assert_eq!(whole_seconds(Duration::from_millis(2001)), 3);

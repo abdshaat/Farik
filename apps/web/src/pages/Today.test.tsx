@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -83,7 +83,7 @@ const TEAM = {
 };
 const ACTIVITY = {
 	activity: [
-		{ agent_id: "mira", state: "working", line: "Writing the plan for FRK-2" },
+		{ agent_id: "mira", state: "working", line: "Writing the plan for CTV-2" },
 		{
 			agent_id: "ada",
 			state: "resting",
@@ -138,7 +138,7 @@ describe("today", () => {
 			within(mira as HTMLElement).getByTitle("Product Manager"),
 		).toBeTruthy();
 		expect(
-			within(mira as HTMLElement).getByText("Writing the plan for FRK-2"),
+			within(mira as HTMLElement).getByText("Writing the plan for CTV-2"),
 		).toBeTruthy();
 		expect(
 			within(ada as HTMLElement).getByText("Resting until 15:40 UTC"),
@@ -201,18 +201,18 @@ describe("today", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: en.requestSend }));
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(3));
-		await s.reply(s.calls("request.file")[2] as never, { task_id: "FRK-3" });
-		// The request's own page asks for FRK-3.
+		await s.reply(s.calls("request.file")[2] as never, { task_id: "CTV-3" });
+		// The request's own page asks for CTV-3.
 		await waitFor(() =>
 			expect(
 				s.calls("query").find((q) => q.params.name === "contract.get")?.params
 					.params,
-			).toEqual({ task_id: "FRK-3" }),
+			).toEqual({ task_id: "CTV-3" }),
 		);
 	});
 
 	it("waits_for_the_connection_before_a_request_can_be_sent", async () => {
-		// Today, drawn alone: the app's shell shows nothing until Farik has answered, so the page
+		// Today, drawn alone: the app's shell shows nothing until Catervas has answered, so the page
 		// is rendered here while the session check is still unanswered and there is no connection.
 		let answerSession: (status: number) => void = () => {};
 		const session = new Promise<Response>((resolve) => {
@@ -239,7 +239,7 @@ describe("today", () => {
 		}) as HTMLButtonElement;
 		expect(send.disabled).toBe(true);
 
-		// Farik answers: the page connects, and the button works.
+		// Catervas answers: the page connects, and the button works.
 		await act(async () => answerSession(204));
 		const socket = await waitFor(() => {
 			const s = sockets[0];
@@ -272,11 +272,11 @@ describe("today", () => {
 		});
 		const { container, s } = await today({
 			waiting: [
-				row("FRK-1", "approval", "gift cards", "mira"),
-				row("FRK-2", "acceptance", "the new checkout page", "theo"),
-				row("FRK-3", "question", "the launch post", "mira"),
-				row("FRK-4", "help", "the menu page", "theo"),
-				row("FRK-5", "integration", "the photos", "theo"),
+				row("CTV-1", "approval", "gift cards", "mira"),
+				row("CTV-2", "acceptance", "the new checkout page", "theo"),
+				row("CTV-3", "question", "the launch post", "mira"),
+				row("CTV-4", "help", "the menu page", "theo"),
+				row("CTV-5", "integration", "the photos", "theo"),
 			],
 		});
 		// A key that works adds no row.
@@ -296,21 +296,21 @@ describe("today", () => {
 				"approval",
 				"Approve the plan for gift cards",
 				"Review",
-				"/tasks/FRK-1/plan",
+				"/tasks/CTV-1/plan",
 			],
 			[
 				"acceptance",
 				"Accept the new checkout page",
 				"Review",
-				"/tasks/FRK-2/accept",
+				"/tasks/CTV-2/accept",
 			],
-			["question", "Mira has a question", "Answer", "/tasks/FRK-3/questions"],
-			["help", "Theo needs your help", "Help", "/tasks/FRK-4/help"],
+			["question", "Mira has a question", "Answer", "/tasks/CTV-3/questions"],
+			["help", "Theo needs your help", "Help", "/tasks/CTV-4/help"],
 			[
 				"integration",
 				"Add the photos to your project",
 				"Add",
-				"/tasks/FRK-5/accept",
+				"/tasks/CTV-5/accept",
 			],
 		] as const;
 		expected.forEach(([kind, title, word, route], i) => {
@@ -330,7 +330,7 @@ describe("today", () => {
 		});
 		expect(
 			await within(rows[1] as HTMLElement).findByText(
-				"All 3 of Farik’s checks passed.",
+				"All 3 of Catervas’s checks passed.",
 			),
 		).toBeTruthy();
 		expect(
@@ -338,7 +338,7 @@ describe("today", () => {
 				.calls("query")
 				.filter((q) => q.params.name === "task.checks")
 				.map((q) => q.params.params),
-		).toEqual([{ task_id: "FRK-2" }]);
+		).toEqual([{ task_id: "CTV-2" }]);
 		// Once one check fails, the row no longer says they passed.
 		await eventArrives(s, 40);
 		const checks = () =>
@@ -362,14 +362,14 @@ describe("today", () => {
 		const { container } = await today({
 			waiting: [
 				{
-					task_id: "FRK-3",
+					task_id: "CTV-3",
 					kind: "question",
 					agent_id: "mira",
 					title: "the launch post",
 					line: "question line",
 				},
 				{
-					task_id: "FRK-9",
+					task_id: "CTV-9",
 					kind: "not_a_kind",
 					agent_id: "mira",
 					title: "something new",
@@ -397,7 +397,7 @@ describe("today", () => {
 		const { container } = await today({
 			waiting: [
 				{
-					task_id: "FRK-14",
+					task_id: "CTV-14",
 					kind: "tool_approval",
 					agent_id: "theo",
 					title: "Sold-out badge on the menu",
@@ -414,7 +414,7 @@ describe("today", () => {
 		expect(within(row).getByText("Theo wants to use github")).toBeTruthy();
 		expect(
 			within(row).getByText(
-				"To create issue, for FRK-14 Sold-out badge on the menu. Theo waits until you decide.",
+				"To create issue, for CTV-14 Sold-out badge on the menu. Theo waits until you decide.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
@@ -431,9 +431,9 @@ describe("today", () => {
 		).toBeTruthy();
 		expect(
 			within(dialog)
-				.getByRole("link", { name: "FRK-14 Sold-out badge on the menu" })
+				.getByRole("link", { name: "CTV-14 Sold-out badge on the menu" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-14");
+		).toBe("/tasks/CTV-14");
 		await expectNoAxeViolations(container);
 	});
 
@@ -441,14 +441,14 @@ describe("today", () => {
 		const { container } = await today({
 			waiting: [
 				{
-					task_id: "FRK-22",
+					task_id: "CTV-22",
 					kind: "preview_missing",
 					agent_id: "iris",
 					title: "The Order again button",
 					line: "iris needs to know how to open your app",
 				},
 				{
-					task_id: "FRK-23",
+					task_id: "CTV-23",
 					kind: "designer_needs_sandbox",
 					agent_id: "iris",
 					title: "A bigger basket",
@@ -498,11 +498,11 @@ describe("today", () => {
 		const { container } = await today({
 			waiting: [
 				{
-					task_id: "FRK-24",
+					task_id: "CTV-24",
 					kind: "designer_needs_browser",
 					agent_id: "iris",
 					title: "A bigger basket",
-					line: "Iris has Playwright off, so Farik gives Iris no work. Turn Playwright on for Iris on the Team page",
+					line: "Iris has Playwright off, so Catervas gives Iris no work. Turn Playwright on for Iris on the Team page",
 				},
 			],
 			team: {
@@ -653,7 +653,7 @@ describe("today", () => {
 	});
 	/** The row `waiting.list` gives while Kai's marketing plan waits on the owner. */
 	const PLAN_ROW = {
-		task_id: "FRK-31",
+		task_id: "CTV-31",
 		kind: "marketing_plan",
 		agent_id: "kai",
 		title: TITLE,
@@ -781,7 +781,7 @@ describe("today's posts", () => {
 			within(instagram).getByText("Thanksgiving pies are open for pre-order."),
 		).toBeTruthy();
 		expect(instagram.textContent).toContain(
-			"Approved in your plan MP-3. Farik hands it to Buffer at 12:00.",
+			"Approved in your plan MP-3. Catervas hands it to Buffer at 12:00.",
 		);
 		expect(
 			within(instagram)
@@ -793,7 +793,7 @@ describe("today's posts", () => {
 		).toBeTruthy();
 		expect(within(later).getByText("in 2 days")).toBeTruthy();
 		expect(later.textContent).toContain(
-			"Approved in your plan MP-3. Farik hands it to Buffer an hour before.",
+			"Approved in your plan MP-3. Catervas hands it to Buffer an hour before.",
 		);
 		expect(
 			within(last).getByText("Instagram, Saturday 31 October at 09:00"),
@@ -841,7 +841,7 @@ describe("today's posts", () => {
 			expect(within(row).getByRole("img", { name: "Kai" })).toBeTruthy();
 	});
 
-	it("what_farik_cannot_show_opens_in_a_new_tab", async () => {
+	it("what_catervas_cannot_show_opens_in_a_new_tab", async () => {
 		const { s } = await todayWith({ posts: GOING_OUT });
 		const [, instagram, , last] = (await goingOut()) as [
 			HTMLElement,
@@ -923,7 +923,7 @@ describe("today's posts", () => {
 		expect(container.querySelector("img[src='x']")).toBeNull();
 		expect(
 			within(row).getByText(
-				"If you allow it, Farik sends it at its time, and it waits under Going out until then, with Stop.",
+				"If you allow it, Catervas sends it at its time, and it waits under Going out until then, with Stop.",
 			),
 		).toBeTruthy();
 		expect(
@@ -1004,7 +1004,7 @@ describe("today's posts", () => {
 		expect(within(missed).getByText("X, yesterday at 18:00")).toBeTruthy();
 		expect(within(missed).getByText("Missed")).toBeTruthy();
 		expect(missed.textContent).toContain(
-			"Farik could not hand it to Buffer before its time.",
+			"Catervas could not hand it to Buffer before its time.",
 		);
 		expect(missed.textContent).toContain(
 			"Kai hears of this in its next session.",
@@ -1052,7 +1052,7 @@ describe("a site the Procurement Specialist asks to read", () => {
 			within(plain as HTMLElement)
 				.getAllByRole("link")
 				.map((link) => link.getAttribute("href")),
-		).toEqual(["/tasks/FRK-31"]);
+		).toEqual(["/tasks/CTV-31"]);
 		expect(container.querySelector("a[href*='pieboxpros']")).toBeNull();
 		expect(
 			within(plain as HTMLElement).getByText(/The task waits until you decide/),
@@ -1136,22 +1136,22 @@ describe("a marketing plan's ads and their budget", () => {
 		expect(
 			screen.getByRole("heading", { name: "Waiting on you (1)" }),
 		).toBeTruthy();
-		// The row is Farik's own, so it carries Farik's picture; the plan's title is text.
-		expect(within(row).getByRole("img", { name: "Farik" })).toBeTruthy();
+		// The row is Catervas's own, so it carries Catervas's picture; the plan's title is text.
+		expect(within(row).getByRole("img", { name: "Catervas" })).toBeTruthy();
 		expect(
 			within(row).getByText(`Ads budget reached: ${TITLE}`, {
 				selector: "strong",
 			}),
 		).toBeTruthy();
 		expect(row.textContent).toContain(
-			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Farik paused it.",
+			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Catervas paused it.",
 		);
 		expect(row.textContent).toContain(
 			"Google Ads: $318.65 of $450.00 USD spent",
 		);
 		expect(row.textContent).toContain("Ends Sunday 22 November");
 		expect(container.querySelector("b")).toBeNull();
-		// Farik paused it: nothing is left running to stop at Google.
+		// Catervas paused it: nothing is left running to stop at Google.
 		expect(
 			within(row).queryByRole("link", { name: "Open Google Ads" }),
 		).toBeNull();
@@ -1164,7 +1164,7 @@ describe("a marketing plan's ads and their budget", () => {
 		cleanup();
 		const refused = await rowOf(PLAN_BUDGET_ROW);
 		expect(refused.row.textContent).toContain(
-			"Its ads reached their budget: $450.00 of $450.00 USD. Farik could not pause them: Google answered “The service is currently unavailable.” Farik tries again every 15 minutes; pause them in Google Ads.",
+			"Its ads reached their budget: $450.00 of $450.00 USD. Catervas could not pause them: Google answered “The service is currently unavailable.” Catervas tries again every 15 minutes; pause them in Google Ads.",
 		);
 		const ads = within(refused.row).getByRole("link", {
 			name: "Open Google Ads",
@@ -1176,9 +1176,9 @@ describe("a marketing plan's ads and their budget", () => {
 
 		// While the owner's raise is open, the row says so, and only "End the plan" is left.
 		cleanup();
-		const raising = await rowOf({ ...BUDGET_ROW, raising: "FRK-40" });
+		const raising = await rowOf({ ...BUDGET_ROW, raising: "CTV-40" });
 		expect(raising.row.textContent).toContain(
-			"Farik paused it. You asked Kai for a new version with a raised budget. It waits for you here when it is ready.",
+			"Catervas paused it. You asked Kai for a new version with a raised budget. It waits for you here when it is ready.",
 		);
 		expect(
 			within(raising.row).queryByRole("button", { name: "Raise the budget" }),
@@ -1200,7 +1200,7 @@ describe("a marketing plan's ads and their budget", () => {
 			],
 		});
 		expect(row.textContent).toContain(
-			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Farik could not pause it: Google answered “The service is currently unavailable.” Farik tries again every 15 minutes; pause it in Google Ads.",
+			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Catervas could not pause it: Google answered “The service is currently unavailable.” Catervas tries again every 15 minutes; pause it in Google Ads.",
 		);
 		expect(row.textContent).not.toContain("$450.00 of $450.00");
 	});
@@ -1218,7 +1218,7 @@ describe("a marketing plan's ads and their budget", () => {
 			name: "End this plan now?",
 		});
 		expect(dialog.textContent).toContain(
-			"Farik pauses its running ads within a minute. $318.65 is spent so far, by Google’s figures at 10:15.",
+			"Catervas pauses its running ads within a minute. $318.65 is spent so far, by Google’s figures at 10:15.",
 		);
 		// Asking first: nothing is sent until it is confirmed.
 		expect(s.calls("command")).toHaveLength(0);
@@ -1235,14 +1235,14 @@ describe("a marketing plan's ads and their budget", () => {
 
 	it("today_says_when_ads_keep_running", async () => {
 		const { container, row } = await rowOf(RUNNING_ROW);
-		expect(within(row).getByRole("img", { name: "Farik" })).toBeTruthy();
+		expect(within(row).getByRole("img", { name: "Catervas" })).toBeTruthy();
 		expect(
 			within(row).getByText(`Ads still running: ${TITLE}`, {
 				selector: "strong",
 			}),
 		).toBeTruthy();
 		expect(row.textContent).toContain(
-			"Farik could not pause its ads: Google answered “The service is currently unavailable.” They keep running at Google until Sunday 22 November or their budget there. Pause them in Google Ads.",
+			"Catervas could not pause its ads: Google answered “The service is currently unavailable.” They keep running at Google until Sunday 22 November or their budget there. Pause them in Google Ads.",
 		);
 		expect(
 			within(row)
@@ -1262,9 +1262,9 @@ describe("a marketing plan's ads and their budget", () => {
 			}),
 		).toBeTruthy();
 		expect(row.textContent).toContain(
-			"Farik can’t read its ad spend: Kai's sign-in to Google has ended; sign Kai in again on Kai's page. Any of its ads still running keep running at Google until Sunday 22 November or their budget there; pause them in Google Ads.",
+			"Catervas can’t read its ad spend: Kai's sign-in to Google has ended; sign Kai in again on Kai's page. Any of its ads still running keep running at Google until Sunday 22 November or their budget there; pause them in Google Ads.",
 		);
-		// The last spend Farik could read stays on the row, with when.
+		// The last spend Catervas could read stays on the row, with when.
 		expect(row.textContent).toContain(
 			"Last read Thursday 12 November at 10:15: $318.65 of $450.00 USD",
 		);
@@ -1314,13 +1314,13 @@ describe("a purchase order the Procurement Specialist suggests", () => {
 			}),
 		).toBeTruthy();
 		expect(row.textContent).toContain(
-			"For FRK-31 Find a supplier for 500 pie boxes.",
+			"For CTV-31 Find a supplier for 500 pie boxes.",
 		);
 		expect(
 			within(row)
-				.getByRole("link", { name: "FRK-31 Find a supplier for 500 pie boxes" })
+				.getByRole("link", { name: "CTV-31 Find a supplier for 500 pie boxes" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-31");
+		).toBe("/tasks/CTV-31");
 		expect(within(row).getByRole("img", { name: "Ivo" })).toBeTruthy();
 
 		// Every line, with its amounts and their currency.
@@ -1613,7 +1613,7 @@ describe("the renewals coming up", () => {
 
 	it("lists_the_renewals_after_what_waits", async () => {
 		const question = {
-			task_id: "FRK-2",
+			task_id: "CTV-2",
 			kind: "question",
 			agent_id: "mira",
 			title: "Pie week",
@@ -1668,7 +1668,7 @@ describe("the renewals coming up", () => {
 		await todayWithOrders({ renewals: RENEWALS });
 		expect(
 			await screen.findByText(
-				"2 rows in the register have a renewal date Farik can’t read, so Farik can’t remind you of them.",
+				"2 rows in the register have a renewal date Catervas can’t read, so Catervas can’t remind you of them.",
 			),
 		).toBeTruthy();
 	});
@@ -1681,7 +1681,7 @@ describe("the renewals coming up", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByText(
-				"3 rows in the register have a renewal date Farik can’t read, so Farik can’t remind you of them.",
+				"3 rows in the register have a renewal date Catervas can’t read, so Catervas can’t remind you of them.",
 			),
 		).toBeTruthy();
 		expect(
@@ -1693,7 +1693,7 @@ describe("the renewals coming up", () => {
 		await todayWithOrders({ renewals: { open: [], unreadable: 1 } });
 		expect(
 			await screen.findByText(
-				"1 row in the register has a renewal date Farik can’t read, so Farik can’t remind you of it.",
+				"1 row in the register has a renewal date Catervas can’t read, so Catervas can’t remind you of it.",
 			),
 		).toBeTruthy();
 	});
@@ -1863,7 +1863,7 @@ describe("the renewals coming up", () => {
 			text: "Is Vercel still worth $20 a month? Cancel it if not.",
 		});
 		expect(s.calls("command")).toHaveLength(0);
-		await s.reply(filed as never, { task_id: "FRK-40" });
+		await s.reply(filed as never, { task_id: "CTV-40" });
 		const dismissed = await sentCommand(s);
 		expect(dismissed.params).toEqual({
 			command: { command: "renewal_dismiss", body: { renewal: 7 } },
@@ -1949,7 +1949,7 @@ describe("the renewals coming up", () => {
 			if (asked.length < 2) throw new Error("not filed again");
 			return asked[1];
 		});
-		await s.reply(second as never, { task_id: "FRK-41" });
+		await s.reply(second as never, { task_id: "CTV-41" });
 		const dismissed = await sentCommand(s);
 		await s.reply(dismissed, { said: "dismissed", events: [82] });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -1975,7 +1975,7 @@ describe("the renewals coming up", () => {
 			if (asked.length === 0) throw new Error("no request was filed");
 			return asked[0];
 		});
-		await s.reply(filed as never, { task_id: "FRK-42" });
+		await s.reply(filed as never, { task_id: "CTV-42" });
 		const first = await sentCommand(s);
 		await s.reply(first, {
 			error: { kind: "failed", detail: "the log could not be written" },
@@ -2022,7 +2022,7 @@ describe("a data pipeline waiting on the owner", () => {
 		const why = within(paid).getByRole("group", {
 			name: "Why it comes to you",
 		});
-		// Farik's sentences, in their order, then the Product Manager's reason.
+		// Catervas's sentences, in their order, then the Product Manager's reason.
 		expect(why.textContent).toBe(
 			`It costs money.The Product Manager asks you:It needs a paid plan, so it is your call.\\u{202e} ${PIPELINE_MARKUP}`,
 		);
@@ -2032,7 +2032,7 @@ describe("a data pipeline waiting on the owner", () => {
 				.textContent,
 		).toContain("It sends your data to Shippo.The Product Manager asks you:");
 		expect(within(shippo).queryByText("It costs money.")).toBeNull();
-		// Three tries: Farik says so, and there is no reason to show.
+		// Three tries: Catervas says so, and there is no reason to show.
 		const undecided = await rowOf("Azure prices");
 		const unclear = within(undecided).getByRole("group", {
 			name: "Why it comes to you",

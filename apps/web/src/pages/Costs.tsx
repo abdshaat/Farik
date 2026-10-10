@@ -1,4 +1,4 @@
-import { Avatar, type AvatarKey, Button } from "@farik/ui";
+import { Avatar, type AvatarKey, Button } from "@catervas/ui";
 import { useState } from "react";
 import { useQuery } from "../app/store.ts";
 import { useWide } from "../shell/Shell.tsx";

@@ -43,7 +43,7 @@ describe("connection", () => {
 			return s;
 		});
 		act(() => socket.emit("open", {}));
-		// "/" is Today, once Farik says it has a project and its team.
+		// "/" is Today, once Catervas says it has a project and its team.
 		await answerStatus(socket, false);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(location.pathname).toBe("/");
@@ -97,7 +97,7 @@ describe("connection", () => {
 		if (!socket) throw new Error("no socket was opened");
 		act(() => socket.emit("open", {}));
 		expect(screen.getByTestId("used").textContent).toBe("false");
-		// The used link goes to "/", which then asks Farik where to go.
+		// The used link goes to "/", which then asks Catervas where to go.
 		expect(location.pathname).toBe("/");
 	});
 

@@ -1,4 +1,4 @@
-import { Button, Choice, TextField } from "@farik/ui";
+import { Button, Choice, TextField } from "@catervas/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { t } from "../../strings/t.ts";

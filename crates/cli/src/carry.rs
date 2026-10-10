@@ -1,24 +1,24 @@
-//! Taking the team to another project (ADR 0051): what the project being left leaves for the one
+//! Taking the team to another project (ADR 0053): what the project being left leaves for the one
 //! taken on, so that its team, pictures, pinned skills' folders, sandbox setting, connector keys and
 //! mailbox are there when it opens. Criteria are not: the new repository keeps the library its own
 //! `init` seeded from its scan. Nothing in the old project is changed.
 
 use std::path::Path;
 
+use catervas_core::team::carried_team;
+use catervas_protocol::event::EventBody;
+use catervas_protocol::generated::event::TeamUpdatedBody;
+use catervas_runtime::connectors::{ConnectorSecrets, copy_keys, write_keys_copied};
+use catervas_runtime::procurement::{carry_mailbox, mailbox_connected};
+use catervas_runtime::skills::{SkillLevel, skill_folder, skill_folder_unlinked};
+use catervas_store::files::ProjectFiles;
 use chrono::{DateTime, Utc};
-use farik_core::team::carried_team;
-use farik_protocol::event::EventBody;
-use farik_protocol::generated::event::TeamUpdatedBody;
-use farik_runtime::connectors::{ConnectorSecrets, copy_keys, write_keys_copied};
-use farik_runtime::procurement::{carry_mailbox, mailbox_connected};
-use farik_runtime::skills::{SkillLevel, skill_folder, skill_folder_unlinked};
-use farik_store::files::ProjectFiles;
 
 use crate::HUMAN;
 use crate::project::Project;
 
 /// Where the mailbox's files are kept, which a carry that fails half way removes again.
-const MAIL: &str = ".farik/local/procurement/mail";
+const MAIL: &str = ".catervas/local/procurement/mail";
 
 /// Carries the team of the project at `from` to `to`, a project `init` has just made: the team
 /// without its retired agents, each other agent active, then the files and keys that go with it,
@@ -47,8 +47,8 @@ pub(crate) fn carry(
         .write_settings(&old.read_settings().map_err(|error| error.to_string())?)
         .map_err(|error| error.to_string())?;
     copy_tree(
-        &from.join(".farik/team/avatars"),
-        &to.root.join(".farik/team/avatars"),
+        &from.join(".catervas/team/avatars"),
+        &to.root.join(".catervas/team/avatars"),
     )?;
     for pin in team.skills() {
         copy_skill(from, &to.root, &SkillLevel::Team, pin.name.as_str())?;

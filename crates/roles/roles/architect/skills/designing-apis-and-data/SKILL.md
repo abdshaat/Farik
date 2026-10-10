@@ -25,8 +25,8 @@ change looks. The Developer builds from your note.
 
 ## 3. Record the choice
 
-Read `farik_read_decisions` first and follow what is there. A choice worth remembering goes in
-`farik_write_decision`, as `reviewing-for-design` says; do not repeat its steps here. The note
+Read `catervas_read_decisions` first and follow what is there. A choice worth remembering goes in
+`catervas_write_decision`, as `reviewing-for-design` says; do not repeat its steps here. The note
 holds the detail, the decision holds the choice and what it rules out.
 
 ## 4. Keep it checkable

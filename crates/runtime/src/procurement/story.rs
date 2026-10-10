@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use farik_protocol::command::Command;
-use farik_protocol::event::EventKind;
+use catervas_protocol::command::Command;
+use catervas_protocol::event::EventKind;
 use serde_json::{Value, json};
 
 use crate::claude::Secret;
@@ -38,7 +38,12 @@ pub(crate) fn drafted(project: &crate::tools::fixtures::TestProject, input: Valu
         scope
             .spawn(|| {
                 project
-                    .call("proc", Some("FRK-1"), "farik_draft_seller_message", input)
+                    .call(
+                        "proc",
+                        Some("CTV-1"),
+                        "catervas_draft_seller_message",
+                        input,
+                    )
                     .expect("a draft")["message"]
                     .as_u64()
                     .expect("a number")
@@ -75,7 +80,7 @@ impl Story {
     pub(crate) async fn new(name: &str) -> Story {
         let fixture = GreenMail::start(name, &[&BUYING, &DANA]);
         let harness = Harness::with_procurement(&format!("send-{name}"));
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let keys = Arc::new(MemoryConnectorSecrets::default());
         assert!(harness.daemon.set_connector_secrets(keys.clone()));
         assert!(
@@ -143,7 +148,10 @@ impl Story {
             .map_err(reason)
     }
 
-    pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<farik_protocol::event::FarikEvent> {
+    pub(crate) fn events(
+        &self,
+        kinds: &[EventKind],
+    ) -> Vec<catervas_protocol::event::CatervasEvent> {
         self.harness.events(kinds)
     }
 
@@ -171,10 +179,10 @@ pub(crate) fn reason(error: CommandError) -> String {
 }
 
 /// The purchase orders that wait for the owner, as the store lists them.
-pub(crate) fn orders_waiting(story: &Story) -> Vec<farik_store::waiting::OrderAsk> {
+pub(crate) fn orders_waiting(story: &Story) -> Vec<catervas_store::waiting::OrderAsk> {
     let deps = &story.harness.project.deps;
     let team = deps.files.read_team().expect("the team");
-    farik_store::waiting::waiting(&deps.projections, &deps.log, &deps.files, &team)
+    catervas_store::waiting::waiting(&deps.projections, &deps.log, &deps.files, &team)
         .expect("the store reads")
         .into_iter()
         .filter_map(|item| item.order)

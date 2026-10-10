@@ -1,4 +1,4 @@
-//! Google Ads calls in the daemon (`docs/SPEC.md` 6.7, ADR 0038, ADR 0042). `farik connector
+//! Google Ads calls in the daemon (`docs/SPEC.md` 6.7, ADR 0038, ADR 0042). `catervas connector
 //! google-ads` is a shim: it lists the ten tools and forwards each call here, to
 //! `POST /connector/call`, with the ticket the launch route gave it. The daemon holds the grant,
 //! checks the plan against the log, calls Google, and records what it created, so no token ever
@@ -12,21 +12,23 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{Duration as Days, NaiveDate};
-use farik_core::contract::Role;
-use farik_core::governor::permissions::ConnectorTag;
-use farik_core::marketing::{
+use catervas_core::contract::Role;
+use catervas_core::governor::permissions::ConnectorTag;
+use catervas_core::marketing::{
     AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, HeldAtGoogle, Lineage,
     PlanProposal, PlanRecord, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write,
     first_day, to_pause_for_end,
 };
-use farik_core::team::{Agent, AgentStatus, CustomServer, Team, custom_server};
-use farik_protocol::event::{
+use catervas_core::team::{Agent, AgentStatus, CustomServer, Team, custom_server};
+use catervas_protocol::event::{
     EventBody, EventIds, MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
     MarketingCampaignPausedBody,
 };
-use farik_store::marketing::{PausedWhy, campaigns_paused, created_campaigns_on, marketing_plans};
-use farik_store::waiting::name_of;
+use catervas_store::marketing::{
+    PausedWhy, campaigns_paused, created_campaigns_on, marketing_plans,
+};
+use catervas_store::waiting::name_of;
+use chrono::{Duration as Days, NaiveDate};
 use serde_json::{Value, json};
 
 use super::hooks::append;
@@ -44,7 +46,7 @@ use crate::google_ads::{
 use crate::orchestrator::with_status;
 use crate::tools::ToolDeps;
 
-/// The name of Farik's Google Ads connector, in a kit and in a team file.
+/// The name of Catervas's Google Ads connector, in a kit and in a team file.
 pub(crate) const GOOGLE_ADS: &str = "google-ads";
 
 /// How long a sign-in must stay good for a call to be made on it: the route makes up to four calls
@@ -212,7 +214,7 @@ fn access_of(
 
 /// The agent's `google-ads` entry, which must be exactly the kit's. A custom entry naming the same
 /// command, whatever its tags, is not the kit's and reaches nothing: only the kit's own entry is
-/// trusted to be Farik's server (ADR 0038).
+/// trusted to be Catervas's server (ADR 0038).
 fn kit_definition(deps: &ToolDeps, team: &Team, agent_id: &str) -> Result<CustomServer, Refusal> {
     let not_kit = || {
         format!(
@@ -240,7 +242,7 @@ fn kit_definition(deps: &ToolDeps, team: &Team, agent_id: &str) -> Result<Custom
     Ok(definition)
 }
 
-/// What Farik uses of an agent's Google Ads connection for a call it makes itself, with no session
+/// What Catervas uses of an agent's Google Ads connection for a call it makes itself, with no session
 /// and so no ticket (step 08g's spend read and pause): the agent's `google-ads` entry, which must
 /// be exactly the kit's, and where its keys are kept. The refusal starts with its code;
 /// `google_ads_not_connected` is an agent with no entry at all.
@@ -292,7 +294,7 @@ pub(crate) fn cut_reason(words: &str) -> String {
 }
 
 /// Google's answer or fault in the owner's words: Google's own message, quoted, after "Google
-/// answered", or Farik's sentence when Google gave none.
+/// answered", or Catervas's sentence when Google gave none.
 fn google_words(error: &GoogleAdsError) -> String {
     match error {
         GoogleAdsError::Google(words) | GoogleAdsError::NotAllowed(words) => {
@@ -430,7 +432,7 @@ pub(crate) async fn read_spend(
 /// when it is not: one `Search` of `status_query` for each ad account, made as `read_spend`'s
 /// are, then one `googleAds:mutate` of `PAUSED` for each campaign Google reports running, or does
 /// not report at all, each on its own, since one mutate is atomic. A campaign reported `PAUSED`
-/// or `REMOVED` counts as paused, with no call. Farik's own fixed act, which no hook judges and
+/// or `REMOVED` counts as paused, with no call. Catervas's own fixed act, which no hook judges and
 /// no plan covers: the caller has decided that these stop.
 pub(crate) async fn pause_campaigns(
     state: &Arc<DaemonState>,
@@ -492,7 +494,7 @@ pub(crate) async fn pause_campaigns(
             let answer = answers
                 .get(campaign)
                 .cloned()
-                .unwrap_or_else(|| Err(format!("{campaign} is not a campaign Farik can pause")));
+                .unwrap_or_else(|| Err(format!("{campaign} is not a campaign Catervas can pause")));
             (campaign.clone(), answer)
         })
         .collect()
@@ -500,10 +502,10 @@ pub(crate) async fn pause_campaigns(
 
 /// Before the owner removes `agent_id`'s Google Ads connection (step 08g): with this agent's grant,
 /// and under the writes' lock, which `_writing` proves the caller holds, pauses every campaign
-/// Farik made that is not recorded paused for
+/// Catervas made that is not recorded paused for
 /// its plan's end, as every pause is made (`pause_campaigns`), and records each as paused: for
 /// `plan_ended` when no active plan carries it, else `connection_removed`, since without the
-/// connection Farik could no longer stop it at its budget. A campaign Google would not pause, or
+/// connection Catervas could no longer stop it at its budget. A campaign Google would not pause, or
 /// that no grant could be had for, is kept as the plan's `unstopped`, in the owner's words, for
 /// Today to say that it keeps running; the caller removes the connection all the same. It pauses
 /// even when another Marketing Specialist still has Google Ads.
@@ -621,7 +623,7 @@ pub(crate) fn google_ads_taken_out(before: &Team, after: &Team) -> Vec<String> {
 /// writes' lock, pauses the plan's campaigns for the first of them whose pause leaves nothing
 /// running, as removing the connection does (`pause_under_lock`), whatever Google answers, since
 /// the write goes ahead all the same, and hands the lock back to hold until the write is done, so
-/// that no agent's enable runs between the pause and the write and turns on what Farik stopped.
+/// that no agent's enable runs between the pause and the write and turns on what Catervas stopped.
 /// `None` when there is no sign-in to lose. A later agent's pause would find everything paused
 /// already. Every path that takes a `google-ads` sign-in away asks it first: `connector.disconnect`,
 /// a save, a start, a template and a retirement.
@@ -648,7 +650,7 @@ pub(crate) async fn pause_and_hold<'a>(
 /// Before `agent_id` is retired (with `newcomer` joining in its place, when there is one): pauses
 /// the plan's campaigns for it (`pause_and_hold`, whose lock the caller holds until the retirement
 /// is written) when it has a sign-in to lose and the retirement would be made; a refused one
-/// pauses nothing and holds nothing. Retiring deletes its keys (ADR 0030), and with them Farik's
+/// pauses nothing and holds nothing. Retiring deletes its keys (ADR 0030), and with them Catervas's
 /// means to stop its campaigns at their budget.
 pub(crate) async fn pause_before_retiring<'a>(
     state: &'a Arc<DaemonState>,
@@ -674,7 +676,7 @@ async fn grant_of(state: &Arc<DaemonState>, access: &Access) -> Result<Secret, R
     .await
     .map_err(|fresh| match fresh {
         Fresh::Lapsed => {
-            format!("sign_in_again: Google ended Farik's sign-in to {GOOGLE_ADS}; sign in again")
+            format!("sign_in_again: Google ended Catervas's sign-in to {GOOGLE_ADS}; sign in again")
         }
         Fresh::NotConfirmed => format!(
             "connector_not_confirmed: {GOOGLE_ADS} is not as it was connected on this computer; \
@@ -703,7 +705,10 @@ struct ActivePlan {
 
 /// The lineage of the plan `id`: itself and every plan it replaces, `replaces` followed through
 /// the whole chain.
-pub(crate) fn lineage_of(plans: &[farik_store::marketing::MarketingPlan], id: &str) -> Vec<String> {
+pub(crate) fn lineage_of(
+    plans: &[catervas_store::marketing::MarketingPlan],
+    id: &str,
+) -> Vec<String> {
     let replaces = |id: &str| {
         plans
             .iter()
@@ -925,7 +930,7 @@ impl Writing<'_> {
         };
         let unread = |why: GoogleAdsError| {
             format!(
-                "not_in_marketing_plan: Farik could not read what the plan's ads have spent, so it \
+                "not_in_marketing_plan: Catervas could not read what the plan's ads have spent, so it \
                  cannot check the budget: {why}"
             )
         };
@@ -985,14 +990,14 @@ impl Writing<'_> {
             "not_in_marketing_plan: the plan is in {plan_currency}, but the ad account {account} \
              bills in {}",
             if account_currency.is_empty() {
-                "a currency Farik could not read"
+                "a currency Catervas could not read"
             } else {
                 account_currency
             }
         ))
     }
 
-    /// The record of a campaign Farik made for the lineage.
+    /// The record of a campaign Catervas made for the lineage.
     fn made(&self, campaign: &str) -> Result<&CreatedCampaign, Refusal> {
         self.created
             .iter()
@@ -1054,7 +1059,7 @@ impl Writing<'_> {
     }
 
     /// Records `marketing_campaign.created`, the session's agent, session and task on its
-    /// envelope, or says that Google made the campaign and Farik could not keep its record.
+    /// envelope, or says that Google made the campaign and Catervas could not keep its record.
     fn record(
         &self,
         input: &CampaignInput,
@@ -1063,7 +1068,7 @@ impl Writing<'_> {
     ) -> Result<(), Refusal> {
         let unrecorded = |why: String| {
             format!(
-                "record_failed: Google made {campaign}, paused, but Farik could not record it \
+                "record_failed: Google made {campaign}, paused, but Catervas could not record it \
                  ({why}); find it in Google Ads and tell the owner"
             )
         };
@@ -1202,8 +1207,8 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use farik_core::governor::permissions::SessionConnector;
-    use farik_protocol::event::{EventBody, EventKind};
+    use catervas_core::governor::permissions::SessionConnector;
+    use catervas_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
     use super::fixtures::{ACCOUNT, Ads, SESSION, code, create, register};
@@ -1216,7 +1221,7 @@ mod tests {
     #[test]
     fn google_ads_is_taken_out_by_a_dropped_entry_a_gone_agent_or_a_retirement() {
         use super::google_ads_taken_out;
-        use farik_core::team::Team;
+        use catervas_core::team::Team;
 
         let team = |change: &dyn Fn(&mut Value)| -> Team {
             crate::tools::fixtures::a_team_of_three(|wire| {
@@ -1229,7 +1234,7 @@ mod tests {
                 };
                 wire["agents"][3]["mcp_servers"] = json!([server("google-ads"), server("github")]);
                 let mut lia =
-                    farik_core::team::fixtures::an_agent_wire("lia", "marketing_specialist");
+                    catervas_core::team::fixtures::an_agent_wire("lia", "marketing_specialist");
                 lia["mcp_servers"] = json!([server("google-ads")]);
                 wire["agents"].as_array_mut().expect("agents").push(lia);
                 change(wire);
@@ -1305,7 +1310,7 @@ mod tests {
         assert!(refused.starts_with("not_in_marketing_plan: "), "{refused}");
         assert!(refused.contains("no campaign search-zzz"), "{refused}");
 
-        // A campaign Farik did not make for the plan, and one in another account.
+        // A campaign Catervas did not make for the plan, and one in another account.
         for campaign in [
             "customers/1234567890/campaigns/77",
             "customers/5555555555/campaigns/77",
@@ -1321,7 +1326,7 @@ mod tests {
                 refused.starts_with("not_in_marketing_plan: "),
                 "{campaign}: {refused}"
             );
-            // Nor is it Farik's to pause.
+            // Nor is it Catervas's to pause.
             let refused = ads
                 .call(
                     "set_campaign_status",
@@ -1375,7 +1380,7 @@ mod tests {
         assert_eq!(ads.made().len(), 1);
     }
 
-    /// The resource name Farik's answer to `create_search_campaign` gives the campaign.
+    /// The resource name Catervas's answer to `create_search_campaign` gives the campaign.
     fn campaign_of(answer: &Value) -> String {
         answer["campaign"].as_str().expect("a campaign").to_string()
     }
@@ -1448,11 +1453,11 @@ mod tests {
                 "500.00"
             )
         );
-        let read = farik_store::marketing::created_campaigns(&ads.harness.project.deps.log)
+        let read = catervas_store::marketing::created_campaigns(&ads.harness.project.deps.log)
             .expect("reads");
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].campaign, campaign);
-        assert_eq!(read[0].kind, farik_core::marketing::BudgetKind::Total);
+        assert_eq!(read[0].kind, catervas_core::marketing::BudgetKind::Total);
         assert_eq!(recorded[0].envelope.ids.agent_id.as_deref(), Some("kai"));
         assert_eq!(
             recorded[0].envelope.ids.session_id.as_deref(),
@@ -1590,7 +1595,7 @@ mod tests {
         ads.harness.project.record_by(
             Some("kai"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_campaign.created",
             &json!({
                 "plan": "MP-9", "key": "search-launch", "account": ACCOUNT,
@@ -1964,7 +1969,7 @@ mod tests {
                 entry["tools"][tool] = json!("network");
                 server.tools.insert(
                     tool.to_string(),
-                    farik_core::governor::permissions::ConnectorTag::Network,
+                    catervas_core::governor::permissions::ConnectorTag::Network,
                 );
             }
             server.kit = false;
@@ -2210,7 +2215,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn runs_a_tool_only_as_the_session_was_given_it() {
-        use farik_core::governor::permissions::ConnectorTag;
+        use catervas_core::governor::permissions::ConnectorTag;
 
         let ads = Ads::new("ads-tags").await;
         ads.plan("MP-1", None);
@@ -2287,11 +2292,11 @@ mod tests {
         ads.harness.project.record_by(
             Some("kai"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.proposed",
             &yen_plan("MP-2"),
         );
-        ads.harness.project.plan_approved("FRK-1", "MP-2", "");
+        ads.harness.project.plan_approved("CTV-1", "MP-2", "");
         ads.google.script(|script| {
             script.customers[0].1["currencyCode"] = json!("JPY");
         });
@@ -2349,11 +2354,11 @@ mod tests {
         ads.harness.project.record_by(
             Some("kai"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.proposed",
             &yen,
         );
-        ads.harness.project.plan_approved("FRK-1", "MP-2", "");
+        ads.harness.project.plan_approved("CTV-1", "MP-2", "");
 
         for (tool, input) in [
             (
@@ -2456,7 +2461,7 @@ mod tests {
         assert_eq!(ads.mutates().len(), 3);
 
         // A plan that replaces it and shortens the campaign: Google still ends it on the 22nd,
-        // and Farik cannot change that.
+        // and Catervas cannot change that.
         ads.plan_with("MP-3", Some("MP-2"), |body| {
             body["campaigns"][0]["budget"] = json!("300.00");
             body["campaigns"][0]["ends_on"] = json!("2026-10-10");
@@ -2549,7 +2554,7 @@ mod tests {
                 &held,
                 &ads.harness.project.deps,
                 "MP-1",
-                farik_core::marketing::EndReason::ByOwner,
+                catervas_core::marketing::EndReason::ByOwner,
                 None,
                 None,
             )
@@ -2573,7 +2578,7 @@ mod tests {
     /// A plan in yen with one campaign of 500.50 to 2026-10-22.
     fn yen_plan(plan: &str) -> Value {
         let mut body =
-            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
         body["plan"] = json!(plan);
         body["starts_on"] = json!("2026-09-20");
         body["ends_on"] = json!("2027-01-31");

@@ -10,7 +10,9 @@ use serde_json::Value;
 use crate::contract::pointer;
 
 pub use crate::contract::ValidationError;
-pub use crate::generated::sprint::{FarikSprint as Sprint, FarikSprintStatus as SprintStatus};
+pub use crate::generated::sprint::{
+    CatervasSprint as Sprint, CatervasSprintStatus as SprintStatus,
+};
 
 /// Wire fixtures for tests, in this crate and in others.
 pub mod fixtures;

@@ -14,7 +14,7 @@ produces:
   - completion notes
 forbidden:
   - pay, refund, or move money
-  - change Farik's budgets or anything in Stripe or a mailbox
+  - change Catervas's budgets or anything in Stripe or a mailbox
   - send, delete, move, or mark any email
   - publish anywhere
   - write application code

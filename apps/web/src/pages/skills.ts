@@ -1,5 +1,5 @@
-import type { DaemonClient } from "@farik/protocol-client";
-import { RpcError } from "@farik/protocol-client";
+import type { DaemonClient } from "@catervas/protocol-client";
+import { RpcError } from "@catervas/protocol-client";
 import { useEffect, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 
@@ -13,7 +13,7 @@ export type SkillFolder = {
 /** Which skill: the team's, or one agent's. */
 export type SkillAt = { level: "team" | "agent"; name: string };
 
-/** A skill Farik ships for a role, which `skill.get` answers with no hash. */
+/** A skill Catervas ships for a role, which `skill.get` answers with no hash. */
 export type SkillShipped = { level: "role"; name: string; role: string };
 
 /** The `skill.get` params for `skill` of `agent`. */

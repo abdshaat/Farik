@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
 
-use farik_core::contract::TaskId;
+use catervas_core::contract::TaskId;
 
 use crate::exec::{ExecError, ExecResult, Executor, supervise, workspace_relative};
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 
-/// The variables a host command keeps from Farik's own environment, when they are set. Nothing
+/// The variables a host command keeps from Catervas's own environment, when they are set. Nothing
 /// else passes, so no credential in the user's shell reaches a command (`docs/SPEC.md` 8.6).
 const PASSED_THROUGH: [&str; 4] = ["PATH", "HOME", "LANG", "TMPDIR"];
 
@@ -112,7 +112,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
-    use farik_core::contract::TaskId;
+    use catervas_core::contract::TaskId;
 
     use super::{HostSandbox, HostSandboxFactory};
     use crate::exec::{ExecError, Executor, OUTPUT_LIMIT_BYTES};
@@ -122,7 +122,7 @@ mod tests {
 
     fn fresh_root(test: &str) -> PathBuf {
         let root =
-            std::env::temp_dir().join(format!("farik-runtime-{}-{test}", std::process::id()));
+            std::env::temp_dir().join(format!("catervas-runtime-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a temporary directory can be made");
         root
@@ -184,7 +184,7 @@ mod tests {
     fn refuses_a_directory_outside_the_workspace() {
         let root = fresh_root("outside");
         let sandbox = HostSandbox::new(root.clone());
-        let marker = format!("farik-outside-marker-{}", std::process::id());
+        let marker = format!("catervas-outside-marker-{}", std::process::id());
         for cwd in ["/tmp", "../x"] {
             let refused = sandbox.run(&format!("touch {marker}"), cwd, 5 * SECOND, &no_env());
             assert_eq!(
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn creates_a_host_sandbox_rooted_at_the_worktree() {
         let root = fresh_root("factory");
-        let task_id = TaskId::try_from("FRK-1").expect("an id");
+        let task_id = TaskId::try_from("CTV-1").expect("an id");
         let sandbox = HostSandboxFactory
             .create("p", &task_id, &root, false)
             .expect("a host sandbox is always available");
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn creates_a_base_sandbox_rooted_at_the_worktree_it_is_given() {
         let root = fresh_root("base");
-        let task_id = TaskId::try_from("FRK-1").expect("an id");
+        let task_id = TaskId::try_from("CTV-1").expect("an id");
         let sandbox = HostSandboxFactory
             .create_base("p", &task_id, &root)
             .expect("a host sandbox is always available");
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn discards_a_host_sandbox_without_touching_the_workspace() {
         let root = fresh_root("discard");
-        let task_id = TaskId::try_from("FRK-1").expect("an id");
+        let task_id = TaskId::try_from("CTV-1").expect("an id");
         let sandbox = HostSandboxFactory
             .create("p", &task_id, &root, false)
             .expect("a host sandbox is always available");
@@ -371,10 +371,10 @@ mod tests {
     #[test]
     fn displays_each_error_in_words() {
         let image = SandboxError::ImageMissing {
-            image: "farik/sandbox:0.0.0".to_owned(),
+            image: "catervas/sandbox:0.0.0".to_owned(),
         }
         .to_string();
-        assert!(image.contains("farik/sandbox:0.0.0"), "{image}");
+        assert!(image.contains("catervas/sandbox:0.0.0"), "{image}");
         let docker = SandboxError::DockerUnavailable.to_string();
         assert!(docker.contains("docker"), "{docker}");
         let outside = ExecError::OutsideWorkspace {

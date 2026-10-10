@@ -40,7 +40,7 @@ export const MARKUP = "<b>not bold</b>";
 
 /** The row `waiting.list` gives while Ivo asks to read a site. */
 export const SITE_ROW = {
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	kind: "site_request",
 	agent_id: "ivo",
 	title: "Find a supplier for 500 pie boxes",
@@ -51,7 +51,7 @@ export const SITE_ROW = {
 	why: `They print pie boxes with your logo from 250 boxes, and their price list is on their site. ${MARKUP}`,
 };
 
-/** A name that looks like uline.com, one letter of it Cyrillic, as Farik keeps it. */
+/** A name that looks like uline.com, one letter of it Cyrillic, as Catervas keeps it. */
 export const SCRIPT_ROW = {
 	...SITE_ROW,
 	line: "Ivo asks to read xn--ulne-m9d.com",
@@ -68,9 +68,9 @@ const shop = (host: string, name: string, category: string) => ({
 	on: true,
 });
 
-/** `sites.list` as it answers for Ivo's page: Farik's sites by kind of shop, and the owner's own. */
+/** `sites.list` as it answers for Ivo's page: Catervas's sites by kind of shop, and the owner's own. */
 export const SITES = {
-	farik: [
+	catervas: [
 		shop("amazon.com", "Amazon", "general_marketplace"),
 		shop("ebay.com", "eBay", "general_marketplace"),
 		shop("walmart.com", "Walmart", "general_marketplace"),

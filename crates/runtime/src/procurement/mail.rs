@@ -9,18 +9,18 @@ use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use farik_core::contract::Role;
-use farik_core::governor::sites::site_of;
-use farik_core::team::private_folder;
-use farik_protocol::event::{
+use catervas_core::contract::Role;
+use catervas_core::governor::sites::site_of;
+use catervas_core::team::private_folder;
+use catervas_protocol::event::{
     EventBody, SellerMessageDiscardedBody, SellerMessageFailedBody, SellerMessagePurpose,
     SellerMessageSentBody,
 };
-use farik_store::StoreError;
-use farik_store::seller_mail::{
+use catervas_store::StoreError;
+use catervas_store::seller_mail::{
     MessageState, SellerMail, SellerMessageRecord, seller_mail, sent_on,
 };
-use farik_store::waiting::OrderSend;
+use catervas_store::waiting::OrderSend;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -36,7 +36,7 @@ use crate::mailbox::{
 use crate::tools::ToolDeps;
 use crate::tools::seller::{body_fault, hex, subject_fault};
 
-/// The line Farik adds under the signature when the owner has it on.
+/// The line Catervas adds under the signature when the owner has it on.
 fn disclosure(name: &str) -> String {
     format!("Written with an AI assistant and sent by {name} after reading it.")
 }
@@ -118,7 +118,7 @@ pub(crate) struct Prepared {
     password: Secret,
     trust: Trust,
     record: SellerMessageRecord,
-    /// The subject and the body as the owner sent them, and the text with what Farik adds.
+    /// The subject and the body as the owner sent them, and the text with what Catervas adds.
     subject: String,
     text: String,
     message_id: String,
@@ -306,7 +306,7 @@ pub(crate) fn prepare(
         return Err(refusal(
             "seller_send_limit",
             format!(
-                "You have sent {MOST_SENT_A_DAY} messages to sellers today, the most Farik sends \
+                "You have sent {MOST_SENT_A_DAY} messages to sellers today, the most Catervas sends \
                  in a day. Send the rest tomorrow."
             ),
         ));
@@ -337,7 +337,7 @@ pub(crate) fn prepare(
     })
 }
 
-/// Hands the message to the sending server: the one place a message leaves Farik, with no lock
+/// Hands the message to the sending server: the one place a message leaves Catervas, with no lock
 /// held.
 ///
 /// # Errors
@@ -399,7 +399,7 @@ pub(crate) fn record_sent(deps: &ToolDeps, prepared: &Prepared) -> Result<u64, M
     .map_err(mail_failed)
 }
 
-/// Records `seller_message.failed` with Farik's sentence for `error`, and answers the refusal
+/// Records `seller_message.failed` with Catervas's sentence for `error`, and answers the refusal
 /// the owner is shown; the message waits to be tried again.
 pub(crate) fn record_failed(
     deps: &ToolDeps,
@@ -589,10 +589,10 @@ pub fn add_order_send_fields(row: &mut Value, deps: &ToolDeps, send: &OrderSend)
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::command::Command;
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_store::purchase_orders::{OrderState, purchase_orders};
-    use farik_store::seller_mail::{MessageState, seller_mail};
+    use catervas_protocol::command::Command;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_store::purchase_orders::{OrderState, purchase_orders};
+    use catervas_store::seller_mail::{MessageState, seller_mail};
     use serde_json::{Value, json};
     use sha2::{Digest as _, Sha256};
 
@@ -802,7 +802,7 @@ mod tests {
     async fn refusals_by_state() {
         // No fixture mail is sent here: the mailbox is a settings file and a password.
         let harness = Harness::with_procurement("send-refusals");
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let send = |message: u64| {
             orchestrator.handle(Command::SellerMessageSend {
@@ -858,7 +858,7 @@ mod tests {
         harness.project.record_in(
             Some("proc"),
             Some("session-1"),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.drafted",
             &order_body(12),
         );
@@ -944,7 +944,7 @@ mod tests {
             harness.project.record_in(
                 Some("proc"),
                 Some("session-1"),
-                "FRK-1",
+                "CTV-1",
                 "seller_message.drafted",
                 &json!({
                     "message": message, "seller": "Pie Box Pros", "to": DANA.address,
@@ -1020,13 +1020,13 @@ mod tests {
         assert_eq!(story.events(&[EventKind::SellerMessageSent]).len(), 1);
     }
 
-    /// Ivo's order PO-12 on FRK-1, with its workbook, and the message that goes with it; answers
+    /// Ivo's order PO-12 on CTV-1, with its workbook, and the message that goes with it; answers
     /// the message's number.
     fn an_order_with_its_message(story: &Story, order: u64) -> u64 {
         story.harness.project.record_in(
             Some("proc"),
             Some("session-1"),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.drafted",
             &order_body(order),
         );
@@ -1085,7 +1085,7 @@ mod tests {
             assert_eq!((&ids.agent_id, &ids.session_id), (&None, &None));
             assert_eq!(
                 ids.task_id.as_ref().map(|task| task.as_str()),
-                Some("FRK-1")
+                Some("CTV-1")
             );
         }
         let EventBody::PurchaseOrderApproved(approved) = &events[0].body else {
@@ -1171,7 +1171,7 @@ mod tests {
             .expect_err("not this order's");
         assert!(reason(wrong).starts_with("seller_message_not_this_order: "));
         story.harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.rejected",
             &json!({ "order": 13, "note": "" }),
         );
@@ -1185,7 +1185,7 @@ mod tests {
         story
             .harness
             .project
-            .record("FRK-1", "purchase_order.expired", &json!({ "order": 14 }));
+            .record("CTV-1", "purchase_order.expired", &json!({ "order": 14 }));
         let expired = story
             .orchestrator()
             .handle(send_order(14, closed_by_time))
@@ -1328,7 +1328,7 @@ mod tests {
         assert_eq!(row["subject"], SUBJECT);
         assert_eq!(row["body"], BODY);
         assert_eq!(row["purpose"], "quote_request");
-        assert_eq!(row["task_id"], "FRK-1");
+        assert_eq!(row["task_id"], "CTV-1");
         assert_eq!(row["agent_id"], "proc");
         assert!(row.get("purchase_order").is_none() && row.get("sent_at").is_none());
         story.send(first, SUBJECT, BODY).await.expect("sent");
@@ -1372,7 +1372,7 @@ mod tests {
         assert_eq!(row["send"]["subject"], "Order PO-12");
         assert_eq!(row["send"]["body"], "Please find our order attached.");
         story.harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.rejected",
             &json!({ "order": 12, "note": "" }),
         );

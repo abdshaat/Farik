@@ -1,4 +1,4 @@
-//! A purchase order's lines and total (`docs/SPEC.md` 6.10, ADR 0039): the sums Farik writes into
+//! A purchase order's lines and total (`docs/SPEC.md` 6.10, ADR 0039): the sums Catervas writes into
 //! an order's workbook and records, exact in hundredths. Pure: the caller parses the amounts.
 
 use std::fmt;

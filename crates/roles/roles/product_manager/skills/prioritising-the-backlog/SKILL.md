@@ -26,10 +26,10 @@ sign-in fault users report most; two tasks wait on it." A tie hides a decision y
 ## 4. Mark a guess as a guess
 
 Where the value or the effort is your estimate, write "guess". Do not dress it as a measurement.
-Ask the user (`farik_ask_human`) when a guess decides the order and they would know.
+Ask the user (`catervas_ask_human`) when a guess decides the order and they would know.
 
 ## 5. Record it
 
-Farik keeps no priority field. When the session lets you post, put the order and each reason in the
-team channel with `farik_post_message`, without naming anyone; the sprint's planning reads the
+Catervas keeps no priority field. When the session lets you post, put the order and each reason in the
+team channel with `catervas_post_message`, without naming anyone; the sprint's planning reads the
 channel. Say only what changed since your last order.

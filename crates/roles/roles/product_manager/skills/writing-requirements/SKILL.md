@@ -1,6 +1,6 @@
 ---
 name: writing-requirements
-description: Use when an approved epic needs its requirements written under .farik/product/.
+description: Use when an approved epic needs its requirements written under .catervas/product/.
 ---
 
 # Writing requirements
@@ -10,8 +10,8 @@ Requirements are a product document. You write one only for an epic the user has
 ## 1. Check the approval first
 
 If the epic is not approved, stop: the governor refuses the write, and a document for work the user
-has not agreed to is a guess in writing. Write it with `farik_write_product_doc`, under
-`.farik/product/`.
+has not agreed to is a guess in writing. Write it with `catervas_write_product_doc`, under
+`.catervas/product/`.
 
 ## 2. The shape
 

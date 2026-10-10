@@ -1,19 +1,19 @@
 //! The purchase orders the Procurement Specialist suggests (`docs/SPEC.md` 6.10, ADR 0039), folded
 //! from the eight `purchase_order.` kinds of the project's log. An order is drafted by the agent;
-//! approved or rejected, placed, then received or closed by the owner; or expired by Farik. Only
+//! approved or rejected, placed, then received or closed by the owner; or expired by Catervas. Only
 //! an event whose envelope names no agent and no session counts as a step after the drafting, so
-//! no Farik tool and no agent can move an order or record what was paid; a placed order's follow-up
+//! no Catervas tool and no agent can move an order or record what was paid; a placed order's follow-up
 //! status is its own agent's, or the owner's correction of it.
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
-use farik_core::contract::TaskId;
-use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, PurchaseOrderDraftedBody, PurchaseOrderStatus,
+use catervas_core::contract::TaskId;
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventKind, PurchaseOrderDraftedBody, PurchaseOrderStatus,
 };
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::{EventLog, EventQuery, StoreError};
 
-/// How many days an order waits to be decided, or to be marked placed once approved, before Farik
+/// How many days an order waits to be decided, or to be marked placed once approved, before Catervas
 /// closes it by itself.
 pub const EXPIRES_AFTER_DAYS: i64 = 30;
 /// How many days after it was placed an order is expected, when no follow-up says another day.
@@ -34,7 +34,7 @@ pub enum OrderState {
     Received,
     /// The owner closed it: the seller cancelled or refunded it, or it was lost.
     Closed,
-    /// Farik closed it: nobody decided or placed it in time.
+    /// Catervas closed it: nobody decided or placed it in time.
     Expired,
 }
 
@@ -156,7 +156,7 @@ fn pay(record: &mut PurchaseOrderRecord, paid: Option<&str>, currency: Option<&s
 }
 
 /// The order a `purchase_order.drafted` event starts, if it names its task.
-fn drafted(event: &FarikEvent, body: &PurchaseOrderDraftedBody) -> Option<PurchaseOrderRecord> {
+fn drafted(event: &CatervasEvent, body: &PurchaseOrderDraftedBody) -> Option<PurchaseOrderRecord> {
     Some(PurchaseOrderRecord {
         order: body.order.get(),
         task_id: event.envelope.ids.task_id.clone()?,
@@ -181,11 +181,11 @@ fn find(orders: &mut [PurchaseOrderRecord], number: u64) -> Option<&mut Purchase
     orders.iter_mut().find(|record| record.order == number)
 }
 
-/// The order `event` is about, when it is in `from` and the event is the owner's or Farik's: its
+/// The order `event` is about, when it is in `from` and the event is the owner's or Catervas's: its
 /// envelope names no agent and no session.
 fn stepped<'a>(
     orders: &'a mut [PurchaseOrderRecord],
-    event: &FarikEvent,
+    event: &CatervasEvent,
     number: u64,
     from: &[OrderState],
 ) -> Option<&'a mut PurchaseOrderRecord> {
@@ -307,7 +307,7 @@ pub fn purchase_orders(log: &EventLog) -> Result<Vec<PurchaseOrderRecord>, Store
     Ok(orders)
 }
 
-/// When Farik closes the order by itself: 30 days after its drafting while it is drafted, 30 days
+/// When Catervas closes the order by itself: 30 days after its drafting while it is drafted, 30 days
 /// after its approval while it is approved. A placed order never expires.
 #[must_use]
 pub fn expires_at(record: &PurchaseOrderRecord) -> Option<DateTime<Utc>> {
@@ -367,11 +367,11 @@ mod tests {
         })
     }
 
-    /// Ivo drafts order `order` on FRK-1, in his session, at 10:`minute`.
+    /// Ivo drafts order `order` on CTV-1, in his session, at 10:`minute`.
     fn draft(board: &Board, minute: u32, order: u64, seller: &str) {
         board.session(
             at(10, minute),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-1",
             "purchase_order.drafted",
@@ -381,7 +381,7 @@ mod tests {
 
     /// The owner's step: an event with the order's task and no agent and no session.
     fn owner(board: &Board, minute: u32, kind: &str, body: Value) {
-        board.put(at(10, minute), Some("FRK-1"), None, kind, body);
+        board.put(at(10, minute), Some("CTV-1"), None, kind, body);
     }
 
     fn only(board: &Board) -> super::PurchaseOrderRecord {
@@ -397,7 +397,7 @@ mod tests {
         let drafted = only(&board);
         assert_eq!(drafted.state, OrderState::Drafted);
         assert_eq!(drafted.order, 1);
-        assert_eq!(drafted.task_id.as_str(), "FRK-1");
+        assert_eq!(drafted.task_id.as_str(), "CTV-1");
         assert_eq!(drafted.agent_id, "ivo");
         assert_eq!(drafted.drafted_at, at(10, 0));
         assert_eq!(drafted.drafted.seller.as_str(), "Acme");
@@ -422,7 +422,7 @@ mod tests {
         );
         board.session(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-2",
             "purchase_order.updated",
@@ -466,7 +466,7 @@ mod tests {
         // The agent cannot approve its own order, whatever the envelope's other fields say.
         board.session(
             at(10, 1),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-1",
             "purchase_order.approved",
@@ -474,14 +474,14 @@ mod tests {
         );
         board.put(
             at(10, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("ivo"),
             "purchase_order.approved",
             json!({ "order": 1, "note": "" }),
         );
         board.put_with(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             Some("session-1"),
             "purchase_order.approved",
@@ -499,7 +499,7 @@ mod tests {
         let by_agent = |minute, kind: &str, body: Value| {
             board.session(
                 at(10, minute),
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "ivo",
                 "session-1",
                 kind,
@@ -703,7 +703,7 @@ mod tests {
             } else {
                 board.session(
                     at(10, minute),
-                    Some("FRK-1"),
+                    Some("CTV-1"),
                     who,
                     "session-9",
                     "purchase_order.updated",
@@ -789,7 +789,7 @@ mod tests {
         // Another agent's, with no session: not the owner's correction, and not its agent's.
         board.put(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("kai"),
             "purchase_order.updated",
             problem.clone(),
@@ -797,7 +797,7 @@ mod tests {
         // A session with no agent: nothing the owner's command records.
         board.put_with(
             at(10, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             Some("session-9"),
             "purchase_order.updated",
@@ -808,7 +808,7 @@ mod tests {
         // The order's own agent with no session is the agent's, never the owner's.
         board.put(
             at(10, 5),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("ivo"),
             "purchase_order.updated",
             json!({ "order": 1, "status": "shipped", "note": "" }),
@@ -940,7 +940,7 @@ mod tests {
         // A status that gives a day replaces it.
         board.session(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-2",
             "purchase_order.updated",
@@ -952,7 +952,7 @@ mod tests {
         // A status with no day leaves the 30 days.
         board.session(
             at(10, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-2",
             "purchase_order.updated",

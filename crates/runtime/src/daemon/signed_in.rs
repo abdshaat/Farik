@@ -3,12 +3,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use farik_core::team::{CustomServer, CustomTransport};
+use catervas_core::team::{CustomServer, CustomTransport};
 
 use crate::claude::Secret;
 use crate::connectors::{ConnectorEntry, ConnectorSecrets, SecretAt, confirmed_entry};
 use crate::credential::CredentialError;
-use crate::registered_apps::app_for_farik_connector;
+use crate::registered_apps::app_for_catervas_connector;
 use crate::sign_in::{
     OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_app_sign_in, start_sign_in,
 };
@@ -223,7 +223,7 @@ pub(crate) struct Attempt {
     /// with the sign-in settings it was made with, and no other.
     transport: CustomTransport,
     issuer: String,
-    /// What Farik's own app for the service is called, when one signs in.
+    /// What Catervas's own app for the service is called, when one signs in.
     provider: Option<String>,
     started: tokio::time::Instant,
     outcome: Outcome,
@@ -231,7 +231,7 @@ pub(crate) struct Attempt {
 }
 
 /// What starting a sign-in answers: the attempt, the page the user is sent to, who signs them in, and,
-/// when one of Farik's own apps does, its name, the code the user types, and where it is installed.
+/// when one of Catervas's own apps does, its name, the code the user types, and where it is installed.
 pub(crate) struct Started {
     pub(crate) attempt: String,
     pub(crate) authorize_url: String,
@@ -281,11 +281,11 @@ fn refusal_of(error: &SignInError) -> String {
             "sign_in_not_offered: this server does not offer signing in".to_string()
         }
         SignInError::NotSupported => {
-            "sign_in_not_supported: this server offers signing in, but Farik cannot register with it"
+            "sign_in_not_supported: this server offers signing in, but Catervas cannot register with it"
                 .to_string()
         }
         SignInError::PkceNotSupported => {
-            "pkce_not_supported: this server's sign-in is not one Farik will use".to_string()
+            "pkce_not_supported: this server's sign-in is not one Catervas will use".to_string()
         }
         SignInError::Failed(why) => format!("sign_in_failed: {why}"),
         SignInError::Denied(_) | SignInError::Mismatch | SignInError::TimedOut | SignInError::Lapsed => {
@@ -353,10 +353,10 @@ impl DaemonState {
         let now = chrono::Utc::now();
         let started = match &server.transport {
             CustomTransport::Http { url, .. } => start_sign_in(url, oauth, apps, now).await,
-            // Farik's own connector signs in with the app the table names for it, and with none
+            // Catervas's own connector signs in with the app the table names for it, and with none
             // there is no way to.
             CustomTransport::Stdio { command, args, .. } => {
-                match app_for_farik_connector(apps, command, args) {
+                match app_for_catervas_connector(apps, command, args) {
                     Some(app) => start_app_sign_in(app, &oauth.scopes, now).await,
                     None => Err(SignInError::NotSupported),
                 }
@@ -402,7 +402,7 @@ impl DaemonState {
     }
 
     /// How the attempt `id` is going: `waiting`, `signed_in`, or `failed` with its reason's code
-    /// and Farik's words. Never a token.
+    /// and Catervas's words. Never a token.
     ///
     /// # Errors
     /// The attempt is not known, was used, ended or expired.
@@ -412,7 +412,7 @@ impl DaemonState {
         let attempt = map
             .get(id)
             .ok_or_else(|| unknown("there is no such sign-in under way"))?;
-        // What the person knows the service by: Farik's own app's name, else the issuer's host.
+        // What the person knows the service by: Catervas's own app's name, else the issuer's host.
         let host = attempt.provider.clone().unwrap_or_else(|| {
             reqwest::Url::parse(&attempt.issuer)
                 .ok()

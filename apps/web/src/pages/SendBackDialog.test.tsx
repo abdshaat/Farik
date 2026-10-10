@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -8,7 +8,7 @@ describe("send back dialog", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
 	it("sends_back_with_a_note", async () => {
-		const { container, s } = await openedGate("/tasks/FRK-1/accept", [
+		const { container, s } = await openedGate("/tasks/CTV-1/accept", [
 			"team.get",
 			"contract.get",
 			"task.history",
@@ -37,7 +37,7 @@ describe("send back dialog", () => {
 		]);
 		expect(
 			within(dialog).getByText(
-				"This is try 1 of 4. After the last, Farik stops and asks you what to do.",
+				"This is try 1 of 4. After the last, Catervas stops and asks you what to do.",
 			),
 		).toBeTruthy();
 
@@ -59,7 +59,7 @@ describe("send back dialog", () => {
 			command: {
 				command: "human_send_back",
 				body: {
-					task_id: "FRK-1",
+					task_id: "CTV-1",
 					subject: "result",
 					message: "The email never came.",
 					failed_criteria: ["C2"],
@@ -80,7 +80,7 @@ describe("send back dialog", () => {
 	});
 
 	it("sends_something_else_as_no_criterion", async () => {
-		const { s } = await openedGate("/tasks/FRK-1/accept", [
+		const { s } = await openedGate("/tasks/CTV-1/accept", [
 			"team.get",
 			"contract.get",
 			"task.history",
@@ -105,7 +105,7 @@ describe("send back dialog", () => {
 			command: {
 				command: "human_send_back",
 				body: {
-					task_id: "FRK-1",
+					task_id: "CTV-1",
 					subject: "result",
 					message: "The colours are wrong.",
 					failed_criteria: [],

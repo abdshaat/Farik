@@ -4,10 +4,10 @@
 //! the plan that wait for the owner, the sites the Procurement Specialist asked to read, the
 //! purchase orders it set up and the data sources it asked for.
 
-use farik_core::team::Team;
-use farik_store::files::ProjectFiles;
-use farik_store::waiting::WaitingKind;
-use farik_store::{EventLog, Projections};
+use catervas_core::team::Team;
+use catervas_store::files::ProjectFiles;
+use catervas_store::waiting::WaitingKind;
+use catervas_store::{EventLog, Projections};
 use serde_json::{Value, json};
 
 /// One thing that waits on the human.
@@ -85,13 +85,13 @@ pub(crate) fn waiting(
     files: &ProjectFiles,
     team: &Team,
 ) -> Result<Vec<Waiting>, String> {
-    let listed =
-        farik_store::waiting::waiting(projections, log, files, team).map_err(|e| e.to_string())?;
+    let listed = catervas_store::waiting::waiting(projections, log, files, team)
+        .map_err(|e| e.to_string())?;
     Ok(listed.into_iter().map(|item| describe(&item)).collect())
 }
 
 /// What waits, and the command that answers it.
-fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
+fn describe(item: &catervas_store::waiting::Waiting) -> Waiting {
     let id = item.task_id.as_str();
     let (what, command) = match item.kind {
         WaitingKind::Question => {
@@ -102,29 +102,29 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
                     item.agent_id.as_deref().unwrap_or_default(),
                     item.line
                 ),
-                format!("farik answer {seq} <your answer>"),
+                format!("catervas answer {seq} <your answer>"),
             )
         }
         WaitingKind::Approval => (
             "awaits your approval".to_string(),
-            format!("farik approve {id}, or farik resolve {id} refining <why>"),
+            format!("catervas approve {id}, or catervas resolve {id} refining <why>"),
         ),
         WaitingKind::Help => (
             format!(
                 "is escalated ({})",
                 item.reason.as_deref().unwrap_or("no reason recorded")
             ),
-            format!("farik resolve {id} <status> <message>"),
+            format!("catervas resolve {id} <status> <message>"),
         ),
         WaitingKind::Acceptance => (
             "may need your acceptance".to_string(),
-            format!("farik accept {id} --message <your review>"),
+            format!("catervas accept {id} --message <your review>"),
         ),
         WaitingKind::ToolApproval => {
             let seq = item.approval.as_ref().map_or(0, |ask| ask.approval);
             (
                 format!("waits: {}", item.line),
-                format!("farik tool approve {seq}, or farik tool refuse {seq}"),
+                format!("catervas tool approve {seq}, or catervas tool refuse {seq}"),
             )
         }
         WaitingKind::MarketingPlan => {
@@ -132,7 +132,7 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
             (
                 format!("waits: {}", item.line),
                 format!(
-                    "farik marketing plan approve {plan}, or farik marketing plan return {plan} \
+                    "catervas marketing plan approve {plan}, or catervas marketing plan return {plan} \
                      --reason <text>"
                 ),
             )
@@ -141,33 +141,37 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
             let post = item.post.as_ref().map_or(0, |ask| ask.post);
             (
                 format!("waits: {}", item.line),
-                format!("farik marketing post send {post}, or farik marketing post decline {post}"),
+                format!(
+                    "catervas marketing post send {post}, or catervas marketing post decline {post}"
+                ),
             )
         }
         WaitingKind::SiteRequest => {
             let request = item.site.as_ref().map_or(0, |ask| ask.request);
             (
                 format!("waits: {}", item.line),
-                format!("farik site approve {request}, or farik site decline {request}"),
+                format!("catervas site approve {request}, or catervas site decline {request}"),
             )
         }
         WaitingKind::PurchaseOrder => {
             let order = item.order.as_ref().map_or(0, |ask| ask.order);
             (
                 format!("waits: {}", item.line),
-                format!("farik order approve {order}, or farik order reject {order}"),
+                format!("catervas order approve {order}, or catervas order reject {order}"),
             )
         }
         WaitingKind::DataPipeline => {
             let pipeline = item.pipeline.as_ref().map_or(0, |ask| ask.pipeline);
             (
                 format!("waits: {}", item.line),
-                format!("farik pipeline approve {pipeline}, or farik pipeline decline {pipeline}"),
+                format!(
+                    "catervas pipeline approve {pipeline}, or catervas pipeline decline {pipeline}"
+                ),
             )
         }
         WaitingKind::Integration => (
             "waits for you to integrate it".to_string(),
-            format!("farik integrate {id}"),
+            format!("catervas integrate {id}"),
         ),
     };
     Waiting {
@@ -186,17 +190,17 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
-    use farik_core::contract::TaskId;
-    use farik_store::waiting::{
+    use catervas_core::contract::TaskId;
+    use catervas_store::waiting::{
         OrderAsk, PlanAsk, PostAsk, SiteAsk, Waiting as Listed, WaitingKind,
     };
+    use chrono::NaiveDate;
 
     use super::describe;
 
     fn a_plan_waiting() -> Listed {
         Listed {
-            task_id: "FRK-1".parse::<TaskId>().expect("a task id"),
+            task_id: "CTV-1".parse::<TaskId>().expect("a task id"),
             kind: WaitingKind::MarketingPlan,
             agent_id: Some("kai".to_string()),
             title: "Spring launch".to_string(),
@@ -241,7 +245,7 @@ mod tests {
             plan: None,
             post: Some(PostAsk {
                 post: 42,
-                channel: farik_core::marketing::PostChannel::Instagram,
+                channel: catervas_core::marketing::PostChannel::Instagram,
                 text: "We open on Wednesday.".to_string(),
                 media: Vec::new(),
                 at: chrono::DateTime::parse_from_rfc3339("2026-11-04T10:00:00+01:00")
@@ -287,15 +291,15 @@ mod tests {
         assert_eq!(
             waiting.lines(),
             [
-                "FRK-1 waits: Theo set up an order from Acme: 59.98 USD: farik order approve 23, or farik order reject 23"
+                "CTV-1 waits: Theo set up an order from Acme: 59.98 USD: catervas order approve 23, or catervas order reject 23"
             ]
         );
         let json = waiting.json();
         assert_eq!(json["order"], 23);
-        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(json["task_id"], "CTV-1");
         assert_eq!(
             json["command"],
-            "farik order approve 23, or farik order reject 23"
+            "catervas order approve 23, or catervas order reject 23"
         );
         assert!(json.get("request").is_none(), "an order names no request");
         assert!(
@@ -311,15 +315,15 @@ mod tests {
         assert_eq!(
             waiting.lines(),
             [
-                "FRK-1 waits: Kai proposes a marketing plan: Spring launch: farik marketing plan approve MP-1, or farik marketing plan return MP-1 --reason <text>"
+                "CTV-1 waits: Kai proposes a marketing plan: Spring launch: catervas marketing plan approve MP-1, or catervas marketing plan return MP-1 --reason <text>"
             ]
         );
         let json = waiting.json();
         assert_eq!(json["plan"], "MP-1");
-        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(json["task_id"], "CTV-1");
         assert_eq!(
             json["command"],
-            "farik marketing plan approve MP-1, or farik marketing plan return MP-1 --reason <text>"
+            "catervas marketing plan approve MP-1, or catervas marketing plan return MP-1 --reason <text>"
         );
         // The kinds that name no plan carry no `plan`.
         let mut question = a_plan_waiting();
@@ -335,15 +339,15 @@ mod tests {
         assert_eq!(
             waiting.lines(),
             [
-                "FRK-1 waits: Kai wants to post on Instagram: farik marketing post send 42, or farik marketing post decline 42"
+                "CTV-1 waits: Kai wants to post on Instagram: catervas marketing post send 42, or catervas marketing post decline 42"
             ]
         );
         let json = waiting.json();
         assert_eq!(json["post"], 42);
-        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(json["task_id"], "CTV-1");
         assert_eq!(
             json["command"],
-            "farik marketing post send 42, or farik marketing post decline 42"
+            "catervas marketing post send 42, or catervas marketing post decline 42"
         );
         assert!(json.get("plan").is_none(), "a post names no plan");
     }
@@ -355,12 +359,12 @@ mod tests {
         assert_eq!(
             waiting.lines(),
             [
-                "FRK-1 waits: Kai asks to read shop.example: farik site approve 17, or farik site decline 17"
+                "CTV-1 waits: Kai asks to read shop.example: catervas site approve 17, or catervas site decline 17"
             ]
         );
         let json = waiting.json();
         assert_eq!(json["request"], 17);
-        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(json["task_id"], "CTV-1");
         assert!(json.get("plan").is_none(), "a request names no plan");
         assert!(describe(&a_post_waiting()).json().get("request").is_none());
     }

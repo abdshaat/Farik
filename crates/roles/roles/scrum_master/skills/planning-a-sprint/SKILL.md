@@ -11,7 +11,7 @@ A sprint is a promise the team can keep. Plan from facts on the board, not from 
 
 The first message lists the candidates, each with its id, kind, most it may cost, and title, and the
 sprint's budget. Choose only from that list: an epic brings its tasks with it. Read the board
-(`farik_read_board`) to check dependencies, never to add a candidate.
+(`catervas_read_board`) to check dependencies, never to add a candidate.
 
 ## 2. Fit the budget
 
@@ -31,5 +31,5 @@ first rework.
 ## 5. Post, then plan
 
 Post the plan, with what did not fit and why in one line each, and the digest, with
-`farik_post_message`, in at most three posts. Then record the plan with one call of
-`farik_plan_sprint`, and end the session.
+`catervas_post_message`, in at most three posts. Then record the plan with one call of
+`catervas_plan_sprint`, and end the session.

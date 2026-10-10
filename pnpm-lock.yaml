@@ -124,13 +124,13 @@ importers:
 
   apps/web:
     dependencies:
-      '@farik/brand':
+      '@catervas/brand':
         specifier: workspace:*
         version: link:../../packages/brand
-      '@farik/protocol-client':
+      '@catervas/protocol-client':
         specifier: workspace:*
         version: link:../../packages/protocol-client
-      '@farik/ui':
+      '@catervas/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       react:
@@ -198,7 +198,7 @@ importers:
 
   packages/ui:
     dependencies:
-      '@farik/brand':
+      '@catervas/brand':
         specifier: workspace:*
         version: link:../brand
       react:

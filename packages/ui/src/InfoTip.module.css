@@ -2,22 +2,22 @@
 	position: relative;
 	display: inline-block;
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-small-family);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
 }
 
 .button {
 	display: inline-flex;
-	padding: 0 var(--farik-space-1);
+	padding: 0 var(--catervas-space-1);
 	border: 0;
 	background: none;
 	font: inherit;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	cursor: pointer;
 }
 
 .button:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -27,12 +27,12 @@
 	inset-block-start: 100%;
 	z-index: 1;
 	width: max-content;
-	max-width: min(20rem, calc(100vw - 2 * var(--farik-space-4)));
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-surface);
-	color: var(--farik-color-ink);
+	max-width: min(20rem, calc(100vw - 2 * var(--catervas-space-4)));
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
 	display: none;
 }
 

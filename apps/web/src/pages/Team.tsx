@@ -1,4 +1,4 @@
-import { AVATAR_URLS, type AvatarKey, Button, RoleTag } from "@farik/ui";
+import { AVATAR_URLS, type AvatarKey, Button, RoleTag } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -60,10 +60,10 @@ export type KitService = {
 	credentialKeys: string[];
 	/** What the kit lets the user pre-approve: each spending tool with its default calls each sprint (ADR 0037). */
 	allowances?: { tool: string; calls: number; what: string }[];
-	/** The service signs in through Farik Cloud, which comes with the web launch: this build cannot connect it yet (ADR 0044). */
+	/** The service signs in through Catervas Cloud, which comes with the web launch: this build cannot connect it yet (ADR 0044). */
 	atLaunch?: true;
 };
-/** The services Farik offers one role. */
+/** The services Catervas offers one role. */
 export type RoleKit = { role: Agent["role"]; connectors: KitService[] };
 /** A custom connector's state on this computer, as `team.get` answers it. */
 export type ConnectorState = {
@@ -81,9 +81,9 @@ export type ConnectorState = {
 	auth?: "keys" | "oauth";
 	/** For a sign-in: whether the service can be asked to forget it when it is removed. */
 	revokes?: boolean;
-	/** For a sign-in made with one of Farik's own apps: what the app is called (GitHub), which the page names in place of the address. */
+	/** For a sign-in made with one of Catervas's own apps: what the app is called (GitHub), which the page names in place of the address. */
 	provider?: string;
-	/** For the same: the page at the service where the user removes Farik's app. */
+	/** For the same: the page at the service where the user removes Catervas's app. */
 	settingsUrl?: string;
 	/** Where its keys or sign-in are kept, whenever some are. */
 	storedIn?: "keychain" | "file";
@@ -112,7 +112,7 @@ export function useTeam() {
 		effective: data?.agents ?? [],
 		/** Whether each custom connector runs on this computer (ADR 0030). */
 		connectors: data?.connectors ?? [],
-		/** What Farik offers each role on the team (ADR 0036). */
+		/** What Catervas offers each role on the team (ADR 0036). */
 		kits: data?.kits ?? [],
 		/** The most agents a team has that are not retired (SPEC F1), as the daemon says. */
 		most: data?.maxAgents,

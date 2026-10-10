@@ -5,8 +5,8 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use farik_core::contract::TaskStatus;
-use farik_core::team::{
+use catervas_core::contract::TaskStatus;
+use catervas_core::team::{
     AgentStatus, Team, TemplateApplied, apply_template, describe_change, template_from_team,
 };
 use serde_json::{Value, json};
@@ -31,7 +31,7 @@ pub(super) const METHODS: [&str; 4] = [
 /// The queries this module answers.
 pub(super) const QUERIES: [&str; 2] = ["templates.list", "template.preview"];
 
-const NO_STATE_FOLDER: &str = "Farik has no folder on this computer to keep saved teams in.";
+const NO_STATE_FOLDER: &str = "Catervas has no folder on this computer to keep saved teams in.";
 const TEMPLATE_CHANGED: &str = "This saved team was saved again since you looked at it. Go back and look at what changes \
      once more.";
 
@@ -54,7 +54,7 @@ fn failure(error: &TemplateError) -> Failure {
     }
 }
 
-/// Where saved teams are kept, or the refusal when Farik has no state folder.
+/// Where saved teams are kept, or the refusal when Catervas has no state folder.
 fn templates_of(state: &DaemonState) -> Result<&Templates, Failure> {
     web_of(state)?
         .templates
@@ -307,10 +307,10 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use farik_core::team::fixtures::an_agent_wire;
-    use farik_core::team::validate_template;
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::event_to_value;
+    use catervas_core::team::fixtures::an_agent_wire;
+    use catervas_core::team::validate_template;
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::event_to_value;
     use serde_json::{Value, json};
     use sha2::{Digest as _, Sha256};
 
@@ -353,7 +353,7 @@ mod tests {
         });
         let folder = std::env::temp_dir()
             .join(format!(
-                "farik-daemon-templates-{}-{name}",
+                "catervas-daemon-templates-{}-{name}",
                 std::process::id()
             ))
             .join("templates");
@@ -548,7 +548,7 @@ mod tests {
                 "The team has no daily spending limit.",
                 "Finished work opens a pull request for you.",
                 "Developers and Architects may no longer run commands.",
-                "Farik still runs every check itself; the agents cannot run commands.",
+                "Catervas still runs every check itself; the agents cannot run commands.",
                 "Developers may now push their work and open pull requests."
             ])
         );
@@ -572,7 +572,7 @@ mod tests {
         let (harness, folder) = templated("templates-switch", |wire| {
             wire["policy"]["plan_in_sprints"] = json!(true);
         });
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let mut off = pair();
         off["policy"]["plan_in_sprints"] = json!(false);
         saved(&folder, &off);
@@ -702,12 +702,12 @@ mod tests {
         };
 
         // Kai made the campaigns and so is retired, which deletes his keys; Lia never worked, so
-        // "Pair", which names neither, removes her, with her Google Ads. Farik pauses once, with
+        // "Pair", which names neither, removes her, with her Google Ads. Catervas pauses once, with
         // the sign-in of the first of them to lose it, since a second pause finds nothing left.
         let (ads, _lia) = kai_and_lia_with_google_ads("templates-remove-ads").await;
         let folder = std::env::temp_dir()
             .join(format!(
-                "farik-daemon-templates-{}-templates-remove-ads",
+                "catervas-daemon-templates-{}-templates-remove-ads",
                 std::process::id()
             ))
             .join("templates");
@@ -757,7 +757,7 @@ mod tests {
         let (ads, _lia) = kai_and_lia_with_google_ads("templates-lock").await;
         let folder = std::env::temp_dir()
             .join(format!(
-                "farik-daemon-templates-{}-templates-lock",
+                "catervas-daemon-templates-{}-templates-lock",
                 std::process::id()
             ))
             .join("templates");
@@ -785,7 +785,7 @@ mod tests {
         let (ads, _) = kai_and_lia_with_google_ads("templates-remove-ads-stale").await;
         let folder = std::env::temp_dir()
             .join(format!(
-                "farik-daemon-templates-{}-templates-remove-ads-stale",
+                "catervas-daemon-templates-{}-templates-remove-ads-stale",
                 std::process::id()
             ))
             .join("templates");
@@ -866,7 +866,7 @@ mod tests {
                 .project
                 .repo
                 .path
-                .join(".farik/agents")
+                .join(".catervas/agents")
                 .join(&removed)
                 .join("skills/gone-style/SKILL.md")
                 .exists()
@@ -880,12 +880,12 @@ mod tests {
             wire["agents"][2]["display_name"] = json!("Sol");
         });
         saved(&folder, &pair());
-        harness.in_progress("FRK-1", "dev-b", "dev-a");
+        harness.in_progress("CTV-1", "dev-b", "dev-a");
         // dev-b also holds a task not started, put on hold too, and one handed in, which is not.
-        harness.assigned("FRK-2", "dev-b", "dev-a");
-        harness.in_progress("FRK-3", "dev-b", "dev-a");
+        harness.assigned("CTV-2", "dev-b", "dev-a");
+        harness.in_progress("CTV-3", "dev-b", "dev-a");
         harness.project.moved(
-            "FRK-3",
+            "CTV-3",
             "in_progress",
             "verifying",
             &json!({ "actor": "assignee", "requested_by": "dev-b", "assignee": "dev-b", "reviewer": "dev-a" }),
@@ -894,7 +894,7 @@ mod tests {
         let shown = preview(&harness, "pair");
         assert_eq!(
             shown["effects"][0],
-            "Sol is retired. Sol's unfinished tasks, FRK-1 \u{201c}Add a login page\u{201d}, FRK-2 \
+            "Sol is retired. Sol's unfinished tasks, CTV-1 \u{201c}Add a login page\u{201d}, CTV-2 \
              \u{201c}Add a login page\u{201d}, are put on hold until you give them to someone.",
             "the preview names what a retirement puts on hold, by name, and only what is not handed in"
         );
@@ -953,7 +953,7 @@ mod tests {
             after[0]["body"],
             json!({ "agent_id": "dev-b", "status": "retired", "updated_by": "human" })
         );
-        for (blocked, task) in after[1..3].iter().zip(["FRK-1", "FRK-2"]) {
+        for (blocked, task) in after[1..3].iter().zip(["CTV-1", "CTV-2"]) {
             assert_eq!(blocked["task_id"], task);
             assert_eq!(blocked["body"]["to"], "blocked");
             assert_eq!(
@@ -964,7 +964,7 @@ mod tests {
         assert_eq!(
             after[3]["body"],
             json!({
-                "team_name": "Farik",
+                "team_name": "Catervas",
                 "agent_ids": ["pm", "dev-a", "dev-b", "noor"],
                 "updated_by": "human",
                 "template": "Pair",
@@ -1101,7 +1101,7 @@ mod tests {
             .project
             .deps
             .files
-            .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
             .expect("written");
         let events = seq_count(&harness);
         assert_eq!(
@@ -1192,7 +1192,7 @@ mod tests {
             .project
             .deps
             .files
-            .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
             .expect("written");
         let events = seq_count(&harness);
         drop(writing);

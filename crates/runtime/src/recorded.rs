@@ -43,16 +43,16 @@ impl Transcript {
     }
 }
 
-/// Answers a replayed call of one of Farik's tools: given the session's id, the tool's full name
-/// (`mcp__farik__<name>`), and its input, the answer the session is to see.
+/// Answers a replayed call of one of Catervas's tools: given the session's id, the tool's full name
+/// (`mcp__catervas__<name>`), and its input, the answer the session is to see.
 pub type ToolRunner =
     Arc<dyn Fn(String, String, Value) -> Pin<Box<dyn Future<Output = Value> + Send>> + Send + Sync>;
 
-/// The prefix Claude Code gives the tools of Farik's own MCP server.
-const FARIK_PREFIX: &str = "mcp__farik__";
+/// The prefix Claude Code gives the tools of Catervas's own MCP server.
+const CATERVAS_PREFIX: &str = "mcp__catervas__";
 
 /// Replays transcripts through `RuntimeAdapter`, one per session started or resumed, in the
-/// order given, and remembers what it was asked. With a `ToolRunner`, a replayed call of a Farik
+/// order given, and remembers what it was asked. With a `ToolRunner`, a replayed call of a Catervas
 /// tool is really made, and its answer replaces the recorded one.
 #[derive(Default)]
 pub struct RecordedAdapter {
@@ -83,7 +83,7 @@ impl RecordedAdapter {
     }
 
     /// An adapter that will play `transcripts` in order, calling `runner` for every replayed call
-    /// of a Farik tool and giving the session its answer in place of the recorded one. Each
+    /// of a Catervas tool and giving the session its answer in place of the recorded one. Each
     /// replay runs in a spawned `tokio` task, so a session must be started inside a runtime.
     #[must_use]
     pub fn with_tools(transcripts: Vec<Transcript>, runner: ToolRunner) -> RecordedAdapter {
@@ -192,7 +192,7 @@ impl SessionHandle for RecordedSession {
     }
 }
 
-/// Sends `events` in order, calling `runner` after each call of a Farik tool and putting its
+/// Sends `events` in order, calling `runner` after each call of a Catervas tool and putting its
 /// answer, as compact JSON, in the output of the next return of that tool. It stops when the
 /// receiver is gone, which is what an abort leaves.
 async fn replay(
@@ -216,7 +216,7 @@ async fn replay(
             other => other,
         };
         let call = match &event {
-            SessionEvent::ToolCalled { tool, input } if tool.starts_with(FARIK_PREFIX) => {
+            SessionEvent::ToolCalled { tool, input } if tool.starts_with(CATERVAS_PREFIX) => {
                 Some((tool.clone(), input.clone()))
             }
             _ => None,
@@ -248,7 +248,9 @@ mod tests {
     use serde_json::{Value, json};
     use tokio::sync::mpsc::error::TryRecvError;
 
-    use super::fixtures::{a_session_spec, reads_a_file, replays_farik_read_board, write_denied};
+    use super::fixtures::{
+        a_session_spec, reads_a_file, replays_catervas_read_board, write_denied,
+    };
     use super::{RecordedAdapter, ToolRunner, Transcript};
     use crate::session::{EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle};
     use crate::stream::StreamParser;
@@ -395,21 +397,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn answers_a_replayed_farik_tool_call_with_the_runner() {
+    async fn answers_a_replayed_catervas_tool_call_with_the_runner() {
         let (runner, calls) = recording_runner();
-        let adapter = RecordedAdapter::with_tools(vec![replays_farik_read_board()], runner);
+        let adapter = RecordedAdapter::with_tools(vec![replays_catervas_read_board()], runner);
         let spec = a_session_spec();
         let mut handle = adapter
             .start_session(spec.clone())
             .expect("a transcript is left");
         let events = read_to_the_end(handle.as_mut()).await;
-        let tool = "mcp__farik__farik_read_board".to_string();
+        let tool = "mcp__catervas__catervas_read_board".to_string();
         assert_eq!(
             *calls.lock().expect("no test panics holding it"),
             vec![(spec.session_id.clone(), tool.clone(), json!({}))]
         );
         let mut parser = StreamParser::default();
-        let expected: Vec<SessionEvent> = replays_farik_read_board()
+        let expected: Vec<SessionEvent> = replays_catervas_read_board()
             .lines()
             .flat_map(|line| parser.parse_line(line).expect("a recorded line parses"))
             .map(|event| match event {
@@ -446,11 +448,11 @@ mod tests {
     #[test]
     fn replays_without_tools_as_before() {
         let mut parser = StreamParser::default();
-        let expected: Vec<SessionEvent> = replays_farik_read_board()
+        let expected: Vec<SessionEvent> = replays_catervas_read_board()
             .lines()
             .flat_map(|line| parser.parse_line(line).expect("a recorded line parses"))
             .collect();
-        let adapter = RecordedAdapter::new(vec![replays_farik_read_board()]);
+        let adapter = RecordedAdapter::new(vec![replays_catervas_read_board()]);
         let mut handle = adapter
             .start_session(a_session_spec())
             .expect("a transcript is left");

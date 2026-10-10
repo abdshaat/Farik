@@ -1,5 +1,5 @@
 //! The forge a team's pull requests live on, driven through the `gh` program (`docs/SPEC.md`
-//! 5.14): Farik opens a pull request for an accepted task and reads whether the human merged it.
+//! 5.14): Catervas opens a pull request for an accepted task and reads whether the human merged it.
 //! `gh` runs in the repository root with the user's own environment and sign-in, as the store runs
 //! git; no credential of it enters a container (ADR 0012).
 
@@ -28,7 +28,7 @@ pub struct PullRequest {
     pub number: u64,
 }
 
-/// An issue on the forge, as `farik contract new --from` reads it.
+/// An issue on the forge, as `catervas contract new --from` reads it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Issue {
     /// Its title.
@@ -247,7 +247,7 @@ mod tests {
     }
 
     fn open(forge: &Forge) -> Result<PullRequest, ForgeError> {
-        forge.open_pull_request("main", "farik/FRK-1", "FRK-1: Add done", BODY)
+        forge.open_pull_request("main", "catervas/CTV-1", "CTV-1: Add done", BODY)
     }
 
     #[test]
@@ -276,7 +276,7 @@ mod tests {
                     "pr",
                     "list",
                     "--head",
-                    "farik/FRK-1",
+                    "catervas/CTV-1",
                     "--base",
                     "main",
                     "--state",
@@ -292,9 +292,9 @@ mod tests {
                     "--base",
                     "main",
                     "--head",
-                    "farik/FRK-1",
+                    "catervas/CTV-1",
                     "--title",
-                    "FRK-1: Add done",
+                    "CTV-1: Add done",
                     "--body-file",
                     "-",
                 ]),
@@ -384,13 +384,13 @@ mod tests {
     #[test]
     fn says_when_gh_is_missing() {
         let forge = Forge {
-            program: PathBuf::from("/nonexistent/farik/gh"),
+            program: PathBuf::from("/nonexistent/catervas/gh"),
             root: std::env::temp_dir(),
         };
         assert_eq!(
             open(&forge),
             Err(ForgeError::Missing {
-                program: "/nonexistent/farik/gh".to_string()
+                program: "/nonexistent/catervas/gh".to_string()
             })
         );
     }

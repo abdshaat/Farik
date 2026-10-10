@@ -1,5 +1,5 @@
-//! Farik's own MCP server over the central banks' exchange rates (`docs/SPEC.md` 6.7, ADR 0038),
-//! started by `farik connector fx`. It speaks to one fixed address, follows no redirect and uses
+//! Catervas's own MCP server over the central banks' exchange rates (`docs/SPEC.md` 6.7, ADR 0038),
+//! started by `catervas connector fx`. It speaks to one fixed address, follows no redirect and uses
 //! no proxy, checks every input before it leaves, and sends Frankfurter only currency codes and a
 //! day. What Frankfurter answers is data the agent reads under the untrusted-content notice.
 
@@ -49,7 +49,7 @@ pub fn tool_names() -> Vec<&'static str> {
 
 /// How long one call to Frankfurter may take.
 const TIMEOUT: Duration = Duration::from_secs(15);
-/// The most of an answer Farik reads.
+/// The most of an answer Catervas reads.
 const MAX_BODY: usize = 1024 * 1024;
 /// The most currencies `list_currencies` answers with.
 const MAX_CURRENCIES: usize = 400;
@@ -57,8 +57,8 @@ const MAX_CURRENCIES: usize = 400;
 const MAX_QUOTES: usize = 30;
 /// What a call says whenever Frankfurter does not answer with rates: never its own words.
 const REFUSED: &str = "Frankfurter could not answer that; check the codes and the date";
-/// The earliest day Farik asks Frankfurter for a rate. Frankfurter answers some earlier days (the
-/// dirham on 1997-06-02), so this is Farik's limit and not Frankfurter's first day.
+/// The earliest day Catervas asks Frankfurter for a rate. Frankfurter answers some earlier days (the
+/// dirham on 1997-06-02), so this is Catervas's limit and not Frankfurter's first day.
 const FIRST_DAY: (i32, u32, u32) = (1999, 1, 4);
 
 /// The server, speaking to one address.
@@ -94,7 +94,7 @@ impl Fx {
 
     fn build(api: &str, today: Option<NaiveDate>, timeout: Duration) -> Result<Self, FxError> {
         let client = reqwest::Client::builder()
-            // Nothing Frankfurter answers sends Farik anywhere else, and nothing is sent through a
+            // Nothing Frankfurter answers sends Catervas anywhere else, and nothing is sent through a
             // proxy.
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
@@ -195,7 +195,7 @@ impl Fx {
         Ok(Value::Array(listed))
     }
 
-    /// The day `input` names: an ISO date from the earliest day Farik allows to today in UTC.
+    /// The day `input` names: an ISO date from the earliest day Catervas allows to today in UTC.
     fn day(&self, input: &Value) -> Result<String, String> {
         let text = input["date"]
             .as_str()
@@ -248,7 +248,7 @@ impl Fx {
                 "Frankfurter could not be reached".to_string()
             }
         })?;
-        // Whatever it says other than rates, a redirect included, is one sentence of Farik's.
+        // Whatever it says other than rates, a redirect included, is one sentence of Catervas's.
         if !response.status().is_success() {
             return Err(REFUSED.to_string());
         }
@@ -303,7 +303,7 @@ fn code_of(value: &Value, what: &str) -> Result<String, String> {
 }
 
 /// The name the server gives itself.
-const SERVER_NAME: &str = "farik-fx";
+const SERVER_NAME: &str = "catervas-fx";
 
 /// Every tool, with what it takes.
 fn descriptors() -> Vec<Tool> {
@@ -370,7 +370,7 @@ impl ServerHandler for Fx {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        // As Farik's own server answers: protocol 2026-07-28 wants a list's freshness said.
+        // As Catervas's own server answers: protocol 2026-07-28 wants a list's freshness said.
         std::future::ready(Ok(ListToolsResult::with_all_items(descriptors())
             .with_ttl_ms(0)
             .with_cache_scope(CacheScope::Private)))
@@ -564,7 +564,10 @@ mod tests {
         let info = client
             .peer_info()
             .expect("the server's answer to initialize");
-        assert_eq!(info.server_info.as_ref().expect("a name").name, "farik-fx");
+        assert_eq!(
+            info.server_info.as_ref().expect("a name").name,
+            "catervas-fx"
+        );
         let tools = client.list_all_tools().await.expect("a list");
         let names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
         assert_eq!(names, tool_names());
@@ -846,7 +849,7 @@ mod tests {
     /// set to a fixture that records, asks a second fixture directly.
     #[tokio::test]
     async fn uses_no_proxy_from_the_environment() {
-        if let Ok(target) = std::env::var("FARIK_FX_PROXY_CHILD") {
+        if let Ok(target) = std::env::var("CATERVAS_FX_PROXY_CHILD") {
             Fx::with_today(&target, today())
                 .expect("a server")
                 .call("list_currencies", &json!({}))
@@ -859,7 +862,7 @@ mod tests {
         let through = proxy.address.trim_end_matches("/v2").to_string();
         let child = tokio::process::Command::new(std::env::current_exe().expect("this test"))
             .args(["--exact", "fx::tests::uses_no_proxy_from_the_environment"])
-            .env("FARIK_FX_PROXY_CHILD", &target.address)
+            .env("CATERVAS_FX_PROXY_CHILD", &target.address)
             .env("HTTP_PROXY", &through)
             .env("http_proxy", &through)
             .env("HTTPS_PROXY", &through)

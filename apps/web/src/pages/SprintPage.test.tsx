@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -35,9 +35,9 @@ const SPRINT = {
 	task_count: 3,
 	done_count: 1,
 	tasks: [
-		{ task_id: "FRK-14", title: "New checkout page", status: "verifying" },
-		{ task_id: "FRK-15", title: "Show sold-out items", status: "rejected" },
-		{ task_id: "FRK-12", title: "New photos", status: "accepted" },
+		{ task_id: "CTV-14", title: "New checkout page", status: "verifying" },
+		{ task_id: "CTV-15", title: "Show sold-out items", status: "rejected" },
+		{ task_id: "CTV-12", title: "New photos", status: "accepted" },
 	],
 	meetings: [
 		{ thread: "planning", first_seq: 40, at: "2026-09-21T09:05:00Z", posts: 3 },
@@ -86,8 +86,8 @@ describe("sprint page", () => {
 			within(tasks)
 				.getByRole("link", { name: "New checkout page" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-14");
-		expect(within(row("New checkout page")).getByText("FRK-14")).toBeTruthy();
+		).toBe("/tasks/CTV-14");
+		expect(within(row("New checkout page")).getByText("CTV-14")).toBeTruthy();
 		expect(
 			within(row("New checkout page")).getByText(en.statusReview),
 		).toBeTruthy();

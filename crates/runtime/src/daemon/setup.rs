@@ -1,4 +1,4 @@
-//! Setup mode (`docs/SPEC.md` section 4.1): the daemon `farik serve` runs before there is a
+//! Setup mode (`docs/SPEC.md` section 4.1): the daemon `catervas serve` runs before there is a
 //! project, answering the first-run wizard through a host the CLI gives it, since runtime cannot
 //! call the CLI's `init` or request filing.
 
@@ -23,7 +23,7 @@ pub enum SetupError {
 pub trait SetupHost: Send + Sync {
     /// Opens the git project at `path`, relative to home, for the team. While a project is being
     /// left, a folder that already has a team is refused unless `replace`, which deletes its
-    /// `.farik/` (ADR 0051).
+    /// `.catervas/` (ADR 0053).
     ///
     /// # Errors
     ///

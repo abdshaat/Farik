@@ -1,6 +1,6 @@
 ---
 name: using-finance-sources
-description: Use when Stripe, Digits or Kick is connected, or a number must come from outside Farik.
+description: Use when Stripe, Digits or Kick is connected, or a number must come from outside Catervas.
 ---
 
 # Using finance sources
@@ -20,7 +20,7 @@ change anything.
 ## 2. Every figure names its source and its date
 
 Write where each number came from beside it, such as Stripe, Digits or Kick, and the dates it
-covers. A number from outside Farik with no source is a guess, and you say it is one.
+covers. A number from outside Catervas with no source is a guess, and you say it is one.
 
 ## 3. Customers' details stay out of the books
 
@@ -44,4 +44,4 @@ requirement that needs it.
 ## 6. When none is connected
 
 If no service is connected, or the one you need is not, ask the user for the figure with
-`farik_ask_human`. Do not guess a number you could not read.
+`catervas_ask_human`. Do not guess a number you could not read.

@@ -1,11 +1,11 @@
-//! `farik run` and `farik plan` (`docs/SPEC.md` 8.2): a process that drives the project until
+//! `catervas run` and `catervas plan` (`docs/SPEC.md` 8.2): a process that drives the project until
 //! nothing needs doing, a stop, or Ctrl-C, and then says what waits on the human.
 
-use farik_runtime::claude::CredentialKind;
-use farik_runtime::credential::Source;
-use farik_runtime::orchestrator::{TickReport, TickRules, TickScope};
-use farik_runtime::sprints::backlog;
-use farik_store::files::Sandbox;
+use catervas_runtime::claude::CredentialKind;
+use catervas_runtime::credential::Source;
+use catervas_runtime::orchestrator::{TickReport, TickRules, TickScope};
+use catervas_runtime::sprints::backlog;
+use catervas_store::files::Sandbox;
 use serde_json::{Value, json};
 
 use crate::project::Project;
@@ -53,7 +53,7 @@ pub(crate) enum OnIdle {
     /// Return: the run is done.
     Return,
     /// Say why, once until a tick acts or the reason changes, and wait for a command, a stop, or
-    /// the recheck: `farik serve`.
+    /// the recheck: `catervas serve`.
     Wait,
 }
 
@@ -70,7 +70,7 @@ pub(crate) enum Ended {
     Failed(String),
 }
 
-/// `farik run` (every rule) or `farik plan` (the planning rules): start, tick until done, say
+/// `catervas run` (every rule) or `catervas plan` (the planning rules): start, tick until done, say
 /// what waits on the human, shut down. Answers the exit code.
 pub(crate) fn drive(project: &Project, rules: TickRules, io: &mut CliIo<'_>, as_json: bool) -> i32 {
     let runtime = match runtime() {
@@ -136,7 +136,7 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         let line = match source {
             Source::Environment => format!("credential: {name} ({what})"),
             Source::Keychain => format!("credential: {what}, kept in your computer's keychain"),
-            Source::File => format!("credential: {what}, kept in farik's credential.json"),
+            Source::File => format!("credential: {what}, kept in catervas's credential.json"),
         };
         printer.line(&line, &Value::Null);
     }
@@ -258,7 +258,7 @@ async fn wait_out(
     driver: &mut Driver,
     printer: &mut Printer<'_, '_>,
     presses: &mut u32,
-    wait: impl Future<Output = farik_runtime::orchestrator::Waited>,
+    wait: impl Future<Output = catervas_runtime::orchestrator::Waited>,
 ) {
     tokio::pin!(wait);
     loop {
@@ -317,7 +317,7 @@ pub(crate) async fn finish(
     match backlog_now(project) {
         Ok(0) => {}
         Ok(count) => printer.line(
-            &format!("start a sprint: {count} waits in the Backlog (`farik sprint start`)"),
+            &format!("start a sprint: {count} waits in the Backlog (`catervas sprint start`)"),
             &json!({ "backlog": { "count": count } }),
         ),
         Err(error) => {
@@ -398,7 +398,7 @@ pub(crate) fn report_error(printer: &mut Printer<'_, '_>, error: &str) {
     if printer.as_json {
         printer.note(&json!({ "error": error }).to_string());
     } else {
-        printer.note(&format!("farik: {error}"));
+        printer.note(&format!("catervas: {error}"));
     }
 }
 

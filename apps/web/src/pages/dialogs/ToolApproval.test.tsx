@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
@@ -36,7 +36,7 @@ async function opened(input: string) {
 	await answerQuery(s, "waiting.list", {
 		waiting: [
 			{
-				task_id: "FRK-14",
+				task_id: "CTV-14",
 				kind: "tool_approval",
 				agent_id: "theo",
 				title: "Sold-out badge on the menu",
