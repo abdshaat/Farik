@@ -136,7 +136,7 @@ Files: modified `packages/ui/src/Stepper.tsx`, `Stepper.module.css`, `Stepper.te
 - `links_the_earlier_steps` — with `current={2}` and `onPick`, exactly two buttons, named after steps 1 and 2; pressing the second calls `onPick(1)`; the current and later steps are not buttons.
 - `links_nothing_without_on_pick` — no buttons.
 
-- [ ] `feat(ui): link a stepper's earlier steps`
+- [x] `feat(ui): link a stepper's earlier steps`
 
 ### Task 7: setup can go back
 
