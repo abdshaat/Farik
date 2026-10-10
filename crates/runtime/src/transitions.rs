@@ -13,6 +13,7 @@ use std::time::Duration;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetState, SessionLedger};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
+use catervas_core::folders::human_of_twin;
 use catervas_core::generated::team::Judgment;
 pub(crate) use catervas_core::governor::done::result_awaits_human;
 use catervas_core::governor::done::{
@@ -47,6 +48,7 @@ use catervas_protocol::event::{
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use catervas_store::git::integration_branch;
+use catervas_store::git::stale_twins;
 
 /// Where the integration lock lives, under the project root.
 pub(crate) const INTEGRATION_LOCK: &str = ".catervas/local/integration.lock";
@@ -562,6 +564,14 @@ impl Transitions {
         }
 
         let review = self.review_of(team, &contract, &changed_paths, &history).1;
+        let stale_twins = if changed_paths
+            .iter()
+            .any(|path| human_of_twin(path).is_some())
+        {
+            stale_twins(&self.git, &integration_branch(team, &self.git)?)?
+        } else {
+            Vec::new()
+        };
         let (results, completion_note, review_note) = evidence_since_work_began(&history);
         let done = with_the_humans_acceptance(
             &contract,
@@ -578,7 +588,7 @@ impl Transitions {
                     ReviewState::Passed => DesignReviewNeed::Passed,
                     _ => DesignReviewNeed::Missing,
                 },
-                stale_twins: Vec::new(),
+                stale_twins,
             },
         );
         let hours = team.policy.blocked_limit_hours.get();
@@ -1543,6 +1553,7 @@ mod tests {
     use catervas_core::budget::default_session_limits;
     use catervas_core::contract::fixtures::a_contract_wire;
     use catervas_core::contract::{Role, TaskStatus, validate_contract};
+    use catervas_core::governor::done::{DoneRule, evaluate_done};
     use catervas_core::governor::gates::{Blocker, DependencyState, Rejection};
     use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
     use catervas_core::governor::transition::TransitionRefusal;
@@ -2541,6 +2552,70 @@ mod tests {
         assert_eq!(context.work.commits, 0);
         assert!(!context.work.worktree_clean);
         assert!(context.done.changed_paths.is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn fills_the_stale_twins_for_a_diff_that_changes_a_twin() {
+        let project = Project::new("stale-twins", a_team(|_| {}), at(12));
+        let product = "docs/catervas/product";
+        for file in ["spec.md", "spec.agent.md", "roadmap.md", "roadmap.agent.md"] {
+            project.repo.write(&format!("{product}/{file}"), "one\n");
+        }
+        project.repo.commit("the documents");
+        project.repo.write(&format!("{product}/spec.md"), "two\n");
+        project.repo.commit("the owner changed the spec");
+        for (task, twin) in [("CTV-1", "spec.agent.md"), ("CTV-2", "roadmap.agent.md")] {
+            project.file(task, |wire| {
+                wire["allowed_paths"] = json!(["docs/catervas/**"]);
+            });
+            project.created(task, "verifying");
+            let worktree = project
+                .repo
+                .path
+                .join(".catervas/local/worktrees")
+                .join(task);
+            project
+                .repo
+                .adapter()
+                .create_worktree(&worktree, &project.branch(task), "main")
+                .expect("the worktree is made");
+            std::fs::write(worktree.join(product).join(twin), "rewritten\n").expect("written");
+            git_in(&worktree, &["add", "-A"]);
+            git_in(&worktree, &["commit", "-m", "the twin"]);
+        }
+        let done = |task: &str| {
+            let context = project.context(
+                &a_request(
+                    task,
+                    TaskStatus::Verifying,
+                    TransitionActor::Assignee,
+                    Some("dev-a"),
+                ),
+                &TransitionAsk::default(),
+            );
+            let contract = project
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the contract");
+            let failed: Vec<DoneRule> = evaluate_done(&contract, &context.done)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .map(|failure| failure.rule)
+                .collect();
+            (context.done.stale_twins, failed)
+        };
+
+        let (stale, failed) = done("CTV-1");
+        assert_eq!(stale, [format!("{product}/spec.agent.md")]);
+        assert!(!failed.contains(&DoneRule::PairChangedAlone), "{failed:?}");
+        let (stale, failed) = done("CTV-2");
+        assert!(
+            !stale.contains(&format!("{product}/roadmap.agent.md")),
+            "{stale:?}"
+        );
+        assert!(failed.contains(&DoneRule::PairChangedAlone), "{failed:?}");
     }
 
     #[test]

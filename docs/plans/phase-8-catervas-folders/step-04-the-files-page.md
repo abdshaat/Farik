@@ -140,7 +140,7 @@ Files: `transitions.rs` (the `DoneEvidence` at `:543` gains `stale_twins` from `
 - `the_team_rules_say_which_twins_are_stale` (`prompt.rs`) — with `stale_twins: [docs/catervas/product/roadmap.agent.md]` the Team rules end with the Decisions' line after the folders line; with none they end with the folders line. RED.
 - `the_prompt_names_a_stale_twin` (`orchestrator/session.rs`, integration) — after a commit of `roadmap.md` alone on main, the Product Manager's triage session prompt holds `- stale twins: docs/catervas/product/roadmap.agent.md.`; with the integration branch named in the team's policy missing from git, the session still starts, with no stale line. RED.
 
-- [ ] `feat(runtime): tell sessions and the Definition of Done which twins are stale`
+- [x] `feat(runtime): tell sessions and the Definition of Done which twins are stale`
 
 ### Task 5: The owner's edit and the re-derive in the log
 

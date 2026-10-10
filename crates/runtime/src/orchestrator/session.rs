@@ -26,6 +26,7 @@ use catervas_protocol::event::{
 };
 use catervas_roles::{ConnectorDefinition, builtin_connector, load_role};
 use catervas_store::EventQuery;
+use catervas_store::git::{integration_branch, stale_twins};
 use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
@@ -1059,6 +1060,11 @@ fn session_spec_without(
         .active_agents()
         .map(|agent| Role::from(agent.role))
         .collect();
+    // ponytail: the runtime has no log to warn in, so a git error leaves the line out; warn
+    // there once it has one.
+    let stale_twins = integration_branch(team, &deps.tools.git)
+        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
+        .unwrap_or_default();
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
@@ -1076,6 +1082,7 @@ fn session_spec_without(
         closing: closing_instruction(ask),
         connectors: &connectors,
         active_roles: &active_roles,
+        stale_twins: &stale_twins,
     })?;
     let limits = budget_state(
         &deps.tools.projections,
@@ -1923,6 +1930,64 @@ mod tests {
             "{prompt}"
         );
         assert!(!prompt.contains("docs/catervas/architecture/"), "{prompt}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_prompt_names_a_stale_twin() {
+        let triage_prompt = |harness: &Harness| {
+            let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+            let deps = &orchestrator.deps;
+            let team = deps.tools.files.read_team().expect("the team");
+            let contract = deps
+                .tools
+                .files
+                .read_contract(&"CTV-1".parse().expect("a task id"))
+                .expect("the contract");
+            session_spec(
+                deps,
+                &team,
+                &SessionAsk {
+                    agent: agent(&team, "pm"),
+                    contract: Some(&contract),
+                    purpose: SessionPurpose::Triage,
+                    cwd: deps.tools.files.root().to_path_buf(),
+                    executor: None,
+                    read_only: false,
+                    only_tool: Some(TRIAGE_TOOL),
+                    tools: None,
+                    in_reply_to: None,
+                    thread: None,
+                    initial_prompt: String::new(),
+                    pipeline: None,
+                },
+            )
+            .expect("the session starts")
+            .system_prompt
+        };
+        let harness = Harness::new("session-stale-twin", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
+        let repo = &harness.project.repo;
+        for file in ["roadmap.md", "roadmap.agent.md"] {
+            repo.write(&format!("docs/catervas/product/{file}"), "one\n");
+        }
+        repo.commit("the documents");
+        let prompt = triage_prompt(&harness);
+        assert!(!prompt.contains("stale twins"), "{prompt}");
+        repo.write("docs/catervas/product/roadmap.md", "two\n");
+        repo.commit("the owner changed the roadmap");
+        let prompt = triage_prompt(&harness);
+        assert!(
+            prompt.contains("- stale twins: docs/catervas/product/roadmap.agent.md."),
+            "{prompt}"
+        );
+
+        let missing = Harness::new("session-stale-twin-missing", |wire| {
+            wire["policy"]["integration_branch"] = json!("nowhere");
+        });
+        missing.file("CTV-1", "draft", |_| {});
+        let prompt = triage_prompt(&missing);
+        assert!(!prompt.contains("stale twins"), "{prompt}");
     }
 
     #[test]

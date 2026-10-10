@@ -3,7 +3,7 @@
 
 use catervas_core::contract::{Role, TaskContract};
 use catervas_core::criteria::CriteriaLibrary;
-use catervas_core::folders::folders_line;
+use catervas_core::folders::{folders_line, stale_line};
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::team::{Agent, TeamPermissions};
@@ -53,6 +53,9 @@ pub struct PromptInput<'a> {
     pub connectors: &'a [String],
     /// The roles the team has an active agent of, for the Team rules' line about folders.
     pub active_roles: &'a [Role],
+    /// The `.agent.md` twins that are behind the document for people beside them, for the Team
+    /// rules' line about them (`docs/SPEC.md` 5.17).
+    pub stale_twins: &'a [String],
 }
 
 /// The prompt's section titles, each written as a `## ` heading, in the one order every prompt
@@ -221,7 +224,7 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
         Some(rules_section(
             input.rules,
             input.role.id,
-            input.active_roles,
+            (input.active_roles, input.stale_twins),
         )),
         if input.criteria.criteria.is_empty() {
             None
@@ -437,8 +440,12 @@ fn you_section(agent: &Agent) -> String {
 
 /// One line per rule, named as `team.yaml` names it; a list rule with nothing in it says nothing,
 /// except `document_paths`, whose empty list means no task but a Developer's can be ready. The
-/// last line names the team's folders (`docs/SPEC.md` 5.17).
-fn rules_section(rules: &TeamRules, role: Role, active_roles: &[Role]) -> String {
+/// last line names the team's folders, and after it the twins that are stale (`docs/SPEC.md` 5.17).
+fn rules_section(
+    rules: &TeamRules,
+    role: Role,
+    (active_roles, stale_twins): (&[Role], &[String]),
+) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
     };
@@ -465,6 +472,7 @@ fn rules_section(rules: &TeamRules, role: Role, active_roles: &[Role]) -> String
             )
         }),
         Some(folders_line(role, active_roles)),
+        stale_line(stale_twins),
     ]
     .into_iter()
     .flatten()
@@ -665,6 +673,7 @@ mod tests {
                 closing: None,
                 connectors: &[],
                 active_roles: &[],
+                stale_twins: &[],
             }
         }
     }
@@ -1151,6 +1160,39 @@ mod tests {
         assert_eq!(
             headings, wanted,
             "the headings are still PROMPT_SECTIONS, in order"
+        );
+    }
+
+    #[test]
+    fn the_team_rules_say_which_twins_are_stale() {
+        let inputs = Inputs::new(Role::Architect, "architect");
+        let stale = ["docs/catervas/product/roadmap.agent.md".to_string()];
+        let prompt = assembled(&PromptInput {
+            stale_twins: &stale,
+            ..inputs.full(SessionPurpose::Refine)
+        });
+        let rules = section(&prompt, "Team rules");
+        let mut lines = rules.lines().rev();
+        assert_eq!(
+            lines.next(),
+            Some(
+                "- stale twins: docs/catervas/product/roadmap.agent.md. Each is behind the document for people beside it, which the owner changed: read that document as well until the twin is brought up to date."
+            )
+        );
+        assert!(
+            lines
+                .next()
+                .is_some_and(|line| line.starts_with("- folders:"))
+        );
+
+        let prompt = assembled(&inputs.full(SessionPurpose::Refine));
+        let rules = section(&prompt, "Team rules");
+        assert!(
+            rules
+                .lines()
+                .last()
+                .is_some_and(|line| line.starts_with("- folders:")),
+            "{rules}"
         );
     }
 
