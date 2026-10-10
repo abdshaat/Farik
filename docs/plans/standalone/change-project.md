@@ -152,7 +152,7 @@ Files: modified `crates/runtime/src/connectors.rs` (functions and `mod tests`, `
 - `keys_copied_file_only_when_something_was_copied` — `write_keys_copied(root, from, &[])` leaves no file; with two, `keys_copied(root)` is `Some((from as a string, 2))` and the file's `keys[*]` hold `agent_id` and `server`.
 - `keys_copied_is_none_without_a_readable_file` — no file, and a file that is not JSON, both answer `None`.
 
-- [ ] `feat(runtime): copy an agent's connector keys to another project`
+- [x] `feat(runtime): copy an agent's connector keys to another project`
 
 ### Task 5: leaving, in the daemon
 

@@ -647,33 +647,89 @@ const MAIL_FOLDER: &str = "mail";
 /// Whether the mailbox files can be kept: the folder `.farik/local/procurement/mail` of `deps`'s
 /// project, made owner-only, refused if it or any part of its path is a link.
 pub(crate) fn mail_dir(deps: &ToolDeps) -> Result<std::path::PathBuf, MailboxRefusal> {
-    use std::os::unix::fs::DirBuilderExt as _;
-    let failed = |why: String| {
+    mail_dir_in(deps.files.root()).map_err(|why| {
         MailboxRefusal::new(
             "mailbox_files",
             format!("The mailbox\u{2019}s folder could not be made: {why}"),
         )
-    };
+    })
+}
+
+/// [`mail_dir`] for the project at `root`; the reason, when it cannot be made.
+fn mail_dir_in(root: &Path) -> Result<std::path::PathBuf, String> {
+    use std::os::unix::fs::DirBuilderExt as _;
     let folder = private_folder(Role::ProcurementSpecialist)
-        .ok_or_else(|| failed("the role has no folder".to_string()))?;
-    let mut at = deps.files.root().to_path_buf();
+        .ok_or_else(|| "the role has no folder".to_string())?;
+    let mut at = root.to_path_buf();
     for part in folder.split('/').chain([MAIL_FOLDER]) {
         at.push(part);
         match std::fs::symlink_metadata(&at) {
             Ok(meta) if meta.file_type().is_symlink() => {
-                return Err(failed(format!("{} is a link", at.display())));
+                return Err(format!("{} is a link", at.display()));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 std::fs::DirBuilder::new()
                     .mode(0o700)
                     .create(&at)
-                    .map_err(|error| failed(error.to_string()))?;
+                    .map_err(|error| error.to_string())?;
             }
-            Err(error) => return Err(failed(error.to_string())),
+            Err(error) => return Err(error.to_string()),
         }
     }
     Ok(at)
+}
+
+/// Copies the procurement mailbox's `mail/mailbox.json` and `mail/ledger.json` from the project at
+/// `from` to the one at `to`, so that a project taken on with the same team finds the mailbox
+/// connected, and mail already read is not read again. The folder is made as [`mail_dir`] makes
+/// it, refused if any part of it is a link; each file is written owner-only. Answers the address,
+/// or `None` (and writes nothing) when `from` has no `mailbox.json`. The password is not here: it
+/// is a secret, and `connectors::copy_keys` copies it.
+///
+/// # Errors
+///
+/// The files could not be read or written, or the folder in `to` is, or lies under, a link.
+pub fn carry_mailbox(from: &Path, to: &Path) -> std::io::Result<Option<String>> {
+    let Some(folder) = private_folder(Role::ProcurementSpecialist) else {
+        return Ok(None);
+    };
+    let old = from.join(folder).join(MAIL_FOLDER);
+    let settings = match std::fs::read(old.join("mailbox.json")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        read => read?,
+    };
+    let invalid = |why: String| std::io::Error::new(std::io::ErrorKind::InvalidData, why);
+    let address = serde_json::from_slice::<Value>(&settings)
+        .map_err(|error| invalid(error.to_string()))?
+        .get("address")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("mailbox.json has no address".to_string()))?
+        .to_string();
+    let ledger = match std::fs::read(old.join("ledger.json")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        read => Some(read?),
+    };
+    let _held = crate::locked(&MAIL);
+    let dir = mail_dir_in(to).map_err(std::io::Error::other)?;
+    crate::write_private(&dir.join("mailbox.json"), &settings)?;
+    if let Some(ledger) = ledger {
+        crate::write_private(&dir.join("ledger.json"), &ledger)?;
+    }
+    Ok(Some(address))
+}
+
+/// The body of `mailbox.connected` for the procurement mailbox at `address`: what
+/// [`connect_mailbox`] records, and what a project taken on with a carried mailbox records.
+///
+/// # Errors
+///
+/// `address` is not one the event takes.
+pub fn mailbox_connected(address: &str) -> Result<EventBody, String> {
+    Ok(EventBody::MailboxConnected(MailboxConnectedBody {
+        purpose: MailboxPurpose::Procurement,
+        address: address.parse().map_err(|error| format!("{error}"))?,
+    }))
 }
 
 /// What the owner connects: the mailbox's settings but the password, with the provider as chosen
@@ -813,10 +869,7 @@ pub(crate) async fn connect_mailbox(
         "ledger.json",
         &serde_json::to_value(&ledger).map_err(mail_failed)?,
     )?;
-    let body = EventBody::MailboxConnected(MailboxConnectedBody {
-        purpose: MailboxPurpose::Procurement,
-        address: settings.address.parse().map_err(mail_failed)?,
-    });
+    let body = mailbox_connected(&settings.address).map_err(mail_failed)?;
     record_unattended(deps, body, None)
         .map(|_| ())
         .map_err(mail_failed)
@@ -1561,6 +1614,97 @@ mod tests {
     }
 
     // The procurement mailbox (step 10f): connecting, disconnecting and what the page is told.
+    fn carry_scratch(test: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("farik-carry-{}-{test}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a folder");
+        dir
+    }
+
+    fn old_mail(old: &std::path::Path) -> std::path::PathBuf {
+        let mail = old.join(".farik/local/procurement/mail");
+        std::fs::create_dir_all(&mail).expect("the old mail folder");
+        mail
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn carry_mailbox_copies_the_settings_and_the_ledger() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let base = carry_scratch("copies");
+        let (old, new) = (base.join("old"), base.join("new"));
+        std::fs::create_dir_all(&new).expect("the new root");
+        let mail = old_mail(&old);
+        let settings = br#"{"address":"buy@shop.test","name":"Buy"}"#;
+        let ledger = br#"{"last_uid":42}"#;
+        std::fs::write(mail.join("mailbox.json"), settings).expect("settings");
+        std::fs::write(mail.join("ledger.json"), ledger).expect("ledger");
+
+        assert_eq!(
+            super::carry_mailbox(&old, &new).expect("carried"),
+            Some("buy@shop.test".to_string())
+        );
+        let there = new.join(".farik/local/procurement/mail");
+        for (name, bytes) in [
+            ("mailbox.json", &settings[..]),
+            ("ledger.json", &ledger[..]),
+        ] {
+            assert_eq!(std::fs::read(there.join(name)).expect("copied"), bytes);
+            let mode = std::fs::metadata(there.join(name))
+                .expect("meta")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let mode = std::fs::metadata(&there)
+            .expect("meta")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
+
+        let (bare_old, bare_new) = (base.join("bare-old"), base.join("bare-new"));
+        std::fs::create_dir_all(&bare_old).expect("a root");
+        std::fs::create_dir_all(&bare_new).expect("a root");
+        assert_eq!(
+            super::carry_mailbox(&bare_old, &bare_new).expect("none"),
+            None
+        );
+        assert!(!bare_new.join(".farik/local/procurement/mail").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn carry_mailbox_refuses_a_linked_mail_folder() {
+        let base = carry_scratch("linked");
+        let (old, new) = (base.join("old"), base.join("new"));
+        let mail = old_mail(&old);
+        std::fs::write(mail.join("mailbox.json"), br#"{"address":"buy@shop.test"}"#)
+            .expect("settings");
+        let elsewhere = base.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("a target");
+        std::fs::create_dir_all(new.join(".farik/local")).expect("the new root");
+        std::os::unix::fs::symlink(&elsewhere, new.join(".farik/local/procurement"))
+            .expect("a link");
+
+        assert!(super::carry_mailbox(&old, &new).is_err());
+        assert_eq!(std::fs::read_dir(&elsewhere).expect("reads").count(), 0);
+    }
+
+    #[test]
+    fn mailbox_connected_is_what_connect_mailbox_records() {
+        let EventBody::MailboxConnected(body) =
+            super::mailbox_connected("buy@shop.test").expect("a body")
+        else {
+            panic!("a connection");
+        };
+        assert_eq!(body.address.as_str(), "buy@shop.test");
+        assert_eq!(
+            body.purpose,
+            farik_protocol::event::MailboxPurpose::Procurement
+        );
+        assert!(super::mailbox_connected("not an address").is_err());
+    }
+
     mod mailbox {
         use farik_protocol::event::{EventBody, EventKind};
 
