@@ -16,16 +16,16 @@ pub use crate::generated::command::CommandName;
 use crate::generated::command::{
     AgentUpdateBody, CatervasCommand as CommandWire, ChatMessagePostBody, ConnectorConnectBody,
     ConnectorDisconnectBody, DataPipelineDecideBody, DataPipelineDecideBodyDecision, EmptyBody,
-    EscalationResolveBody, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
-    HumanSendBackBodySubject, MarketingPlanDecideBody, MarketingPlanDecideBodyDecision,
-    MarketingPlanEndBody, MessagePostBody, PurchaseOrderDecideBody,
-    PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody, PurchaseOrderStepBody,
-    PurchaseOrderUpdateBody, QuestionAnswerBody, RenewalDismissBody, RequestTriageBody,
-    RequestTriageBodySize, SellerMessageDiscardBody, SellerMessageSendBody, SellerReplyDismissBody,
-    SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel,
-    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
-    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
-    ToolDecisionBody,
+    EscalationResolveBody, FolderChangeIntegrateBody, HumanAcceptBody, HumanAcceptBodySubject,
+    HumanSendBackBody, HumanSendBackBodySubject, MarketingPlanDecideBody,
+    MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody,
+    PurchaseOrderDecideBody, PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody,
+    PurchaseOrderStepBody, PurchaseOrderUpdateBody, QuestionAnswerBody, RenewalDismissBody,
+    RequestTriageBody, RequestTriageBodySize, SellerMessageDiscardBody, SellerMessageSendBody,
+    SellerReplyDismissBody, SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody,
+    SkillConfirmBody, SkillLevel, SkillRemoveBody, SkillSaveBody, SocialPostDecideBody,
+    SocialPostDecideBodyDecision, SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody,
+    TaskTransitionBody, ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -342,6 +342,12 @@ pub enum Command {
         /// The reply's number.
         reply: u64,
     },
+    /// Add folder change `change` to the project now, whatever escalations it carries
+    /// (`catervas integrate folder-<n>`).
+    FolderChangeIntegrate {
+        /// The change's number, the n of `docs/folder-<n>`.
+        change: u64,
+    },
     /// Approve an order and email it, with its workbook, to its seller in one press, which records
     /// it placed: the owner pays the seller outside Catervas (ADR 0039).
     PurchaseOrderSend {
@@ -632,6 +638,12 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             let body: SellerReplyDismissBody = read_body(body, name)?;
             Ok(Command::SellerReplyDismiss {
                 reply: body.reply.get(),
+            })
+        }
+        CommandName::FolderChangeIntegrate => {
+            let body: FolderChangeIntegrateBody = read_body(body, name)?;
+            Ok(Command::FolderChangeIntegrate {
+                change: body.change.get(),
             })
         }
         CommandName::PurchaseOrderSend => {
@@ -1001,6 +1013,10 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::SellerMessageDiscard { message } => (
             CommandName::SellerMessageDiscard,
             json!({ "message": message }),
+        ),
+        Command::FolderChangeIntegrate { change } => (
+            CommandName::FolderChangeIntegrate,
+            json!({ "change": change }),
         ),
         Command::SellerReplyDismiss { reply } => {
             (CommandName::SellerReplyDismiss, json!({ "reply": reply }))
@@ -2326,6 +2342,28 @@ mod tests {
             "data_pipeline_decide",
             &json!({ "pipeline": 1, "decision": "approve", "note": "x".repeat(600) }),
         );
+    }
+
+    #[test]
+    fn reads_folder_change_integrate() {
+        let command = Command::FolderChangeIntegrate { change: 3 };
+        assert_eq!(
+            read("folder_change_integrate", &json!({ "change": 3 })),
+            command
+        );
+        assert_eq!(
+            command_to_value(&command),
+            json!({ "command": "folder_change_integrate", "body": { "change": 3 } })
+        );
+        for body in [
+            json!({}),
+            json!({ "change": 0 }),
+            json!({ "change": "3" }),
+            json!({ "change": 3, "task_id": "CTV-1" }),
+        ] {
+            let errors = refusal(&json!({ "command": "folder_change_integrate", "body": body }));
+            assert!(!errors.is_empty(), "{body}");
+        }
     }
 
     #[test]

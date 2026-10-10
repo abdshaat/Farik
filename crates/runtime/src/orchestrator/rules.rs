@@ -23,7 +23,7 @@ use catervas_store::{CostScope, EventQuery, Git, TaskProjection};
 use chrono::{DateTime, Utc};
 
 use super::design::{self, Stage};
-use super::integrate::{awaiting, cleanup};
+use super::integrate::{awaiting, awaiting_folder_changes, cleanup};
 use super::messages::{
     Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message, plan_message,
     planning_message, posts_heard, retro_message, sprint_review_message, standup_message,
@@ -191,6 +191,12 @@ pub(super) async fn tick(
             if let Some(report) = awaiting(orchestrator, &team, row).await? {
                 return Ok(report);
             }
+        }
+        // The folder changes, in a tick that is about no one task and after the accepted ones.
+        if scope.task_id.is_none()
+            && let Some(report) = awaiting_folder_changes(orchestrator, &team).await?
+        {
+            return Ok(report);
         }
     }
     if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
@@ -1657,7 +1663,8 @@ mod tests {
             TickReport::Idle { .. }
             | TickReport::Sprint { .. }
             | TickReport::Conversation { .. }
-            | TickReport::Chat { .. } => None,
+            | TickReport::Chat { .. }
+            | TickReport::FolderChange { .. } => None,
         }
     }
 

@@ -248,6 +248,14 @@ pub(crate) async fn ticks(
                 );
                 after(printer);
             }
+            Ok(TickReport::FolderChange { change, what }) => {
+                last_idle = None;
+                printer.line(
+                    &format!("folder-{change}: {what}"),
+                    &json!({ "folder_change": change, "what": what }),
+                );
+                after(printer);
+            }
             Err(error) => return Ended::Failed(error.to_string()),
         }
     }

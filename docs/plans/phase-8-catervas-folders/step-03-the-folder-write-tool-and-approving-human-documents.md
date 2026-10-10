@@ -169,7 +169,7 @@ Consumes: Tasks 2 to 4.
 - `reads_folder_change_integrate` (`command.rs`) — `{ change: 3 }` reads and writes back; `change: 0` is refused. RED.
 - `integrates_a_folder_change_from_the_command_line` (`crates/cli/tests/commands.rs`) — `catervas integrate folder-3` sends `FolderChangeIntegrate { change: 3 }`; `catervas integrate CTV-1` still sends `TaskIntegrate`; `folder-0` and `folder-x` are refused before anything is sent. RED.
 
-- [ ] `feat(runtime): integrate a folder change as an accepted task's branch`
+- [x] `feat(runtime): integrate a folder change as an accepted task's branch`
 
 ### Task 6: The owner decides, and the review hears it
 

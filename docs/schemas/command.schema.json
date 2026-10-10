@@ -57,7 +57,8 @@
         "seller_message_send",
         "seller_message_discard",
         "seller_reply_dismiss",
-        "purchase_order_send"
+        "purchase_order_send",
+        "folder_change_integrate"
       ]
     },
     "commandBodyWire": {
@@ -99,6 +100,7 @@
         { "$ref": "#/$defs/sellerMessageDiscardBody" },
         { "$ref": "#/$defs/sellerReplyDismissBody" },
         { "$ref": "#/$defs/purchaseOrderSendBody" },
+        { "$ref": "#/$defs/folderChangeIntegrateBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -402,6 +404,16 @@
       "required": ["reply"],
       "properties": {
         "reply": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "folderChangeIntegrateBody": {
+      "title": "Folder Change Integrate Body",
+      "description": "The owner adds folder change change (docs/catervas documents Catervas committed on a branch docs/folder-<change>) to the project now, as catervas integrate folder-<change> does, whatever escalations it carries (docs/SPEC.md 5.14). Refused no_such_folder_change; a change already integrated answers its commit.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change"],
+      "properties": {
+        "change": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
       }
     },
     "purchaseOrderSendBody": {

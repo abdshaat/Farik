@@ -122,6 +122,9 @@ pub(super) async fn handle(
             reason,
         } => transition(tools, &task_id, to, &reason),
         Command::TaskIntegrate { task_id } => integrate(orchestrator, &task_id).await,
+        Command::FolderChangeIntegrate { change } => {
+            integrate_folder_change(orchestrator, change).await
+        }
         Command::AgentUpdate { agent_id, status } => {
             // Retiring deletes the agent's keys (ADR 0030), so Catervas could no longer stop its
             // campaigns at their budget: it pauses them first, as removing Google Ads does, and
@@ -1826,6 +1829,54 @@ async fn integrate(
         said,
         events: seqs_since(&orchestrator.deps.tools, task_id, before)?,
     })
+}
+
+/// Adds a folder change to the project now, as `integrate` does for an accepted task.
+async fn integrate_folder_change(
+    orchestrator: &Orchestrator,
+    change: u64,
+) -> Result<CommandReport, CommandError> {
+    let tools = &orchestrator.deps.tools;
+    let before = tools
+        .log
+        .read(&EventQuery {
+            limit: Some(1),
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .first()
+        .map_or(0, |event| event.envelope.seq);
+    let name = format!("folder change {change}");
+    let said = match orchestrator.integrate_folder_change(change).await {
+        Ok(IntegrationOutcome::Merged { sha, .. }) => {
+            format!("{name} merged into the integration branch at {sha}")
+        }
+        Ok(IntegrationOutcome::PullRequestOpened { url }) => {
+            format!("{name}: pull request opened at {url}")
+        }
+        Ok(IntegrationOutcome::AwaitingForge) => {
+            format!("{name}'s pull request is open on the forge, waiting for its merge")
+        }
+        Ok(IntegrationOutcome::Escalated { detail, .. }) => {
+            format!("{name} could not be integrated: {detail}")
+        }
+        Err(OrchestratorError::Refused { reason }) => {
+            return Err(CommandError::Refused { reason });
+        }
+        Err(error) => return Err(failed(error)),
+    };
+    let events = tools
+        .log
+        .read(&EventQuery {
+            after_seq: Some(before),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .iter()
+        .map(|event| event.envelope.seq)
+        .collect();
+    Ok(CommandReport { said, events })
 }
 
 /// Changes an agent's status in the team file and records `agent.updated` (F1). A pause or a

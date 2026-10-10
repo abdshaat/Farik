@@ -495,9 +495,9 @@ enum Commands {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         answer: Vec<String>,
     },
-    /// Integrate an accepted task now (5.14).
+    /// Integrate an accepted task, or a folder change, now (5.14).
     Integrate {
-        /// The accepted task.
+        /// The accepted task, or `folder-<n>` for a folder change.
         task_id: String,
     },
     /// Resolve an escalation by moving the task, with a message for the next session (5.7).
@@ -1505,6 +1505,17 @@ pub(crate) fn task(task_id: &str) -> Result<TaskId, String> {
         .map_err(|error| format!("{task_id} is not a task id: {error}"))
 }
 
+/// The number in `folder-<n>`: decimal digits, from 1.
+fn folder_change(number: &str) -> Result<u64, String> {
+    number
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| number.parse::<u64>().ok())
+        .flatten()
+        .filter(|change| *change >= 1)
+        .ok_or_else(|| format!("folder-{number} is not a folder change: write folder-1, folder-2"))
+}
+
 /// The human's command a subcommand stands for, and its name as typed.
 #[allow(clippy::too_many_lines, reason = "one arm per command")]
 fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
@@ -1568,8 +1579,13 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
         ),
         Commands::Integrate { task_id } => (
             "integrate",
-            Command::TaskIntegrate {
-                task_id: task(task_id)?,
+            match task_id.strip_prefix("folder-") {
+                Some(number) => Command::FolderChangeIntegrate {
+                    change: folder_change(number)?,
+                },
+                None => Command::TaskIntegrate {
+                    task_id: task(task_id)?,
+                },
             },
         ),
         Commands::Resolve {
