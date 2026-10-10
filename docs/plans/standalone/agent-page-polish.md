@@ -71,7 +71,7 @@ Tests:
 - `it('puts each skill's description behind an info button')` — for a role skill and a team skill: the description's text is inside the row's `role="tooltip"` element and in no other element of the row outside it; the row head holds the skill's name and the button "More about this".
 - The existing assertions that a description is in the row (`inRow(...).textContent` containing it, skills.test.tsx:142 and its neighbours) stay as they are: tooltip text is in the row's text.
 
-- [ ] `fix(web): hide each skill's description behind an info button`
+- [x] `fix(web): hide each skill's description behind an info button`
 
 ### Task 4: the kit row's ⓘ stays with its line
 

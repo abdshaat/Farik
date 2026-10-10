@@ -1092,6 +1092,11 @@ function SkillsSection({
 										<div className={styles.rowHead}>
 											<span>
 												<strong>{r.name}</strong>
+												{r.state !== "missing" && (
+													<InfoTip id={`skill-${r.level}-${r.name}-info`}>
+														{visibly(r.description)}
+													</InfoTip>
+												)}
 											</span>
 											{r.level === "role" && (
 												<span className={styles.actions}>
@@ -1145,14 +1150,12 @@ function SkillsSection({
 												</span>
 											)}
 										</div>
-										{r.state === "missing" ? (
+										{r.state === "missing" && (
 											<p>
 												<strong>
 													<code>{r.name}</code> {t("skillMissing")}
 												</strong>
 											</p>
-										) : (
-											<p>{visibly(r.description)}</p>
 										)}
 										{r.state === "review" && (
 											<p>

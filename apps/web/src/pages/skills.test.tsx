@@ -115,6 +115,35 @@ const NOTES_FILES = {
 describe("skills on the agent page", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
+	it("puts each skill's description behind an info button", async () => {
+		await opened();
+		const cases: [string, string, string][] = [
+			[
+				"Comes with Developer",
+				"implementing-a-contract",
+				"About implementing-a-contract.",
+			],
+			[
+				"For the whole team",
+				"release-notes",
+				"Write release notes in our voice",
+			],
+		];
+		for (const [list, name, text] of cases) {
+			const li = inRow(list, name);
+			const tip = within(li).getByRole("tooltip", { hidden: true });
+			expect(tip.textContent).toBe(text);
+			const outside = within(li)
+				.queryAllByText(text)
+				.filter((el) => !el.closest('[role="tooltip"]'));
+			expect(outside).toEqual([]);
+			const head = li.querySelector("strong")?.closest("div") as HTMLElement;
+			expect(
+				within(head).getByRole("button", { name: "More about this" }),
+			).toBeTruthy();
+		}
+	});
+
 	it("agent_edit_lists_skills_by_level", async () => {
 		const { container } = await opened();
 		await expectNoAxeViolations(container);
