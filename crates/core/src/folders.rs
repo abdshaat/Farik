@@ -252,6 +252,155 @@ pub fn folders_line(role: Role, active_roles: &[Role]) -> String {
     format!("- folders: {}. {yours} {reading}", listed.join(", "))
 }
 
+/// How a line of a document differs between two versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineChange {
+    /// In both versions.
+    Same,
+    /// Only in the new version.
+    Added,
+    /// Only in the old version.
+    Removed,
+}
+
+/// A line to show the owner, with how it changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShownLine {
+    /// How the line changed.
+    pub change: LineChange,
+    /// The line, without its line ending.
+    pub text: String,
+}
+
+/// A middle whose two lengths multiply past this is shown whole rather than compared.
+const COMPARE_LIMIT: usize = 1_000_000;
+
+fn document_lines(text: &str) -> Vec<&str> {
+    text.split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .filter(|line| !line.trim().is_empty())
+        .collect()
+}
+
+/// The lines of two versions of a document that are worth showing: every changed line, the
+/// unchanged line just before and just after each run of changes, and the nearest unchanged
+/// heading (a line starting with `#`) above each run (section 5.7). Blank lines and a trailing
+/// `\r` are not compared. Within a run, the removed lines come before the added ones.
+///
+/// ponytail: a middle whose two lengths multiply past 1,000,000 is shown whole, every old line
+/// removed then every new one added, rather than compared; compare it in pieces if a real
+/// document's change reads badly.
+#[must_use]
+pub fn changed_lines(before: &str, after: &str) -> Vec<ShownLine> {
+    let old = document_lines(before);
+    let new = document_lines(after);
+    let head = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    let tail = old[head..]
+        .iter()
+        .rev()
+        .zip(new[head..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let (old_mid, new_mid) = (&old[head..old.len() - tail], &new[head..new.len() - tail]);
+
+    let mut all: Vec<(LineChange, &str)> = old[..head]
+        .iter()
+        .map(|line| (LineChange::Same, *line))
+        .collect();
+    all.extend(compare(old_mid, new_mid));
+    all.extend(
+        old[old.len() - tail..]
+            .iter()
+            .map(|line| (LineChange::Same, *line)),
+    );
+
+    let mut shown = vec![false; all.len()];
+    let mut start = 0;
+    while start < all.len() {
+        if all[start].0 == LineChange::Same {
+            start += 1;
+            continue;
+        }
+        let end = start
+            + all[start..]
+                .iter()
+                .take_while(|(change, _)| *change != LineChange::Same)
+                .count();
+        shown[start..end].fill(true);
+        if start > 0 {
+            shown[start - 1] = true;
+        }
+        if end < all.len() {
+            shown[end] = true;
+        }
+        if let Some(heading) = all[..start]
+            .iter()
+            .rposition(|(change, text)| *change == LineChange::Same && text.starts_with('#'))
+        {
+            shown[heading] = true;
+        }
+        start = end;
+    }
+    all.iter()
+        .zip(shown)
+        .filter(|(_, shown)| *shown)
+        .map(|((change, text), _)| ShownLine {
+            change: *change,
+            text: (*text).to_string(),
+        })
+        .collect()
+}
+
+/// The middle of two documents as changes: by longest common subsequence, adding first where
+/// removing and adding keep as long a common sequence; each run of changes lists its removed
+/// lines, then its added ones.
+fn compare<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(LineChange, &'a str)> {
+    if old.len().saturating_mul(new.len()) > COMPARE_LIMIT {
+        let removed = old.iter().map(|line| (LineChange::Removed, *line));
+        return removed
+            .chain(new.iter().map(|line| (LineChange::Added, *line)))
+            .collect();
+    }
+    let width = new.len() + 1;
+    let mut common = vec![0u32; (old.len() + 1) * width];
+    for i in (0..old.len()).rev() {
+        for j in (0..new.len()).rev() {
+            common[i * width + j] = if old[i] == new[j] {
+                common[(i + 1) * width + j + 1] + 1
+            } else {
+                common[(i + 1) * width + j].max(common[i * width + j + 1])
+            };
+        }
+    }
+    let (mut i, mut j) = (0, 0);
+    let mut out: Vec<(LineChange, &str)> = Vec::new();
+    let (mut removed, mut added): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    let flush = |out: &mut Vec<(LineChange, &'a str)>,
+                 removed: &mut Vec<&'a str>,
+                 added: &mut Vec<&'a str>| {
+        out.extend(removed.drain(..).map(|line| (LineChange::Removed, line)));
+        out.extend(added.drain(..).map(|line| (LineChange::Added, line)));
+    };
+    while i < old.len() || j < new.len() {
+        if i < old.len() && j < new.len() && old[i] == new[j] {
+            flush(&mut out, &mut removed, &mut added);
+            out.push((LineChange::Same, old[i]));
+            i += 1;
+            j += 1;
+        } else if j < new.len()
+            && (i == old.len() || common[i * width + j + 1] >= common[(i + 1) * width + j])
+        {
+            added.push(new[j]);
+            j += 1;
+        } else {
+            removed.push(old[i]);
+            i += 1;
+        }
+    }
+    flush(&mut out, &mut removed, &mut added);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -259,6 +408,7 @@ mod tests {
         check_folder_doc_path, folder_doc_author, folder_doc_message, folders_line, human_of_twin,
         is_human_document, pair_changed_alone, read_access, role_folder,
     };
+    use super::{LineChange, ShownLine, changed_lines};
     use crate::team::Role;
 
     const READ: &str = "Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents.";
@@ -602,5 +752,98 @@ mod tests {
             ),
             "docs(product): roadmap.md, spec.md by Mira, approved by the owner"
         );
+    }
+
+    fn shown(lines: &[(LineChange, &str)]) -> Vec<ShownLine> {
+        lines
+            .iter()
+            .map(|(change, text)| ShownLine {
+                change: *change,
+                text: (*text).to_string(),
+            })
+            .collect()
+    }
+
+    const GIFT: &str = "- Gift cards. Buy a card online, spend it in the shop.";
+    const OLD_PIE: &str = "- Pie pre-orders. Customers order Thanksgiving pies ahead and collect them on 25 or 26 November.";
+    const NEW_PIE: &str = "- Pie pre-orders. 41 pies ordered in the first week.";
+    const CHRISTMAS: &str =
+        "- Christmas orders. Stollen, yule logs and mince pies, collected from 19 to 24 December.";
+
+    #[test]
+    fn shows_the_roadmaps_changes_as_drawn() {
+        let before = format!(
+            "# Roadmap\n\n## Done\n\n## Now\n\n{OLD_PIE}\n\n## Next\n\n{GIFT}\n\n- Opening hours on every page.\n"
+        );
+        let after = format!(
+            "# Roadmap\n\n## Done\n\n{NEW_PIE}\n\n## Now\n\n{GIFT}\n\n## Next\n\n{CHRISTMAS}\n\n- Opening hours on every page.\n"
+        );
+        assert_eq!(
+            changed_lines(&before, &after),
+            shown(&[
+                (LineChange::Same, "## Done"),
+                (LineChange::Added, NEW_PIE),
+                (LineChange::Same, "## Now"),
+                (LineChange::Removed, OLD_PIE),
+                (LineChange::Added, GIFT),
+                (LineChange::Same, "## Next"),
+                (LineChange::Removed, GIFT),
+                (LineChange::Added, CHRISTMAS),
+                (LineChange::Same, "- Opening hours on every page."),
+            ])
+        );
+    }
+
+    #[test]
+    fn shows_the_heading_above_a_change() {
+        let before = "# Little Oak Bakery\n\nWhat we sell.\n\n## Ordering ahead\n\nCustomers pick a day and a time to collect their order.\n";
+        let after = format!(
+            "{before}\nPre-orders close 3 days before collection, so the kitchen can plan.\n"
+        );
+        assert_eq!(
+            changed_lines(before, &after),
+            shown(&[
+                (LineChange::Same, "## Ordering ahead"),
+                (
+                    LineChange::Same,
+                    "Customers pick a day and a time to collect their order."
+                ),
+                (
+                    LineChange::Added,
+                    "Pre-orders close 3 days before collection, so the kitchen can plan."
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn shows_a_new_document_whole_and_an_unchanged_one_empty() {
+        assert_eq!(
+            changed_lines("", "# New\n\n\nOne.\n\nTwo.\n"),
+            shown(&[
+                (LineChange::Added, "# New"),
+                (LineChange::Added, "One."),
+                (LineChange::Added, "Two."),
+            ])
+        );
+        assert!(changed_lines("# A\nB\n", "# A\nB\n").is_empty());
+        assert!(changed_lines("# A\nB\n", "# A\r\n\r\n\nB\r\n\n").is_empty());
+    }
+
+    #[test]
+    fn shows_a_change_too_big_to_compare_whole() {
+        let old: Vec<String> = (0..1001).map(|n| format!("old {n}")).collect();
+        let new: Vec<String> = (0..1001).map(|n| format!("new {n}")).collect();
+        let before = format!("first\n{}\nlast\n", old.join("\n"));
+        let after = format!("first\n{}\nlast\n", new.join("\n"));
+        let mut expected = vec![(LineChange::Same, "first".to_string())];
+        expected.extend(old.iter().map(|t| (LineChange::Removed, t.clone())));
+        expected.extend(new.iter().map(|t| (LineChange::Added, t.clone())));
+        expected.push((LineChange::Same, "last".to_string()));
+        let expected: Vec<ShownLine> = expected
+            .into_iter()
+            .map(|(change, text)| ShownLine { change, text })
+            .collect();
+        assert_eq!(changed_lines(&before, &after), expected);
     }
 }

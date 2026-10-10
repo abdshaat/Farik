@@ -85,7 +85,7 @@ Files: modified `crates/core/src/folders.rs` (`changed_lines`, its tests).
 - `shows_a_new_document_whole_and_an_unchanged_one_empty` — before empty: every non-blank line `Added`, in order; equal texts, or texts that differ in blank lines or a `\r` alone: nothing. RED.
 - `shows_a_change_too_big_to_compare_whole` — a middle of 1,001 old and 1,001 new distinct lines: the 1,001 removed lines, then the 1,001 added, with the common first and last lines around them. RED.
 
-- [ ] `feat(core): show a document's changes line by line`
+- [x] `feat(core): show a document's changes line by line`
 
 ### Task 2: The owner accepts a task that may change the product plan
 
