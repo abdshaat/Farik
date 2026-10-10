@@ -3039,6 +3039,30 @@ pub(super) mod tests {
             "folderDocProposalsListResult",
         );
         assert_eq!(listed, json!({ "integration": "manual", "cards": [] }));
+
+        let harness = folders_integrating("gates-folder-doc-two-reviews", "pull_request");
+        let third = pm_proposes(&harness, "S3", ROADMAP, "# Roadmap\n", "Roadmap.");
+        let fourth = pm_proposes(&harness, "S4", SPEC, "# Spec\n", "Spec.");
+        let listed = query(
+            &harness.daemon,
+            "folder_doc_proposals.list",
+            &json!({}),
+            "folderDocProposalsListResult",
+        );
+        let cards = listed["cards"].as_array().expect("cards");
+        assert_eq!(cards.len(), 2, "one card for each sprint review: {listed}");
+        assert_eq!(cards[0]["sprint_id"], "S3");
+        assert_eq!(
+            cards[0]["documents"].as_array().expect("documents").len(),
+            1
+        );
+        assert_eq!(cards[0]["documents"][0]["proposal"], json!(third));
+        assert_eq!(cards[1]["sprint_id"], "S4");
+        assert_eq!(
+            cards[1]["documents"].as_array().expect("documents").len(),
+            1
+        );
+        assert_eq!(cards[1]["documents"][0]["proposal"], json!(fourth));
     }
 
     #[test]
