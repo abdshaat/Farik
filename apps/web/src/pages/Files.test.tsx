@@ -572,6 +572,16 @@ describe("Files", () => {
 			}
 		});
 
+		it("keeps the draft when the screen changes size", async () => {
+			await typed();
+			act(() => media.set(WIDE, false));
+			await screen.findByRole("link", { name: en.filesBack });
+			expect((box() as HTMLTextAreaElement).value).toBe(draftText);
+			act(() => media.set(WIDE, true));
+			await screen.findByRole("navigation", { name: en.files });
+			expect((box() as HTMLTextAreaElement).value).toBe(draftText);
+		});
+
 		it("cancels without saving", async () => {
 			const { s } = await typed();
 			press(en.filesCancel);

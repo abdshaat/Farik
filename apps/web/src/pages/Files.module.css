@@ -11,6 +11,11 @@
 	gap: var(--catervas-space-4);
 }
 
+.phoneHead {
+	display: grid;
+	gap: var(--catervas-space-4);
+}
+
 .document {
 	min-width: 0;
 }

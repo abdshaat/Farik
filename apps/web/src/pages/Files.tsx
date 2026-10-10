@@ -34,24 +34,26 @@ export function Files() {
 	) : (
 		splat && <h2 className={styles.none}>{t("filesNoSuch")}</h2>
 	);
-	return wide ? (
-		<div className={styles.wide}>
-			<FolderTree tree={tree} agents={agents} open={path} />
+	// The document sits in the same place in both layouts, so that a draft survives a resize.
+	return (
+		<div className={wide ? styles.wide : styles.narrow}>
+			{wide ? (
+				<FolderTree tree={tree} agents={agents} open={path} />
+			) : (
+				<div className={styles.phoneHead}>
+					<Link to="/team" className={styles.back}>
+						{t("filesBack")}
+					</Link>
+					<h1 className={styles.title}>{t("files")}</h1>
+					<Picker
+						tree={tree}
+						agents={agents}
+						open={path}
+						folder={open?.folder ?? tree.folders[0]}
+					/>
+				</div>
+			)}
 			<div className={styles.document}>{shown}</div>
-		</div>
-	) : (
-		<div className={styles.narrow}>
-			<Link to="/team" className={styles.back}>
-				{t("filesBack")}
-			</Link>
-			<h1 className={styles.title}>{t("files")}</h1>
-			<Picker
-				tree={tree}
-				agents={agents}
-				open={path}
-				folder={open?.folder ?? tree.folders[0]}
-			/>
-			{shown}
 		</div>
 	);
 }
