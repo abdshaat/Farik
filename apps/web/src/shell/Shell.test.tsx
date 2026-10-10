@@ -67,6 +67,23 @@ describe("shell", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("keeps_team_marked_on_a_phone_while_files_is_open", async () => {
+		media.set(WIDE, false);
+		const { socket } = await renderApp("/files");
+		await answerStatus(socket as never, false);
+		const bar = await screen.findByRole("navigation", { name: en.navBar });
+		expect(
+			within(bar)
+				.getByRole("link", { name: en.team })
+				.getAttribute("aria-current"),
+		).toBe("page");
+		expect(
+			within(bar)
+				.getByRole("link", { name: en.today })
+				.getAttribute("aria-current"),
+		).toBeNull();
+	});
+
 	it("orders_the_rail", async () => {
 		media.set(WIDE, true);
 		const { container, socket } = await renderApp("/team");

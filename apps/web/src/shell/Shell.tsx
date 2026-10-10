@@ -60,9 +60,16 @@ export function Shell() {
 			{PLACES.filter(([to]) => wide || !UNDER_TEAM.includes(to)).map(
 				([to, word]) => (
 					<li key={to}>
-						<NavLink to={to} end={to === "/"}>
-							{t(word)}
-						</NavLink>
+						{!wide && to === "/team" && path.startsWith("/files") ? (
+							// Files sits under Team on a phone: Team stays marked (NavLink marks only its own path).
+							<Link to={to} aria-current="page">
+								{t(word)}
+							</Link>
+						) : (
+							<NavLink to={to} end={to === "/"}>
+								{t(word)}
+							</NavLink>
+						)}
 					</li>
 				),
 			)}
