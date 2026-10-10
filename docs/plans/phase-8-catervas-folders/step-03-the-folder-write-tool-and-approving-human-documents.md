@@ -139,7 +139,7 @@ Files: `crates/store/src/git.rs` (`CommitOutcome`, `commit_files`), `crates/stor
 - `cleans_up_a_commit_that_fails` — with a `pre-commit` hook that exits 1: the answer is git's error, `docs/folder-1` does not exist, the root is on `main` again, the new file is gone and nothing is staged; a changed file is back to `main`'s text; with HEAD detached the call is refused before anything is written. RED.
 - `integrate.rs`'s tests hold unchanged with the lock moved.
 
-- [ ] `feat(store): commit named files on a branch of their own`
+- [x] `feat(store): commit named files on a branch of their own`
 
 ### Task 4: The tool
 

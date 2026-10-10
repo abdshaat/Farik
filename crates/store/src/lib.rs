@@ -46,7 +46,7 @@ pub mod waiting;
 
 pub use error::StoreError;
 pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
-pub use git::{Git, GitError, HeadSummary, MergeOutcome};
+pub use git::{CommitOutcome, Git, GitError, HeadSummary, MergeOutcome};
 pub use metrics::{CostSplit, HarnessMetrics, MetricsError};
 pub use projections::{
     CostProjection, CostScope, CostWindow, Projections, SprintProjection, TaskProjection,

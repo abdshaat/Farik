@@ -2,7 +2,7 @@
 //! branch integrated the way the team's policy says, one task at a time even across processes,
 //! and a finished task's worktrees and containers removed, its branch kept.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -26,10 +26,7 @@ use super::{
 };
 use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
-use crate::transitions::{integration_branch, is_move_into};
-
-/// Where the integration lock lives, under the project root.
-const LOCK: &str = ".catervas/local/integration.lock";
+use crate::transitions::{INTEGRATION_LOCK, integration_branch, integration_lock, is_move_into};
 
 /// Who asked for an integration: the tick, on the team's policy, or the human.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -641,24 +638,11 @@ fn last_integrated_sha(
         }))
 }
 
-/// Takes the integration lock, waiting for whoever holds it, process or thread; it is let go when
-/// the file is dropped.
+/// Takes the integration lock, mapping its error.
 fn lock(root: &Path) -> Result<File, OrchestratorError> {
-    let path = root.join(LOCK);
-    let failed = |error: std::io::Error| OrchestratorError::Lock {
-        detail: format!("{}: {error}", path.display()),
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(failed)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(failed)?;
-    file.lock().map_err(failed)?;
-    Ok(file)
+    integration_lock(root).map_err(|error| OrchestratorError::Lock {
+        detail: format!("{}: {error}", root.join(INTEGRATION_LOCK).display()),
+    })
 }
 
 /// Rule 1: a task `accepted` or `cancelled` whose worktree, or whose base worktree, is still
