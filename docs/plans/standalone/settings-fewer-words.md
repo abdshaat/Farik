@@ -104,7 +104,7 @@ Tests:
 - `saves_the_preview_in_settings` (`team.test.tsx`) changes: the region holds `previewLead`'s two lines as list items (filled with "Iris"); `previewMore`'s lines are found only inside tooltips (`onlyInTips`); each of the four textboxes (found by its exact label, as today) is described by an element whose text contains its field's first line; every line of the four hint keys is only in tooltips; axe still passes. The rest of the test stays.
 - The setup card's test in `setup/team.test.tsx` (the region "Iris needs to know how to open your app"): `previewSetupLead`'s three lines are list items in it; `previewMore`'s and the four hint keys' lines are only in tooltips; the port refusal later in the test is still found once by `en.refusePreviewPort`.
 
-- [ ] `fix(web): say briefly how to open your app, the detail behind info buttons`
+- [x] `fix(web): say briefly how to open your app, the detail behind info buttons`
 
 ### Task 4: the rest of Settings
 

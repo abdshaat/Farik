@@ -17,6 +17,7 @@ import {
 	answerStatus,
 	renderApp,
 } from "../../test/render-app.tsx";
+import { onlyInTips } from "../../test/tips.ts";
 import type { Template } from "../SavedTeams.tsx";
 import { type Agent, draftOf, type Proposed, someone } from "./TeamSetup.tsx";
 
@@ -50,6 +51,12 @@ const TESTS_PASS = {
 	source: "project_scan",
 	verification: { method: "test", command: "pnpm test" },
 };
+
+/** The team list's own rows, not the bullets inside a row's cards. */
+const membersOf = (list: HTMLElement) =>
+	within(list)
+		.getAllByRole("listitem")
+		.filter((li) => li.parentElement === list);
 
 function proposed(change: (team: Record<string, unknown>) => void = () => {}) {
 	const team: Record<string, unknown> = {
@@ -306,7 +313,7 @@ describe("team setup", () => {
 		expect(await screen.findByText(en.teamLead)).toBeTruthy();
 		expect(en.teamLead).toMatch(/^We suggest six, one for each job\./);
 		const list = await screen.findByRole("list", { name: en.teamMembers });
-		expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+		expect(membersOf(list)).toHaveLength(6);
 		const include = screen.getByRole("checkbox", {
 			name: "Include the UI/UX Designer",
 		}) as HTMLInputElement;
@@ -336,8 +343,7 @@ describe("team setup", () => {
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
-		const faces = within(list)
-			.getAllByRole("listitem")
+		const faces = membersOf(list)
 			.slice(6)
 			.map((row) => row.querySelector("img")?.getAttribute("src"));
 		expect(faces.slice(0, 3)).toEqual([
@@ -379,7 +385,7 @@ describe("team setup", () => {
 		const list = await screen.findByRole("list", { name: en.teamMembers });
 		for (let added = 0; added < 3; added++)
 			fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
-		const rows = within(list).getAllByRole("listitem").slice(6);
+		const rows = membersOf(list).slice(6);
 		expect(
 			rows.map((row) => [
 				(within(row).getByRole("textbox") as HTMLInputElement).getAttribute(
@@ -409,7 +415,7 @@ describe("team setup", () => {
 			}),
 		);
 		const list = await screen.findByRole("list", { name: en.teamMembers });
-		expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+		expect(membersOf(list)).toHaveLength(6);
 		// It is offered under "More roles", unticked, and is not one of the team's rows.
 		const finance = screen.getByRole("checkbox", {
 			name: "Include the Finance Specialist",
@@ -445,7 +451,7 @@ describe("team setup", () => {
 		);
 		const list = await screen.findByRole("list", { name: en.teamMembers });
 		// The suggested six, ticked, and nothing else among them.
-		const six = within(list).getAllByRole("listitem");
+		const six = membersOf(list);
 		expect(six).toHaveLength(6);
 		for (const row of six)
 			expect(
@@ -790,6 +796,20 @@ describe("team setup", () => {
 		const card = await screen.findByRole("region", {
 			name: "Iris needs to know how to open your app",
 		});
+		const lines = (key: keyof typeof en) =>
+			t(key, { designer: "Iris" }).split("\n");
+		const items = within(card)
+			.getAllByRole("listitem")
+			.map((i) => i.textContent);
+		for (const line of lines("previewSetupLead")) expect(items).toContain(line);
+		for (const key of [
+			"previewMore",
+			"previewPrepareHint",
+			"previewStartHint",
+			"previewPortHint",
+			"previewPathHint",
+		] as const)
+			for (const line of lines(key)) onlyInTips(line);
 		const field = (name: string) =>
 			within(card).getByRole("textbox", { name }) as HTMLInputElement;
 		expect(field(en.previewPrepare).value).toBe("");
@@ -1481,7 +1501,7 @@ describe("team setup's three starts", () => {
 		]);
 		expect(radios[0]?.checked).toBe(true);
 		const list = screen.getByRole("list", { name: en.teamMembers });
-		expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+		expect(membersOf(list)).toHaveLength(6);
 		await expectNoAxeViolations(container);
 	});
 

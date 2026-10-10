@@ -20,6 +20,7 @@ import {
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { NO_MAILBOX } from "../test/sellerMail.ts";
 import { SITES } from "../test/sites.ts";
+import { onlyInTips } from "../test/tips.ts";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -678,12 +679,32 @@ describe("team page", () => {
 		expect(preview.id).toBe("preview");
 		// Today's row links here, and the page goes to the section.
 		await waitFor(() => expect(scrolled.mock.contexts).toContain(preview));
-		expect(
-			within(preview).getByText(
-				"Iris, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Catervas the commands you use to open it. Catervas runs them inside Docker’s sandbox, never straight on your computer.",
-			),
-		).toBeTruthy();
-		expect(within(preview).getByText(en.previewNotSure)).toBeTruthy();
+		const lines = (key: keyof typeof en) =>
+			t(key, { designer: "Iris" }).split("\n");
+		const items = within(preview)
+			.getAllByRole("listitem")
+			.map((i) => i.textContent);
+		for (const line of lines("previewLead")) expect(items).toContain(line);
+		for (const line of lines("previewMore")) onlyInTips(line);
+		for (const key of [
+			"previewPrepareHint",
+			"previewStartHint",
+			"previewPortHint",
+			"previewPathHint",
+		] as const)
+			for (const line of lines(key)) onlyInTips(line);
+		const described = (name: string, key: keyof typeof en) => {
+			const box = within(preview).getByRole("textbox", { name });
+			const text = (box.getAttribute("aria-describedby") ?? "")
+				.split(" ")
+				.map((id) => document.getElementById(id)?.textContent ?? "")
+				.join(" ");
+			expect(text).toContain(lines(key)[0]);
+		};
+		described(en.previewPrepare, "previewPrepareHint");
+		described(en.previewStart, "previewStartHint");
+		described(en.previewPort, "previewPortHint");
+		described(en.previewPath, "previewPathHint");
 		await expectNoAxeViolations(container);
 
 		const field = (name: string) =>
@@ -1702,13 +1723,6 @@ describe("team templates", () => {
 		expect(deleted.params).toEqual({ slug: "my-usual-team" });
 	});
 });
-
-/** Every place `text` shows on the page, each of which must sit inside an info button's tip. */
-function onlyInTips(text: string) {
-	const found = screen.getAllByText(text);
-	expect(found.length).toBeGreaterThan(0);
-	for (const el of found) expect(el.closest('[role="tooltip"]')).not.toBeNull();
-}
 
 describe("info buttons on the agent page", () => {
 	afterEach(() => {

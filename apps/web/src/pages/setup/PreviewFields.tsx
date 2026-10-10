@@ -1,5 +1,6 @@
 import { TextField } from "@catervas/ui";
 import type { Refusal } from "../../app/refusals.ts";
+import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
 
 /** `team.yaml`'s `preview` (step 12, D2): how Catervas opens the app for the UI/UX Designer. */
@@ -69,7 +70,7 @@ export function PreviewFields({
 		<TextField
 			id={`${id}-${name}`}
 			label={t(label)}
-			hint={t(hint, { designer })}
+			info={<Bullets text={t(hint, { designer })} />}
 			value={form[name]}
 			{...(error && { error })}
 			onChange={(value) => onChange({ ...form, [name]: value })}

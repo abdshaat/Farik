@@ -1113,21 +1113,24 @@ export const en = {
 	sprintReadIt: "Read it",
 	previewTitle: "How to open your app",
 	previewLead:
-		"{designer}, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Catervas the commands you use to open it. Catervas runs them inside Docker’s sandbox, never straight on your computer.",
+		"{designer} opens your app in a browser to check its screens.\nTell Catervas the commands that start it.",
 	previewSetupTitle: "{designer} needs to know how to open your app",
 	previewSetupLead:
-		"{designer} looks at your app in a browser. Tell Catervas the commands you use to open it; Catervas runs them inside Docker’s sandbox. Not sure? Leave them empty. You can add them in Settings later, and {designer} waits until you do.",
+		"{designer} opens your app in a browser to check its screens.\nTell Catervas the commands that start it.\nNot sure? Leave these empty and add them in Settings later. {designer} waits until you do.",
 	previewPrepare: "Get it ready (optional)",
 	previewPrepareHint:
-		"Installs what your app needs and builds it. This may use the internet, for up to 15 minutes.",
+		"A command that installs what your app needs and builds it, such as “npm install”.\nYou can leave it empty.\nIt may use the internet, for up to 15 minutes.",
 	previewStart: "Start it",
-	previewStartHint: "Starts your app. The internet is off while it runs.",
+	previewStartHint:
+		"The command that starts your app, such as “npm start”.\nThe internet is off while your app runs.",
 	previewPort: "Port",
-	previewPortHint: "The number your app answers on.",
+	previewPortHint:
+		"The number your app answers on, like a door number.\nYour app often shows it when it starts: in “localhost:3000” it is 3000.\nIt must be a number from 1024 to 65535.",
 	previewPath: "First page",
-	previewPathHint: "The page {designer} opens first.",
-	previewNotSure:
-		"Not sure what to type? Whoever set up your app knows. Your README file often says too.",
+	previewPathHint:
+		"The page {designer} opens first.\nLeave it as “/” for your app’s home page.",
+	previewMore:
+		"Catervas runs these commands inside Docker’s sandbox, a safe box kept apart from the rest of your computer.\nNot sure what to type? Ask whoever set up your app, or look in its README file.",
 	refusePreviewPort: "Use a number from 1024 to 65535.",
 	refusePreview:
 		"Catervas cannot use these. Starting your app needs a command and a port, each command is at most 500 characters, and the first page starts with /.",

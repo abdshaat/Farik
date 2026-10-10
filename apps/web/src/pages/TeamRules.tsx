@@ -1,9 +1,10 @@
-import { Button, TextField } from "@catervas/ui";
+import { Button, InfoTip, TextField } from "@catervas/ui";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
+import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import {
@@ -341,8 +342,13 @@ function Preview({
 			className={styles.section}
 			aria-labelledby="preview-heading"
 		>
-			<h2 id="preview-heading">{t("previewTitle")}</h2>
-			<p>{t("previewLead", { designer })}</p>
+			<div className={styles.titled}>
+				<h2 id="preview-heading">{t("previewTitle")}</h2>
+				<InfoTip id="previewMore-info">
+					<Bullets text={t("previewMore")} />
+				</InfoTip>
+			</div>
+			<Bullets text={t("previewLead", { designer })} />
 			<PreviewFields
 				id="preview"
 				form={form}
@@ -351,7 +357,6 @@ function Preview({
 				onChange={setMine}
 			/>
 			{foot}
-			<p className={styles.muted}>{t("previewNotSure")}</p>
 		</section>
 	);
 }
