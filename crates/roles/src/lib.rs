@@ -1549,6 +1549,66 @@ mod tests {
     }
 
     #[test]
+    fn planning_follows_the_architects_plan() {
+        let architect = flattened(&loaded(Role::Architect).system_prompt);
+        for needle in [
+            "An approved epic's implementation plan",
+            "planning-in-lanes",
+        ] {
+            assert!(architect.contains(needle), "{needle}: {architect}");
+        }
+        let manager = loaded(Role::ProductManager);
+        let prompt = flattened(&manager.system_prompt);
+        assert!(
+            prompt.contains("You write the tasks of every approved epic"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("break approved epics into"), "{prompt}");
+        let contracts = flattened(
+            &manager
+                .skills
+                .iter()
+                .find(|skill| skill.name == "writing-task-contracts")
+                .expect("the contract skill")
+                .text,
+        );
+        assert!(
+            !contracts.contains("When you break an approved epic"),
+            "{contracts}"
+        );
+        for needle in [
+            "## 7. An approved epic's tasks",
+            "lanes_overlap",
+            "lane_beyond_builders",
+        ] {
+            assert!(contracts.contains(needle), "{needle}: {contracts}");
+        }
+        let master = loaded(Role::ScrumMaster);
+        let prompt = flattened(&master.system_prompt);
+        assert!(
+            prompt.contains("You do not break an approved epic down"),
+            "{prompt}"
+        );
+        assert!(
+            !prompt.contains("You break an approved epic down"),
+            "{prompt}"
+        );
+        let flowing = flattened(
+            &master
+                .skills
+                .iter()
+                .find(|skill| skill.name == "keeping-work-flowing")
+                .expect("the flow skill")
+                .text,
+        );
+        assert!(flowing.contains("lane_taken"), "{flowing}");
+        assert!(
+            !flowing.contains("Break an approved epic into tasks"),
+            "{flowing}"
+        );
+    }
+
+    #[test]
     fn every_owner_s_prompt_names_its_folder() {
         for (role, folder) in catervas_core::folders::ROLE_FOLDERS {
             let prompt = loaded(role).system_prompt;

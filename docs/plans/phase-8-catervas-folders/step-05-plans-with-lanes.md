@@ -155,7 +155,7 @@ Files and text, exactly where quoted; step 01's, 01b's and 02's lines are kept.
 - `the_lanes_skill_names_the_plan_and_its_limits` (`kit.rs`) — `planning-in-lanes` holds `docs/catervas/architecture/plans/`, `## Lane`, `allowed_paths`, `builders`, `lanes_overlap` and `catervas_git_commit`, is under 6 KiB, and has no " @". RED: no skill.
 - `the_planners_keep_other_tasks_off_the_owners_folders` (step 01) and `kit_skills_name_only_tools_catervas_lists` (`daemon/team.rs:5354`) hold unchanged.
 
-- [ ] `feat(roles): plan an epic Architect first, then contracts, then the schedule`
+- [x] `feat(roles): plan an epic Architect first, then contracts, then the schedule`
 
 ### Task 7: Spec
 

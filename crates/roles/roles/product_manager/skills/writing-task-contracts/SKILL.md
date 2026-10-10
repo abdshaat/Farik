@@ -1,6 +1,6 @@
 ---
 name: writing-task-contracts
-description: Use when a request from the user needs triage, or a draft or refining task needs its contract written, whether an epic or a standalone task, so that it passes the Definition of Ready.
+description: Use when a request from the user needs triage, or a draft or refining task needs its contract written, whether an epic or a standalone task, so that it passes the Definition of Ready, or an approved epic needs its tasks.
 ---
 
 # Writing task contracts
@@ -100,6 +100,24 @@ Developer; do not change the reviewer role to one nobody on the team holds.
 
 An epic always waits for the user's approval before it is ready, and so does a `high` risk task or
 any task the team's policy names. Only after an epic is approved do you write its requirements into the spec,
-by `writing-requirements`. When you break an approved epic
-down, file each task with `catervas_create_task` and its `parent` set, each with clear deliverables and
-exit criteria of its own, then assign them with `catervas_assign_task`.
+by `writing-requirements`.
+
+## 7. An approved epic's tasks
+
+An approved epic's tasks are yours to write. Read the epic and the tasks already under it
+(`catervas_read_board`) first.
+
+1. With an active Architect, file one task for it with `catervas_create_task`, `parent` the epic,
+   `assignee_role` `architect`, `plan` and `allowed_paths` `docs/catervas/architecture/plans/<epic-id>.md`,
+   no `lane`, an `artifact` criterion that the plan exists, and in its requirements how many
+   builders (Software Developers and UI/UX Designers) are active.
+2. Once the plan is on the integration branch, file one task per planned task: its `plan`, its
+   `lane`, the planned tasks it needs in `dependencies`, the Architect's paths as `allowed_paths`
+   and its constraints as `constraints`, with acceptance criteria from the epic's requirements and
+   the spec.
+3. With no Architect, plan the lanes yourself: each task gets its `lane` and no `plan`.
+4. The governor refuses lanes that could meet (`lanes_overlap`) and a lane past the builders
+   (`lane_beyond_builders`); narrow the paths, or put the tasks in one lane.
+
+Each task has clear deliverables and exit criteria of its own. The Scrum Master, or you when the
+team has none, assigns them.

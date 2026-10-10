@@ -210,6 +210,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "security-review",
             "setting-performance-budgets",
             "using-architecture-sources",
+            "planning-in-lanes",
         ),
         Role::SoftwareDeveloper => embedded!("software_developer":
             "test-driven-development",
@@ -2339,6 +2340,7 @@ mod tests {
                 "security-review",
                 "setting-performance-budgets",
                 "using-architecture-sources",
+                "planning-in-lanes",
             ]
         );
         for skill in &kit.skills {
@@ -2348,6 +2350,29 @@ mod tests {
                 skill.name
             );
         }
+    }
+
+    #[test]
+    fn the_lanes_skill_names_the_plan_and_its_limits() {
+        let kit = load_kit(Role::Architect).expect("the Architect's kit");
+        let text = &kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "planning-in-lanes")
+            .expect("the lanes skill")
+            .session_files["SKILL.md"];
+        for needle in [
+            "docs/catervas/architecture/plans/",
+            "## Lane",
+            "allowed_paths",
+            "builders",
+            "lanes_overlap",
+            "catervas_git_commit",
+        ] {
+            assert!(text.contains(needle), "{needle}: {text}");
+        }
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "{text}");
     }
 
     /// The kit's skills are the nine of steps 08 and 08b, then the four of step 08c: the brand kit,
