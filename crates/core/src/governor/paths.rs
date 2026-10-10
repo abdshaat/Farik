@@ -129,39 +129,34 @@ pub fn reaches_the_catervas_directory(glob: &str) -> bool {
     })
 }
 
-/// The directory the Marketing Specialist owns while the team has one (`docs/SPEC.md` section 5.3,
-/// ADR 0042): the brand kit, the persona, the marketing plans and their research.
-const MARKETING_DIRECTORY: [&str; 2] = ["docs", "marketing"];
-
-/// Whether a glob of paths could match something under `docs/marketing/`: after `.` segments are
-/// dropped and each `{a,b}` is expanded, its first segment holds `**`, or matches `docs` regardless
-/// of letter case and either ends the glob as a literal, or its second segment holds `**`, or
-/// matches `marketing` and the glob goes on or is a literal there. A segment that does not compile
-/// cannot be read, so the glob is taken to reach: the check fails closed as
-/// `reaches_the_catervas_directory` does.
+/// Whether a glob of paths could match something under `folder`, a repository-relative path of
+/// any number of segments (`docs/SPEC.md` section 5.3, 5.17). After backslashes become `/`, `.`
+/// segments are dropped and each `{a,b}` is expanded, the glob is read segment by segment against
+/// the folder's: a segment holding `**`, or one that does not compile, reaches (the check fails
+/// closed, as `reaches_the_catervas_directory` does); one that does not name the folder's segment,
+/// ignoring letter case, does not. A glob that goes on below the folder reaches; one that ends at
+/// or before it reaches when its last segment is no wildcard, since a literal directory names
+/// what is under it.
 #[must_use]
-pub fn reaches_the_marketing_directory(glob: &str) -> bool {
+pub fn reaches_the_folder(glob: &str, folder: &str) -> bool {
+    let folder: Vec<&str> = folder.split('/').collect();
     expand_braces(&glob.replace('\\', "/")).iter().any(|glob| {
-        let mut segments = glob
+        let segments: Vec<&str> = glob
             .split('/')
-            .filter(|segment| !segment.is_empty() && *segment != ".");
-        let [docs, marketing] = MARKETING_DIRECTORY;
-        let Some(first) = segments.next() else {
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .collect();
+        let Some(last) = segments.last() else {
             return false;
         };
-        if first.contains("**") || !compiles(first) {
-            return true;
+        for (segment, directory) in segments.iter().zip(&folder) {
+            if segment.contains("**") || !compiles(segment) {
+                return true;
+            }
+            if !names(segment, directory) {
+                return false;
+            }
         }
-        if !names(first, docs) {
-            return false;
-        }
-        let Some(second) = segments.next() else {
-            return !is_a_wildcard(first);
-        };
-        if second.contains("**") || !compiles(second) {
-            return true;
-        }
-        names(second, marketing) && (segments.next().is_some() || !is_a_wildcard(second))
+        segments.len() > folder.len() || !is_a_wildcard(last)
     })
 }
 
@@ -238,7 +233,7 @@ fn refuse<'a>(violations: impl Iterator<Item = &'a String>) -> Result<(), PathRe
 mod tests {
     use super::{
         GlobError, PathRefusal, PathViolation, check_allowed_paths, check_protected_paths,
-        reaches_the_marketing_directory,
+        reaches_the_folder,
     };
 
     fn strings(items: &[&str]) -> Vec<String> {
@@ -257,22 +252,28 @@ mod tests {
     }
 
     #[test]
-    fn reaches_the_marketing_directory_as_the_rule_says() {
-        // Each names a path under `docs/marketing/` or could match one.
+    fn reaches_a_folder_as_the_rule_says() {
+        // Each names a path under `docs/catervas/marketing/` or could match one.
         for glob in [
             "docs/**",
             "**/*.md",
-            "Docs/Marketing/x.md",
-            "docs/{marketing,adr}/**",
-            "./docs/marketing",
-            "docs",
-            "docs[/]marketing/x",
             "**",
-            "d*/m*/x",
-            "docs/marketing/**",
-            "DOCS\\MARKETING\\x.md",
+            "Docs/Catervas/Marketing/x.md",
+            "docs/catervas/{marketing,adr}/**",
+            "./docs/catervas/marketing",
+            "docs",
+            "docs/catervas",
+            "docs[/]catervas/marketing/x",
+            "d*/c*/m*/x",
+            "docs/catervas/marketing/**",
+            "DOCS\\CATERVAS\\MARKETING\\x.md",
+            "docs/catervas/**",
+            "docs/*/marketing/**",
         ] {
-            assert!(reaches_the_marketing_directory(glob), "{glob}");
+            assert!(
+                reaches_the_folder(glob, "docs/catervas/marketing"),
+                "{glob}"
+            );
         }
         for glob in [
             "docs/adr/**",
@@ -280,13 +281,27 @@ mod tests {
             "*.md",
             "docs/*.md",
             "*",
-            "docs/marketing*",
-            "docsx/marketing/x",
-            "docs/marketingx/**",
+            "docs/*",
+            "docs/catervas/*.md",
+            "docs/catervas/marketing*",
+            "docsx/catervas/marketing/x",
+            "docs/catervas/marketingx/**",
+            "docs/catervas/product/**",
             "",
         ] {
-            assert!(!reaches_the_marketing_directory(glob), "{glob}");
+            assert!(
+                !reaches_the_folder(glob, "docs/catervas/marketing"),
+                "{glob}"
+            );
         }
+        assert!(reaches_the_folder(
+            "docs/*/product/**",
+            "docs/catervas/product"
+        ));
+        assert!(!reaches_the_folder(
+            "docs/catervas/productx/**",
+            "docs/catervas/product"
+        ));
     }
 
     #[test]

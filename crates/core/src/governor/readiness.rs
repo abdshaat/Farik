@@ -5,8 +5,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::paths::{
-    GlobError, PathRefusal, check_allowed_paths, reaches_the_catervas_directory,
-    reaches_the_marketing_directory,
+    GlobError, PathRefusal, check_allowed_paths, reaches_the_catervas_directory, reaches_the_folder,
 };
 use super::team_rules::TeamRules;
 use crate::contract::{
@@ -642,7 +641,7 @@ fn marketing_paths_owned(
         .allowed_paths
         .iter()
         .map(String::as_str)
-        .filter(|path| reaches_the_marketing_directory(path))
+        .filter(|path| reaches_the_folder(path, "docs/marketing"))
         .collect();
     if reaching.is_empty() {
         return None;

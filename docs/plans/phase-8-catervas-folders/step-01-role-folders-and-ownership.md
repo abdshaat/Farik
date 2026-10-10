@@ -98,7 +98,7 @@ Produces: `reaches_the_folder`. Consumes: the private helpers of `paths.rs`.
 
 - `reaches_a_folder_as_the_rule_says` — for `docs/catervas/marketing`, each of `docs/**`, `**/*.md`, `**`, `Docs/Catervas/Marketing/x.md`, `docs/catervas/{marketing,adr}/**`, `./docs/catervas/marketing`, `docs`, `docs/catervas`, `docs[/]catervas/marketing/x`, `d*/c*/m*/x`, `docs/catervas/marketing/**`, `DOCS\CATERVAS\MARKETING\x.md`, `docs/catervas/**` and `docs/*/marketing/**` reaches; none of `docs/adr/**`, `src/**`, `*.md`, `docs/*.md`, `*`, `docs/*`, `docs/catervas/*.md`, `docs/catervas/marketing*`, `docsx/catervas/marketing/x`, `docs/catervas/marketingx/**`, `docs/catervas/product/**` and the empty glob does. For `docs/catervas/product`, `docs/*/product/**` reaches and `docs/catervas/productx/**` does not. RED: no function.
 
-- [ ] `refactor(core): read any folder's reach from a glob`
+- [x] `refactor(core): read any folder's reach from a glob`
 
 ### Task 3: Readiness keeps each folder to its owner
 
