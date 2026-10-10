@@ -5,13 +5,15 @@
 //! document the owner approves is proposed at the sprint review and waits for the owner.
 
 use catervas_core::folders::{
-    FolderDocPath, FolderDocPathRefusal, agent_twin, check_folder_doc_path, folder_doc_author,
-    folder_doc_message, role_folder,
+    FolderDocPath, FolderDocPathRefusal, LineChange, agent_twin, changed_lines,
+    check_folder_doc_path, folder_doc_author, folder_doc_message, role_folder,
 };
 use catervas_core::governor::paths::check_protected_paths;
 use catervas_core::team::{Integration, Team};
 use catervas_protocol::event::{EventBody, Thread};
-use catervas_store::folder_docs::folder_docs;
+use catervas_store::StoreError;
+use catervas_store::folder_docs::{FolderDocProposal, ProposalState, folder_docs};
+use catervas_store::waiting::name_of;
 use catervas_store::{CommitOutcome, Git};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -174,6 +176,128 @@ pub(crate) fn land(
         CommitOutcome::Busy(paths) => Err(LandRefusal::Busy(paths)),
         CommitOutcome::Linked(path) => Err(LandRefusal::Link(path)),
     }
+}
+
+/// The documents' plain names, joined by " and ": the roadmap and the spec as the owner knows
+/// them, any other by its path within `docs/catervas/`.
+fn plain_names(paths: &[&str]) -> String {
+    paths
+        .iter()
+        .map(|path| match *path {
+            "docs/catervas/product/roadmap.md" => "Roadmap",
+            "docs/catervas/product/spec.md" => "Product description",
+            other => other.strip_prefix("docs/catervas/").unwrap_or(other),
+        })
+        .collect::<Vec<_>>()
+        .join(" and ")
+}
+
+/// `folder_doc_proposals.list` (`docs/SPEC.md` 5.7): the team's integration policy and the
+/// proposals still pending as one card for each sprint review and agent, ordered by its first
+/// proposal, each document with its lines changed from the integration branch's file.
+pub(crate) fn proposals_list(deps: &ToolDeps, team: &Team) -> Result<Value, StoreError> {
+    let io = |error: &dyn std::fmt::Display| StoreError::Io {
+        detail: error.to_string(),
+    };
+    let pending: Vec<_> = folder_docs(&deps.log)?
+        .proposals
+        .into_iter()
+        .filter(|each| each.state == ProposalState::Pending)
+        .collect();
+    let mut cards: Vec<Vec<&FolderDocProposal>> = Vec::new();
+    for each in &pending {
+        match cards
+            .iter_mut()
+            .find(|card| card[0].sprint_id == each.sprint_id && card[0].agent_id == each.agent_id)
+        {
+            Some(card) => card.push(each),
+            None => cards.push(vec![each]),
+        }
+    }
+    let mut listed = Vec::new();
+    for card in &cards {
+        let into = integration_branch(team, &deps.git).map_err(|error| io(&error))?;
+        let documents: Vec<Value> = card
+            .iter()
+            .map(|each| {
+                let before = deps.git.file_at(&into, &each.path).unwrap_or_default();
+                let lines: Vec<Value> = changed_lines(&before, &each.text)
+                    .into_iter()
+                    .map(|line| {
+                        let change = match line.change {
+                            LineChange::Same => "same",
+                            LineChange::Added => "added",
+                            LineChange::Removed => "removed",
+                        };
+                        json!({ "change": change, "text": line.text })
+                    })
+                    .collect();
+                json!({ "proposal": each.proposal, "path": each.path, "lines": lines })
+            })
+            .collect();
+        let summaries: Vec<&str> = card.iter().map(|each| each.summary.as_str()).collect();
+        listed.push(json!({
+            "sprint_id": card[0].sprint_id, "agent_id": card[0].agent_id,
+            "summary": summaries.join(" "), "documents": documents,
+        }));
+    }
+    Ok(json!({
+        "integration": team.policy.integration.to_string(), "cards": listed,
+    }))
+}
+
+/// The `integration` rows of `waiting.list` for the folder changes under `manual` that are
+/// neither integrated nor escalated: an approval waits for the owner to add it, as does a write;
+/// empty under any other policy.
+pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, StoreError> {
+    if team.policy.integration != Integration::Manual {
+        return Ok(Vec::new());
+    }
+    let docs = folder_docs(&deps.log)?;
+    let mut rows = Vec::new();
+    for change in docs
+        .changes
+        .iter()
+        .filter(|change| !change.integrated && !change.escalated)
+    {
+        let proposals: Vec<&FolderDocProposal> = docs
+            .proposals
+            .iter()
+            .filter(|each| change.proposals.contains(&each.proposal))
+            .collect();
+        let (agent, title, line) = if let Some(first) = proposals.first() {
+            let mut paths: Vec<&str> = Vec::new();
+            for each in &proposals {
+                if !paths.contains(&each.path.as_str()) {
+                    paths.push(&each.path);
+                }
+            }
+            (
+                first.agent_id.clone(),
+                format!(
+                    "{} from the sprint {} review",
+                    plain_names(&paths),
+                    first.sprint_id.trim_start_matches('S')
+                ),
+                "You approved it; it waits for you to add it".to_string(),
+            )
+        } else if let Some(writer) = &change.written_by {
+            let name = name_of(team, writer);
+            let paths: Vec<&str> = change.paths.iter().map(String::as_str).collect();
+            (
+                writer.clone(),
+                format!("{} by {name}", plain_names(&paths)),
+                format!("{name} wrote it; it waits for you to add it"),
+            )
+        } else {
+            continue;
+        };
+        rows.push(json!({
+            "kind": "integration", "folder_change": change.change, "agent_id": agent,
+            "title": title, "line": line,
+        }));
+    }
+    Ok(rows)
 }
 
 /// What a call asks for once its input is checked.

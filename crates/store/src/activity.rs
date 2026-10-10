@@ -13,6 +13,7 @@ use catervas_protocol::event::{
 use chrono::{DateTime, Utc};
 
 use crate::files::ProjectFiles;
+use crate::folder_docs::{FolderDocProposal, ProposalState, folder_docs};
 use crate::marketing::{
     PausedWhy, PostMove, PostMoveKind, budgets_reached, campaigns_paused, marketing_plans,
     post_moves,
@@ -67,6 +68,10 @@ pub struct AgentActivity {
 /// # Errors
 ///
 /// What the store refused.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one pass over the team, each state in its precedence"
+)]
 pub fn activity(
     log: &EventLog,
     projections: &Projections,
@@ -100,6 +105,7 @@ pub fn activity(
         ..EventQuery::default()
     })?;
     let waiting = crate::waiting::waiting(projections, log, files, team)?;
+    let proposals = folder_docs(log)?.proposals;
     let mut all = Vec::new();
     for agent in team
         .agents
@@ -156,6 +162,14 @@ pub fn activity(
                 Some(item.task_id.clone()),
                 None,
             ));
+            continue;
+        }
+        if proposals
+            .iter()
+            .any(|each| each.state == ProposalState::Pending && each.agent_id == id)
+        {
+            let line = "Waiting on you: product plan changes".to_string();
+            all.push(one(ActivityState::Waiting, line, None, None));
             continue;
         }
         if let Some((task, line)) = plan_waiting(&plans, &board, team, id) {
@@ -283,7 +297,8 @@ pub struct Moved {
 }
 
 /// What moved after `since`, oldest first: the moves, the integrations, the human's acceptances,
-/// the agents' naps, the ceremonies' posts, and what happened to the social posts.
+/// the agents' naps, the ceremonies' posts, what happened to the social posts, and who proposed
+/// changes to the product plan.
 ///
 /// # Errors
 ///
@@ -386,8 +401,55 @@ pub fn moved_since(
             .into_iter()
             .map(|(seq, at, line)| (seq, Moved { at, line })),
     );
+    moved.extend(proposal_moves(log, &who, since)?);
     moved.sort_by_key(|(seq, _)| *seq);
     Ok(moved.into_iter().map(|(_, moved)| moved).collect())
+}
+
+/// Who proposed changes to the product plan since `since`: one line for each agent and sprint
+/// review, with the latest proposal's sequence number and time, and `k` the distinct documents.
+fn proposal_moves(
+    log: &EventLog,
+    who: &impl Fn(&str) -> String,
+    since: DateTime<Utc>,
+) -> Result<Vec<(u64, Moved)>, StoreError> {
+    let docs = folder_docs(log)?;
+    let mut groups: Vec<(&FolderDocProposal, Vec<&str>)> = Vec::new();
+    for each in docs.proposals.iter().filter(|each| each.at > since) {
+        let same = |(first, _): &(&FolderDocProposal, Vec<&str>)| {
+            first.agent_id == each.agent_id && first.sprint_id == each.sprint_id
+        };
+        match groups.iter_mut().find(|group| same(group)) {
+            Some((latest, paths)) => {
+                *latest = each;
+                if !paths.contains(&each.path.as_str()) {
+                    paths.push(&each.path);
+                }
+            }
+            None => groups.push((each, vec![&each.path])),
+        }
+    }
+    Ok(groups
+        .into_iter()
+        .map(|(latest, paths)| {
+            let what = match paths.len() {
+                1 => "a change".to_string(),
+                k => format!("{k} changes"),
+            };
+            let line = format!(
+                "{} proposed {what} to the product plan from the sprint {} review.",
+                who(&latest.agent_id),
+                latest.sprint_id.trim_start_matches('S')
+            );
+            (
+                latest.proposal,
+                Moved {
+                    at: latest.at,
+                    line,
+                },
+            )
+        })
+        .collect())
 }
 
 /// What Catervas did with a marketing plan's ads on its own since `since`, one line each, with the
@@ -525,6 +587,90 @@ mod tests {
             { "id": "theo", "display_name": "Theo", "role": "software_developer", "status": "paused" },
         ]);
         validate_team(&wire).expect("the fixture is a team")
+    }
+
+    /// `ada` proposes `path` at the sprint `sprint` review, in her session.
+    fn proposes(board: &Board, when: chrono::DateTime<chrono::Utc>, sprint: &str, path: &str) {
+        board.session(
+            when,
+            None,
+            "ada",
+            "session-1",
+            "folder_doc.proposed",
+            json!({
+                "path": path, "text": "For people.", "agent_text": "For agents.",
+                "summary": "Pie pre-orders are done.", "sprint_id": sprint, "proposed_by": "ada"
+            }),
+        );
+    }
+
+    const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+    const SPEC: &str = "docs/catervas/product/spec.md";
+
+    #[test]
+    fn an_agent_whose_changes_wait_waits_on_the_owner() {
+        let board = Board::new("activity-folder-doc-waits");
+        let team = five();
+        proposes(&board, at(9, 1), "S4", ROADMAP);
+        let ada = |board: &Board| {
+            activity(
+                &board.log,
+                &board.projections,
+                &board.files,
+                &team,
+                at(12, 0),
+            )
+            .expect("the store reads")
+            .into_iter()
+            .find(|one| one.agent_id == "ada")
+            .expect("Ada")
+        };
+
+        let waiting = ada(&board);
+        assert_eq!(waiting.state, ActivityState::Waiting);
+        assert_eq!(waiting.line, "Waiting on you: product plan changes");
+        assert!(waiting.task_id.is_none());
+
+        board.put(
+            at(9, 2),
+            None,
+            None,
+            "folder_doc.approved",
+            json!({ "proposals": [1] }),
+        );
+        assert_eq!(ada(&board).state, ActivityState::Idle);
+    }
+
+    #[test]
+    fn says_who_proposed_changes_to_the_product_plan() {
+        let board = Board::new("moved-folder-doc-proposed");
+        let team = five();
+        proposes(&board, at(8, 0), "S4", SPEC);
+        proposes(&board, at(10, 1), "S4", ROADMAP);
+        proposes(&board, at(10, 2), "S4", ROADMAP);
+        let said = |board: &Board| -> Vec<(chrono::DateTime<chrono::Utc>, String)> {
+            moved_since(&board.log, &board.projections, &team, at(9, 0))
+                .expect("the store reads")
+                .into_iter()
+                .map(|one| (one.at, one.line))
+                .collect()
+        };
+        assert_eq!(
+            said(&board),
+            [(
+                at(10, 2),
+                "Ada proposed a change to the product plan from the sprint 4 review.".to_string()
+            )]
+        );
+
+        proposes(&board, at(10, 3), "S4", SPEC);
+        assert_eq!(
+            said(&board),
+            [(
+                at(10, 3),
+                "Ada proposed 2 changes to the product plan from the sprint 4 review.".to_string()
+            )]
+        );
     }
 
     #[test]

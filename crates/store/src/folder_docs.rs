@@ -68,6 +68,10 @@ pub struct FolderChange {
     pub paths: Vec<String>,
     /// Whether it carries the owner's approval.
     pub approved: bool,
+    /// The proposals the owner approved in it; empty for a write.
+    pub proposals: Vec<u64>,
+    /// The agent that wrote it; `None` for an approval.
+    pub written_by: Option<String>,
     /// Whether it reached the integration branch.
     pub integrated: bool,
     /// Whether Catervas gave its integration to the human.
@@ -104,12 +108,19 @@ fn settle(docs: &mut FolderDocs, proposals: &[u64], state: ProposalState) {
     }
 }
 
-fn add_change(docs: &mut FolderDocs, change: u64, paths: Vec<String>, approved: bool) {
+fn add_change(
+    docs: &mut FolderDocs,
+    change: u64,
+    paths: Vec<String>,
+    by: Result<Vec<u64>, String>,
+) {
     if docs.changes.iter().all(|known| known.change != change) {
         docs.changes.push(FolderChange {
             change,
             paths,
-            approved,
+            approved: by.is_ok(),
+            proposals: by.clone().unwrap_or_default(),
+            written_by: by.err(),
             integrated: false,
             escalated: false,
         });
@@ -167,7 +178,7 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
                     &mut docs,
                     body.change.get(),
                     vec![body.path.to_string()],
-                    false,
+                    Err(body.written_by.clone()),
                 );
             }
             EventBody::FolderDocApproved(body) if is_unattended(event) => {
@@ -197,7 +208,7 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
                             }
                         }
                     }
-                    add_change(&mut docs, change.get(), paths, true);
+                    add_change(&mut docs, change.get(), paths, Ok(proposals.clone()));
                 }
                 settle(&mut docs, &proposals, ProposalState::Approved);
             }

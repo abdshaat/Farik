@@ -108,7 +108,7 @@ Consumes: `changed_lines` (Task 1).
 - `an_agent_whose_changes_wait_waits_on_the_owner` (`activity.rs`) — `pm` with a pending proposal and no waiting row: state `waiting`, line "Waiting on you: product plan changes", no task; once the owner decides, `pm` is idle. RED.
 - `says_who_proposed_changes_to_the_product_plan` (`activity.rs`) — two proposals by `pm` in S4 since `since` and one before it: one line "Mira proposed 2 changes to the product plan from the sprint 4 review." at the later one's time; two proposals of one path give "Mira proposed a change to the product plan from the sprint 4 review.". RED.
 
-- [ ] `feat(runtime): list the product plan changes waiting for the owner`
+- [x] `feat(runtime): list the product plan changes waiting for the owner`
 
 ### Task 4: The card on Today
 

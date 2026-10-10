@@ -245,6 +245,9 @@ pub(super) fn query(
             // What Catervas could not keep within a budget or keep paused comes first: it is money.
             let mut rows = ads_rows(state, deps).map_err(|e| internal(&e))?;
             rows.extend(listed.iter().map(|item| waiting_row(deps, item)));
+            rows.extend(
+                crate::tools::folders::integration_rows(deps, &team).map_err(|e| internal(&e))?,
+            );
             rows.extend(design_reviews_waiting(deps, &team)?);
             Ok(json!({ "waiting": rows }))
         }
@@ -294,6 +297,9 @@ pub(super) fn query(
             marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
         }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
+        "folder_doc_proposals.list" => {
+            crate::tools::folders::proposals_list(deps, &team()?).map_err(|e| internal(&e))
+        }
         "seller_replies.list" => {
             crate::procurement::seller_replies_list(deps).map_err(|e| internal(&e))
         }
@@ -2926,6 +2932,192 @@ pub(super) mod tests {
                 "{params}"
             );
         }
+    }
+
+    const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+    const SPEC: &str = "docs/catervas/product/spec.md";
+
+    /// A harness whose Product Manager `pm` is Mira and Scrum Master `sm` is Sol, integrating
+    /// under `policy`.
+    fn folders_integrating(name: &str, policy: &'static str) -> Harness {
+        Harness::new(name, move |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "sm", "display_name": "Sol", "role": "scrum_master", "status": "active"
+            }));
+            wire["policy"]["integration"] = json!(policy);
+        })
+    }
+
+    /// `pm`'s proposal of `path` at the sprint review `sprint`, and its number.
+    fn pm_proposes(harness: &Harness, sprint: &str, path: &str, text: &str, summary: &str) -> u64 {
+        harness
+            .project
+            .record_in(
+                Some("pm"),
+                Some("session-1"),
+                "",
+                "folder_doc.proposed",
+                &json!({
+                    "path": path, "text": text, "agent_text": format!("{text} (for agents)"),
+                    "summary": summary, "sprint_id": sprint, "proposed_by": "pm"
+                }),
+            )
+            .envelope
+            .seq
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_the_changes_waiting_for_the_owner() {
+        let harness = folders_integrating("gates-folder-doc-proposals", "pull_request");
+        let root = &harness.project.repo;
+        root.write(ROADMAP, "# Roadmap\n\n## Now\n\nPie pre-orders.\n");
+        root.commit("the roadmap");
+        let approved = pm_proposes(&harness, "S3", SPEC, "# Old\n", "Old spec.");
+        harness.project.record(
+            "",
+            "folder_doc.approved",
+            &json!({ "proposals": [approved] }),
+        );
+        let returned = pm_proposes(&harness, "S3", ROADMAP, "# Old\n", "Old roadmap.");
+        harness.project.record(
+            "",
+            "folder_doc.returned",
+            &json!({ "proposals": [returned], "reason": "No" }),
+        );
+        pm_proposes(&harness, "S4", ROADMAP, "# Roadmap\n", "Older roadmap.");
+        let roadmap = pm_proposes(
+            &harness,
+            "S4",
+            ROADMAP,
+            "# Roadmap\n\n## Now\n\nGift cards.\n\nPie pre-orders.\n",
+            "Roadmap summary.",
+        );
+        let spec = pm_proposes(
+            &harness,
+            "S4",
+            SPEC,
+            "# Spec\n\nA shop for pies.\n",
+            "Spec summary.",
+        );
+
+        let listed = query(
+            &harness.daemon,
+            "folder_doc_proposals.list",
+            &json!({}),
+            "folderDocProposalsListResult",
+        );
+
+        assert_eq!(
+            listed,
+            json!({
+                "integration": "pull_request",
+                "cards": [{
+                    "sprint_id": "S4", "agent_id": "pm",
+                    "summary": "Roadmap summary. Spec summary.",
+                    "documents": [
+                        { "proposal": roadmap, "path": ROADMAP, "lines": [
+                            { "change": "same", "text": "## Now" },
+                            { "change": "added", "text": "Gift cards." },
+                            { "change": "same", "text": "Pie pre-orders." },
+                        ] },
+                        { "proposal": spec, "path": SPEC, "lines": [
+                            { "change": "added", "text": "# Spec" },
+                            { "change": "added", "text": "A shop for pies." },
+                        ] },
+                    ]
+                }]
+            })
+        );
+
+        let harness = folders_integrating("gates-folder-doc-none", "manual");
+        let listed = query(
+            &harness.daemon,
+            "folder_doc_proposals.list",
+            &json!({}),
+            "folderDocProposalsListResult",
+        );
+        assert_eq!(listed, json!({ "integration": "manual", "cards": [] }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_a_folder_change_waiting_to_be_added_under_manual() {
+        let harness = folders_integrating("gates-folder-change-manual", "manual");
+        let roadmap = pm_proposes(&harness, "S4", ROADMAP, "# Roadmap\n", "Roadmap.");
+        let spec = pm_proposes(&harness, "S4", SPEC, "# Spec\n", "Spec.");
+        harness.project.record(
+            "",
+            "folder_doc.approved",
+            &json!({ "proposals": [roadmap, spec], "change": 1, "sha": "abc" }),
+        );
+        harness.project.record_in(
+            Some("sm"),
+            Some("session-2"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                "change": 2, "sha": "def"
+            }),
+        );
+        let integration_rows = |harness: &Harness| {
+            let listed = query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult",
+            );
+            listed["waiting"]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .filter(|row| row["kind"] == "integration")
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            integration_rows(&harness),
+            [
+                json!({
+                    "kind": "integration", "folder_change": 1, "agent_id": "pm",
+                    "title": "Roadmap and Product description from the sprint 4 review",
+                    "line": "You approved it; it waits for you to add it"
+                }),
+                json!({
+                    "kind": "integration", "folder_change": 2, "agent_id": "sm",
+                    "title": "delivery/cadence.md by Sol",
+                    "line": "Sol wrote it; it waits for you to add it"
+                }),
+            ]
+        );
+
+        harness.project.record(
+            "",
+            "folder_change.integrated",
+            &json!({ "change": 1, "sha": "abc", "into": "main", "integrated_by": "governor" }),
+        );
+        harness.project.record(
+            "",
+            "folder_change.escalated",
+            &json!({ "change": 2, "detail": "conflict" }),
+        );
+        assert!(integration_rows(&harness).is_empty());
+
+        let harness = folders_integrating("gates-folder-change-auto", "auto_merge");
+        harness.project.record_in(
+            Some("sm"),
+            Some("session-2"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                "change": 1, "sha": "def"
+            }),
+        );
+        assert!(integration_rows(&harness).is_empty());
     }
 
     #[test]
