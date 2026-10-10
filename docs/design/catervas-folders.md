@@ -1,6 +1,6 @@
 # The Catervas Folder System: each role's own documentation
 
-Status: approved by the founder on 2026-10-09, in conversation (ADR 0051). It is the design input to phase 8, Catervas folders.
+Status: approved by the founder on 2026-10-09, in conversation (ADR 0051); its mockups, the canvas page "Catervas folders" (version 19, sources in `docs/design/mockups/`), approved by the founder on 2026-10-10 ("Approve as drawn"). It is the design input to phase 8, Catervas folders.
 
 ## Why
 
