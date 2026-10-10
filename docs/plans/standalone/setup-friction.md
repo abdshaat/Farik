@@ -98,7 +98,7 @@ Files: modified `crates/store/src/scan.rs`, `crates/store/tests/project_files.rs
 - `suggests_start_then_preview` — npm with `["start","preview"]` answers `npm run start`; with `["preview"]` alone, `npm run preview`.
 - `suggests_nothing_without_a_script_or_on_cargo` — npm with `["test"]` answers `None`; cargo answers `None`; no toolchain answers `None`.
 
-- [ ] `feat(store): suggest how to start the project's app`
+- [x] `feat(store): suggest how to start the project's app`
 
 ### Task 3: setup proposes the suggestion
 

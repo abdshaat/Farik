@@ -52,6 +52,6 @@ pub use projections::{
 };
 pub use reconcile::{Drift, ReconcileError, reconcile};
 pub use scan::{
-    ProjectScan, ScanError, ScanFacts, material, names_of, project_document, scan_project,
-    seeded_library,
+    AppStart, ProjectScan, ScanError, ScanFacts, material, names_of, project_document,
+    scan_project, seeded_library,
 };

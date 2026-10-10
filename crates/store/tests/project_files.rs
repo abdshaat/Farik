@@ -667,6 +667,7 @@ fn keeps_the_user_note_across_a_rescan() {
         read_back: "Rust, cargo, no commits yet".to_string(),
         detected_criteria: Vec::new(),
         facts: catervas_store::ScanFacts::default(),
+        app_start: None,
     };
     let library = validate_criteria(&a_criteria_library_wire()).expect("a library");
     files
