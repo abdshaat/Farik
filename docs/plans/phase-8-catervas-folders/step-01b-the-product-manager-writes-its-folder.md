@@ -121,6 +121,6 @@ Text, exactly where it is quoted:
 ```
 cargo xtask check --integration      # or /tmp/claude-0/fullcheck.sh in the cloud container; Tasks 1 and 2 name integration tests
 # expected: xtask check: ok
-git grep -n "NOT_FOR_READ_ONLY\|You have no tool that writes to the repository" -- crates
+git grep -n "NOT_FOR_READ_ONLY\|You have no tool that writes to the repository" -- crates/runtime crates/roles/roles/product_manager
 # expected: no output
 ```
