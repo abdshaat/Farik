@@ -110,6 +110,8 @@ mod tests {
             "wip/CTV-4",
             "feature/CTV-1/more",
             "feature/CTV-1234567",
+            "feature/FRK-7",
+            "fix/FRK-7",
         ] {
             assert_eq!(task_number_of_branch(name), None, "{name}");
         }
