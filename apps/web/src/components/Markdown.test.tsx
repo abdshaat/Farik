@@ -22,7 +22,11 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><text>A</text></svg>';
 beforeEach(() => {
 	mermaid.current = {
 		initialize: vi.fn(),
-		render: vi.fn().mockResolvedValue({ svg: SVG }),
+		// Like mermaid: it empties the element it is given before it draws.
+		render: vi.fn(async (_id: string, _src: string, el: HTMLElement) => {
+			el.innerHTML = "";
+			return { svg: SVG };
+		}),
 	};
 });
 
@@ -86,6 +90,7 @@ describe("Markdown", () => {
 				securityLevel: "strict",
 				startOnLoad: false,
 				htmlLabels: false,
+				suppressErrorRendering: true,
 			}),
 		);
 		expect(mermaid.current.render).toHaveBeenCalledWith(
@@ -98,7 +103,14 @@ describe("Markdown", () => {
 	});
 
 	it("keeps a diagram mermaid refuses as its source", async () => {
-		mermaid.current.render.mockRejectedValue(new Error("Parse error"));
+		// Like mermaid: it empties the element, draws its own error there, and throws.
+		mermaid.current.render.mockImplementation(
+			async (_id: string, _src: string, el: HTMLElement) => {
+				el.innerHTML = "";
+				el.append(document.createElement("svg"));
+				throw new Error("Parse error");
+			},
+		);
 		const { container } = render(
 			<Markdown text={"```mermaid\nnot a diagram\n```"} />,
 		);
@@ -107,6 +119,7 @@ describe("Markdown", () => {
 			"not a diagram",
 		);
 		expect(container.querySelector("img")).toBeNull();
+		expect(container.querySelector("svg")).toBeNull();
 	});
 
 	it("has no accessibility violations", async () => {

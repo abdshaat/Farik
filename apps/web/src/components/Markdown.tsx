@@ -31,15 +31,19 @@ async function draw(figures: HTMLElement[], live: () => boolean) {
 			theme: "neutral",
 			fontFamily: "system-ui, sans-serif",
 			htmlLabels: false,
+			suppressErrorRendering: true,
 		});
 	}
 	for (const figure of figures) {
 		const source = figure.querySelector("pre")?.textContent?.trimEnd() ?? "";
+		// mermaid empties the element it draws into, so it gets a scratch one, not the figure.
+		const scratch = document.createElement("div");
+		figure.append(scratch);
 		try {
 			const { svg } = await mermaid.render(
 				`catervas-diagram-${++drawn}`,
 				source,
-				figure,
+				scratch,
 			);
 			if (!live()) return;
 			const img = document.createElement("img");
@@ -47,6 +51,7 @@ async function draw(figures: HTMLElement[], live: () => boolean) {
 			img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 			figure.replaceChildren(img);
 		} catch {
+			scratch.remove();
 			if (!live()) return;
 			const note = document.createElement("p");
 			note.textContent = t("diagramFailed");
