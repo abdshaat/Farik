@@ -131,7 +131,7 @@ Files: modified `crates/core/src/governor/done.rs` (`PairChangedAlone`, `CHECKS`
 - `refuses_a_diff_that_changes_one_file_of_a_pair` — allowed `docs/catervas/**`: `[docs/catervas/product/spec.md]` fails `[PairChangedAlone]` with exactly `the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md; a document for people and its .agent.md twin change together`; `[docs/catervas/product/roadmap.agent.md]` names `roadmap.agent.md without …/roadmap.md`; `[docs/catervas/marketing/plans/MP-2.md]` fails; `[spec.md, roadmap.agent.md]` names both, joined by `, `; `[spec.md, spec.agent.md, docs/catervas/architecture/overview.md]` passes. RED: no rule.
 - `reports_every_failure_in_rule_order` (`:864`, updated) — the changed paths gain `docs/catervas/product/roadmap.md`, the order gains `R::PairChangedAlone` after `R::NoCatervasPathChanged`, and the `PathsWithinAllowed` message names it. RED: no rule.
 
-- [ ] `feat(core): refuse a diff that changes one file of a human document's pair`
+- [x] `feat(core): refuse a diff that changes one file of a human document's pair`
 
 ### Task 6: The Product Manager's documents move to its folder
 
