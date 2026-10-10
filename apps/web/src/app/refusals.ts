@@ -112,6 +112,15 @@ const WORDS: Record<string, keyof typeof en> = {
 	secret_store_unavailable: "refuseSecretStore",
 	seller_reply_dismissed: "refuseSellerReplyDismissed",
 	unknown_seller_reply: "refuseSellerReplyUnknown",
+	// The owner's decisions on the product plan's changes (SPEC 5.7).
+	folder_doc_decided: "refuseFolderDocDecided",
+	folder_doc_superseded: "refuseFolderDocSuperseded",
+	unknown_folder_doc: "refuseUnknownFolderDoc",
+	folder_doc_mixed: "refuseFolderDocMixed",
+	folder_doc_reason_needed: "refuseFolderDocReasonNeeded",
+	folder_doc_busy: "refuseFolderDocBusy",
+	folder_doc_link: "refuseFolderDocLink",
+	folder_doc_waiting: "refuseFolderDocWaiting",
 	// A skill's refusals (SPEC 6.7), said at the field they belong to.
 	skill_runs_commands: "skillRunsCommands",
 	skill_attaches_files: "skillAttachesFiles",

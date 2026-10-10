@@ -21,6 +21,7 @@ import {
 	UNREAD_ROW,
 } from "../test/ads.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
+import { CARD, docs as folderDocs } from "../test/folderDocs.ts";
 import { sentCommand } from "../test/gate.ts";
 import {
 	TEAM as MARKETING_TEAM,
@@ -54,6 +55,7 @@ import {
 	eventArrives,
 	renderApp,
 } from "../test/render-app.tsx";
+import { bodyOf, refusedBy } from "../test/schema.ts";
 import {
 	SCRIPT_ROW,
 	MARKUP as SITE_MARKUP,
@@ -102,6 +104,7 @@ async function today(fields: {
 	sprint?: unknown;
 	team?: unknown;
 	backlog?: unknown;
+	docs?: unknown;
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -112,6 +115,8 @@ async function today(fields: {
 	await answerQuery(s, "moved.since", { moved: fields.moved ?? [] });
 	await answerQuery(s, "sprint.current", fields.sprint ?? null);
 	if (fields.backlog) await answerQuery(s, "backlog.summary", fields.backlog);
+	if (fields.docs)
+		await answerQuery(s, "folder_doc_proposals.list", fields.docs);
 	return { container, s };
 }
 
@@ -255,6 +260,116 @@ describe("today", () => {
 			return f;
 		});
 		expect(filed.params).toEqual({ text: "Add gift cards to checkout" });
+	});
+
+	it("adds_a_folder_change_from_its_row", async () => {
+		const { s } = await today({
+			waiting: [
+				{
+					kind: "integration",
+					folder_change: 1,
+					agent_id: "mira",
+					title: "Roadmap and Product description from the sprint 4 review",
+					line: "You approved it; it waits for you to add it",
+				},
+				{
+					task_id: "CTV-5",
+					kind: "integration",
+					agent_id: "theo",
+					title: "the photos",
+					line: "Accepted, waiting for you to add it",
+				},
+			],
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const [folder, task] = within(list).getAllByRole(
+			"listitem",
+		) as HTMLElement[];
+		expect(
+			within(folder as HTMLElement).getByText(
+				"Add Roadmap and Product description from the sprint 4 review to your project",
+			),
+		).toBeTruthy();
+		expect(
+			within(folder as HTMLElement).getByText(
+				"You approved it; it waits for you to add it",
+			),
+		).toBeTruthy();
+		expect(within(folder as HTMLElement).queryByRole("link")).toBeNull();
+		fireEvent.click(
+			within(folder as HTMLElement).getByRole("button", { name: "Add" }),
+		);
+		const sent = await sentCommand(s);
+		expect(sent.params).toEqual({
+			command: { command: "folder_change_integrate", body: { change: 1 } },
+		});
+		expect(refusedBy("folderChangeIntegrateBody", bodyOf(sent))).toEqual([]);
+		// A task's row still goes to its page.
+		expect(
+			within(task as HTMLElement)
+				.getByRole("link", { name: "Add" })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-5/accept");
+	});
+
+	it("counts_and_lists_the_document_changes", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		const { s } = await today({
+			waiting: [question],
+			docs: folderDocs([CARD]),
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (2)" }),
+		).toBeTruthy();
+		const list = screen.getByRole("list", { name: en.waitingList });
+		const items = within(list).getAllByRole("listitem") as HTMLElement[];
+		const region = await screen.findByRole("region", {
+			name: en.docChangesTitle,
+		});
+		const asked = items.findIndex((one) => one.contains(region));
+		expect(asked).toBeGreaterThan(
+			items.findIndex((one) => one.textContent?.includes("question line")),
+		);
+		expect(
+			s
+				.calls("query")
+				.some((q) => q.params.name === "folder_doc_proposals.list"),
+		).toBe(true);
+	});
+
+	it("counts_no_card_when_none_waits_and_lists_one_alone", async () => {
+		cleanup();
+		await today({
+			waiting: [
+				{
+					task_id: "CTV-3",
+					kind: "question",
+					agent_id: "mira",
+					title: "the launch post",
+					line: "question line",
+				},
+			],
+			docs: folderDocs([]),
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		cleanup();
+
+		await today({ waiting: [], docs: folderDocs([CARD]) });
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		expect(
+			await screen.findByRole("region", { name: en.docChangesTitle }),
+		).toBeTruthy();
+		expect(screen.queryByText(en.waitingNone)).toBeNull();
 	});
 
 	it("lists_what_waits_on_you", async () => {

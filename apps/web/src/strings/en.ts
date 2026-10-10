@@ -2440,4 +2440,34 @@ export const en = {
 		"Catervas could not keep the key on this computer. If it asks whether Catervas may use the keychain, choose “Always”, then try again.",
 	refuseSellerMessageClosed:
 		"This message went with an order that was decided without it, so it is not sent.",
+	// The product plan's changes the owner approves on Today (spec 5.7).
+	docChangesTitle: "Product plan changes to approve",
+	docChangesFrom: "From {name}, after the sprint {n} review",
+	docChangesLegend: "Lines marked + are added; lines marked − are removed.",
+	docNameRoadmap: "Roadmap",
+	docNameSpec: "Product description",
+	docChangeAdded: "Added: ",
+	docChangeRemoved: "Removed: ",
+	docChangesTeamOnly: "Only the version for the team changes.",
+	docChangesNotes: "Notes for {name}",
+	docChangesNotesHint: "(needed to send it back)",
+	docChangesApprove: "Approve",
+	docChangesSendBack: "Send back",
+	docChangesNeedNotes: "Write what {name} should change first.",
+	docChangesNothingYet: "Nothing changes until you approve.",
+	docChangesPullRequest:
+		"Nothing changes until you approve. Then Catervas opens a pull request, and the change is in your project once it is merged.",
+	docChangesManual:
+		"Nothing changes until you approve. Then it waits under Waiting on you for you to add it to your project.",
+	refuseFolderDocDecided: "These changes were decided already.",
+	refuseFolderDocSuperseded: "A newer version of these changes is waiting.",
+	refuseUnknownFolderDoc: "These changes are no longer there.",
+	refuseFolderDocMixed: "These changes come from more than one agent.",
+	refuseFolderDocReasonNeeded: "Write what to change before sending it back.",
+	refuseFolderDocBusy:
+		"One of these files has changes of yours that are not committed. Commit or undo them, then approve.",
+	refuseFolderDocLink:
+		"One of these files is a link, which Catervas does not write through.",
+	refuseFolderDocWaiting:
+		"An earlier change to one of these files is not in your project yet. Approve once it is.",
 };

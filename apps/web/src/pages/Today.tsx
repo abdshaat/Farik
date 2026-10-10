@@ -17,6 +17,11 @@ import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
 import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
+import {
+	DocumentChanges,
+	type DocumentChangesCard,
+	type Integration,
+} from "./DocumentChanges.tsx";
 import { DataPipeline, type PipelineAsk } from "./dialogs/DataPipeline.tsx";
 import {
 	isScript,
@@ -73,7 +78,10 @@ type PostAsk = {
 	at: string;
 };
 type Waiting = {
-	taskId: string;
+	/** Absent on a folder change waiting to be added, which no task holds. */
+	taskId?: string | undefined;
+	/** The folder change an `integration` row waits to add, when it is about one. */
+	folderChange?: number | undefined;
 	kind:
 		| Kind
 		| "tool_approval"
@@ -190,6 +198,12 @@ export function Today() {
 	const { data: posts, again: askPostsAgain } = useQuery<{
 		posts: GoingOutPost[];
 	}>("social_posts.list", {});
+	// The product plan's changes, one card for each sprint review and agent that proposed them.
+	const { data: planChanges, again: askPlanChangesAgain } = useQuery<{
+		integration: Integration;
+		cards: DocumentChangesCard[];
+	}>("folder_doc_proposals.list", {});
+	const cards = planChanges?.cards ?? [];
 	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
 	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
 	// The daemon counts nothing while the team does not plan in sprints.
@@ -248,10 +262,12 @@ export function Today() {
 				<section className={styles.section} aria-labelledby="waiting-heading">
 					<h2 id="waiting-heading">
 						{t("waitingTitle", {
-							count: String(waiting.waiting.length + (keyRefused ? 1 : 0)),
+							count: String(
+								waiting.waiting.length + cards.length + (keyRefused ? 1 : 0),
+							),
 						})}
 					</h2>
-					{waiting.waiting.length === 0 && !keyRefused ? (
+					{waiting.waiting.length === 0 && cards.length === 0 && !keyRefused ? (
 						<p className={styles.muted}>{t("waitingNone")}</p>
 					) : (
 						<ul className={styles.rows} aria-label={t("waitingList")}>
@@ -305,7 +321,7 @@ export function Today() {
 									/>
 								) : (
 									<WaitingRow
-										key={`${item.kind}-${item.taskId}`}
+										key={`${item.kind}-${item.taskId ?? `folder-${item.folderChange}`}`}
 										item={item}
 										agent={agent(item.agentId)}
 										developer={
@@ -318,6 +334,21 @@ export function Today() {
 									/>
 								),
 							)}
+							{planChanges &&
+								cards.map((card) => {
+									const one = agent(card.agentId);
+									return (
+										<li key={`plan-${card.sprintId}-${card.agentId}`}>
+											<DocumentChanges
+												card={card}
+												integration={planChanges.integration}
+												name={one?.displayName ?? card.agentId}
+												avatar={one?.avatar as AvatarKey | undefined}
+												again={askPlanChangesAgain}
+											/>
+										</li>
+									);
+								})}
 						</ul>
 					)}
 				</section>
@@ -466,7 +497,8 @@ function WaitingRow({
 }) {
 	const kind = KINDS[item.kind as Kind];
 	const name = agent?.displayName ?? item.agentId ?? "";
-	const titleId = `waiting-${item.kind}-${item.taskId}`;
+	const { busy, refusal, send } = useCommand(() => {});
+	const titleId = `waiting-${item.kind}-${item.taskId ?? `folder-${item.folderChange}`}`;
 	return (
 		<li className={styles.row}>
 			{agent?.avatar && (
@@ -479,19 +511,42 @@ function WaitingRow({
 				<span>
 					{kind.line ? t(kind.line, { designer: name, developer }) : item.line}
 				</span>
-				{item.kind === "acceptance" && <ChecksPassed taskId={item.taskId} />}
+				{item.kind === "acceptance" && item.taskId && (
+					<ChecksPassed taskId={item.taskId} />
+				)}
+				{refusal && (
+					<p role="alert" className={styles.alert}>
+						{refusal}
+					</p>
+				)}
 			</div>
-			<Link
-				className={styles.action}
-				to={
-					kind.page.startsWith("/")
-						? kind.page.replace("{agent}", item.agentId ?? "")
-						: `/tasks/${item.taskId}/${kind.page}`
-				}
-				aria-describedby={titleId}
-			>
-				{t(kind.word)}
-			</Link>
+			{item.folderChange !== undefined ? (
+				<div className={styles.decide}>
+					<Button
+						busy={busy}
+						onClick={() =>
+							send({
+								command: "folder_change_integrate",
+								body: { change: item.folderChange },
+							})
+						}
+					>
+						{t(kind.word)}
+					</Button>
+				</div>
+			) : (
+				<Link
+					className={styles.action}
+					to={
+						kind.page.startsWith("/")
+							? kind.page.replace("{agent}", item.agentId ?? "")
+							: `/tasks/${item.taskId}/${kind.page}`
+					}
+					aria-describedby={titleId}
+				>
+					{t(kind.word)}
+				</Link>
+			)}
 		</li>
 	);
 }
@@ -854,7 +909,7 @@ function ToolApprovalRow({
 				<span>
 					{t("waitingToolApprovalLine", {
 						tool: ask.tool.replaceAll("_", " "),
-						task: item.taskId,
+						task: item.taskId ?? "",
 						title: item.title,
 						agent: name,
 					})}
@@ -885,7 +940,7 @@ function ToolApprovalRow({
 						}
 					}
 					kit={kit}
-					taskId={item.taskId}
+					taskId={item.taskId ?? ""}
 					title={item.title}
 					onClose={() => setOpen(false)}
 				/>

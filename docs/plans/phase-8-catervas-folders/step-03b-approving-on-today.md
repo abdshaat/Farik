@@ -123,7 +123,7 @@ Files: created `DocumentChanges.tsx`, `DocumentChanges.module.css`, `DocumentCha
 - `a_refusal_shows_its_words` — a command refused `folder_doc_busy: …` shows "One of these files has changes of yours that are not committed. Commit or undo them, then approve.". RED.
 - `counts_and_lists_the_document_changes` (`Today.test.tsx`) — `waiting.list` with one question and `folder_doc_proposals.list` with the card: the heading reads "Waiting on you (2)" and the list holds the card after the question; with `cards: []` it reads "Waiting on you (1)"; with `waiting: []` and the card it reads "Waiting on you (1)" and "Nothing waits on you." is absent. RED: the query is not asked.
 
-- [ ] `feat(web): approve the product plan's changes on Today`
+- [x] `feat(web): approve the product plan's changes on Today`
 
 ### Task 5: Spec
 
