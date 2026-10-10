@@ -161,7 +161,7 @@ Lines, exactly: "- Your folder, `docs/catervas/architecture/`, which only Archit
 
 - `every_owner_s_prompt_names_its_folder` (`lib.rs`) — for each row of `ROLE_FOLDERS`, the role's system prompt holds `<folder>/`; the Finance and Procurement Specialists' hold no `docs/catervas/`. RED: the four prompts name none.
 
-- [ ] `feat(roles): name each owner's folder in its prompt`
+- [x] `feat(roles): name each owner's folder in its prompt`
 
 ### Task 9: Spec
 

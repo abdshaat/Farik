@@ -1347,6 +1347,23 @@ mod tests {
     }
 
     #[test]
+    fn every_owner_s_prompt_names_its_folder() {
+        for (role, folder) in catervas_core::folders::ROLE_FOLDERS {
+            let prompt = loaded(role).system_prompt;
+            assert!(
+                prompt.contains(&format!("{folder}/")),
+                "{role} does not name {folder}/"
+            );
+        }
+        for role in [Role::FinanceSpecialist, Role::ProcurementSpecialist] {
+            assert!(
+                !loaded(role).system_prompt.contains("docs/catervas/"),
+                "{role} names a folder it does not own"
+            );
+        }
+    }
+
+    #[test]
     fn forbids_application_code_to_every_role_but_the_developer() {
         for role in [
             Role::ProductManager,
