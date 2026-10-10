@@ -1469,6 +1469,17 @@ mod tests {
             .find(|skill| skill.name == "marketing-what-ships")
             .expect("the skill");
         assert!(flattened(&ships.body).contains("`docs/catervas/product/`"));
+        let (_, voice) = skills
+            .iter()
+            .find(|(file, _)| {
+                file.to_string_lossy()
+                    .contains("writing-in-the-brands-voice")
+            })
+            .expect("the skill");
+        assert!(
+            flattened(voice).contains("packaging, the replies the user has sent"),
+            "{voice}"
+        );
         let contracts = loaded(Role::ProductManager);
         let contracts = contracts
             .skills
