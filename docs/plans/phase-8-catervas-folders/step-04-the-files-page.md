@@ -130,7 +130,7 @@ Files: `crates/store/src/git.rs` (the items, `--literal-pathspecs` on each path 
 - `finds_the_last_commit_that_changed_a_path` — a branch changing `x.md` merged `--no-ff` with message `Merge CTV-2: t`: with `first_parent` the answer is the merge (subject `Merge CTV-2: t`); without, the branch's commit; a path never changed is `None`; the author name is the commit's. RED.
 - `finds_the_twins_the_owner_left_behind` — `spec.md` and `spec.agent.md` committed together: `stale_twins` is `[]`; a branch changing `spec.md` alone, merged: `[docs/catervas/product/spec.agent.md]`; a branch from there changing the twin, merged: `[]`; a branch changing the twin made before a second change of `spec.md` and merged after it: stale again; one merge bringing a branch where `spec.md` changed after its twin, so the twin's own last commit is not after the document's: `[]`, both paths' first-parent commit being that merge. RED.
 
-- [ ] `feat(store): read the folders and their stale twins from git`
+- [x] `feat(store): read the folders and their stale twins from git`
 
 ### Task 4: Sessions and the Definition of Done know the stale twins
 

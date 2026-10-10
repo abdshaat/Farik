@@ -6,6 +6,7 @@
 //! and they cannot rot unnoticed (`docs/standards/code.md`, "Rust integration test").
 
 use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
+use catervas_store::git::stale_twins;
 use catervas_store::{CommitOutcome, Git, GitError, MergeOutcome};
 
 #[test]
@@ -1283,5 +1284,179 @@ fn cleans_up_a_commit_that_fails() {
     assert_eq!(
         repository.git_output(&["branch", "--list", "docs/folder-2"]),
         ""
+    );
+}
+
+const PRODUCT: &str = "docs/catervas/product";
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_the_tree_under_a_folder_with_each_mode() {
+    let repository = TempRepo::new("tree-entries");
+    repository.write(&format!("{PRODUCT}/spec.md"), "spec\n");
+    repository.write(&format!("{PRODUCT}/spec.agent.md"), "twin\n");
+    repository.write("src/a.rs", "fn a() {}\n");
+    std::os::unix::fs::symlink("spec.md", repository.path.join(format!("{PRODUCT}/l.md")))
+        .expect("a link");
+    repository.commit("the documents");
+    let git = repository.adapter();
+
+    let entries = git
+        .tree_entries("main", "docs/catervas")
+        .expect("the tree is read");
+    let listed: Vec<(&str, &str)> = entries
+        .iter()
+        .map(|entry| (entry.mode.as_str(), entry.path.as_str()))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("120000", "docs/catervas/product/l.md"),
+            ("100644", "docs/catervas/product/spec.agent.md"),
+            ("100644", "docs/catervas/product/spec.md"),
+        ]
+    );
+    for entry in &entries {
+        assert_eq!(
+            entry.blob,
+            repository.git_output(&["rev-parse", &format!("main:{}", entry.path)])
+        );
+    }
+    assert!(
+        git.tree_entries("main", "docs/catervas/missing")
+            .expect("a missing directory is read")
+            .is_empty()
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_the_last_commit_that_changed_a_path() {
+    let repository = TempRepo::new("last-commit");
+    repository.write("x.md", "one\n");
+    repository.commit("add x");
+    repository.git(&["checkout", "-b", "feature/CTV-2"]);
+    repository.write("x.md", "two\n");
+    repository.commit("change x");
+    repository.git(&["checkout", "main"]);
+    repository.write("y.md", "y\n");
+    repository.commit("add y");
+    repository.git(&["merge", "--no-ff", "-m", "Merge CTV-2: t", "feature/CTV-2"]);
+    let git = repository.adapter();
+
+    let merge = git
+        .last_commit("main", "x.md", true)
+        .expect("read")
+        .expect("a commit");
+    assert_eq!(merge.subject, "Merge CTV-2: t");
+    assert_eq!(merge.sha, repository.git_output(&["rev-parse", "main"]));
+    assert_eq!(merge.author_name, "Catervas Test");
+    assert_eq!(
+        merge.committed_at,
+        repository.git_output(&["log", "-1", "--format=%cI", "main"])
+    );
+    let branch = git
+        .last_commit("main", "x.md", false)
+        .expect("read")
+        .expect("a commit");
+    assert_eq!(branch.subject, "change x");
+    assert_eq!(
+        git.last_commit("main", "never.md", false).expect("read"),
+        None
+    );
+    assert_eq!(
+        git.last_commit("main", "never.md", true).expect("read"),
+        None
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_the_twins_the_owner_left_behind() {
+    let repository = TempRepo::new("stale-twins");
+    let spec = format!("{PRODUCT}/spec.md");
+    let twin = format!("{PRODUCT}/spec.agent.md");
+    repository.write(&spec, "spec 1\n");
+    repository.write(&twin, "twin 1\n");
+    repository.commit("both together");
+    let git = repository.adapter();
+    assert_eq!(
+        stale_twins(&git, "main").expect("read"),
+        Vec::<String>::new()
+    );
+
+    // The owner's change to the document alone, merged: the twin is behind.
+    repository.git(&["checkout", "-b", "docs/folder-1"]);
+    repository.write(&spec, "spec 2\n");
+    repository.commit("docs(product): edit spec.md");
+    repository.git(&["checkout", "main"]);
+    repository.git(&[
+        "merge",
+        "--no-ff",
+        "-m",
+        "Merge docs/folder-1: product/spec.md",
+        "docs/folder-1",
+    ]);
+    assert_eq!(
+        stale_twins(&git, "main").expect("read"),
+        std::slice::from_ref(&twin)
+    );
+
+    // A branch from there that changes the twin, merged: caught up.
+    repository.git(&["checkout", "-b", "feature/CTV-1"]);
+    repository.write(&twin, "twin 2\n");
+    repository.commit("bring the twin up to date");
+    repository.git(&["checkout", "main"]);
+    repository.git(&[
+        "merge",
+        "--no-ff",
+        "-m",
+        "Merge CTV-1: twin",
+        "feature/CTV-1",
+    ]);
+    assert_eq!(
+        stale_twins(&git, "main").expect("read"),
+        Vec::<String>::new()
+    );
+
+    // A re-derive started before a second edit and merged after it stays stale.
+    repository.git(&["checkout", "-b", "feature/CTV-2"]);
+    repository.write(&twin, "twin 3\n");
+    repository.commit("a re-derive that began early");
+    repository.git(&["checkout", "main"]);
+    repository.write(&spec, "spec 3\n");
+    repository.commit("docs(product): edit spec.md again");
+    repository.git(&[
+        "merge",
+        "--no-ff",
+        "-m",
+        "Merge CTV-2: twin",
+        "feature/CTV-2",
+    ]);
+    assert_eq!(
+        stale_twins(&git, "main").expect("read"),
+        std::slice::from_ref(&twin)
+    );
+
+    // One merge brings a branch where the document changed after its twin: one integration
+    // brought both, so the twin is not behind.
+    repository.git(&["checkout", "-b", "feature/CTV-3"]);
+    repository.write(&twin, "twin 4\n");
+    repository.commit("the twin first");
+    repository.write(&spec, "spec 4\n");
+    repository.commit("then the document");
+    repository.git(&["checkout", "main"]);
+    repository.write("other.txt", "moved on\n");
+    repository.commit("main moves on");
+    repository.git(&[
+        "merge",
+        "--no-ff",
+        "-m",
+        "Merge CTV-3: both",
+        "feature/CTV-3",
+    ]);
+    assert_eq!(
+        stale_twins(&git, "main").expect("read"),
+        Vec::<String>::new()
     );
 }

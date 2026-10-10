@@ -5,6 +5,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use catervas_core::folders::{agent_twin, is_human_document, twin_is_stale};
 use catervas_core::team::Team;
 
 /// Why a git operation did not happen.
@@ -51,6 +52,30 @@ pub struct HeadSummary {
     pub sha: String,
     /// When it was committed, as git's strict ISO 8601.
     pub committed_at: String,
+    /// Its subject line.
+    pub subject: String,
+}
+
+/// One entry of a tree: a file, a link or a submodule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeEntry {
+    /// Its mode as git writes it: `100644` or `100755` for a file, `120000` for a link.
+    pub mode: String,
+    /// Its object hash.
+    pub blob: String,
+    /// Its path from the repository's root.
+    pub path: String,
+}
+
+/// A commit that changed a path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathCommit {
+    /// The commit's hash.
+    pub sha: String,
+    /// When it was committed, as git's strict ISO 8601.
+    pub committed_at: String,
+    /// The author's name.
+    pub author_name: String,
     /// Its subject line.
     pub subject: String,
 }
@@ -422,6 +447,68 @@ impl Git {
             command: format!("rev-list --count {range}"),
             stderr: format!("answered {counted:?}, which is not a number of commits"),
         })
+    }
+
+    /// Every entry under `dir` as `rev` has it, at any depth, in git's order; a directory `rev`
+    /// does not hold gives none.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn tree_entries(&self, rev: &str, dir: &str) -> Result<Vec<TreeEntry>, GitError> {
+        self.require_repository()?;
+        let listed =
+            self.at_root(&["--literal-pathspecs", "ls-tree", "-r", "-z", rev, "--", dir])?;
+        Ok(listed
+            .split('\0')
+            .filter_map(|entry| {
+                let (meta, path) = entry.split_once('\t')?;
+                let mut meta = meta.split(' ');
+                let mode = meta.next()?;
+                let blob = meta.nth(1)?;
+                Some(TreeEntry {
+                    mode: mode.to_string(),
+                    blob: blob.to_string(),
+                    path: path.to_string(),
+                })
+            })
+            .collect())
+    }
+
+    /// The last commit of `rev`'s history that changed `path`: with `first_parent`, along the
+    /// first parents alone, so that a merge is the commit that brought the change; without, by
+    /// git's history simplification, so that it is the commit that made it.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn last_commit(
+        &self,
+        rev: &str,
+        path: &str,
+        first_parent: bool,
+    ) -> Result<Option<PathCommit>, GitError> {
+        self.require_repository()?;
+        let mut arguments = vec!["--literal-pathspecs", "log", "-1", "--no-color"];
+        if first_parent {
+            arguments.push("--first-parent");
+        }
+        arguments.extend(["--format=%H%x1f%cI%x1f%an%x1f%s", rev, "--", path]);
+        let line = self.at_root(&arguments)?;
+        let mut fields = line.splitn(4, '\u{1f}');
+        Ok(
+            match (fields.next(), fields.next(), fields.next(), fields.next()) {
+                (Some(sha), Some(at), Some(author), Some(subject)) if !sha.is_empty() => {
+                    Some(PathCommit {
+                        sha: sha.to_string(),
+                        committed_at: at.to_string(),
+                        author_name: author.to_string(),
+                        subject: subject.to_string(),
+                    })
+                }
+                _ => None,
+            },
+        )
     }
 
     /// Every path `head` changed since it and `base` last agreed.
@@ -930,6 +1017,44 @@ pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
         }
         None => git.default_branch(),
     }
+}
+
+/// The `.agent.md` twins on `branch` that are behind the document for people beside them: the
+/// document's last commit is neither the twin's last nor its ancestor, and one integration did
+/// not bring both (`docs/SPEC.md` 5.17). A pair with a file missing is no pair.
+///
+/// # Errors
+///
+/// `CommandFailed` when `branch` names nothing.
+pub fn stale_twins(git: &Git, branch: &str) -> Result<Vec<String>, GitError> {
+    let entries = git.tree_entries(branch, "docs/catervas")?;
+    let is_file = |path: &str| {
+        entries
+            .iter()
+            .any(|entry| entry.path == path && matches!(entry.mode.as_str(), "100644" | "100755"))
+    };
+    let mut stale = Vec::new();
+    for entry in &entries {
+        let Some(twin) = agent_twin(&entry.path).filter(|_| is_human_document(&entry.path)) else {
+            continue;
+        };
+        if !is_file(&entry.path) || !is_file(&twin) {
+            continue;
+        }
+        let (Some(human_last), Some(twin_last)) = (
+            git.last_commit(branch, &entry.path, false)?,
+            git.last_commit(branch, &twin, false)?,
+        ) else {
+            continue;
+        };
+        let brought_together = git.last_commit(branch, &entry.path, true)?.map(|c| c.sha)
+            == git.last_commit(branch, &twin, true)?.map(|c| c.sha);
+        let behind = git.commit_count(&twin_last.sha, &human_last.sha)?;
+        if !brought_together && twin_is_stale(&human_last.sha, &twin_last.sha, behind) {
+            stale.push(twin);
+        }
+    }
+    Ok(stale)
 }
 
 #[cfg(test)]
