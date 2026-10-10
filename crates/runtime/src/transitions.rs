@@ -2876,8 +2876,18 @@ mod tests {
         let board = project.projections.board().expect("the board");
         let row = board.iter().find(|row| row.task_id == id).expect("the row");
         let contract = project.files.read_contract(&id).expect("the file reads");
-        super::lane_builder(&project.files, &project.team, &board, row, &contract)
-            .expect("the lane reads")
+        let found = super::lane_builder(&project.files, &project.team, &board, row, &contract)
+            .expect("the lane reads");
+        // The board's order, ascending by task number, is not what picks the builder.
+        let mut reversed = board.clone();
+        reversed.reverse();
+        assert_eq!(
+            super::lane_builder(&project.files, &project.team, &reversed, row, &contract)
+                .expect("the lane reads"),
+            found,
+            "the builder depends on the board's order"
+        );
+        found
     }
 
     #[test]
@@ -2931,6 +2941,23 @@ mod tests {
             Some("dev-a".to_string())
         );
         assert_eq!(builder("lane-g", team(), None, &base), None);
+        // The highest number wins as a number, not by filing order or by its first digit.
+        let out_of_order = [
+            vec![(
+                "CTV-10",
+                "CTV-1",
+                Some(1),
+                dev,
+                "in_progress",
+                Some("dev-b"),
+            )],
+            vec![("CTV-9", "CTV-1", Some(1), dev, "accepted", Some("dev-a"))],
+        ]
+        .concat();
+        assert_eq!(
+            builder("lane-h", team(), Some(1), &out_of_order),
+            Some("dev-b".to_string())
+        );
     }
 
     #[test]
