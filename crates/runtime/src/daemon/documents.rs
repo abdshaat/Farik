@@ -82,7 +82,7 @@ fn edit_refusal(why: OwnerEditRefusal) -> Failure {
         ),
         OwnerEditRefusal::TooLarge => (
             "/text",
-            "That is too long to save: a document is at most 262,144 bytes.",
+            "This is too long to save here: a document can be at most about 256 KB.",
         ),
     };
     refusal(why.code(), pointer, message)
@@ -134,21 +134,21 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             return Err(refusal(
                 "file_busy",
                 "/path",
-                "This document has a change in the project's folder that is not saved yet: save it or put it aside first.",
+                "This file was also changed on your computer, outside Catervas. Finish or undo that change, then save here again.",
             ));
         }
         Err(LandRefusal::Link(_)) => {
             return Err(refusal(
                 "is_a_link",
                 "/path",
-                "This document is a link, and Catervas writes nothing through a link.",
+                "This file is a link, which Catervas does not write through.",
             ));
         }
         Err(LandRefusal::Waiting { .. }) => {
             return Err(refusal(
                 "change_waiting",
                 "/path",
-                "An earlier change of this document is not added to the project yet.",
+                "An earlier change to this file is not in your project yet. Edit it once it is.",
             ));
         }
         Err(LandRefusal::Git(detail)) => return Err(Failure::new(INTERNAL_ERROR, detail)),
@@ -959,6 +959,13 @@ mod tests {
         );
     }
 
+    /// The words of the first error of `reply`, which the page shows as they are.
+    fn said(reply: &Value) -> &str {
+        reply["error"]["data"]["errors"][0]["message"]
+            .as_str()
+            .expect("a message")
+    }
+
     /// The first error of `reply`: its code and its pointer.
     fn refusal(reply: &Value) -> (String, String) {
         assert_eq!(reply["error"]["code"], -32005, "{reply}");
@@ -977,7 +984,7 @@ mod tests {
         let overview = blob(&harness, OVERVIEW);
         let gone = "0".repeat(40);
         let long = "x".repeat(262_145);
-        let refused = |path: &str, text: &str, base: &str, code: &str, at: &str| {
+        let refused = |path: &str, text: &str, base: &str, code: &str, at: &str| -> Value {
             let reply = save(&harness, path, text, base);
             assert_eq!(
                 refusal(&reply),
@@ -1000,6 +1007,7 @@ mod tests {
                 git_output(&harness, &["branch", "--list", "docs/folder-*"]),
                 ""
             );
+            reply
         };
         for outside in [
             "docs/catervas/../x.md",
@@ -1023,7 +1031,11 @@ mod tests {
             "marketing_plan",
             "/path",
         );
-        refused(OVERVIEW, &long, &overview, "too_large", "/text");
+        let too_large = refused(OVERVIEW, &long, &overview, "too_large", "/text");
+        assert_eq!(
+            said(&too_large),
+            "This is too long to save here: a document can be at most about 256 KB."
+        );
         refused(OVERVIEW, "x\n", &gone, "file_changed", "/base");
         refused(
             "docs/catervas/product/gone.md",
@@ -1035,12 +1047,16 @@ mod tests {
 
         // An uncommitted change at the project's root to the same file.
         write(&harness, ROADMAP, "the owner's own, not committed\n");
-        refused(
+        let busy = refused(
             ROADMAP,
             "x\n",
             &blob(&harness, ROADMAP),
             "file_busy",
             "/path",
+        );
+        assert_eq!(
+            said(&busy),
+            "This file was also changed on your computer, outside Catervas. Finish or undo that change, then save here again."
         );
         git(&harness, &["checkout", "--", ROADMAP]);
 
@@ -1051,6 +1067,10 @@ mod tests {
         assert_eq!(
             refusal(&reply),
             ("change_waiting".to_string(), "/path".to_string())
+        );
+        assert_eq!(
+            said(&reply),
+            "An earlier change to this file is not in your project yet. Edit it once it is."
         );
         assert_eq!(
             harness.project.events(&[EventKind::FolderDocEdited]).len(),
@@ -1067,6 +1087,10 @@ mod tests {
         assert_eq!(
             refusal(&reply),
             ("is_a_link".to_string(), "/path".to_string())
+        );
+        assert_eq!(
+            said(&reply),
+            "This file is a link, which Catervas does not write through."
         );
         assert!(
             !elsewhere.join("product").exists(),
