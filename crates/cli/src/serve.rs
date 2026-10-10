@@ -108,10 +108,7 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
                             &format!("farik: the project could not be taken on: {error}"),
                         );
                         take_on_error = Some(error);
-                        Mode::Setup {
-                            waiting: waited_on.take(),
-                            leaving: left_from.take(),
-                        }
+                        back_in_setup(&mut waited_on, &mut left_from)
                     }
                     Err(error) => return refuse(io, false, &error),
                 },
@@ -314,6 +311,15 @@ async fn drive(
     Ok(driven(left, code))
 }
 
+/// The wizard a failed take-on goes back to: it keeps the project that was being left, so that
+/// Stay on still works, and the project it waited on for the credential.
+fn back_in_setup(waited_on: &mut Option<PathBuf>, left_from: &mut Option<PathBuf>) -> Mode {
+    Mode::Setup {
+        waiting: waited_on.take(),
+        leaving: left_from.take(),
+    }
+}
+
 /// How a drive ended: back to the wizard only for a leave that finished cleanly; any other code
 /// (Ctrl-C pressed during the leave, a failed finish) ends serve with it.
 fn driven(left: Option<PathBuf>, code: i32) -> Driven {
@@ -337,6 +343,19 @@ mod tests {
     fn a_leave_that_finishes_with_a_code_ends_serve_with_it() {
         let left = Some(PathBuf::from("/old"));
         assert!(matches!(driven(left, 130), Driven::Ended(130)));
+    }
+
+    #[test]
+    fn a_failed_take_on_keeps_the_way_back() {
+        let mode = back_in_setup(
+            &mut Some(PathBuf::from("/w")),
+            &mut Some(PathBuf::from("/old")),
+        );
+        assert!(matches!(
+            mode,
+            Mode::Setup { waiting: Some(w), leaving: Some(l) }
+                if w == Path::new("/w") && l == Path::new("/old")
+        ));
     }
 
     #[test]
