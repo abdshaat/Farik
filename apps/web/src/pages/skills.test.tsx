@@ -137,11 +137,20 @@ describe("skills on the agent page", () => {
 				.queryAllByText(text)
 				.filter((el) => !el.closest('[role="tooltip"]'));
 			expect(outside).toEqual([]);
-			const head = li.querySelector("strong")?.closest("div") as HTMLElement;
+			const head = li.querySelector("strong")?.parentElement as HTMLElement;
 			expect(
 				within(head).getByRole("button", { name: "More about this" }),
 			).toBeTruthy();
 		}
+	});
+
+	it("gives a missing skill no info button", async () => {
+		await opened();
+		expect(
+			within(inRow("Just for Theo", "old-skill")).queryByRole("button", {
+				name: "More about this",
+			}),
+		).toBeNull();
 	});
 
 	it("agent_edit_lists_skills_by_level", async () => {

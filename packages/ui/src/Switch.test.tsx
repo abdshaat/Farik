@@ -63,7 +63,7 @@ describe("Switch", () => {
 			/>,
 		);
 		const label = document.getElementById("s-label");
-		expect(label?.firstElementChild?.tagName).toBe("IMG");
+		expect((label?.firstChild as Element)?.tagName).toBe("IMG");
 		expect(label?.textContent).toBe("Notify me");
 		expect(screen.getByRole("switch", { name: "Notify me" })).toBeTruthy();
 	});
