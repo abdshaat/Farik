@@ -1322,6 +1322,28 @@ mod tests {
         for needle in ["spec.md", "spec.agent.md"] {
             assert!(requirements.contains(needle), "{requirements}");
         }
+        for name in ["writing-requirements", "scoping-a-release"] {
+            let skill = kit
+                .skills
+                .iter()
+                .find(|skill| skill.name == name)
+                .expect("the skill");
+            let flat = flattened(&skill.session_files["SKILL.md"]);
+            assert!(
+                flat.contains(
+                    "You have no tool that writes your folder yet: do not file a task for \
+                     yourself; give the text to the user in your answer."
+                ),
+                "{name}: {flat}"
+            );
+        }
+        assert!(
+            flattened(&definition.system_prompt).contains(
+                "Your folder, `docs/catervas/product/`, which only you write and everyone reads"
+            ),
+            "{}",
+            definition.system_prompt
+        );
         let mut texts = vec![definition.system_prompt.clone()];
         texts.extend(definition.skills.iter().map(|skill| skill.text.clone()));
         for skill in &kit.skills {
@@ -1346,6 +1368,23 @@ mod tests {
         );
     }
 
+    /// `text` with every run of whitespace made one space.
+    fn flattened(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn the_marketing_specialist_owns_its_folder_while_on_the_team() {
+        let prompt = flattened(&loaded(Role::MarketingSpecialist).system_prompt);
+        assert!(
+            prompt.contains(
+                "Your folder is `docs/catervas/marketing/`, which only you write while you are \
+                 on the team, and everyone reads."
+            ),
+            "{prompt}"
+        );
+    }
+
     #[test]
     fn every_owner_s_prompt_names_its_folder() {
         for (role, folder) in catervas_core::folders::ROLE_FOLDERS {
@@ -1354,6 +1393,20 @@ mod tests {
                 prompt.contains(&format!("{folder}/")),
                 "{role} does not name {folder}/"
             );
+        }
+        for role in [
+            Role::Architect,
+            Role::SoftwareDeveloper,
+            Role::UiUxDesigner,
+            Role::ScrumMaster,
+        ] {
+            let prompt = flattened(&loaded(role).system_prompt);
+            for words in [
+                "which only",
+                "write while one is active, and everyone reads",
+            ] {
+                assert!(prompt.contains(words), "{role} lost {words}");
+            }
         }
         for role in [Role::FinanceSpecialist, Role::ProcurementSpecialist] {
             assert!(
