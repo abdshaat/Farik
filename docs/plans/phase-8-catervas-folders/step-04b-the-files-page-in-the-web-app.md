@@ -133,7 +133,7 @@ Files: `e2e/fixtures/serve.ts` (`commitFiles`: writes each file, `git add` and `
 
 `docs/SPEC.md` 4.5, "Reading and changing the team's documents" (added in the next spec revision): the Files page as the Decisions build it (where it is, the tree and the phone picker, the two versions, the changed line, the stale line, editing and the Preview, Save as the owner's change, what the page says it does under each integration policy, the waiting line, `file_changed`, `file_busy` and `change_waiting`, no edit of a marketing plan, "Open in Files" on Today's card), Markdown with raw HTML off and unsafe links left as text, diagrams drawn by Mermaid only on a document that has one, as an image, under `securityLevel: "strict"`. `docs/design/catervas-folders.md`, "The Files page": the stale twin's words become "<agent> is bringing this up to date with your change." (the approved mockup's), and the waiting-proposal sentence gains "(a later step)".
 
-- [ ] `docs(spec): record the Files page`
+- [x] `docs(spec): record the Files page`
 
 ## Verification
 
