@@ -35,7 +35,7 @@ The founder wants every agent to keep its knowledge of the project as documents 
 ## Ownership and reading
 
 - **Writing.** Readiness generalizes today's `marketing_paths_owned` to `folder_owned`: while a role has an active agent, another role's task may not name a path that could reach its folder in `allowed_paths`. Ownership is held at readiness: the Definition of Done holds the diff to `allowed_paths`, which `folder_owned` checked when the task became ready; an owner made active after that does not reopen it. The write tool refuses any path outside the caller's folder, a path through a link, and anything but `.md`.
-- **Reading.** Every agent reads every folder, except the Marketing Specialist: its sessions are registered with read paths `docs/catervas/product/**` and `docs/catervas/marketing/**`, fixed when the session starts, and the hook refuses a `Read`, `Grep` or `Glob` outside them (`read_not_allowed`), one without a path included. Catervas's own read tools are unchanged; the residual is a `catervas_git_diff` of the agent's own branch, which holds only its own work.
+- **Reading.** Every agent reads every folder, except the Marketing Specialist: its sessions are registered with read paths `docs/catervas/product/**` and `docs/catervas/marketing/**`, fixed when the session starts, and the hook refuses a `Read`, `Grep` or `Glob` outside them (`read_not_allowed`), one without a path included. `catervas_exec` and the diff of a task that is not its own are refused too. Catervas's own read tools are otherwise unchanged; the residual is a `catervas_git_diff` of the agent's own branch, which holds only its own work.
 
 ## Two versions
 
