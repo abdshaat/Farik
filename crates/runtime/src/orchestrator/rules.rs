@@ -1854,13 +1854,21 @@ mod tests {
             .iter()
             .find(|agent| agent.id.as_str() == "pm")
             .expect("pm is on the team");
+        assert!(
+            pm.tiers(&team.permissions())
+                .contains(&PermissionTier::WriteWorkspace),
+            "the Product Manager holds the tier, and a plan session still does not write"
+        );
         assert_eq!(
             spec.builtin_tools,
-            allowed_builtins(
-                &pm.tiers(&team.permissions())
-                    .into_iter()
-                    .collect::<BTreeSet<_>>()
-            )
+            [
+                "Glob",
+                "Grep",
+                "Read",
+                "ToolSearch",
+                "WebFetch",
+                "WebSearch"
+            ]
         );
         assert!(
             spec.initial_prompt.contains("CTV-1"),
@@ -5183,6 +5191,8 @@ mod tests {
         let expected: Vec<String> = tool_descriptors()
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
+            // A plan session works on no task's implement session, so it changes nothing.
+            .filter(|tool| !crate::tools::writes_the_project(tool.name, tool.tier))
             .filter(|tool| {
                 ![
                     "catervas_check_page",

@@ -2063,6 +2063,58 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_product_manager_writes_nothing_while_it_plans() {
+        // The harness team has no Scrum Master, so the Product Manager assigns too.
+        let harness = Harness::new("session-pm-plans", |_| {});
+        harness.in_progress("CTV-1", "pm", "dev-a");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+        let spec = |purpose| {
+            // As the refine and plan sessions are asked, which are not read-only.
+            let mut ask = asked(deps, agent(&team, "pm"), purpose, Some(&contract));
+            ask.read_only = false;
+            session_spec(deps, &team, &ask).expect("the spec")
+        };
+
+        for purpose in [SessionPurpose::Refine, SessionPurpose::Plan] {
+            let planning = spec(purpose);
+            assert!(
+                planning.builtin_tools.contains(&"WebFetch".to_string()),
+                "{purpose:?}: {:?}",
+                planning.builtin_tools
+            );
+            for builtin in ["Write", "Edit"] {
+                assert!(
+                    !planning.builtin_tools.contains(&builtin.to_string()),
+                    "{purpose:?}: {:?}",
+                    planning.builtin_tools
+                );
+            }
+            assert!(
+                !planning
+                    .catervas_tools
+                    .contains(&"catervas_git_commit".to_string()),
+                "{purpose:?}: {:?}",
+                planning.catervas_tools
+            );
+        }
+        let implement = spec(SessionPurpose::Implement);
+        assert!(implement.builtin_tools.contains(&"Write".to_string()));
+        assert!(
+            implement
+                .catervas_tools
+                .contains(&"catervas_git_commit".to_string())
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_no_write_outside_a_tasks_implement_session() {
         let harness = Harness::new("session-no-write", |_| {});
         harness.in_progress("CTV-1", "dev-a", "pm");

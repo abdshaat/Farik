@@ -91,7 +91,7 @@ Consumes: `works_on_a_task`, `writes_the_project` (Task 1).
 - `gives_a_session_the_catervas_tools_of_its_tiers` (`rules.rs:5168`, updated): the Product Manager's plan session's expected tools leave out every tool `writes_the_project` names (its `catervas_git_status` and `catervas_git_diff` now in), and it still holds `catervas_assign_task` and not `catervas_exec`.
 - `lists_only_the_tools_the_agent_can_call` (`prompt.rs:965`, updated): its Product Manager `refine` half takes `inputs.tools` without the tools `writes_the_project` names, as `offered_tools` gives that session; its assertions are unchanged.
 
-- [ ] `feat(core): let the Product Manager write and commit in its docs tasks`
+- [x] `feat(core): let the Product Manager write and commit in its docs tasks`
 
 ### Task 3: The Product Manager is told to keep its folder in docs tasks
 

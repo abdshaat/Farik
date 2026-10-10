@@ -973,7 +973,11 @@ mod tests {
 
     #[test]
     fn lists_only_the_tools_the_agent_can_call() {
-        let inputs = a_product_manager();
+        let mut inputs = a_product_manager();
+        // As `offered_tools` gives a refine session: none of the tools that change the project.
+        inputs
+            .tools
+            .retain(|tool| !crate::tools::writes_the_project(tool.name, tool.tier));
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         let tools = section(&prompt, "Your tools");
         assert!(tools.contains("`mcp__catervas__<name>`"), "{tools}");

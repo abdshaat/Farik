@@ -3779,8 +3779,8 @@ pub(super) mod tests {
                 {
                     "id": "pm",
                     "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
-                    "tiers": ["read", "network"],
-                    "base_tiers": ["read", "network"],
+                    "tiers": ["read", "network", "write_workspace", "git_local"],
+                    "base_tiers": ["read", "network", "write_workspace", "git_local"],
                 },
                 {
                     "id": "dev-a",
