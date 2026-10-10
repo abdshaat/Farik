@@ -191,6 +191,43 @@ pub fn stays_within(glob: &str, read: &str) -> bool {
     })
 }
 
+/// Whether two globs could match one path.
+// ponytail: literal prefixes only, so src/*.rs and src/*.ts are taken to meet; exact glob intersection if it refuses real plans.
+#[must_use]
+pub fn could_overlap(a: &str, b: &str) -> bool {
+    let (a, b) = (alternatives(a), alternatives(b));
+    a.iter()
+        .any(|a| b.iter().any(|b| prefixes_meet(a.as_ref(), b.as_ref())))
+}
+
+/// Each brace alternative of a glob as its segments, backslashes read as `/`, empty and `.`
+/// segments dropped; `None` for one that holds `..`, which meets anything.
+fn alternatives(glob: &str) -> Vec<Option<Vec<String>>> {
+    expand_braces(&glob.replace('\\', "/"))
+        .iter()
+        .map(|alternative| {
+            let segments: Vec<&str> = alternative
+                .split('/')
+                .filter(|segment| !segment.is_empty() && *segment != ".")
+                .collect();
+            (!segments.contains(&"..")).then(|| {
+                segments
+                    .into_iter()
+                    .take_while(|segment| !is_a_wildcard(segment))
+                    .map(str::to_lowercase)
+                    .collect()
+            })
+        })
+        .collect()
+}
+
+fn prefixes_meet(a: Option<&Vec<String>>, b: Option<&Vec<String>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a.iter().zip(b).all(|(a, b)| a == b),
+        _ => true,
+    }
+}
+
 fn compiles(segment: &str) -> bool {
     GlobBuilder::new(segment).build().is_ok()
 }
@@ -264,8 +301,41 @@ fn refuse<'a>(violations: impl Iterator<Item = &'a String>) -> Result<(), PathRe
 mod tests {
     use super::{
         GlobError, PathRefusal, PathViolation, check_allowed_paths, check_protected_paths,
-        reaches_the_folder, stays_within,
+        could_overlap, reaches_the_folder, stays_within,
     };
+
+    #[test]
+    fn two_globs_meet_unless_their_literal_prefixes_part() {
+        let meet = [
+            ("src/**", "src/a.rs"),
+            ("src/*.rs", "src/*.ts"),
+            ("**/*.md", "apps/x"),
+            ("Src/a/**", "src/a/b.rs"),
+            ("src/{a,b}/**", "src/b/x"),
+            ("src", "src/a.rs"),
+            ("src/a.rs", "src/a.rs"),
+            ("a/../b/**", "c/x"),
+            ("", "x"),
+            ("./src/**", "src/a.rs"),
+            ("src\\a\\**", "src/a/b.rs"),
+        ];
+        let part = [
+            ("apps/web/**", "crates/**"),
+            ("src/a/**", "src/b/**"),
+            ("src/a.rs", "src/b.rs"),
+            ("src/{a,b}/**", "src/c/x"),
+            ("./src/a/**", "src\\b\\x"),
+            ("docs/x.md", "docs/y.md"),
+        ];
+        for (a, b) in meet {
+            assert!(could_overlap(a, b), "{a} and {b} meet");
+            assert!(could_overlap(b, a), "{b} and {a} meet");
+        }
+        for (a, b) in part {
+            assert!(!could_overlap(a, b), "{a} and {b} part");
+            assert!(!could_overlap(b, a), "{b} and {a} part");
+        }
+    }
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_string()).collect()

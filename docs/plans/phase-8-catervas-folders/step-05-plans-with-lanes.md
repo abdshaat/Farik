@@ -97,7 +97,7 @@ Files: `paths.rs` (`could_overlap` with its `ponytail:` comment; a test).
 
 - `two_globs_meet_unless_their_literal_prefixes_part` — each pair asserted both ways. Meet: `src/**` and `src/a.rs`; `src/*.rs` and `src/*.ts` (the ceiling); `**/*.md` and `apps/x`; `Src/a/**` and `src/a/b.rs`; `src/{a,b}/**` and `src/b/x`; `src` and `src/a.rs`; `src/a.rs` and `src/a.rs`; `a/../b/**` and `c/x`; the empty glob and `x`; `./src/**` and `src/a.rs`; `src\a\**` and `src/a/b.rs`. Part: `apps/web/**` and `crates/**`; `src/a/**` and `src/b/**`; `src/a.rs` and `src/b.rs`; `src/{a,b}/**` and `src/c/x`; `./src/a/**` and `src\b\x`; `docs/x.md` and `docs/y.md`. RED: no function.
 
-- [ ] `feat(core): tell whether two globs could meet`
+- [x] `feat(core): tell whether two globs could meet`
 
 ### Task 3: Readiness keeps an epic's lanes apart
 
