@@ -187,7 +187,7 @@ Files: `crates/store/src/requests.rs` (the three items; `Filing` gains `rederive
 
 `docs/SPEC.md`: 3 (the sprint exceptions bullet gains the re-derive, planned first in the sprint's first plan); 5.4 item 2 (`pair_changed_alone` lets a diff change a stale twin alone); 5.14 (the owner's save is a folder change, integrated by the team's policy as step 03's are); 5.17 (the owner's edits, their refusals, `file_changed`, `file_busy`, `marketing_plan` and `change_waiting`, the waiting change shown from its branch, staleness read from git, the Team rules' stale line, the re-derive at integration, its dedupe and its judgment as filed whole); 8.5 (`folder_doc.edited`, `task.created.rederives`); the next spec revision. `docs/design/catervas-folders.md`, "How documents are written" and "The Files page": the owner's edit is a folder change integrated by the team's policy, not a commit at once, and its re-derive is filed when it is integrated; its steps table splits row 04 into 04, "The Files page's server", and 04b, "The Files page in the web app". `docs/plans/project-plan.md`: row 04 becomes this step's Delivers with Spec `3, 5.4, 5.14, 5.17, 8.5`, and row 04b the page's with Spec `4.5`. ADR 0051 is not touched.
 
-- [ ] `docs(spec): record the owner's edits, stale twins and their re-derive`
+- [x] `docs(spec): record the owner's edits, stale twins and their re-derive`
 
 ## Verification
 
