@@ -29,7 +29,7 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
 use super::design::{DECIDE_TOOL, RECORD_DESIGN_REVIEW_TOOL};
-use super::messages::human_message;
+use super::messages::{human_message, preview_address};
 use super::pipeline::DECIDE_PIPELINE_TOOL;
 use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
@@ -288,6 +288,8 @@ async fn give_browser(
         Ok(running) => running,
         Err(error) => return preview_failed(deps, team, contract, spec, ids, &error).map(Err),
     };
+    spec.initial_prompt
+        .push_str(&preview_address(running.port(), &preview.path));
     // The browser's own folder, apart from the page check's screenshots, which only Catervas writes.
     let output = deps
         .tools
@@ -556,7 +558,7 @@ async fn open_preview(
         tools,
         ids.clone(),
         EventBody::PreviewStarted(PreviewStartedBody {
-            port: preview.port.into(),
+            port: running.port().into(),
         }),
     )?;
     Ok(Ok(running))
@@ -1570,6 +1572,108 @@ mod tests {
         assert_eq!(
             witness.given_tiers(),
             vec![vec![PermissionTier::Read, PermissionTier::Network]; 3]
+        );
+    }
+
+    /// `browsing`, but the preview does not say its port.
+    fn browsing_without_a_port(wire: &mut serde_json::Value) {
+        browsing(wire);
+        wire["preview"]
+            .as_object_mut()
+            .expect("a preview")
+            .remove("port");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn preview_started_records_the_port_found() {
+        use crate::preview::fixtures::FakePreviews;
+
+        let mut harness = Harness::new("preview-port-found", browsing_without_a_port);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness.in_progress("CTV-1", "iris", "ada");
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness);
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+        run_session(deps, &team, exploring(&harness, &team, &contract))
+            .await
+            .expect("the session runs");
+        let ports: Vec<i64> = harness
+            .events(&[EventKind::PreviewStarted])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::PreviewStarted(body) => Some(body.port),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ports, [5173]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_browsing_session_is_told_the_preview_address() {
+        use crate::preview::fixtures::FakePreviews;
+
+        let mut harness = Harness::new("preview-address", browsing_without_a_port);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness.in_progress("CTV-1", "iris", "ada");
+        let adapter = harness.recorded(vec![
+            crate::recorded::fixtures::reads_a_file(),
+            crate::recorded::fixtures::reads_a_file(),
+        ]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness);
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+        run_session(deps, &team, exploring(&harness, &team, &contract))
+            .await
+            .expect("the session runs");
+        // The Developer has no browser, so its session carries no address.
+        run_session(
+            deps,
+            &team,
+            a_session(
+                &harness,
+                &team,
+                &contract,
+                "dev-a",
+                SessionPurpose::Implement,
+            ),
+        )
+        .await
+        .expect("the session runs");
+        let started = adapter.started();
+        assert!(
+            started[0]
+                .initial_prompt
+                .ends_with("The app's preview is at http://localhost:5173/."),
+            "{}",
+            started[0].initial_prompt
+        );
+        assert!(
+            !started[1]
+                .initial_prompt
+                .contains("The app's preview is at"),
+            "{}",
+            started[1].initial_prompt
         );
     }
 

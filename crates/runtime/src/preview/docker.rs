@@ -144,9 +144,9 @@ impl PreviewFactory for DockerPreviewFactory {
             format!("catervas.project={project_id}"),
             format!("catervas.task={}", task_id.as_str()),
         ];
-        let running = DockerPreview {
+        let mut running = DockerPreview {
             name,
-            port: preview.port,
+            port: preview.port.unwrap_or(0),
             labels,
             user,
         };
@@ -173,8 +173,8 @@ impl PreviewFactory for DockerPreviewFactory {
         if !started.status.success() {
             return Err(unavailable(stderr_of(&started)));
         }
-        let url = format!("http://localhost:{}{}", preview.port, preview.path);
-        if running.answers(&url) {
+        if let Some(found) = running.answering_port(preview.port, &preview.path) {
+            running.port = found;
             return Ok(Box::new(running));
         }
         let logs = run(&["logs", "--tail", &TAIL_LINES.to_string(), &running.name])?;
@@ -245,36 +245,84 @@ impl DockerPreview {
         Err(PreviewError::Prepare { tail })
     }
 
-    /// Whether the preview answers at `url` inside its own namespace within `ANSWER_LIMIT`,
-    /// probed once a second; false as soon as its container is gone.
-    fn answers(&self, url: &str) -> bool {
-        let probe = format!("curl -fsS -o /dev/null {url} || wget -q -O /dev/null {url}");
+    /// The port on which the preview answers `path` inside its own namespace within
+    /// `ANSWER_LIMIT`, tried once a second; `None` as soon as its container is gone. The candidates
+    /// are `port` when it is set, else the ports the container listens on (ADR 0054), the first
+    /// that answers winning.
+    fn answering_port(&self, port: Option<u16>, path: &str) -> Option<u16> {
         let deadline = Instant::now() + ANSWER_LIMIT;
         while Instant::now() < deadline {
-            let mut client = Command::new("docker");
-            client.args(["exec", &self.name, "sh", "-c", &probe]);
-            let answered = supervise(
-                &mut client,
-                PROBE_LIMIT,
-                |child| {
-                    let _ = child.kill();
+            let candidates = match port {
+                Some(port) => vec![port],
+                None => match self.exec(&["cat", "/proc/net/tcp", "/proc/net/tcp6"]) {
+                    Ok(finished) => listening_ports(&finished.stdout),
+                    Err(true) => return None,
+                    Err(false) => Vec::new(),
                 },
-                |_| {},
-            );
-            match answered {
-                Ok(finished) if finished.exit_code == 0 && !finished.killed => return true,
-                Ok(finished) if finished.stderr.contains("is not running") => return false,
-                Ok(finished) if finished.stderr.contains("No such container") => return false,
-                _ => std::thread::sleep(Duration::from_secs(1)),
+            };
+            for candidate in candidates {
+                let url = format!("http://localhost:{candidate}{path}");
+                let probe = format!("curl -fsS -o /dev/null {url} || wget -q -O /dev/null {url}");
+                match self.exec(&["sh", "-c", &probe]) {
+                    Ok(_) => return Some(candidate),
+                    Err(true) => return None,
+                    Err(false) => {}
+                }
             }
+            std::thread::sleep(Duration::from_secs(1));
         }
-        false
+        None
     }
+
+    /// Runs `command` in the container within `PROBE_LIMIT`: its output when it succeeds, else
+    /// `Err(true)` when the container is gone and `Err(false)` for any other failure.
+    fn exec(&self, command: &[&str]) -> Result<crate::exec::Finished, bool> {
+        let mut client = Command::new("docker");
+        client.args(["exec", &self.name]).args(command);
+        let answered = supervise(
+            &mut client,
+            PROBE_LIMIT,
+            |child| {
+                let _ = child.kill();
+            },
+            |_| {},
+        );
+        match answered {
+            Ok(finished) if finished.exit_code == 0 && !finished.killed => Ok(finished),
+            Ok(finished) => Err(finished.stderr.contains("is not running")
+                || finished.stderr.contains("No such container")),
+            Err(_) => Err(false),
+        }
+    }
+}
+
+/// The ports at or above 1024 that `proc_net`, the text of `/proc/net/tcp` and `/proc/net/tcp6`
+/// together, shows as listening: ascending, each once. Header and malformed rows are skipped.
+pub(crate) fn listening_ports(proc_net: &str) -> Vec<u16> {
+    let mut ports: Vec<u16> = proc_net
+        .lines()
+        .filter_map(|row| {
+            let mut columns = row.split_whitespace().skip(1);
+            let (local, state) = (columns.next()?, columns.nth(1)?);
+            let (_, port) = local.rsplit_once(':')?;
+            (state == "0A")
+                .then(|| u16::from_str_radix(port, 16).ok())
+                .flatten()
+                .filter(|port| *port >= 1024)
+        })
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
 }
 
 impl RunningPreview for DockerPreview {
     fn origin(&self) -> String {
         format!("http://localhost:{}", self.port)
+    }
+
+    fn port(&self) -> u16 {
+        self.port
     }
 
     fn container(&self) -> String {
@@ -319,7 +367,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use super::{DockerPreviewFactory, daemon_answers};
+    use super::{DockerPreviewFactory, daemon_answers, listening_ports};
     use crate::preview::PreviewFactory;
 
     /// A folder holding an executable `docker` that runs `body` under `sh`, answering its path.
@@ -416,5 +464,27 @@ mod tests {
             "/nonexistent/catervas-docker",
             Duration::from_secs(30)
         ));
+    }
+
+    const HEADER: &str = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n";
+
+    #[test]
+    fn listening_ports_reads_the_listening_rows() {
+        let tcp = format!(
+            "{HEADER}   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 1 1 0\n\
+                \x20  1: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 2 1 0\n\
+                \x20  2: 0100007F:1F91 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 3 1 0\n"
+        );
+        let tcp6 = format!(
+            "{HEADER}   0: 00000000000000000000000001000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4 1 0\n"
+        );
+        assert_eq!(listening_ports(&format!("{tcp}{tcp6}")), [8080]);
+    }
+
+    #[test]
+    fn listening_ports_orders_and_skips_bad_rows() {
+        let rows = "   0: 0100007F:1F91 00000000:0000 0A 0\n   1: 0100007F:1F90 00000000:0000 0A 0\n   2: nonsense 0A\n";
+        assert_eq!(listening_ports(rows), [8080, 8081]);
+        assert_eq!(listening_ports(""), Vec::<u16>::new());
     }
 }

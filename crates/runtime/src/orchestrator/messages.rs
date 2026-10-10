@@ -793,11 +793,13 @@ pub(super) fn explore_message(contract: &TaskContract, returned: Option<&str>) -
 }
 
 /// The UI/UX Designer's design review's message (step 12): the Developer's change, the
-/// repository's words and so untrusted, the page the preview opens on, and the one answer to give.
-pub(super) fn design_review_message(contract: &TaskContract, diff: &str, page: &str) -> String {
+/// repository's words and so untrusted, and the one answer to give. The preview's address is not
+/// here: the session is told it once the preview answers (`preview_address`).
+pub(super) fn design_review_message(contract: &TaskContract, diff: &str) -> String {
     format!(
         "The Software Developer changed the interface of {task}, whose contract is above. Before \
-         the reviewer reads it, check it in the browser: the app's preview opens at {page}. Look \
+         the reviewer reads it, check it in the browser: the app's preview address is at the end \
+         of this message. Look \
          at the pages the change touches at phone width (360 px) and desktop width (1280 px), in \
          the light and the dark theme, and run `catervas_check_page` on each at both widths in both \
          themes. You change nothing. End the session with `catervas_record_design_review`: pass it, \
@@ -807,6 +809,11 @@ pub(super) fn design_review_message(contract: &TaskContract, diff: &str, page: &
         branch = task_branch(contract),
         diff = untrusted_block("diff", diff, DIFF_CAP_BYTES)
     )
+}
+
+/// What a browsing session is told once the preview answers: where the app is.
+pub(super) fn preview_address(port: u16, path: &str) -> String {
+    format!("\n\nThe app's preview is at http://localhost:{port}{path}.")
 }
 
 /// The Product Manager's decision session's message: the Designer's plan, an agent's words and so
@@ -1089,13 +1096,23 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        Changes, Digest, Resume, ReviewBrief, close_out_message, human_message, implement_message,
-        planning_message, refine_message, review_message,
+        Changes, Digest, Resume, ReviewBrief, close_out_message, design_review_message,
+        human_message, implement_message, planning_message, refine_message, review_message,
     };
     use crate::tools::fixtures::at;
 
     fn contract() -> TaskContract {
         validate_contract(&a_contract_wire()).expect("the fixture is a contract")
+    }
+
+    #[test]
+    fn the_design_review_points_to_the_address_at_the_end() {
+        let message = design_review_message(&contract(), "a diff");
+        assert!(!message.contains("http://localhost"), "{message}");
+        assert!(
+            message.contains("the app's preview address is at the end of this message"),
+            "{message}"
+        );
     }
 
     fn an_epic() -> TaskContract {

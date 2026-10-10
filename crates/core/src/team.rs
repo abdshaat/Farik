@@ -1106,8 +1106,8 @@ pub struct Preview {
     pub prepare: Option<String>,
     /// Starts the app.
     pub start: String,
-    /// The port it serves on.
-    pub port: u16,
+    /// The port it serves on; left out, Catervas finds it when the app starts (ADR 0054).
+    pub port: Option<u16>,
     /// The page to open first, starting with `/`.
     pub path: String,
 }
@@ -1125,7 +1125,9 @@ impl Team {
         self.preview.as_ref().map(|wire| Preview {
             prepare: wire.prepare.as_deref().cloned(),
             start: wire.start.to_string(),
-            port: u16::try_from(wire.port).unwrap_or(u16::MAX),
+            port: wire
+                .port
+                .map(|port| u16::try_from(port).unwrap_or(u16::MAX)),
             path: wire.path.to_string(),
         })
     }
@@ -1679,6 +1681,22 @@ mod tests {
     }
 
     #[test]
+    fn leaves_a_preview_port_left_out_to_be_found() {
+        let mut wire = a_team_wire();
+        wire["preview"] = json!({ "start": "npm start" });
+        assert_eq!(
+            team(&wire).preview(),
+            Some(Preview {
+                prepare: None,
+                start: "npm start".to_string(),
+                port: None,
+                path: "/".to_string(),
+            }),
+            "a port left out is found when the app starts"
+        );
+    }
+
+    #[test]
     fn validates_the_preview_and_the_connectors() {
         // Every existing fixture still validates, the full one with a preview and a connector.
         assert!(team(&a_team_wire()).preview().is_none());
@@ -1688,7 +1706,7 @@ mod tests {
             Some(Preview {
                 prepare: Some("pnpm install --frozen-lockfile".to_string()),
                 start: "pnpm dev --port 4400".to_string(),
-                port: 4400,
+                port: Some(4400),
                 path: "/app".to_string(),
             })
         );
@@ -1700,7 +1718,7 @@ mod tests {
             Some(Preview {
                 prepare: None,
                 start: "npm start".to_string(),
-                port: 3000,
+                port: Some(3000),
                 path: "/".to_string(),
             }),
             "prepare left out is skipped, and path defaults to /"

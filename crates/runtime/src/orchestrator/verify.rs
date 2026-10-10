@@ -384,9 +384,6 @@ async fn design_review_first(
     }
     let git = &deps.tools.git;
     let diff = git.diff(&integration_branch(team, git)?, &task_branch(contract))?;
-    let page = team.preview().map_or_else(String::new, |preview| {
-        format!("http://localhost:{}{}", preview.port, preview.path)
-    });
     let end = run_session(
         deps,
         team,
@@ -396,7 +393,7 @@ async fn design_review_first(
                 contract,
                 designer,
                 worktree(deps, &row.task_id),
-                design_review_message(contract, &diff, &page),
+                design_review_message(contract, &diff),
             )
         },
     )

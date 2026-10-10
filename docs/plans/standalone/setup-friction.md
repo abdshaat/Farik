@@ -88,7 +88,7 @@ Files: modified `docs/schemas/team.schema.json`, `crates/core/src/team.rs` (its 
 - `the_design_review_points_to_the_address_at_the_end` (messages.rs, new) — `design_review_message` holds no `http://localhost` and contains "the app's preview address is at the end of this message".
 - `finds_the_port_it_was_not_told` (playwright_connector.rs, `#[ignore = "needs docker"]`) — `serving()` with `port: None` starts, `preview.port()` is `PORT`, and `preview.origin()` is `http://localhost:<PORT>`.
 
-- [ ] `feat(runtime): find the preview's port when it is not set`
+- [x] `feat(runtime): find the preview's port when it is not set`
 
 ### Task 2: the scan suggests how to start the app
 
