@@ -101,7 +101,7 @@ Files: modified `docs/SPEC.md` (0.86 header sentence; the Advanced sentences), `
 
 Tests: none (docs).
 
-- [ ] `docs(spec): advanced settings open under their own section`
+- [x] `docs(spec): advanced settings open under their own section`
 
 ## Verification
 

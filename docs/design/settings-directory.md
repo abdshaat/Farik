@@ -16,23 +16,23 @@ Settings becomes a list of sections, each at its own address. Nothing a setting 
 
 | Address | Section | Holds |
 |---|---|---|
-| `/settings/general` | General | Theme, language, the Advanced switch |
+| `/settings/general` | General | Theme, language |
 | `/settings/allowed-actions` | Allowed actions | What agents may do |
 | `/settings/spending` | Spending | The daily limit |
-| `/settings/work` | How work runs | Finishing work, planning in sprints, checking plans; the UI file patterns when Advanced is on |
+| `/settings/work` | How work runs | Finishing work, planning in sprints, checking plans; the UI file patterns under its Show advanced settings button |
 | `/settings/your-app` | Your app | How to open your app |
 | `/settings/saved-teams` | Saved teams | Rename and delete saved teams |
 | `/settings/computer` | This computer | Connected, project folder, address, Change project, Disconnect, Events for testing |
 | `/settings/account` | AI account | The Claude connection, Connect again, Disconnect |
 
-The list's order is the table's. The Advanced switch stays in General because it changes every page, not one section.
+The list's order is the table's. Each section that has advanced settings opens its own under a "Show advanced settings" button; nothing is remembered or shared between sections, and every page starts closed.
 
 ## Layout
 
 - Desktop (1024 px and wider, the shell's `useWide`): the page is titled "Settings"; a side list of the sections sits on the left and the chosen section fills the rest. The current section's row is marked (`aria-current="page"`, the rail's active style). `/settings` opens General (a replace, so Back does not return to the bare address).
 - Phone (below 1024 px): `/settings` is the list alone, one row per section with a one-line summary under its name. A section fills the screen with a "← Settings" link above its heading, which goes back to the list.
 - Settings stays under Team on a phone (`web-ui.md`), and the rail's Settings link stays active on every section.
-- Each section's heading carries an ⓘ where it needs explaining, its notes in bullets (`docs/brand/brand.md`, Voice). Phone summaries are a few words each: "Theme, language, advanced", "What agents may do", "The daily limit", "Sprints and plan checks", "How to open your app", "Your saved teams", "Folder and connection", "Your Claude account".
+- Each section's heading carries an ⓘ where it needs explaining, its notes in bullets (`docs/brand/brand.md`, Voice). Phone summaries are a few words each: "Theme and language", "What agents may do", "The daily limit", "Sprints and plan checks", "How to open your app", "Your saved teams", "Folder and connection", "Your Claude account".
 
 ## Edge cases
 
