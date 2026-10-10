@@ -34,6 +34,12 @@ export const en = {
 	resume: "Resume",
 	pausedLead: "The team is paused.",
 	pausedNothingNew: "Nothing new starts until you resume.",
+	keysCopied:
+		"Your agents’ connections were copied from {from} ({count} services). Use different keys for this project?",
+	keysCopiedOne:
+		"Your agents’ connections were copied from {from} (1 service). Use different keys for this project?",
+	keysKeep: "Keep them",
+	keysChoose: "Choose different keys",
 	pausedStillYours: "You can still answer, approve and accept.",
 	eventsCaption: "The last 100 events, newest first",
 	eventSeq: "Seq",
@@ -167,6 +173,18 @@ export const en = {
 	browserNote:
 		"A folder that is not a git project can’t be used yet. For a new project, go back and choose “No, start a new one”: Catervas makes the folder and sets up git for you.",
 	opening: "Opening your project…",
+	changeProject: "Change project…",
+	changeShort: "Change",
+	projectWord: "project",
+	changeProjectConfirm:
+		"The team stops working on {name}. Its work there is kept, and it is all there if you come back.",
+	changeProjectYes: "Change project",
+	movingFrom: "Moving your team from {name}",
+	stayOn: "Stay on {name}",
+	replaceTeam:
+		"{target} already has a Catervas team. It will be replaced by yours, starting fresh; your code is not touched.",
+	replaceYes: "Replace it",
+	replaceNo: "Choose another",
 	takeOnError: "Catervas could not open that project.",
 	scanTitle: "Here is what Catervas found in your project",
 	scanLead:

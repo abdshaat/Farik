@@ -188,6 +188,41 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_change_project_requests() {
+        for frame in [
+            request(1, "project.leave", &json!({})),
+            request(2, "keys_copied.dismiss", &json!({})),
+            request(
+                3,
+                "project.open",
+                &json!({ "path": "code/a", "no_sandbox": false, "replace": true }),
+            ),
+            request(
+                4,
+                "project.open",
+                &json!({ "path": "code/a", "no_sandbox": false }),
+            ),
+        ] {
+            rpc_request_from_value(&frame).unwrap_or_else(|e| panic!("{frame} refused: {e:?}"));
+        }
+    }
+
+    #[test]
+    fn refuses_bad_change_project_requests() {
+        for frame in [
+            request(1, "project.leave", &json!({ "x": 1 })),
+            request(2, "keys_copied.dismiss", &json!({ "x": 1 })),
+            request(
+                3,
+                "project.open",
+                &json!({ "path": "code/a", "no_sandbox": false, "replace": "yes" }),
+            ),
+        ] {
+            assert!(rpc_request_from_value(&frame).is_err(), "{frame} was read");
+        }
+    }
+
+    #[test]
     fn refuses_a_request_without_jsonrpc_2_0() {
         let wrong = json!({ "jsonrpc": "1.0", "id": 1, "method": "unsubscribe", "params": {} });
         assert!(rpc_request_from_value(&wrong).is_err());

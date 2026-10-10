@@ -2,7 +2,7 @@
 //! `fix/<id>` for a Software Developer's or a UI/UX Designer's task, by its contract's `change`, and
 //! `docs/<id>` for every other role's task, because only those two change code.
 
-use crate::contract::TaskContract;
+use crate::contract::{TaskContract, TaskId};
 use crate::generated::task_contract::CatervasTaskContractChange as Change;
 use crate::team::changes_code;
 
@@ -22,9 +22,29 @@ pub fn task_branch(contract: &TaskContract) -> String {
     }
 }
 
+/// The task number a branch name holds, when it is one of the three shapes `task_branch` makes
+/// (`feature/CTV-<n>`, `fix/CTV-<n>`, `docs/CTV-<n>`), with or without a remote's name before it
+/// (`origin/fix/CTV-7`). Any single leading segment is read as a remote's name, so `x/feature/CTV-7`
+/// counts too, which at worst skips numbers. A number past what a task id can hold, and any other
+/// name, answers `None`.
+#[must_use]
+pub fn task_number_of_branch(name: &str) -> Option<u64> {
+    let parts: Vec<&str> = name.split('/').collect();
+    let [kind, id] = match parts.as_slice() {
+        [_, kind, id] | [kind, id] => [*kind, *id],
+        _ => return None,
+    };
+    if !matches!(kind, "feature" | "fix" | "docs") {
+        return None;
+    }
+    // Only a number a contract can hold: an id past the limit would be a floor no task id follows.
+    let task_id: TaskId = id.parse().ok()?;
+    task_id.as_str().strip_prefix("CTV-")?.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::task_branch;
+    use super::{task_branch, task_number_of_branch};
     use crate::contract::Role;
     use crate::generated::task_contract::CatervasTaskContractChange as Change;
     use crate::governor::readiness::fixtures::a_contract;
@@ -69,6 +89,48 @@ mod tests {
         ] {
             let contract = a_task(role, Some(Change::Fix));
             assert_eq!(task_branch(&contract), "docs/CTV-7", "{role}");
+        }
+    }
+
+    #[test]
+    fn task_number_of_branch_reads_the_three_shapes() {
+        for (name, number) in [
+            ("feature/CTV-7", 7),
+            ("fix/CTV-12", 12),
+            ("docs/CTV-3", 3),
+            ("origin/feature/CTV-9", 9),
+        ] {
+            assert_eq!(task_number_of_branch(name), Some(number), "{name}");
+        }
+        for name in [
+            "main",
+            "feature/login",
+            "feature/CTV-",
+            "feature/CTV-x",
+            "wip/CTV-4",
+            "feature/CTV-1/more",
+            "feature/CTV-1234567",
+            "feature/FRK-7",
+            "fix/FRK-7",
+        ] {
+            assert_eq!(task_number_of_branch(name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn task_number_of_branch_inverts_task_branch() {
+        for (role, change) in [
+            (Role::Architect, None),
+            (Role::SoftwareDeveloper, Some(Change::Fix)),
+            (Role::SoftwareDeveloper, Some(Change::Feature)),
+        ] {
+            let mut contract = a_task(role, change);
+            contract.id = "CTV-41".parse().expect("a task id");
+            assert_eq!(
+                task_number_of_branch(&task_branch(&contract)),
+                Some(41),
+                "{role}"
+            );
         }
     }
 }

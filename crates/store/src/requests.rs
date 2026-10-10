@@ -25,6 +25,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::files::{FilesError, ProjectFiles};
+use crate::git::Git;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
 /// Who the human is in the log: the id every act of theirs is recorded under.
@@ -329,11 +330,22 @@ fn file(
     // Past every contract the repository already holds as well as the counter: the log is
     // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
     // would hand out CTV-1 again. `list_contracts` is in number order, so the last is the highest.
-    let taken = files
+    // And past every task branch the repository holds, whatever its contracts say: a project
+    // whose `.catervas/` was removed or carried elsewhere still has the branches of its old tasks. A
+    // folder whose refs cannot be listed counts as having none; a collision then shows when the
+    // worktree is made.
+    let contracts = files
         .list_contracts()?
         .last()
         .and_then(|id| id.as_str().trim_start_matches("CTV-").parse::<u64>().ok())
         .unwrap_or(0);
+    let branches = Git::open(files.root().to_path_buf())
+        .task_branch_numbers()
+        .unwrap_or_default()
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+    let taken = contracts.max(branches);
     contract.id = log.next_task_id_above(taken)?;
 
     files.create_contract(&contract)?;
@@ -807,6 +819,7 @@ mod tests {
         request_from_brief, triage_by_human,
     };
     use crate::files::fixtures::{TempProject, a_team};
+    use crate::git::fixtures::git_in;
     use crate::{EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections};
 
     fn at() -> DateTime<Utc> {
@@ -887,6 +900,59 @@ mod tests {
         };
         assert!((placeholder_budget_usd(&capped) - 12.5).abs() < 1e-9);
         assert!((placeholder_budget_usd(&TeamRules::default()) - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_request_past_the_highest_old_task_branch() {
+        let (project, log) = a_project("requests-old-branch");
+        let root = project.root.clone();
+        git_in(&root, &["init", "-b", "main"]);
+        git_in(&root, &["config", "user.name", "Catervas Test"]);
+        git_in(&root, &["config", "user.email", "test@catervas.invalid"]);
+        git_in(&root, &["commit", "--allow-empty", "-m", "first"]);
+        git_in(&root, &["branch", "feature/CTV-7"]);
+        let files = project.files();
+        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
+            .expect("the request is filed");
+        assert_eq!(
+            request.id.as_str(),
+            "CTV-8",
+            "past the branch, with no contract"
+        );
+
+        // CTV-8 is a contract now; one numbered above the branch still wins.
+        let mut held = request.clone();
+        held.id = "CTV-10".parse().expect("a task id");
+        files.create_contract(&held).expect("a contract is held");
+        let fresh = Arc::new(open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens"));
+        let next = file_request(
+            &files,
+            &fresh,
+            a_request(),
+            "human",
+            None,
+            at(),
+            &ids(),
+            None,
+        )
+        .expect("the request is filed");
+        assert_eq!(
+            next.id.as_str(),
+            "CTV-11",
+            "past the contract, with the lower branch"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_request_when_git_cannot_list_branches() {
+        // The folder is not a repository, so its branches cannot be listed: it counts as having none.
+        let (project, log) = a_project("requests-no-repository");
+        let files = project.files();
+        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
+            .expect("the request is filed");
+        assert_eq!(request.id.as_str(), "CTV-1");
     }
 
     #[test]

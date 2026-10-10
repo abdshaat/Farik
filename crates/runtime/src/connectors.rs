@@ -508,6 +508,99 @@ impl ConnectorSecrets for MemoryConnectorSecrets {
     }
 }
 
+/// Where a project taken on with another's team notes the keys it copied, under its root.
+pub const KEYS_COPIED: &str = ".catervas/local/keys-copied.json";
+
+/// Copies the keys of the carried `team` from the project at `from` to the one at `to`, for the
+/// change of project (ADR 0053): for each agent and each of its `mcp_servers`, the whole entry
+/// (an OAuth sign-in included) kept under `from`'s id on this machine is kept under `to`'s, and so
+/// is the procurement mailbox's password when the team has a Procurement Specialist. The old
+/// entries stay. An entry the store cannot read or write is skipped and not counted: the agent
+/// page then shows that server as not connected. Answers what was copied, under `to`'s id.
+///
+/// # Errors
+///
+/// Either project's id could not be read or made.
+pub fn copy_keys(
+    secrets: &dyn ConnectorSecrets,
+    state: &std::path::Path,
+    from: &std::path::Path,
+    to: &std::path::Path,
+    team: &catervas_core::team::Team,
+) -> std::io::Result<Vec<SecretAt>> {
+    let (old, new) = (local_project_id(state, from)?, local_project_id(state, to)?);
+    let mut wanted: Vec<(SecretAt, SecretAt)> = Vec::new();
+    for agent in &team.agents {
+        for server in agent.mcp_servers.iter().flatten() {
+            let (agent_id, server) = (agent.id.as_str(), server.name.as_str());
+            wanted.push((
+                SecretAt {
+                    project_id: old.clone(),
+                    agent_id: agent_id.into(),
+                    server: server.into(),
+                },
+                SecretAt {
+                    project_id: new.clone(),
+                    agent_id: agent_id.into(),
+                    server: server.into(),
+                },
+            ));
+        }
+    }
+    if team.has_active(catervas_core::contract::Role::ProcurementSpecialist) {
+        wanted.push((
+            SecretAt::mailbox(&old, "procurement"),
+            SecretAt::mailbox(&new, "procurement"),
+        ));
+    }
+    Ok(wanted
+        .into_iter()
+        .filter_map(|(was, now)| {
+            let entry = secrets.load(&was).ok().flatten()?;
+            secrets.save(&now, &entry).ok()?;
+            Some(now)
+        })
+        .collect())
+}
+
+/// Notes in `root`'s [`KEYS_COPIED`] that `copied` keys came from the project at `from`, for the
+/// page to say so until the user chooses; what a key is called, never its value. Writes nothing
+/// when nothing was copied.
+///
+/// # Errors
+///
+/// The file could not be written.
+pub fn write_keys_copied(
+    root: &std::path::Path,
+    from: &std::path::Path,
+    copied: &[SecretAt],
+) -> std::io::Result<()> {
+    if copied.is_empty() {
+        return Ok(());
+    }
+    let file = root.join(KEYS_COPIED);
+    if let Some(folder) = file.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    let keys: Vec<serde_json::Value> = copied
+        .iter()
+        .map(|at| serde_json::json!({ "agent_id": at.agent_id, "server": at.server }))
+        .collect();
+    let note = serde_json::json!({ "from": from.to_string_lossy(), "keys": keys });
+    crate::write_private(&file, note.to_string().as_bytes())
+}
+
+/// What [`write_keys_copied`] noted in `root`: the folder the keys came from and how many; `None`
+/// when there is no note, it cannot be read, or it lists no keys.
+#[must_use]
+pub fn keys_copied(root: &std::path::Path) -> Option<(String, usize)> {
+    let note: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join(KEYS_COPIED)).ok()?).ok()?;
+    let count = note.get("keys")?.as_array()?.len();
+    let from = note.get("from")?.as_str()?.to_string();
+    (count > 0).then_some((from, count))
+}
+
 /// Why a server's tools could not be listed, or its launch not described.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectorError {
@@ -1685,5 +1778,206 @@ mod tests {
         assert!(printed.contains("***"), "{printed}");
         assert!(printed.contains("abc"), "{printed}");
         assert!(!printed.contains("ghp-secret-value"), "{printed}");
+    }
+
+    /// A team of `ada` and `theo`, who holds a `github` and a `notion` server, and `proc` (a
+    /// Procurement Specialist) when `with_proc`.
+    fn keyed_team(with_proc: bool) -> catervas_core::team::Team {
+        use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+        let server = |name: &str| {
+            serde_json::json!({
+                "name": name, "source": "custom", "transport": "stdio",
+                "command": "server", "tools": { "search": "network" }
+            })
+        };
+        let mut wire = a_team_wire();
+        let mut theo = an_agent_wire("theo", "software_developer");
+        theo["mcp_servers"] = serde_json::json!([server("github"), server("notion"), server("x")]);
+        let mut agents = vec![an_agent_wire("ada", "product_manager"), theo];
+        if with_proc {
+            agents.push(an_agent_wire("proc", "procurement_specialist"));
+        }
+        wire["agents"] = serde_json::Value::Array(agents);
+        catervas_core::team::validate_team(&wire).expect("the fixture is a team")
+    }
+
+    /// Two projects' ids, kept in a fresh state folder.
+    fn two_projects(test: &str) -> (PathBuf, PathBuf, PathBuf, String, String) {
+        let base = scratch(test);
+        let (state, old, new) = (base.join("state"), base.join("old"), base.join("new"));
+        for dir in [&state, &old, &new] {
+            std::fs::create_dir_all(dir).expect("a folder");
+        }
+        let old_id = local_project_id(&state, &old).expect("an id");
+        let new_id = local_project_id(&state, &new).expect("an id");
+        (state, old, new, old_id, new_id)
+    }
+
+    fn keyed(project: &str, agent: &str, server: &str) -> SecretAt {
+        SecretAt {
+            project_id: project.to_string(),
+            agent_id: agent.to_string(),
+            server: server.to_string(),
+        }
+    }
+
+    #[test]
+    fn copy_keys_copies_each_kept_agents_entries() {
+        let (state, old, new, old_id, new_id) = two_projects("copy-keys");
+        let secrets = MemoryConnectorSecrets::default();
+        let signed_in = signed_in_entry();
+        secrets
+            .save(&keyed(&old_id, "theo", "github"), &signed_in)
+            .expect("kept");
+        secrets
+            .save(&keyed(&old_id, "theo", "notion"), &entry("n"))
+            .expect("kept");
+
+        let copied = copy_keys(&secrets, &state, &old, &new, &keyed_team(false)).expect("copies");
+
+        assert_eq!(
+            copied,
+            vec![
+                keyed(&new_id, "theo", "github"),
+                keyed(&new_id, "theo", "notion")
+            ]
+        );
+        let there = secrets
+            .load(&keyed(&new_id, "theo", "github"))
+            .expect("reads");
+        assert_eq!(there, Some(signed_in.clone()));
+        assert!(there.expect("kept").oauth.is_some());
+        assert_eq!(
+            secrets.load(&keyed(&new_id, "theo", "notion")),
+            Ok(Some(entry("n")))
+        );
+        assert_eq!(
+            secrets.load(&keyed(&old_id, "theo", "github")),
+            Ok(Some(signed_in))
+        );
+    }
+
+    #[test]
+    fn copy_keys_leaves_agents_off_the_team_and_servers_with_no_entry() {
+        let (state, old, new, old_id, new_id) = two_projects("copy-keys-off-team");
+        let secrets = MemoryConnectorSecrets::default();
+        secrets
+            .save(&keyed(&old_id, "iris", "x"), &entry("i"))
+            .expect("kept");
+        secrets
+            .save(&keyed(&old_id, "theo", "github"), &entry("g"))
+            .expect("kept");
+
+        let copied = copy_keys(&secrets, &state, &old, &new, &keyed_team(false)).expect("copies");
+
+        assert_eq!(secrets.load(&keyed(&new_id, "iris", "x")), Ok(None));
+        assert_eq!(copied, vec![keyed(&new_id, "theo", "github")]);
+    }
+
+    #[test]
+    fn copy_keys_copies_the_mailbox_with_a_procurement_specialist() {
+        let (state, old, new, old_id, new_id) = two_projects("copy-keys-mailbox");
+        let secrets = MemoryConnectorSecrets::default();
+        let old_mail = SecretAt::mailbox(&old_id, "procurement");
+        secrets.save(&old_mail, &entry("m")).expect("kept");
+        let new_mail = SecretAt::mailbox(&new_id, "procurement");
+
+        let without = copy_keys(&secrets, &state, &old, &new, &keyed_team(false)).expect("copies");
+        assert!(without.is_empty());
+        assert_eq!(secrets.load(&new_mail), Ok(None));
+
+        let with = copy_keys(&secrets, &state, &old, &new, &keyed_team(true)).expect("copies");
+        assert_eq!(with, vec![new_mail.clone()]);
+        assert_eq!(secrets.load(&new_mail), Ok(Some(entry("m"))));
+    }
+
+    /// A store that cannot read one entry.
+    struct CannotRead {
+        inner: MemoryConnectorSecrets,
+        at: String,
+    }
+
+    impl ConnectorSecrets for CannotRead {
+        fn load(&self, at: &SecretAt) -> Result<Option<ConnectorEntry>, CredentialError> {
+            if at.account() == self.at {
+                return Err(CredentialError::Failed("locked".to_string()));
+            }
+            self.inner.load(at)
+        }
+
+        fn save(
+            &self,
+            at: &SecretAt,
+            entry: &ConnectorEntry,
+        ) -> Result<SecretStore, CredentialError> {
+            self.inner.save(at, entry)
+        }
+
+        fn delete(&self, at: &SecretAt) -> Result<(), CredentialError> {
+            self.inner.delete(at)
+        }
+    }
+
+    #[test]
+    fn copy_keys_skips_an_entry_the_store_cannot_read() {
+        let (state, old, new, old_id, new_id) = two_projects("copy-keys-unreadable");
+        let secrets = CannotRead {
+            inner: MemoryConnectorSecrets::default(),
+            at: keyed(&old_id, "theo", "github").account(),
+        };
+        for server in ["github", "notion"] {
+            secrets
+                .save(&keyed(&old_id, "theo", server), &entry(server))
+                .expect("kept");
+        }
+
+        let copied = copy_keys(&secrets, &state, &old, &new, &keyed_team(false)).expect("copies");
+
+        assert_eq!(copied, vec![keyed(&new_id, "theo", "notion")]);
+        assert_eq!(secrets.load(&keyed(&new_id, "theo", "github")), Ok(None));
+    }
+
+    #[test]
+    fn keys_copied_file_only_when_something_was_copied() {
+        let root = scratch("keys-copied");
+        std::fs::create_dir_all(&root).expect("a root");
+        let from = std::path::Path::new("/work/old");
+
+        write_keys_copied(&root, from, &[]).expect("nothing to write");
+        assert!(!root.join(KEYS_COPIED).exists());
+        assert_eq!(keys_copied(&root), None);
+
+        let copied = [
+            keyed("p", "theo", "github"),
+            SecretAt::mailbox("p", "procurement"),
+        ];
+        write_keys_copied(&root, from, &copied).expect("written");
+        assert_eq!(keys_copied(&root), Some(("/work/old".to_string(), 2)));
+        let file: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join(KEYS_COPIED)).expect("reads"))
+                .expect("json");
+        assert_eq!(
+            file["keys"],
+            serde_json::json!([
+                { "agent_id": "theo", "server": "github" },
+                { "agent_id": "", "server": "procurement" }
+            ])
+        );
+        let text = file.to_string();
+        assert!(
+            !text.contains("ghp-secret-value") && !text.contains("\"p\""),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn keys_copied_is_none_without_a_readable_file() {
+        let root = scratch("keys-copied-unreadable");
+        std::fs::create_dir_all(root.join(".catervas/local")).expect("a root");
+        assert_eq!(keys_copied(&root), None);
+        std::fs::write(root.join(KEYS_COPIED), "not json").expect("written");
+        assert_eq!(keys_copied(&root), None);
+        std::fs::write(root.join(KEYS_COPIED), r#"{"from":"/x","keys":[]}"#).expect("written");
+        assert_eq!(keys_copied(&root), None);
     }
 }

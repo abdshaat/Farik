@@ -6,6 +6,7 @@ import { saidAll } from "../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
 import type { ThemeChoice } from "../app/theme.ts";
 import { t } from "../strings/t.ts";
+import { ChangeProject } from "./ChangeProject.tsx";
 import { ConnectAgain } from "./ConnectAgain.tsx";
 import styles from "./pages.module.css";
 import { SavedTeams } from "./SavedTeams.tsx";
@@ -108,6 +109,7 @@ export function Settings({
 						<dd>{`127.0.0.1:${data.port}`}</dd>
 					</dl>
 				)}
+				{data?.projectRoot && <ChangeProject root={data.projectRoot} />}
 				<div>
 					<Button busy={leaving} onClick={leave}>
 						{t("disconnect")}

@@ -707,6 +707,7 @@ pub(crate) fn web(
         port: 0,
         clock: Arc::clone(&io.clock),
         take_on_error: std::sync::Mutex::default(),
+        leaving: std::sync::Mutex::default(),
         stores: (io.credential_stores)(),
         env: io.env.clone(),
         in_use,
