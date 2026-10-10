@@ -181,7 +181,7 @@ Files: `crates/store/src/requests.rs` (the three items; `Filing` gains `rederive
 - `judges_a_rederive_as_filed_whole` (`orchestrator/requests.rs`, integration, `Harness::new` with no judging) — a re-derive filed with `file_rederive_request`, which the first tick moves to `refining`: the next tick starts no session (`adapter.started()` is empty) and the governor's `refining → ready` is recorded, moved or refused by `governor`, as for a breakdown's child. RED: the Product Manager's refine session starts.
 - `plans_the_waiting_rederives_first` (`sprints.rs`) — under `plan_in_sprints`, a Backlog re-derive CTV-2 (filed with `file_rederive_request`, then moved to `ready`) and a ready CTV-3, a sprint opened (`TestProject::open_sprint`, `:360`) with CTV-3's budget: the Scrum Master planning `[CTV-3]` leaves the sprint's `task_ids` and `sprint.planned`'s as `[CTV-2, CTV-3]`; naming both plans each once; a governor plan, and the policy off, add none. RED.
 
-- [ ] `feat(runtime): file the twin's re-derive when the owner's change is integrated`
+- [x] `feat(runtime): file the twin's re-derive when the owner's change is integrated`
 
 ### Task 9: Spec
 

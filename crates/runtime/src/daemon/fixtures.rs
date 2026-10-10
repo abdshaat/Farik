@@ -420,3 +420,9 @@ pub(crate) fn connector_states(state: &Arc<DaemonState>) -> Value {
         ["connectors"]
         .clone()
 }
+
+/// The reply frame to `method` with `params`, as the daemon answers it, for a test outside the
+/// daemon's own modules.
+pub(crate) fn rpc(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
+    super::gates::tests::rpc(state, method, params)
+}

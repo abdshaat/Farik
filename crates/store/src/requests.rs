@@ -7,7 +7,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::sync::{Mutex, PoisonError};
 
-use catervas_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use catervas_core::criteria::{CriteriaLibrary, TemplateVerification};
 use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteRefusal, FIELDS_FIXED_AT_CREATION,
@@ -214,6 +214,7 @@ pub fn file_request(
             parent,
             from_chat_message,
             raises: None,
+            rederives: None,
         },
         (now, ids),
     )
@@ -243,6 +244,79 @@ pub fn rederive_tasks(log: &EventLog) -> Result<Vec<(TaskId, String)>, StoreErro
         .collect())
 }
 
+/// The whole contract of the task that brings `twin`, the version of `human` written for agents,
+/// up to date with the owner's change to `human` (`docs/SPEC.md` 5.17): `owner` writes it and
+/// `reviewer` checks it, within `max_cost_usd`, and it may change nothing but the twin.
+#[must_use]
+pub fn rederive_request(
+    human: &str,
+    twin: &str,
+    owner: Role,
+    reviewer: Role,
+    max_cost_usd: f64,
+) -> Value {
+    let file = |path: &str| path.rsplit('/').next().unwrap_or(path).to_string();
+    let says = format!("{twin} says what {human} says now");
+    json!({
+        "title": format!("Bring {} up to date with the owner's change", file(twin)),
+        "intent": format!(
+            "The owner changed {human} on the Files page. Rewrite {twin}, the version written for \
+             agents, so that it says what {human} now says."
+        ),
+        "scope": {
+            "in_scope": [twin],
+            "out_of_scope": [format!("{human}, which stays as the owner left it")]
+        },
+        "requirements": [{ "id": "R1", "text": format!("{says}, written for agents.") }],
+        "exit_criteria": [{
+            "id": "C1",
+            "text": format!("{says}."),
+            "satisfies": ["R1"],
+            "verification": {
+                "method": "review",
+                "rubric": [
+                    format!("Every fact, decision and limit in {human} is in {twin}."),
+                    format!("Nothing in {twin} contradicts {human}.")
+                ]
+            }
+        }],
+        "assignee_role": owner.to_string(),
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": [twin]
+    })
+}
+
+/// Files the whole contract `rederive_request` makes, as `file_request` files one: `task.created`
+/// names the twin in `rederives` and `catervas` filed it, and `request.triaged { small }` follows
+/// at once, by `catervas`, so that no triage session runs.
+///
+/// # Errors
+///
+/// As `file_request`.
+pub fn file_rederive_request(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    twin: &str,
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by: "catervas",
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            rederives: Some(twin),
+        },
+        (now, ids),
+    )
+}
+
 /// Files the request that raises the budget of marketing plan `plan` (ADR 0042, step 08g), as
 /// `file_request` files one for `created_by`: `task.created` names the plan in `raises`, so that
 /// the sprint policy never holds it, and `request.triaged { small }` follows at once, by `catervas`,
@@ -267,6 +341,7 @@ pub fn file_raise_request(
             parent: None,
             from_chat_message: None,
             raises: Some(plan),
+            rederives: None,
         },
         (now, ids),
     )
@@ -279,6 +354,7 @@ struct Filing<'a> {
     parent: Option<&'a TaskId>,
     from_chat_message: Option<u64>,
     raises: Option<&'a str>,
+    rederives: Option<&'a str>,
 }
 
 fn file(
@@ -398,6 +474,7 @@ fn creation_bodies(
         parent,
         from_chat_message,
         raises,
+        rederives,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
@@ -412,7 +489,15 @@ fn creation_bodies(
                     })
             })
             .transpose()?,
-        rederives: None,
+        rederives: rederives
+            .map(|twin| {
+                twin.to_string()
+                    .try_into()
+                    .map_err(|_| RequestError::Refused {
+                        reason: format!("rederives {twin:?}, which is no .agent.md twin"),
+                    })
+            })
+            .transpose()?,
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
@@ -425,6 +510,13 @@ fn creation_bodies(
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
             size: RequestTriagedBodySize::Small,
             reason: format!("a raised marketing budget for {plan}"),
+            triaged_by: "catervas".to_string(),
+        }));
+    }
+    if let Some(twin) = rederives {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: format!("a re-derive of {twin}"),
             triaged_by: "catervas".to_string(),
         }));
     }

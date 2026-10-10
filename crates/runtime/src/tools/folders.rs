@@ -4,15 +4,19 @@
 //! team's integration policy adds it to the project as it does an accepted task's branch; a
 //! document the owner approves is proposed at the sprint review and waits for the owner.
 
+use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::{
-    FolderDocPath, FolderDocPathRefusal, LineChange, agent_twin, changed_lines,
-    check_folder_doc_path, folder_doc_author, folder_doc_message, role_folder,
+    FolderDocPath, FolderDocPathRefusal, LineChange, ROLE_FOLDERS, agent_twin, changed_lines,
+    check_folder_doc_path, folder_doc_author, folder_doc_message, is_human_document, role_folder,
 };
 use catervas_core::governor::paths::check_protected_paths;
 use catervas_core::team::{Integration, Team};
 use catervas_protocol::event::{EventBody, Thread};
 use catervas_store::StoreError;
 use catervas_store::folder_docs::{FolderDocProposal, ProposalState, folder_docs};
+use catervas_store::requests::{
+    RequestError, file_rederive_request, placeholder_budget_usd, rederive_request, rederive_tasks,
+};
 use catervas_store::waiting::name_of;
 use catervas_store::{CommitOutcome, Git};
 use schemars::JsonSchema;
@@ -177,6 +181,84 @@ pub(crate) fn land(
         CommitOutcome::Busy(paths) => Err(LandRefusal::Busy(paths)),
         CommitOutcome::Linked(path) => Err(LandRefusal::Link(path)),
     }
+}
+
+/// Files the task that brings the twin of the document the owner changed up to date, when folder
+/// change `change` is the owner's (`folder_doc.edited`) and has just been integrated
+/// (`docs/SPEC.md` 5.17): a whole contract, `created_by: catervas`, triaged small at once. Unless a
+/// task for the same twin is still a `draft`, `refining`, `ready` or `assigned`, which has not
+/// reached its worktree and will hold the owner's change; then, and for a change that is not the
+/// owner's or changes no human document, nothing is filed.
+///
+/// # Errors
+///
+/// `Refused` when no role reviews the owner of the folder, and what filing the request refuses.
+pub(crate) fn file_rederive(
+    deps: &ToolDeps,
+    team: &Team,
+    change: u64,
+) -> Result<Option<TaskId>, RequestError> {
+    let docs = folder_docs(&deps.log)?;
+    let Some(human) = docs
+        .changes
+        .iter()
+        .find(|held| held.change == change && held.edited)
+        .and_then(|held| held.paths.iter().find(|path| is_human_document(path)))
+    else {
+        return Ok(None);
+    };
+    let Some(twin) = agent_twin(human) else {
+        return Ok(None);
+    };
+    deps.projections.catch_up()?;
+    let board = deps.projections.board()?;
+    let waiting = rederive_tasks(&deps.log)?.iter().any(|(id, aimed)| {
+        *aimed == twin
+            && board.iter().any(|row| {
+                row.task_id == *id
+                    && matches!(
+                        row.status,
+                        TaskStatus::Draft
+                            | TaskStatus::Refining
+                            | TaskStatus::Ready
+                            | TaskStatus::Assigned
+                    )
+            })
+    });
+    let owner = ROLE_FOLDERS
+        .iter()
+        .find(|(_, folder)| human.starts_with(&format!("{folder}/")))
+        .map(|(role, _)| *role);
+    let (false, Some(owner)) = (waiting, owner) else {
+        return Ok(None);
+    };
+    let reviewer =
+        catervas_roles::default_reviewer_role(team, TaskKind::Task, owner).or_else(|| {
+            catervas_roles::REVIEWER_ROLE_FOR
+                .iter()
+                .find(|(assignee, _)| *assignee == owner)
+                .and_then(|(_, preferred)| preferred.first().copied())
+        });
+    let Some(reviewer) = reviewer else {
+        return Err(RequestError::Refused {
+            reason: format!("no role reviews the tasks of {owner}"),
+        });
+    };
+    let wire = rederive_request(
+        human,
+        &twin,
+        owner,
+        reviewer,
+        placeholder_budget_usd(&team.rules()),
+    );
+    let filed = file_rederive_request(
+        &deps.files,
+        &deps.log,
+        wire,
+        &twin,
+        (deps.clock.now(), &deps.ids),
+    )?;
+    Ok(Some(filed.id))
 }
 
 /// The documents' plain names, joined by " and ": the roadmap and the spec as the owner knows

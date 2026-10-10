@@ -269,8 +269,8 @@ fn judge(
 }
 
 /// Whether the contract is judged now: written since refining began with no refusal by the
-/// governor since that write, or, with no such write, filed whole and not refused since refining
-/// began. A raw request is not judged: its brief would fail and spend one of the three attempts.
+/// governor since that write, or, with no such write, filed whole (a breakdown's task, a contract
+/// the human holds, a twin's re-derive) and not refused since refining began. A raw request is not judged: its brief would fail and spend one of the three attempts.
 fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u64) -> bool {
     let refused_after = |after: u64| {
         history.iter().any(|event| {
@@ -284,9 +284,14 @@ fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u6
         .rev()
         .find(|event| event.envelope.seq > began && event.body.kind() == EventKind::ContractWritten)
         .map(|event| event.envelope.seq);
+    let is_a_rederive = history.iter().any(
+        |event| matches!(&event.body, EventBody::TaskCreated(body) if body.rederives.is_some()),
+    );
     match written {
         Some(written) => !refused_after(written),
-        None => (contract.parent.is_some() || contract.locked) && !refused_after(began),
+        None => {
+            (contract.parent.is_some() || contract.locked || is_a_rederive) && !refused_after(began)
+        }
     }
 }
 
@@ -1747,6 +1752,43 @@ mod tests {
                 if body.reason == EscalationRaisedBodyReason::ReadinessFailures
         ));
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_a_rederive_as_filed_whole() {
+        use catervas_core::contract::Role;
+        use catervas_store::requests::{file_rederive_request, rederive_request};
+
+        let harness = Harness::new(
+            "req-rederive-whole",
+            crate::tools::fixtures::with_the_designer,
+        );
+        let deps = &harness.project.deps;
+        let human = "docs/catervas/product/roadmap.md";
+        let twin = "docs/catervas/product/roadmap.agent.md";
+        file_rederive_request(
+            &deps.files,
+            &deps.log,
+            rederive_request(human, twin, Role::ProductManager, Role::Architect, 2.0),
+            twin,
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("the re-derive is filed");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            moves_of(&harness, "CTV-1"),
+            ["draft -> refining", "refining -> ready"]
+        );
+        assert!(
+            adapter.started().is_empty(),
+            "no refine session rewrites it"
+        );
     }
 
     #[tokio::test]

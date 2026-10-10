@@ -768,9 +768,32 @@ fn record_integrated(
                 tools,
                 tools.ids.clone(),
                 EventBody::FolderChangeIntegrated(body),
-            )
+            )?;
+            file_the_rederive(tools, *change)
         }
     }
+}
+
+/// Files the task that brings an owner's change to a document up to date in its twin. A filing
+/// refused is said in the channel with its reason, and the integration stands.
+fn file_the_rederive(tools: &ToolDeps, change: u64) -> Result<(), OrchestratorError> {
+    let filed = tools
+        .files
+        .read_team()
+        .map_err(catervas_store::requests::RequestError::from)
+        .and_then(|team| crate::tools::folders::file_rederive(tools, &team, change));
+    if let Err(reason) = filed {
+        post_system(
+            &tools.log,
+            tools.clock.as_ref(),
+            &tools.ids,
+            None,
+            &format!(
+                "Folder change {change} was added to the project, but the task that brings the team's version of it up to date could not be filed: {reason}"
+            ),
+        )?;
+    }
+    Ok(())
 }
 
 /// Appends an integration escalation, which moves nothing, and answers it. A folder change's is
@@ -2117,6 +2140,161 @@ mod tests {
     }
 
     const CADENCE: &str = "docs/catervas/delivery/cadence.md";
+
+    const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+    const ROADMAP_TWIN: &str = "docs/catervas/product/roadmap.agent.md";
+
+    /// A harness with the Architect, under `policy`, whose main holds the roadmap with its twin
+    /// and the architecture overview.
+    fn with_documents(name: &str, policy: &str) -> Harness {
+        let policy = policy.to_string();
+        let harness = Harness::new(name, move |wire| {
+            crate::tools::fixtures::with_the_designer(wire);
+            wire["policy"]["integration"] = json!(policy);
+        });
+        let repo = &harness.project.repo;
+        repo.write(ROADMAP, "the roadmap\n");
+        repo.write(ROADMAP_TWIN, "the roadmap for agents\n");
+        repo.write("docs/catervas/architecture/overview.md", "the overview\n");
+        repo.commit("the documents");
+        harness
+    }
+
+    /// The owner's save of `path` as `text`, through the daemon, and the change it made.
+    fn owner_saves(harness: &Harness, path: &str, text: &str) -> u64 {
+        let base = at_root(harness, &["rev-parse", &format!("main:{path}")]);
+        let reply = crate::daemon::fixtures::rpc(
+            &harness.daemon,
+            "files.save",
+            &json!({ "path": path, "text": text, "base": base }),
+        );
+        reply["result"]["change"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("a change was made: {reply}"))
+    }
+
+    fn block_on<T>(work: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime")
+            .block_on(work)
+    }
+
+    fn adds(orchestrator: &crate::orchestrator::Orchestrator, change: u64) {
+        block_on(
+            orchestrator
+                .handle(catervas_protocol::command::Command::FolderChangeIntegrate { change }),
+        )
+        .expect("the owner adds it");
+    }
+
+    /// The tasks filed to bring a twin up to date, with the twin each brings up to date.
+    fn rederives(harness: &Harness) -> Vec<(String, String)> {
+        catervas_store::requests::rederive_tasks(&harness.project.deps.log)
+            .expect("the log reads")
+            .into_iter()
+            .map(|(id, twin)| (id.to_string(), twin))
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_the_rederive_when_the_owners_change_is_integrated() {
+        let harness = with_documents("int-rederive", "manual");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let change = owner_saves(&harness, ROADMAP, "the owner's roadmap\n");
+        assert!(
+            rederives(&harness).is_empty(),
+            "nothing is filed at the save"
+        );
+        adds(&orchestrator, change);
+        assert_eq!(
+            rederives(&harness),
+            [("CTV-1".to_string(), ROADMAP_TWIN.to_string())]
+        );
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-1"))
+            .expect("the contract");
+        assert_eq!(
+            contract.assignee_role,
+            catervas_core::contract::Role::ProductManager
+        );
+        assert_eq!(
+            contract.reviewer_role,
+            catervas_core::contract::Role::Architect
+        );
+        assert_eq!(contract.allowed_paths, [ROADMAP_TWIN.to_string()]);
+        assert_eq!(
+            contract.title.as_str(),
+            "Bring roadmap.agent.md up to date with the owner's change"
+        );
+        assert!(
+            contract.intent.as_str().contains(ROADMAP)
+                && contract.intent.as_str().contains(ROADMAP_TWIN),
+            "{}",
+            contract.intent.as_str()
+        );
+        assert_eq!(contract.scope.in_scope, [ROADMAP_TWIN.to_string()]);
+        let created = harness.events(&[EventKind::TaskCreated]);
+        let EventBody::TaskCreated(created) = &created[0].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "catervas");
+        let triaged = harness.events(&[EventKind::RequestTriaged]);
+        let EventBody::RequestTriaged(triaged) = &triaged[0].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(
+            (triaged.triaged_by.as_str(), triaged.reason.as_str()),
+            (
+                "catervas",
+                "a re-derive of docs/catervas/product/roadmap.agent.md"
+            )
+        );
+
+        // A second integrated save while the first re-derive is a draft files none.
+        let change = owner_saves(&harness, ROADMAP, "a second roadmap\n");
+        adds(&orchestrator, change);
+        assert_eq!(rederives(&harness).len(), 1);
+
+        // Once that task is under way, the next one files another.
+        harness
+            .project
+            .moved("CTV-1", "draft", "in_progress", &json!({}));
+        let change = owner_saves(&harness, ROADMAP, "a third roadmap\n");
+        adds(&orchestrator, change);
+        assert_eq!(rederives(&harness).len(), 2);
+
+        // Another document of the owner's, and an agent's change, file none.
+        let change = owner_saves(&harness, "docs/catervas/architecture/overview.md", "x\n");
+        adds(&orchestrator, change);
+        let agents = harness.folder_change(ROADMAP, "an agent's roadmap\n");
+        adds(&orchestrator, agents);
+        assert_eq!(rederives(&harness).len(), 2);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_the_rederive_when_the_tick_integrates_the_owners_change() {
+        let harness = with_documents("int-rederive-auto", "auto_merge");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        owner_saves(&harness, ROADMAP, "the owner's roadmap\n");
+        for _ in 0..3 {
+            block_on(orchestrator.tick()).expect("the tick runs");
+            if !rederives(&harness).is_empty() {
+                break;
+            }
+        }
+        assert_eq!(
+            rederives(&harness),
+            [("CTV-1".to_string(), ROADMAP_TWIN.to_string())]
+        );
+    }
 
     fn folder_events(harness: &Harness, kind: EventKind) -> Vec<serde_json::Value> {
         harness
