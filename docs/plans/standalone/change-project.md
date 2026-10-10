@@ -191,7 +191,7 @@ Order in `open` while leaving: the existing checks (home, git root, not home, lo
 - `opens_a_folder_with_a_team_as_before_when_not_leaving` — `leaving: None`, target with a team, `replace: false`: answers the target, its `team.yaml` unchanged.
 - `serving.rs` `changes_project_from_the_browser` — serving `a_team` under home: `project.leave`, then `project.open { path: <target's name> }`: the target is driven (its `daemon.json`), `serve.status` `project_root` is the target, `state.json` `last_project` is the target, `farik stop` ends serve with 0.
 
-- [ ] `feat(cli): take the team to another project`
+- [x] `feat(cli): take the team to another project`
 
 ### Task 8: the rail, the landing and the copied-keys notice
 

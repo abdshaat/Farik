@@ -174,6 +174,7 @@ async fn set_up(
         chosen,
         waiting,
         leaving: leaving.clone(),
+        secrets: Arc::clone(&io.connector_secrets),
     });
     let bound = port_of(held)?;
     let (mut web, code) = web(Path::new(""), io, None)?;

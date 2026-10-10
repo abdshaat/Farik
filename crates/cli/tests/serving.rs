@@ -1821,3 +1821,104 @@ fn stays_on_the_project_it_left() {
     let ran = joined(serving.thread, "the serve");
     assert_eq!(ran.code, 0, "{}", serving.err.text());
 }
+
+/// `serving_a_team`, with `HOME` the temporary folder, where `TempRepo` makes the repositories a
+/// change of project can go to.
+fn serving_a_team_under_home(name: &str) -> (TempRepo, Serving, std::path::PathBuf) {
+    let repository = a_team(name);
+    let state = scratch(&format!("{name}-state"));
+    let mut env = setup_env(&std::env::temp_dir(), &state);
+    env.insert(
+        "ANTHROPIC_API_KEY".to_string(),
+        "sk-ant-api03-test".to_string(),
+    );
+    let serving = serving_in(&repository.path, env, true);
+    (repository, serving, state)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn changes_project_from_the_browser() {
+    let (repository, serving, state) = serving_a_team_under_home("serve-changes");
+    let target = TempRepo::new("serve-changes-target");
+    let root = target.path.canonicalize().expect("the root");
+    left_for_the_wizard(&serving);
+
+    let opened = call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&target.path), "no_sandbox": false }),
+    );
+    assert_eq!(
+        opened["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{opened}"
+    );
+    until("the target is driven", || daemon_file(&target).exists());
+    let mut status = Value::Null;
+    until("serve answers for the target", || {
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+        status["project_root"] == json!(root.display().to_string())
+    });
+
+    assert_eq!(status["paused"], false, "{status}");
+    let written: Value = serde_json::from_str(
+        &std::fs::read_to_string(state.join("farik/state.json")).expect("state.json"),
+    )
+    .expect("JSON");
+    assert_eq!(written["last_project"], json!(root.display().to_string()));
+    assert!(!root.join(".farik/local/setup-pending").exists());
+    let stopped = run(&root, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+    drop(repository);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn a_take_on_that_fails_keeps_the_way_back() {
+    let (repository, serving, _state) = serving_a_team_under_home("serve-failed-take-on");
+    let old = repository.path.canonicalize().expect("the root");
+    let target = TempRepo::new("serve-failed-take-on-target");
+    target.write(".farik/prices.json", "not JSON");
+    left_for_the_wizard(&serving);
+
+    let opened = call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&target.path), "no_sandbox": false }),
+    );
+    assert!(opened["result"]["project_root"].is_string(), "{opened}");
+    let mut status = Value::Null;
+    until("serve is back in setup with the reason", || {
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+        status["take_on_error"].is_string()
+    });
+    assert_eq!(
+        status["leaving"],
+        json!(old.display().to_string()),
+        "{status}"
+    );
+
+    let stayed = call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": old.display().to_string(), "no_sandbox": false }),
+    );
+    assert_eq!(
+        stayed["result"]["project_root"],
+        json!(old.display().to_string()),
+        "{stayed}"
+    );
+    until("the old team is driven again", || {
+        daemon_file(&repository).exists()
+    });
+    let stopped = run(&old, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}

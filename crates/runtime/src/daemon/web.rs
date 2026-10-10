@@ -995,7 +995,13 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
                     .map(|image| json!({ "image": image }))
                     .map_err(|sentence| Failure::new(REFUSED, sentence));
             }
-            "project.open" => host.open(text("path"), no_sandbox).map(root),
+            "project.open" => host
+                .open(
+                    text("path"),
+                    no_sandbox,
+                    params["replace"].as_bool().unwrap_or_default(),
+                )
+                .map(root),
             "project.create" => host
                 .create(
                     text("parent"),
@@ -2908,11 +2914,11 @@ mod tests {
     }
 
     impl SetupHost for FakeHost {
-        fn open(&self, path: &str, no_sandbox: bool) -> Result<PathBuf, SetupError> {
+        fn open(&self, path: &str, no_sandbox: bool, replace: bool) -> Result<PathBuf, SetupError> {
             self.calls
                 .lock()
                 .expect("the calls")
-                .push(json!({ "open": path, "no_sandbox": no_sandbox }));
+                .push(json!({ "open": path, "no_sandbox": no_sandbox, "replace": replace }));
             if path == "busy" {
                 return Err(SetupError::Refused(
                     "another farik is already running this project".to_string(),
@@ -3049,7 +3055,7 @@ mod tests {
         let (_, opened) = asked(
             &state,
             "project.open",
-            &json!({ "path": "code/a", "no_sandbox": true }),
+            &json!({ "path": "code/a", "no_sandbox": true, "replace": true }),
         )
         .await;
         conforms(&opened["result"], "projectOpenResult");
@@ -3085,9 +3091,9 @@ mod tests {
         assert_eq!(
             *host.calls.lock().expect("the calls"),
             [
-                json!({ "open": "code/a", "no_sandbox": true }),
+                json!({ "open": "code/a", "no_sandbox": true, "replace": true }),
                 json!({ "create": ["code", "bakery", description], "no_sandbox": false }),
-                json!({ "open": "busy", "no_sandbox": false }),
+                json!({ "open": "busy", "no_sandbox": false, "replace": false }),
             ]
         );
     }

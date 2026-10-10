@@ -21,12 +21,14 @@ pub enum SetupError {
 
 /// What the CLI does for the wizard: take a project on, and keep the credential.
 pub trait SetupHost: Send + Sync {
-    /// Opens the git project at `path`, relative to home, for the team.
+    /// Opens the git project at `path`, relative to home, for the team. While a project is being
+    /// left, a folder that already has a team is refused unless `replace`, which deletes its
+    /// `.farik/` (ADR 0050).
     ///
     /// # Errors
     ///
     /// `Refused` with the sentence to show; `Failed` when something broke.
-    fn open(&self, path: &str, no_sandbox: bool) -> Result<PathBuf, SetupError>;
+    fn open(&self, path: &str, no_sandbox: bool, replace: bool) -> Result<PathBuf, SetupError>;
     /// Makes the project `parent/name`, relative to home, from `description`.
     ///
     /// # Errors
