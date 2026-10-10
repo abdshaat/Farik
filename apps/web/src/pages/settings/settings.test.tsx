@@ -327,17 +327,23 @@ describe("settings directory", () => {
 			judges: [],
 			max_agents: 7,
 		};
-		const { s } = await open("/settings/work", rules);
-		await answerQuery(s, "settings.defaults", {
+		const defaults = {
 			budgets: {},
 			rules: {},
 			policy: {},
 			ui_paths: ["**/*.tsx"],
-		});
+		};
+		const { s } = await open("/settings/work", rules);
+		await answerQuery(s, "settings.defaults", defaults);
 		await main().findByRole("button", { name: en.advancedSwitch });
 		expect(main().queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
 		cleanup();
 
+		// The rules sections are checked once their parts have loaded, not at their title.
+		const loaded: Record<string, string> = {
+			"allowed-actions": en.rulesMay,
+			spending: en.rulesSpendTitle,
+		};
 		for (const path of [
 			"general",
 			"allowed-actions",
@@ -347,11 +353,16 @@ describe("settings directory", () => {
 			"computer",
 			"account",
 		]) {
-			await open(
+			const part = loaded[path];
+			const { s } = await open(
 				`/settings/${path}`,
-				path === "your-app" ? WITH_DESIGNER : null,
+				part ? rules : path === "your-app" ? WITH_DESIGNER : null,
 			);
 			await screen.findByRole("heading", { level: 2 });
+			if (part) {
+				await answerQuery(s, "settings.defaults", defaults);
+				await main().findByRole("heading", { level: 3, name: part });
+			}
 			expect(
 				main().queryByRole("button", { name: en.advancedSwitch }),
 			).toBeNull();

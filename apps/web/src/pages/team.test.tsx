@@ -544,6 +544,8 @@ describe("team page", () => {
 	});
 
 	it("starts_closed_on_each_page", async () => {
+		// The old global switch's key, left in a browser, opens nothing.
+		localStorage.setItem("catervas.advanced", "true");
 		await settings(WITH_IRIS, "/settings/work");
 		fireEvent.click(
 			await screen.findByRole("button", { name: en.advancedSwitch }),
