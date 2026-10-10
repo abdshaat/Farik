@@ -5,6 +5,7 @@ import { Chats } from "../pages/Chats.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
+import { Files } from "../pages/Files.tsx";
 import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
 import { MarketingPlan } from "../pages/MarketingPlan.tsx";
@@ -64,6 +65,8 @@ export function App() {
 				<Route path="/board" element={<Board />} />
 				<Route path="/channel" element={<Chats />} />
 				<Route path="/channel/:id" element={<Chats />} />
+				<Route path="/files" element={<Files />} />
+				<Route path="/files/*" element={<Files />} />
 				<Route path="/sprints/:id" element={<SprintPage />} />
 				<Route path="/costs" element={<Costs />} />
 				<Route path="/events" element={<Events />} />

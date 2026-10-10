@@ -103,7 +103,7 @@ Files: `files.ts`, `files.test.ts`, `Files.tsx`, `Files.module.css`, `FileDocume
 - `picks a document on a phone` — narrow: "Back" links to `/team`; the select "File" has optgroups "Product, Mira", "Architecture, Ada", "Design, Iris", the option "Design: nothing here yet" disabled, "Mira’s folder, Product" shown; choosing "Architecture › Overview" goes to `/files/architecture/overview.md`. RED.
 - `has no accessibility violations` — `expectNoAxeViolations` wide and narrow.
 
-- [ ] `feat(web): browse the team's folders and read their documents`
+- [x] `feat(web): browse the team's folders and read their documents`
 
 ### Task 3: Edit and save
 

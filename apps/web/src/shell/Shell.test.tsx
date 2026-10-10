@@ -81,6 +81,7 @@ describe("shell", () => {
 			[en.today, "/"],
 			[en.board, "/board"],
 			[en.chats, "/channel"],
+			[en.files, "/files"],
 			[en.team, "/team"],
 			[en.costs, "/costs"],
 			[en.settings, "/settings"],
@@ -97,9 +98,15 @@ describe("shell", () => {
 			[en.team, "/team"],
 			[en.costs, "/costs"],
 		]);
+		const main = screen.getByRole("main");
 		expect(
-			screen.getByRole("link", { name: en.settings }).getAttribute("href"),
-		).toBe("/settings");
+			within(main)
+				.getAllByRole("link")
+				.map((a) => [a.textContent, a.getAttribute("href")]),
+		).toEqual([
+			[en.files, "/files"],
+			[en.settings, "/settings"],
+		]);
 		await expectNoAxeViolations(container);
 	});
 

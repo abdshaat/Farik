@@ -1,0 +1,264 @@
+/* The Files page as the approved mockups draw it: the folders beside the open document, on a phone a picker above it. */
+.wide {
+	display: grid;
+	grid-template-columns: 300px minmax(0, 1fr);
+	gap: var(--catervas-space-6);
+	align-items: start;
+}
+
+.narrow {
+	display: grid;
+	gap: var(--catervas-space-4);
+}
+
+.document {
+	min-width: 0;
+}
+
+.title {
+	margin: 0;
+	font:
+		var(--catervas-type-title-weight) var(--catervas-type-title-size) /
+		var(--catervas-type-title-line-height) var(--catervas-type-title-family);
+}
+
+.none {
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+	font-weight: 400;
+}
+
+.back {
+	display: inline-flex;
+	align-items: center;
+	align-self: start;
+	justify-self: start;
+	min-height: 44px;
+	font-weight: 600;
+}
+
+/* The folders. */
+.tree {
+	display: grid;
+	gap: var(--catervas-space-3);
+	align-content: start;
+	border-right: 1px solid var(--catervas-color-rule);
+}
+
+.lead {
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+}
+
+.folders,
+.docs {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.folders {
+	margin-top: var(--catervas-space-2);
+	border-top: 1px solid var(--catervas-color-rule);
+}
+
+.folders > li {
+	border-bottom: 1px solid var(--catervas-color-rule);
+}
+
+.fold {
+	display: flex;
+	align-items: center;
+	gap: var(--catervas-space-3);
+	min-height: 56px;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	cursor: pointer;
+	list-style: none;
+}
+
+.fold::-webkit-details-marker {
+	display: none;
+}
+
+summary.fold::before {
+	content: "";
+	flex-shrink: 0;
+	border-top: 5px solid transparent;
+	border-bottom: 5px solid transparent;
+	border-left: 7px solid var(--catervas-color-ink);
+}
+
+details[open] > summary.fold::before {
+	transform: rotate(90deg);
+}
+
+.nil {
+	padding-left: 41px;
+	cursor: default;
+}
+
+.name {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+
+.top {
+	display: flex;
+	align-items: center;
+	gap: var(--catervas-space-2);
+}
+
+.owner,
+.empty {
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+}
+
+.docs {
+	margin-bottom: var(--catervas-space-2);
+}
+
+.docs a {
+	display: flex;
+	align-items: center;
+	min-height: 40px;
+	padding: 0 var(--catervas-space-3) 0 83px;
+	color: var(--catervas-color-ink);
+	text-decoration: none;
+}
+
+.docs a:hover {
+	text-decoration: underline;
+}
+
+.docs a[aria-current="page"] {
+	background: var(--catervas-color-surface);
+	box-shadow: inset 3px 0 0 var(--catervas-color-ink);
+	font-weight: 600;
+}
+
+.fold:focus-visible,
+.docs a:focus-visible,
+.version button:focus-visible,
+.pick select:focus-visible {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: -2px;
+}
+
+/* A phone's picker. */
+.pick {
+	display: grid;
+	gap: 6px;
+}
+
+.pick label {
+	font-size: var(--catervas-type-small-size);
+	font-weight: 600;
+}
+
+.pick select {
+	width: 100%;
+	min-height: 48px;
+	padding: 0 var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-page);
+	color: var(--catervas-color-ink);
+	font: inherit;
+}
+
+.pickOwner {
+	display: flex;
+	align-items: center;
+	gap: var(--catervas-space-2);
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+}
+
+/* The open document. */
+.doc {
+	display: grid;
+	grid-template-columns: minmax(0, 760px);
+	gap: var(--catervas-space-4);
+	align-content: start;
+}
+
+.crumb,
+.changed,
+.forTeam {
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+}
+
+.changed a {
+	color: inherit;
+	font-family: var(--catervas-type-code-family);
+}
+
+.head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: var(--catervas-space-3) var(--catervas-space-5);
+}
+
+.headText {
+	display: grid;
+	flex: 1 1 20rem;
+	gap: 6px;
+}
+
+.version {
+	display: inline-flex;
+	justify-self: start;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+}
+
+.version button {
+	min-height: 44px;
+	padding: 0 18px;
+	border: 0;
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.version button + button {
+	border-left: 1px solid var(--catervas-color-control-border);
+}
+
+.version button[aria-pressed="true"] {
+	background: var(--catervas-color-band);
+	color: var(--catervas-color-band-ink);
+}
+
+.notice {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--catervas-space-2) var(--catervas-space-3);
+	margin: 0;
+	padding: 10px 14px;
+	border-left: 3px solid var(--catervas-color-status-waiting);
+	background: var(--catervas-color-surface);
+}
+
+.work {
+	border-left-color: var(--catervas-color-status-working);
+}
+
+.bringing {
+	color: var(--catervas-color-status-working);
+	font-weight: 600;
+}
