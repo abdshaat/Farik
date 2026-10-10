@@ -31,7 +31,7 @@ Four steps join phase 6 before the milestone runs (three in revision 22; revisio
 - **Mandate.** A developer focused on the interface. It explores the running app, plans changes to it, implements them once the plan is approved, and reviews every interface change the Developer makes.
 - **What it may change.** Any code, like the Developer, on the tasks assigned to it. The rule "only the Software Developer changes code" (spec 0.11, the founder's decision of 2026-09-24) becomes "only the Developer and the UI/UX Designer change code". In practice:
   - the `document_paths` readiness rule (5.3, 5.12) holds every role but the Developer and the Designer;
-  - its tasks work on `feature/FRK-<n>` or `fix/FRK-<n>`, by the contract's `change` (5.14);
+  - its tasks work on `feature/CTV-<n>` or `fix/CTV-<n>`, by the contract's `change` (5.14);
   - 6.1, 6.2, 6.3 and 6.5 say "which only the Developer and the UI/UX Designer do".
 - **Default tiers** (5.6): `read`, `write_workspace`, `execute`, `git_local`, the Developer's. The team's `permissions` answers apply to it as to the Developer (decided here): `run_commands: false` takes away `execute`, and `push: true` grants `git_remote`.
 - **Default model**: the Developer's (Claude Opus 5 at `high`).
@@ -140,7 +140,7 @@ Connector: the Playwright connector above. Phase 7 moves both into `roles/ui_ux_
 
 - The Channel page becomes a chat list. The first chat is **Team**, today's group channel, unchanged. Below it is one private chat per agent who is not retired, each with its avatar, name, role and last line. A retired agent's chat keeps its history, read-only, under "Past teammates". The rail's label is settled in the step 13 mockups ("Chats", confirmed by the founder on 2026-09-30), and the address `/channel` stays, with `/channel/<agent_id>` for a one-to-one.
 - **A one-to-one follows spec 4.3's read-only rule.** The agent answers from its memory and read access to the project, and changes nothing.
-- **"Send as a request".** When the agent thinks work is needed, its reply carries a proposed request, shown under the reply as the request's words with a "Send as a request" button. The user may edit the words first. Pressing it files a request through the existing `request.file`, triaged and contracted like any other (5.16). The chat then shows "Sent as FRK-12" with a link. Nothing is filed without the user.
+- **"Send as a request".** When the agent thinks work is needed, its reply carries a proposed request, shown under the reply as the request's words with a "Send as a request" button. The user may edit the words first. Pressing it files a request through the existing `request.file`, triaged and contracted like any other (5.16). The chat then shows "Sent as CTV-12" with a link. Nothing is filed without the user.
 - **Private.** A chat is never posted to the team channel, never in the channel summary, and never shown to another agent. The agent itself sees its own chat's history only in its later chats, never in its task sessions (decided here).
 - **History is kept**, in the event log, which is machine-local and never committed (8.4).
 - **An agent answers while the team is paused.** The pause stops work; a chat is not work. A paused agent answers too (decided here: pausing means it takes no work). A retired agent does not.

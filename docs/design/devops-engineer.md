@@ -20,7 +20,7 @@ The role is the DevOps Engineer, with the id `devops_engineer`. It is optional: 
 
 Mandate: deploy what the team integrated, watch production, restore the service when it fails, and fix the cause.
 
-Produces: deployments, incident notes, fixes on `fix/FRK-<n>` branches, completion notes.
+Produces: deployments, incident notes, fixes on `fix/CTV-<n>` branches, completion notes.
 
 Cannot:
 - deploy anything but the commit the team integrated;
