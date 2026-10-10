@@ -98,7 +98,7 @@ Tests (`settings.test.tsx` unless named):
 - `Shell.test.tsx`'s `shows_the_rail_on_a_wide_screen_and_a_bar_on_a_phone` finds `eventsForTesting` on `/settings/computer`.
 - e2e: `templates.spec.ts` (lines 58, 172) and `board.spec.ts` (227), `sprints.spec.ts` (245) and `setup-team.spec.ts` (90) go to `/settings/rules` or `/settings/saved-teams`. `setup-project.spec.ts:78` keeps `/settings`: it checks that the shell sends a deep link back to setup, before any Settings route draws.
 
-- [ ] `feat(web): make Settings a directory of sections`
+- [x] `feat(web): make Settings a directory of sections`
 
 ### Task 2: the team's rules on three pages
 

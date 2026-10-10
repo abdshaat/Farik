@@ -1,6 +1,5 @@
 import { Button, InfoTip, TextField } from "@catervas/ui";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router";
+import { type ReactNode, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
@@ -161,7 +160,7 @@ export function useChange(
 	return { checked, errors, foot, preview, save, busy, blocked };
 }
 
-/** One part of the area, under its heading. */
+/** One part of a page, under its heading. */
 function Part({
 	id,
 	title,
@@ -173,13 +172,13 @@ function Part({
 }) {
 	return (
 		<section className={styles.section} aria-labelledby={id}>
-			<h2 id={id}>{title}</h2>
+			<h3 id={id}>{title}</h3>
 			{children}
 		</section>
 	);
 }
 
-function May(part: Part) {
+export function May(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<Team["policy"]["permissions"]>();
 	// A team file without the answers runs on the defaults (SPEC 5.6).
@@ -212,7 +211,7 @@ function May(part: Part) {
 }
 
 /** The daily limit: the Costs page's own control, here beside the other rules. */
-function Spend(part: Part) {
+export function Spend(part: Part) {
 	const { saved } = part;
 	const { wrong, budgets, fields } = useDailyLimit(saved.budgets.dailyUsd);
 	const usd = budgets(saved.budgets).dailyUsd;
@@ -229,7 +228,7 @@ function Spend(part: Part) {
 	);
 }
 
-function Finish(part: Part) {
+export function Finish(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<string>();
 	const next = mine
@@ -248,7 +247,7 @@ function Finish(part: Part) {
 	);
 }
 
-function Planning(part: Part) {
+export function Planning(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<boolean>();
 	// An old team file without the key does not plan in sprints.
@@ -272,7 +271,7 @@ function Planning(part: Part) {
 	);
 }
 
-function Plans(part: Part) {
+export function Plans(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<Team["policy"]["judgment"]>();
 	const next = mine
@@ -298,13 +297,14 @@ function Plans(part: Part) {
  * "How to open your app" (step 12, D2): the preview's two commands, its port and first page,
  * asked only of a team with a UI/UX Designer, and saved on their own.
  */
-export function HowToOpen() {
+export function HowToOpen({ none }: { none?: ReactNode }) {
 	const { data, again } = useQuery<{ team: Team }>("team.get", {});
 	const [round, setRound] = useState(0);
 	const designer = data?.team.agents.find(
 		(a) => a.role === "ui_ux_designer" && a.status !== "retired",
 	);
-	if (!data || !designer) return null;
+	if (!data) return null;
+	if (!designer) return none ?? null;
 	return (
 		<Preview
 			key={round}
@@ -333,15 +333,8 @@ function Preview({
 	const { errors, foot } = useChange({ saved, base: undefined, done }, next, {
 		shownAbove: "/preview",
 	});
-	// Today's "Open Settings" links here: the page goes to the section once it is drawn.
-	const { hash } = useLocation();
-	const here = useRef<HTMLElement>(null);
-	useEffect(() => {
-		if (hash === "#preview") here.current?.scrollIntoView();
-	}, [hash]);
 	return (
 		<section
-			ref={here}
 			id="preview"
 			className={styles.section}
 			aria-labelledby="preview-heading"
@@ -372,7 +365,7 @@ function withPreview(team: Team, preview: Team["preview"]): Team {
 }
 
 /** Advanced: the globs that make a Developer's change one the Designer checks (spec 5.12). */
-function UiPaths(part: Part) {
+export function UiPaths(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<string[]>();
 	const [adding, setAdding] = useState("");

@@ -8,6 +8,7 @@ import {
 } from "@catervas/ui";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { useAdvanced } from "../app/advanced.ts";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
@@ -29,7 +30,6 @@ import { MailboxSection } from "./Mailbox.tsx";
 import { OrdersSection } from "./Orders.tsx";
 import styles from "./pages.module.css";
 import { ServiceLogo } from "./ServiceLogo.tsx";
-import { useAdvanced } from "./Settings.tsx";
 import { SitesSection } from "./Sites.tsx";
 import {
 	type Agent,

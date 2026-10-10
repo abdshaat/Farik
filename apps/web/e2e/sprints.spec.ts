@@ -242,7 +242,7 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 		await expect(backlog.locator('a[href="/tasks/CTV-1"]')).toBeVisible();
 
 		// 8. Switching the policy off in Settings releases it: Theo builds CTV-1.
-		await page.goto(at("/settings"));
+		await page.goto(at("/settings/rules"));
 		const planning = page.getByRole("region", { name: "Planning work" });
 		await planning.getByLabel("Plan work in sprints").click();
 		await expect(

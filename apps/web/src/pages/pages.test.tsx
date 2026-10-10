@@ -24,8 +24,26 @@ describe("pages", () => {
 		localStorage.clear();
 	});
 
-	it("settings_changes_the_theme_and_disconnects", async () => {
-		const { container, fetch, socket } = await renderApp("/settings", {
+	it("settings_changes_the_theme_and_advanced", async () => {
+		const { container, socket } = await renderApp("/settings/general");
+		if (!socket) throw new Error("no socket");
+		// The shell asks first, and the page asks nothing.
+		await answerStatus(socket, false);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(await screen.findByRole("radio", { name: /^Dark/ }));
+		expect(document.documentElement.dataset.theme).toBe("dark");
+
+		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
+		fireEvent.click(advanced);
+		expect(localStorage.getItem("catervas.advanced")).toBe("true");
+		expect(advanced.getAttribute("aria-checked")).toBe("true");
+		fireEvent.click(advanced);
+		expect(localStorage.getItem("catervas.advanced")).toBe("false");
+	});
+
+	it("settings_shows_the_computer_and_disconnects", async () => {
+		const { container, fetch, socket } = await renderApp("/settings/computer", {
 			"GET /session": 204,
 			"POST /disconnect": 204,
 		});
@@ -36,16 +54,6 @@ describe("pages", () => {
 		expect(await screen.findByText("/home/me/corner-bakery")).toBeTruthy();
 		expect(screen.getByText("127.0.0.1:7420")).toBeTruthy();
 		await expectNoAxeViolations(container);
-
-		fireEvent.click(screen.getByRole("radio", { name: /^Dark/ }));
-		expect(document.documentElement.dataset.theme).toBe("dark");
-
-		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
-		fireEvent.click(advanced);
-		expect(localStorage.getItem("catervas.advanced")).toBe("true");
-		expect(advanced.getAttribute("aria-checked")).toBe("true");
-		fireEvent.click(advanced);
-		expect(localStorage.getItem("catervas.advanced")).toBe("false");
 
 		fireEvent.click(screen.getByRole("button", { name: en.disconnect }));
 		expect(
@@ -59,7 +67,7 @@ describe("pages", () => {
 
 	it("settings_changes_the_project_after_asking", async () => {
 		const { socket } = await renderApp(
-			"/settings",
+			"/settings/computer",
 			{ "GET /session": 204 },
 			<Status />,
 		);
@@ -100,7 +108,7 @@ describe("pages", () => {
 
 	it("settings_shows_a_refused_change_and_clears_it_on_the_next_try", async () => {
 		const { socket } = await renderApp(
-			"/settings",
+			"/settings/computer",
 			{ "GET /session": 204 },
 			<Status />,
 		);

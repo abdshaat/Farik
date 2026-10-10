@@ -87,7 +87,7 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		expect(updated).toBeGreaterThan(-1);
 		expect(kinds.indexOf("team.resumed", updated)).toBeGreaterThan(updated);
 		expect(existsSync(marker)).toBe(false);
-		await page.goto(`http://127.0.0.1:${serve.port}/settings`);
+		await page.goto(`http://127.0.0.1:${serve.port}/settings/rules`);
 		await expect(
 			page.getByText("Nothing new starts until you resume."),
 		).toHaveCount(0);

@@ -20,7 +20,8 @@
 	gap: var(--catervas-space-2);
 }
 
-.section h2 {
+.section h2,
+.section h3 {
 	margin: 0;
 	font:
 		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
@@ -947,4 +948,95 @@
 	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--catervas-space-2);
+}
+
+/* Settings: a side list beside the section on a wide screen, which stacks when the room is short. */
+.settingsPage {
+	max-width: 60rem;
+}
+
+.settings {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-6);
+	align-items: flex-start;
+}
+
+.settingsBody {
+	display: grid;
+	gap: var(--catervas-space-4);
+	flex: 999 1 35rem;
+	min-width: 0;
+}
+
+.pageHeading {
+	margin: 0;
+	font:
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
+}
+
+.settingsSide,
+.settingsRows {
+	flex: 0 0 15rem;
+}
+
+.settingsRows {
+	flex: 1 1 100%;
+}
+
+.settingsSide ul,
+.settingsRows ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+
+.settingsSide a {
+	display: flex;
+	align-items: center;
+	box-sizing: border-box;
+	min-height: 44px;
+	padding: 0 var(--catervas-space-3);
+	border: 1px solid transparent;
+	border-radius: var(--catervas-radius-control);
+	color: inherit;
+	text-decoration: none;
+}
+
+.settingsSide a[aria-current="page"] {
+	font-weight: 700;
+	background: var(--catervas-color-surface);
+	border-color: var(--catervas-color-control-border);
+}
+
+.settingsRows a {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	column-gap: var(--catervas-space-3);
+	align-items: center;
+	box-sizing: border-box;
+	min-height: 56px;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	color: inherit;
+	text-decoration: none;
+}
+
+.settingsRows a > :nth-child(2) {
+	grid-column: 1;
+}
+
+.chevron {
+	grid-column: 2;
+	grid-row: 1 / span 2;
+}
+
+.settingsBack {
+	display: inline-flex;
+	align-items: center;
+	min-height: 44px;
 }

@@ -55,7 +55,7 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 				.getByText("the login form is done and its tests are next."),
 		).toBeVisible({ timeout: 15_000 });
 
-		await page.goto(inA("/settings"));
+		await page.goto(inA("/settings/rules"));
 		const may = page.getByRole("region", { name: "What agents may do" });
 		await may.getByLabel(/^Yes, on its own branches/).check();
 		await may.getByRole("button", { name: "Save changes" }).click();
@@ -169,7 +169,7 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 		expect(teamOf(a.project)).toBe(unchanged);
 
 		// 5. Settings: Three of us renamed, Pair deleted.
-		await page.goto(inA("/settings"));
+		await page.goto(inA("/settings/saved-teams"));
 		const savedTeams = page.getByRole("region", { name: "Saved teams" });
 		await savedTeams
 			.getByRole("button", { name: "Rename Three of us" })

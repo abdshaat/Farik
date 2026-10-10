@@ -172,21 +172,24 @@ const DEFAULTS = {
 	ui_paths: UI_PATHS,
 };
 
-/** Settings, with the team and the defaults answered: its team's rules area. */
-async function settings(team: object = TEAM, path = "/settings") {
+/** A Settings section, with the queries it asks answered: the rules page asks for the defaults. */
+async function settings(team: object = TEAM, path = "/settings/rules") {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
-	// The shell asks first, then the page itself.
 	await answerStatus(s, false);
-	await answerStatus(s, false, 2);
-	await answerQuery(s, "team.get", {
-		team,
-		agents: EFFECTIVE,
-		judges: JUDGES,
-		max_agents: 7,
-	});
-	await answerQuery(s, "settings.defaults", DEFAULTS);
-	const rules = await screen.findByRole("region", { name: en.rulesArea });
+	const isRules = path.endsWith("/rules");
+	// Only the rules and the preview ask for the team, on a phone.
+	if (isRules || path.endsWith("/your-app"))
+		await answerQuery(s, "team.get", {
+			team,
+			agents: EFFECTIVE,
+			judges: JUDGES,
+			max_agents: 7,
+		});
+	if (isRules) await answerQuery(s, "settings.defaults", DEFAULTS);
+	const rules = isRules
+		? await screen.findByRole("region", { name: en.rulesArea })
+		: await screen.findByRole("main");
 	const part = (name: string) =>
 		within(rules).getByRole("region", { name }) as HTMLElement;
 	return { container, s, rules, part };
@@ -612,7 +615,7 @@ describe("team page", () => {
 	});
 
 	it("says_a_failed_disconnect_in_plain_words", async () => {
-		const { socket } = await renderApp("/settings");
+		const { socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		await answerQuery(s, "account.status", {
@@ -670,15 +673,11 @@ describe("team page", () => {
 	});
 
 	it("saves_the_preview_in_settings", async () => {
-		const scrolled = vi.fn();
-		Element.prototype.scrollIntoView = scrolled;
-		const { container, s } = await settings(WITH_IRIS, "/settings#preview");
+		const { container, s } = await settings(WITH_IRIS, "/settings/your-app");
 		const preview = await screen.findByRole("region", {
 			name: en.previewTitle,
 		});
 		expect(preview.id).toBe("preview");
-		// Today's row links here, and the page goes to the section.
-		await waitFor(() => expect(scrolled.mock.contexts).toContain(preview));
 		const lines = (key: keyof typeof en) =>
 			t(key, { designer: "Iris" }).split("\n");
 		const items = within(preview)
@@ -737,15 +736,19 @@ describe("team page", () => {
 		).toEqual(expected);
 		cleanup();
 
-		// A team without a Designer is never asked.
-		await settings();
+		// A team without a Designer is told to add one, and never asked.
+		await settings(TEAM, "/settings/your-app");
 		expect(screen.queryByRole("region", { name: en.previewTitle })).toBeNull();
+		expect(await screen.findByText(en.yourAppNone)).toBeTruthy();
 	});
 
 	it("edits_the_ui_paths_in_advanced", async () => {
-		const { container, s } = await settings(WITH_IRIS);
+		// With Advanced off the page does not ask for the patterns.
+		await settings(WITH_IRIS);
 		expect(screen.queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		cleanup();
+		localStorage.setItem("catervas.advanced", "true");
+		const { container, s } = await settings(WITH_IRIS);
 		const paths = screen.getByRole("region", { name: en.uiPathsTitle });
 		const list = within(paths).getByRole("list");
 		// The team says none, so the seven defaults stand.
@@ -1010,7 +1013,7 @@ describe("team page", () => {
 		const { container, s, rules, part } = await settings(on);
 		// The section sits after "How finished work is added", before the plan check.
 		const headings = within(rules)
-			.getAllByRole("heading", { level: 2 })
+			.getAllByRole("heading", { level: 3 })
 			.map((h) => h.textContent);
 		expect(headings.indexOf(en.rulesPlanning)).toBe(
 			headings.indexOf(en.rulesFinish) + 1,
@@ -1176,7 +1179,7 @@ describe("team page", () => {
 	});
 
 	it("shows_and_disconnects_the_account", async () => {
-		const { container, socket } = await renderApp("/settings");
+		const { container, socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		await answerQuery(s, "account.status", {
@@ -1218,7 +1221,7 @@ describe("team page", () => {
 	});
 
 	it("says_the_key_did_not_work_and_connects_again", async () => {
-		const { container, socket } = await renderApp("/settings");
+		const { container, socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, true);
 		await answerQuery(s, "account.status", {
@@ -1282,7 +1285,7 @@ describe("team page", () => {
 	});
 
 	it("says_a_refused_key_from_the_environment_is_changed_where_catervas_runs", async () => {
-		const { socket } = await renderApp("/settings");
+		const { socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, true);
 		await answerQuery(s, "account.status", {
@@ -1307,7 +1310,7 @@ describe("team page", () => {
 	});
 
 	it("names_the_variable_a_key_from_the_environment_comes_from", async () => {
-		const { socket } = await renderApp("/settings");
+		const { socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		await answerQuery(s, "account.status", {
@@ -1633,7 +1636,7 @@ describe("team templates", () => {
 	});
 
 	it("renames_and_deletes_in_settings", async () => {
-		const { container, socket } = await renderApp("/settings");
+		const { container, socket } = await renderApp("/settings/saved-teams");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		const listed = {
@@ -1810,7 +1813,21 @@ describe("info buttons on Settings", () => {
 	});
 
 	it("keeps Settings to short lines, the rest behind info buttons", async () => {
-		const { container, s } = await settings();
+		const general = await settings(TEAM, "/settings/general");
+		for (const line of en.advancedMore.split("\n")) onlyInTips(line);
+		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
+		expect(
+			document.getElementById(advanced.getAttribute("aria-describedby") ?? "")
+				?.textContent,
+		).toBe(en.advancedBody);
+		await expectNoAxeViolations(general.container);
+		cleanup();
+
+		await settings();
+		for (const line of en.rulesNextSession.split("\n")) onlyInTips(line);
+		cleanup();
+
+		const { s } = await settings(TEAM, "/settings/saved-teams");
 		await answerQuery(s, "templates.list", {
 			folder: FOLDER,
 			templates: [
@@ -1823,20 +1840,14 @@ describe("info buttons on Settings", () => {
 			unreadable: [],
 		});
 		await screen.findByText("My usual team", { selector: "strong" });
-		for (const key of [
-			"advancedMore",
-			"rulesNextSession",
-			"savedTeamsLead",
-			"connectedBody",
-		] as const)
-			for (const line of en[key].split("\n")) onlyInTips(line);
-		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
-		expect(
-			document.getElementById(advanced.getAttribute("aria-describedby") ?? "")
-				?.textContent,
-		).toBe(en.advancedBody);
+		for (const line of en.savedTeamsLead.split("\n")) onlyInTips(line);
+		cleanup();
+
+		const computer = await settings(TEAM, "/settings/computer");
+		await answerStatus(computer.s, false, 2);
+		await screen.findByText("/home/me/corner-bakery");
+		for (const line of en.connectedBody.split("\n")) onlyInTips(line);
 		const connected = screen.getByText(en.connectedLead);
 		expect(connected.closest('[role="tooltip"]')).toBeNull();
-		await expectNoAxeViolations(container);
 	});
 });

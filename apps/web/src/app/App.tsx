@@ -14,8 +14,17 @@ import { PlanPage } from "../pages/PlanPage.tsx";
 import { ProcurementMailbox } from "../pages/ProcurementMailbox.tsx";
 import { Questions } from "../pages/Questions.tsx";
 import { RequestFiled } from "../pages/RequestFiled.tsx";
-import { Settings } from "../pages/Settings.tsx";
 import { SprintPage } from "../pages/SprintPage.tsx";
+import { Account } from "../pages/settings/Account.tsx";
+import { Computer } from "../pages/settings/Computer.tsx";
+import { General } from "../pages/settings/General.tsx";
+import { Rules } from "../pages/settings/Rules.tsx";
+import { SavedTeamsPage } from "../pages/settings/SavedTeamsPage.tsx";
+import {
+	SettingsIndex,
+	SettingsLayout,
+} from "../pages/settings/SettingsLayout.tsx";
+import { YourApp } from "../pages/settings/YourApp.tsx";
 import { SetupAccount } from "../pages/setup/SetupAccount.tsx";
 import { SetupAdvanced } from "../pages/setup/SetupAdvanced.tsx";
 import { SetupComputer } from "../pages/setup/SetupComputer.tsx";
@@ -78,10 +87,18 @@ export function App() {
 				<Route path="/team" element={<Team />} />
 				<Route path="/team/:id" element={<AgentEdit />} />
 				<Route path="/team/:id/mailbox" element={<ProcurementMailbox />} />
-				<Route
-					path="/settings"
-					element={<Settings theme={theme} onTheme={setTheme} />}
-				/>
+				<Route path="/settings" element={<SettingsLayout />}>
+					<Route index element={<SettingsIndex />} />
+					<Route
+						path="general"
+						element={<General theme={theme} onTheme={setTheme} />}
+					/>
+					<Route path="rules" element={<Rules />} />
+					<Route path="your-app" element={<YourApp />} />
+					<Route path="saved-teams" element={<SavedTeamsPage />} />
+					<Route path="computer" element={<Computer />} />
+					<Route path="account" element={<Account />} />
+				</Route>
 				<Route path="*" element={<NotFound />} />
 			</Route>
 		</Routes>

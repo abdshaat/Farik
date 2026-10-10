@@ -8,6 +8,7 @@ import {
 } from "@catervas/ui";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
+import { useAdvanced } from "../app/advanced.ts";
 import { useConnection } from "../app/connection.tsx";
 import { daemonSaid } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
@@ -18,7 +19,6 @@ import own from "./PlanEditor.module.css";
 import type { Contract, Criterion } from "./PlanPage.tsx";
 import { riskWord } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
-import { useAdvanced } from "./Settings.tsx";
 import type { Team } from "./setup/TeamSetup.tsx";
 
 const CHECK_AFTER_MS = 400;
