@@ -318,6 +318,9 @@ mod tests {
             ("", "x"),
             ("./src/**", "src/a.rs"),
             ("src\\a\\**", "src/a/b.rs"),
+            ("src\\a.rs", "src/a.rs"),
+            ("src/*/b.rs", "src/x/b.rs"),
+            ("src/a*/x", "src/ab/x"),
         ];
         let part = [
             ("apps/web/**", "crates/**"),
