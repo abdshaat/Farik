@@ -129,7 +129,7 @@ Files: created `DocumentChanges.tsx`, `DocumentChanges.module.css`, `DocumentCha
 
 `docs/SPEC.md`: 4.2 (the owner approves the team's changes to the product plan from Today); 5.1 and 6.1 (a task that may change `spec.md` or `roadmap.md` is accepted by the owner after its reviewer's review, replacing 01b's "until step 06" for those tasks); 5.4 (item 5 and "What a human gate shows" gain such a task, with `may_change_an_owner_document`'s rule and its residual; the sprint waits while such a task waits for the owner, as for a `high` risk task, since a sprint ends only when its tasks are accepted, `finished_sprint`, `rules.rs:329`); 5.14 (a folder change waiting under `manual` is listed on Today as a task awaiting integration); 5.7 (the card: its query, one per sprint review and agent, the lines shown, Approve and Send back, the note by the team's integration policy, the band's line and the moved line; a proposal is not in `waiting.list`); 8.6 (the summary and the lines are the agent's words, shown as text); F3 (Today's card); the revision after step 03's, 0.88. `docs/design/catervas-folders.md`: the steps table's row 06's Delivers becomes, exactly, "the chat's button; `product_plan_first`; the product plan's task, which the owner accepts (03b), shown on Today as a document to approve, its version for people first", and row 04b gains "Open in Files" on the card. `docs/plans/project-plan.md`: row 03b, as step 03 wrote it, marked planned.
 
-- [ ] `docs(spec): record approving the product plan's changes on Today`
+- [x] `docs(spec): record approving the product plan's changes on Today`
 
 ## Verification
 

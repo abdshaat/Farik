@@ -104,9 +104,9 @@ At sprint review the Product Manager proposes the spec's and the roadmap's chang
 | 02 | Marketing's read limit | read paths per session, `read_not_allowed` in the hook |
 | 03 | The folder write tool and approving human documents | `catervas_write_folder_doc`, the `folder_doc.*` and `folder_change.*` events, folder changes and their integration, the owner's `folder_doc_decide`, the review hearing the owner's words |
 | 03b | Approving on Today | Today's "Product plan changes to approve" card and its query, the agent's waiting line and the moved line, a folder change waiting under `manual`, and the owner accepting a docs task that may change the spec or the roadmap; mocked up first |
-| 04 | The Files page | browse, view with Mermaid, edit and save as the owner's commit; staleness, the re-derive task and `pair_changed_alone`'s re-derive exception; mocked up first |
+| 04 | The Files page | browse, view with Mermaid, edit and save as the owner's commit; staleness, the re-derive task and `pair_changed_alone`'s re-derive exception; "Open in Files" on Today's card (04b); mocked up first |
 | 05 | Plans with lanes | contract `plan` and `lane`, `lanes_overlap`, the Architect's planning, the Product Manager's contracts from the plan, the Scrum Master's scheduling by lane |
-| 06 | A new project's interview and product plan | the chat's button, the owner accepting a task that changes a human document, `product_plan_first`; mocked up first |
+| 06 | A new project's interview and product plan | the chat's button; `product_plan_first`; the product plan's task, which the owner accepts (03b), shown on Today as a document to approve, its version for people first |
 | 07 | Catervafication | the recommendation, the epic and its tasks, every role's `catervafying-the-repository`, Catervas's recommended workflow, the sprint review's refreshes |
 | 08 | The founder's live check | in the web app, an existing repository Catervafied and a new project from interview to approved plan to its Catervafication, recorded in `docs/milestones/catervas-folders.md` |
 
