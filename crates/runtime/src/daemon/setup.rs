@@ -23,7 +23,7 @@ pub enum SetupError {
 pub trait SetupHost: Send + Sync {
     /// Opens the git project at `path`, relative to home, for the team. While a project is being
     /// left, a folder that already has a team is refused unless `replace`, which deletes its
-    /// `.farik/` (ADR 0050).
+    /// `.farik/` (ADR 0051).
     ///
     /// # Errors
     ///

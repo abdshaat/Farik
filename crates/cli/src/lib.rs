@@ -8,7 +8,7 @@
 
 /// The lifecycle, one line per task.
 pub mod board;
-/// Taking the team to another project (ADR 0050).
+/// Taking the team to another project (ADR 0051).
 #[cfg(unix)]
 mod carry;
 /// The team's channel.

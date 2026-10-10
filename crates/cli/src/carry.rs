@@ -1,4 +1,4 @@
-//! Taking the team to another project (ADR 0050): what the project being left leaves for the one
+//! Taking the team to another project (ADR 0051): what the project being left leaves for the one
 //! taken on, so that its team, pictures, pinned skills' folders, sandbox setting, connector keys and
 //! mailbox are there when it opens. Criteria are not: the new repository keeps the library its own
 //! `init` seeded from its scan. Nothing in the old project is changed.

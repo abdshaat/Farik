@@ -1177,7 +1177,7 @@
               "type": "null"
             }
           ],
-          "description": "The root of the project being left while the page chooses another (ADR 0050), or null."
+          "description": "The root of the project being left while the page chooses another (ADR 0051), or null."
         },
         "keys_copied": {
           "oneOf": [
@@ -1434,7 +1434,7 @@
             },
             "replace": {
               "type": "boolean",
-              "description": "Replace a folder that already has a Farik team: its .farik/ is removed and the team of the project being left is carried over (ADR 0050). Without it such a folder is refused as has_team."
+              "description": "Replace a folder that already has a Farik team: its .farik/ is removed and the team of the project being left is carried over (ADR 0051). Without it such a folder is refused as has_team."
             }
           },
           "required": [
@@ -1561,7 +1561,7 @@
     },
     "projectLeaveRequest": {
       "title": "Project Leave Request",
-      "description": "Stops the team's driver and lets go of the project, so that the page returns to choosing a project (ADR 0050). Waits, as farik stop does, for a running session's tick to end. Answers emptyResult.",
+      "description": "Stops the team's driver and lets go of the project, so that the page returns to choosing a project (ADR 0051). Waits, as farik stop does, for a running session's tick to end. Answers emptyResult.",
       "type": "object",
       "additionalProperties": false,
       "required": [

@@ -512,7 +512,7 @@ impl ConnectorSecrets for MemoryConnectorSecrets {
 pub const KEYS_COPIED: &str = ".farik/local/keys-copied.json";
 
 /// Copies the keys of the carried `team` from the project at `from` to the one at `to`, for the
-/// change of project (ADR 0050): for each agent and each of its `mcp_servers`, the whole entry
+/// change of project (ADR 0051): for each agent and each of its `mcp_servers`, the whole entry
 /// (an OAuth sign-in included) kept under `from`'s id on this machine is kept under `to`'s, and so
 /// is the procurement mailbox's password when the team has a Procurement Specialist. The old
 /// entries stay. An entry the store cannot read or write is skipped and not counted: the agent
