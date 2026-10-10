@@ -418,5 +418,16 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(false, true), (true, false)]
         );
+
+        // An integration an agent recorded changes nothing.
+        board.put(
+            at(10, 11),
+            None,
+            Some("pm"),
+            "folder_change.integrated",
+            json!({ "change": 4, "sha": "y", "into": "main", "integrated_by": "governor" }),
+        );
+        let docs = folder_docs(&board.log).expect("folds");
+        assert!(!docs.changes[0].integrated);
     }
 }
