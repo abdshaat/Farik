@@ -90,7 +90,7 @@ Tests:
 
 - `it('shows each line as a bullet')` — `text="One.\nTwo."` renders one `list` with two `listitem`s, "One." and "Two.", in order; `"One.\n\nTwo.\n"` renders the same two.
 
-- [ ] `feat(web): show an explanation as bullets`
+- [x] `feat(web): show an explanation as bullets`
 
 ### Task 3: How to open your app
 
