@@ -190,6 +190,10 @@ mod tests {
             agent_twin("./docs/catervas/product/spec.md").as_deref(),
             Some("docs/catervas/product/spec.agent.md")
         );
+        assert_eq!(
+            human_of_twin("./docs/catervas/product/spec.agent.md").as_deref(),
+            Some("docs/catervas/product/spec.md")
+        );
         assert_eq!(agent_twin(&product("notes.md")), None);
         assert_eq!(agent_twin(&product("spec.agent.md")), None);
         assert_eq!(human_of_twin(&product("notes.agent.md")), None);

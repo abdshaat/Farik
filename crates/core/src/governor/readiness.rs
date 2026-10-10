@@ -1450,14 +1450,25 @@ mod tests {
         }
         let task = a_task_for(Role::SoftwareDeveloper, &["docs/**/*.rs"]);
         assert_eq!(failed(&task, &a_ready_context()), [R::FolderOwned]);
+        let task = a_task_for(
+            Role::SoftwareDeveloper,
+            &["docs/catervas/architecture/x.md"],
+        );
+        assert_eq!(
+            message_of(&task, &a_ready_context(), R::FolderOwned),
+            "allowed paths docs/catervas/architecture/x.md could reach folders other roles own: \
+             docs/catervas/architecture/ (Architect); name narrower paths, or give the task to the \
+             folder's owner"
+        );
         // A role added to the team holds its folder too.
         let mut context = a_ready_context();
         context.active_agents_by_role.insert(Role::UiUxDesigner, 1);
         let task = a_task_for(Role::SoftwareDeveloper, &["docs/catervas/design/x.md"]);
-        let message = message_of(&task, &context, R::FolderOwned);
-        assert!(
-            message.contains("docs/catervas/design/ (UI/UX Designer)"),
-            "{message}"
+        assert_eq!(
+            message_of(&task, &context, R::FolderOwned),
+            "allowed paths docs/catervas/design/x.md could reach folders other roles own: \
+             docs/catervas/design/ (UI/UX Designer); name narrower paths, or give the task to the \
+             folder's owner"
         );
         // An epic is not held: it names the ceiling its tasks fall within.
         let mut epic = a_task_for(Role::Architect, &["docs/**"]);
