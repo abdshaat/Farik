@@ -127,7 +127,7 @@ Files: `e2e/fixtures/serve.ts` (`commitFiles`: writes each file, `git add` and `
 
 - `the owner reads and edits the team's documents, through the real server and browser` — `startServe({ team: "pm-architect-developer", transcripts: [] })`, then `commitFiles` of `docs/catervas/product/roadmap.md` (`# Roadmap\n\nPie pre-orders.\n`), its twin (`# Roadmap\n\nNow: pie pre-orders.\n`) and `docs/catervas/architecture/overview.md` with a `mermaid` fence `flowchart LR\n  Shop --> Orders`: (1) the rail's "Files" shows Product (Mira), Architecture (Ada), Engineering (Theo) "Nothing here yet"; (2) Overview shows an image "Diagram" whose `naturalWidth` is over 0; (3) Roadmap's "For the team" shows "Now: pie pre-orders."; (4) "For you", "Edit", the footnote reads "Saving keeps your change at once. Mira will update the team’s version." (`catervas init`'s policy is `auto_merge`), a new line typed, "Save": the typed line is shown and "Changed by you just now" (once the tick has merged the change, within 15 s), and `events(project)` holds one `folder_doc.edited` with that path, one `folder_change.integrated` and one `task.created` whose `rederives` is `docs/catervas/product/roadmap.agent.md`; "For the team" then reads "Mira is bringing this up to date with your change."; (5) "Edit", another line typed, `commitFiles` changing `roadmap.md`, "Save": the alert, the typed text still in the box; "Reload" puts the committed text in it; (6) at 390 × 844, `/team`'s "Files", then "Architecture › Overview" in "File", reaches `/files/architecture/overview.md`. RED: no page.
 
-- [ ] `test(web): read and edit a document in the browser`
+- [x] `test(web): read and edit a document in the browser`
 
 ### Task 5: Spec
 
