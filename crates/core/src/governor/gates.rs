@@ -1234,6 +1234,9 @@ mod tests {
         );
         input.assignee_id = "dev-a".to_string();
         assert_eq!(check_assignment(&contract, &input), Ok(()));
+        // The ids are compared trimmed.
+        input.assignee_id = " dev-a ".to_string();
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
     }
 
     #[test]
