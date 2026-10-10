@@ -418,11 +418,26 @@ pub(super) fn plan_message(
     contract: &TaskContract,
     assignees: &[String],
     reviewers: &[String],
+    lane_builder: Option<&str>,
 ) -> String {
+    let lane = match (contract.lane, &contract.parent) {
+        (Some(lane), Some(epic)) => match lane_builder {
+            Some(builder) => format!(
+                " It is in lane {lane} of {epic}, which {builder} builds.",
+                epic = epic.as_str()
+            ),
+            None => format!(
+                " It is the first of lane {lane} of {epic} to be assigned; whoever you assign \
+                 builds that lane's other tasks too.",
+                epic = epic.as_str()
+            ),
+        },
+        _ => String::new(),
+    };
     format!(
         "Assign {task} with `catervas_assign_task`, naming its assignee and its reviewer. The agents \
          of its assignee role, {assignee_role}, with room for it: {assignees}. The agents of its \
-         reviewer role, {reviewer_role}: {reviewers}. The reviewer is never the assignee.",
+         reviewer role, {reviewer_role}: {reviewers}. The reviewer is never the assignee.{lane}",
         task = contract.id.as_str(),
         assignee_role = contract.assignee_role,
         reviewer_role = contract.reviewer_role,
@@ -1166,7 +1181,7 @@ mod tests {
 
     use super::{
         Changes, Digest, Resume, ReviewBrief, close_out_message, human_message, implement_message,
-        planning_message, refine_message, review_message,
+        plan_message, planning_message, refine_message, review_message,
     };
     use crate::tools::fixtures::at;
 
@@ -1193,6 +1208,40 @@ mod tests {
             "body": body,
         }))
         .expect("the event is schema-valid")
+    }
+
+    #[test]
+    fn names_a_lanes_builder() {
+        let people = (
+            ["dev-a".to_string(), "dev-b".to_string()],
+            ["arch".to_string()],
+        );
+        let unlaned = plan_message(&contract(), &people.0, &people.1, None);
+        assert!(!unlaned.contains("lane"), "{unlaned}");
+        assert!(
+            unlaned.ends_with("The reviewer is never the assignee."),
+            "{unlaned}"
+        );
+        assert_eq!(
+            plan_message(&contract(), &people.0, &people.1, Some("dev-a")),
+            unlaned
+        );
+        let mut laned = contract();
+        laned.parent = Some("CTV-1".parse().expect("a task id"));
+        laned.lane = std::num::NonZeroU64::new(2);
+        let taken = plan_message(&laned, &people.0, &people.1, Some("dev-a"));
+        assert!(taken.starts_with(&unlaned), "{taken}");
+        assert!(
+            taken.ends_with("It is in lane 2 of CTV-1, which dev-a builds."),
+            "{taken}"
+        );
+        let first = plan_message(&laned, &people.0, &people.1, None);
+        assert!(
+            first.ends_with(
+                "It is the first of lane 2 of CTV-1 to be assigned; whoever you assign builds that lane's other tasks too."
+            ),
+            "{first}"
+        );
     }
 
     #[test]

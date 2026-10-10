@@ -122,7 +122,7 @@ Files: `gates.rs` (`lane_builder` field and its doc; in `check_assignment`, afte
 - `offers_a_lanes_task_to_its_builder_alone` (`requests.rs`, integration) — `pm`'s epic CTV-1 in progress; CTV-2 lane 1 accepted by `dev-a`; CTV-3 lane 1 ready: `pm`'s plan session for CTV-3 has a first message naming `dev-a` and not `dev-b` among those with room, and holding `lane 1 of CTV-1, which dev-a builds`; with `dev-a` paused it names `dev-b` and `first of lane 1`. RED: both are named.
 - `names_a_lanes_builder` (`messages.rs`) — `plan_message` for a task with no lane is unchanged; with lane 2 of CTV-1 it holds each sentence above for `Some("dev-a")` and `None`. RED: no parameter.
 
-- [ ] `feat(runtime): give each lane of an epic to one builder`
+- [x] `feat(runtime): give each lane of an epic to one builder`
 
 ### Task 5: The Product Manager plans an epic with the Architect
 

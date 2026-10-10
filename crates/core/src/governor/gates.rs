@@ -126,6 +126,10 @@ pub struct AssignmentInput {
     /// plan's budget (ADR 0042, ADR 0028's exception). It is worked on at once, in no sprint,
     /// under the policy or not, and the sprint's budget does not pay for it.
     pub skips_sprints: bool,
+    /// The agent that builds the task's lane, when the task has a lane and a parent and another
+    /// task of that lane and role is not cancelled and has an active assignee: the one of them
+    /// with the highest id. `None` for the first task of a lane to be assigned.
+    pub lane_builder: Option<String>,
 }
 
 /// A row of the board as the sprint policy reads it (ADR 0028).
@@ -301,22 +305,9 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
             ));
         }
     }
-    if input.assignee_open_tasks >= input.wip_limit {
-        reasons.push(if input.wip_limit == 0 {
-            format!(
-                "{} takes no work: its limit is zero",
-                input.assignee_id.trim()
-            )
-        } else {
-            format!(
-                "{} already holds {} unfinished tasks and the limit is {}",
-                input.assignee_id.trim(),
-                input.assignee_open_tasks,
-                input.wip_limit
-            )
-        });
-    }
+    reasons.extend(over_the_limit(input));
     reasons.extend(without_the_folder(input));
+    reasons.extend(lane_taken(contract, input));
     if !in_the_open_sprint(contract.kind, input) {
         let open = input.open_sprint.as_deref().unwrap_or_default();
         reasons.push(if input.plan_in_sprints {
@@ -344,6 +335,25 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     verdict(reasons)
 }
 
+/// Why the assignee can take no more work, if it cannot: the team's limit on work in progress.
+fn over_the_limit(input: &AssignmentInput) -> Option<String> {
+    (input.assignee_open_tasks >= input.wip_limit).then(|| {
+        if input.wip_limit == 0 {
+            format!(
+                "{} takes no work: its limit is zero",
+                input.assignee_id.trim()
+            )
+        } else {
+            format!(
+                "{} already holds {} unfinished tasks and the limit is {}",
+                input.assignee_id.trim(),
+                input.assignee_open_tasks,
+                input.wip_limit
+            )
+        }
+    })
+}
+
 /// Why the task cannot be assigned while another holds the assignee's private folder, if it
 /// cannot (6.6): one piece of work touches the folder at a time.
 fn without_the_folder(input: &AssignmentInput) -> Option<String> {
@@ -352,6 +362,20 @@ fn without_the_folder(input: &AssignmentInput) -> Option<String> {
             "private_folder_busy: another task holds {}, and one piece of work touches it at a \
              time; this one waits until that task is accepted or cancelled",
             private_folder(input.assignee_role).unwrap_or("the assignee's private folder")
+        )
+    })
+}
+
+/// Why a task cannot go to the assignee while its lane has another builder, if it cannot
+/// (ADR 0051): the tasks of one lane are built by one agent, in order.
+fn lane_taken(contract: &TaskContract, input: &AssignmentInput) -> Option<String> {
+    let builder = input.lane_builder.as_deref()?;
+    let (lane, epic) = contract.lane.zip(contract.parent.as_ref())?;
+    (builder.trim() != input.assignee_id.trim()).then(|| {
+        format!(
+            "lane_taken: lane {lane} of {epic} is {builder}'s, who builds its tasks in order; assign {task} to {builder}",
+            epic = epic.as_str(),
+            task = contract.id.as_str()
         )
     })
 }
@@ -1147,6 +1171,7 @@ mod tests {
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
             skips_sprints: false,
+            lane_builder: None,
         }
     }
 
@@ -1184,6 +1209,26 @@ mod tests {
         );
         input.has_active_scrum_master = false;
         assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+    }
+
+    #[test]
+    fn gives_a_lane_to_its_builder() {
+        let mut contract = a_contract();
+        contract.id = "CTV-5".parse().expect("a task id");
+        contract.parent = Some("CTV-3".parse().expect("a task id"));
+        contract.lane = std::num::NonZeroU64::new(2);
+        let mut input = an_assignment();
+        input.assignee_id = "dev-b".to_string();
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
+        input.lane_builder = Some("dev-a".to_string());
+        assert_eq!(
+            reasons(check_assignment(&contract, &input)),
+            [
+                "lane_taken: lane 2 of CTV-3 is dev-a's, who builds its tasks in order; assign CTV-5 to dev-a"
+            ]
+        );
+        input.assignee_id = "dev-a".to_string();
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
     }
 
     #[test]

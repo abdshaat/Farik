@@ -1472,9 +1472,16 @@ async fn ready(
     }
     let open = deps.tools.projections.open_sprint()?;
     let open = open.as_ref().map(|sprint| sprint.sprint_id.as_str());
+    // The tasks of a lane go to one builder, who waits for room rather than give them away.
+    let lane_builder = transitions::lane_builder(&deps.tools.files, team, board, row, &contract)?;
     let assignees: Vec<String> = team
         .active_agents()
         .filter(|agent| Role::from(agent.role) == contract.assignee_role)
+        .filter(|agent| {
+            lane_builder
+                .as_deref()
+                .is_none_or(|builder| agent.id.as_str() == builder)
+        })
         .filter(|agent| has_room(team, open, board, agent))
         .map(|agent| agent.id.to_string())
         .collect();
@@ -1503,7 +1510,12 @@ async fn ready(
             tools: None,
             in_reply_to: None,
             thread: None,
-            initial_prompt: plan_message(&contract, &assignees, &reviewers),
+            initial_prompt: plan_message(
+                &contract,
+                &assignees,
+                &reviewers,
+                lane_builder.as_deref(),
+            ),
             pipeline: None,
         },
     )

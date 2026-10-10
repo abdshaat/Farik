@@ -561,6 +561,7 @@ impl Transitions {
         if let Some(assignment) = assignment.as_mut() {
             assignment.private_folder_busy =
                 private_folder_busy(&self.files, &board, row, assignment.assignee_role)?;
+            assignment.lane_builder = lane_builder(&self.files, team, &board, row, &contract)?;
         }
 
         let review = self.review_of(team, &contract, &changed_paths, &history).1;
@@ -1264,7 +1265,60 @@ fn assignment(
         // Filled by `context`, which reads the contracts of the tasks that might hold the folder.
         private_folder_busy: false,
         skips_sprints: row.skips_sprints,
+        // Filled by `context`, which reads the contracts of the tasks in the lane.
+        lane_builder: None,
     })
+}
+
+/// The agent that builds the lane of `contract` (ADR 0051): of the epic's other tasks in that lane
+/// with the same assignee role, not cancelled, whose assignee is active, the assignee of the one
+/// with the highest id. `None` for a task with no lane or no epic, and for the first task of a lane
+/// to be assigned.
+///
+/// # Errors
+///
+/// `Files` when a contract that might share the lane cannot be read.
+pub(crate) fn lane_builder(
+    files: &ProjectFiles,
+    team: &Team,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+    contract: &TaskContract,
+) -> Result<Option<String>, TransitionError> {
+    let (Some(lane), Some(parent)) = (contract.lane, &row.parent) else {
+        return Ok(None);
+    };
+    let mut builder: Option<(u64, &str)> = None;
+    for other in board.iter().filter(|other| {
+        other.task_id != row.task_id
+            && other.parent.as_ref() == Some(parent)
+            && other.status != TaskStatus::Cancelled
+    }) {
+        let Some(assignee) = other.assignee_id.as_deref().filter(|assignee| {
+            team.active_agents()
+                .any(|agent| agent.id.as_str() == *assignee)
+        }) else {
+            continue;
+        };
+        match files.read_contract(&other.task_id) {
+            Ok(theirs)
+                if theirs.lane == Some(lane) && theirs.assignee_role == contract.assignee_role =>
+            {
+                let number = other
+                    .task_id
+                    .as_str()
+                    .strip_prefix("CTV-")
+                    .and_then(|number| number.parse().ok())
+                    .unwrap_or(0);
+                if builder.is_none_or(|(highest, _)| number > highest) {
+                    builder = Some((number, assignee));
+                }
+            }
+            Ok(_) | Err(FilesError::NotFound { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(builder.map(|(_, assignee)| assignee.to_string()))
 }
 
 /// Whether another task holds the private folder `assignee_role` works in (6.6): one assigned to
@@ -2779,6 +2833,104 @@ mod tests {
                 .iter()
                 .any(|failure| failure.rule == ReadinessRule::LanesOverlap)
         );
+    }
+
+    /// A task of the lane tests: `(id, parent, lane, its contract's assignee role, status, assignee)`.
+    type LaneTask<'a> = (
+        &'a str,
+        &'a str,
+        Option<u64>,
+        &'a str,
+        &'a str,
+        Option<&'a str>,
+    );
+
+    /// The builder `lane_builder` finds for `CTV-4`, a ready task of CTV-1 in `lane`, beside `others`.
+    fn the_builder_of(
+        name: &str,
+        team: Team,
+        lane: Option<u64>,
+        others: &[LaneTask],
+    ) -> Option<String> {
+        let project = Project::new(name, team, at(12));
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        let asked: LaneTask = ("CTV-4", "CTV-1", lane, "software_developer", "ready", None);
+        for (task, parent, lane, role, status, assignee) in std::iter::once(&asked).chain(others) {
+            project.file(task, |wire| {
+                wire["parent"] = json!(parent);
+                wire["assignee_role"] = json!(role);
+                if let Some(lane) = lane {
+                    wire["lane"] = json!(lane);
+                }
+            });
+            project.created_under(task, "ready", "task", Some(parent));
+            if let Some(assignee) = assignee {
+                let people = json!({ "assignee": assignee, "reviewer": "maya" });
+                project.moved(task, "ready", status, &people, at(10));
+            } else if *status != "ready" {
+                project.moved(task, "ready", status, &json!({}), at(10));
+            }
+        }
+        let id = "CTV-4".parse().expect("a task id");
+        let board = project.projections.board().expect("the board");
+        let row = board.iter().find(|row| row.task_id == id).expect("the row");
+        let contract = project.files.read_contract(&id).expect("the file reads");
+        super::lane_builder(&project.files, &project.team, &board, row, &contract)
+            .expect("the lane reads")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn finds_the_builder_of_a_lane() {
+        let dev = "software_developer";
+        let base: Vec<LaneTask> = vec![
+            ("CTV-2", "CTV-1", Some(1), dev, "accepted", Some("dev-a")),
+            ("CTV-3", "CTV-1", Some(2), dev, "in_progress", Some("dev-b")),
+        ];
+        let with = |extra: LaneTask<'static>| [base.clone(), vec![extra]].concat();
+        let team = || a_team(|_| {});
+        let builder = |name: &str, team: Team, lane, others: &[LaneTask]| {
+            the_builder_of(name, team, lane, others)
+        };
+        assert_eq!(
+            builder("lane-a", team(), Some(1), &base),
+            Some("dev-a".to_string())
+        );
+        // The highest of the lane's tasks wins.
+        let later = with(("CTV-5", "CTV-1", Some(1), dev, "in_progress", Some("dev-b")));
+        assert_eq!(
+            builder("lane-b", team(), Some(1), &later),
+            Some("dev-b".to_string())
+        );
+        let cancelled = [
+            vec![("CTV-2", "CTV-1", Some(1), dev, "cancelled", Some("dev-a"))],
+            base[1..].to_vec(),
+        ]
+        .concat();
+        assert_eq!(builder("lane-c", team(), Some(1), &cancelled), None);
+        let paused = a_team(|wire| wire["agents"][1]["status"] = json!("paused"));
+        assert_eq!(builder("lane-d", paused, Some(1), &base), None);
+        let designers = [
+            vec![(
+                "CTV-2",
+                "CTV-1",
+                Some(1),
+                "ui_ux_designer",
+                "accepted",
+                Some("dev-a"),
+            )],
+            base[1..].to_vec(),
+        ]
+        .concat();
+        assert_eq!(builder("lane-e", team(), Some(1), &designers), None);
+        // Another epic's lane 1 is another lane.
+        let elsewhere = with(("CTV-6", "CTV-9", Some(1), dev, "in_progress", Some("dev-b")));
+        assert_eq!(
+            builder("lane-f", team(), Some(1), &elsewhere),
+            Some("dev-a".to_string())
+        );
+        assert_eq!(builder("lane-g", team(), None, &base), None);
     }
 
     #[test]

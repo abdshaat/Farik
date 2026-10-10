@@ -762,6 +762,7 @@ mod tests {
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
             skips_sprints: false,
+            lane_builder: None,
         }
     }
 

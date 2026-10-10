@@ -2655,6 +2655,58 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn offers_a_lanes_task_to_its_builder_alone() {
+        for (paused, offered, words) in [
+            (false, "dev-a", "lane 1 of CTV-1, which dev-a builds"),
+            (true, "dev-b", "first of lane 1"),
+        ] {
+            let harness = Harness::new(&format!("lane-builder-{paused}"), |wire| {
+                if paused {
+                    wire["agents"][1]["status"] = json!("paused");
+                }
+            });
+            an_epic_in_progress(&harness, |_| {});
+            for (task, status) in [("CTV-2", "accepted"), ("CTV-3", "ready")] {
+                harness.file_under(task, "ready", Some("CTV-1"), |wire| {
+                    wire["lane"] = json!(1);
+                    wire["budget"] = json!({ "max_cost_usd": 2 });
+                });
+                if status == "accepted" {
+                    let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+                    for pair in
+                        ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2)
+                    {
+                        harness.project.moved(task, pair[0], pair[1], &people);
+                    }
+                }
+            }
+            integrated(&harness, false);
+            let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+
+            orchestrator.tick().await.expect("the tick runs");
+
+            let spec = &adapter.started()[0];
+            assert_eq!(
+                (spec.purpose, spec.agent_id.as_str(), spec.task_id.clone()),
+                (SessionPurpose::Plan, "pm", Some(task("CTV-3")))
+            );
+            assert!(
+                spec.initial_prompt
+                    .contains(&format!("with room for it: {offered}.")),
+                "{}",
+                spec.initial_prompt
+            );
+            assert!(
+                spec.initial_prompt.contains(words),
+                "{}",
+                spec.initial_prompt
+            );
+        }
+    }
+
     /// The Scrum Master's epic CTV-1 `verifying` after its child CTV-2 was accepted, each with its
     /// completion note.
     fn a_scrum_masters_epic_verifying(harness: &Harness) {
