@@ -1,6 +1,6 @@
 # The Catervas Folder System: each role's own documentation
 
-Status: drafted on 2026-10-09 from the founder's brainstorm, awaiting the founder's review (ADR 0051). It is the design input to phase 9, Catervas folders.
+Status: approved by the founder on 2026-10-09, in conversation (ADR 0051). It is the design input to phase 8, Catervas folders.
 
 ## Why
 
@@ -15,7 +15,7 @@ The founder wants every agent to keep its knowledge of the project as documents 
 - Writing is a hybrid: big documents through reviewed docs tasks, small recurring updates through one tool held to the caller's own folder.
 - A new project starts with the Product Manager's interview in the one-to-one chat and an approval screen for the product plan; Catervafication follows the approval.
 - The owner edits in the web app; Save commits at once as the owner's own change, and the folder's agent re-derives its own version when the owner edits a human version.
-- Catervas folders is its own phase 9, before ask or auto and the milestones, so the milestone runs exercise it; the phases after it move down by one.
+- Catervas folders is its own phase, built first: "Replace phase 8 with 9. Build Catervas folder system first before cloud." It is phase 8, Catervas Cloud phase 9, and the phases after it move down by one, so the milestone runs (phase 10) exercise it.
 
 ## The folders
 
@@ -95,7 +95,7 @@ At sprint review the Product Manager proposes the spec's and the roadmap's chang
 
 `folder_doc.written`, `folder_doc.proposed`, `folder_doc.approved`, `folder_doc.returned`, `folder_doc.edited`, `catervafication.started`, `project.started`. A new project is told from an existing one by a new event, `project.started`, recorded when the first run's `project.create` makes the folder and runs `git init` (`project.scanned` stays the existing repository's).
 
-## Phase 9 steps
+## Phase 8 steps
 
 | Step | Name | Delivers |
 |---|---|---|
