@@ -1,10 +1,11 @@
-import { Button, Choice, Switch } from "@catervas/ui";
+import { Button, Choice, InfoTip, Switch } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { saidAll } from "../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
 import type { ThemeChoice } from "../app/theme.ts";
+import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
 import { ChangeProject } from "./ChangeProject.tsx";
 import { ConnectAgain } from "./ConnectAgain.tsx";
@@ -84,7 +85,12 @@ export function Settings({
 			/>
 			<HowToOpen />
 			<section className={styles.section} aria-labelledby="advanced-heading">
-				<h2 id="advanced-heading">{t("advanced")}</h2>
+				<div className={styles.titled}>
+					<h2 id="advanced-heading">{t("advanced")}</h2>
+					<InfoTip id="advancedMore-info">
+						<Bullets text={t("advancedMore")} />
+					</InfoTip>
+				</div>
 				<Switch
 					id="advanced"
 					label={t("advancedSwitch")}
@@ -92,15 +98,17 @@ export function Settings({
 					checked={advanced}
 					onChange={toggle}
 				/>
-				<p>{t("advancedSafe")}</p>
 			</section>
 			<TeamRules advanced={advanced} />
 			<SavedTeams />
 			<section className={styles.section} aria-labelledby="computer-heading">
 				<h2 id="computer-heading">{t("thisComputer")}</h2>
-				<p>
-					<strong>{t("connectedLead")}</strong> {t("connectedBody")}
-				</p>
+				<div className={styles.titled}>
+					<strong>{t("connectedLead")}</strong>
+					<InfoTip id="connectedBody-info">
+						<Bullets text={t("connectedBody")} />
+					</InfoTip>
+				</div>
 				{data && (
 					<dl className={styles.facts}>
 						<dt>{t("projectFolder")}</dt>

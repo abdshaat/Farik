@@ -23,7 +23,7 @@ The three brand pillars each have a short description:
 - **Configurable role hierarchy:** assemble and customize your ideal product team.
 - **Agile product execution:** plan, iterate and ship faster, together.
 
-Voice: short, plain, confident sentences, with a terminal's economy. It speaks to a non-technical person: it says what happens and what to do next, and it uses no jargon that the screen does not explain. The terminal touches (the `>` prompt, the blinking block cursor, monospace labels) are decoration. The words themselves stay plain English.
+Voice: short, plain, confident sentences, with a terminal's economy. It speaks to a non-technical person: it says what happens and what to do next, and it uses no jargon that the screen does not explain. The terminal touches (the `>` prompt, the blinking block cursor, monospace labels) are decoration. The words themselves stay plain English. An explanation the user reads is short bullet points, never a paragraph: the screen shows a line or two, and the detail sits behind an info button (ⓘ).
 
 ## Colour
 

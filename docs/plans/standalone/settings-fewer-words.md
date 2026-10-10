@@ -116,7 +116,7 @@ Tests:
 - `it('keeps Settings to short lines, the rest behind info buttons')` (`team.test.tsx`, beside the info-button tests) — on Settings with a saved team listed: each line of `advancedMore`, `rulesNextSession`, `savedTeamsLead` and `connectedBody` is only in tooltips; the Advanced switch's description is `advancedBody`; "Connected." is visible outside any tooltip; axe passes. (The saved-team listing is answered as the test at `team.test.tsx:1631` does; `settings()` does not answer `template.list`.)
 - `changes_what_agents_may_do_and_the_limit_from_settings`'s first assertion becomes `onlyInTips` over `rulesNextSession`'s lines.
 
-- [ ] `fix(web): move Settings' notes behind info buttons, as bullets`
+- [x] `fix(web): move Settings' notes behind info buttons, as bullets`
 
 ## Verification
 

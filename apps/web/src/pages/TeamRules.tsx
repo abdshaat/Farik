@@ -62,8 +62,12 @@ export function TeamRules({ advanced = false }: { advanced?: boolean }) {
 	});
 	return (
 		<section className={styles.section} aria-labelledby="rules-area">
-			<h2 id="rules-area">{t("rulesArea")}</h2>
-			<p className={styles.muted}>{t("rulesNextSession")}</p>
+			<div className={styles.titled}>
+				<h2 id="rules-area">{t("rulesArea")}</h2>
+				<InfoTip id="rulesNextSession-info">
+					<Bullets text={t("rulesNextSession")} />
+				</InfoTip>
+			</div>
 			<May key={`may-${rounds.may ?? 0}`} {...part("may")} />
 			{/* Its fields keep their own state, so a newly saved limit starts it again. */}
 			<Spend

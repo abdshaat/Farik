@@ -1,10 +1,11 @@
 import type { RpcError } from "@catervas/protocol-client";
-import { AVATAR_URLS, type AvatarKey, Button } from "@catervas/ui";
+import { AVATAR_URLS, type AvatarKey, Button, InfoTip } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { refusalsOf, said } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
+import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import { type Agent, type Judgment, ringOf } from "./setup/TeamSetup.tsx";
@@ -80,7 +81,16 @@ export function SavedTeams() {
 	const { listing, noFolder, again } = useTemplates();
 	return (
 		<section className={styles.section} aria-labelledby="saved-heading">
-			<h2 id="saved-heading">{t("savedTeams")}</h2>
+			<div className={styles.titled}>
+				<h2 id="saved-heading">{t("savedTeams")}</h2>
+				{listing &&
+				!noFolder &&
+				(listing.templates.length || listing.unreadable.length) ? (
+					<InfoTip id="savedTeamsLead-info">
+						<Bullets text={t("savedTeamsLead")} />
+					</InfoTip>
+				) : null}
+			</div>
 			{noFolder ? (
 				<p className={styles.notice}>{t("templateNoFolder")}</p>
 			) : listing && !listing.templates.length && !listing.unreadable.length ? (
@@ -92,7 +102,6 @@ export function SavedTeams() {
 			) : (
 				listing && (
 					<>
-						<p>{t("savedTeamsLead")}</p>
 						<ul className={styles.savedRows}>
 							{listing.templates.map(({ slug, template }) => (
 								<SavedRow

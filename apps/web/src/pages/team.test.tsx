@@ -785,8 +785,8 @@ describe("team page", () => {
 	});
 
 	it("changes_what_agents_may_do_and_the_limit_from_settings", async () => {
-		const { container, s, rules, part } = await settings();
-		expect(within(rules).getByText(en.rulesNextSession)).toBeTruthy();
+		const { container, s, part } = await settings();
+		for (const line of en.rulesNextSession.split("\n")) onlyInTips(line);
 		await expectNoAxeViolations(container);
 
 		// The team's own answers, not setup's blanks.
@@ -1801,5 +1801,43 @@ describe("info buttons on the agent page", () => {
 			"mailboxNoneNote",
 		] as const)
 			onlyInTips(t(key, { name: "Ivo" }));
+	});
+});
+
+describe("info buttons on Settings", () => {
+	afterEach(() => {
+		cleanup();
+		localStorage.clear();
+	});
+
+	it("keeps Settings to short lines, the rest behind info buttons", async () => {
+		const { container, s } = await settings();
+		await answerQuery(s, "templates.list", {
+			folder: FOLDER,
+			templates: [
+				{
+					...PAIR,
+					slug: "my-usual-team",
+					template: { ...PAIR.template, name: "My usual team" },
+				},
+			],
+			unreadable: [],
+		});
+		await screen.findByText("My usual team", { selector: "strong" });
+		for (const key of [
+			"advancedMore",
+			"rulesNextSession",
+			"savedTeamsLead",
+			"connectedBody",
+		] as const)
+			for (const line of en[key].split("\n")) onlyInTips(line);
+		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
+		expect(
+			document.getElementById(advanced.getAttribute("aria-describedby") ?? "")
+				?.textContent,
+		).toBe(en.advancedBody);
+		const connected = screen.getByText(en.connectedLead);
+		expect(connected.closest('[role="tooltip"]')).toBeNull();
+		await expectNoAxeViolations(container);
 	});
 });

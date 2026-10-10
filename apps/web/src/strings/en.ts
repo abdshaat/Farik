@@ -55,14 +55,13 @@ export const en = {
 	themeSystemNote: "Follows your computer’s setting.",
 	advanced: "Advanced settings",
 	advancedSwitch: "Show advanced settings",
-	advancedBody:
-		"Catervas’s defaults are safe, and you never need to change them. Turning this on shows the detailed settings in each screen: what each agent may do, the team’s rules, the list of checks Catervas can run, the models, and how Catervas judges a plan ready.",
-	advancedSafe:
-		"Catervas refuses any change that would leave your team unable to work, and says what to change instead.",
+	advancedBody: "Shows the detailed settings on each screen.",
+	advancedMore:
+		"Catervas’s defaults are safe. You never need to change them.\nTurning this on shows what each agent may do, the team’s rules, the checks, the models, and how a plan is judged ready.\nCatervas refuses any change that would stop your team working, and says what to change instead.",
 	thisComputer: "Catervas on this computer",
 	connectedLead: "Connected.",
 	connectedBody:
-		"This page talks to Catervas running on your computer, and nothing leaves it except the requests to the AI models.",
+		"This page talks to Catervas on your computer.\nNothing leaves your computer except the requests to the AI models.",
 	projectFolder: "Project folder",
 	address: "Address",
 	disconnect: "Disconnect this browser",
@@ -788,7 +787,7 @@ export const en = {
 	putBack: "Put back the default",
 	rulesArea: "Your team’s rules",
 	rulesNextSession:
-		"The answers you gave in setup, to change whenever you like. Each change starts with each agent’s next session, never in the middle of one.",
+		"Your answers from setup. Change them whenever you like.\nA change starts with each agent’s next piece of work, never in the middle of one.",
 	rulesMay: "What agents may do",
 	rulesSpend: "Daily spending limit",
 	rulesSpendTitle: "What the team may spend",
@@ -1606,7 +1605,7 @@ export const en = {
 	templateChooseAnother: "Choose another saved team.",
 	savedTeams: "Saved teams",
 	savedTeamsLead:
-		"Teams you saved from a Team page. Every project on this computer can start from them. Renaming or deleting one changes no project’s team.",
+		"Teams you saved from a Team page.\nAny project on this computer can start from one.\nRenaming or deleting one changes no project’s team.",
 	savedTeamsNoneBefore: "You have no saved teams yet. Save one from your ",
 	savedTeamsNoneAfter: " page with “Save as a template”.",
 	savedRename: "Rename",
