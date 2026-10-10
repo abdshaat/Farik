@@ -12,6 +12,7 @@ import {
 import { useConnection } from "../app/connection.tsx";
 import { landing } from "../app/landing.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
+import { ChangeProject } from "../pages/ChangeProject.tsx";
 import { t } from "../strings/t.ts";
 import { PauseControl } from "./PauseControl.tsx";
 import styles from "./Shell.module.css";
@@ -92,6 +93,9 @@ export function Shell() {
 								{name}
 							</p>
 						)}
+						{data.projectRoot && (
+							<ChangeProject root={data.projectRoot} short />
+						)}
 						<p className={styles.conn}>
 							<span
 								className={`${styles.dot}${status === "open" ? ` ${styles.live}` : ""}`}
@@ -105,7 +109,8 @@ export function Shell() {
 				</header>
 			) : (
 				<header className={styles.top}>
-					<span>{data?.projectRoot?.split(/[\\/]/).at(-1) ?? t("brand")}</span>
+					<span>{name ?? t("brand")}</span>
+					{data.projectRoot && <ChangeProject root={data.projectRoot} short />}
 					{pause}
 				</header>
 			)}

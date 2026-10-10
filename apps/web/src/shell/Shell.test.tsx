@@ -10,6 +10,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useConnection } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
 import { media } from "../test/media.ts";
 import { answerStatus, eventArrives, renderApp } from "../test/render-app.tsx";
@@ -17,6 +18,25 @@ import { refusedBy } from "../test/schema.ts";
 import styles from "./Shell.module.css";
 
 const WIDE = "(min-width: 1024px)";
+
+function Status() {
+	return <p data-testid="status">{useConnection().status}</p>;
+}
+
+/** Opens a status with the project old-repo and returns the socket. */
+async function openOnOldRepo() {
+	const { socket } = await renderApp(
+		"/team",
+		{ "GET /session": 204 },
+		<Status />,
+	);
+	if (!socket) throw new Error("no socket");
+	await answerStatus(socket, false, 1, { project_root: "/h/work/old-repo" });
+	return socket;
+}
+
+const sent = (socket: Awaited<ReturnType<typeof openOnOldRepo>>) =>
+	socket.calls("project.leave");
 
 describe("shell", () => {
 	afterEach(() => vi.unstubAllGlobals());
@@ -175,6 +195,72 @@ describe("shell", () => {
 			name.compareDocumentPosition(connected) &
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+	});
+
+	it("changes_the_project_from_beside_its_name", async () => {
+		media.set(WIDE, true);
+		const s = await openOnOldRepo();
+		const name = await screen.findByText("old-repo");
+		const change = screen.getByRole("button", { name: en.changeProjectYes });
+		expect(
+			name.compareDocumentPosition(change) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			change.compareDocumentPosition(screen.getByText(en.connected)) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		fireEvent.click(change);
+		const sentence = en.changeProjectConfirm.replace("{name}", "old-repo");
+		expect(screen.getByText(sentence)).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: en.agentCancel }));
+		expect(screen.queryByText(sentence)).toBeNull();
+		expect(sent(s)).toHaveLength(0);
+
+		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		const call = await waitFor(() => {
+			const f = sent(s).at(-1);
+			if (!f) throw new Error("no project.leave was sent");
+			return f;
+		});
+		expect(sent(s)).toHaveLength(1);
+		expect(refusedBy("projectLeaveRequest", call.params)).toEqual([]);
+		expect(call.params).toEqual({});
+		await s.reply(call, {});
+		await waitFor(() =>
+			expect(screen.getByTestId("status").textContent).toBe("reopening"),
+		);
+	});
+
+	it("changes_the_project_from_the_top_bar", async () => {
+		media.set(WIDE, false);
+		const s = await openOnOldRepo();
+		const top = (await screen.findByText("old-repo")).closest("header");
+		if (!top) throw new Error("no top bar");
+		fireEvent.click(
+			within(top).getByRole("button", { name: en.changeProjectYes }),
+		);
+		expect(
+			screen.getByText(en.changeProjectConfirm.replace("{name}", "old-repo")),
+		).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		await waitFor(() => expect(sent(s)).toHaveLength(1));
+	});
+
+	it("shows_a_refused_leave_beside_the_name", async () => {
+		media.set(WIDE, true);
+		const s = await openOnOldRepo();
+		await screen.findByText("old-repo");
+		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		const call = await waitFor(() => {
+			const f = sent(s).at(-1);
+			if (!f) throw new Error("no project.leave was sent");
+			return f;
+		});
+		await s.fail(call, -32005, "a task is still running");
+		expect(await screen.findByRole("alert")).toBeTruthy();
+		expect(screen.getByTestId("status").textContent).not.toBe("reopening");
 	});
 
 	it("offers_other_keys_until_one_is_chosen", async () => {

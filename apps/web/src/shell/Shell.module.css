@@ -172,6 +172,7 @@ It holds the calm green under reduced motion. */
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
+	flex-wrap: wrap;
 	gap: var(--catervas-space-3);
 	padding: var(--catervas-space-3) var(--catervas-space-4);
 	border-bottom: 1px solid var(--catervas-color-rule);

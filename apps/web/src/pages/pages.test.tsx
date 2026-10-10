@@ -80,7 +80,11 @@ describe("pages", () => {
 		expect(s.calls("project.leave")).toHaveLength(0);
 
 		fireEvent.click(screen.getByRole("button", { name: en.changeProject }));
-		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		fireEvent.click(
+			within(screen.getByRole("main")).getByRole("button", {
+				name: en.changeProjectYes,
+			}),
+		);
 		const call = await waitFor(() => {
 			const f = s.calls("project.leave").at(-1);
 			if (!f) throw new Error("no project.leave was sent");
@@ -106,7 +110,11 @@ describe("pages", () => {
 		fireEvent.click(
 			await screen.findByRole("button", { name: en.changeProject }),
 		);
-		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		fireEvent.click(
+			within(screen.getByRole("main")).getByRole("button", {
+				name: en.changeProjectYes,
+			}),
+		);
 		const first = await waitFor(() => {
 			const f = s.calls("project.leave").at(-1);
 			if (!f) throw new Error("no project.leave was sent");
@@ -117,7 +125,11 @@ describe("pages", () => {
 		expect(screen.getByTestId("status").textContent).not.toBe("reopening");
 
 		// A new attempt starts without the old error.
-		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		fireEvent.click(
+			within(screen.getByRole("main")).getByRole("button", {
+				name: en.changeProjectYes,
+			}),
+		);
 		await waitFor(() => expect(s.calls("project.leave")).toHaveLength(2));
 		expect(screen.queryByRole("alert")).toBeNull();
 	});

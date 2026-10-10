@@ -174,6 +174,8 @@ export const en = {
 		"A folder that is not a git project can’t be used yet. For a new project, go back and choose “No, start a new one”: Catervas makes the folder and sets up git for you.",
 	opening: "Opening your project…",
 	changeProject: "Change project…",
+	changeShort: "Change",
+	projectWord: "project",
 	changeProjectConfirm:
 		"The team stops working on {name}. Its work there is kept, and it is all there if you come back.",
 	changeProjectYes: "Change project",
