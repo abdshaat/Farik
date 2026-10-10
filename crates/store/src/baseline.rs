@@ -325,8 +325,8 @@ mod tests {
     fn copies_every_file_but_the_history_once() {
         let folder = a_folder("copy");
         symlink("/etc/hostname", folder.join("link.xlsx")).expect("a link");
-        assert!(copy_baseline(&folder, &task("FRK-1")).expect("copied"));
-        let copy = folder.join(".history/FRK-1");
+        assert!(copy_baseline(&folder, &task("CTV-1")).expect("copied"));
+        let copy = folder.join(".history/CTV-1");
         assert_eq!(read(&copy.join("books.xlsx")).as_deref(), Some("books"));
         assert_eq!(
             read(&copy.join("2026/pricing.xlsx")).as_deref(),
@@ -338,12 +338,12 @@ mod tests {
         // The folder is as it was, and a second copy is not taken over the first.
         assert_eq!(read(&folder.join("books.xlsx")).as_deref(), Some("books"));
         fs::write(folder.join("books.xlsx"), "edited").expect("written");
-        assert!(!copy_baseline(&folder, &task("FRK-1")).expect("kept"));
+        assert!(!copy_baseline(&folder, &task("CTV-1")).expect("kept"));
         assert_eq!(read(&copy.join("books.xlsx")).as_deref(), Some("books"));
         // Another task has its own copy, taken as the folder is then.
-        assert!(copy_baseline(&folder, &task("FRK-2")).expect("copied"));
+        assert!(copy_baseline(&folder, &task("CTV-2")).expect("copied"));
         assert_eq!(
-            read(&folder.join(".history/FRK-2/books.xlsx")).as_deref(),
+            read(&folder.join(".history/CTV-2/books.xlsx")).as_deref(),
             Some("edited")
         );
     }
@@ -365,8 +365,8 @@ mod tests {
     #[test]
     fn leaves_the_mail_out_of_a_procurement_folder_s_copy_and_changes() {
         let folder = a_procurement_folder("mail");
-        assert!(copy_baseline(&folder, &task("FRK-1")).expect("copied"));
-        let copy = folder.join(".history/FRK-1");
+        assert!(copy_baseline(&folder, &task("CTV-1")).expect("copied"));
+        let copy = folder.join(".history/CTV-1");
         assert_eq!(read(&copy.join("vendors.xlsx")).as_deref(), Some("vendors"));
         assert!(
             !copy.join("mail").exists(),
@@ -377,19 +377,19 @@ mod tests {
         fs::write(folder.join("mail/out/1.sent.txt"), "sent").expect("written");
         fs::remove_file(folder.join("mail/out/1.txt")).expect("removed");
         assert_eq!(
-            changes_since_baseline(&folder, &task("FRK-1")),
+            changes_since_baseline(&folder, &task("CTV-1")),
             Ok(Vec::new())
         );
         // However the folder is spelled on a disk that ignores case.
         fs::create_dir_all(folder.join("Mail")).expect("made");
         fs::write(folder.join("Mail/2.txt"), "spelled otherwise").expect("written");
         assert_eq!(
-            changes_since_baseline(&folder, &task("FRK-1")),
+            changes_since_baseline(&folder, &task("CTV-1")),
             Ok(Vec::new())
         );
         // The register still counts, and a task with no copy has everything but mail/ new.
         fs::write(folder.join("vendors.xlsx"), "VENDORS").expect("written");
-        let changes = changes_since_baseline(&folder, &task("FRK-1")).expect("changes");
+        let changes = changes_since_baseline(&folder, &task("CTV-1")).expect("changes");
         assert_eq!(
             changes
                 .iter()
@@ -397,7 +397,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["vendors.xlsx"]
         );
-        let all = changes_since_baseline(&folder, &task("FRK-2")).expect("changes");
+        let all = changes_since_baseline(&folder, &task("CTV-2")).expect("changes");
         assert_eq!(
             all.iter()
                 .map(|change| change.path.as_str())
@@ -408,9 +408,9 @@ mod tests {
         let books = a_folder("mail-finance");
         fs::create_dir_all(books.join("mail")).expect("made");
         fs::write(books.join("mail/books.xlsx"), "kept").expect("written");
-        copy_baseline(&books, &task("FRK-1")).expect("copied");
+        copy_baseline(&books, &task("CTV-1")).expect("copied");
         assert_eq!(
-            read(&books.join(".history/FRK-1/mail/books.xlsx")).as_deref(),
+            read(&books.join(".history/CTV-1/mail/books.xlsx")).as_deref(),
             Some("kept")
         );
     }
@@ -418,17 +418,17 @@ mod tests {
     #[test]
     fn finds_what_changed_since_the_copy() {
         let folder = a_folder("changes");
-        copy_baseline(&folder, &task("FRK-1")).expect("copied");
+        copy_baseline(&folder, &task("CTV-1")).expect("copied");
         // Nothing has changed yet, however the files were touched.
         fs::write(folder.join("books.xlsx"), "books").expect("written again, the same");
         assert_eq!(
-            changes_since_baseline(&folder, &task("FRK-1")),
+            changes_since_baseline(&folder, &task("CTV-1")),
             Ok(Vec::new())
         );
         // The same length is a change too: the bytes are compared, not only the sizes.
         fs::write(folder.join("books.xlsx"), "BOOKS").expect("written, as long as it was");
         assert_eq!(
-            changes_since_baseline(&folder, &task("FRK-1"))
+            changes_since_baseline(&folder, &task("CTV-1"))
                 .expect("compared")
                 .iter()
                 .map(|change| (change.path.as_str(), change.kind.word()))
@@ -446,7 +446,7 @@ mod tests {
         )
         .expect("written");
         symlink("/etc/hostname", folder.join("link.xlsx")).expect("a link");
-        let changes = changes_since_baseline(&folder, &task("FRK-1")).expect("compared");
+        let changes = changes_since_baseline(&folder, &task("CTV-1")).expect("compared");
         let words: Vec<(&str, &str)> = changes
             .iter()
             .map(|change| (change.path.as_str(), change.kind.word()))
@@ -461,7 +461,7 @@ mod tests {
         );
         // A task with no copy was assigned before there were copies: everything in the folder is
         // new to it, rather than nothing.
-        let all = changes_since_baseline(&folder, &task("FRK-9")).expect("compared");
+        let all = changes_since_baseline(&folder, &task("CTV-9")).expect("compared");
         assert_eq!(
             all.iter()
                 .map(|change| (change.path.as_str(), change.kind.word()))
@@ -474,8 +474,8 @@ mod tests {
     fn copies_an_empty_or_missing_folder_as_an_empty_copy() {
         let folder = a_folder("empty");
         fs::remove_dir_all(&folder).expect("removed");
-        assert!(copy_baseline(&folder, &task("FRK-1")).expect("copied"));
-        assert!(folder.join(".history/FRK-1").is_dir());
+        assert!(copy_baseline(&folder, &task("CTV-1")).expect("copied"));
+        assert!(folder.join(".history/CTV-1").is_dir());
     }
 
     #[test]
@@ -486,7 +486,7 @@ mod tests {
         fs::create_dir_all(&elsewhere).expect("made");
         fs::remove_dir_all(folder.join(".history")).expect("removed");
         symlink(&elsewhere, folder.join(".history")).expect("a link");
-        let error = copy_baseline(&folder, &task("FRK-1")).expect_err("refused");
+        let error = copy_baseline(&folder, &task("CTV-1")).expect_err("refused");
         assert!(error.to_string().contains("is a link"), "{error}");
         assert_eq!(fs::read_dir(&elsewhere).expect("read").count(), 0);
     }
@@ -531,10 +531,10 @@ mod tests {
         let elsewhere = folder.parent().expect("a parent").join("elsewhere");
         fs::create_dir_all(&elsewhere).expect("made");
         fs::write(elsewhere.join("outside-secret.xlsx"), "outside").expect("written");
-        symlink(&elsewhere, folder.join(".history/FRK-1")).expect("a link");
-        let copy = copy_baseline(&folder, &task("FRK-1")).expect_err("refused");
+        symlink(&elsewhere, folder.join(".history/CTV-1")).expect("a link");
+        let copy = copy_baseline(&folder, &task("CTV-1")).expect_err("refused");
         assert!(copy.to_string().contains("is a link"), "{copy}");
-        let changes = changes_since_baseline(&folder, &task("FRK-1")).expect_err("refused");
+        let changes = changes_since_baseline(&folder, &task("CTV-1")).expect_err("refused");
         assert!(changes.to_string().contains("is a link"), "{changes}");
         assert!(!changes.to_string().contains("outside-secret"), "{changes}");
         // Nothing was written where the link points.
@@ -549,9 +549,9 @@ mod tests {
         fs::write(elsewhere.join("outside-secret.xlsx"), "outside").expect("written");
         let linked = folder.parent().expect("a parent").join("linked");
         symlink(&elsewhere, &linked).expect("a link");
-        let copy = copy_baseline(&linked, &task("FRK-1")).expect_err("refused");
+        let copy = copy_baseline(&linked, &task("CTV-1")).expect_err("refused");
         assert!(copy.to_string().contains("is a link"), "{copy}");
-        let changes = changes_since_baseline(&linked, &task("FRK-1")).expect_err("refused");
+        let changes = changes_since_baseline(&linked, &task("CTV-1")).expect_err("refused");
         assert!(changes.to_string().contains("is a link"), "{changes}");
         assert!(!changes.to_string().contains("outside-secret"), "{changes}");
         assert!(!elsewhere.join(".history").exists());
@@ -561,10 +561,10 @@ mod tests {
     fn makes_the_copy_for_its_owner_alone() {
         use std::os::unix::fs::PermissionsExt as _;
         let folder = a_folder("private");
-        copy_baseline(&folder, &task("FRK-1")).expect("copied");
+        copy_baseline(&folder, &task("CTV-1")).expect("copied");
         let mode = |path: &Path| fs::metadata(path).expect("there").permissions().mode() & 0o777;
-        assert_eq!(mode(&folder.join(".history/FRK-1")), 0o700);
-        assert_eq!(mode(&folder.join(".history/FRK-1/2026")), 0o700);
-        assert_eq!(mode(&folder.join(".history/FRK-1/books.xlsx")) & 0o077, 0);
+        assert_eq!(mode(&folder.join(".history/CTV-1")), 0o700);
+        assert_eq!(mode(&folder.join(".history/CTV-1/2026")), 0o700);
+        assert_eq!(mode(&folder.join(".history/CTV-1/books.xlsx")) & 0o077, 0);
     }
 }

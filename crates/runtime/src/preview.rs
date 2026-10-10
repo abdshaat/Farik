@@ -876,13 +876,13 @@ pub(crate) mod fixtures {
         }
 
         fn container(&self) -> String {
-            "catervas-preview-p-frk-1".to_string()
+            "catervas-preview-p-ctv-1".to_string()
         }
 
         fn labels(&self) -> Vec<String> {
             vec![
                 "catervas.project=p".to_string(),
-                "catervas.task=FRK-1".to_string(),
+                "catervas.task=CTV-1".to_string(),
             ]
         }
 
@@ -932,13 +932,13 @@ pub(crate) mod fixtures {
         }
 
         fn container(&self) -> String {
-            "catervas-preview-p-frk-1".to_string()
+            "catervas-preview-p-ctv-1".to_string()
         }
 
         fn labels(&self) -> Vec<String> {
             vec![
                 "catervas.project=p".to_string(),
-                "catervas.task=FRK-1".to_string(),
+                "catervas.task=CTV-1".to_string(),
             ]
         }
 
@@ -1144,7 +1144,7 @@ mod tests {
         let server = connector_server(
             &definition,
             &NamedPreview { port: 4400 },
-            Path::new("/p/.catervas/local/browser/FRK-1/s-1"),
+            Path::new("/p/.catervas/local/browser/CTV-1/s-1"),
         );
         assert_eq!(server.name, "playwright");
         let McpTransport::Stdio { command, args } = server.transport else {
@@ -1152,20 +1152,20 @@ mod tests {
         };
         assert_eq!(command, "docker");
         assert_eq!(args[..2], ["run", "--rm"]);
-        assert_eq!(after(&args, "--name"), ["catervas-browser-p-frk-1"]);
+        assert_eq!(after(&args, "--name"), ["catervas-browser-p-ctv-1"]);
         assert_eq!(
             after(&args, "--label"),
-            ["catervas.project=p", "catervas.task=FRK-1"]
+            ["catervas.project=p", "catervas.task=CTV-1"]
         );
         assert_eq!(after(&args, "--user"), ["1000:1000"]);
         assert_eq!(
             after(&args, "--network"),
-            ["container:catervas-preview-p-frk-1"]
+            ["container:catervas-preview-p-ctv-1"]
         );
         assert_eq!(after(&args, "--pull"), ["never"]);
         assert_eq!(
             after(&args, "--mount"),
-            ["type=bind,src=/p/.catervas/local/browser/FRK-1/s-1,dst=/output"]
+            ["type=bind,src=/p/.catervas/local/browser/CTV-1/s-1,dst=/output"]
         );
         // The image, then its own arguments, then Catervas's confinement.
         let image = args

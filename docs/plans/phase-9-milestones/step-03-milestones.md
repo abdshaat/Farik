@@ -42,7 +42,7 @@ The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.
 
         preview:
           prepare: "pnpm install --frozen-lockfile && pnpm -r --if-present generate && pnpm --filter @farik/web build && cargo build -p farik --features e2e --bin farik-e2e-serve"
-          start: "target/debug/farik-e2e-serve --preview --port 4400 --pace 600 --transcripts triage_frk_1_small_by_pm,refine_writes_high_risk_frk_1,judge_frk_1_by_architect,plan_assigns_frk_1_to_theo,implement_finishes_frk_1,review_writes_note,implement_after_send_back_frk_1,review_writes_note"
+          start: "target/debug/farik-e2e-serve --preview --port 4400 --pace 600 --transcripts triage_ctv_1_small_by_pm,refine_writes_high_risk_ctv_1,judge_ctv_1_by_architect,plan_assigns_ctv_1_to_theo,implement_finishes_ctv_1,review_writes_note,implement_after_send_back_ctv_1,review_writes_note"
           port: 4400
           path: /
 
@@ -54,12 +54,12 @@ The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.
   - **Order of actions: decided.** The founder chose the policy "Plan work in sprints" (ADR 0028, 2026-10-01), built in step 15. Under `farik serve` a ready task used to be assigned at once (readiness finding B1), and holding it by pausing both Developers is refused by the last-of-role rule. With the policy on in `team.yaml`, the team gets work ready at any time but assigns and builds nothing outside the open sprint, so both requests wait in the Backlog until S1 opens. The order in the browser:
     1. On Today, file request 1, then request 2, pasting `brief1.txt` and `brief2.txt`.
     2. Answer the Product Manager's questions.
-    3. Open FRK-2's gate and check phase 4's three things (`allowed_paths` include `CHANGELOG.md`; the requirements or criteria name the CHANGELOG entry; they name the decision the Architect records). If all hold, approve the epic, and approve FRK-1 if it waits; if one is missing, that is an incident: re-run from stage 1 (phase 4 stage 3).
-    4. Both wait in the Backlog: on the Board, FRK-1 is in the Backlog lane, and so is FRK-2, the epic, from its approval; Today's count reaches 2 once FRK-1 is ready ("2 pieces of work are ready and wait in the Backlog"). Nothing is assigned yet.
+    3. Open CTV-2's gate and check phase 4's three things (`allowed_paths` include `CHANGELOG.md`; the requirements or criteria name the CHANGELOG entry; they name the decision the Architect records). If all hold, approve the epic, and approve CTV-1 if it waits; if one is missing, that is an incident: re-run from stage 1 (phase 4 stage 3).
+    4. Both wait in the Backlog: on the Board, CTV-1 is in the Backlog lane, and so is CTV-2, the epic, from its approval; Today's count reaches 2 once CTV-1 is ready ("2 pieces of work are ready and wait in the Backlog"). Nothing is assigned yet.
     5. Start the sprint, from Today's link or the Board, with "No limit".
-    6. Planning takes both: S1's planning ceremony plans FRK-1 and FRK-2 with every task under it.
+    6. Planning takes both: S1's planning ceremony plans CTV-1 and CTV-2 with every task under it.
 
-    Then the founder watches the work, acting on whatever Today lists (questions, help, escalations); mentions `@arch` once, in Chats → Team; before accepting the epic, checks on its first filter task's page that the contract carries the decision's `review` criterion (phase 4 stage 4.3), an incident if missing; accepts the epic with a note, and FRK-1's result too if it came out high risk; and reads the review and the "Looking back" meeting in Chats → Team. No pause or resume is needed. Any the founder takes are by `human`, and the record lists them.
+    Then the founder watches the work, acting on whatever Today lists (questions, help, escalations); mentions `@arch` once, in Chats → Team; before accepting the epic, checks on its first filter task's page that the contract carries the decision's `review` criterion (phase 4 stage 4.3), an incident if missing; accepts the epic with a note, and CTV-1's result too if it came out high risk; and reads the review and the "Looking back" meeting in Chats → Team. No pause or resume is needed. Any the founder takes are by `human`, and the record lists them.
   - **Chats.** Once, after the sprint's planning, the founder asks one agent one question in its one-to-one chat (Chats → the agent). The founder never presses "Send as a request": the run has two requests, word for word. The record lists the `chat` session and its reply. It is not a pass criterion.
   - **Templates.** Not exercised in the team sprint. The founder does not use "Use a saved team" or change any agent's model during the run, whatever the Team page suggests, since its suggestions are now `claude-opus-5-5` and `claude-sonnet-5-5`. "Save as a template" may be pressed after Task 1's record, and it writes only to `~/farik-m1/home/.config/farik/templates`. The thirty-minute test meets templates as new users do: "A saved team" is offered and cannot be chosen.
 - **The thirty-minute test.**

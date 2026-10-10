@@ -3973,11 +3973,11 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_removing_an_agent_that_holds_a_task() {
-        // Assigned work but no event of its own yet: removed, it would leave FRK-1 with nobody.
+        // Assigned work but no event of its own yet: removed, it would leave CTV-1 with nobody.
         let harness = driven("team-refuse-assigned");
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "ready",
             "assigned",
             &json!({ "assignee": "dev-b", "reviewer": "dev-a" }),
@@ -4168,23 +4168,23 @@ pub(super) mod tests {
     }
 
     /// `team.validate`'s effects of switching the sprint policy to `on`, on a board with the ready
-    /// FRK-1, FRK-2 under way since before the switch, FRK-3 under way in the open S2, and FRK-4,
+    /// CTV-1, CTV-2 under way since before the switch, CTV-3 under way in the open S2, and CTV-4,
     /// which S1 left for the Backlog.
     fn switching(name: &str, on: bool) -> Value {
         let harness = crate::orchestrator::fixtures::Harness::new(name, |wire| {
             wire["policy"]["plan_in_sprints"] = json!(!on);
         });
-        harness.ready("FRK-1");
-        harness.file("FRK-2", "in_progress", |_| {});
-        harness.file("FRK-3", "in_progress", |_| {});
-        harness.file("FRK-4", "assigned", |_| {});
-        harness.open_sprint("S1", &["FRK-4"]);
+        harness.ready("CTV-1");
+        harness.file("CTV-2", "in_progress", |_| {});
+        harness.file("CTV-3", "in_progress", |_| {});
+        harness.file("CTV-4", "assigned", |_| {});
+        harness.open_sprint("S1", &["CTV-4"]);
         harness.project.record(
             "",
             "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": ["FRK-4"], "backlog": true }),
+            &json!({ "sprint_id": "S1", "ended_by": "human", "left": ["CTV-4"], "backlog": true }),
         );
-        harness.open_sprint("S2", &["FRK-3"]);
+        harness.open_sprint("S2", &["CTV-3"]);
         let mut team = team_file(&harness);
         team["policy"]["plan_in_sprints"] = json!(on);
         query(

@@ -115,7 +115,7 @@ pub struct ProjectFiles {
 
 /// What `.catervas/local/.gitignore` holds: everything under it, including itself.
 ///
-/// A task's worktree lives at `.catervas/local/worktrees/FRK-<n>` (5.14) and the event log at
+/// A task's worktree lives at `.catervas/local/worktrees/CTV-<n>` (5.14) and the event log at
 /// `.catervas/local/catervas.db` (8.4). Without this, every repository Catervas touches is dirty for good
 /// and `Git::is_clean` on the root never answers true again.
 const LOCAL_GITIGNORE: &str = "*\n";
@@ -406,14 +406,14 @@ impl ProjectFiles {
             }
         }
         // By the number in the id, so that the tenth task does not come before the ninth, and then
-        // by the id itself, because the schema's pattern allows a leading zero: `FRK-01` and `FRK-1`
+        // by the id itself, because the schema's pattern allows a leading zero: `CTV-01` and `CTV-1`
         // are two spellings of one number, and without the second key the order between them is
         // whatever `read_dir` gave, which is stable on one filesystem and not across a fresh clone.
         // `projections` broke this tie in step 03 and `reconcile` in step 07. The parse cannot fail:
-        // `TaskId` is `FRK-` and one to six digits, which is what let it be built at all.
+        // `TaskId` is `CTV-` and one to six digits, which is what let it be built at all.
         ids.sort_by_key(|id| {
             (
-                id.as_str().trim_start_matches("FRK-").parse::<u64>().ok(),
+                id.as_str().trim_start_matches("CTV-").parse::<u64>().ok(),
                 id.as_str().to_string(),
             )
         });
@@ -1239,8 +1239,8 @@ mod tests {
     #[test]
     fn names_the_file_a_contract_lives_in() {
         assert_eq!(
-            contract_path(&TaskId::try_from("FRK-12").expect("an id")),
-            "contracts/FRK-12.yaml"
+            contract_path(&TaskId::try_from("CTV-12").expect("an id")),
+            "contracts/CTV-12.yaml"
         );
     }
 

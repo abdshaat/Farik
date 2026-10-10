@@ -492,14 +492,14 @@ fn files_a_contract_as_a_draft_request() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
         ran.out
-            .contains("FRK-1 filed as a draft request: A board command"),
+            .contains("CTV-1 filed as a draft request: A board command"),
         "{}",
         ran.out
     );
     assert!(ran.out.contains("catervas triage"), "{}", ran.out);
 
     let contract = files_of(&repository)
-        .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+        .read_contract(&TaskId::try_from("CTV-1").expect("a task id"))
         .expect("a contract was written");
     assert_eq!(contract.status.to_string(), "draft");
     assert_eq!(contract.created_by.as_deref(), Some("human"));
@@ -511,7 +511,7 @@ fn files_a_contract_as_a_draft_request() {
     assert_eq!(
         board_of(&repository),
         [(
-            "FRK-1".to_string(),
+            "CTV-1".to_string(),
             "task".to_string(),
             "draft".to_string(),
             false,
@@ -526,7 +526,7 @@ fn files_a_contract_as_a_draft_request() {
 fn never_hands_out_an_id_a_committed_contract_already_has() {
     // The log is machine-local and the contracts travel with the repository (8.4), so a fresh clone
     // has the files and a counter at zero. Taking the id from the counter alone would file the next
-    // request as FRK-1 and write it over the contract a teammate committed.
+    // request as CTV-1 and write it over the contract a teammate committed.
     let repository = a_project("cli-create-fresh-clone");
     let first = a_request_file(&repository, "first.yaml", "The committed one");
     let filed = run_in(
@@ -543,10 +543,10 @@ fn never_hands_out_an_id_a_committed_contract_already_has() {
     );
 
     assert_eq!(ran.code, 0, "{}", ran.err);
-    assert!(ran.out.contains("FRK-2 filed"), "{}", ran.out);
+    assert!(ran.out.contains("CTV-2 filed"), "{}", ran.out);
     assert_eq!(
         files_of(&repository)
-            .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+            .read_contract(&TaskId::try_from("CTV-1").expect("a task id"))
             .expect("the committed contract is still there")
             .title
             .as_str(),
@@ -576,7 +576,7 @@ fn hands_out_an_id_past_contracts_a_pull_brought_in() {
         &["task", "create", first.to_str().expect("a path")],
     );
     assert_eq!(created.code, 0, "{}", created.err);
-    for id in ["FRK-2", "FRK-3", "FRK-4", "FRK-5"] {
+    for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5"] {
         a_contract_file_at(&repository, id);
     }
 
@@ -587,16 +587,16 @@ fn hands_out_an_id_past_contracts_a_pull_brought_in() {
     );
 
     assert_eq!(ran.code, 0, "{}", ran.err);
-    assert!(ran.out.contains("FRK-6 filed"), "{}", ran.out);
+    assert!(ran.out.contains("CTV-6 filed"), "{}", ran.out);
 }
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn hands_out_an_id_past_the_highest_number_not_the_highest_spelling() {
-    // FRK-10 sorts before FRK-9 as text; the id has to be past the tenth.
+    // CTV-10 sorts before CTV-9 as text; the id has to be past the tenth.
     let repository = a_project("cli-create-ten");
-    a_contract_file_at(&repository, "FRK-9");
-    a_contract_file_at(&repository, "FRK-10");
+    a_contract_file_at(&repository, "CTV-9");
+    a_contract_file_at(&repository, "CTV-10");
 
     let file = a_request_file(&repository, "request.yaml", "The new one");
     let ran = run_in(
@@ -605,7 +605,7 @@ fn hands_out_an_id_past_the_highest_number_not_the_highest_spelling() {
     );
 
     assert_eq!(ran.code, 0, "{}", ran.err);
-    assert!(ran.out.contains("FRK-11 filed"), "{}", ran.out);
+    assert!(ran.out.contains("CTV-11 filed"), "{}", ran.out);
 }
 
 #[test]
@@ -629,7 +629,7 @@ fn reads_the_contract_from_where_the_command_was_run() {
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
-        ran.out.contains("FRK-1 filed as a draft request"),
+        ran.out.contains("CTV-1 filed as a draft request"),
         "{}",
         ran.out
     );
@@ -643,7 +643,7 @@ fn refuses_a_request_that_sets_what_is_not_the_authors_to_set() {
     std::fs::write(
         &path,
         format!(
-            "{}id: FRK-9\nstatus: ready\nlocked: true\nparent: FRK-2\n",
+            "{}id: CTV-9\nstatus: ready\nlocked: true\nparent: CTV-2\n",
             a_request("A board command")
         ),
     )
@@ -777,7 +777,7 @@ fn a_refused_request_does_not_use_up_an_id() {
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
-        ran.out.contains("FRK-1 filed"),
+        ran.out.contains("CTV-1 filed"),
         "the next id is the next one, not one past a refusal: {}",
         ran.out
     );
@@ -816,7 +816,7 @@ fn sizes_a_request_as_large_and_makes_it_an_epic() {
         &repository.path,
         &[
             "triage",
-            "FRK-1",
+            "CTV-1",
             "large",
             "--reason",
             "it is three screens and a migration",
@@ -826,13 +826,13 @@ fn sizes_a_request_as_large_and_makes_it_an_epic() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
         ran.out
-            .contains("FRK-1 is large: epic. it is three screens and a migration"),
+            .contains("CTV-1 is large: epic. it is three screens and a migration"),
         "{}",
         ran.out
     );
     assert_eq!(
         files_of(&repository)
-            .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+            .read_contract(&TaskId::try_from("CTV-1").expect("a task id"))
             .expect("a contract")
             .kind
             .to_string(),
@@ -842,7 +842,7 @@ fn sizes_a_request_as_large_and_makes_it_an_epic() {
     assert_eq!(
         board_of(&repository),
         [(
-            "FRK-1".to_string(),
+            "CTV-1".to_string(),
             "epic".to_string(),
             "draft".to_string(),
             true,
@@ -866,14 +866,14 @@ fn overrules_a_triage_while_the_request_is_still_a_draft() {
     );
     run_in(
         &repository.path,
-        &["triage", "FRK-1", "large", "--reason", "it looked large"],
+        &["triage", "CTV-1", "large", "--reason", "it looked large"],
     );
 
     let ran = run_in(
         &repository.path,
         &[
             "triage",
-            "FRK-1",
+            "CTV-1",
             "small",
             "--reason",
             "one screen after all",
@@ -916,7 +916,7 @@ fn refuses_a_triage_with_no_reason_written() {
 
     let ran = run_in(
         &repository.path,
-        &["triage", "FRK-1", "large", "--reason", "   "],
+        &["triage", "CTV-1", "large", "--reason", "   "],
     );
 
     assert_eq!(ran.code, 1);
@@ -937,11 +937,11 @@ fn refuses_a_triage_once_refining_has_started() {
         &repository.path,
         &["task", "create", file.to_str().expect("a path")],
     );
-    moved_to(&repository, "FRK-1", "refining");
+    moved_to(&repository, "CTV-1", "refining");
 
     let ran = run_in(
         &repository.path,
-        &["triage", "FRK-1", "large", "--reason", "too late"],
+        &["triage", "CTV-1", "large", "--reason", "too late"],
     );
 
     assert_eq!(ran.code, 1);
@@ -962,16 +962,16 @@ fn refuses_a_triage_of_a_task_that_belongs_to_an_epic() {
         &["task", "create", file.to_str().expect("a path")],
     );
     let files = files_of(&repository);
-    let id = TaskId::try_from("FRK-1").expect("a task id");
+    let id = TaskId::try_from("CTV-1").expect("a task id");
     let mut contract = files.read_contract(&id).expect("a contract");
-    contract.parent = Some("FRK-2".parse().expect("a parent id"));
+    contract.parent = Some("CTV-2".parse().expect("a parent id"));
     files
         .write_contract(&contract)
         .expect("the contract is written");
 
     let ran = run_in(
         &repository.path,
-        &["triage", "FRK-1", "large", "--reason", "not mine to size"],
+        &["triage", "CTV-1", "large", "--reason", "not mine to size"],
     );
 
     assert_eq!(ran.code, 1);
@@ -988,12 +988,12 @@ fn takes_a_contract_and_gives_it_back() {
         &["task", "create", file.to_str().expect("a path")],
     );
 
-    let taken = run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+    let taken = run_in(&repository.path, &["contract", "lock", "CTV-1"]);
     assert_eq!(taken.code, 0, "{}", taken.err);
-    assert!(taken.out.contains("FRK-1 is yours"), "{}", taken.out);
+    assert!(taken.out.contains("CTV-1 is yours"), "{}", taken.out);
     assert!(
         files_of(&repository)
-            .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+            .read_contract(&TaskId::try_from("CTV-1").expect("a task id"))
             .expect("a contract")
             .locked
     );
@@ -1002,10 +1002,10 @@ fn takes_a_contract_and_gives_it_back() {
         "the board says the human holds it"
     );
 
-    let given = run_in(&repository.path, &["contract", "unlock", "FRK-1"]);
+    let given = run_in(&repository.path, &["contract", "unlock", "CTV-1"]);
     assert_eq!(given.code, 0, "{}", given.err);
     assert!(
-        given.out.contains("FRK-1 is the team's again"),
+        given.out.contains("CTV-1 is the team's again"),
         "{}",
         given.out
     );
@@ -1030,9 +1030,9 @@ fn refuses_to_take_a_contract_that_is_already_yours() {
         &repository.path,
         &["task", "create", file.to_str().expect("a path")],
     );
-    run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+    run_in(&repository.path, &["contract", "lock", "CTV-1"]);
 
-    let ran = run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+    let ran = run_in(&repository.path, &["contract", "lock", "CTV-1"]);
 
     assert_eq!(ran.code, 1);
     assert!(ran.err.contains("already yours"), "{}", ran.err);
@@ -1049,7 +1049,7 @@ fn refuses_to_give_back_a_contract_that_is_already_the_teams() {
     );
     let before = kinds_in(&repository);
 
-    let ran = run_in(&repository.path, &["contract", "unlock", "FRK-1"]);
+    let ran = run_in(&repository.path, &["contract", "unlock", "CTV-1"]);
 
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(ran.err.contains("already the team's"), "{}", ran.err);
@@ -1065,9 +1065,9 @@ fn refuses_to_take_a_contract_whose_task_is_finished() {
         &repository.path,
         &["task", "create", file.to_str().expect("a path")],
     );
-    moved_to(&repository, "FRK-1", "accepted");
+    moved_to(&repository, "CTV-1", "accepted");
 
-    let ran = run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+    let ran = run_in(&repository.path, &["contract", "lock", "CTV-1"]);
 
     assert_eq!(ran.code, 1);
     assert!(
@@ -1079,13 +1079,13 @@ fn refuses_to_take_a_contract_whose_task_is_finished() {
     // And the governor is asked before the contract is found to be held already, so a task nothing
     // can be written to says that rather than answering about the lock.
     let files = files_of(&repository);
-    let id = TaskId::try_from("FRK-1").expect("a task id");
+    let id = TaskId::try_from("CTV-1").expect("a task id");
     let mut contract = files.read_contract(&id).expect("a contract");
     contract.locked = true;
     files
         .write_contract(&contract)
         .expect("the contract is written");
-    let again = run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+    let again = run_in(&repository.path, &["contract", "lock", "CTV-1"]);
 
     assert_eq!(again.code, 1);
     assert!(
@@ -1095,7 +1095,7 @@ fn refuses_to_take_a_contract_whose_task_is_finished() {
     );
 }
 
-/// A project with FRK-1 filed and a second contract, FRK-7, written straight to its file, so that
+/// A project with CTV-1 filed and a second contract, CTV-7, written straight to its file, so that
 /// the log has never heard of it.
 fn a_project_with_a_contract_only_the_files_know(name: &str) -> TempRepo {
     let repository = a_project(name);
@@ -1107,9 +1107,9 @@ fn a_project_with_a_contract_only_the_files_know(name: &str) -> TempRepo {
     assert_eq!(created.code, 0, "{}", created.err);
     let files = files_of(&repository);
     let mut contract = files
-        .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+        .read_contract(&TaskId::try_from("CTV-1").expect("a task id"))
         .expect("a contract");
-    contract.id = TaskId::try_from("FRK-7").expect("a task id");
+    contract.id = TaskId::try_from("CTV-7").expect("a task id");
     files
         .write_contract(&contract)
         .expect("the contract is written");
@@ -1125,9 +1125,9 @@ fn shows_the_status_the_log_says_and_that_the_file_disagrees() {
         &repository.path,
         &["task", "create", file.to_str().expect("a path")],
     );
-    moved_to(&repository, "FRK-1", "refining");
+    moved_to(&repository, "CTV-1", "refining");
 
-    let ran = run_in(&repository.path, &["task", "show", "FRK-1"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-1"]);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert_eq!(
@@ -1149,7 +1149,7 @@ fn shows_the_status_the_log_says_and_that_the_file_disagrees() {
 fn shows_a_task_the_log_has_never_heard_of_and_says_so() {
     let repository = a_project_with_a_contract_only_the_files_know("cli-show-unheard");
 
-    let ran = run_in(&repository.path, &["task", "show", "FRK-7"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-7"]);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
@@ -1168,13 +1168,13 @@ fn refuses_to_change_a_task_the_log_has_never_heard_of() {
     let before = kinds_in(&repository);
 
     for args in [
-        &["triage", "FRK-7", "small", "--reason", "one screen"][..],
-        &["contract", "lock", "FRK-7"][..],
+        &["triage", "CTV-7", "small", "--reason", "one screen"][..],
+        &["contract", "lock", "CTV-7"][..],
     ] {
         let ran = run_in(&repository.path, args);
         assert_eq!(ran.code, 1, "{args:?}: {}", ran.out);
         assert!(
-            ran.err.contains("the log has never heard of FRK-7"),
+            ran.err.contains("the log has never heard of CTV-7"),
             "{args:?}: {}",
             ran.err
         );
@@ -1204,9 +1204,9 @@ fn prints_what_it_did_as_json_when_asked() {
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     let printed: Value = serde_json::from_str(ran.out.trim()).expect("one JSON object per run");
-    assert_eq!(printed["task_id"], json!("FRK-1"));
+    assert_eq!(printed["task_id"], json!("CTV-1"));
     assert_eq!(printed["status"], json!("draft"));
-    assert_eq!(printed["path"], json!(".catervas/contracts/FRK-1.yaml"));
+    assert_eq!(printed["path"], json!(".catervas/contracts/CTV-1.yaml"));
     assert!(printed["events"].is_array(), "{printed}");
 }
 
@@ -1331,7 +1331,7 @@ fn files_a_task_under_an_epic_in_progress() {
     sized(&repository, "epic.yaml", "A whole board", "large");
     project::walked(
         &repository,
-        "FRK-1",
+        "CTV-1",
         &["refining", "ready", "assigned", "in_progress"],
     );
     let child = a_request_file(&repository, "child.yaml", "One row of the board");
@@ -1343,22 +1343,22 @@ fn files_a_task_under_an_epic_in_progress() {
             "create",
             child.to_str().expect("a path"),
             "--parent",
-            "FRK-1",
+            "CTV-1",
         ],
     );
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
-        ran.out.starts_with("FRK-2 filed as a task of FRK-1: "),
+        ran.out.starts_with("CTV-2 filed as a task of CTV-1: "),
         "{}",
         ran.out
     );
     let contract = files_of(&repository)
-        .read_contract(&TaskId::try_from("FRK-2").expect("a task id"))
+        .read_contract(&TaskId::try_from("CTV-2").expect("a task id"))
         .expect("the child is written");
     assert_eq!(
         contract.parent.as_ref().map(|parent| parent.as_str()),
-        Some("FRK-1")
+        Some("CTV-1")
     );
     assert_eq!(contract.kind.to_string(), "task");
     let triaged = project::events(&repository, &[EventKind::RequestTriaged])
@@ -1369,7 +1369,7 @@ fn files_a_task_under_an_epic_in_progress() {
     };
     assert_eq!(body.size.to_string(), "small");
     assert_eq!(body.triaged_by, "human");
-    assert_eq!(body.reason, "a task of FRK-1");
+    assert_eq!(body.reason, "a task of CTV-1");
 }
 
 #[cfg(unix)]
@@ -1379,14 +1379,14 @@ fn refuses_a_parent_that_is_not_an_epic_in_progress() {
     let repository = a_project("cli-child-refused");
     sized(&repository, "task.yaml", "One board", "small");
     sized(&repository, "epic.yaml", "A whole board", "large");
-    project::walked(&repository, "FRK-2", &["refining", "ready"]);
+    project::walked(&repository, "CTV-2", &["refining", "ready"]);
     let child = a_request_file(&repository, "child.yaml", "One row of the board");
     let before = kinds_in(&repository).len();
 
     for (parent, words) in [
-        ("FRK-1", "is not an epic"),
+        ("CTV-1", "is not an epic"),
         (
-            "FRK-2",
+            "CTV-2",
             "the epic is ready and its tasks are written while it is in progress",
         ),
     ] {
@@ -1407,7 +1407,7 @@ fn refuses_a_parent_that_is_not_an_epic_in_progress() {
     assert!(
         !repository
             .path
-            .join(".catervas/contracts/FRK-3.yaml")
+            .join(".catervas/contracts/CTV-3.yaml")
             .exists(),
         "nothing is filed"
     );

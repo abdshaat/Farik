@@ -559,7 +559,7 @@ mod tests {
     };
 
     /// A project with the Procurement Specialists `proc` and `proc-2` and the Finance Specialist
-    /// `fin`, each in progress on a task of its own: FRK-1, FRK-2 and FRK-3.
+    /// `fin`, each in progress on a task of its own: CTV-1, CTV-2 and CTV-3.
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(
             name,
@@ -576,9 +576,9 @@ mod tests {
             }),
         );
         for (task, role, assignee) in [
-            ("FRK-1", "procurement_specialist", "proc"),
-            ("FRK-2", "finance_specialist", "fin"),
-            ("FRK-3", "procurement_specialist", "proc-2"),
+            ("CTV-1", "procurement_specialist", "proc"),
+            ("CTV-2", "finance_specialist", "fin"),
+            ("CTV-3", "procurement_specialist", "proc-2"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -610,11 +610,11 @@ mod tests {
         input
     }
 
-    /// `catervas_draft_seller_message` as `proc` in its implement session of FRK-1.
+    /// `catervas_draft_seller_message` as `proc` in its implement session of CTV-1.
     fn draft(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             "catervas_draft_seller_message",
             input.clone(),
         )
@@ -671,7 +671,7 @@ mod tests {
 
     /// The owner's step on `order`: no agent, no session.
     fn owner_decides(project: &TestProject, kind: &str, body: &Value) {
-        project.record("FRK-1", kind, body);
+        project.record("CTV-1", kind, body);
     }
 
     /// A conversation: message 1 sent after the founder edited it and answered, message 2 that a
@@ -738,7 +738,7 @@ mod tests {
         let read = project
             .call(
                 "proc",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_read_seller_messages",
                 json!({}),
             )
@@ -766,7 +766,7 @@ mod tests {
         let replies = project
             .call(
                 "proc",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_read_seller_replies",
                 json!({}),
             )
@@ -806,7 +806,7 @@ mod tests {
         let none = project
             .call(
                 "proc",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_read_seller_replies",
                 json!({ "message": 2 }),
             )
@@ -815,7 +815,7 @@ mod tests {
         let one = project
             .call(
                 "proc",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_read_seller_replies",
                 json!({ "message": 1 }),
             )
@@ -833,9 +833,9 @@ mod tests {
             "catervas_read_seller_replies",
         ] {
             // Another role, and a verify session.
-            let reason = refusal_of(project.call("fin", Some("FRK-2"), tool, json!({})));
+            let reason = refusal_of(project.call("fin", Some("CTV-2"), tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
-            let mut context = project.context("proc", Some("FRK-1"));
+            let mut context = project.context("proc", Some("CTV-1"));
             context.purpose = SessionPurpose::Verify;
             let reason = refusal_of(run(&context, tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
@@ -847,7 +847,7 @@ mod tests {
             // Procurement Specialist's.
             let reason = refusal_of(project.call("proc", None, tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
-            let reason = refusal_of(project.call("proc", Some("FRK-3"), tool, json!({})));
+            let reason = refusal_of(project.call("proc", Some("CTV-3"), tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
         }
     }
@@ -938,7 +938,7 @@ mod tests {
         let ids = &events[0].envelope.ids;
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(ids.agent_id.as_deref(), Some("proc"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
@@ -977,20 +977,20 @@ mod tests {
         // implement session of another's task.
         let reason = refusal_of(project.call(
             "fin",
-            Some("FRK-2"),
+            Some("CTV-2"),
             "catervas_draft_seller_message",
             quote(),
         ));
         assert!(reason.starts_with("seller_message_refused: "), "{reason}");
         for purpose in [SessionPurpose::Chat, SessionPurpose::Verify] {
-            let mut context = project.context("proc", Some("FRK-1"));
+            let mut context = project.context("proc", Some("CTV-1"));
             context.purpose = purpose;
             let reason = refusal_of(run(&context, "catervas_draft_seller_message", quote()));
             assert!(reason.starts_with("seller_message_refused: "), "{reason}");
         }
         let reason = refusal_of(project.call(
             "proc",
-            Some("FRK-3"),
+            Some("CTV-3"),
             "catervas_draft_seller_message",
             quote(),
         ));
@@ -1137,10 +1137,10 @@ mod tests {
             input["purchase_order"] = order;
             input
         };
-        drafted_order(&project, "proc", "FRK-1", 12);
-        drafted_order(&project, "proc-2", "FRK-3", 13);
-        drafted_order(&project, "proc", "FRK-1", 14);
-        drafted_order(&project, "proc", "FRK-1", 15);
+        drafted_order(&project, "proc", "CTV-1", 12);
+        drafted_order(&project, "proc-2", "CTV-3", 13);
+        drafted_order(&project, "proc", "CTV-1", 14);
+        drafted_order(&project, "proc", "CTV-1", 15);
         owner_decides(
             &project,
             "purchase_order.approved",
@@ -1223,7 +1223,7 @@ mod tests {
 
         // An order's message whose order was rejected no longer counts.
         let project = a_project("seller-draft-twenty-order");
-        drafted_order(&project, "proc", "FRK-1", 12);
+        drafted_order(&project, "proc", "CTV-1", 12);
         let mut order_message = with(quote(), "purpose", json!("purchase_order"));
         order_message["purchase_order"] = json!(12);
         draft(&project, &order_message).expect("an order message");

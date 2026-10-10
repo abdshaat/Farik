@@ -1324,7 +1324,7 @@ mod tests {
     use serde_json::json;
 
     use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
-    use crate::recorded::fixtures::implement_finishes_frk_1;
+    use crate::recorded::fixtures::implement_finishes_ctv_1;
     use crate::session::SessionPurpose;
 
     use catervas_core::team::Effort;
@@ -1337,7 +1337,7 @@ mod tests {
     use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
 
-    /// The tiers and Catervas's tools the Developer's implement session of FRK-1 was given, on a team
+    /// The tiers and Catervas's tools the Developer's implement session of CTV-1 was given, on a team
     /// whose permission answers `answers` sets. Commands and pushes go through Catervas's tools
     /// (`catervas_exec`, `catervas_git_push`); no built-in runs either.
     async fn implementing_under(
@@ -1347,8 +1347,8 @@ mod tests {
         let harness = Harness::new(name, |wire| {
             wire["policy"]["permissions"] = answers.clone();
         });
-        harness.assigned("FRK-1", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1()]);
         let witness = Arc::new(ExecutorWitness::new(
             adapter.clone(),
             Arc::clone(&harness.daemon),
@@ -1444,7 +1444,7 @@ mod tests {
         assert!(offered_connector(iris, SessionPurpose::Verify, browser).is_none());
     }
 
-    /// Iris's explore session of FRK-1, in its worktree.
+    /// Iris's explore session of CTV-1, in its worktree.
     fn exploring<'a>(
         harness: &Harness,
         team: &'a catervas_core::team::Team,
@@ -1454,7 +1454,7 @@ mod tests {
             agent: agent(team, "iris"),
             contract: Some(contract),
             purpose: SessionPurpose::Explore,
-            cwd: harness.worktree("FRK-1"),
+            cwd: harness.worktree("CTV-1"),
             executor: None,
             read_only: true,
             only_tool: None,
@@ -1474,7 +1474,7 @@ mod tests {
         let mut harness = Harness::new("preview-once-per-tree", browsing);
         let previews = Arc::new(FakePreviews::ready());
         harness.previews = previews.clone();
-        harness.in_progress("FRK-1", "iris", "ada");
+        harness.in_progress("CTV-1", "iris", "ada");
         let adapter = harness.recorded(vec![
             crate::recorded::fixtures::reads_a_file(),
             crate::recorded::fixtures::reads_a_file(),
@@ -1490,7 +1490,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
 
         for _ in 0..2 {
@@ -1498,7 +1498,7 @@ mod tests {
                 .await
                 .expect("the session runs");
         }
-        let worktree = harness.worktree("FRK-1");
+        let worktree = harness.worktree("CTV-1");
         std::fs::write(worktree.join("site.txt"), "two").expect("written");
         catervas_store::git::fixtures::git_in(&worktree, &["add", "site.txt"]);
         catervas_store::git::fixtures::git_in(&worktree, &["commit", "-q", "-m", "A new page"]);
@@ -1553,7 +1553,7 @@ mod tests {
                 .expect("the output folder is mounted");
             let screenshots = crate::tools::design::screenshots(
                 deps.tools.files.root(),
-                &"FRK-1".parse().expect("an id"),
+                &"CTV-1".parse().expect("an id"),
             );
             assert!(
                 !std::path::Path::new(source).starts_with(&screenshots),
@@ -1573,7 +1573,7 @@ mod tests {
         );
     }
 
-    /// `agent`'s session of FRK-1 for `purpose`, in its worktree.
+    /// `agent`'s session of CTV-1 for `purpose`, in its worktree.
     fn a_session<'a>(
         harness: &Harness,
         team: &'a catervas_core::team::Team,
@@ -1598,7 +1598,7 @@ mod tests {
 
         let mut harness = Harness::new("preview-network-tier", browsing);
         harness.previews = Arc::new(FakePreviews::ready());
-        harness.in_progress("FRK-1", "iris", "ada");
+        harness.in_progress("CTV-1", "iris", "ada");
         let adapter = harness.recorded(vec![
             crate::recorded::fixtures::reads_a_file(),
             crate::recorded::fixtures::reads_a_file(),
@@ -1614,7 +1614,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
 
         for (who, purpose) in [
@@ -1645,14 +1645,14 @@ mod tests {
         let checks = |name: &str, previews: Arc<dyn crate::preview::PreviewFactory>| {
             let mut harness = Harness::new(name, browsing);
             harness.previews = previews;
-            harness.in_progress("FRK-1", "iris", "ada");
+            harness.in_progress("CTV-1", "iris", "ada");
             let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
             let deps = &orchestrator.deps;
             let team = deps.tools.files.read_team().expect("the team");
             let contract = deps
                 .tools
                 .files
-                .read_contract(&"FRK-1".parse().expect("an id"))
+                .read_contract(&"CTV-1".parse().expect("an id"))
                 .expect("the contract");
             [
                 ("iris", SessionPurpose::Implement),
@@ -1721,7 +1721,7 @@ mod tests {
         ] {
             let mut harness = Harness::new(name, browsing);
             harness.previews = Arc::new(FakePreviews::failing(error));
-            harness.in_progress("FRK-1", "iris", "ada");
+            harness.in_progress("CTV-1", "iris", "ada");
             let adapter = harness.recorded(Vec::new());
             let orchestrator = harness.orchestrator(adapter.clone());
             let deps = &orchestrator.deps;
@@ -1729,7 +1729,7 @@ mod tests {
             let contract = deps
                 .tools
                 .files
-                .read_contract(&"FRK-1".parse().expect("an id"))
+                .read_contract(&"CTV-1".parse().expect("an id"))
                 .expect("the contract");
 
             run_session(deps, &team, exploring(&harness, &team, &contract))
@@ -1738,7 +1738,7 @@ mod tests {
 
             assert!(adapter.started().is_empty(), "{name}: no session starts");
             assert_eq!(
-                harness.row("FRK-1").status,
+                harness.row("CTV-1").status,
                 catervas_core::contract::TaskStatus::Escalated,
                 "{name}"
             );
@@ -1787,14 +1787,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_no_post_to_a_one_tool_session() {
         let harness = Harness::new("session-no-post", |_| {});
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let pm = team.active_agents().next().expect("an agent");
         let spec = |purpose, only_tool| {
@@ -1837,14 +1837,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_no_memory_to_a_one_tool_session() {
         let harness = Harness::new("session-no-memory", |_| {});
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let pm = team.active_agents().next().expect("an agent");
         let spec = |purpose, only_tool| {
@@ -1894,14 +1894,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn gives_a_one_tool_session_that_tool_alone() {
         let harness = Harness::new("session-one-tool", |_| {});
-        harness.file("FRK-1", "refining", |_| {});
+        harness.file("CTV-1", "refining", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let pm = team.active_agents().next().expect("an agent");
 
@@ -2010,14 +2010,14 @@ mod tests {
                     "marketing_specialist",
                 ));
         });
-        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("CTV-1", "kai", "pm");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let offered = |name: &str, who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
@@ -2062,20 +2062,20 @@ mod tests {
             "catervas_read_seller_replies",
         ];
         let harness = Harness::with_procurement("session-seller-tools");
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.ready("FRK-2");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.ready("CTV-2");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let procurement = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let developers = deps
             .tools
             .files
-            .read_contract(&"FRK-2".parse().expect("an id"))
+            .read_contract(&"CTV-2".parse().expect("an id"))
             .expect("the contract");
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
@@ -2121,14 +2121,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn procurement_is_offered_its_tools() {
         let harness = Harness::with_procurement("session-procurement-offer");
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let procurement = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let offered = |who: &str, purpose: SessionPurpose, about, tools: &[&'static str]| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
@@ -2212,9 +2212,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_evaluations_to_procurement_alone() {
         let harness = Harness::with_procurement("session-evaluation-offer");
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.finance_task("FRK-2", Some("in_progress"));
-        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.finance_task("CTV-2", Some("in_progress"));
+        harness.in_progress("CTV-3", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2224,7 +2224,7 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
@@ -2285,17 +2285,17 @@ mod tests {
             with_the_marketing_specialist(wire);
         });
         // A finance task `fin` holds and `pm` reviews, and a Developer's task.
-        harness.file("FRK-1", "ready", |wire| {
+        harness.file("CTV-1", "ready", |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("product_manager");
         });
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "ready",
             "assigned",
             &json!({ "assignee": "fin", "reviewer": "pm" }),
         );
-        harness.in_progress("FRK-2", "dev-a", "dev-b");
+        harness.in_progress("CTV-2", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2305,7 +2305,7 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (finance, developers) = (read("FRK-1"), read("FRK-2"));
+        let (finance, developers) = (read("CTV-1"), read("CTV-2"));
         let sheet_tools = [
             "catervas_read_costs",
             "catervas_read_sheet",
@@ -2386,9 +2386,9 @@ mod tests {
             with_the_marketing_specialist(wire);
             with_the_procurement_specialist(wire);
         });
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.finance_task("FRK-2", Some("in_progress"));
-        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.finance_task("CTV-2", Some("in_progress"));
+        harness.in_progress("CTV-3", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2398,7 +2398,7 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
         let site_tools = ["catervas_read_sites", "catervas_request_sites"];
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
@@ -2489,9 +2489,9 @@ mod tests {
             with_the_marketing_specialist(wire);
             with_the_procurement_specialist(wire);
         });
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.finance_task("FRK-2", Some("in_progress"));
-        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.finance_task("CTV-2", Some("in_progress"));
+        harness.in_progress("CTV-3", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2501,7 +2501,7 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
         let order_tools = [
             "catervas_draft_purchase_order",
             "catervas_read_purchase_orders",
@@ -2594,9 +2594,9 @@ mod tests {
             with_the_marketing_specialist(wire);
             with_the_procurement_specialist(wire);
         });
-        harness.procurement_task("FRK-1", Some("in_progress"));
-        harness.finance_task("FRK-2", Some("in_progress"));
-        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        harness.finance_task("CTV-2", Some("in_progress"));
+        harness.in_progress("CTV-3", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2606,7 +2606,7 @@ mod tests {
                 .read_contract(&task.parse().expect("an id"))
                 .expect("the contract")
         };
-        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
         let asked_and_read = [
             "catervas_request_data_pipeline",
             "catervas_read_data_pipelines",
@@ -2702,14 +2702,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_the_reply_only_in_a_chat() {
         let harness = Harness::new("session-chat-reply-only", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let (dev_a, dev_b) = (agent(&team, "dev-a"), agent(&team, "dev-b"));
         let tools = |ask: SessionAsk<'_>| {
@@ -2740,7 +2740,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn prompts_with_the_chat_alone() {
         let harness = Harness::new("session-chat-prompt", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let deps = &harness.project.deps;
         let chat = |agent: &str, author: &str, text: String| {
             crate::chat::post_chat(
@@ -2809,7 +2809,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("an id"))
+            .read_contract(&"CTV-1".parse().expect("an id"))
             .expect("the contract");
         let implement = session_spec(
             deps,
@@ -3059,7 +3059,7 @@ mod tests {
         assert!(harness.daemon.set_connector_secrets(store));
     }
 
-    /// `dev-a`'s session of FRK-1 for `purpose`, with `only_tool` and `thread`.
+    /// `dev-a`'s session of CTV-1 for `purpose`, with `only_tool` and `thread`.
     fn dev_asks<'a>(
         harness: &Harness,
         team: &'a catervas_core::team::Team,
@@ -3137,7 +3137,7 @@ mod tests {
     fn one_tool_sessions_get_no_skills() {
         let (pin, text) = a_skill_pin("api-style", "ZEBRA-STYLE-BODY");
         let harness = Harness::new("session-skills-which", |wire| wire["skills"] = json!([pin]));
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "api-style",
@@ -3151,7 +3151,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let skills = |purpose, only_tool| {
             let spec = session_spec(
@@ -3200,7 +3200,7 @@ mod tests {
         let harness = Harness::new("session-skills-prompt", |wire| {
             wire["skills"] = json!([pin]);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "api-style",
@@ -3214,7 +3214,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3245,7 +3245,7 @@ mod tests {
         let harness = Harness::new("session-skills-replaced", |wire| {
             wire["skills"] = json!([pin]);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "writing-task-contracts",
@@ -3324,7 +3324,7 @@ mod tests {
         let harness = Harness::new("session-skills-register", |wire| {
             wire["skills"] = json!([pin]);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "api-style",
@@ -3338,7 +3338,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3368,7 +3368,7 @@ mod tests {
         let harness = Harness::new("session-skills-removed", |wire| {
             wire["skills"] = json!([pin]);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         put_skill(
             &harness,
             "api-style",
@@ -3387,7 +3387,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3403,7 +3403,7 @@ mod tests {
     async fn a_session_is_registered_with_its_skills() {
         let (pin, text) = a_skill_pin("api-style", "x");
         let harness = Harness::new("session-skills-hook", |wire| wire["skills"] = json!([pin]));
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         put_skill(
             &harness,
             "api-style",
@@ -3411,7 +3411,7 @@ mod tests {
             pin["sha256"].as_str().expect("a hash"),
             true,
         );
-        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1()]);
         let witness = Arc::new(
             ExecutorWitness::probing(adapter.clone(), Arc::clone(&harness.daemon), &["Skill"])
                 .with_input(json!({ "skill": "catervas:api-style" })),
@@ -3439,7 +3439,7 @@ mod tests {
             let harness = Harness::new(&format!("session-skills-kind-{n}"), |wire| {
                 wire["skills"] = json!([pin]);
             });
-            harness.file("FRK-1", "draft", |_| {});
+            harness.file("CTV-1", "draft", |_| {});
             put_skill(
                 &harness,
                 "api-style",
@@ -3458,7 +3458,7 @@ mod tests {
             let contract = deps
                 .tools
                 .files
-                .read_contract(&"FRK-1".parse().expect("a task id"))
+                .read_contract(&"CTV-1".parse().expect("a task id"))
                 .expect("the contract");
             let spec = session_spec(
                 deps,
@@ -3478,7 +3478,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn gives_custom_servers_to_task_sessions_only() {
         let harness = Harness::new("session-custom-which", with_custom_servers);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         connect(&harness, &["github", "linear"], |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
@@ -3486,7 +3486,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let servers = |purpose, only_tool| {
             let spec = session_spec(
@@ -3529,7 +3529,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn mcp_json_holds_no_secret() {
         let harness = Harness::new("session-custom-mcp-json", with_custom_servers);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         connect(&harness, &["github", "linear"], |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
@@ -3537,7 +3537,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3596,7 +3596,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn denied_tools_join_disallowed_tools() {
         let harness = Harness::new("session-custom-denied", with_custom_servers);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         connect(&harness, &["github", "linear"], |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let deps = &orchestrator.deps;
@@ -3604,7 +3604,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3738,7 +3738,7 @@ mod tests {
         use crate::tools::fixtures::a_developer_kit;
 
         let harness = Harness::new("session-kit-stale", with_a_kit_server);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         harness
             .project
             .set_kit(a_developer_kit(&[], Some("network")));
@@ -3749,7 +3749,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let given = || {
             let spec = session_spec(
@@ -3791,7 +3791,7 @@ mod tests {
         use crate::tools::fixtures::a_developer_kit;
 
         let harness = Harness::new("session-kit-given", with_a_kit_server);
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         harness
             .project
             .set_kit(a_developer_kit(&[], Some("network")));
@@ -3802,7 +3802,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3861,7 +3861,7 @@ mod tests {
 
         let (pin, text) = a_skill_pin("launch-plans", "THE-TEAMS-LAUNCH-PLANS");
         let harness = Harness::new("session-kit-skills", |wire| wire["skills"] = json!([pin]));
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         harness.project.set_kit(a_developer_kit(
             &[("launch-plans", "THE-KITS-LAUNCH-PLANS")],
             None,
@@ -3872,7 +3872,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let loaded = || {
             let spec = session_spec(
@@ -3913,7 +3913,7 @@ mod tests {
         );
         // With no skill of the name on the team, the kit's loads.
         let bare = Harness::new("session-kit-skills-bare", |_| {});
-        bare.file("FRK-1", "draft", |_| {});
+        bare.file("CTV-1", "draft", |_| {});
         bare.project.set_kit(a_developer_kit(
             &[("launch-plans", "THE-KITS-LAUNCH-PLANS")],
             None,
@@ -3924,7 +3924,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -3987,7 +3987,7 @@ mod tests {
                 .expect("a list")
                 .truncate(1);
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         let store = Arc::new(Flaky::default());
         let deps = &harness.project.deps;
         let team = deps.files.read_team().expect("the team");
@@ -4030,7 +4030,7 @@ mod tests {
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let contract = deps
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let given = || {
             let spec = session_spec(
@@ -4077,7 +4077,7 @@ mod tests {
             servers.push(jira);
             servers.push(asana);
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         // `linear` was connected at another address than the team file now names.
         connect(&harness, &["github", "linear", "asana"], |server| {
             if let catervas_core::team::CustomTransport::Http { url, .. } = &mut server.transport
@@ -4130,7 +4130,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         run_session(
             deps,
@@ -4250,7 +4250,7 @@ mod tests {
         let harness = Harness::new("session-signed-refresh", |wire| {
             signed_in_server(wire, &fixture.mcp_url, &json!({}));
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         // Ten minutes left, and the session may run thirty.
         let old = keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
@@ -4260,7 +4260,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         run_session(
             deps,
@@ -4296,7 +4296,7 @@ mod tests {
         let harness = Harness::new("session-signed-lapsed", |wire| {
             signed_in_server(wire, &fixture.mcp_url, &json!({}));
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
         let witness = Arc::new(ExecutorWitness::probing(
@@ -4310,7 +4310,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         run_session(
             deps,
@@ -4412,7 +4412,7 @@ mod tests {
         let fixture = runtime.block_on(crate::oauth_fixture::Fixture::start());
         fixture.set(|flags| flags.client_secret = Some(secret.to_string()));
         let harness = Harness::new("session-catervas-refresh", signed_in_catervas_connector);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let old = keep_signed_in_catervas(&harness, &fixture, chrono::Duration::minutes(10));
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -4421,7 +4421,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         runtime
             .block_on(run_session(
@@ -4454,7 +4454,7 @@ mod tests {
             flags.refresh_error = Some((400, "invalid_grant".to_string()));
         });
         let harness = Harness::new("session-catervas-lapsed", signed_in_catervas_connector);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         keep_signed_in_catervas(&harness, &fixture, chrono::Duration::minutes(10));
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -4463,7 +4463,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         runtime
             .block_on(run_session(
@@ -4496,7 +4496,7 @@ mod tests {
             let harness = Harness::new(&format!("session-signed-errs-{minutes}"), |wire| {
                 signed_in_server(wire, &fixture.mcp_url, &json!({}));
             });
-            harness.in_progress("FRK-1", "dev-a", "dev-b");
+            harness.in_progress("CTV-1", "dev-a", "dev-b");
             keep_signed_in(
                 &harness,
                 &fixture,
@@ -4510,7 +4510,7 @@ mod tests {
             let contract = deps
                 .tools
                 .files
-                .read_contract(&"FRK-1".parse().expect("a task id"))
+                .read_contract(&"CTV-1".parse().expect("a task id"))
                 .expect("the contract");
             run_session(
                 deps,
@@ -4531,7 +4531,7 @@ mod tests {
         let harness = Harness::new("session-signed-slow", |wire| {
             signed_in_server(wire, &fixture.mcp_url, &json!({}));
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         // Ten minutes left, a session of thirty, and the service not answering the refresh.
         let old = keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
         fixture.hold("token");
@@ -4542,7 +4542,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         run_session(
             deps,
@@ -4586,7 +4586,7 @@ mod tests {
                 &json!({ "scopes": ["read", "write"] }),
             );
         });
-        harness.file("FRK-1", "draft", |_| {});
+        harness.file("CTV-1", "draft", |_| {});
         keep_signed_in(
             &harness,
             &fixture,
@@ -4606,7 +4606,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let spec = session_spec(
             deps,
@@ -4638,7 +4638,7 @@ mod tests {
                 .push(github);
         });
         harness.previews = Arc::new(FakePreviews::ready());
-        harness.in_progress("FRK-1", "dev-a", "ada");
+        harness.in_progress("CTV-1", "dev-a", "ada");
         connect(&harness, &["github"], |_| {});
         let adapter = harness.recorded(vec![
             crate::recorded::fixtures::reads_a_file(),
@@ -4655,7 +4655,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let without_network = agent(&team, "dev-a").tiers(&team.permissions());
         assert!(!without_network.contains(&PermissionTier::Network));
@@ -4698,7 +4698,7 @@ mod tests {
             );
         }
     }
-    /// dev-a's implement session of FRK-1, given `github`, whose start calls each of `probes`.
+    /// dev-a's implement session of CTV-1, given `github`, whose start calls each of `probes`.
     async fn probed_session(
         harness: &Harness,
         probes: &[&str],
@@ -4724,7 +4724,7 @@ mod tests {
         let contract = deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let end = run_session(
             deps,
@@ -4740,7 +4740,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn an_external_effect_call_asks_and_stops() {
         let harness = Harness::new("session-approval-asks", with_custom_servers);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         connect(&harness, &["github"], |_| {});
         let (witness, end) = probed_session(&harness, &["mcp__github__create_issue"]).await;
 
@@ -4780,9 +4780,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn an_approval_stop_is_not_a_failed_try() {
         let harness = Harness::new("session-approval-try", with_custom_servers);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         connect(&harness, &["github"], |_| {});
-        let before = harness.row("FRK-1");
+        let before = harness.row("CTV-1");
         let adapter = harness.recorded(vec![
             crate::recorded::fixtures::reads_a_file(),
             crate::recorded::fixtures::reads_a_file(),
@@ -4797,7 +4797,7 @@ mod tests {
         assert_eq!(adapter.started().len(), 1);
         assert_eq!(harness.events(&[EventKind::ToolApprovalRequested]).len(), 1);
 
-        let after = harness.row("FRK-1");
+        let after = harness.row("CTV-1");
         assert_eq!(
             (after.status, after.iteration),
             (before.status, before.iteration)
@@ -4811,7 +4811,7 @@ mod tests {
             .costs(catervas_store::CostScope::Task)
             .expect("the costs read")
             .into_iter()
-            .find(|row| row.key == "FRK-1")
+            .find(|row| row.key == "CTV-1")
             .map(|row| row.sessions);
         assert_eq!(sessions, Some(1), "max_sessions counts it");
         // While it waits, no session starts for it.
@@ -4823,7 +4823,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_next_session_is_told_and_runs_the_call_once() {
         let harness = Harness::new("session-approval-granted", with_custom_servers);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         connect(&harness, &["github"], |_| {});
         let create = "mcp__github__create_issue";
         probed_session(&harness, &[create]).await;
@@ -4874,7 +4874,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_next_session_is_shown_the_input_and_replays_it_through() {
         let harness = Harness::new("session-approval-replay", with_custom_servers);
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         connect(&harness, &["github"], |_| {});
         let create = "mcp__github__create_issue";
         // Keys out of order, a line break, a quote, and a non-ASCII letter: what an agent could not write again from memory.

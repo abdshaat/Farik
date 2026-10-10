@@ -37,7 +37,7 @@ export const MESSAGE = {
 	subject: `Quote for 500 printed pie boxes ${MARKUP}`,
 	body: `Hello,\n\nCould you quote 500 printed pie boxes?\n${MARKUP}‮\n\nThank you.`,
 	purpose: "quote_request",
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	agent_id: "ivo",
 	drafted_at: at(26, 8),
 };
@@ -102,7 +102,7 @@ export const WRITTEN_MAILBOX = { ...MAILBOX, name: `Sam${HIDE} Ortiz` };
 export const REPLY = {
 	reply: 7,
 	message: 1,
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	seller: "Packaging Express",
 	sent_subject: "Quote for 500 printed pie boxes",
 	from: "Dana Reyes <sales@packagingexpress.test>",
@@ -185,7 +185,7 @@ export async function todayWithMail(fields: {
 		await answerQuery(s, "tasks.list", {
 			tasks: [
 				{
-					task_id: "FRK-31",
+					task_id: "CTV-31",
 					kind: "task",
 					title: "Find a supplier for 500 pie boxes",
 					status: "in_progress",

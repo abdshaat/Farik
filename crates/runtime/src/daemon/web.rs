@@ -2057,7 +2057,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_the_task_with_its_plan() {
         let harness = Harness::new("rpc-design-plan", |_| {});
-        harness.file("FRK-1", "in_progress", |_| {});
+        harness.file("CTV-1", "in_progress", |_| {});
         let (handle, mut socket) = driven(&harness).await;
         let mut id = 0;
         let mut plan_of = async |socket: &mut Socket| {
@@ -2066,14 +2066,14 @@ mod tests {
                 socket,
                 id,
                 "task.get",
-                &json!({ "task_id": "FRK-1" }),
+                &json!({ "task_id": "CTV-1" }),
                 "taskGetResult",
             )
             .await;
             got["design_plan"].clone()
         };
         let record = |kind: &str, body: Value| {
-            harness.project.record("FRK-1", kind, &body);
+            harness.project.record("CTV-1", kind, &body);
         };
 
         assert_eq!(plan_of(&mut socket).await, Value::Null);
@@ -2104,13 +2104,13 @@ mod tests {
         handle.shutdown().await.expect("the daemon stops");
     }
 
-    /// FRK-2, `dev-a`'s change to `site/style.css` on a team with the Designer, in `verifying`;
-    /// and FRK-1, a task with no change.
+    /// CTV-2, `dev-a`'s change to `site/style.css` on a team with the Designer, in `verifying`;
+    /// and CTV-1, a task with no change.
     fn a_ui_change(name: &str) -> Harness {
         let mut harness = Harness::new(name, crate::tools::fixtures::browsing);
         harness.previews = Arc::new(crate::preview::fixtures::FakePreviews::ready());
-        harness.file("FRK-1", "in_progress", |_| {});
-        harness.verifying_a_ui_change("FRK-2");
+        harness.file("CTV-1", "in_progress", |_| {});
+        harness.verifying_a_ui_change("CTV-2");
         harness
     }
 
@@ -2143,8 +2143,8 @@ mod tests {
                 .unwrap_or_else(|| panic!("{id} is listed: {listed}"))
         };
         // A UI change in review says where its design review stands, so the board need not ask.
-        assert_eq!(row("FRK-2")["design_review_state"], "waiting", "{listed}");
-        assert_eq!(row("FRK-1").get("design_review_state"), None, "{listed}");
+        assert_eq!(row("CTV-2")["design_review_state"], "waiting", "{listed}");
+        assert_eq!(row("CTV-1").get("design_review_state"), None, "{listed}");
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }
@@ -2158,7 +2158,7 @@ mod tests {
             .deps
             .files
             .root()
-            .join(".catervas/contracts/FRK-2.yaml");
+            .join(".catervas/contracts/CTV-2.yaml");
         std::fs::write(&contract, "not: [a contract\n").expect("written");
         let (handle, mut socket) = driven(&harness).await;
         let listed = query(&mut socket, 1, "tasks.list", &json!({}), "tasksListResult").await;
@@ -2167,7 +2167,7 @@ mod tests {
             .as_array()
             .map(|tasks| tasks.iter().map(|task| &task["task_id"]).collect())
             .unwrap_or_default();
-        assert_eq!(ids, vec!["FRK-1", "FRK-2"], "{listed}");
+        assert_eq!(ids, vec!["CTV-1", "CTV-2"], "{listed}");
         assert_eq!(
             listed["tasks"][1].get("design_review_state"),
             None,
@@ -2203,24 +2203,24 @@ mod tests {
         let on = Harness::new("rpc-backlog-on", |wire| {
             wire["policy"]["plan_in_sprints"] = json!(true);
         });
-        on.ready("FRK-1");
+        on.ready("CTV-1");
         // Under way since before the switch: no mark, so it keeps its lane.
-        on.file("FRK-2", "in_progress", |_| {});
+        on.file("CTV-2", "in_progress", |_| {});
         assert_eq!(
-            backlog_of(&on, &["FRK-1", "FRK-2"]),
+            backlog_of(&on, &["CTV-1", "CTV-2"]),
             [json!(true), json!(false)]
         );
-        on.open_sprint("S1", &["FRK-1"]);
+        on.open_sprint("S1", &["CTV-1"]);
         assert_eq!(
-            backlog_of(&on, &["FRK-1", "FRK-2"]),
+            backlog_of(&on, &["CTV-1", "CTV-2"]),
             [json!(false), json!(false)]
         );
 
         let off = Harness::new("rpc-backlog-off", |_| {});
-        off.ready("FRK-1");
-        off.file("FRK-2", "in_progress", |_| {});
+        off.ready("CTV-1");
+        off.file("CTV-2", "in_progress", |_| {});
         assert_eq!(
-            backlog_of(&off, &["FRK-1", "FRK-2"]),
+            backlog_of(&off, &["CTV-1", "CTV-2"]),
             [json!(false), json!(false)]
         );
     }
@@ -2247,17 +2247,17 @@ mod tests {
             .await
         };
 
-        let plain = get(&mut socket, 1, "FRK-1").await;
+        let plain = get(&mut socket, 1, "CTV-1").await;
         assert_eq!(plain["ui_change"], false, "{plain}");
         assert_eq!(plain["design_review"], Value::Null, "{plain}");
-        let waiting = get(&mut socket, 2, "FRK-2").await;
+        let waiting = get(&mut socket, 2, "CTV-2").await;
         assert_eq!(waiting["ui_change"], true, "{waiting}");
         assert_eq!(
             waiting["design_review"],
             json!({ "state": "waiting", "checks": [] })
         );
 
-        checked(&harness, "FRK-2", "phone", "dark", "s-1-phone-dark.png");
+        checked(&harness, "CTV-2", "phone", "dark", "s-1-phone-dark.png");
         let violation = json!({
             "rule": "color-contrast", "impact": "serious", "target": "h1",
             "help": "Elements must meet minimum color contrast ratio thresholds"
@@ -2266,7 +2266,7 @@ mod tests {
         harness.project.record_by(
             Some("iris"),
             at,
-            "FRK-2",
+            "CTV-2",
             "design_review.recorded",
             &json!({
                 "pass": false,
@@ -2274,7 +2274,7 @@ mod tests {
                 "checks": [{ "width": "phone", "theme": "dark", "violations": [violation] }]
             }),
         );
-        let failed = get(&mut socket, 3, "FRK-2").await;
+        let failed = get(&mut socket, 3, "CTV-2").await;
         assert_eq!(
             failed["design_review"],
             json!({
@@ -2293,11 +2293,11 @@ mod tests {
         harness.project.record_by(
             Some("iris"),
             at + chrono::Duration::hours(1),
-            "FRK-2",
+            "CTV-2",
             "design_review.recorded",
             &json!({ "pass": true, "reasons": "Darker now.", "checks": [] }),
         );
-        let both = get(&mut socket, 6, "FRK-2").await;
+        let both = get(&mut socket, 6, "CTV-2").await;
         assert_eq!(
             both["design_reviews"],
             json!([first, {
@@ -2312,14 +2312,14 @@ mod tests {
             .project
             .repo
             .path
-            .join(".catervas/local/screenshots/FRK-2");
+            .join(".catervas/local/screenshots/CTV-2");
         std::fs::create_dir_all(&folder).expect("made");
         std::fs::write(folder.join("s-1-phone-dark.png"), png).expect("written");
         let shot = query(
             &mut socket,
             4,
             "task.screenshot",
-            &json!({ "task_id": "FRK-2", "file": "s-1-phone-dark.png" }),
+            &json!({ "task_id": "CTV-2", "file": "s-1-phone-dark.png" }),
             "taskScreenshotResult",
         )
         .await;
@@ -2348,9 +2348,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn refuses_a_screenshot_the_task_did_not_take() {
         let harness = a_ui_change("rpc-screenshot-refused");
-        checked(&harness, "FRK-1", "phone", "light", "s-1-phone-light.png");
+        checked(&harness, "CTV-1", "phone", "light", "s-1-phone-light.png");
         let root = &harness.project.repo.path;
-        for task in ["FRK-1", "FRK-2"] {
+        for task in ["CTV-1", "CTV-2"] {
             let folder = root.join(".catervas/local/screenshots").join(task);
             std::fs::create_dir_all(&folder).expect("made");
             std::fs::write(folder.join("s-1-phone-light.png"), b"png").expect("written");
@@ -2363,7 +2363,7 @@ mod tests {
                 &mut socket,
                 id,
                 "query",
-                &json!({ "name": "task.screenshot", "params": { "task_id": "FRK-2", "file": file } }),
+                &json!({ "name": "task.screenshot", "params": { "task_id": "CTV-2", "file": file } }),
             )
             .await;
             assert_eq!(
@@ -2385,19 +2385,19 @@ mod tests {
     )]
     async fn answers_the_queries() {
         let harness = Harness::new("rpc-queries", |_| {});
-        harness.file("FRK-1", "refining", |_| {});
-        harness.file("FRK-2", "draft", |_| {});
+        harness.file("CTV-1", "refining", |_| {});
+        harness.file("CTV-2", "draft", |_| {});
         let (handle, mut socket) = driven(&harness).await;
 
         let listed = query(&mut socket, 1, "tasks.list", &json!({}), "tasksListResult").await;
-        assert_eq!(listed["tasks"][0]["task_id"], "FRK-1", "{listed}");
+        assert_eq!(listed["tasks"][0]["task_id"], "CTV-1", "{listed}");
         assert_eq!(listed["tasks"][0]["status"], "refining", "{listed}");
 
         let got = query(
             &mut socket,
             2,
             "task.get",
-            &json!({ "task_id": "FRK-1" }),
+            &json!({ "task_id": "CTV-1" }),
             "taskGetResult",
         )
         .await;
@@ -2406,7 +2406,7 @@ mod tests {
             &mut socket,
             3,
             "query",
-            &json!({ "name": "task.get", "params": { "task_id": "FRK-99" } }),
+            &json!({ "name": "task.get", "params": { "task_id": "CTV-99" } }),
         )
         .await;
         assert_eq!(missing["id"], 3, "{missing}");

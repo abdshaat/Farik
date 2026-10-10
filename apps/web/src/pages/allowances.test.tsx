@@ -665,7 +665,7 @@ describe("allowances on the screens", () => {
 		await answerQuery(s, "waiting.list", {
 			waiting: [
 				{
-					task_id: "FRK-16",
+					task_id: "CTV-16",
 					kind: "tool_approval",
 					agent_id: "kai",
 					title: "Launch post for gift cards",
@@ -718,7 +718,7 @@ describe("allowances on the screens", () => {
 		await answerQuery(s, "waiting.list", {
 			waiting: [
 				{
-					task_id: "FRK-16",
+					task_id: "CTV-16",
 					kind: "tool_approval",
 					agent_id: "kai",
 					title: "Launch post",
@@ -752,7 +752,7 @@ describe("allowances on the screens", () => {
 		await answerQuery(s, "waiting.list", {
 			waiting: [
 				{
-					task_id: "FRK-16",
+					task_id: "CTV-16",
 					kind: "tool_approval",
 					agent_id: "kai",
 					title: "Launch post",

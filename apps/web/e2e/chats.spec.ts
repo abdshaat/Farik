@@ -20,8 +20,8 @@ test("the user chats with an agent, and sends her proposal as a request, through
 		team: "pm-architect-developer",
 		transcripts: [
 			"chat_answers_with_a_request",
-			"triage_frk_1_small_by_pm",
-			"ask_with_choices_frk_1",
+			"triage_ctv_1_small_by_pm",
+			"ask_with_choices_ctv_1",
 			// Ada's answer, given while she is paused.
 			"chat_answers_with_a_request",
 		],
@@ -73,24 +73,24 @@ test("the user chats with an agent, and sends her proposal as a request, through
 
 		// 4. The proposal, sent by the user's hand.
 		await reply.getByRole("button", { name: "Send as a request" }).click();
-		const sent = reply.getByRole("link", { name: "Sent as FRK-1" });
-		await expect(sent).toHaveAttribute("href", "/requests/FRK-1");
+		const sent = reply.getByRole("link", { name: "Sent as CTV-1" });
+		await expect(sent).toHaveAttribute("href", "/requests/CTV-1");
 		const created = events(serve.project).find(
 			(e) => e.kind === "task.created",
 		);
-		expect(created?.task_id).toBe("FRK-1");
+		expect(created?.task_id).toBe("CTV-1");
 		expect(created?.body).toMatchObject({ created_by: "human" });
 		expect(created?.body.from_chat_message).toEqual(expect.any(Number));
 		await shots(page, "chats-sent");
 
-		// 5. FRK-1 on Today, where Mira asks about it.
+		// 5. CTV-1 on Today, where Mira asks about it.
 		await page.getByRole("link", { name: "Today" }).first().click();
 		await expect(page.getByText("Mira has a question")).toBeVisible({
 			timeout: 30_000,
 		});
 		await expect(page.getByRole("link", { name: "Answer" })).toHaveAttribute(
 			"href",
-			"/tasks/FRK-1/questions",
+			"/tasks/CTV-1/questions",
 		);
 
 		// 6. Ada, paused, still answers her chat. (The only Product Manager and Developer cannot be paused.)

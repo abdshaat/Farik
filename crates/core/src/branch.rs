@@ -31,7 +31,7 @@ mod tests {
 
     fn a_task(role: Role, change: Option<Change>) -> crate::contract::TaskContract {
         let mut contract = a_contract();
-        contract.id = "FRK-7".parse().expect("a task id");
+        contract.id = "CTV-7".parse().expect("a task id");
         contract.assignee_role = role;
         contract.change = change;
         contract
@@ -40,23 +40,23 @@ mod tests {
     #[test]
     fn names_a_developers_feature_branch() {
         let contract = a_task(Role::SoftwareDeveloper, None);
-        assert_eq!(task_branch(&contract), "feature/FRK-7");
+        assert_eq!(task_branch(&contract), "feature/CTV-7");
     }
 
     #[test]
     fn names_a_developers_fix_branch() {
         let contract = a_task(Role::SoftwareDeveloper, Some(Change::Fix));
-        assert_eq!(task_branch(&contract), "fix/FRK-7");
+        assert_eq!(task_branch(&contract), "fix/CTV-7");
     }
 
     #[test]
     fn puts_a_designers_task_on_a_feature_or_fix_branch() {
         let feature = a_task(Role::UiUxDesigner, None);
-        assert_eq!(task_branch(&feature), "feature/FRK-7");
+        assert_eq!(task_branch(&feature), "feature/CTV-7");
         let feature = a_task(Role::UiUxDesigner, Some(Change::Feature));
-        assert_eq!(task_branch(&feature), "feature/FRK-7");
+        assert_eq!(task_branch(&feature), "feature/CTV-7");
         let fix = a_task(Role::UiUxDesigner, Some(Change::Fix));
-        assert_eq!(task_branch(&fix), "fix/FRK-7");
+        assert_eq!(task_branch(&fix), "fix/CTV-7");
     }
 
     #[test]
@@ -68,7 +68,7 @@ mod tests {
             Role::ScrumMaster,
         ] {
             let contract = a_task(role, Some(Change::Fix));
-            assert_eq!(task_branch(&contract), "docs/FRK-7", "{role}");
+            assert_eq!(task_branch(&contract), "docs/CTV-7", "{role}");
         }
     }
 }

@@ -6,10 +6,10 @@ import type { FakeSocket } from "../test/fake-socket.ts";
 import { CONTRACT, SUMMARY, TEAM } from "../test/plan.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 
-/** The approval row `waiting.list` answers while FRK-1's plan waits on the human. */
+/** The approval row `waiting.list` answers while CTV-1's plan waits on the human. */
 const APPROVING = [
 	{
-		task_id: "FRK-1",
+		task_id: "CTV-1",
 		kind: "approval",
 		agent_id: "mira",
 		title: "Gift cards",
@@ -17,9 +17,9 @@ const APPROVING = [
 	},
 ];
 
-/** The plan page for FRK-1, with the team, the plan, its checks and its questions answered. */
+/** The plan page for CTV-1, with the team, the plan, its checks and its questions answered. */
 async function opened(waiting: object[] = APPROVING) {
-	const { container, socket } = await renderApp("/tasks/FRK-1/plan");
+	const { container, socket } = await renderApp("/tasks/CTV-1/plan");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team: TEAM });
@@ -70,7 +70,7 @@ describe("plan page", () => {
 		expect(
 			s.calls("query").find((q) => q.params.name === "task.checks")?.params
 				.params,
-		).toEqual({ task_id: "FRK-1" });
+		).toEqual({ task_id: "CTV-1" });
 
 		// The letter: the summary, signed by the Product Manager.
 		const letter = screen.getByRole("region", {
@@ -135,7 +135,7 @@ describe("plan page", () => {
 			screen
 				.getByRole("link", { name: "Edit the plan yourself" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-1/plan/edit");
+		).toBe("/tasks/CTV-1/plan/edit");
 		await expectNoAxeViolations(container);
 	});
 
@@ -161,7 +161,7 @@ describe("plan page", () => {
 		expect(approve.params).toEqual({
 			command: {
 				command: "human_accept",
-				body: { task_id: "FRK-1", subject: "contract" },
+				body: { task_id: "CTV-1", subject: "contract" },
 			},
 		});
 		await s.reply(approve, {
@@ -190,7 +190,7 @@ describe("plan page", () => {
 			command: {
 				command: "human_send_back",
 				body: {
-					task_id: "FRK-1",
+					task_id: "CTV-1",
 					subject: "contract",
 					message: "Leave out the email part for now.",
 					failed_criteria: [],

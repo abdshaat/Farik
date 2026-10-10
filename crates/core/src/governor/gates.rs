@@ -1215,7 +1215,7 @@ mod tests {
 
     fn a_depending_contract() -> TaskContract {
         let mut contract = a_contract();
-        contract.dependencies = vec!["FRK-2".parse().expect("a dependency id")];
+        contract.dependencies = vec!["CTV-2".parse().expect("a dependency id")];
         contract
     }
 
@@ -1766,7 +1766,7 @@ mod tests {
         let mut input = an_assignment();
         input.plan_in_sprints = true;
         let backlog = [
-            "this team plans work in sprints, and FRK-1 waits in the Backlog until a sprint plans it",
+            "this team plans work in sprints, and CTV-1 waits in the Backlog until a sprint plans it",
         ];
         assert_eq!(reasons(check_assignment(&a_contract(), &input)), backlog);
         input.open_sprint = Some("S1".to_string());
@@ -1799,7 +1799,7 @@ mod tests {
         let mut input = an_assignment();
         assert_eq!(
             reasons(check_assignment(&contract, &input)),
-            ["the runtime reported nothing about FRK-2, which this task depends on"]
+            ["the runtime reported nothing about CTV-2, which this task depends on"]
         );
         for status in [
             TaskStatus::Ready,
@@ -1807,32 +1807,32 @@ mod tests {
             TaskStatus::Rejected,
         ] {
             input.dependencies = vec![DependencyState {
-                task_id: "FRK-2".to_string(),
+                task_id: "CTV-2".to_string(),
                 status,
                 integrated: true,
             }];
             assert_eq!(
                 reasons(check_assignment(&contract, &input)),
                 [format!(
-                    "FRK-2 is {status} and a dependency is assigned only once it is accepted"
+                    "CTV-2 is {status} and a dependency is assigned only once it is accepted"
                 )],
                 "{status}"
             );
         }
         input.dependencies = vec![DependencyState {
-            task_id: "FRK-2".to_string(),
+            task_id: "CTV-2".to_string(),
             status: TaskStatus::Verifying,
             integrated: false,
         }];
         assert_eq!(
             reasons(check_assignment(&contract, &input)),
-            ["FRK-2 is verifying and a dependency is assigned only once it is accepted"]
+            ["CTV-2 is verifying and a dependency is assigned only once it is accepted"]
         );
         input.dependencies[0].status = TaskStatus::Accepted;
         assert_eq!(
             reasons(check_assignment(&contract, &input)),
             [
-                "FRK-2 is accepted but not integrated, and this task's branch starts from the integration branch"
+                "CTV-2 is accepted but not integrated, and this task's branch starts from the integration branch"
             ]
         );
         input.dependencies[0].integrated = true;
@@ -1841,15 +1841,15 @@ mod tests {
         // lists them: an agent sent back learns everything it has to wait for at once.
         let mut two = a_depending_contract();
         two.dependencies
-            .push("FRK-3".parse().expect("a dependency id"));
+            .push("CTV-3".parse().expect("a dependency id"));
         input.dependencies = vec![
             DependencyState {
-                task_id: "FRK-2".to_string(),
+                task_id: "CTV-2".to_string(),
                 status: TaskStatus::Verifying,
                 integrated: false,
             },
             DependencyState {
-                task_id: "FRK-3".to_string(),
+                task_id: "CTV-3".to_string(),
                 status: TaskStatus::Accepted,
                 integrated: false,
             },
@@ -1857,13 +1857,13 @@ mod tests {
         assert_eq!(
             reasons(check_assignment(&two, &input)),
             [
-                "FRK-2 is verifying and a dependency is assigned only once it is accepted",
-                "FRK-3 is accepted but not integrated, and this task's branch starts from the integration branch"
+                "CTV-2 is verifying and a dependency is assigned only once it is accepted",
+                "CTV-3 is accepted but not integrated, and this task's branch starts from the integration branch"
             ]
         );
         // A padded dependency id is the same dependency.
         input.dependencies = vec![DependencyState {
-            task_id: " FRK-2 ".to_string(),
+            task_id: " CTV-2 ".to_string(),
             status: TaskStatus::Accepted,
             integrated: true,
         }];
@@ -1874,12 +1874,12 @@ mod tests {
     fn names_a_dependency_once_however_often_the_contract_lists_it() {
         let mut contract = a_depending_contract();
         contract.dependencies = vec![
-            "FRK-2".parse().expect("a dependency id"),
-            "FRK-2".parse().expect("a dependency id"),
+            "CTV-2".parse().expect("a dependency id"),
+            "CTV-2".parse().expect("a dependency id"),
         ];
         assert_eq!(
             reasons(check_assignment(&contract, &an_assignment())),
-            ["the runtime reported nothing about FRK-2, which this task depends on"]
+            ["the runtime reported nothing about CTV-2, which this task depends on"]
         );
     }
 
@@ -1892,40 +1892,40 @@ mod tests {
         let mut input = an_assignment();
         input.dependencies = vec![
             DependencyState {
-                task_id: "FRK-2".to_string(),
+                task_id: "CTV-2".to_string(),
                 status: TaskStatus::Accepted,
                 integrated: true,
             },
             DependencyState {
-                task_id: "FRK-2".to_string(),
+                task_id: "CTV-2".to_string(),
                 status: TaskStatus::InProgress,
                 integrated: false,
             },
         ];
         assert_eq!(
             reasons(check_assignment(&contract, &input)),
-            ["the runtime reported FRK-2 twice, and a dependency has one state"]
+            ["the runtime reported CTV-2 twice, and a dependency has one state"]
         );
         input.dependencies.push(DependencyState {
-            task_id: " FRK-2 ".to_string(),
+            task_id: " CTV-2 ".to_string(),
             status: TaskStatus::Blocked,
             integrated: false,
         });
         assert_eq!(
             reasons(check_assignment(&contract, &input)),
-            ["the runtime reported FRK-2 twice, and a dependency has one state"]
+            ["the runtime reported CTV-2 twice, and a dependency has one state"]
         );
         // Only the dependencies this contract names are its business: two reports about a task it
         // does not depend on say nothing about whether it may be assigned.
         let mut unrelated = an_assignment();
         unrelated.dependencies = vec![
             DependencyState {
-                task_id: "FRK-99".to_string(),
+                task_id: "CTV-99".to_string(),
                 status: TaskStatus::Accepted,
                 integrated: true,
             },
             DependencyState {
-                task_id: "FRK-99".to_string(),
+                task_id: "CTV-99".to_string(),
                 status: TaskStatus::Draft,
                 integrated: false,
             },
@@ -1945,7 +1945,7 @@ mod tests {
         }];
         assert_eq!(
             reasons(check_assignment(&contract, &input)),
-            ["FRK-1 depends on itself, which nothing can satisfy"]
+            ["CTV-1 depends on itself, which nothing can satisfy"]
         );
     }
 
@@ -1968,7 +1968,7 @@ mod tests {
                 "dev-1 cannot review its own work; name another agent as reviewer",
                 "dev-1 already holds 9 unfinished tasks and the limit is 2",
                 "the budget of 5 USD does not fit the 0 USD left in the sprint",
-                "the runtime reported nothing about FRK-2, which this task depends on"
+                "the runtime reported nothing about CTV-2, which this task depends on"
             ]
         );
     }
@@ -2273,11 +2273,11 @@ mod tests {
     fn verifies_an_epic_when_its_tasks_are_done_and_at_least_one_was_accepted() {
         let done = [
             ChildState {
-                task_id: "FRK-2".to_string(),
+                task_id: "CTV-2".to_string(),
                 status: TaskStatus::Accepted,
             },
             ChildState {
-                task_id: "FRK-3".to_string(),
+                task_id: "CTV-3".to_string(),
                 status: TaskStatus::Cancelled,
             },
         ];
@@ -2292,7 +2292,7 @@ mod tests {
             assert_eq!(
                 reasons(check_children_done(&unfinished)),
                 [format!(
-                    "every task under this epic is accepted or cancelled first, and FRK-3 is {status}"
+                    "every task under this epic is accepted or cancelled first, and CTV-3 is {status}"
                 )],
                 "{status}"
             );
@@ -2301,7 +2301,7 @@ mod tests {
         running[1].status = TaskStatus::InProgress;
         assert_eq!(
             reasons(check_children_done(&running)),
-            ["every task under this epic is accepted or cancelled first, and FRK-3 is in_progress"]
+            ["every task under this epic is accepted or cancelled first, and CTV-3 is in_progress"]
         );
         // Every unfinished task is named, not the first: the epic's assignee is told what is left.
         let mut two_left = done.clone();
@@ -2310,12 +2310,12 @@ mod tests {
         assert_eq!(
             reasons(check_children_done(&two_left)),
             [
-                "every task under this epic is accepted or cancelled first, and FRK-2 is in_progress; FRK-3 is blocked",
+                "every task under this epic is accepted or cancelled first, and CTV-2 is in_progress; CTV-3 is blocked",
                 "no task under this epic was accepted, so there is nothing to verify"
             ]
         );
         let cancelled = [ChildState {
-            task_id: "FRK-2".to_string(),
+            task_id: "CTV-2".to_string(),
             status: TaskStatus::Cancelled,
         }];
         assert_eq!(
@@ -2327,17 +2327,17 @@ mod tests {
         // an epic must not verify on a report that contradicts itself.
         let twice = [
             ChildState {
-                task_id: "FRK-2".to_string(),
+                task_id: "CTV-2".to_string(),
                 status: TaskStatus::Accepted,
             },
             ChildState {
-                task_id: " FRK-2 ".to_string(),
+                task_id: " CTV-2 ".to_string(),
                 status: TaskStatus::Cancelled,
             },
         ];
         assert_eq!(
             reasons(check_children_done(&twice)),
-            ["the runtime reported FRK-2 twice, and a task under this epic has one state"]
+            ["the runtime reported CTV-2 twice, and a task under this epic has one state"]
         );
         let unnamed = [ChildState {
             task_id: "  ".to_string(),

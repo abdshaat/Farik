@@ -823,7 +823,7 @@ mod tests {
     async fn merges_and_pushes_under_auto_merge() {
         let harness = under("int-auto-merge", "auto_merge");
         let origin = harness.with_origin();
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         // A tag named as the integration branch: a push that did not spell `refs/heads/main` would
         // be refused as matching both.
         git_in(&harness.project.repo.path, &["tag", "main"]);
@@ -832,7 +832,7 @@ mod tests {
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
-            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "FRK-1"),
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
             "{report:?}"
         );
         assert!(
@@ -853,7 +853,7 @@ mod tests {
             &harness,
             &["rev-list", "--parents", "-n", "1", "refs/heads/main"],
         );
-        let branch = at_root(&harness, &["rev-parse", &harness.branch("FRK-1")]);
+        let branch = at_root(&harness, &["rev-parse", &harness.branch("CTV-1")]);
         assert!(
             parents.split(' ').skip(1).any(|parent| parent == branch),
             "{parents}"
@@ -863,7 +863,7 @@ mod tests {
             at_root(&harness, &["symbolic-ref", "HEAD"]),
             "refs/heads/main"
         );
-        assert!(!harness.row("FRK-1").awaiting_integration);
+        assert!(!harness.row("CTV-1").awaiting_integration);
         let _ = std::fs::remove_dir_all(&origin);
     }
 
@@ -871,9 +871,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn integrates_a_fix_branch() {
         let harness = under("int-fix", "auto_merge");
-        harness.verifying_with("FRK-1", true, true, |wire| wire["change"] = json!("fix"));
+        harness.verifying_with("CTV-1", true, true, |wire| wire["change"] = json!("fix"));
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "verifying",
             "accepted",
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -899,14 +899,14 @@ mod tests {
             &harness,
             &["rev-list", "--parents", "-n", "1", "refs/heads/main"],
         );
-        let branch = at_root(&harness, &["rev-parse", "fix/FRK-1"]);
+        let branch = at_root(&harness, &["rev-parse", "fix/CTV-1"]);
         assert_eq!(
             parents.split(' ').nth(2),
             Some(branch.as_str()),
             "{parents}"
         );
         assert!(
-            said.iter().any(|what| what.ends_with("and kept fix/FRK-1")),
+            said.iter().any(|what| what.ends_with("and kept fix/CTV-1")),
             "{said:?}"
         );
     }
@@ -915,7 +915,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn merges_without_a_push_when_there_is_no_origin() {
         let harness = under("int-no-origin", "auto_merge");
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         orchestrator.tick().await.expect("the tick runs");
@@ -930,7 +930,7 @@ mod tests {
     async fn escalates_a_failed_push_and_keeps_the_merge() {
         let harness = under("int-push-fails", "auto_merge");
         harness.with_origin_nowhere();
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         orchestrator.tick().await.expect("the tick runs");
@@ -955,7 +955,7 @@ mod tests {
         assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
         let before = harness.events(&[]).len();
         assert_eq!(
-            orchestrator.integrate(&task("FRK-1")).await,
+            orchestrator.integrate(&task("CTV-1")).await,
             Ok(IntegrationOutcome::Merged {
                 sha: integrated[0].sha.clone(),
                 scan: ScanRefresh::Unchanged,
@@ -968,7 +968,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_conflict_and_leaves_the_task_accepted() {
         let harness = under("int-conflict", "auto_merge");
-        harness.accepted_in_conflict("FRK-1");
+        harness.accepted_in_conflict("CTV-1");
         let moves_before = harness.events(&[EventKind::TaskTransitioned]).len();
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -982,7 +982,7 @@ mod tests {
             harness.events(&[EventKind::TaskTransitioned]).len(),
             moves_before
         );
-        let row = harness.row("FRK-1");
+        let row = harness.row("CTV-1");
         assert_eq!(row.status, TaskStatus::Accepted);
         assert!(row.awaiting_integration);
         assert!(integrations(&harness).is_empty());
@@ -993,11 +993,11 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn integrates_for_the_human_after_an_escalation() {
         let harness = under("int-human", "auto_merge");
-        harness.accepted_in_conflict("FRK-1");
+        harness.accepted_in_conflict("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator.tick().await.expect("the tick runs");
 
-        let again = orchestrator.integrate(&task("FRK-1")).await;
+        let again = orchestrator.integrate(&task("CTV-1")).await;
         assert!(
             matches!(&again, Ok(IntegrationOutcome::Escalated { detail, scan: None }) if detail.contains("a.txt")),
             "{again:?}"
@@ -1005,7 +1005,7 @@ mod tests {
         assert_eq!(escalations(&harness).len(), 2);
 
         harness.resolve_the_conflict();
-        let merged = orchestrator.integrate(&task("FRK-1")).await;
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
         let head = at_root(&harness, &["rev-parse", "main"]);
         assert_eq!(
             merged,
@@ -1027,13 +1027,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_an_integrated_task_without_merging_again() {
         let harness = under("int-twice", "auto_merge");
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator.tick().await.expect("the tick runs");
         let sha = integrations(&harness)[0].sha.clone();
 
         assert_eq!(
-            orchestrator.integrate(&task("FRK-1")).await,
+            orchestrator.integrate(&task("CTV-1")).await,
             Ok(IntegrationOutcome::Merged {
                 sha: sha.clone(),
                 scan: ScanRefresh::Unchanged
@@ -1048,7 +1048,7 @@ mod tests {
     async fn leaves_an_accepted_task_to_the_human_under_manual() {
         let harness = under("int-manual", "manual");
         let origin = harness.with_origin();
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         let pushed = git_output_in(&origin, &["rev-parse", "main"]);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -1056,7 +1056,7 @@ mod tests {
         assert!(integrations(&harness).is_empty());
         assert_eq!(at_root(&harness, &["rev-parse", "main"]), pushed);
 
-        let merged = orchestrator.integrate(&task("FRK-1")).await;
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
         let head = at_root(&harness, &["rev-parse", "main"]);
         assert_ne!(head, pushed);
         assert_eq!(
@@ -1074,13 +1074,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn refuses_to_integrate_what_is_not_accepted() {
         let harness = under("int-not-accepted", "auto_merge");
-        harness.verifying("FRK-1");
+        harness.verifying("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
-        let refused = orchestrator.integrate(&task("FRK-1")).await;
+        let refused = orchestrator.integrate(&task("CTV-1")).await;
 
         assert!(
-            matches!(&refused, Err(OrchestratorError::Refused { reason }) if reason.starts_with("not_accepted: FRK-1")),
+            matches!(&refused, Err(OrchestratorError::Refused { reason }) if reason.starts_with("not_accepted: CTV-1")),
             "{refused:?}"
         );
         assert!(integrations(&harness).is_empty());
@@ -1094,31 +1094,31 @@ mod tests {
             wire["policy"]["integration"] = json!("auto_merge");
             crate::tools::fixtures::with_the_finance_specialist(wire);
         });
-        harness.finance_task("FRK-1", Some("verifying"));
+        harness.finance_task("CTV-1", Some("verifying"));
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "verifying",
             "accepted",
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "fin",
                      "reviewer": "pm", "effects": ["nothing_to_integrate"] }),
         );
-        assert!(!harness.row("FRK-1").awaiting_integration);
+        assert!(!harness.row("CTV-1").awaiting_integration);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
-        let refused = orchestrator.integrate(&task("FRK-1")).await;
+        let refused = orchestrator.integrate(&task("CTV-1")).await;
 
         assert!(
-            matches!(&refused, Err(OrchestratorError::Refused { reason }) if reason.starts_with("nothing_to_integrate: FRK-1")),
+            matches!(&refused, Err(OrchestratorError::Refused { reason }) if reason.starts_with("nothing_to_integrate: CTV-1")),
             "{refused:?}"
         );
         assert!(integrations(&harness).is_empty());
         // Nor does a tick try: nothing awaits.
         assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
         // An earlier refusal still comes first: a task that is not accepted is not accepted.
-        harness.finance_task("FRK-2", Some("verifying"));
-        let refused = orchestrator.integrate(&task("FRK-2")).await;
+        harness.finance_task("CTV-2", Some("verifying"));
+        let refused = orchestrator.integrate(&task("CTV-2")).await;
         assert!(
-            matches!(&refused, Err(OrchestratorError::Refused { reason }) if reason.starts_with("not_accepted: FRK-2")),
+            matches!(&refused, Err(OrchestratorError::Refused { reason }) if reason.starts_with("not_accepted: CTV-2")),
             "{refused:?}"
         );
     }
@@ -1129,15 +1129,15 @@ mod tests {
         let harness = under("int-refusals", "auto_merge");
         harness
             .project
-            .filed_with("FRK-1", "accepted", "epic", None, |wire| {
+            .filed_with("CTV-1", "accepted", "epic", None, |wire| {
                 wire["assignee_role"] = json!("product_manager");
                 wire["reviewer_role"] = json!("human");
             });
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         for (task_id, prefix) in [
-            ("FRK-1", "an_epic: FRK-1"),
-            ("FRK-9", "no_such_task: FRK-9"),
+            ("CTV-1", "an_epic: CTV-1"),
+            ("CTV-9", "no_such_task: CTV-9"),
         ] {
             let refused = orchestrator.integrate(&task(task_id)).await;
             assert!(
@@ -1177,18 +1177,18 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_a_task_another_process_integrated() {
         let harness = under("int-elsewhere", "auto_merge");
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         let head = at_root(&harness, &["rev-parse", "main"]);
         appended_elsewhere(
             &harness,
-            "FRK-1",
+            "CTV-1",
             "task.integrated",
             &json!({ "sha": head, "into": "main", "integrated_by": "human" }),
         );
-        assert!(harness.row("FRK-1").awaiting_integration, "not projected");
+        assert!(harness.row("CTV-1").awaiting_integration, "not projected");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
-        let answered = orchestrator.integrate(&task("FRK-1")).await;
+        let answered = orchestrator.integrate(&task("CTV-1")).await;
 
         assert_eq!(
             answered,
@@ -1206,9 +1206,9 @@ mod tests {
     async fn escalates_a_push_that_would_have_to_be_forced() {
         let harness = under("int-push-behind", "auto_merge");
         let origin = harness.with_origin();
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         // `origin`'s `main` gains a commit the local `main` lacks.
-        let theirs = harness.merge_on_the_forge(&origin, "FRK-1");
+        let theirs = harness.merge_on_the_forge(&origin, "CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         orchestrator.tick().await.expect("the tick runs");
@@ -1229,7 +1229,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_merge_git_refuses() {
         let harness = under("int-merge-refused", "auto_merge");
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         // An untracked `done.txt` in the root checkout, which the merge would overwrite.
         std::fs::write(harness.project.repo.path.join("done.txt"), "mine\n").expect("written");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
@@ -1237,7 +1237,7 @@ mod tests {
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
-            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "FRK-1"),
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
             "{report:?}"
         );
         let raised = escalations(&harness);
@@ -1246,13 +1246,13 @@ mod tests {
         assert!(
             raised[0].detail.starts_with(&format!(
                 "merging {} into main failed",
-                harness.branch("FRK-1")
+                harness.branch("CTV-1")
             )),
             "{}",
             raised[0].detail
         );
         assert!(integrations(&harness).is_empty());
-        assert!(harness.row("FRK-1").awaiting_integration);
+        assert!(harness.row("CTV-1").awaiting_integration);
     }
 
     #[tokio::test]
@@ -1262,7 +1262,7 @@ mod tests {
             wire["policy"]["integration"] = json!("auto_merge");
             wire["policy"]["integration_branch"] = json!("main:other");
         });
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         orchestrator.tick().await.expect("the tick runs");
@@ -1281,9 +1281,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn integrates_whatever_escalations_of_another_reason_it_carries() {
         let harness = under("int-other-escalation", "auto_merge");
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "escalation.raised",
             &json!({ "reason": "budget", "detail": "the task's budget is spent" }),
         );
@@ -1310,7 +1310,7 @@ mod tests {
             // Each branch gets a commit of its own: the fixtures' two `done.txt` commits, made in
             // the same second on the same parent, are one commit, so either branch would hold the
             // other's tip, and whichever merged second could find itself already merged.
-            for (task, file) in [("FRK-1", "one.txt"), ("FRK-2", "two.txt")] {
+            for (task, file) in [("CTV-1", "one.txt"), ("CTV-2", "two.txt")] {
                 harness.accepted_with_worktree(task);
                 let worktree = harness.worktree(task);
                 std::fs::write(worktree.join(file), format!("{task}\n")).expect("written");
@@ -1323,9 +1323,9 @@ mod tests {
             let first = harness.orchestrator(harness.recorded(Vec::new()));
             let second = harness.orchestrator(harness.recorded(Vec::new()));
 
-            let (frk_1, frk_2) = (task("FRK-1"), task("FRK-2"));
+            let (ctv_1, ctv_2) = (task("CTV-1"), task("CTV-2"));
             let (one, two) = runtime.block_on(async {
-                tokio::join!(first.integrate(&frk_1), second.integrate(&frk_2))
+                tokio::join!(first.integrate(&ctv_1), second.integrate(&ctv_2))
             });
 
             assert!(
@@ -1341,7 +1341,7 @@ mod tests {
                 "work",
                 "{round}"
             );
-            for branch in [harness.branch("FRK-1"), harness.branch("FRK-2")] {
+            for branch in [harness.branch("CTV-1"), harness.branch("CTV-2")] {
                 git_in(
                     &harness.project.repo.path,
                     &["merge-base", "--is-ancestor", &branch, "main"],
@@ -1358,22 +1358,22 @@ mod tests {
     const PULL_URL: &str = "https://github.com/o/r/pull/7";
     const OPEN: &str = r#"{"mergeCommit":null,"state":"OPEN"}"#;
 
-    /// FRK-1 accepted under `pull_request` with `origin`, its review note written, and, when
+    /// CTV-1 accepted under `pull_request` with `origin`, its review note written, and, when
     /// `opened`, its pull request 7 already recorded.
     fn a_pull_request(name: &str, opened: bool) -> (Harness, std::path::PathBuf) {
         let harness = under(name, "pull_request");
         let origin = harness.with_origin();
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
             &json!({ "kind": "review", "text": "C1 passes; done.txt is there.", "written_by": "dev-b" }),
         );
         if opened {
             harness.project.record(
-                "FRK-1",
+                "CTV-1",
                 "pull_request.opened",
-                &json!({ "url": PULL_URL, "number": 7, "branch": harness.branch("FRK-1") }),
+                &json!({ "url": PULL_URL, "number": 7, "branch": harness.branch("CTV-1") }),
             );
         }
         (harness, origin)
@@ -1404,7 +1404,7 @@ mod tests {
     async fn opens_a_pull_request_for_an_accepted_task() {
         let (harness, origin) = a_pull_request("int-pr-opens", false);
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
             &json!({ "kind": "review", "text": "C1 still passes, on a second look.", "written_by": "dev-b" }),
         );
@@ -1417,20 +1417,20 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(
-            git_output_in(&origin, &["rev-parse", &harness.branch("FRK-1")]),
-            at_root(&harness, &["rev-parse", &harness.branch("FRK-1")])
+            git_output_in(&origin, &["rev-parse", &harness.branch("CTV-1")]),
+            at_root(&harness, &["rev-parse", &harness.branch("CTV-1")])
         );
         let recorded = opened(&harness);
         assert_eq!(recorded.len(), 1, "{recorded:?}");
         assert_eq!(recorded[0].number, 7);
-        assert_eq!(recorded[0].branch, harness.branch("FRK-1"));
+        assert_eq!(recorded[0].branch, harness.branch("CTV-1"));
         assert_eq!(recorded[0].url, PULL_URL);
         let body = harness.gh.stdin_of("create");
         let contract = harness
             .project
             .deps
             .files
-            .read_contract(&task("FRK-1"))
+            .read_contract(&task("CTV-1"))
             .expect("the contract reads");
         let places: Vec<usize> = [
             "## Intent",
@@ -1451,7 +1451,7 @@ mod tests {
 
         harness.gh.answers("view", OPEN, "", 0);
         assert_eq!(
-            orchestrator.integrate(&task("FRK-1")).await,
+            orchestrator.integrate(&task("CTV-1")).await,
             Ok(IntegrationOutcome::AwaitingForge)
         );
         assert_eq!(opened(&harness).len(), 1);
@@ -1477,7 +1477,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn records_a_pull_request_merged_on_the_forge() {
         let (harness, origin) = a_pull_request("int-pr-merged", true);
-        let sha = harness.merge_on_the_forge(&origin, "FRK-1");
+        let sha = harness.merge_on_the_forge(&origin, "CTV-1");
         harness.gh.answers(
             "view",
             &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
@@ -1541,16 +1541,16 @@ mod tests {
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator.tick().await.expect("the tick runs");
 
-        let again = orchestrator.integrate(&task("FRK-1")).await;
+        let again = orchestrator.integrate(&task("CTV-1")).await;
         assert!(
             matches!(&again, Ok(IntegrationOutcome::Escalated { detail, scan: None }) if detail.contains("reopen it")),
             "{again:?}"
         );
         assert_eq!(escalations(&harness).len(), 2);
 
-        let sha = harness.merge_on_the_forge(&origin, "FRK-1");
+        let sha = harness.merge_on_the_forge(&origin, "CTV-1");
         assert_eq!(
-            orchestrator.integrate(&task("FRK-1")).await,
+            orchestrator.integrate(&task("CTV-1")).await,
             Ok(IntegrationOutcome::Merged {
                 sha: sha.clone(),
                 scan: ScanRefresh::Refreshed
@@ -1597,7 +1597,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_pull_request_with_no_origin() {
         let harness = under("int-pr-no-origin", "pull_request");
-        harness.accepted("FRK-1");
+        harness.accepted("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         orchestrator.tick().await.expect("the tick runs");
@@ -1617,7 +1617,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_forge_merge_the_local_branch_cannot_follow() {
         let (harness, origin) = a_pull_request("int-pr-diverged", true);
-        let sha = harness.merge_on_the_forge(&origin, "FRK-1");
+        let sha = harness.merge_on_the_forge(&origin, "CTV-1");
         harness.gh.answers(
             "view",
             &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
@@ -1699,7 +1699,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn rescans_after_an_integration_that_changed_the_project() {
         let harness = under("int-rescan", "auto_merge");
-        accepted_adding(&harness, "FRK-1", PACKAGE);
+        accepted_adding(&harness, "CTV-1", PACKAGE);
         let files = &harness.project.deps.files;
         files
             .append_project_note(
@@ -1745,7 +1745,7 @@ mod tests {
                 .task_id
                 .as_ref()
                 .map(|id| id.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         match &harness.events(&[EventKind::CriteriaUpdated])[0].body {
             EventBody::CriteriaUpdated(body) => {
@@ -1771,10 +1771,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn writes_nothing_when_the_scan_is_the_same() {
         let harness = under("int-rescan-same", "auto_merge");
-        accepted_adding(&harness, "FRK-1", PACKAGE);
+        accepted_adding(&harness, "CTV-1", PACKAGE);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         acted(&orchestrator).await;
-        accepted_adding(&harness, "FRK-2", &[("README.md", "# Notes\n")]);
+        accepted_adding(&harness, "CTV-2", &[("README.md", "# Notes\n")]);
         let scanned = harness.events(&[EventKind::ProjectScanned]).len();
 
         let what = acted(&orchestrator).await;
@@ -1790,7 +1790,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let harness = under("int-rescan-retry", "auto_merge");
-        accepted_adding(&harness, "FRK-1", PACKAGE);
+        accepted_adding(&harness, "CTV-1", PACKAGE);
         let team = harness.project.repo.path.join(".catervas/team");
         let mode = |bits| {
             std::fs::set_permissions(&team, std::fs::Permissions::from_mode(bits))
@@ -1807,7 +1807,7 @@ mod tests {
         );
 
         // The next integration changes nothing the scan reads, and finishes the refresh.
-        accepted_adding(&harness, "FRK-2", &[("README.md", "# Notes\n")]);
+        accepted_adding(&harness, "CTV-2", &[("README.md", "# Notes\n")]);
         let what = acted(&orchestrator).await;
 
         assert!(what.ends_with("; the project scan was refreshed"), "{what}");
@@ -1833,13 +1833,13 @@ mod tests {
             // Named, since with none the integration branch is whatever is checked out.
             wire["policy"]["integration_branch"] = json!("main");
         });
-        accepted_adding(&harness, "FRK-1", PACKAGE);
+        accepted_adding(&harness, "CTV-1", PACKAGE);
         git_in(&harness.project.repo.path, &["checkout", "-b", "elsewhere"]);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let reply = orchestrator
             .handle(catervas_protocol::command::Command::TaskIntegrate {
-                task_id: task("FRK-1"),
+                task_id: task("CTV-1"),
             })
             .await
             .expect("integrated");
@@ -1859,7 +1859,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn keeps_the_integration_when_the_scan_fails() {
         let harness = under("int-rescan-fails", "auto_merge");
-        accepted_adding(&harness, "FRK-1", PACKAGE);
+        accepted_adding(&harness, "CTV-1", PACKAGE);
         let document = harness.project.repo.path.join(".catervas/project.md");
         let _ = std::fs::remove_file(&document);
         std::fs::create_dir_all(&document).expect("project.md is a directory");
@@ -1868,7 +1868,7 @@ mod tests {
         let what = acted(&orchestrator).await;
 
         assert_eq!(integrations(&harness).len(), 1);
-        assert!(!harness.row("FRK-1").awaiting_integration);
+        assert!(!harness.row("CTV-1").awaiting_integration);
         assert!(
             what.contains("; the project scan was not refreshed: ") && what.contains("project.md"),
             "{what}"

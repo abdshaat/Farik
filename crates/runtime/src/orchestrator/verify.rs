@@ -833,7 +833,7 @@ mod tests {
     use crate::preview::fixtures::FakePreviews;
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
-        design_review_fails_frk_2, design_review_passes_frk_2, implement_css_frk_2,
+        design_review_fails_ctv_2, design_review_passes_ctv_2, implement_css_ctv_2,
         replays_catervas_read_board, review_writes_note,
     };
     use crate::sandbox::SandboxError;
@@ -858,25 +858,25 @@ mod tests {
         harness
     }
 
-    /// FRK-2, the Software Developer `dev-a`'s task, reviewed by the Architect `ada`, in progress
+    /// CTV-2, the Software Developer `dev-a`'s task, reviewed by the Architect `ada`, in progress
     /// with its worktree made: its one allowed path and its criterion C1 are `path`.
     fn a_developers_task(harness: &Harness, path: &str) {
-        harness.file("FRK-2", "ready", |wire| {
+        harness.file("CTV-2", "ready", |wire| {
             wire["reviewer_role"] = json!("architect");
             wire["allowed_paths"] = json!([path]);
             wire["exit_criteria"][0]["text"] = json!(format!("{path} exists."));
             wire["exit_criteria"][0]["verification"]["command"] = json!(format!("test -f {path}"));
         });
         let people = json!({ "assignee": "dev-a", "reviewer": "ada" });
-        harness.project.moved("FRK-2", "ready", "assigned", &people);
+        harness.project.moved("CTV-2", "ready", "assigned", &people);
         harness
             .project
-            .moved("FRK-2", "assigned", "in_progress", &people);
+            .moved("CTV-2", "assigned", "in_progress", &people);
         harness
             .project
             .deps
             .git
-            .create_worktree(&harness.worktree("FRK-2"), &harness.branch("FRK-2"), "main")
+            .create_worktree(&harness.worktree("CTV-2"), &harness.branch("CTV-2"), "main")
             .expect("the task's worktree is made");
     }
 
@@ -884,7 +884,7 @@ mod tests {
     /// moved to `verifying`.
     fn a_developers_change(harness: &Harness, path: &str) {
         a_developers_task(harness, path);
-        let worktree = harness.worktree("FRK-2");
+        let worktree = harness.worktree("CTV-2");
         let file = worktree.join(path);
         std::fs::create_dir_all(file.parent().expect("a folder")).expect("made");
         std::fs::write(&file, "h1 { color: #3b4a5c; }\n").expect("written");
@@ -895,14 +895,14 @@ mod tests {
             .commit(&worktree, "The change", &[path.to_string()])
             .expect("committed");
         harness.project.record(
-            "FRK-2",
+            "CTV-2",
             "note.written",
             &json!({ "kind": "completion", "text": "Changed it.\n\nChanged it.", "written_by": "dev-a" }),
         );
         let people = json!({ "assignee": "dev-a", "reviewer": "ada", "actor": "assignee", "requested_by": "dev-a" });
         harness
             .project
-            .moved("FRK-2", "in_progress", "verifying", &people);
+            .moved("CTV-2", "in_progress", "verifying", &people);
     }
 
     /// Ticks `count` times with `transcripts`; the sessions started, and the tiers each was held to.
@@ -930,12 +930,12 @@ mod tests {
             .collect()
     }
 
-    /// The design review of FRK-2 as `task.get` reads it.
+    /// The design review of CTV-2 as `task.get` reads it.
     fn state(harness: &Harness) -> ReviewState {
         let deps = &harness.project.deps;
         let team = deps.files.read_team().expect("the team");
         deps.transitions
-            .design_review(&team, &"FRK-2".parse().expect("an id"))
+            .design_review(&team, &"CTV-2".parse().expect("an id"))
             .expect("read")
             .1
             .state
@@ -949,8 +949,8 @@ mod tests {
         let (started, tiers) = ticked(
             &harness,
             vec![
-                implement_css_frk_2(),
-                design_review_passes_frk_2(),
+                implement_css_ctv_2(),
+                design_review_passes_ctv_2(),
                 review_writes_note(),
             ],
             3,
@@ -1018,7 +1018,7 @@ mod tests {
         a_developers_task(&harness, "site/style.css");
         let (started, _) = ticked(
             &harness,
-            vec![implement_css_frk_2(), design_review_fails_frk_2()],
+            vec![implement_css_ctv_2(), design_review_fails_ctv_2()],
             3,
         )
         .await;
@@ -1030,7 +1030,7 @@ mod tests {
                 ("iris", SessionPurpose::Verify),
             ]
         );
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Rejected);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Rejected);
         let moves = harness.events(&[EventKind::TaskTransitioned]);
         let rejected = moves.last().expect("a move");
         let EventBody::TaskTransitioned(body) = &rejected.body else {
@@ -1079,7 +1079,7 @@ mod tests {
         let (started, _) = ticked(&harness, Vec::new(), 2).await;
 
         assert!(started.is_empty(), "{:?}", who(&started));
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Verifying);
         assert_eq!(state(&harness), ReviewState::WaitingOnDesigner);
     }
 
@@ -1094,7 +1094,7 @@ mod tests {
         let (started, _) = ticked(&harness, Vec::new(), 2).await;
 
         assert!(started.is_empty(), "{:?}", who(&started));
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Verifying);
         assert_eq!(state(&harness), ReviewState::PreviewMissing);
     }
 
@@ -1107,7 +1107,7 @@ mod tests {
         let (started, _) = ticked(&harness, Vec::new(), 2).await;
 
         assert!(started.is_empty(), "{:?}", who(&started));
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Verifying);
     }
 
     #[tokio::test]
@@ -1117,7 +1117,7 @@ mod tests {
         let harness = a_harness("design-review-recorded-first", browsing);
         a_developers_change(&harness, "site/style.css");
         harness.project.record(
-            "FRK-2",
+            "CTV-2",
             "design_review.recorded",
             &json!({ "pass": true, "reasons": "Fine.", "checks": [] }),
         );
@@ -1138,7 +1138,7 @@ mod tests {
         a_developers_change(&harness, "site/style.css");
         for pass in [false, true] {
             harness.project.record(
-                "FRK-2",
+                "CTV-2",
                 "design_review.recorded",
                 &json!({ "pass": pass, "reasons": "Looked again.", "checks": [] }),
             );
@@ -1161,7 +1161,7 @@ mod tests {
         let (started, _) = ticked(&harness, Vec::new(), 2).await;
 
         assert!(started.is_empty(), "{:?}", who(&started));
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Verifying);
         assert_eq!(state(&harness), ReviewState::DesignerNeedsBrowser);
     }
 
@@ -1176,7 +1176,7 @@ mod tests {
             .project
             .deps
             .files
-            .read_contract(&"FRK-2".parse().expect("an id"))
+            .read_contract(&"CTV-2".parse().expect("an id"))
             .expect("the contract");
         contract.budget.max_sessions = std::num::NonZeroU64::new(2).expect("two");
         harness
@@ -1199,7 +1199,7 @@ mod tests {
                 ("iris", SessionPurpose::Verify),
             ]
         );
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Escalated);
         let reasons: Vec<EscalationRaisedBodyReason> = harness
             .events(&[EventKind::EscalationRaised])
             .iter()
@@ -1218,26 +1218,26 @@ mod tests {
         a_developers_change(&harness, "site/style.css");
         // The last round: the Designer passed it, and the Architect sent it back.
         harness.project.record(
-            "FRK-2",
+            "CTV-2",
             "design_review.recorded",
             &json!({ "pass": true, "reasons": "Fine.", "checks": [] }),
         );
         let back = json!({ "actor": "reviewer", "requested_by": "ada", "assignee": "dev-a", "reviewer": "ada" });
         harness
             .project
-            .moved("FRK-2", "verifying", "rejected", &back);
+            .moved("CTV-2", "verifying", "rejected", &back);
         harness
             .project
-            .moved("FRK-2", "rejected", "in_progress", &back);
+            .moved("CTV-2", "rejected", "in_progress", &back);
         let people = json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "ada" });
         harness
             .project
-            .moved("FRK-2", "in_progress", "verifying", &people);
+            .moved("CTV-2", "in_progress", "verifying", &people);
         assert_eq!(state(&harness), ReviewState::Waiting);
 
         let (started, _) = ticked(
             &harness,
-            vec![design_review_passes_frk_2(), review_writes_note()],
+            vec![design_review_passes_ctv_2(), review_writes_note()],
             2,
         )
         .await;

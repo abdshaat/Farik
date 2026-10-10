@@ -23,7 +23,7 @@ const CAMPAIGN_CAP = {
 const PLAN_CAP = { scope: "plan", spent: "450.00", budget: "450.00" };
 
 const PLAN_FIELDS = {
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	agent_id: "kai",
 	plan: "MP-3",
 	plan_title: TITLE,

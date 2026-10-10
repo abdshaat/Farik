@@ -243,7 +243,7 @@ impl Harness {
             });
     }
 
-    /// Files a request titled `title`, as the human does through `file_request`: step 11's FRK-1
+    /// Files a request titled `title`, as the human does through `file_request`: step 11's CTV-1
     /// contract with no kind, an untriaged draft whose one allowed path is `done.txt`, whose one
     /// criterion C1 runs `test -f done.txt`, with one item out of scope, risk `low`, and 5 dollars.
     pub(crate) fn a_request(&self, title: &str) {

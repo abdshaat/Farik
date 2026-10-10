@@ -22,7 +22,7 @@
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^FRK-[0-9]{1,6}$",
+      "pattern": "^CTV-[0-9]{1,6}$",
       "description": "Stable identifier. Assigned by the store, never edited."
     },
     "title": {
@@ -41,7 +41,7 @@
     },
     "parent": {
       "type": "string",
-      "pattern": "^FRK-[0-9]{1,6}$",
+      "pattern": "^CTV-[0-9]{1,6}$",
       "description": "The epic this task belongs to. Absent for an epic and for a standalone task that came from a small request; required for a task created by an epic's breakdown. Enforced by the governor."
     },
     "intent": {
@@ -129,7 +129,7 @@
       "maxItems": 100,
       "items": {
         "type": "string",
-        "pattern": "^FRK-[0-9]{1,6}$"
+        "pattern": "^CTV-[0-9]{1,6}$"
       },
       "description": "Tasks this one needs. Each must be at least `ready` for this contract to pass the Definition of Ready, and accepted and integrated before this task can be assigned (docs/SPEC.md 5.14)."
     },

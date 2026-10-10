@@ -33,7 +33,7 @@ fn project(test: &str) -> String {
 }
 
 fn task() -> TaskId {
-    TaskId::try_from("FRK-1").expect("an id")
+    TaskId::try_from("CTV-1").expect("an id")
 }
 
 fn docker(args: &[&str]) -> (bool, String) {

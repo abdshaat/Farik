@@ -36,7 +36,7 @@ async function opened(input: string) {
 	await answerQuery(s, "waiting.list", {
 		waiting: [
 			{
-				task_id: "FRK-14",
+				task_id: "CTV-14",
 				kind: "tool_approval",
 				agent_id: "theo",
 				title: "Sold-out badge on the menu",

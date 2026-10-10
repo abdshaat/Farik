@@ -164,7 +164,7 @@ mod tests {
 
     use crate::channel::{NewMessage, post};
     use crate::orchestrator::fixtures::Harness;
-    use crate::recorded::fixtures::implement_reacts_frk_1;
+    use crate::recorded::fixtures::implement_reacts_ctv_1;
     use crate::session::SessionPurpose;
     use crate::tools::ToolError;
     use crate::tools::fixtures::{TestProject, a_team_of_three, at, run};
@@ -182,7 +182,7 @@ mod tests {
     fn say(project: &TestProject, text: &str) -> Result<serde_json::Value, ToolError> {
         project.call(
             "dev-a",
-            Some("FRK-1"),
+            Some("CTV-1"),
             "catervas_post_message",
             json!({ "text": text }),
         )
@@ -192,8 +192,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn posts_a_reaction_from_a_session() {
         let harness = Harness::new("channel-reaction", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![implement_reacts_frk_1()]);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_reacts_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the session runs");
@@ -212,7 +212,7 @@ mod tests {
                 .task_id
                 .as_ref()
                 .map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(messages[0].envelope.ids.agent_id.as_deref(), Some("dev-a"));
     }
@@ -221,10 +221,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn counts_a_second_post_as_ambient() {
         let project = TestProject::new("channel-ambient", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         project.open_sprint("S1", None, &[]);
 
-        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "CTV-1 is in review.").expect("the reaction");
         say(&project, "The login page is lovely.").expect("the ambient message");
         let before = project.event_count();
         let refused = say(&project, "And another thing.").expect_err("past the allowance");
@@ -244,7 +244,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn counts_the_allowance_per_day_without_a_sprint() {
         let project = TestProject::new("channel-day", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         post(
             &project.deps.log,
             &FixedClock::new(at() - Duration::days(1)),
@@ -263,7 +263,7 @@ mod tests {
         )
         .expect("posted");
 
-        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "CTV-1 is in review.").expect("the reaction");
         say(&project, "Today's.").expect("today's allowance is whole");
 
         assert_eq!(
@@ -302,7 +302,7 @@ mod tests {
     fn counts_the_allowance_per_sprint() {
         // Yesterday's message, inside the open sprint, spends today's allowance too.
         let project = TestProject::new("channel-sprint", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         project.open_sprint("S1", None, &[]);
         ambient_at(
             &project,
@@ -310,7 +310,7 @@ mod tests {
             "Yesterday's, in the sprint.",
         );
 
-        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "CTV-1 is in review.").expect("the reaction");
         let refused = say(&project, "Today's.").expect_err("the sprint's allowance is spent");
 
         assert!(
@@ -320,11 +320,11 @@ mod tests {
 
         // A message from before the sprint started, even today, spends nothing of it.
         let project = TestProject::new("channel-sprint-before", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         ambient_at(&project, at(), "Before the sprint.");
         project.open_sprint("S1", None, &[]);
 
-        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "CTV-1 is in review.").expect("the reaction");
         say(&project, "Today's.").expect("the sprint's allowance is whole");
     }
 
@@ -338,8 +338,8 @@ mod tests {
         let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
 
         for text in [
-            "FRK-1 moved.",
-            "FRK-2 is blocked.",
+            "CTV-1 moved.",
+            "CTV-2 is blocked.",
             "Nothing waits on the human.",
         ] {
             say(text).expect("a ceremony post");

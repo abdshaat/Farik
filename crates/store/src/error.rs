@@ -23,7 +23,7 @@ pub enum StoreError {
         detail: String,
     },
     /// The task id counter has passed what the contract schema's pattern can spell
-    /// (`^FRK-[0-9]{1,6}$`), so the store has no id left to hand out. Refused rather than
+    /// (`^CTV-[0-9]{1,6}$`), so the store has no id left to hand out. Refused rather than
     /// returning something that is not a task id.
     TaskIdsExhausted {
         /// The number the counter reached.
@@ -44,7 +44,7 @@ impl fmt::Display for StoreError {
             }
             Self::TaskIdsExhausted { next } => write!(
                 formatter,
-                "the task id counter reached {next}, which no longer fits FRK- and six digits"
+                "the task id counter reached {next}, which no longer fits CTV- and six digits"
             ),
         }
     }
@@ -101,7 +101,7 @@ mod tests {
                 "the file system refused: the directory is read-only",
                 "sqlite refused: database is locked",
                 "the log holds a row that is not an event: event 3 cannot be read back",
-                "the task id counter reached 1000000, which no longer fits FRK- and six digits",
+                "the task id counter reached 1000000, which no longer fits CTV- and six digits",
             ]
         );
     }

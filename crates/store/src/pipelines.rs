@@ -277,17 +277,17 @@ mod tests {
         })
     }
 
-    /// `proc`'s request for Firecrawl on FRK-1; answers its number.
+    /// `proc`'s request for Firecrawl on CTV-1; answers its number.
     fn requested(board: &Board, minute: u32) -> u64 {
         requested_as(board, minute, firecrawl())
     }
 
-    /// `proc`'s request on FRK-1 with `body`; answers its number.
+    /// `proc`'s request on CTV-1 with `body`; answers its number.
     fn requested_as(board: &Board, minute: u32, body: Value) -> u64 {
         board
             .session(
                 at(10, minute),
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "proc",
                 "session-proc",
                 "data_pipeline.requested",
@@ -333,7 +333,7 @@ mod tests {
     ) {
         let mut body = json!({ "pipeline": pipeline, "by": by, "reason": "Because." });
         if kind == "data_pipeline.approved" {
-            body["request"] = json!("FRK-9");
+            body["request"] = json!("CTV-9");
         }
         board.put_with(at(10, minute), None, agent, session, kind, body);
     }
@@ -351,7 +351,7 @@ mod tests {
         let open = only(&board);
         assert_eq!(open.pipeline, pipeline);
         assert_eq!(open.state, PipelineState::Open);
-        assert_eq!(open.task_id.as_str(), "FRK-1");
+        assert_eq!(open.task_id.as_str(), "CTV-1");
         assert_eq!(open.agent_id, "proc");
         assert_eq!(open.requested.name.as_str(), "Firecrawl");
         assert_eq!(open.requested_at, at(10, 1));
@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(approved.reason.as_deref(), Some("Because."));
         assert_eq!(
             approved.request.as_ref().map(|id| id.as_str()),
-            Some("FRK-9")
+            Some("CTV-9")
         );
         assert_eq!(approved.tries, vec!["session-1".to_string()]);
         assert_eq!(

@@ -121,12 +121,12 @@ describe("pages", () => {
 	});
 
 	it.each([
-		"/requests/FRK-99",
-		"/tasks/FRK-99/questions",
-		"/tasks/FRK-99/plan",
-		"/tasks/FRK-99/plan/edit",
-		"/tasks/FRK-99/accept",
-		"/tasks/FRK-99/help",
+		"/requests/CTV-99",
+		"/tasks/CTV-99/questions",
+		"/tasks/CTV-99/plan",
+		"/tasks/CTV-99/plan/edit",
+		"/tasks/CTV-99/accept",
+		"/tasks/CTV-99/help",
 	])("says_a_task_it_cannot_read_at_%s", async (path) => {
 		const { container, socket } = await renderApp(path);
 		if (!socket) throw new Error("no socket");
@@ -135,7 +135,7 @@ describe("pages", () => {
 			socket.calls("query").filter((q) => q.params.name !== "serve.status");
 		await waitFor(() => expect(asked().length).toBeGreaterThan(0));
 		for (const q of asked())
-			await socket.fail(q, -32002, "there is no task FRK-99");
+			await socket.fail(q, -32002, "there is no task CTV-99");
 		// The daemon's words never show: a task that is not there is said plainly.
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			en.pageNotFound,
@@ -147,7 +147,7 @@ describe("pages", () => {
 	});
 
 	it("says_a_failed_read_plainly", async () => {
-		const { socket } = await renderApp("/tasks/FRK-1/help");
+		const { socket } = await renderApp("/tasks/CTV-1/help");
 		if (!socket) throw new Error("no socket");
 		await answerStatus(socket, false);
 		const asked = () =>

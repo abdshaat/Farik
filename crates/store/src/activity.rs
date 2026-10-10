@@ -531,10 +531,10 @@ mod tests {
     fn an_agent_waiting_on_a_connector_call_is_asked_about_in_one_line() {
         let board = Board::new("activity-tool-approval");
         let team = five();
-        board.file("FRK-1", "Login form", |_| {});
+        board.file("CTV-1", "Login form", |_| {});
         board.put(
             at(9, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("linus"),
             "tool_approval.requested",
             json!({
@@ -558,7 +558,7 @@ mod tests {
             .expect("Linus");
         assert_eq!(linus.state, ActivityState::Waiting);
         assert_eq!(linus.line, "Waiting on you: may Linus use airtable?");
-        assert_eq!(linus.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
+        assert_eq!(linus.task_id.as_ref().map(|id| id.as_str()), Some("CTV-1"));
     }
 
     #[test]
@@ -569,17 +569,17 @@ mod tests {
     fn derives_each_agents_activity() {
         let board = Board::new("activity-states");
         let team = five();
-        board.file("FRK-1", "Login form", |_| {});
+        board.file("CTV-1", "Login form", |_| {});
         board.moved(
             at(9, 1),
-            "FRK-1",
+            "CTV-1",
             ("draft", "in_progress"),
             "linus",
             (Some("linus"), Some("grace")),
         );
         board.session(
             at(9, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "linus",
             "session-1",
             "session.started",
@@ -592,17 +592,17 @@ mod tests {
             "agent.slept",
             json!({ "until": at(14, 30).to_rfc3339(), "detail": "usage limit" }),
         );
-        board.file("FRK-2", "A plan", |_| {});
+        board.file("CTV-2", "A plan", |_| {});
         board.moved(
             at(9, 4),
-            "FRK-2",
+            "CTV-2",
             ("draft", "escalated"),
             "ada",
             (None, None),
         );
         board.put(
             at(9, 4),
-            Some("FRK-2"),
+            Some("CTV-2"),
             None,
             "escalation.raised",
             json!({ "reason": "approval", "detail": "waits" }),
@@ -636,14 +636,14 @@ mod tests {
                     "ada".to_string(),
                     ActivityState::Waiting,
                     "Waiting on you: Ada wrote a plan for you to approve".to_string(),
-                    Some("FRK-2".to_string()),
+                    Some("CTV-2".to_string()),
                     None
                 ),
                 (
                     "linus".to_string(),
                     ActivityState::Working,
                     "Building Login form".to_string(),
-                    Some("FRK-1".to_string()),
+                    Some("CTV-1".to_string()),
                     None
                 ),
                 (
@@ -673,7 +673,7 @@ mod tests {
         // Linus's session ends and Mira runs the standup; a nap past its time is over.
         board.session(
             at(9, 5),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "linus",
             "session-1",
             "session.ended",
@@ -727,10 +727,10 @@ mod tests {
             { "id": "iris", "display_name": "Iris", "role": "ui_ux_designer", "status": "active" },
         ]);
         let team = validate_team(&wire).expect("the fixture is a team");
-        board.file("FRK-1", "A calmer menu page", |_| {});
+        board.file("CTV-1", "A calmer menu page", |_| {});
         board.moved(
             at(9, 1),
-            "FRK-1",
+            "CTV-1",
             ("draft", "in_progress"),
             "sol",
             (Some("iris"), Some("ada")),
@@ -752,7 +752,7 @@ mod tests {
         };
         board.session(
             at(9, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "iris",
             "session-1",
             "session.started",
@@ -761,7 +761,7 @@ mod tests {
         assert_eq!(iris(&board).1, "Planning A calmer menu page");
         board.session(
             at(9, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "iris",
             "session-1",
             "session.ended",
@@ -769,7 +769,7 @@ mod tests {
         );
         board.put(
             at(9, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("iris"),
             "design_plan.proposed",
             json!({ "plan": "A plan." }),
@@ -779,13 +779,13 @@ mod tests {
             (
                 ActivityState::Idle,
                 "Waiting for Mira to approve a plan".to_string(),
-                Some("FRK-1".to_string())
+                Some("CTV-1".to_string())
             )
         );
         // Once decided, the plan waits no more.
         board.put(
             at(9, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("mira"),
             "design_plan.returned",
             json!({ "reason": "Not yet." }),
@@ -799,40 +799,40 @@ mod tests {
         let team = five();
         // A request's first line often ends in a full stop, which the sentence drops; an
         // ellipsis stays.
-        board.file("FRK-1", "Add a login form.", |_| {});
-        board.file("FRK-2", "More photos...", |_| {});
+        board.file("CTV-1", "Add a login form.", |_| {});
+        board.file("CTV-2", "More photos...", |_| {});
         // Before `since`, and not shown.
         board.moved(
             at(9, 0),
-            "FRK-1",
+            "CTV-1",
             ("draft", "refining"),
             "ada",
             (None, None),
         );
         board.moved(
             at(10, 1),
-            "FRK-1",
+            "CTV-1",
             ("refining", "in_progress"),
             "linus",
             (Some("linus"), Some("grace")),
         );
         board.moved(
             at(10, 2),
-            "FRK-1",
+            "CTV-1",
             ("in_progress", "rejected"),
             "human",
             (Some("linus"), Some("grace")),
         );
         board.put(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "human.accepted",
             json!({ "subject": "result", "accepted_by": "human" }),
         );
         board.put(
             at(10, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "task.integrated",
             json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
@@ -853,7 +853,7 @@ mod tests {
         );
         board.put(
             at(10, 6),
-            Some("FRK-2"),
+            Some("CTV-2"),
             None,
             "human.accepted",
             json!({ "subject": "result", "accepted_by": "human" }),
@@ -861,7 +861,7 @@ mod tests {
         // A task the board has no title for is named by its id.
         board.put(
             at(10, 6),
-            Some("FRK-9"),
+            Some("CTV-9"),
             None,
             "task.integrated",
             json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
@@ -894,7 +894,7 @@ mod tests {
                 ),
                 (at(10, 6), "Mira posted the standup"),
                 (at(10, 6), "You accepted “More photos...”"),
-                (at(10, 6), "FRK-9 was added to the project"),
+                (at(10, 6), "CTV-9 was added to the project"),
             ]
         );
     }
@@ -926,7 +926,7 @@ mod tests {
     fn moved_tells_of_the_posts() {
         let board = Board::new("moved-posts");
         let team = with_kai();
-        board.file("FRK-1", "Spring posts", |_| {});
+        board.file("CTV-1", "Spring posts", |_| {});
         let writes = |minute: u32, channel: &str, going_out: &str| {
             let mut body = a_post(channel, going_out);
             body["approved_by"] = json!("plan");
@@ -935,7 +935,7 @@ mod tests {
             board
                 .session(
                     at(10, minute),
-                    Some("FRK-1"),
+                    Some("CTV-1"),
                     "kai",
                     "session-1",
                     "social_post.scheduled",
@@ -948,7 +948,7 @@ mod tests {
             board
                 .session(
                     at(10, minute),
-                    Some("FRK-1"),
+                    Some("CTV-1"),
                     "kai",
                     "session-1",
                     "social_post.requested",
@@ -997,7 +997,7 @@ mod tests {
         allowance["approved_by"] = json!("owner");
         board.put(
             at(10, 10),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "social_post.scheduled",
             allowance,
@@ -1010,7 +1010,7 @@ mod tests {
         // A move of the task between the posts' lines keeps its place among them.
         board.moved(
             at(10, 12),
-            "FRK-1",
+            "CTV-1",
             ("draft", "refining"),
             "ada",
             (None, None),
@@ -1026,7 +1026,7 @@ mod tests {
         let forged = writes(14, "facebook", "2026-09-28T19:00:00Z");
         board.session(
             at(10, 15),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "social_post.sent",
@@ -1037,7 +1037,7 @@ mod tests {
         // the post's own, so the line does not name it.
         board.session(
             at(23, 30),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "social_post.scheduled",
@@ -1102,7 +1102,7 @@ mod tests {
     fn says_what_moved_with_the_ads() {
         let board = Board::new("moved-ads");
         let team = with_kai();
-        board.file("FRK-1", "Autumn push", |_| {});
+        board.file("CTV-1", "Autumn push", |_| {});
         let mut plan = catervas_protocol::event::fixtures::a_body_wire(
             catervas_protocol::event::EventKind::MarketingPlanProposed,
         );
@@ -1115,7 +1115,7 @@ mod tests {
         }]);
         board.session(
             at(8, 0),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "marketing_plan.proposed",
@@ -1192,7 +1192,7 @@ mod tests {
         // What an agent's session says it did moved nothing.
         board.session(
             at(10, 9),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "marketing_campaign.paused",

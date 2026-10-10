@@ -527,7 +527,7 @@ mod tests {
 
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(name, &a_team_of_three(with_the_designer));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         project
     }
 
@@ -553,7 +553,7 @@ mod tests {
         call(
             project,
             agent,
-            Some("FRK-1"),
+            Some("CTV-1"),
             purpose,
             "catervas_propose_design_plan",
             json!({ "plan": plan }),
@@ -590,18 +590,18 @@ mod tests {
         assert_eq!(after(args, "--user"), ["1000:1000"]);
         assert_eq!(
             after(args, "--network"),
-            ["container:catervas-preview-p-frk-1"]
+            ["container:catervas-preview-p-ctv-1"]
         );
         assert_eq!(
             after(args, "--label"),
-            ["catervas.project=p", "catervas.task=FRK-1"]
+            ["catervas.project=p", "catervas.task=CTV-1"]
         );
         // A missing image fails the check at once rather than pulling gigabytes unseen.
         assert_eq!(after(args, "--pull"), ["never"]);
         // Named, so that a check Catervas gives up on is removed by name, not left to its watchdog.
         let named = after(args, "--name");
         assert!(
-            named.len() == 1 && named[0].starts_with("catervas-check-catervas-preview-p-frk-1-"),
+            named.len() == 1 && named[0].starts_with("catervas-check-catervas-preview-p-ctv-1-"),
             "{args:?}"
         );
         assert_eq!(after(args, "--entrypoint"), ["node"]);
@@ -620,7 +620,7 @@ mod tests {
     fn checks_a_page_through_the_runner() {
         let project = a_project("tools-check-page");
         let preview = Arc::new(CheckedPreview::printing(A_VIOLATION));
-        let mut context = project.context("iris", Some("FRK-1"));
+        let mut context = project.context("iris", Some("CTV-1"));
         context.preview = Some(preview.clone());
         let phone = run(
             &context,
@@ -666,7 +666,7 @@ mod tests {
                     project
                         .repo
                         .path
-                        .join(".catervas/local/screenshots/FRK-1")
+                        .join(".catervas/local/screenshots/CTV-1")
                         .join(file)
                 )
                 .expect("the screenshot is kept"),
@@ -692,7 +692,7 @@ mod tests {
             })
         );
         let ids = &checked[0].envelope.ids;
-        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
+        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("CTV-1"));
         assert_eq!(ids.agent_id.as_deref(), Some("iris"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
 
@@ -720,14 +720,14 @@ mod tests {
         let outside = "check_page_refused: only the UI/UX Designer checks a page, in a session \
                        of its task with the preview open";
 
-        let mut architect = project.context("ada", Some("FRK-1"));
+        let mut architect = project.context("ada", Some("CTV-1"));
         architect.purpose = SessionPurpose::Verify;
         architect.preview = Some(preview.clone());
         assert_eq!(
             refused(run(&architect, "catervas_check_page", page.clone())),
             outside
         );
-        let without_preview = project.context("iris", Some("FRK-1"));
+        let without_preview = project.context("iris", Some("CTV-1"));
         assert_eq!(
             refused(run(&without_preview, "catervas_check_page", page.clone())),
             outside
@@ -740,7 +740,7 @@ mod tests {
         );
 
         // The path is the page's on the preview: anything else could name another host.
-        let mut designer = project.context("iris", Some("FRK-1"));
+        let mut designer = project.context("iris", Some("CTV-1"));
         designer.preview = Some(preview.clone());
         for path in ["@evil.test", "x"] {
             assert_eq!(
@@ -761,7 +761,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn copies_the_latest_check_of_each_into_the_review() {
         let project = a_project("tools-design-review-latest");
-        let mut context = project.context("iris", Some("FRK-1"));
+        let mut context = project.context("iris", Some("CTV-1"));
         context.purpose = SessionPurpose::Verify;
         let check = |context: &crate::tools::ToolContext, width: &str, theme: &str| {
             run(
@@ -803,7 +803,7 @@ mod tests {
     fn refuses_an_incomplete_design_review() {
         let project = a_project("tools-design-review");
         let preview = Arc::new(CheckedPreview::printing(A_VIOLATION));
-        let mut context = project.context("iris", Some("FRK-1"));
+        let mut context = project.context("iris", Some("CTV-1"));
         context.purpose = SessionPurpose::Verify;
         context.preview = Some(preview);
         let review = json!({ "pass": false, "reasons": "The menu button has no name." });
@@ -817,7 +817,7 @@ mod tests {
         };
         // A check of another session is not this review's.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "page.checked",
             &json!({
                 "width": "desktop", "theme": "dark", "path": "/", "violations": [],
@@ -875,9 +875,9 @@ mod tests {
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
 
         // Only the Designer records one, in its design review of the task.
-        let mut implementing = project.context("iris", Some("FRK-1"));
+        let mut implementing = project.context("iris", Some("CTV-1"));
         implementing.purpose = SessionPurpose::Implement;
-        let mut architect = project.context("ada", Some("FRK-1"));
+        let mut architect = project.context("ada", Some("CTV-1"));
         architect.purpose = SessionPurpose::Verify;
         for outside in [implementing, architect] {
             assert!(
@@ -959,7 +959,7 @@ mod tests {
         };
         assert_eq!(body.plan, a_plan(600, 8_000));
         let ids = &proposed[1].envelope.ids;
-        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
+        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("CTV-1"));
         assert_eq!(ids.agent_id.as_deref(), Some("iris"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
     }
@@ -969,7 +969,7 @@ mod tests {
     fn refuses_the_decision_but_from_the_product_manager() {
         let project = a_project("tools-design-decide");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.proposed",
             &json!({ "plan": a_plan(40, 400) }),
         );
@@ -979,7 +979,7 @@ mod tests {
             refused(decide(
                 &project,
                 "ada",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 SessionPurpose::Verify
             )),
             outside
@@ -987,7 +987,7 @@ mod tests {
         // The Designer never decides its own plan, in whatever session.
         for purpose in [SessionPurpose::Explore, SessionPurpose::Verify] {
             assert_eq!(
-                refused(decide(&project, "iris", Some("FRK-1"), purpose)),
+                refused(decide(&project, "iris", Some("CTV-1"), purpose)),
                 outside
             );
         }
@@ -995,7 +995,7 @@ mod tests {
             refused(decide(
                 &project,
                 "pm",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 SessionPurpose::Implement
             )),
             outside
@@ -1006,7 +1006,7 @@ mod tests {
         );
         assert!(project.events(&[EventKind::DesignPlanApproved]).is_empty());
 
-        decide(&project, "pm", Some("FRK-1"), SessionPurpose::Verify)
+        decide(&project, "pm", Some("CTV-1"), SessionPurpose::Verify)
             .expect("the Product Manager decides, in its verify session of the task");
         let approved = project.events(&[EventKind::DesignPlanApproved]);
         assert_eq!(approved.len(), 1);
@@ -1021,14 +1021,14 @@ mod tests {
             refused(decide(
                 &project,
                 "pm",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 SessionPurpose::Verify
             )),
             "design_plan_refused: the task has no plan waiting for a decision"
         );
         // With the next plan waiting, a blank reason is still refused.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.proposed",
             &json!({ "plan": a_plan(40, 400) }),
         );
@@ -1036,7 +1036,7 @@ mod tests {
             refused(call(
                 &project,
                 "pm",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 SessionPurpose::Verify,
                 "catervas_decide_design_plan",
                 json!({ "approve": false, "reason": " " }),

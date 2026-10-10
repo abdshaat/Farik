@@ -121,9 +121,9 @@ test("the user mentions an agent in the channel, and the agent's reply appears b
 		await expect(reply).toBeVisible({ timeout: 15_000 });
 		await expect(reply).toContainText("Theo");
 		await expect(reply.getByText("Replying to You")).toBeVisible();
-		await expect(reply.getByRole("link", { name: "FRK-1" })).toHaveAttribute(
+		await expect(reply.getByRole("link", { name: "CTV-1" })).toHaveAttribute(
 			"href",
-			"/tasks/FRK-1",
+			"/tasks/CTV-1",
 		);
 		await screenshots(page, "channel");
 

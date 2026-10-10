@@ -202,13 +202,13 @@ fn refuses_a_library_and_a_contract_a_person_broke() {
     assert_eq!(path, ".catervas/team/criteria.yaml");
     assert!(detail.contains("/criteria/0/verification"), "{detail}");
 
-    files.write_contract(&a_contract("FRK-1")).expect("written");
+    files.write_contract(&a_contract("CTV-1")).expect("written");
     std::fs::write(
-        project.root.join(".catervas/contracts/FRK-1.yaml"),
-        "id: FRK-1\ntitle: Too little to be a contract\n",
+        project.root.join(".catervas/contracts/CTV-1.yaml"),
+        "id: CTV-1\ntitle: Too little to be a contract\n",
     )
     .expect("a person edits it too");
-    let id = TaskId::try_from("FRK-1").expect("an id");
+    let id = TaskId::try_from("CTV-1").expect("an id");
     assert!(
         matches!(files.read_contract(&id), Err(FilesError::Invalid { .. })),
         "half a contract is not one"
@@ -456,7 +456,7 @@ fn refuses_to_write_a_library_or_a_contract_that_could_not_be_read_back() {
     );
     assert!(!project.root.join(".catervas/team/criteria.yaml").exists());
 
-    let mut contract = a_contract("FRK-1");
+    let mut contract = a_contract("CTV-1");
     contract.exit_criteria.clear();
     assert!(
         matches!(
@@ -465,23 +465,23 @@ fn refuses_to_write_a_library_or_a_contract_that_could_not_be_read_back() {
         ),
         "a contract with no exit criteria is not one"
     );
-    assert!(!project.root.join(".catervas/contracts/FRK-1.yaml").exists());
+    assert!(!project.root.join(".catervas/contracts/CTV-1.yaml").exists());
 }
 
 #[test]
 fn writes_a_contract_to_the_file_its_own_id_names() {
     let project = TempProject::new("contracts");
     let files = project.files();
-    let contract = a_contract("FRK-7");
+    let contract = a_contract("CTV-7");
     files.write_contract(&contract).expect("it is written");
 
     assert!(
         project
             .root
-            .join(".catervas/contracts/FRK-7.yaml")
+            .join(".catervas/contracts/CTV-7.yaml")
             .is_file()
     );
-    let id = TaskId::try_from("FRK-7").expect("an id");
+    let id = TaskId::try_from("CTV-7").expect("an id");
     assert_eq!(files.read_contract(&id).expect("it reads back"), contract);
 }
 
@@ -491,7 +491,7 @@ fn writes_the_yaml_the_files_hold() {
     // what a person reads in .catervas/ and what the governor judges; a second writer would drift.
     let project = TempProject::new("yaml-text");
     let files = project.files();
-    let contract = a_contract("FRK-7");
+    let contract = a_contract("CTV-7");
     let library = validate_criteria(&a_criteria_library_wire()).expect("the fixture is a library");
     files.write_contract(&contract).expect("it is written");
     files.write_criteria(&library).expect("it is written");
@@ -499,7 +499,7 @@ fn writes_the_yaml_the_files_hold() {
     let on_disk = |path: &str| std::fs::read_to_string(project.root.join(path)).expect("the file");
     assert_eq!(
         contract_yaml(&contract).expect("the text"),
-        on_disk(".catervas/contracts/FRK-7.yaml")
+        on_disk(".catervas/contracts/CTV-7.yaml")
     );
     assert_eq!(
         criteria_yaml(&library).expect("the text"),
@@ -513,19 +513,19 @@ fn creates_a_contract_only_where_there_is_none() {
     // there is somebody's committed work and nothing else holds a copy of it.
     let project = TempProject::new("contract-create");
     let files = project.files();
-    let contract = a_contract("FRK-7");
+    let contract = a_contract("CTV-7");
     files.create_contract(&contract).expect("it is created");
-    let mut other = a_contract("FRK-7");
+    let mut other = a_contract("CTV-7");
     other.title = "Another one".parse().expect("a title");
 
     assert!(
         matches!(
             files.create_contract(&other),
-            Err(FilesError::Invalid { ref path, .. }) if path == ".catervas/contracts/FRK-7.yaml"
+            Err(FilesError::Invalid { ref path, .. }) if path == ".catervas/contracts/CTV-7.yaml"
         ),
         "a second create of one id is refused"
     );
-    let id = TaskId::try_from("FRK-7").expect("an id");
+    let id = TaskId::try_from("CTV-7").expect("an id");
     assert_eq!(
         files.read_contract(&id).expect("it reads back"),
         contract,
@@ -539,19 +539,19 @@ fn refuses_a_contract_that_says_it_is_another() {
     // believed the file name would show a task that does not exist.
     let project = TempProject::new("contract-id");
     let files = project.files();
-    files.write_contract(&a_contract("FRK-7")).expect("written");
+    files.write_contract(&a_contract("CTV-7")).expect("written");
     std::fs::rename(
-        project.root.join(".catervas/contracts/FRK-7.yaml"),
-        project.root.join(".catervas/contracts/FRK-8.yaml"),
+        project.root.join(".catervas/contracts/CTV-7.yaml"),
+        project.root.join(".catervas/contracts/CTV-8.yaml"),
     )
     .expect("a person moves it");
 
-    let id = TaskId::try_from("FRK-8").expect("an id");
+    let id = TaskId::try_from("CTV-8").expect("an id");
     let Err(FilesError::Invalid { path, detail }) = files.read_contract(&id) else {
-        panic!("the contract inside says FRK-7");
+        panic!("the contract inside says CTV-7");
     };
-    assert_eq!(path, ".catervas/contracts/FRK-8.yaml");
-    assert!(detail.contains("says it is FRK-7"), "{detail}");
+    assert_eq!(path, ".catervas/contracts/CTV-8.yaml");
+    assert!(detail.contains("says it is CTV-7"), "{detail}");
 }
 
 #[test]
@@ -563,19 +563,19 @@ fn refuses_a_contract_and_a_library_that_break_a_rule_only_the_schema_knows() {
     let files = project.files();
     files.init(&a_team()).expect("a project is made");
     let mut wire = catervas_core::contract::fixtures::a_contract_wire();
-    wire["id"] = serde_json::json!("FRK-1");
+    wire["id"] = serde_json::json!("CTV-1");
     wire["exit_criteria"] = serde_json::json!([]);
     std::fs::write(
-        project.root.join(".catervas/contracts/FRK-1.yaml"),
+        project.root.join(".catervas/contracts/CTV-1.yaml"),
         serde_json::to_string(&wire).expect("a value writes as JSON, which is YAML"),
     )
     .expect("a contract with nothing to meet");
     let Err(FilesError::Invalid { path, detail }) =
-        files.read_contract(&TaskId::try_from("FRK-1").expect("an id"))
+        files.read_contract(&TaskId::try_from("CTV-1").expect("an id"))
     else {
         panic!("a contract with no exit criteria is not one");
     };
-    assert_eq!(path, ".catervas/contracts/FRK-1.yaml");
+    assert_eq!(path, ".catervas/contracts/CTV-1.yaml");
     assert!(detail.contains("/exit_criteria"), "{detail}");
 }
 
@@ -583,16 +583,16 @@ fn refuses_a_contract_and_a_library_that_break_a_rule_only_the_schema_knows() {
 fn lists_contracts_in_the_order_a_board_shows_them() {
     let project = TempProject::new("list");
     let files = project.files();
-    for id in ["FRK-10", "FRK-2", "FRK-1"] {
+    for id in ["CTV-10", "CTV-2", "CTV-1"] {
         files.write_contract(&a_contract(id)).expect("written");
     }
     // A person's own notes in the same directory are not contracts and are not a problem either.
     std::fs::write(project.root.join(".catervas/contracts/notes.md"), "mine\n").expect("a note");
-    std::fs::write(project.root.join(".catervas/contracts/FRK-3.txt"), "?\n")
+    std::fs::write(project.root.join(".catervas/contracts/CTV-3.txt"), "?\n")
         .expect("not a contract");
     // Nor is a directory a person named that way: a board that listed it would show a task that
     // cannot be read.
-    std::fs::create_dir_all(project.root.join(".catervas/contracts/FRK-9.yaml"))
+    std::fs::create_dir_all(project.root.join(".catervas/contracts/CTV-9.yaml"))
         .expect("notes kept in a directory");
 
     assert_eq!(
@@ -602,7 +602,7 @@ fn lists_contracts_in_the_order_a_board_shows_them() {
             .iter()
             .map(|id| id.as_str().to_string())
             .collect::<Vec<_>>(),
-        ["FRK-1", "FRK-2", "FRK-10"],
+        ["CTV-1", "CTV-2", "CTV-10"],
         "by the number in the id, so the tenth does not come before the ninth"
     );
 }
@@ -938,19 +938,19 @@ fn reads_one_yaml_dialect_whatever_directory_the_file_came_from() {
 
 #[test]
 fn lists_two_spellings_of_one_number_in_an_order_that_is_not_the_filesystem_s() {
-    // The schema allows a leading zero, so `FRK-01` and `FRK-1` are two spellings of one number. The
+    // The schema allows a leading zero, so `CTV-01` and `CTV-1` are two spellings of one number. The
     // number alone is not a key: without the id behind it the order falls to `read_dir`, which is
     // stable on one filesystem and not across a fresh clone or a restore. `projections` broke this
     // tie in step 03 and `reconcile` in step 07.
     let project = TempProject::new("list-two-spellings");
     let files = project.files();
     for id in [
-        "FRK-1",
-        "FRK-01",
-        "FRK-001",
-        "FRK-0001",
-        "FRK-00001",
-        "FRK-000001",
+        "CTV-1",
+        "CTV-01",
+        "CTV-001",
+        "CTV-0001",
+        "CTV-00001",
+        "CTV-000001",
     ] {
         let mut contract = catervas_core::contract::fixtures::a_contract_wire();
         contract["id"] = serde_json::json!(id);
@@ -967,12 +967,12 @@ fn lists_two_spellings_of_one_number_in_an_order_that_is_not_the_filesystem_s() 
             .map(|id| id.as_str().to_string())
             .collect::<Vec<_>>(),
         [
-            "FRK-000001",
-            "FRK-00001",
-            "FRK-0001",
-            "FRK-001",
-            "FRK-01",
-            "FRK-1"
+            "CTV-000001",
+            "CTV-00001",
+            "CTV-0001",
+            "CTV-001",
+            "CTV-01",
+            "CTV-1"
         ],
         "by the number, then by the id itself"
     );

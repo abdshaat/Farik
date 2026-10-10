@@ -15,7 +15,7 @@ export const event = (
 	recorded_at: at,
 	team_id: "t",
 	project_id: "p",
-	task_id: "FRK-1",
+	task_id: "CTV-1",
 	...(agent_id ? { agent_id } : {}),
 	kind,
 	body,
@@ -96,10 +96,10 @@ export const TASK = {
 	created_at: "2026-09-23T09:00:00Z",
 };
 
-/** The acceptance row `waiting.list` answers for FRK-1 while its result waits on the human. */
+/** The acceptance row `waiting.list` answers for CTV-1 while its result waits on the human. */
 export const ACCEPTING = [
 	{
-		task_id: "FRK-1",
+		task_id: "CTV-1",
 		kind: "acceptance",
 		agent_id: "theo",
 		title: "Gift cards",
@@ -107,7 +107,7 @@ export const ACCEPTING = [
 	},
 ];
 
-/** `path` for FRK-1, with each of `names` answered: the team, `contract`, its history, checks, diff, tries, `waiting` and choices, or what `overrides` gives. */
+/** `path` for CTV-1, with each of `names` answered: the team, `contract`, its history, checks, diff, tries, `waiting` and choices, or what `overrides` gives. */
 export async function openedGate(
 	path: string,
 	names: string[],
@@ -146,14 +146,14 @@ export async function openedGate(
 					label: "Give 2 more tries",
 					body: {
 						command: "escalation_resolve",
-						body: { task_id: "FRK-1", to: "in_progress", extra_tries: 2 },
+						body: { task_id: "CTV-1", to: "in_progress", extra_tries: 2 },
 					},
 				},
 				{
 					label: "Ask Mira to change the plan",
 					body: {
 						command: "escalation_resolve",
-						body: { task_id: "FRK-1", to: "refining" },
+						body: { task_id: "CTV-1", to: "refining" },
 					},
 				},
 			],

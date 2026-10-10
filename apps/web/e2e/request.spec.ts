@@ -8,10 +8,10 @@ test("a request is sized, its question answered by choice, and it becomes a task
 	const serve = await startServe({
 		team: "pm-architect-developer",
 		transcripts: [
-			"triage_frk_1_small_by_pm",
-			"ask_with_choices_frk_1",
-			"refine_writes_task_for_theo_frk_1",
-			"judge_frk_1_by_architect",
+			"triage_ctv_1_small_by_pm",
+			"ask_with_choices_ctv_1",
+			"refine_writes_task_for_theo_ctv_1",
+			"judge_ctv_1_by_architect",
 		],
 	});
 	try {
@@ -24,7 +24,7 @@ test("a request is sized, its question answered by choice, and it becomes a task
 			.fill("Add a done.txt at the root, so a run can be checked for it");
 		await page.getByRole("button", { name: "Send to the team" }).click();
 
-		await expect(page).toHaveURL(/\/requests\/FRK-1$/);
+		await expect(page).toHaveURL(/\/requests\/CTV-1$/);
 		await expect(
 			page.getByText("Mira sized it as a small request"),
 		).toBeVisible();
@@ -120,7 +120,7 @@ test("a request is sized, its question answered by choice, and it becomes a task
 		await stale.close();
 		await page.getByRole("link", { name: "Answer" }).click();
 
-		await expect(page).toHaveURL(/\/tasks\/FRK-1\/questions$/);
+		await expect(page).toHaveURL(/\/tasks\/CTV-1\/questions$/);
 		await expect(
 			page.getByRole("heading", { name: "Mira has a question" }),
 		).toBeVisible();
@@ -140,7 +140,7 @@ test("a request is sized, its question answered by choice, and it becomes a task
 			.toBe("Leave it empty");
 
 		// A low-risk plan needs no approval: once Ada has checked it, it waits to be picked up.
-		await page.goto(`http://127.0.0.1:${serve.port}/requests/FRK-1`);
+		await page.goto(`http://127.0.0.1:${serve.port}/requests/CTV-1`);
 		await expect(page.getByText("To do", { exact: true })).toBeVisible({
 			timeout: 15_000,
 		});

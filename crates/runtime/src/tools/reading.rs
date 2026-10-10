@@ -13,7 +13,7 @@ use super::{Call, ToolError, failed};
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadTaskInput {
-    /// The task to read, `FRK-<n>`.
+    /// The task to read, `CTV-<n>`.
     task_id: String,
 }
 
@@ -60,17 +60,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_a_task_with_its_board_row() {
         let project = TestProject::new("tools-read-task", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "draft", "task", None);
-        project.moved("FRK-1", "draft", "refining", &json!({}));
+        project.filed("CTV-1", "draft", "task", None);
+        project.moved("CTV-1", "draft", "refining", &json!({}));
         let read = project
             .call(
                 "dev-a",
                 None,
                 "catervas_read_task",
-                json!({ "task_id": "FRK-1" }),
+                json!({ "task_id": "CTV-1" }),
             )
             .expect("the task reads");
-        assert_eq!(read["contract"]["id"], "FRK-1");
+        assert_eq!(read["contract"]["id"], "CTV-1");
         assert_eq!(read["contract"]["status"], "draft", "the file as it is");
         assert_eq!(read["board"]["status"], "refining", "the board's status");
     }
@@ -82,7 +82,7 @@ mod tests {
             "tools-read-all",
             &a_team_of_three(|wire| wire["rules"] = json!({ "forbidden_commands": ["curl"] })),
         );
-        project.filed("FRK-1", "draft", "task", None);
+        project.filed("CTV-1", "draft", "task", None);
         let deps = &project.deps;
         assert_eq!(
             project.call("pm", None, "catervas_read_board", json!({})),
@@ -104,7 +104,7 @@ mod tests {
             project
                 .call("pm", None, "catervas_read_board", json!({}))
                 .expect("a board")["tasks"][0]["task_id"],
-            "FRK-1"
+            "CTV-1"
         );
     }
 }

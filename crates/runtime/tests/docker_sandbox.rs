@@ -28,7 +28,7 @@ fn worktree(test: &str) -> PathBuf {
 }
 
 fn task() -> TaskId {
-    TaskId::try_from("FRK-1").expect("an id")
+    TaskId::try_from("CTV-1").expect("an id")
 }
 
 fn create_at(test: &str, root: &std::path::Path, network: bool) -> DockerSandbox {
@@ -158,7 +158,7 @@ fn refuses_an_image_that_is_not_there() {
             image: image.to_owned()
         })
     );
-    let name = format!("catervas-{}-frk-1", project("image"));
+    let name = format!("catervas-{}-ctv-1", project("image"));
     assert_eq!(containers_named(&name), 0);
 }
 
@@ -209,7 +209,7 @@ fn names_a_container_docker_accepts_from_any_project_id() {
     let project = format!("My Project/{}", std::process::id());
     let sandbox = DockerSandbox::create(&project, &task(), &worktree("name"), false, IMAGE)
         .unwrap_or_else(|error| panic!("the sandbox could not be made: {error}"));
-    let expected = format!("catervas-my-project-{}-frk-1", std::process::id());
+    let expected = format!("catervas-my-project-{}-ctv-1", std::process::id());
     assert_eq!(sandbox.name(), expected);
     assert_eq!(containers_named(&expected), 1);
     Box::new(sandbox)
@@ -273,7 +273,7 @@ fn makes_a_base_container_beside_the_task_s_own_with_no_network() {
         .create_base(&project, &task(), &worktree("base"))
         .unwrap_or_else(|error| panic!("the base sandbox could not be made: {error}"));
     // `project` is already in Docker's alphabet, so the names are spelled out rather than derived.
-    let own_name = format!("catervas-{project}-frk-1");
+    let own_name = format!("catervas-{project}-ctv-1");
     let base_name = format!("{own_name}-base");
     assert_eq!(containers_named(&own_name), 1);
     assert_eq!(containers_named(&base_name), 1, "both run side by side");
@@ -313,7 +313,7 @@ fn removes_a_container_by_name() {
     let _base = factory
         .create_base(&project, &task(), &worktree("remove-base"))
         .unwrap_or_else(|error| panic!("the base sandbox could not be made: {error}"));
-    let own_name = format!("catervas-{project}-frk-1");
+    let own_name = format!("catervas-{project}-ctv-1");
     let base_name = format!("{own_name}-base");
     assert_eq!(containers_named(&own_name), 1);
     assert_eq!(containers_named(&base_name), 1);

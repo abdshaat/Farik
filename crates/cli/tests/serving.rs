@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_protocol::clock::FixedClock;
 use catervas_protocol::event::{EventBody, EventKind};
-use catervas_runtime::recorded::fixtures::{refine_asks_frk_1, triage_frk_1_large};
+use catervas_runtime::recorded::fixtures::{refine_asks_ctv_1, triage_ctv_1_large};
 use catervas_runtime::sleep::Sleeper;
 use catervas_store::git::fixtures::TempRepo;
 use chrono::{DateTime, Utc};
@@ -188,9 +188,9 @@ fn keeps_serving_when_the_board_is_idle() {
     let shared = out.clone();
     let serving = std::thread::spawn(move || {
         run_with(&root, &["serve", "--port", &port], |io| {
-            // The triage makes FRK-1 an epic, so serve refines it next; the refine asks the human
+            // The triage makes CTV-1 an epic, so serve refines it next; the refine asks the human
             // and leaves the board waiting on them, so serve goes back to its idle wait.
-            io.engine = recorded(vec![triage_frk_1_large(), refine_asks_frk_1()]);
+            io.engine = recorded(vec![triage_ctv_1_large(), refine_asks_ctv_1()]);
             io.stdout = Box::new(shared);
             io.sleeper = Some(sleeper);
         })
@@ -1282,7 +1282,7 @@ fn creates_a_project_paused_with_its_first_request() {
         .expect("the log reads");
     assert_eq!(paused.len(), 1);
     let contract = catervas_store::files::ProjectFiles::open(root.clone())
-        .read_contract(&"FRK-1".parse().expect("an id"))
+        .read_contract(&"CTV-1".parse().expect("an id"))
         .expect("the first request is filed");
     assert_eq!(contract.intent.as_str(), description);
 }

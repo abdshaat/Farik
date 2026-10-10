@@ -1049,31 +1049,31 @@ mod tests {
         let board = Board::new("waiting-reviewed");
         let people = (Some("linus"), Some("grace"));
         let high = |wire: &mut serde_json::Value| wire["risk"] = json!("high");
-        board.file("FRK-1", "Unreviewed work", high);
-        board.moved(at(9, 1), "FRK-1", ("draft", "verifying"), "linus", people);
+        board.file("CTV-1", "Unreviewed work", high);
+        board.moved(at(9, 1), "CTV-1", ("draft", "verifying"), "linus", people);
         // A pass from before the task went back to work is not this verification's.
-        board.file("FRK-2", "Reworked work", high);
-        board.moved(at(9, 2), "FRK-2", ("draft", "verifying"), "linus", people);
-        reviewed(&board, "FRK-2");
+        board.file("CTV-2", "Reworked work", high);
+        board.moved(at(9, 2), "CTV-2", ("draft", "verifying"), "linus", people);
+        reviewed(&board, "CTV-2");
         board.moved(
             at(9, 3),
-            "FRK-2",
+            "CTV-2",
             ("verifying", "in_progress"),
             "human",
             people,
         );
         board.moved(
             at(9, 4),
-            "FRK-2",
+            "CTV-2",
             ("in_progress", "verifying"),
             "linus",
             people,
         );
         // An epic's result is the human's to review, so it waits on no reviewer.
-        board.file("FRK-3", "An epic", |wire| wire["kind"] = json!("epic"));
+        board.file("CTV-3", "An epic", |wire| wire["kind"] = json!("epic"));
         board.moved(
             at(9, 5),
-            "FRK-3",
+            "CTV-3",
             ("draft", "verifying"),
             "linus",
             (Some("linus"), None),
@@ -1085,9 +1085,9 @@ mod tests {
             .iter()
             .map(|item| (item.task_id.as_str(), item.line.as_str()))
             .collect();
-        assert_eq!(seen, vec![("FRK-3", "Linus finished it")]);
+        assert_eq!(seen, vec![("CTV-3", "Linus finished it")]);
 
-        reviewed(&board, "FRK-1");
+        reviewed(&board, "CTV-1");
         let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
             .expect("the store reads");
         assert_eq!(listed[0].line, "Linus finished it and Grace reviewed it");
@@ -1097,49 +1097,49 @@ mod tests {
     fn lists_what_waits_on_the_human() {
         let board = Board::new("waiting-five");
         let people = (Some("linus"), Some("grace"));
-        board.file("FRK-1", "A plan", |_| {});
+        board.file("CTV-1", "A plan", |_| {});
         board.moved(
             at(9, 1),
-            "FRK-1",
+            "CTV-1",
             ("draft", "escalated"),
             "ada",
             (None, None),
         );
         board.put(
             at(9, 1),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "escalation.raised",
             json!({ "reason": "approval", "detail": "waits" }),
         );
-        board.file("FRK-2", "A result", |wire| {
+        board.file("CTV-2", "A result", |wire| {
             wire["exit_criteria"][0]["verification"] =
                 json!({ "method": "human", "question": "Does it look right?" });
         });
-        board.moved(at(9, 2), "FRK-2", ("draft", "verifying"), "linus", people);
-        reviewed(&board, "FRK-2");
-        board.file("FRK-3", "A question", |_| {});
+        board.moved(at(9, 2), "CTV-2", ("draft", "verifying"), "linus", people);
+        reviewed(&board, "CTV-2");
+        board.file("CTV-3", "A question", |_| {});
         let asked = board.put(
             at(9, 3),
-            Some("FRK-3"),
+            Some("CTV-3"),
             Some("linus"),
             "question.asked",
             json!({ "question": "Which colour should the button be?", "asked_by": "linus" }),
         );
-        board.file("FRK-4", "Stuck work", |_| {});
-        board.moved(at(9, 4), "FRK-4", ("draft", "escalated"), "linus", people);
+        board.file("CTV-4", "Stuck work", |_| {});
+        board.moved(at(9, 4), "CTV-4", ("draft", "escalated"), "linus", people);
         board.put(
             at(9, 4),
-            Some("FRK-4"),
+            Some("CTV-4"),
             None,
             "escalation.raised",
             json!({ "reason": "iterations", "detail": "three tries" }),
         );
-        board.file("FRK-5", "Done work", |_| {});
-        board.moved(at(9, 5), "FRK-5", ("draft", "accepted"), "linus", people);
+        board.file("CTV-5", "Done work", |_| {});
+        board.moved(at(9, 5), "CTV-5", ("draft", "accepted"), "linus", people);
         // A low-risk result with no human criterion waits on nobody.
-        board.file("FRK-6", "Plain work", |_| {});
-        board.moved(at(9, 6), "FRK-6", ("draft", "verifying"), "linus", people);
+        board.file("CTV-6", "Plain work", |_| {});
+        board.moved(at(9, 6), "CTV-6", ("draft", "verifying"), "linus", people);
 
         let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
             .expect("the store reads");
@@ -1159,35 +1159,35 @@ mod tests {
             seen,
             vec![
                 (
-                    "FRK-3",
+                    "CTV-3",
                     WaitingKind::Question,
                     Some("linus"),
                     "A question",
                     "Which colour should the button be?"
                 ),
                 (
-                    "FRK-1",
+                    "CTV-1",
                     WaitingKind::Approval,
                     Some("ada"),
                     "A plan",
                     "Ada wrote a plan for you to approve"
                 ),
                 (
-                    "FRK-4",
+                    "CTV-4",
                     WaitingKind::Help,
                     Some("linus"),
                     "Stuck work",
                     "Linus needs your help: it used all its tries"
                 ),
                 (
-                    "FRK-2",
+                    "CTV-2",
                     WaitingKind::Acceptance,
                     Some("linus"),
                     "A result",
                     "Linus finished it and Grace reviewed it"
                 ),
                 (
-                    "FRK-5",
+                    "CTV-5",
                     WaitingKind::Integration,
                     Some("linus"),
                     "Done work",
@@ -1215,7 +1215,7 @@ mod tests {
         board
             .session(
                 super::fixtures::at(9, 5),
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "kai",
                 "session-1",
                 "social_post.requested",
@@ -1234,7 +1234,7 @@ mod tests {
     fn waiting_lists_a_requested_post() {
         let board = Board::new("waiting-post");
         let team = with_kai();
-        board.file("FRK-1", "Spring posts", |_| {});
+        board.file("CTV-1", "Spring posts", |_| {});
         let post = requested(&board, "2026-09-28T14:00:00+02:00");
         let rows = |board: &Board| {
             waiting(&board.projections, &board.log, &board.files, &team)
@@ -1250,7 +1250,7 @@ mod tests {
         let row = &listed[0];
         assert_eq!(row.line, "Kai wants to post on Instagram");
         assert_eq!(row.agent_id.as_deref(), Some("kai"));
-        assert_eq!(row.task_id.as_str(), "FRK-1");
+        assert_eq!(row.task_id.as_str(), "CTV-1");
         assert_eq!(WaitingKind::SocialPost.as_str(), "social_post");
         let ask = row.post.as_ref().expect("the post's ask");
         assert_eq!(ask.post, post);
@@ -1281,7 +1281,7 @@ mod tests {
         // Decided by the owner, it waits no more.
         board.put(
             at(9, 6),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "social_post.stopped",
             json!({ "post": post, "by": "declined" }),
@@ -1316,10 +1316,10 @@ mod tests {
     fn waiting_lists_each_drafted_order() {
         let board = Board::new("waiting-order");
         let team = with_ivo_buying();
-        board.file("FRK-1", "Price 500 boxes", |_| {});
+        board.file("CTV-1", "Price 500 boxes", |_| {});
         board.session(
             at(9, 5),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-1",
             "purchase_order.drafted",
@@ -1346,7 +1346,7 @@ mod tests {
         let row = &listed[0];
         assert_eq!(row.line, "Ivo set up an order from Acme: 59.98 USD");
         assert_eq!(row.agent_id.as_deref(), Some("ivo"));
-        assert_eq!(row.task_id.as_str(), "FRK-1");
+        assert_eq!(row.task_id.as_str(), "CTV-1");
         assert_eq!(row.title, "Price 500 boxes");
         assert_eq!(WaitingKind::PurchaseOrder.as_str(), "purchase_order");
         let ask = row.order.as_ref().expect("the order's ask");
@@ -1383,7 +1383,7 @@ mod tests {
         assert!(
             !board
                 .projections
-                .task(&"FRK-1".parse().expect("a task id"))
+                .task(&"CTV-1".parse().expect("a task id"))
                 .expect("reads")
                 .expect("the task")
                 .waiting_on_human,
@@ -1399,12 +1399,12 @@ mod tests {
     fn an_escalated_request_waits_on_the_human() {
         let board = Board::new("waiting-pipeline");
         let team = with_ivo_buying();
-        board.file("FRK-1", "Price 500 boxes", |_| {});
+        board.file("CTV-1", "Price 500 boxes", |_| {});
         let request = |name: &str, minute| {
             board
                 .session(
                     at(9, minute),
-                    Some("FRK-1"),
+                    Some("CTV-1"),
                     "ivo",
                     "session-ivo",
                     "data_pipeline.requested",
@@ -1453,7 +1453,7 @@ mod tests {
         let row = &listed[0];
         assert_eq!(row.line, "Ivo asks for a data source: Firecrawl");
         assert_eq!(row.agent_id.as_deref(), Some("ivo"));
-        assert_eq!(row.task_id.as_str(), "FRK-1");
+        assert_eq!(row.task_id.as_str(), "CTV-1");
         assert_eq!(row.title, "Price 500 boxes");
         assert_eq!(WaitingKind::DataPipeline.as_str(), "data_pipeline");
         let ask = row.pipeline.as_ref().expect("the request's ask");
@@ -1498,7 +1498,7 @@ mod tests {
         assert!(
             !board
                 .projections
-                .task(&"FRK-1".parse().expect("a task id"))
+                .task(&"CTV-1".parse().expect("a task id"))
                 .expect("reads")
                 .expect("the task")
                 .waiting_on_human,
@@ -1539,7 +1539,7 @@ mod tests {
             None,
             None,
             "data_pipeline.approved",
-            json!({ "pipeline": first, "by": "human", "reason": "", "request": "FRK-9" }),
+            json!({ "pipeline": first, "by": "human", "reason": "", "request": "CTV-9" }),
         );
         board.put(
             at(9, 13),
@@ -1555,7 +1555,7 @@ mod tests {
     fn an_order_waits_no_more_once_decided_or_expired() {
         let board = Board::new("waiting-order-ends");
         let team = with_ivo_buying();
-        board.file("FRK-1", "Price 500 boxes", |_| {});
+        board.file("CTV-1", "Price 500 boxes", |_| {});
         let rows = |board: &Board| {
             waiting(&board.projections, &board.log, &board.files, &team)
                 .expect("the store reads")
@@ -1578,7 +1578,7 @@ mod tests {
         ] {
             board.session(
                 at(9, number),
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "ivo",
                 "session-1",
                 "purchase_order.drafted",
@@ -1590,7 +1590,7 @@ mod tests {
                 }),
             );
             assert_eq!(rows(&board).len(), 1, "{kind} waits");
-            board.put(at(10, number), Some("FRK-1"), None, kind, body);
+            board.put(at(10, number), Some("CTV-1"), None, kind, body);
             assert!(rows(&board).is_empty(), "{kind} decided");
         }
     }
@@ -1605,12 +1605,12 @@ mod tests {
         catervas_core::team::validate_team(&wire).expect("the fixture is a team")
     }
 
-    /// A request of Kai's, in her session, to read `url`, on FRK-1.
+    /// A request of Kai's, in her session, to read `url`, on CTV-1.
     fn asked_to_read(board: &Board, minute: u32, host: &str, url: &str) -> u64 {
         board
             .session(
                 super::fixtures::at(9, minute),
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "kai",
                 "session-1",
                 "site.requested",
@@ -1624,7 +1624,7 @@ mod tests {
     fn waiting_lists_each_site_request() {
         let board = Board::new("waiting-site");
         let team = with_kai_buying();
-        board.file("FRK-1", "Price 500 boxes", |_| {});
+        board.file("CTV-1", "Price 500 boxes", |_| {});
         let site = asked_to_read(&board, 6, "shop.example", "https://www.shop.example/boxes");
         let rows = |board: &Board| {
             waiting(&board.projections, &board.log, &board.files, &team)
@@ -1661,7 +1661,7 @@ mod tests {
         let row = &listed[1];
         assert_eq!(row.line, "Kai asks to read shop.example");
         assert_eq!(row.agent_id.as_deref(), Some("kai"));
-        assert_eq!(row.task_id.as_str(), "FRK-1");
+        assert_eq!(row.task_id.as_str(), "CTV-1");
         assert_eq!(WaitingKind::SiteRequest.as_str(), "site_request");
         let ask = row.site.as_ref().expect("the site's ask");
         assert_eq!(ask.request, site);
@@ -1672,7 +1672,7 @@ mod tests {
         // Decided by the owner, either way, it waits no more.
         board.put(
             at(9, 7),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "site.approved",
             json!({ "host": "shop.example", "request": site }),
@@ -1682,7 +1682,7 @@ mod tests {
         assert_eq!(rows(&board).len(), 2);
         board.put(
             at(9, 9),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "site.declined",
             json!({ "request": other, "host": "other.example", "note": "" }),
@@ -1693,7 +1693,7 @@ mod tests {
         let third = asked_to_read(&board, 10, "third.example", "https://third.example/");
         board.session(
             at(9, 11),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "site.approved",

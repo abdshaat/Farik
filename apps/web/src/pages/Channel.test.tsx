@@ -172,36 +172,36 @@ describe("channel", () => {
 
 	it("words_catervas_move_lines_as_the_history_tab_does", async () => {
 		await channel([
-			message("catervas", "system", "FRK-1 refining → ready (by the governor)"),
+			message("catervas", "system", "CTV-1 refining → ready (by the governor)"),
 			message(
 				"catervas",
 				"system",
-				"FRK-2 verifying → rejected (by theo): C1 failed: <b>no</b> file",
+				"CTV-2 verifying → rejected (by theo): C1 failed: <b>no</b> file",
 			),
 			message(
 				"catervas",
 				"system",
-				"FRK-3 escalated → in_progress (by the human): go on",
+				"CTV-3 escalated → in_progress (by the human): go on",
 			),
-			message("catervas", "system", "FRK-4 dreaming → flying (by theo)"),
+			message("catervas", "system", "CTV-4 dreaming → flying (by theo)"),
 		]);
 		const list = await screen.findByRole("list", { name: en.channelMessages });
 		const rows = within(list).getAllByRole("listitem");
 		expect(rows.map((li) => li.textContent?.replace(/\d\d:\d\d$/, ""))).toEqual(
 			[
-				"Catervas moved FRK-1 to To do. ",
-				"Theo sent FRK-2 back. Why: C1 failed: <b>no</b> file ",
-				"You moved FRK-3 to In progress. Why: go on ",
+				"Catervas moved CTV-1 to To do. ",
+				"Theo sent CTV-2 back. Why: C1 failed: <b>no</b> file ",
+				"You moved CTV-3 to In progress. Why: go on ",
 				// A line of another shape stays as Catervas wrote it.
-				"Catervas FRK-4 dreaming → flying (by theo) ",
+				"Catervas CTV-4 dreaming → flying (by theo) ",
 			],
 		);
 		// The task is a link to it; the agent's words stay words, never markup.
 		expect(
 			within(rows[0] as HTMLElement)
-				.getByRole("link", { name: "FRK-1" })
+				.getByRole("link", { name: "CTV-1" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-1");
+		).toBe("/tasks/CTV-1");
 		expect(list.querySelector("b")).toBeNull();
 	});
 
@@ -290,14 +290,14 @@ describe("channel", () => {
 				message(
 					"theo",
 					"reaction",
-					"@human FRK-2 is ready, and @mira has the plan. <img src=x onerror=alert(1)>",
-					{ task_id: "FRK-3", mentions: ["mira"] },
+					"@human CTV-2 is ready, and @mira has the plan. <img src=x onerror=alert(1)>",
+					{ task_id: "CTV-3", mentions: ["mira"] },
 				),
 			],
 			{
 				waiting: [
 					{
-						task_id: "FRK-2",
+						task_id: "CTV-2",
 						kind: "acceptance",
 						agent_id: "theo",
 						title: "Menu page",
@@ -307,12 +307,12 @@ describe("channel", () => {
 			},
 		);
 		const list = await screen.findByRole("list", { name: en.channelMessages });
-		const link = within(list).getByRole("link", { name: "FRK-2" });
-		expect(link.getAttribute("href")).toBe("/tasks/FRK-2");
+		const link = within(list).getByRole("link", { name: "CTV-2" });
+		expect(link.getAttribute("href")).toBe("/tasks/CTV-2");
 		expect(link.nextSibling?.textContent).toContain(en.channelWaitingOnYou);
 		expect(
-			within(list).getByRole("link", { name: "FRK-3" }).getAttribute("href"),
-		).toBe("/tasks/FRK-3");
+			within(list).getByRole("link", { name: "CTV-3" }).getAttribute("href"),
+		).toBe("/tasks/CTV-3");
 		expect(within(list).getByText(en.channelAtYou)).toBeTruthy();
 		expect(within(list).getByText("@Mira")).toBeTruthy();
 
@@ -324,11 +324,11 @@ describe("channel", () => {
 
 	it("links_a_task_whose_id_starts_a_longer_one", async () => {
 		await channel([
-			message("theo", "reaction", "FRK-10 is done.", { task_id: "FRK-1" }),
+			message("theo", "reaction", "CTV-10 is done.", { task_id: "CTV-1" }),
 		]);
 		const list = await screen.findByRole("list", { name: en.channelMessages });
-		expect(within(list).getByRole("link", { name: "FRK-10" })).toBeTruthy();
-		expect(within(list).getByRole("link", { name: "FRK-1" })).toBeTruthy();
+		expect(within(list).getByRole("link", { name: "CTV-10" })).toBeTruthy();
+		expect(within(list).getByRole("link", { name: "CTV-1" })).toBeTruthy();
 	});
 
 	it("posts_and_mentions", async () => {

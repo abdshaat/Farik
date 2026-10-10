@@ -362,44 +362,44 @@ mod tests {
     fn lists_the_open_escalations() {
         let project = TestProject::new("ceremonies-open", &a_team_of_three(|_| {}));
         let raised = |task: &str, reason: &str| json!({ "reason": reason, "detail": format!("{task} waits") });
-        // FRK-1 escalated at its iterations, thirty hours ago.
+        // CTV-1 escalated at its iterations, thirty hours ago.
         let long_ago = at() - Duration::hours(30);
-        project.filed("FRK-1", "rejected", "task", None);
-        project.moved_at(long_ago, "FRK-1", "rejected", "escalated", &json!({}));
+        project.filed("CTV-1", "rejected", "task", None);
+        project.moved_at(long_ago, "CTV-1", "rejected", "escalated", &json!({}));
         project.record_at(
             long_ago,
-            "FRK-1",
+            "CTV-1",
             "escalation.raised",
-            &raised("FRK-1", "iterations"),
+            &raised("CTV-1", "iterations"),
         );
-        // FRK-2 accepted, its integration failed and not landed since.
-        project.filed("FRK-2", "verifying", "task", None);
-        project.moved("FRK-2", "verifying", "accepted", &json!({}));
+        // CTV-2 accepted, its integration failed and not landed since.
+        project.filed("CTV-2", "verifying", "task", None);
+        project.moved("CTV-2", "verifying", "accepted", &json!({}));
         project.record(
-            "FRK-2",
+            "CTV-2",
             "escalation.raised",
-            &raised("FRK-2", "integration"),
+            &raised("CTV-2", "integration"),
         );
-        // FRK-3 escalated, then resolved by the human.
-        project.filed("FRK-3", "in_progress", "task", None);
-        project.moved("FRK-3", "in_progress", "escalated", &json!({}));
-        project.record("FRK-3", "escalation.raised", &raised("FRK-3", "budget"));
+        // CTV-3 escalated, then resolved by the human.
+        project.filed("CTV-3", "in_progress", "task", None);
+        project.moved("CTV-3", "in_progress", "escalated", &json!({}));
+        project.record("CTV-3", "escalation.raised", &raised("CTV-3", "budget"));
         project.record(
-            "FRK-3",
+            "CTV-3",
             "escalation.resolved",
             &json!({ "to": "in_progress", "message": "go on", "resolved_by": "human" }),
         );
-        project.moved("FRK-3", "escalated", "in_progress", &json!({}));
-        // FRK-4 accepted, its integration failed, then landed.
-        project.filed("FRK-4", "verifying", "task", None);
-        project.moved("FRK-4", "verifying", "accepted", &json!({}));
+        project.moved("CTV-3", "escalated", "in_progress", &json!({}));
+        // CTV-4 accepted, its integration failed, then landed.
+        project.filed("CTV-4", "verifying", "task", None);
+        project.moved("CTV-4", "verifying", "accepted", &json!({}));
         project.record(
-            "FRK-4",
+            "CTV-4",
             "escalation.raised",
-            &raised("FRK-4", "integration"),
+            &raised("CTV-4", "integration"),
         );
         project.record(
-            "FRK-4",
+            "CTV-4",
             "task.integrated",
             &json!({ "sha": "abc123", "into": "main", "integrated_by": "human" }),
         );
@@ -421,8 +421,8 @@ mod tests {
         assert_eq!(
             listed,
             vec![
-                ("FRK-1", "iterations", "FRK-1 waits", long_ago),
-                ("FRK-2", "integration", "FRK-2 waits", at()),
+                ("CTV-1", "iterations", "CTV-1 waits", long_ago),
+                ("CTV-2", "integration", "CTV-2 waits", at()),
             ]
         );
         assert_eq!(open[0].title, "Add a login page");

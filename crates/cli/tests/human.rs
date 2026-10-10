@@ -204,7 +204,7 @@ fn stops_only_a_driving_process() {
     let task = filed(&repository, "Add done.txt");
     let started = json!({ "purpose": "refine", "model": "claude-opus-5", "effort": "high" });
     let ended = json!({ "reason": "completed", "detail": "done" });
-    // FRK-1's first session ended and its second runs; FRK-2's one session ended.
+    // CTV-1's first session ended and its second runs; CTV-2's one session ended.
     record_as(
         &repository,
         &task,
@@ -263,7 +263,7 @@ fn stops_only_a_driving_process() {
     }
     for (target, said) in [
         (other.as_str(), format!("{other} has no session running")),
-        ("FRK-9", "FRK-9 has no session running".to_string()),
+        ("CTV-9", "CTV-9 has no session running".to_string()),
     ] {
         let ran = run(&repository.path, &["stop", target]);
         assert_eq!(ran.code, 1, "{}", ran.out);
@@ -350,16 +350,16 @@ fn prints_the_refusal_the_driving_process_answered() {
         (
             "human-routed-not-found",
             CommandError::NotFound {
-                what: "FRK-9".to_string(),
+                what: "CTV-9".to_string(),
             },
-            "catervas: FRK-9 is not in this project",
+            "catervas: CTV-9 is not in this project",
         ),
         (
             "human-routed-refused",
             CommandError::Refused {
-                reason: "not_awaiting_approval: FRK-1 is a draft".to_string(),
+                reason: "not_awaiting_approval: CTV-1 is a draft".to_string(),
             },
-            "catervas: not_awaiting_approval: FRK-1 is a draft",
+            "catervas: not_awaiting_approval: CTV-1 is a draft",
         ),
     ] {
         let repository = a_project(name);
@@ -399,11 +399,11 @@ fn holds_the_run_lock_while_it_handles_a_command_here() {
     for (name, args) in [
         (
             "human-lock-cancel",
-            &["cancel", "FRK-1", "Not", "needed."][..],
+            &["cancel", "CTV-1", "Not", "needed."][..],
         ),
         (
             "human-lock-triage",
-            &["triage", "FRK-1", "small", "--reason", "One."][..],
+            &["triage", "CTV-1", "small", "--reason", "One."][..],
         ),
     ] {
         let repository = a_project(name);
@@ -565,7 +565,7 @@ fn joins_a_task_the_human_files_under_a_sprints_epic() {
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     let contract = files_of(&repository)
-        .read_contract(&"FRK-2".parse().expect("a task id"))
+        .read_contract(&"CTV-2".parse().expect("a task id"))
         .expect("the child is written");
     assert_eq!(contract.sprint.as_deref(), Some("S1"));
 }
@@ -588,10 +588,10 @@ fn files_a_task_whose_join_fails_and_says_so() {
     let ran = file_under(&repository, &epic);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
-    assert!(ran.out.contains("FRK-2 filed"), "{}", ran.out);
+    assert!(ran.out.contains("CTV-2 filed"), "{}", ran.out);
     assert!(ran.out.contains("S1 has ended"), "{}", ran.out);
     let contract = files_of(&repository)
-        .read_contract(&"FRK-2".parse().expect("a task id"))
+        .read_contract(&"CTV-2".parse().expect("a task id"))
         .expect("the child is written");
     assert_eq!(contract.sprint, None);
 }

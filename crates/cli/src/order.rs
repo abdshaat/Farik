@@ -131,7 +131,7 @@ mod tests {
         let order = |number: u64, state: &str| {
             json!({
                 "order": number, "state": state, "seller": "Acme", "total": "1.00",
-                "currency": "USD", "period": "once", "task_id": "FRK-1", "agent_id": "theo",
+                "currency": "USD", "period": "once", "task_id": "CTV-1", "agent_id": "theo",
                 "overdue": false
             })
         };
@@ -146,12 +146,12 @@ mod tests {
     fn a_line_says_where_an_order_stands() {
         let drafted = json!({
             "order": 1, "state": "drafted", "seller": "Acme", "total": "59.98",
-            "currency": "USD", "period": "once", "task_id": "FRK-1", "agent_id": "theo",
+            "currency": "USD", "period": "once", "task_id": "CTV-1", "agent_id": "theo",
             "overdue": false
         });
         assert_eq!(
             line(&drafted),
-            "PO-1  drafted  Acme  59.98 USD once  FRK-1  theo"
+            "PO-1  drafted  Acme  59.98 USD once  CTV-1  theo"
         );
         let mut placed = drafted;
         placed["state"] = json!("placed");
@@ -163,7 +163,7 @@ mod tests {
         });
         assert_eq!(
             line(&placed),
-            "PO-1  placed  Acme  59.98 USD once  FRK-1  theo  placed 2026-10-08  overdue  \
+            "PO-1  placed  Acme  59.98 USD once  CTV-1  theo  placed 2026-10-08  overdue  \
              delayed (you, 2026-10-20): Short of flour, expected 2026-11-02"
         );
         placed["status"]["by"] = json!("agent");

@@ -40,7 +40,7 @@ pub(crate) fn drafted(project: &crate::tools::fixtures::TestProject, input: Valu
                 project
                     .call(
                         "proc",
-                        Some("FRK-1"),
+                        Some("CTV-1"),
                         "catervas_draft_seller_message",
                         input,
                     )
@@ -80,7 +80,7 @@ impl Story {
     pub(crate) async fn new(name: &str) -> Story {
         let fixture = GreenMail::start(name, &[&BUYING, &DANA]);
         let harness = Harness::with_procurement(&format!("send-{name}"));
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let keys = Arc::new(MemoryConnectorSecrets::default());
         assert!(harness.daemon.set_connector_secrets(keys.clone()));
         assert!(

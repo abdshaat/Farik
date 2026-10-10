@@ -40,7 +40,7 @@ export const MARKUP = "<b>not bold</b>";
 
 /** The row `waiting.list` gives while Ivo asks to read a site. */
 export const SITE_ROW = {
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	kind: "site_request",
 	agent_id: "ivo",
 	title: "Find a supplier for 500 pie boxes",
