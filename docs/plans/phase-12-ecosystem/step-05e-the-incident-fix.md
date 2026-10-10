@@ -1,12 +1,12 @@
-# Phase 11, step 05e: The incident's fix
+# Phase 12, step 05e: The incident's fix
 
 Status: draft. Its readiness review runs once step 05d has landed.
-Branch: `phase/11-ecosystem` (the phase branch; steps do not get their own)
+Branch: `phase/12-ecosystem` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 5.2, 5.5, 5.16, 6.9, 8.5; F9
 Depends on: step 05d (`incident_step`, `IncidentFacts`, incident sessions, `INCIDENT_TOOLS`, `production_gate` in an incident); step 05b (`farik_deploy`, `deployment.started`, `DeployWork`); step 05c (settling); phase 6 step 15 (`SprintHold`, `waits_for_a_sprint`, `in_the_open_sprint`, `PlannedBy::Governor`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
 Amended 2026-10-07 by step 08g (the founder's "Skip the queue" for a raised marketing budget, ADR 0042): 08g builds ADR 0028's exception first, as `skips_sprints` on `SprintHold`, `AssignmentInput` and `TaskProjection` (column `task_projections.skips_sprints`); this step fills it from `task.created`'s `incident` too, in place of the `incident_fix` fields its Decisions name (its `incident` column stays), and still joins the open sprint with `PlannedBy::Governor`.
-Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 11e until then (its file was `step-11e-the-incident-fix.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 11, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 9 step 01; step 13, the kit check, is phase 9 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 8 moved up by one.
+Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 11e until then (its file was `step-11e-the-incident-fix.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 12, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 10 step 01; step 13, the kit check, is phase 10 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 9 moved up by one.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 05 (see step 05's header); ADR 0045, 7, is this step's, and it closes the exception ADR 0028 left for it.
 
