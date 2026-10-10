@@ -89,7 +89,7 @@ Produces: every `catervas_core::folders` item above. Consumes: `normalise`, `pla
 - `tells_a_role_without_a_folder_to_write_none` — for the Finance Specialist with active `[ProductManager]` the line is `- folders: docs/catervas/product/ (Product Manager). You have none: write none of them. Read any of them, …` (the sentence above); with no active role it is `- folders: none`. RED.
 - `lists_the_readers_own_folder_when_it_is_not_active` — for the Architect with active `[ProductManager]`, both folders are listed, the Architect's second. RED.
 
-- [ ] `feat(core): add each role's folder and its human documents`
+- [x] `feat(core): add each role's folder and its human documents`
 
 ### Task 2: `reaches_the_folder`
 
