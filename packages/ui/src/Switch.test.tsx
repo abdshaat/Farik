@@ -51,4 +51,20 @@ describe("Switch", () => {
 			screen.queryByRole("button", { name: "More about this" }),
 		).toBeNull();
 	});
+
+	it("shows an icon inside its label, before the words", () => {
+		render(
+			<Switch
+				id="s"
+				label="Notify me"
+				checked={false}
+				onChange={() => {}}
+				icon={<img alt="" src="x.svg" />}
+			/>,
+		);
+		const label = document.getElementById("s-label");
+		expect((label?.firstChild as Element)?.tagName).toBe("IMG");
+		expect(label?.textContent).toBe("Notify me");
+		expect(screen.getByRole("switch", { name: "Notify me" })).toBeTruthy();
+	});
 });

@@ -54,6 +54,9 @@
 }
 
 .label {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--farik-space-1);
 	font:
 		var(--farik-type-body-weight) var(--farik-type-body-size) /
 		var(--farik-type-body-line-height) var(--farik-type-body-family);

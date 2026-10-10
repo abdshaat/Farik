@@ -9,6 +9,7 @@ export function Switch({
 	onChange,
 	description,
 	info,
+	icon,
 }: {
 	id: string;
 	label: string;
@@ -17,6 +18,8 @@ export function Switch({
 	description?: string;
 	/** A longer note, kept behind an info button after the label. */
 	info?: ReactNode;
+	/** Sits inside the label, before its words. */
+	icon?: ReactNode;
 }) {
 	return (
 		<div className={styles.row}>
@@ -35,6 +38,7 @@ export function Switch({
 			<span className={styles.text}>
 				<span className={styles.labelRow}>
 					<span id={`${id}-label`} className={styles.label}>
+						{icon}
 						{label}
 					</span>
 					{info ? <InfoTip id={`${id}-info`}>{info}</InfoTip> : null}
