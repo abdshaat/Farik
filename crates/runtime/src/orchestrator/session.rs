@@ -1032,6 +1032,10 @@ fn session_spec_without(
     let permissions = team.permissions();
     let custom = custom_connectors(deps, ask, left_out);
     let connectors = connector_names(deps, team, ask, &custom);
+    let active_roles: Vec<Role> = team
+        .active_agents()
+        .map(|agent| Role::from(agent.role))
+        .collect();
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
@@ -1048,6 +1052,7 @@ fn session_spec_without(
         human_message: human.as_deref(),
         closing: closing_instruction(ask),
         connectors: &connectors,
+        active_roles: &active_roles,
     })?;
     let limits = budget_state(
         &deps.tools.projections,
@@ -1781,6 +1786,55 @@ mod tests {
         assert!(!tiers.contains(&PermissionTier::GitRemote), "{tiers:?}");
         assert!(has(&tools, "catervas_exec"), "{tools:?}");
         assert!(!has(&tools, "catervas_git_push"), "{tools:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_prompt_lists_the_folders_of_the_active_roles() {
+        // The Architect `ada` is paused: nobody holds her folder, so the prompt leaves it out.
+        let harness = Harness::new("session-folders", |wire| {
+            crate::tools::fixtures::with_the_designer(wire);
+            wire["agents"][4]["status"] = json!("paused");
+        });
+        harness.file("CTV-1", "draft", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("a task id"))
+            .expect("the contract");
+        let spec = session_spec(
+            deps,
+            &team,
+            &SessionAsk {
+                agent: agent(&team, "pm"),
+                contract: Some(&contract),
+                purpose: SessionPurpose::Triage,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: false,
+                only_tool: Some(TRIAGE_TOOL),
+                tools: None,
+                in_reply_to: None,
+                thread: None,
+                initial_prompt: String::new(),
+                pipeline: None,
+            },
+        )
+        .expect("the spec");
+
+        let prompt = &spec.system_prompt;
+        assert!(
+            prompt.contains("docs/catervas/engineering/ (Software Developer)"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("docs/catervas/design/ (UI/UX Designer)"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("docs/catervas/architecture/"), "{prompt}");
     }
 
     #[test]

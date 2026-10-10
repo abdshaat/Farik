@@ -152,7 +152,7 @@ Files: `prompt.rs` (`PromptInput.active_roles`, `rules_section` taking it and th
 - `the_team_rules_name_the_active_roles_folders` (`prompt.rs`) — an Architect with active `[ProductManager, ScrumMaster, Architect, FinanceSpecialist]`: the Team rules' last line holds `docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/delivery/ (Scrum Master). Yours is docs/catervas/architecture/`; the headings are still `PROMPT_SECTIONS`. RED.
 - `the_prompt_lists_the_folders_of_the_active_roles` (`session.rs`, integration) — a team of three `with_the_designer` (`tools/fixtures.rs:50`) whose Architect `ada` is paused: the Product Manager's triage session prompt holds `docs/catervas/engineering/ (Software Developer)` and `docs/catervas/design/ (UI/UX Designer)` and not `docs/catervas/architecture/`. RED: no folders line.
 
-- [ ] `feat(runtime): tell every session the team's folders`
+- [x] `feat(runtime): tell every session the team's folders`
 
 ### Task 8: Each owner's prompt names its folder
 
