@@ -592,7 +592,7 @@ impl Git {
             Err(failure) => {
                 self.take_back(from, files, &paths);
                 // Best effort: the failure being reported is the one worth keeping.
-                let _ = self.at_root(&["checkout", "--force", &was_on]);
+                let _ = self.at_root(&["checkout", &was_on]);
                 let _ = self.at_root(&["branch", "-D", branch]);
                 return Err(failure);
             }

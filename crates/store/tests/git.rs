@@ -1223,6 +1223,7 @@ fn cleans_up_a_commit_that_fails() {
 
     let repository = TempRepo::new("commit-files-cleanup");
     repository.write(CADENCE, "old\n");
+    repository.write("src/x.rs", "fn a() {}\n");
     repository.commit("the first cadence");
     let hooks = repository.path.join(".git/refusing-hooks");
     std::fs::create_dir_all(&hooks).expect("a hooks directory");
@@ -1230,6 +1231,10 @@ fn cleans_up_a_commit_that_fails() {
     std::fs::write(&hook, "#!/bin/sh\nexit 1\n").expect("a hook");
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("executable");
     repository.git(&["config", "core.hooksPath", hooks.to_str().expect("text")]);
+    // The owner's work outside Catervas: one change staged, one not.
+    repository.write("README.md", "the owner's staged line\n");
+    repository.git(&["add", "README.md"]);
+    repository.write("src/x.rs", "fn b() {}\n");
     let git = repository.adapter();
     let new = "docs/catervas/delivery/new.md";
     let files = vec![
@@ -1254,8 +1259,8 @@ fn cleans_up_a_commit_that_fails() {
     );
     assert_eq!(
         repository.git_output(&["status", "--porcelain", "--untracked-files=all"]),
-        "",
-        "nothing is staged or left over"
+        "M  README.md\n M src/x.rs",
+        "only the owner's own changes are left, staged and unstaged as they were"
     );
 
     repository.git(&["checkout", "--detach"]);
@@ -1265,6 +1270,16 @@ fn cleans_up_a_commit_that_fails() {
         "{answer:?}"
     );
     assert!(!repository.path.join(new).exists(), "nothing was written");
+    assert!(
+        !std::process::Command::new("git")
+            .current_dir(&repository.path)
+            .args(["symbolic-ref", "-q", "HEAD"])
+            .output()
+            .expect("git runs")
+            .status
+            .success(),
+        "HEAD is still detached"
+    );
     assert_eq!(
         repository.git_output(&["branch", "--list", "docs/folder-2"]),
         ""
