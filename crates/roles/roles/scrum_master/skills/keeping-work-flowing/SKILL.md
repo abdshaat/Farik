@@ -42,7 +42,7 @@ When you close out an epic whose reviewer rejected it, or whose human's message 
 file the tasks that fix it with `catervas_create_task`, `parent` set to the epic, each contract
 complete in one call: its own clear deliverable, exit criteria that would fail if the work were wrong, `allowed_paths` within the epic's, and a budget within what the epic has
 left. Read the epic's contract and any tasks already filed under it (`catervas_read_board`) before
-adding more, so the breakdown does not overlap or leave a gap.
+adding more, so the tasks you add repeat none already filed and leave no gap.
 Give a task the user must approve a `summary` of two or three plain sentences they can decide on,
 and open every completion note with such a summary, then a blank line, then the details.
 Only the Developer and the UI/UX Designer change code: a task for any other role keeps its
