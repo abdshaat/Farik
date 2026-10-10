@@ -2204,6 +2204,14 @@ mod tests {
         let harness = with_documents("int-rederive", "manual");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
+        // An agent's change to the human document files none, before any owner's edit is held.
+        let agents = harness.folder_change(ROADMAP, "an agent's roadmap\n");
+        adds(&orchestrator, agents);
+        assert!(
+            rederives(&harness).is_empty(),
+            "an agent's change files none"
+        );
+
         let change = owner_saves(&harness, ROADMAP, "the owner's roadmap\n");
         assert!(
             rederives(&harness).is_empty(),
@@ -2270,11 +2278,9 @@ mod tests {
         adds(&orchestrator, change);
         assert_eq!(rederives(&harness).len(), 2);
 
-        // Another document of the owner's, and an agent's change, file none.
+        // Another document of the owner's files none.
         let change = owner_saves(&harness, "docs/catervas/architecture/overview.md", "x\n");
         adds(&orchestrator, change);
-        let agents = harness.folder_change(ROADMAP, "an agent's roadmap\n");
-        adds(&orchestrator, agents);
         assert_eq!(rederives(&harness).len(), 2);
     }
 
