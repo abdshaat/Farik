@@ -2676,6 +2676,17 @@ describe("logos and info buttons on the Connectors section", () => {
 		onlyInTips(notion, KIT_NOTION.why);
 	});
 
+	it("keeps a kit service's info button with its short line", async () => {
+		await openedWithKit([KIT_NOTION], [], []);
+		const notion = kitRow("Notion");
+		const line = within(notion).getByText(KIT_NOTION.about).closest("span");
+		expect(
+			within(line as HTMLElement).getByRole("button", {
+				name: "More about this",
+			}),
+		).toBeTruthy();
+	});
+
 	it("shows the plug for a connector you added", async () => {
 		await opened();
 		const airtable = row("airtable");
@@ -2688,10 +2699,12 @@ describe("logos and info buttons on the Connectors section", () => {
 	it("shows Playwright with its logo, a short line and the rest behind info", async () => {
 		await opened();
 		const sw = screen.getByRole("switch", { name: en.connectorPlaywright });
-		const playwright = sw.closest("div")?.parentElement as HTMLElement;
-		expect(playwright.querySelector("img")?.getAttribute("src")).toBe(
-			serviceLogo("playwright"),
-		);
+		const playwright = sw.closest("div") as HTMLElement;
+		expect(
+			playwright
+				.querySelector("#connector-playwright-label img")
+				?.getAttribute("src"),
+		).toBe(serviceLogo("playwright"));
 		expect(
 			within(playwright).getByText(en.connectorPlaywrightShort),
 		).toBeTruthy();

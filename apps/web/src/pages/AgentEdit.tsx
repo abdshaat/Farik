@@ -511,22 +511,20 @@ function Editor({
 						{t("connectorsLead", { name })}
 					</InfoTip>
 				</div>
-				<div className={styles.titled}>
-					<ServiceLogo name="playwright" />
-					<Switch
-						id="connector-playwright"
-						label={t("connectorPlaywright")}
-						description={t("connectorPlaywrightShort")}
-						info={
-							<>
-								<span>{t("connectorPlaywrightNote", { name })}</span>
-								<span>{t("connectorsNote")}</span>
-							</>
-						}
-						checked={browsing}
-						onChange={(on) => setDraft(withPlaywright(agent, on))}
-					/>
-				</div>
+				<Switch
+					id="connector-playwright"
+					icon={<ServiceLogo name="playwright" />}
+					label={t("connectorPlaywright")}
+					description={t("connectorPlaywrightShort")}
+					info={
+						<>
+							<span>{t("connectorPlaywrightNote", { name })}</span>
+							<span>{t("connectorsNote")}</span>
+						</>
+					}
+					checked={browsing}
+					onChange={(on) => setDraft(withPlaywright(agent, on))}
+				/>
 				{!browsing && agent.role === "ui_ux_designer" && (
 					<p>
 						<strong>{t("connectorOff", { name })}</strong>
@@ -918,8 +916,10 @@ function KitRow({
 			<span className={styles.titled}>
 				<ServiceLogo name={service.name} />
 				<strong>{service.title}</strong>
-				<span className={styles.muted}>{service.about}</span>
-				<InfoTip id={`kit-${service.name}-info`}>{service.why}</InfoTip>
+				<span className={styles.muted}>
+					{service.about}{" "}
+					<InfoTip id={`kit-${service.name}-info`}>{service.why}</InfoTip>
+				</span>
 			</span>
 			{service.atLaunch && !held && (
 				<p>
@@ -1101,6 +1101,11 @@ function SkillsSection({
 										<div className={styles.rowHead}>
 											<span>
 												<strong>{r.name}</strong>
+												{r.state !== "missing" && (
+													<InfoTip id={`skill-${r.level}-${r.name}-info`}>
+														{visibly(r.description)}
+													</InfoTip>
+												)}
 											</span>
 											{r.level === "role" && (
 												<span className={styles.actions}>
@@ -1154,14 +1159,12 @@ function SkillsSection({
 												</span>
 											)}
 										</div>
-										{r.state === "missing" ? (
+										{r.state === "missing" && (
 											<p>
 												<strong>
 													<code>{r.name}</code> {t("skillMissing")}
 												</strong>
 											</p>
-										) : (
-											<p>{visibly(r.description)}</p>
 										)}
 										{r.state === "review" && (
 											<p>

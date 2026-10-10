@@ -54,6 +54,9 @@
 }
 
 .label {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--catervas-space-1);
 	font:
 		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
 		var(--catervas-type-body-line-height) var(--catervas-type-body-family);

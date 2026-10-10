@@ -30,7 +30,7 @@ The options were:
 
 ## Consequences
 
-- Every name in code, command and wire format changes at once: `catervas serve`, `catervas_ask_human`, `@catervas/ui`, `.catervas/`. Spec revision 0.80 records it.
+- Every name in code, command and wire format changes at once: `catervas serve`, `catervas_ask_human`, `@catervas/ui`, `.catervas/`. Spec revision 0.81 records it.
 - A pull request open against the old names (#30) needs rebasing onto this one.
 - The step plans not yet executed still say `farik`; each is read against the code at its readiness review, which takes the new names.
 - The wordmark is wider than the old one, so the web UI shows it wider at the same height (220 px on the first-run screen, 264 px on the sign-in page).
