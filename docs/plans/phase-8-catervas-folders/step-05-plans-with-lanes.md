@@ -161,7 +161,7 @@ Files and text, exactly where quoted; step 01's, 01b's and 02's lines are kept.
 
 `docs/SPEC.md`: 3 (Contract: `plan` and `lane`; Epic: the Architect plans it before the Product Manager writes its tasks; Planning in sprints: an epic's breakdown is preparation, its plan task a task that waits with it; `catervas plan`'s breakdown stops at the plan task); 5.2 (the assignment row: `lane_taken` and the lane's builder); 5.3 (bullets `lane_beyond_builders` and `lanes_overlap`, their messages, plain words and the overlap test with its ceiling); 5.13 (an epic's task contracts come from the Architect's plan, by the Product Manager); 5.16 item 3 (a task's `allowed_paths` within its epic's, its own plan's path aside; the order: the Product Manager's breakdown files the plan task, then the plan's tasks; the Architect writes the plan in its docs task; the assignee assigns and closes out; with no Architect, the Product Manager's lanes; who files an epic's tasks); 6.1, 6.2 (Mandate, Produces, Default tools: no breakdown), 6.3 (Produces: implementation plans; Kit: six skills, `planning-in-lanes`); 5.4 ("one the Scrum Master broke down" and "The Scrum Master's breakdown tasks" say the epic the Scrum Master holds and its tasks); 5.16 item 4 ("when the Scrum Master broke it down" becomes "when the Scrum Master holds it"); the next spec revision: "records phase 8 step 05, plans with lanes". `docs/design/catervas-folders.md`: "With no Architect the Product Manager writes the plan" becomes "With no Architect the Product Manager plans the lanes in its tasks, with no plan document".
 
-- [ ] `docs(spec): record plans with lanes`
+- [x] `docs(spec): record plans with lanes`
 
 ## Verification
 

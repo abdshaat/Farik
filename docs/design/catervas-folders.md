@@ -71,7 +71,7 @@ A new page in the rail, "Files", mocked up and approved before it is built.
 4. Readiness refuses two tasks of the same epic in different lanes whose `allowed_paths` could overlap (`lanes_overlap`), so parallel lanes cannot collide. Two globs could overlap unless their literal prefixes, up to the first wildcard, part at a path segment. (`ponytail:` a conservative test that may refuse paths that never meet; exact glob intersection if it refuses real plans.)
 5. The Scrum Master schedules the contracts into the sprint, one lane to one builder.
 
-With no Architect the Product Manager writes the plan; with no Scrum Master the Product Manager schedules, as today. The Scrum Master no longer breaks epics into tasks.
+With no Architect the Product Manager plans the lanes in its tasks, with no plan document; with no Scrum Master the Product Manager schedules, as today. The Scrum Master no longer breaks epics into tasks.
 
 ## Starting: Catervafication
 
