@@ -309,6 +309,11 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "into": "main",
             "integrated_by": "governor"
         }),
+        EventKind::FolderDocEdited => json!({
+            "path": "docs/catervas/product/roadmap.md",
+            "change": 2,
+            "sha": "a1b2c3d4"
+        }),
         EventKind::FolderChangeEscalated => json!({
             "change": 1,
             "detail": "The merge conflicted in docs/catervas/delivery/cadence.md."

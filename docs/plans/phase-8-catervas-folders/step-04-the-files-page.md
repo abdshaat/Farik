@@ -150,7 +150,7 @@ Files: `event.schema.json` (`folder_doc.edited` in `eventKind` and its `oneOf` b
 - `folds_an_owners_edit_as_a_change` (`folder_docs.rs`) — `folder_doc.edited { path: …/roadmap.md, change: 2, sha }` gives `FolderChange { change: 2, paths: [path], approved: false, integrated: false, escalated: false, edited: true }`, integrated once `folder_change.integrated { change: 2 }` follows; a `folder_doc.written` change has `edited: false`; projecting the log with the event passes. RED: the kind is unknown to the fold.
 - `reads_a_task_created_that_rederives` — `rederives: "docs/catervas/product/roadmap.agent.md"` reads; `"docs/catervas/product/roadmap.md"` is refused at `/body/rederives`. RED.
 
-- [ ] `feat(protocol): record the owner's edit of a folder document`
+- [x] `feat(protocol): record the owner's edit of a folder document`
 
 ### Task 6: The folders and one document, answered
 

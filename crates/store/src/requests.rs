@@ -388,6 +388,7 @@ fn creation_bodies(
                     })
             })
             .transpose()?,
+        rederives: None,
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {

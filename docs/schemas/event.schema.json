@@ -162,6 +162,7 @@
         "folder_doc.proposed",
         "folder_doc.approved",
         "folder_doc.returned",
+        "folder_doc.edited",
         "folder_change.opened",
         "folder_change.integrated",
         "folder_change.escalated"
@@ -266,6 +267,7 @@
         { "$ref": "#/$defs/folderDocProposedBody" },
         { "$ref": "#/$defs/folderDocApprovedBody" },
         { "$ref": "#/$defs/folderDocReturnedBody" },
+        { "$ref": "#/$defs/folderDocEditedBody" },
         { "$ref": "#/$defs/folderChangeOpenedBody" },
         { "$ref": "#/$defs/folderChangeIntegratedBody" },
         { "$ref": "#/$defs/folderChangeEscalatedBody" }
@@ -298,7 +300,13 @@
         "summary": { "$ref": "#/$defs/contractSummary" },
         "created_by": { "type": "string", "description": "The agent id that filed the request, or human." },
         "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
-        "raises": { "$ref": "#/$defs/marketingPlanId" }
+        "raises": { "$ref": "#/$defs/marketingPlanId" },
+        "rederives": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^docs/catervas/.+\\.agent\\.md$",
+          "description": "The .agent.md twin this request brings up to date with the owner's change to the document beside it (docs/SPEC.md 5.17); Catervas files it, so created_by is catervas."
+        }
       }
     },
     "requestTriagedBody": {
@@ -1751,6 +1759,18 @@
       "properties": {
         "proposals": { "$ref": "#/$defs/folderDocProposals" },
         "reason": { "type": "string", "minLength": 1, "maxLength": 600 }
+      }
+    },
+    "folderDocEditedBody": {
+      "title": "Folder Doc Edited Body",
+      "description": "The owner saved a document on the Files page (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha, and the team's integration policy then adds it to the project. The envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "change", "sha"],
+      "properties": {
+        "path": { "$ref": "#/$defs/folderDocPath" },
+        "change": { "$ref": "#/$defs/folderChangeNumber" },
+        "sha": { "type": "string", "minLength": 1 }
       }
     },
     "folderChangeOpenedBody": {

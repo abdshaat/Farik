@@ -60,6 +60,10 @@ pub struct FolderDocDecision {
 }
 
 /// One folder change: a commit of folder documents on a branch of its own.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "four independent facts the log tells of a change, each its own event"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FolderChange {
     /// Its number (`docs/folder-<n>`).
@@ -76,6 +80,8 @@ pub struct FolderChange {
     pub integrated: bool,
     /// Whether Catervas gave its integration to the human.
     pub escalated: bool,
+    /// Whether the owner made it, by saving a document on the Files page.
+    pub edited: bool,
 }
 
 /// Everything the log holds of folder documents.
@@ -123,6 +129,7 @@ fn add_change(
             written_by: by.err(),
             integrated: false,
             escalated: false,
+            edited: false,
         });
     }
 }
@@ -138,6 +145,7 @@ fn change_of(docs: &mut FolderDocs, change: u64) -> Option<&mut FolderChange> {
 /// # Errors
 ///
 /// What the log refused.
+#[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
     let events = log.read(&EventQuery {
         kinds: vec![
@@ -145,6 +153,7 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
             EventKind::FolderDocProposed,
             EventKind::FolderDocApproved,
             EventKind::FolderDocReturned,
+            EventKind::FolderDocEdited,
             EventKind::FolderChangeIntegrated,
             EventKind::FolderChangeEscalated,
         ],
@@ -180,6 +189,21 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
                     vec![body.path.to_string()],
                     Err(body.written_by.clone()),
                 );
+            }
+            EventBody::FolderDocEdited(body) if is_unattended(event) => {
+                let change = body.change.get();
+                if change_of(&mut docs, change).is_none() {
+                    docs.changes.push(FolderChange {
+                        change,
+                        paths: vec![body.path.to_string()],
+                        approved: false,
+                        proposals: Vec::new(),
+                        written_by: None,
+                        integrated: false,
+                        escalated: false,
+                        edited: true,
+                    });
+                }
             }
             EventBody::FolderDocApproved(body) if is_unattended(event) => {
                 let proposals: Vec<u64> = body.proposals.iter().map(|n| n.get()).collect();
@@ -242,7 +266,7 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
 mod tests {
     use serde_json::json;
 
-    use super::{ProposalState, folder_docs};
+    use super::{FolderChange, ProposalState, folder_docs};
     use crate::waiting::fixtures::{Board, at};
 
     const ROADMAP: &str = "docs/catervas/product/roadmap.md";
@@ -440,5 +464,64 @@ mod tests {
         );
         let docs = folder_docs(&board.log).expect("folds");
         assert!(!docs.changes[0].integrated);
+    }
+
+    #[test]
+    fn folds_an_owners_edit_as_a_change() {
+        let board = Board::new("folds-owners-edit");
+        board.put(
+            at(10, 1),
+            None,
+            None,
+            "folder_doc.edited",
+            json!({ "path": ROADMAP, "change": 2, "sha": "a1" }),
+        );
+        board.put(
+            at(10, 2),
+            None,
+            Some("pm"),
+            "folder_doc.written",
+            json!({ "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                    "change": 3, "sha": "b2" }),
+        );
+        let docs = folder_docs(&board.log).expect("folds");
+        assert_eq!(
+            docs.changes[0],
+            FolderChange {
+                change: 2,
+                paths: vec![ROADMAP.to_string()],
+                proposals: Vec::new(),
+                written_by: None,
+                approved: false,
+                integrated: false,
+                escalated: false,
+                edited: true,
+            }
+        );
+        assert!(!docs.changes[1].edited);
+        board.put(
+            at(10, 3),
+            None,
+            None,
+            "folder_change.integrated",
+            json!({ "change": 2, "sha": "x", "into": "main", "integrated_by": "governor" }),
+        );
+        let docs = folder_docs(&board.log).expect("folds");
+        assert!(docs.changes[0].integrated && docs.changes[0].edited);
+
+        // An edit an agent recorded is not the owner's.
+        board.put(
+            at(10, 4),
+            None,
+            Some("pm"),
+            "folder_doc.edited",
+            json!({ "path": SPEC, "change": 4, "sha": "c3" }),
+        );
+        assert_eq!(folder_docs(&board.log).expect("folds").changes.len(), 2);
+
+        // The projections pass over it.
+        let projections = crate::open_projections(std::sync::Arc::clone(&board.log))
+            .expect("the projections open");
+        projections.board().expect("the board projects");
     }
 }
