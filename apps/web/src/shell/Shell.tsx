@@ -1,3 +1,4 @@
+import icon from "@farik/brand/assets/icons/icon-48.png";
 import { useSyncExternalStore } from "react";
 import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -56,7 +57,10 @@ export function Shell() {
 		<div className={wide ? styles.wide : styles.narrow}>
 			{wide ? (
 				<header className={styles.rail}>
-					<p className={styles.logo}>{t("brand")}</p>
+					<p className={styles.logo}>
+						<img src={icon} alt="" width="24" height="24" />
+						{t("brand")}
+					</p>
 					<nav aria-label={t("navRail")}>{places}</nav>
 					<div className={styles.foot}>
 						<p className={styles.conn}>

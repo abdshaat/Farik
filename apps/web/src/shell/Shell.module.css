@@ -44,6 +44,9 @@ each place's twice, and one line of text. */
 }
 
 .logo {
+	display: flex;
+	align-items: center;
+	gap: var(--farik-space-2);
 	margin: 0 var(--farik-space-2) var(--farik-space-4);
 	font: 600 13px / 18px var(--farik-type-code-family);
 	letter-spacing: 0.12em;

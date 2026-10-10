@@ -40,7 +40,7 @@ Tests (the test calls `media.set(WIDE, true)`, `renderApp("/")`, `answerStatus(s
 
 - `it("shows Farik's mark beside its name in the rail")` — that line contains an `img` whose `getAttribute("src")` equals the imported `icon-48.png` URL, whose `alt` is `""`, and whose `width` and `height` are `"24"`; the line's `textContent` is exactly `en.brand`.
 
-- [ ] `feat(web): show Farik's mark beside its name in the rail`
+- [x] `feat(web): show Farik's mark beside its name in the rail`
 
 ## Verification
 
