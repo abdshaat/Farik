@@ -68,9 +68,17 @@ describe("settings directory", () => {
 			expect(within(list).getAllByRole("link")).toHaveLength(SECTIONS.length),
 		);
 		const links = within(list).getAllByRole("link");
-		expect(links.map((a) => a.textContent)).toEqual(
-			SECTIONS.map((s) => en[s.name]),
-		);
+		// The design's order and addresses, not merely SECTIONS' own.
+		expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+			[en.sectionGeneral, "/settings/general"],
+			[en.sectionAllowedActions, "/settings/allowed-actions"],
+			[en.sectionSpending, "/settings/spending"],
+			[en.sectionWork, "/settings/work"],
+			[en.sectionYourApp, "/settings/your-app"],
+			[en.sectionSavedTeams, "/settings/saved-teams"],
+			[en.sectionComputer, "/settings/computer"],
+			[en.sectionAccount, "/settings/account"],
+		]);
 		// The team's rules have three sections of their own, not one.
 		expect(links).toHaveLength(8);
 		expect(links.map((a) => a.textContent)).not.toContain("Your team’s rules");
