@@ -25,7 +25,7 @@ Not carried: the criteria (the new repository keeps the checks its own `init` sc
 ## The folders
 
 - **The old project** is left as it is: its `.farik/` keeps the team, the board and the memory. Choosing it again later (Change project, or **Stay on**) drives it as it was, with no reset and no copy.
-- **A target with a team** has its whole `.farik/` deleted before `init`. Committed `.farik` files show as deleted in git; the user's own files are never touched.
+- **A target with a team** (after the confirmation), **or with a `.farik/` but no `team.yaml`** (a leftover, deleted with no confirmation so that no stale memory carries over), has its whole `.farik/` deleted before `init`. Committed `.farik` files show as deleted in git; the user's own files are never touched.
 - Old task branches (`feature/FRK-<n>`, `fix/FRK-<n>`, `docs/FRK-<n>`) are left untouched. A new task's number starts past the highest number any such branch in the repository holds, local or remote, as it already starts past every committed contract, so no new task's branch collides with an old one (the founder, 2026-10-09). This holds for every request filed, in any project.
 - `state.json` remembers the new folder, so the next `farik serve` opens it.
 
