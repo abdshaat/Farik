@@ -4,6 +4,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fs::{File, OpenOptions};
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -45,6 +47,30 @@ use catervas_protocol::event::{
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use catervas_store::git::integration_branch;
+
+/// Where the integration lock lives, under the project root.
+pub(crate) const INTEGRATION_LOCK: &str = ".catervas/local/integration.lock";
+
+/// Takes the integration lock (`docs/SPEC.md` 5.14), waiting for whoever holds it, process or
+/// thread; it is let go when the file is dropped. Whatever moves the root's checkout holds it: an
+/// integration, a folder document's write and the owner's decision on one.
+///
+/// # Errors
+///
+/// The error of making the file or of locking it.
+pub(crate) fn integration_lock(root: &Path) -> std::io::Result<File> {
+    let path = root.join(INTEGRATION_LOCK);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)?;
+    file.lock()?;
+    Ok(file)
+}
 pub(crate) use catervas_store::waiting::{is_move_into, last_move_into, review_passed};
 use catervas_store::{
     EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection,

@@ -49,14 +49,14 @@ and open every completion note with such a summary, then a blank line, then the 
 Only the Developer and the UI/UX Designer change code: a task for any other role keeps its
 `allowed_paths` inside the team's `document_paths`, and a Developer's or a Designer's task says
 `change: fix` when it repairs a defect.
-While the team has a Marketing Specialist, another role's task names no path that could reach
-docs/marketing/ (not docs/** or docs); name the folder it needs, such as docs/adr/**.
+While a role that owns a folder under docs/catervas/ has an active agent, another role's task
+names no path that could reach that folder (not docs/**, docs/catervas/**, docs, ** or **/*.md);
+name the folder it needs, such as docs/adr/** or src/**/*.rs.
 
 ## 4. Assign within the WIP limit
 
 Assign a ready task to an agent of its assignee role with room under the team's WIP limit, using
-`catervas_assign_task`. Nobody reviews their own work, and the Product Manager and the Scrum Master are
-never a task's assignee. When nobody has room or no agent of the role is active, leave the task
+`catervas_assign_task`. Nobody reviews their own work. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks. When nobody has room or no agent of the role is active, leave the task
 ready and say why in your note; do not force an assignment past the limit.
 
 ## 5. Escalation hygiene

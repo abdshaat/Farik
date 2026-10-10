@@ -57,7 +57,9 @@
         "seller_message_send",
         "seller_message_discard",
         "seller_reply_dismiss",
-        "purchase_order_send"
+        "purchase_order_send",
+        "folder_change_integrate",
+        "folder_doc_decide"
       ]
     },
     "commandBodyWire": {
@@ -99,6 +101,8 @@
         { "$ref": "#/$defs/sellerMessageDiscardBody" },
         { "$ref": "#/$defs/sellerReplyDismissBody" },
         { "$ref": "#/$defs/purchaseOrderSendBody" },
+        { "$ref": "#/$defs/folderChangeIntegrateBody" },
+        { "$ref": "#/$defs/folderDocDecideBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -402,6 +406,34 @@
       "required": ["reply"],
       "properties": {
         "reply": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "folderChangeIntegrateBody": {
+      "title": "Folder Change Integrate Body",
+      "description": "The owner adds folder change change (docs/catervas documents Catervas committed on a branch docs/folder-<change>) to the project now, as catervas integrate folder-<change> does, whatever escalations it carries (docs/SPEC.md 5.14). Refused no_such_folder_change; a change already integrated answers its commit.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change"],
+      "properties": {
+        "change": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "folderDocDecideBody": {
+      "title": "Folder Doc Decide Body",
+      "description": "The owner approves (decision approve: Catervas makes one folder change of both files of each proposal) or sends back (decision return: the agent's next sprint review reads note as the owner's own words) the proposals of one card on Today, proposals being their numbers, 1 to 20 (docs/SPEC.md 5.7). note is at most 600 characters; return requires one. folder_doc.approved or folder_doc.returned is appended. Refused unknown_folder_doc, folder_doc_decided, folder_doc_superseded, folder_doc_mixed, folder_doc_reason_needed, folder_doc_busy, folder_doc_link and folder_doc_waiting; all or nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposals", "decision"],
+      "properties": {
+        "proposals": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+        },
+        "decision": { "type": "string", "enum": ["approve", "return"] },
+        "note": { "type": "string", "maxLength": 600 }
       }
     },
     "purchaseOrderSendBody": {

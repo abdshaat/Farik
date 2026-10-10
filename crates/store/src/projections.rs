@@ -769,7 +769,16 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::SellerMessageFailed(_)
         | EventBody::SellerMessageDiscarded(_)
         | EventBody::SellerReplyReceived(_)
-        | EventBody::SellerReplyDismissed(_) => Ok(()),
+        | EventBody::SellerReplyDismissed(_)
+        // Folder documents and folder changes are read from the log by `folder_docs`; they are
+        // about no task.
+        | EventBody::FolderDocWritten(_)
+        | EventBody::FolderDocProposed(_)
+        | EventBody::FolderDocApproved(_)
+        | EventBody::FolderDocReturned(_)
+        | EventBody::FolderChangeOpened(_)
+        | EventBody::FolderChangeIntegrated(_)
+        | EventBody::FolderChangeEscalated(_) => Ok(()),
     }
 }
 

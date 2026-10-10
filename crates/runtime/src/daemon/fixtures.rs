@@ -130,9 +130,48 @@ impl TestDaemon {
         limits: SessionLimits,
         catervas_tools: &[&str],
     ) {
+        self.register_as(
+            session_id,
+            agent,
+            task,
+            limits,
+            catervas_tools,
+            SessionPurpose::Implement,
+        );
+    }
+
+    /// Registers a session of `agent` for `purpose`, given every Catervas tool, so that its tiers
+    /// and its purpose alone decide which it may call.
+    pub(crate) fn register_for(
+        &self,
+        session_id: &str,
+        agent: &str,
+        task: Option<&str>,
+        purpose: SessionPurpose,
+    ) {
+        self.register_as(
+            session_id,
+            agent,
+            task,
+            DEFAULT_SESSION_LIMITS,
+            &every_catervas_tool(),
+            purpose,
+        );
+    }
+
+    fn register_as(
+        &self,
+        session_id: &str,
+        agent: &str,
+        task: Option<&str>,
+        limits: SessionLimits,
+        catervas_tools: &[&str],
+        purpose: SessionPurpose,
+    ) {
         self.state.register_session(SessionRegistration {
             session_id: session_id.to_string(),
             web: self.web_of(agent),
+            reads: self.reads_of(agent),
             agent_id: agent.to_string(),
             task_id: task.map(|task| task.parse().expect("a task id")),
             cwd: self.worktree.clone(),
@@ -142,7 +181,7 @@ impl TestDaemon {
             tiers: tiers_of(&self.project.deps, agent),
             connectors: Vec::new(),
             preview: None,
-            purpose: SessionPurpose::Implement,
+            purpose,
             in_reply_to: None,
             thread: None,
             skills: Vec::new(),
@@ -168,6 +207,26 @@ impl TestDaemon {
                     .map(|one| web_access(Role::from(one.role)))
             })
             .unwrap_or(WebAccess::Open)
+    }
+
+    /// What `agent` may read of the project, from its role as the team file says now: what a
+    /// session of it is registered with. An agent the team does not have reads everything.
+    pub(crate) fn reads_of(&self, agent: &str) -> catervas_core::folders::ReadAccess {
+        use catervas_core::contract::Role;
+        use catervas_core::folders::{ReadAccess, read_access};
+
+        self.project
+            .deps
+            .files
+            .read_team()
+            .ok()
+            .and_then(|team| {
+                team.agents
+                    .iter()
+                    .find(|one| one.id.as_str() == agent)
+                    .map(|one| read_access(Role::from(one.role)))
+            })
+            .unwrap_or(ReadAccess::Open)
     }
 
     /// A recorded hook input with `/workspace` made the worktree.
@@ -217,6 +276,7 @@ impl TestDaemon {
         state.register_session(SessionRegistration {
             session_id: DEV_SESSION.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: self.worktree.clone(),
@@ -262,6 +322,7 @@ impl TestDaemon {
         state.register_session(SessionRegistration {
             session_id: "session-proc".to_string(),
             web: self.web_of("proc"),
+            reads: self.reads_of("proc"),
             agent_id: "proc".to_string(),
             task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: self.worktree.clone(),

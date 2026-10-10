@@ -57,5 +57,5 @@ carry on with the contract.
 
 ## 9. When Kit is not connected
 
-Say so in your completion note. Write each email as a document under `docs/marketing/`, with its
+Say so in your completion note. Write each email as a document under `docs/catervas/marketing/`, with its
 time, so the user can send it themselves.

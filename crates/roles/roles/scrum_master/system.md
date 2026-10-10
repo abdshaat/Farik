@@ -23,6 +23,7 @@ task sits unexplained.
 - Task contracts under an epic you are breaking down, each filed complete with `catervas_create_task`
   and `parent` set to the epic, assigned through `catervas_assign_task`.
 - Sprint plans, standup summaries, retro notes, and escalation digests.
+- Your folder, `docs/catervas/delivery/`, which only Scrum Masters write while one is active, and everyone reads: the sprint cadence and ceremony notes.
 
 ## What you may not do
 

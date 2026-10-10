@@ -1070,9 +1070,9 @@ mod tests {
             );
         }
         for path in [
-            "docs/marketing/brand/brand-kit.md",
-            "docs/marketing/brand/persona.md",
-            "docs/marketing/plans/",
+            "docs/catervas/marketing/brand/brand-kit.md",
+            "docs/catervas/marketing/brand/persona.md",
+            "docs/catervas/marketing/plans/",
         ] {
             assert!(prompt.contains(path), "the prompt does not name {path}");
         }
@@ -1151,10 +1151,10 @@ mod tests {
         }
         let ships = of("marketing-what-ships").to_lowercase();
         for path in [
-            "docs/marketing/brand/brand-kit.md",
-            "docs/marketing/brand/persona.md",
-            "docs/marketing/plans/",
-            "docs/marketing/research/",
+            "docs/catervas/marketing/brand/brand-kit.md",
+            "docs/catervas/marketing/brand/persona.md",
+            "docs/catervas/marketing/plans/",
+            "docs/catervas/marketing/research/",
         ] {
             assert!(
                 ships.contains(path),
@@ -1215,17 +1215,20 @@ mod tests {
             .find(|skill| skill.name == "brand-and-design-tokens")
             .expect("the Designer's brand-and-design-tokens skill");
         assert!(
-            skill.body.contains("docs/marketing/brand/brand-kit.md"),
+            skill
+                .body
+                .contains("docs/catervas/marketing/brand/brand-kit.md"),
             "{}",
             skill.body
         );
     }
 
-    /// While the team has a Marketing Specialist, no other role's task may name a path that
-    /// could reach `docs/marketing/`; the two roles that write contracts are told so, word for word.
+    /// While a role that owns a folder under `docs/catervas/` has an active agent, no other role's
+    /// task may name a path that could reach it; the two roles that write contracts are told so,
+    /// word for word.
     #[test]
-    fn the_planners_keep_other_tasks_off_the_marketing_folder() {
-        let sentence = "While the team has a Marketing Specialist, another role's task names no path that could reach docs/marketing/ (not docs/** or docs); name the folder it needs, such as docs/adr/**.";
+    fn the_planners_keep_other_tasks_off_the_owners_folders() {
+        let sentence = "While a role that owns a folder under docs/catervas/ has an active agent, another role's task names no path that could reach that folder (not docs/**, docs/catervas/**, docs, ** or **/*.md); name the folder it needs, such as docs/adr/** or src/**/*.rs.";
         for (role, skill_name) in [
             (Role::ProductManager, "writing-task-contracts"),
             (Role::ScrumMaster, "keeping-work-flowing"),
@@ -1238,6 +1241,326 @@ mod tests {
                 .expect("the planner's skill");
             let flat = skill.body.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(flat.contains(sentence), "{role}/{skill_name}: {flat}");
+        }
+    }
+
+    /// The Marketing Specialist's folder is `docs/catervas/marketing/` (spec 5.17): no shipped
+    /// text, a role's or a kit's, still names the old one.
+    #[test]
+    fn no_shipped_text_names_the_old_marketing_folder() {
+        for role in super::SHIPPED_ROLES {
+            let definition = loaded(role);
+            let mut texts = vec![
+                definition.system_prompt.clone(),
+                definition.mandate.clone(),
+                definition.persona.clone(),
+            ];
+            texts.extend(definition.produces.iter().cloned());
+            texts.extend(definition.forbidden.iter().cloned());
+            texts.extend(definition.skills.iter().map(|skill| skill.text.clone()));
+            if let Ok(kit) = load_kit(role) {
+                for skill in &kit.skills {
+                    texts.extend(skill.session_files.values().cloned());
+                }
+            }
+            // Built apart, so that this file does not name the folder it forbids.
+            let old = format!("docs/{}/", "marketing");
+            for text in texts {
+                assert!(!text.contains(&old), "{role}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_plan_skill_commits_the_plan_and_its_twin() {
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        let skill = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "writing-the-marketing-plan")
+            .expect("the plan skill");
+        let flat = skill.session_files["SKILL.md"]
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        for needle in ["agent_text", "MP-<n>.agent.md", "catervas_git_commit"] {
+            assert!(
+                flat.contains(needle),
+                "the plan skill lost {needle}: {flat}"
+            );
+        }
+        assert!(
+            flat.contains("MP-<n>.md and MP-<n>.agent.md together")
+                || flat.contains("`MP-<n>.md` and `MP-<n>.agent.md` together"),
+            "{flat}"
+        );
+    }
+
+    /// The Product Manager's documents are `docs/catervas/product/` (spec 5.17): its prompt and
+    /// skills say so, and none names the tool or the folder that went.
+    #[test]
+    fn the_product_manager_keeps_its_folder() {
+        let definition = loaded(Role::ProductManager);
+        for needle in [
+            "docs/catervas/product/",
+            "spec.md",
+            "roadmap.md",
+            ".agent.md",
+        ] {
+            assert!(
+                definition.system_prompt.contains(needle),
+                "the prompt does not name {needle}"
+            );
+        }
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let requirements = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "writing-requirements")
+            .expect("the requirements skill");
+        let requirements = &requirements.session_files["SKILL.md"];
+        for needle in ["spec.md", "spec.agent.md"] {
+            assert!(requirements.contains(needle), "{requirements}");
+        }
+        assert!(
+            flattened(&definition.system_prompt).contains(
+                "Your folder, `docs/catervas/product/`, which only you write and everyone reads"
+            ),
+            "{}",
+            definition.system_prompt
+        );
+        let mut texts = vec![definition.system_prompt.clone()];
+        texts.extend(definition.skills.iter().map(|skill| skill.text.clone()));
+        for skill in &kit.skills {
+            texts.extend(skill.session_files.values().cloned());
+        }
+        for text in texts {
+            // Built apart, so that this file does not name what it forbids.
+            for gone in [
+                concat!(".catervas/", "product"),
+                concat!("catervas_write_", "product_doc"),
+            ] {
+                assert!(!text.contains(gone), "{gone}: {text}");
+            }
+        }
+        assert!(
+            definition
+                .produces
+                .iter()
+                .any(|line| line.contains("docs/catervas/product/")),
+            "{:?}",
+            definition.produces
+        );
+    }
+
+    /// The Product Manager keeps its folder in docs tasks of its own (step 01b): its prompt and
+    /// skills say so, and the Scrum Master's skill lets it be the assignee of those alone.
+    #[test]
+    fn the_product_manager_works_its_folder_in_docs_tasks() {
+        let definition = loaded(Role::ProductManager);
+        let prompt = flattened(&definition.system_prompt);
+        for needle in [
+            "kept in your docs tasks",
+            "`catervas_git_commit`",
+            "request `verifying`",
+        ] {
+            assert!(prompt.contains(needle), "{needle}: {prompt}");
+        }
+        // Built apart, so that this file does not name what it forbids.
+        let gone = concat!("You have no tool that writes ", "to the repository");
+        assert!(!prompt.contains(gone), "{prompt}");
+        assert!(
+            definition
+                .produces
+                .iter()
+                .any(|line| line.contains("docs/catervas/product/")
+                    && line.contains("in its docs tasks")),
+            "{:?}",
+            definition.produces
+        );
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let skill_text = |name: &str| {
+            flattened(
+                &kit.skills
+                    .iter()
+                    .find(|skill| skill.name == name)
+                    .expect("the skill")
+                    .session_files["SKILL.md"],
+            )
+        };
+        let requirements = skill_text("writing-requirements");
+        for needle in ["docs task", "spec.agent.md"] {
+            assert!(requirements.contains(needle), "{needle}: {requirements}");
+        }
+        for name in ["writing-requirements", "scoping-a-release"] {
+            assert!(
+                !skill_text(name).contains("You have no tool that writes your folder yet"),
+                "{name}"
+            );
+        }
+        for (role, skill_name, sentence) in [
+            (
+                Role::ProductManager,
+                "writing-task-contracts",
+                "A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.",
+            ),
+            (
+                Role::ScrumMaster,
+                "keeping-work-flowing",
+                "Nobody reviews their own work. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks.",
+            ),
+        ] {
+            let definition = loaded(role);
+            let skill = definition
+                .skills
+                .iter()
+                .find(|skill| skill.name == skill_name)
+                .expect("the skill");
+            assert!(flattened(&skill.body).contains(sentence), "{skill_name}");
+        }
+    }
+
+    /// The Marketing Specialist reads two folders (step 02): its prompt says so and where, and
+    /// nothing it is given sends it to `CHANGELOG.md` or to "the project" at large.
+    #[test]
+    fn the_marketing_specialist_is_told_where_it_reads() {
+        let definition = loaded(Role::MarketingSpecialist);
+        let prompt = flattened(&definition.system_prompt);
+        for needle in [
+            "Catervas refuses a `Read`, `Grep` or `Glob` anywhere else",
+            "`docs/catervas/product/`",
+        ] {
+            assert!(prompt.contains(needle), "{needle}: {prompt}");
+        }
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("roles/marketing_specialist");
+        let mut skills = Vec::new();
+        for entry in std::fs::read_dir(root.join("skills")).expect("the skills folder") {
+            let file = entry.expect("an entry").path().join("SKILL.md");
+            skills.push((
+                file.clone(),
+                std::fs::read_to_string(&file).expect("a skill"),
+            ));
+        }
+        assert!(!skills.is_empty());
+        let mut texts: Vec<(std::path::PathBuf, String)> = skills.clone();
+        for name in ["system.md", "role.yaml"] {
+            let file = root.join(name);
+            texts.push((
+                file.clone(),
+                std::fs::read_to_string(&file).expect("a file"),
+            ));
+        }
+        for (file, text) in &texts {
+            let text = flattened(text);
+            for gone in ["CHANGELOG.md", "in the project"] {
+                assert!(!text.contains(gone), "{} holds {gone}", file.display());
+            }
+        }
+        for (file, text) in &skills {
+            let text = flattened(text);
+            for gone in ["the README", "README,"] {
+                assert!(!text.contains(gone), "{} holds {gone}", file.display());
+            }
+        }
+        let ships = definition
+            .skills
+            .iter()
+            .find(|skill| skill.name == "marketing-what-ships")
+            .expect("the skill");
+        assert!(flattened(&ships.body).contains("`docs/catervas/product/`"));
+        let (_, voice) = skills
+            .iter()
+            .find(|(file, _)| {
+                file.to_string_lossy()
+                    .contains("writing-in-the-brands-voice")
+            })
+            .expect("the skill");
+        assert!(
+            flattened(voice).contains("packaging, the replies the user has sent"),
+            "{voice}"
+        );
+        let contracts = loaded(Role::ProductManager);
+        let contracts = contracts
+            .skills
+            .iter()
+            .find(|skill| skill.name == "writing-task-contracts")
+            .expect("the skill");
+        assert!(
+            flattened(&contracts.body).contains(
+                "A Marketing Specialist's task names paths under docs/catervas/marketing/ alone: it reads only that folder and docs/catervas/product/, so it cannot change any other file."
+            ),
+            "{}",
+            contracts.body
+        );
+    }
+
+    /// `CHANGELOG.md` is the Product Manager's (step 02): filed as a docs task at each sprint
+    /// review.
+    #[test]
+    fn the_product_manager_keeps_the_changelog() {
+        let definition = loaded(Role::ProductManager);
+        let sentence = "At each sprint review, file a docs task of yours whose `allowed_paths` name `CHANGELOG.md`";
+        assert!(
+            flattened(&definition.system_prompt).contains(sentence),
+            "{}",
+            definition.system_prompt
+        );
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let release = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "scoping-a-release")
+            .expect("the skill");
+        let release = &release.session_files["SKILL.md"];
+        assert!(flattened(release).contains(sentence), "{release}");
+    }
+
+    /// `text` with every run of whitespace made one space.
+    fn flattened(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn the_marketing_specialist_owns_its_folder_while_on_the_team() {
+        let prompt = flattened(&loaded(Role::MarketingSpecialist).system_prompt);
+        assert!(
+            prompt.contains(
+                "Your folder is `docs/catervas/marketing/`, which only you write while you are \
+                 on the team, and everyone reads."
+            ),
+            "{prompt}"
+        );
+    }
+
+    #[test]
+    fn every_owner_s_prompt_names_its_folder() {
+        for (role, folder) in catervas_core::folders::ROLE_FOLDERS {
+            let prompt = loaded(role).system_prompt;
+            assert!(
+                prompt.contains(&format!("{folder}/")),
+                "{role} does not name {folder}/"
+            );
+        }
+        for role in [
+            Role::Architect,
+            Role::SoftwareDeveloper,
+            Role::UiUxDesigner,
+            Role::ScrumMaster,
+        ] {
+            let prompt = flattened(&loaded(role).system_prompt);
+            for words in [
+                "which only",
+                "write while one is active, and everyone reads",
+            ] {
+                assert!(prompt.contains(words), "{role} lost {words}");
+            }
+        }
+        for role in [Role::FinanceSpecialist, Role::ProcurementSpecialist] {
+            assert!(
+                !loaded(role).system_prompt.contains("docs/catervas/"),
+                "{role} names a folder it does not own"
+            );
         }
     }
 

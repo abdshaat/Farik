@@ -23,11 +23,11 @@ use catervas_store::{CostScope, EventQuery, Git, TaskProjection};
 use chrono::{DateTime, Utc};
 
 use super::design::{self, Stage};
-use super::integrate::{awaiting, cleanup};
+use super::integrate::{awaiting, awaiting_folder_changes, cleanup};
 use super::messages::{
-    Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message, plan_message,
-    planning_message, posts_heard, retro_message, sprint_review_message, standup_message,
-    with_the_approved_plan,
+    Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message,
+    owners_folder_words, plan_message, planning_message, posts_heard, retro_message,
+    sprint_review_message, standup_message, with_the_approved_plan,
 };
 use super::pipeline::decide_pipelines;
 use super::requests;
@@ -191,6 +191,12 @@ pub(super) async fn tick(
             if let Some(report) = awaiting(orchestrator, &team, row).await? {
                 return Ok(report);
             }
+        }
+        // The folder changes, in a tick that is about no one task and after the accepted ones.
+        if scope.task_id.is_none()
+            && let Some(report) = awaiting_folder_changes(orchestrator, &team).await?
+        {
+            return Ok(report);
         }
     }
     if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
@@ -421,12 +427,13 @@ async fn review_and_retro(
             .into_iter()
             .find(|cost| cost.key == sprint.sprint_id)
             .map_or(0.0, |cost| cost.usd);
-        (
-            Thread::Review,
-            sprint_review_message(&sprint.sprint_id, &tasks, file.budget_usd, spent),
-            CEREMONY_TOOLS,
-            "review ceremony",
-        )
+        let mut facts = sprint_review_message(&sprint.sprint_id, &tasks, file.budget_usd, spent);
+        // What the owner decided of the runner's documents since its last review.
+        let heard = owners_folder_words(&tools.log, runner.id.as_str())?;
+        if !heard.is_empty() {
+            facts = format!("{facts}\n{heard}");
+        }
+        (Thread::Review, facts, CEREMONY_TOOLS, "review ceremony")
     };
     let end = run_session(
         deps,
@@ -454,7 +461,7 @@ async fn review_and_retro(
 }
 
 /// The Catervas tools the retro is offered: the standup's and the review's, and the retro's append.
-const RETRO_TOOLS: &[&str] = &[
+pub(super) const RETRO_TOOLS: &[&str] = &[
     "catervas_read_task",
     "catervas_read_board",
     "catervas_read_rules",
@@ -463,6 +470,7 @@ const RETRO_TOOLS: &[&str] = &[
     "catervas_append_retro",
     "catervas_write_memory",
     "catervas_read_decisions",
+    "catervas_write_folder_doc",
 ];
 
 /// Whether the sprint rules run in `scope`: they are about no one task, so only in a tick scoped
@@ -581,7 +589,7 @@ async fn sprint_planning(
 
 /// The Catervas tools the planning ceremony is offered: the reading tools, the channel, the plan, the
 /// notebook, and the decisions to read.
-const PLANNING_TOOLS: &[&str] = &[
+pub(super) const PLANNING_TOOLS: &[&str] = &[
     "catervas_read_task",
     "catervas_read_board",
     "catervas_read_rules",
@@ -590,6 +598,7 @@ const PLANNING_TOOLS: &[&str] = &[
     "catervas_plan_sprint",
     "catervas_write_memory",
     "catervas_read_decisions",
+    "catervas_write_folder_doc",
 ];
 
 /// The open sprint's standup (5.9), under `All` alone in a tick scoped to no task: once a UTC day,
@@ -676,7 +685,7 @@ async fn standup(
 
 /// The Catervas tools the standup and the review are offered: the reading tools, the channel, the
 /// notebook, and the decisions to read.
-const CEREMONY_TOOLS: &[&str] = &[
+pub(super) const CEREMONY_TOOLS: &[&str] = &[
     "catervas_read_task",
     "catervas_read_board",
     "catervas_read_rules",
@@ -684,6 +693,7 @@ const CEREMONY_TOOLS: &[&str] = &[
     "catervas_post_message",
     "catervas_write_memory",
     "catervas_read_decisions",
+    "catervas_write_folder_doc",
 ];
 
 /// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
@@ -1654,7 +1664,8 @@ mod tests {
             TickReport::Idle { .. }
             | TickReport::Sprint { .. }
             | TickReport::Conversation { .. }
-            | TickReport::Chat { .. } => None,
+            | TickReport::Chat { .. }
+            | TickReport::FolderChange { .. } => None,
         }
     }
 
@@ -1854,13 +1865,21 @@ mod tests {
             .iter()
             .find(|agent| agent.id.as_str() == "pm")
             .expect("pm is on the team");
+        assert!(
+            pm.tiers(&team.permissions())
+                .contains(&PermissionTier::WriteWorkspace),
+            "the Product Manager holds the tier, and a plan session still does not write"
+        );
         assert_eq!(
             spec.builtin_tools,
-            allowed_builtins(
-                &pm.tiers(&team.permissions())
-                    .into_iter()
-                    .collect::<BTreeSet<_>>()
-            )
+            [
+                "Glob",
+                "Grep",
+                "Read",
+                "ToolSearch",
+                "WebFetch",
+                "WebSearch"
+            ]
         );
         assert!(
             spec.initial_prompt.contains("CTV-1"),
@@ -5179,10 +5198,12 @@ mod tests {
         // chat's reply in a chat alone, the books' tools to the Finance Specialist and, to read
         // a workbook, a verify session about a finance task, an evaluation and the sites to the
         // Procurement Specialist in an implement session, and a post to the Marketing Specialist
-        // in one.
+        // in one; a folder document is written in a ceremony alone.
         let expected: Vec<String> = tool_descriptors()
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
+            // A plan session works on no task's implement session, so it changes nothing.
+            .filter(|tool| !crate::tools::writes_the_project(tool.name, tool.tier))
             .filter(|tool| {
                 ![
                     "catervas_check_page",
@@ -5204,6 +5225,7 @@ mod tests {
                     "catervas_read_seller_messages",
                     "catervas_read_seller_replies",
                     "catervas_schedule_post",
+                    "catervas_write_folder_doc",
                 ]
                 .contains(&tool.name)
             })
@@ -5499,6 +5521,7 @@ mod tests {
                 "catervas_plan_sprint",
                 "catervas_write_memory",
                 "catervas_read_decisions",
+                "catervas_write_folder_doc",
             ])
         );
         // The candidates, the escalation the digest lists, the last retro, and the channel.
@@ -7299,7 +7322,10 @@ mod tests {
             "the note's first line alone: {}",
             spec.initial_prompt
         );
-        assert_eq!(tools_of(spec), BTreeSet::from(READ_AND_POST));
+        // The review writes a folder document of the Scrum Master's own; the standup does not.
+        let mut review_tools = BTreeSet::from(READ_AND_POST);
+        review_tools.insert("catervas_write_folder_doc");
+        assert_eq!(tools_of(spec), review_tools);
 
         let next = orchestrator.tick().await.expect("the tick runs");
 
@@ -7311,6 +7337,7 @@ mod tests {
         assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
         let mut retro_tools = BTreeSet::from(READ_AND_POST);
         retro_tools.insert("catervas_append_retro");
+        retro_tools.insert("catervas_write_folder_doc");
         assert_eq!(tools_of(&adapter.started()[1]), retro_tools);
         let after = orchestrator.tick().await.expect("the tick runs");
         assert!(!matches!(after, TickReport::Sprint { .. }), "{after:?}");
@@ -7593,6 +7620,87 @@ mod tests {
             "{:?}",
             ceremonies(&harness)
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn tells_the_review_the_owners_decisions() {
+        const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+        const SPEC: &str = "docs/catervas/product/spec.md";
+        // No Scrum Master: the Product Manager runs the ceremonies and proposes its documents.
+        let harness = Harness::new("orch-review-owner-words", |_| {});
+        let adapter = harness.recorded(vec![review(), review(), review()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let propose = |path: &str| {
+            harness
+                .project
+                .record_in(
+                    Some("pm"),
+                    Some("session-1"),
+                    "",
+                    "folder_doc.proposed",
+                    &json!({
+                        "path": path, "text": "For people.", "agent_text": "For agents.",
+                        "summary": "Pie pre-orders are done.", "sprint_id": "S1",
+                        "proposed_by": "pm"
+                    }),
+                )
+                .envelope
+                .seq
+        };
+        // A sprint of a task, ended by the tick, and its review.
+        let review_of = |sprint: &str, task: &str| {
+            harness.accepted(task);
+            harness.open_sprint(sprint, &[task]);
+            async {
+                orchestrator.tick().await.expect("the sprint ends");
+                orchestrator.tick().await.expect("the review runs");
+            }
+        };
+        review_of("S1", "CTV-1").await;
+        assert!(
+            !adapter.started()[0].initial_prompt.contains("The owner"),
+            "the first review has nothing to hear"
+        );
+        let (roadmap, spec) = (propose(ROADMAP), propose(SPEC));
+        harness.project.record(
+            "",
+            "folder_doc.returned",
+            &json!({ "proposals": [roadmap], "reason": "Keep gift cards in Now" }),
+        );
+
+        review_of("S2", "CTV-2").await;
+
+        let prompt = outside_the_untrusted_blocks(&adapter.started()[1].initial_prompt);
+        assert!(
+            prompt.contains(&format!(
+                "The owner sent back your changes to {ROADMAP}: Keep gift cards in Now"
+            )),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains(&format!(
+                "Your change to {SPEC} (proposal {spec}) still waits for the owner; proposing it again replaces it."
+            )),
+            "{prompt}"
+        );
+        harness.project.record(
+            "",
+            "folder_doc.approved",
+            &json!({ "proposals": [spec], "note": "Thanks" }),
+        );
+
+        review_of("S3", "CTV-3").await;
+
+        let prompt = outside_the_untrusted_blocks(&adapter.started()[2].initial_prompt);
+        assert!(
+            prompt.contains(&format!(
+                "The owner approved your changes to {SPEC}. The owner adds: Thanks"
+            )),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("sent back your changes"), "{prompt}");
+        assert!(!prompt.contains("still waits for the owner"), "{prompt}");
     }
 
     /// Records `text` in `agent`'s chat as `author`, and answers its seq.
@@ -8079,6 +8187,114 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_marketing_session_held_to_its_read_paths() {
+        // The registration's `reads` is the agent's role: the hook judges the implement session of
+        // the Marketing Specialist's task by its two folders.
+        let harness = Harness::new(
+            "orch-marketing-reads",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.file("CTV-1", "ready", |wire| {
+            wire["assignee_role"] = json!("marketing_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!(["docs/catervas/marketing/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The notes are written.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "docs/catervas/marketing/notes.md" }
+            }]);
+        });
+        let people = json!({ "assignee": "kai", "reviewer": "pm" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
+        harness.project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "kai", "assignee": "kai", "reviewer": "pm" }),
+        );
+        harness
+            .project
+            .deps
+            .git
+            .create_worktree(&harness.worktree("CTV-1"), &harness.branch("CTV-1"), "main")
+            .expect("the task's worktree is made");
+        let probe = Arc::new(HookProbe {
+            inner: harness.recorded(vec![reads_a_file()]),
+            daemon: Arc::clone(&harness.daemon),
+            calls: vec![
+                ("Read", json!({ "file_path": "README.md" })),
+                ("Grep", json!({ "pattern": "x" })),
+                (
+                    "Read",
+                    json!({ "file_path": "docs/catervas/product/spec.md" }),
+                ),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+
+        harness
+            .orchestrator(probe.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let seen = probe
+            .seen
+            .lock()
+            .expect("no test panics holding it")
+            .clone();
+        assert_eq!(seen.len(), 1, "one implement session: {seen:?}");
+        let verdicts: Vec<(&str, &str)> = seen[0]
+            .0
+            .iter()
+            .map(|(tool, verdict)| (tool.as_str(), verdict.as_str()))
+            .collect();
+        assert_eq!(
+            verdicts,
+            [
+                ("Read", "read_not_allowed"),
+                ("Grep", "read_not_allowed"),
+                ("Read", "allow"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_marketing_chat_is_held_too() {
+        let harness = Harness::new(
+            "orch-marketing-chat-reads",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        chatted(&harness, "kai", "human", "What do we say at launch?", None);
+        let probe = Arc::new(HookProbe {
+            inner: harness.recorded(vec![chat_answers_with_a_request()]),
+            daemon: Arc::clone(&harness.daemon),
+            calls: vec![("Read", json!({ "file_path": "README.md" }))],
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+
+        harness
+            .orchestrator(probe.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let seen = probe
+            .seen
+            .lock()
+            .expect("no test panics holding it")
+            .clone();
+        assert_eq!(seen.len(), 1, "one chat session: {seen:?}");
+        assert_eq!(
+            seen[0].0,
+            [("Read".to_string(), "read_not_allowed".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_through_the_recorded_transcript() {
         let harness = Harness::new("orch-chat-transcript", |_| {});
         let asked = chatted(
@@ -8263,6 +8479,7 @@ mod tests {
         harness.daemon.register_session(SessionRegistration {
             session_id: session_id.clone(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: agent.to_string(),
             task_id: None,
             purpose,

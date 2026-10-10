@@ -3,6 +3,7 @@
 //! contract and the evidence gathered for it.
 
 use crate::contract::{ExitCriterion, TaskContract, TaskStatus, wire_method};
+use crate::folders::{agent_twin, human_of_twin, pair_changed_alone as pairs_changed_alone};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::paths::{
@@ -84,6 +85,9 @@ pub enum DoneRule {
     NoProtectedPathChanged,
     /// The diff touches nothing under `.catervas/`, whose files change only through Catervas's tools.
     NoCatervasPathChanged,
+    /// The diff changes no human document of a role's folder without its `.agent.md` twin, nor the
+    /// twin without the document.
+    PairChangedAlone,
     /// The assignee wrote a completion note.
     CompletionNotePresent,
     /// The reviewer wrote a review note.
@@ -130,13 +134,14 @@ pub fn result_awaits_human(contract: &TaskContract) -> bool {
 
 type Check = fn(&TaskContract, &DoneEvidence) -> Option<DoneFailure>;
 
-const CHECKS: [Check; 10] = [
+const CHECKS: [Check; 11] = [
     criterion_run_by_reviewer,
     criterion_passed,
     human_criterion_accepted,
     paths_within_allowed,
     no_protected_path_changed,
     no_catervas_path_changed,
+    pair_changed_alone,
     completion_note_present,
     review_note_present,
     design_review_passed,
@@ -357,6 +362,30 @@ fn no_catervas_path_changed(
         format!(
             "the diff changes {} under .catervas/, whose files change only through Catervas's tools",
             distinct(&changed)
+        ),
+    ))
+}
+
+/// No human document changes without its agent twin, nor the twin without the document (5.4,
+/// 5.17): the two are one document, written twice. The diff is judged whole, whatever the
+/// allowed paths say.
+fn pair_changed_alone(_: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
+    let alone = pairs_changed_alone(&evidence.changed_paths);
+    if alone.is_empty() {
+        return None;
+    }
+    let lacking: Vec<String> = alone
+        .iter()
+        .filter_map(|path| {
+            let partner = agent_twin(path).or_else(|| human_of_twin(path))?;
+            Some(format!("{path} without {partner}"))
+        })
+        .collect();
+    Some(failure(
+        DoneRule::PairChangedAlone,
+        format!(
+            "the diff changes {}; a document for people and its .agent.md twin change together",
+            lacking.join(", ")
         ),
     ))
 }
@@ -862,7 +891,7 @@ mod tests {
 
     #[test]
     fn reports_every_failure_in_rule_order() {
-        // All nine at once, so that the order is one assertion rather than a chain of pairs, and
+        // All ten at once, so that the order is one assertion rather than a chain of pairs, and
         // every list is plural, so that the singular and the plural wording are both pinned.
         let mut contract = a_contract();
         contract.risk = Risk::High;
@@ -892,6 +921,7 @@ mod tests {
             ".env".to_string(),
             "src/login/k.pem".to_string(),
             ".catervas/team.yaml".to_string(),
+            "docs/catervas/product/roadmap.md".to_string(),
         ];
         evidence.completion_note = None;
         evidence.review_note = None;
@@ -904,6 +934,7 @@ mod tests {
                 R::PathsWithinAllowed,
                 R::NoProtectedPathChanged,
                 R::NoCatervasPathChanged,
+                R::PairChangedAlone,
                 R::CompletionNotePresent,
                 R::ReviewNotePresent,
                 R::HumanAccepted
@@ -923,12 +954,51 @@ mod tests {
         );
         assert_eq!(
             message_of(&contract, &evidence, R::PathsWithinAllowed),
-            "the diff changes README.md, Cargo.toml, .env, .catervas/team.yaml outside the contract's allowed paths src/login/**"
+            "the diff changes README.md, Cargo.toml, .env, .catervas/team.yaml, docs/catervas/product/roadmap.md outside the contract's allowed paths src/login/**"
         );
         assert_eq!(
             message_of(&contract, &evidence, R::NoProtectedPathChanged),
             "the diff changes .env, src/login/k.pem, which the team's protected paths cover"
         );
+    }
+
+    #[test]
+    fn refuses_a_diff_that_changes_one_file_of_a_pair() {
+        let mut contract = a_contract();
+        contract.allowed_paths = vec!["docs/catervas/**".to_string()];
+        let changed = |paths: &[&str]| {
+            let mut evidence = an_evidence();
+            evidence.changed_paths = paths.iter().map(|path| (*path).to_string()).collect();
+            evidence
+        };
+        let spec = "docs/catervas/product/spec.md";
+        let spec_twin = "docs/catervas/product/spec.agent.md";
+        let roadmap_twin = "docs/catervas/product/roadmap.agent.md";
+        let evidence = changed(&[spec]);
+        assert_eq!(failed_rules(&contract, &evidence), [R::PairChangedAlone]);
+        assert_eq!(
+            message_of(&contract, &evidence, R::PairChangedAlone),
+            "the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md; a document for people and its .agent.md twin change together"
+        );
+        assert_eq!(
+            message_of(&contract, &changed(&[roadmap_twin]), R::PairChangedAlone),
+            "the diff changes docs/catervas/product/roadmap.agent.md without docs/catervas/product/roadmap.md; a document for people and its .agent.md twin change together"
+        );
+        let plan = "docs/catervas/marketing/plans/MP-2.md";
+        assert_eq!(
+            failed_rules(&contract, &changed(&[plan])),
+            [R::PairChangedAlone]
+        );
+        assert_eq!(
+            message_of(
+                &contract,
+                &changed(&[spec, roadmap_twin]),
+                R::PairChangedAlone
+            ),
+            "the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md, docs/catervas/product/roadmap.agent.md without docs/catervas/product/roadmap.md; a document for people and its .agent.md twin change together"
+        );
+        let whole = changed(&[spec, spec_twin, "docs/catervas/architecture/overview.md"]);
+        assert_eq!(evaluate_done(&contract, &whole), Ok(()));
     }
 
     #[test]

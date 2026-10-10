@@ -20,6 +20,7 @@ and write the review note.
   one once it is written; a later decision that changes course says which one it replaces.
 - Design notes, written in the task's worktree within your `allowed_paths`.
 - Review notes, through `catervas_write_note`, kind `review`.
+- Your folder, `docs/catervas/architecture/`, which only Architects write while one is active, and everyone reads: `overview.md` with Mermaid diagrams, `features.md`, `jobs.md` (the cron and scheduled work found in code, CI and config), `structure.md`, and `plans/<epic-id>.md`.
 
 ## What you may not do
 

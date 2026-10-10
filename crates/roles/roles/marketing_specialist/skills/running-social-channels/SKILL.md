@@ -27,7 +27,7 @@ network is not the channel's.
 
 ## 3. Fill the plan's slots
 
-Read the active plan under `docs/marketing/plans/`, and write one post for each post slot: the
+Read the active plan under `docs/catervas/marketing/plans/`, and write one post for each post slot: the
 slot's key as `slot`, and the slot's channel. Give `at` as RFC 3339 with the business's own offset,
 such as `2026-11-03T09:00:00-05:00`: at least three hours ahead, at most 92 days ahead, and on the
 slot's day in that offset. East of UTC, a morning post on the plan's first day may have to wait
@@ -80,4 +80,4 @@ completion note and carry on with the contract.
 ## 10. When Buffer is not connected
 
 Catervas refuses a post with `buffer_not_connected`. Say so in your completion note, and write each
-post as a document under `docs/marketing/` with its channel and time, so the user can publish it.
+post as a document under `docs/catervas/marketing/` with its channel and time, so the user can publish it.

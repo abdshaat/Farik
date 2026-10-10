@@ -1,8 +1,9 @@
 //! A session's system prompt (`docs/SPEC.md` section 8.2, ADR 0011): the same sections in the same
 //! order for every role and purpose.
 
-use catervas_core::contract::TaskContract;
+use catervas_core::contract::{Role, TaskContract};
 use catervas_core::criteria::CriteriaLibrary;
+use catervas_core::folders::folders_line;
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::team::{Agent, TeamPermissions};
@@ -50,6 +51,8 @@ pub struct PromptInput<'a> {
     pub closing: Option<&'a str>,
     /// The connectors the session is given, by name, whose every answer is untrusted (8.6).
     pub connectors: &'a [String],
+    /// The roles the team has an active agent of, for the Team rules' line about folders.
+    pub active_roles: &'a [Role],
 }
 
 /// The prompt's section titles, each written as a `## ` heading, in the one order every prompt
@@ -215,7 +218,11 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
             .project_scan
             .and_then(|scan| untrusted("project_scan", scan, 16 * KIB)),
         Some(memory_section(input)),
-        Some(rules_section(input.rules)),
+        Some(rules_section(
+            input.rules,
+            input.role.id,
+            input.active_roles,
+        )),
         if input.criteria.criteria.is_empty() {
             None
         } else {
@@ -429,8 +436,9 @@ fn you_section(agent: &Agent) -> String {
 }
 
 /// One line per rule, named as `team.yaml` names it; a list rule with nothing in it says nothing,
-/// except `document_paths`, whose empty list means no task but a Developer's can be ready.
-fn rules_section(rules: &TeamRules) -> String {
+/// except `document_paths`, whose empty list means no task but a Developer's can be ready. The
+/// last line names the team's folders (`docs/SPEC.md` 5.17).
+fn rules_section(rules: &TeamRules, role: Role, active_roles: &[Role]) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
     };
@@ -456,6 +464,7 @@ fn rules_section(rules: &TeamRules) -> String {
                     .to_string(),
             )
         }),
+        Some(folders_line(role, active_roles)),
     ]
     .into_iter()
     .flatten()
@@ -655,6 +664,7 @@ mod tests {
                 human_message: Some("Please start with the login form."),
                 closing: None,
                 connectors: &[],
+                active_roles: &[],
             }
         }
     }
@@ -963,7 +973,11 @@ mod tests {
 
     #[test]
     fn lists_only_the_tools_the_agent_can_call() {
-        let inputs = a_product_manager();
+        let mut inputs = a_product_manager();
+        // As `offered_tools` gives a refine session: none of the tools that change the project.
+        inputs
+            .tools
+            .retain(|tool| !crate::tools::writes_the_project(tool.name, tool.tier));
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         let tools = section(&prompt, "Your tools");
         assert!(tools.contains("`mcp__catervas__<name>`"), "{tools}");
@@ -1080,7 +1094,8 @@ mod tests {
             "- protected_paths: .env, **/*.pem\n\
              - require_new_tests: no\n\
              - max_task_budget_usd: none\n\
-             - document_paths: none (no task but a Software Developer's can be ready)"
+             - document_paths: none (no task but a Software Developer's can be ready)\n\
+             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents."
         );
 
         inputs.rules = TeamRules {
@@ -1102,7 +1117,40 @@ mod tests {
              - require_new_tests: yes\n\
              - max_task_budget_usd: 12.5\n\
              - forbidden_commands: ^rm -rf /\n\
-             - document_paths: docs/**, **/*.md, CHANGELOG.md"
+             - document_paths: docs/**, **/*.md, CHANGELOG.md\n\
+             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents."
+        );
+    }
+
+    #[test]
+    fn the_team_rules_name_the_active_roles_folders() {
+        let inputs = Inputs::new(Role::Architect, "architect");
+        let active = [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::FinanceSpecialist,
+        ];
+        let prompt = assembled(&PromptInput {
+            active_roles: &active,
+            ..inputs.full(SessionPurpose::Refine)
+        });
+        let rules = section(&prompt, "Team rules");
+        let last = rules.lines().last().expect("a last line");
+        assert!(
+            last.contains("docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/delivery/ (Scrum Master). Yours is docs/catervas/architecture/"),
+            "{last}"
+        );
+        assert!(!last.contains("Finance"), "{last}");
+        let headings = headings(&prompt);
+        let wanted: Vec<&str> = PROMPT_SECTIONS
+            .iter()
+            .copied()
+            .filter(|title| headings.contains(title))
+            .collect();
+        assert_eq!(
+            headings, wanted,
+            "the headings are still PROMPT_SECTIONS, in order"
         );
     }
 

@@ -5,13 +5,13 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::paths::{
-    GlobError, PathRefusal, check_allowed_paths, reaches_the_catervas_directory,
-    reaches_the_marketing_directory,
+    GlobError, PathRefusal, check_allowed_paths, reaches_the_catervas_directory, reaches_the_folder,
 };
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
+use crate::folders::ROLE_FOLDERS;
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::team::{
     changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
@@ -53,9 +53,9 @@ pub enum ReadinessRule {
     /// A task not assigned to the Software Developer keeps every allowed path within the team's
     /// document paths: only the Developer changes code.
     DocumentPathsOnly,
-    /// While the team has an active Marketing Specialist, no other role's task names a path that
-    /// could reach `docs/marketing/`, which the Marketing Specialist owns.
-    MarketingPathsOwned,
+    /// While a role that owns a folder under `docs/catervas/` has an active agent, no other role's
+    /// task names a path that could reach that folder.
+    FolderOwned,
     /// No allowed path reaches under `.catervas/`, whose files change only through Catervas's tools.
     NoCatervasPaths,
     /// A task for a role with a private folder works only there: every allowed path lies within
@@ -162,7 +162,7 @@ const CHECKS: [Check; 22] = [
     new_tests_required_by_rule,
     allowed_paths_within_ceiling,
     document_paths_only,
-    marketing_paths_owned,
+    folder_owned,
     no_catervas_paths,
     private_folder_task,
     private_folder_reviewer,
@@ -622,37 +622,50 @@ fn document_paths_only(
     ))
 }
 
-/// While the team has an active Marketing Specialist, another role's task may not name a path that
-/// could reach `docs/marketing/` (5.3, ADR 0042): the brand kit and the marketing plans are the
-/// Marketing Specialist's, and everyone else reads them. An epic names a ceiling and is not held.
-fn marketing_paths_owned(
-    contract: &TaskContract,
-    context: &ReadinessContext,
-) -> Option<ReadinessFailure> {
-    if contract.kind != Kind::Task
-        || contract.assignee_role == Role::MarketingSpecialist
-        || context
-            .active_agents_by_role
-            .get(&Role::MarketingSpecialist)
-            .is_none_or(|count| *count == 0)
-    {
+/// While a role that owns a folder under `docs/catervas/` has an active agent, another role's
+/// task may not name a path that could reach that folder (5.3, 5.17, ADR 0051): only a folder's
+/// owner changes the documents in it, and everyone else reads them. A folder whose owner has no
+/// active agent is anyone's. An epic names a ceiling and is not held.
+fn folder_owned(contract: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    if contract.kind != Kind::Task {
         return None;
     }
+    let owned: Vec<(Role, &str)> = ROLE_FOLDERS
+        .iter()
+        .copied()
+        .filter(|(owner, _)| {
+            *owner != contract.assignee_role
+                && context
+                    .active_agents_by_role
+                    .get(owner)
+                    .is_some_and(|count| *count > 0)
+        })
+        .collect();
     let reaching: Vec<&str> = contract
         .allowed_paths
         .iter()
         .map(String::as_str)
-        .filter(|path| reaches_the_marketing_directory(path))
+        .filter(|path| {
+            owned
+                .iter()
+                .any(|(_, folder)| reaches_the_folder(path, folder))
+        })
         .collect();
     if reaching.is_empty() {
         return None;
     }
+    let folders: Vec<String> = owned
+        .iter()
+        .filter(|(_, folder)| reaching.iter().any(|path| reaches_the_folder(path, folder)))
+        .map(|(owner, folder)| format!("{folder}/ ({})", plain_role(*owner)))
+        .collect();
     Some(failure(
-        ReadinessRule::MarketingPathsOwned,
+        ReadinessRule::FolderOwned,
         format!(
-            "allowed paths {} could reach docs/marketing/, which the Marketing Specialist owns; \
-             name narrower paths or give the task to the Marketing Specialist",
-            reaching.join(", ")
+            "allowed paths {} could reach folders other roles own: {}; name narrower paths, or \
+             give the task to the folder's owner",
+            reaching.join(", "),
+            folders.join(", ")
         ),
     ))
 }
@@ -1287,40 +1300,37 @@ mod tests {
             for role in [Role::SoftwareDeveloper, Role::Architect] {
                 let mut task = a_task_for(role, &["docs/x.md", path]);
                 assert!(
-                    failed_rules(&task, &a_context_without_marketing())
-                        .contains(&R::NoCatervasPaths),
+                    failed_rules(&task, &a_ready_context()).contains(&R::NoCatervasPaths),
                     "{path} for {role:?}"
                 );
                 task.kind = Kind::Epic;
                 assert!(
-                    failed_rules(&task, &a_context_without_marketing())
-                        .contains(&R::NoCatervasPaths),
+                    failed_rules(&task, &a_ready_context()).contains(&R::NoCatervasPaths),
                     "{path} for an epic"
                 );
             }
         }
         let task = a_task_for(Role::Architect, &["**/*.md"]);
         assert_eq!(
-            failed_rules(&task, &a_context_without_marketing()),
-            [R::NoCatervasPaths]
+            failed_rules(&task, &a_ready_context()),
+            [R::FolderOwned, R::NoCatervasPaths]
         );
         assert!(
-            message_of(&task, &a_context_without_marketing(), R::NoCatervasPaths)
-                .contains("**/*.md"),
+            message_of(&task, &a_ready_context(), R::NoCatervasPaths).contains("**/*.md"),
             "the message names the path"
         );
         for path in [
             "src/**",
             "*.md",
             "*",
-            "docs/**",
+            "docs/adr/**",
             ".catervasx/**",
             ".github/**",
             "src/.catervas/x",
         ] {
             let task = a_task_for(Role::SoftwareDeveloper, &[path]);
             assert_eq!(
-                evaluate_readiness(&task, &a_context_without_marketing()),
+                evaluate_readiness(&task, &a_ready_context()),
                 Ok(()),
                 "{path}"
             );
@@ -1330,14 +1340,14 @@ mod tests {
     #[test]
     fn keeps_a_ceiling_with_a_file_filter_exact() {
         let mut contract = a_contract();
-        contract.allowed_paths = vec!["docs/**".to_string()];
-        let mut context = a_context_without_marketing();
-        context.rules.allowed_paths_ceiling = vec!["docs/**/*.md".to_string()];
+        contract.allowed_paths = vec!["docs/adr/**".to_string()];
+        let mut context = a_ready_context();
+        context.rules.allowed_paths_ceiling = vec!["docs/adr/**/*.md".to_string()];
         assert_eq!(
             failed_rules(&contract, &context),
             [R::AllowedPathsWithinCeiling]
         );
-        contract.allowed_paths = vec!["docs/**/*.md".to_string()];
+        contract.allowed_paths = vec!["docs/adr/**/*.md".to_string()];
         assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
     }
 
@@ -1347,99 +1357,123 @@ mod tests {
         for path in ["docs*/**", "docs?/x", "docs{,rc}/**", "docs[x]/**"] {
             let mut contract = a_contract();
             contract.allowed_paths = vec![path.to_string()];
-            let mut context = a_context_without_marketing();
+            let mut context = a_ready_context();
             context.rules.allowed_paths_ceiling = vec!["docs/**".to_string()];
+            // `docs*` and `docs{,rc}` also reach `docs/`, which holds the owners' folders.
+            let reaches_docs = path.starts_with("docs*") || path.starts_with("docs{");
+            let expected: &[R] = if reaches_docs {
+                &[R::AllowedPathsWithinCeiling, R::FolderOwned]
+            } else {
+                &[R::AllowedPathsWithinCeiling]
+            };
             assert_eq!(
                 failed_rules(&contract, &context),
-                [R::AllowedPathsWithinCeiling],
+                expected,
                 "{path} against the ceiling"
             );
             let task = a_task_for(Role::Architect, &[path]);
+            let expected: &[R] = if reaches_docs {
+                &[R::DocumentPathsOnly, R::FolderOwned]
+            } else {
+                &[R::DocumentPathsOnly]
+            };
             assert_eq!(
-                failed_rules(&task, &a_context_without_marketing()),
-                [R::DocumentPathsOnly],
+                failed_rules(&task, &a_ready_context()),
+                expected,
                 "{path} against the document paths"
             );
         }
-        for path in ["docs", "docs/**", "docs/*.md"] {
+        for path in ["docs/adr", "docs/adr/**", "docs/adr/*.md"] {
             let task = a_task_for(Role::Architect, &[path]);
             assert_eq!(
-                evaluate_readiness(&task, &a_context_without_marketing()),
+                evaluate_readiness(&task, &a_ready_context()),
                 Ok(()),
                 "{path}"
             );
         }
     }
 
-    /// The ready context with no Marketing Specialist, for the tests of the rules about paths
-    /// that name `docs/` or everything: `marketing_paths_owned` would hold those paths too.
-    fn a_context_without_marketing() -> ReadinessContext {
-        let mut context = a_ready_context();
-        context
-            .active_agents_by_role
-            .remove(&Role::MarketingSpecialist);
-        context
-    }
-
     #[test]
-    fn another_role_may_not_name_the_marketing_folder() {
+    fn another_role_may_not_name_an_owned_folder() {
         let failed = |task: &TaskContract, context: &ReadinessContext| -> Vec<R> {
             match evaluate_readiness(task, context) {
                 Ok(()) => Vec::new(),
                 Err(failures) => failures.iter().map(|failure| failure.rule).collect(),
             }
         };
-        // `a_ready_context()` has one active Marketing Specialist.
-        let mut with_marketing = a_task_for(Role::ProductManager, &["docs/adr/**", "docs/**"]);
-        with_marketing.reviewer_role = Role::Architect;
+        let others = "docs/catervas/product/ (Product Manager), docs/catervas/engineering/ \
+                      (Software Developer), docs/catervas/delivery/ (Scrum Master), \
+                      docs/catervas/marketing/ (Marketing Specialist); name narrower paths, or \
+                      give the task to the folder's owner";
+        // `a_ready_context()` has one active Product Manager, Scrum Master, Architect, Developer
+        // and Marketing Specialist.
+        let architects = a_task_for(Role::Architect, &["docs/adr/**", "docs/**"]);
+        assert_eq!(failed(&architects, &a_ready_context()), [R::FolderOwned]);
         assert_eq!(
-            failed(&with_marketing, &a_ready_context()),
-            [R::MarketingPathsOwned]
+            message_of(&architects, &a_ready_context(), R::FolderOwned),
+            format!("allowed paths docs/** could reach folders other roles own: {others}")
         );
-        let message = message_of(&with_marketing, &a_ready_context(), R::MarketingPathsOwned);
+        let two = a_task_for(Role::Architect, &["docs/**", "docs/catervas/delivery/x.md"]);
+        assert_eq!(failed(&two, &a_ready_context()), [R::FolderOwned]);
         assert_eq!(
-            message,
-            "allowed paths docs/** could reach docs/marketing/, which the Marketing Specialist \
-             owns; name narrower paths or give the task to the Marketing Specialist"
+            message_of(&two, &a_ready_context(), R::FolderOwned),
+            format!(
+                "allowed paths docs/**, docs/catervas/delivery/x.md could reach folders other \
+                 roles own: {others}"
+            )
         );
-        // The same task passes once nobody on the team is a Marketing Specialist, or one is paused.
+        // A folder whose owner has no active agent is anyone's.
+        let mut scrum = a_task_for(Role::ProductManager, &["docs/catervas/delivery/**"]);
+        scrum.reviewer_role = Role::Architect;
+        assert_eq!(failed(&scrum, &a_ready_context()), [R::FolderOwned]);
         for count in [None, Some(0)] {
             let mut context = a_ready_context();
-            context
-                .active_agents_by_role
-                .remove(&Role::MarketingSpecialist);
+            context.active_agents_by_role.remove(&Role::ScrumMaster);
             if let Some(count) = count {
                 context
                     .active_agents_by_role
-                    .insert(Role::MarketingSpecialist, count);
+                    .insert(Role::ScrumMaster, count);
             }
-            assert_eq!(
-                evaluate_readiness(&with_marketing, &context),
-                Ok(()),
-                "{count:?}"
-            );
+            assert_eq!(evaluate_readiness(&scrum, &context), Ok(()), "{count:?}");
         }
-        // Any other role is held, and a narrower path passes.
-        for role in [Role::Architect, Role::SoftwareDeveloper] {
-            let task = a_task_for(role, &["docs/**"]);
-            assert_eq!(
-                failed(&task, &a_ready_context()),
-                [R::MarketingPathsOwned],
-                "{role:?}"
-            );
-            let task = a_task_for(role, &["docs/adr/**"]);
-            assert_eq!(failed(&task, &a_ready_context()), [], "{role:?}");
+        // The owner's own folder, and a path no folder is under.
+        for (role, paths) in [
+            (
+                Role::Architect,
+                &["docs/catervas/architecture/**", "docs/adr/**"][..],
+            ),
+            (Role::SoftwareDeveloper, &["docs/catervas/engineering/**"]),
+            (Role::SoftwareDeveloper, &["src/**"]),
+        ] {
+            let task = a_task_for(role, paths);
+            assert_eq!(failed(&task, &a_ready_context()), [], "{role:?} {paths:?}");
         }
-        // The Marketing Specialist's own task may name its folder.
-        let own = a_task_for(
-            Role::MarketingSpecialist,
-            &["docs/marketing/**", "CHANGELOG.md"],
+        let task = a_task_for(Role::SoftwareDeveloper, &["docs/**/*.rs"]);
+        assert_eq!(failed(&task, &a_ready_context()), [R::FolderOwned]);
+        let task = a_task_for(
+            Role::SoftwareDeveloper,
+            &["docs/catervas/architecture/x.md"],
         );
-        assert_eq!(evaluate_readiness(&own, &a_ready_context()), Ok(()));
+        assert_eq!(
+            message_of(&task, &a_ready_context(), R::FolderOwned),
+            "allowed paths docs/catervas/architecture/x.md could reach folders other roles own: \
+             docs/catervas/architecture/ (Architect); name narrower paths, or give the task to the \
+             folder's owner"
+        );
+        // A role added to the team holds its folder too.
+        let mut context = a_ready_context();
+        context.active_agents_by_role.insert(Role::UiUxDesigner, 1);
+        let task = a_task_for(Role::SoftwareDeveloper, &["docs/catervas/design/x.md"]);
+        assert_eq!(
+            message_of(&task, &context, R::FolderOwned),
+            "allowed paths docs/catervas/design/x.md could reach folders other roles own: \
+             docs/catervas/design/ (UI/UX Designer); name narrower paths, or give the task to the \
+             folder's owner"
+        );
         // An epic is not held: it names the ceiling its tasks fall within.
         let mut epic = a_task_for(Role::Architect, &["docs/**"]);
         epic.kind = Kind::Epic;
-        assert!(!failed(&epic, &a_ready_context()).contains(&R::MarketingPathsOwned));
+        assert!(!failed(&epic, &a_ready_context()).contains(&R::FolderOwned));
     }
 
     /// A task for the Finance Specialist, reviewed by the Product Manager, allowed `paths`, with
@@ -1524,7 +1558,7 @@ mod tests {
                   "verification": { "method": "command", "command": "make", "expect": { "exit_code": 0 } } }
             ]),
         );
-        let context = a_context_without_marketing();
+        let context = a_ready_context();
         assert_eq!(failed_rules(&runs, &context), [R::PrivateFolderTask]);
         assert!(
             message_of(&runs, &context, R::PrivateFolderTask)
@@ -1712,15 +1746,15 @@ mod tests {
                     &[
                         ".catervas/local/finance/**",
                         ".catervas/local/financeX/**",
-                        "docs/**",
+                        "docs/adr/**",
                     ],
                     the_books_criteria(),
                 ),
-                "allowed paths .catervas/local/financeX/**, docs/** lie outside .catervas/local/finance",
+                "allowed paths .catervas/local/financeX/**, docs/adr/** lie outside .catervas/local/finance",
             ),
         ];
         for (task, said) in cases {
-            let context = a_context_without_marketing();
+            let context = a_ready_context();
             let failed = failed_rules(&task, &context);
             // `.catervas/local/financeX/**` is also under `.catervas/`.
             let wanted: &[R] = if said.contains("financeX") {
@@ -1736,7 +1770,7 @@ mod tests {
         // within the folder.
         let mut under_an_epic = a_finance_task(folder, the_books_criteria());
         under_an_epic.parent = Some("CTV-3".parse().expect("a task id"));
-        let mut context = a_context_without_marketing();
+        let mut context = a_ready_context();
         context.parent = Some(ParentState {
             status: TaskStatus::InProgress,
             allowed_paths: vec!["**".to_string()],
@@ -1787,17 +1821,11 @@ mod tests {
         context.rules.document_paths = vec!["docs/**".to_string()];
         assert_eq!(evaluate_readiness(&task, &context), Ok(()));
         // Another role's task is held to both.
-        let developers = a_task_for(Role::SoftwareDeveloper, &["docs/**"]);
+        let developers = a_task_for(Role::SoftwareDeveloper, &["docs/adr/**"]);
         assert_eq!(
-            failed_rules(&developers, &a_context_without_marketing_under_a_ceiling()),
+            failed_rules(&developers, &context),
             [R::AllowedPathsWithinCeiling]
         );
-    }
-
-    fn a_context_without_marketing_under_a_ceiling() -> ReadinessContext {
-        let mut context = a_context_without_marketing();
-        context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
-        context
     }
 
     #[test]
@@ -1811,7 +1839,7 @@ mod tests {
         ] {
             let task = a_task_for(role, &[".catervas/local/finance/**"]);
             assert!(
-                failed_rules(&task, &a_context_without_marketing()).contains(&R::NoCatervasPaths),
+                failed_rules(&task, &a_ready_context()).contains(&R::NoCatervasPaths),
                 "{role:?}"
             );
         }
@@ -1911,7 +1939,7 @@ mod tests {
 
     #[test]
     fn refuses_every_document_task_with_an_empty_list() {
-        let task = a_task_for(Role::MarketingSpecialist, &["docs/marketing/**"]);
+        let task = a_task_for(Role::MarketingSpecialist, &["docs/catervas/marketing/**"]);
         let mut context = a_ready_context();
         context.rules.document_paths.clear();
         assert_eq!(failed_rules(&task, &context), [R::DocumentPathsOnly]);

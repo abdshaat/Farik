@@ -2,7 +2,7 @@
 //! branch integrated the way the team's policy says, one task at a time even across processes,
 //! and a finished task's worktrees and containers removed, its branch kept.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -15,21 +15,20 @@ use catervas_protocol::event::{
 };
 use catervas_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
 use catervas_store::files::FilesError;
+use catervas_store::folder_docs::{FolderChange, folder_docs};
 use catervas_store::{
     EventQuery, Git, GitError, MergeOutcome, TaskProjection, material, names_of, project_document,
     scan_project, seeded_library,
 };
 
-use super::verify::{GOVERNOR, append};
+use super::verify::{GOVERNOR, append, append_stamped};
 use super::{
     IntegrationOutcome, Orchestrator, OrchestratorError, ScanRefresh, TickReport, worktree,
 };
+use crate::channel::post_system;
 use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
-use crate::transitions::{integration_branch, is_move_into};
-
-/// Where the integration lock lives, under the project root.
-const LOCK: &str = ".catervas/local/integration.lock";
+use crate::transitions::{INTEGRATION_LOCK, integration_branch, integration_lock, is_move_into};
 
 /// Who asked for an integration: the tick, on the team's policy, or the human.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +51,8 @@ pub(super) async fn awaiting(
     {
         return Ok(None);
     }
-    let Some(outcome) = attempt(orchestrator, team, &row.task_id, Asker::Tick).await? else {
+    let subject = Subject::Task(row.task_id.clone());
+    let Some(outcome) = attempt(orchestrator, team, &subject, Asker::Tick).await? else {
         return Ok(None);
     };
     let what = match outcome {
@@ -88,9 +88,14 @@ pub(super) async fn integrate(
         )));
     }
     let team = orchestrator.deps.tools.files.read_team()?;
-    attempt(orchestrator, &team, task_id, Asker::Human)
-        .await?
-        .ok_or_else(|| refused(format!("nothing_to_do: {}", task_id.as_str())))
+    attempt(
+        orchestrator,
+        &team,
+        &Subject::Task(task_id.clone()),
+        Asker::Human,
+    )
+    .await?
+    .ok_or_else(|| refused(format!("nothing_to_do: {}", task_id.as_str())))
 }
 
 /// `Refused` for a row that is not an accepted task.
@@ -115,21 +120,138 @@ fn refused(reason: String) -> OrchestratorError {
     OrchestratorError::Refused { reason }
 }
 
+/// What an integration is about: an accepted task's branch, or a folder change's (5.14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Subject {
+    Task(TaskId),
+    FolderChange(u64),
+}
+
+impl Subject {
+    /// How the human names it: `catervas integrate <this>`.
+    fn name(&self) -> String {
+        match self {
+            Self::Task(task_id) => task_id.as_str().to_string(),
+            Self::FolderChange(change) => format!("folder-{change}"),
+        }
+    }
+
+    /// Its branch.
+    fn branch(&self, tools: &ToolDeps) -> Result<String, OrchestratorError> {
+        Ok(match self {
+            Self::Task(task_id) => task_branch(&tools.files.read_contract(task_id)?),
+            Self::FolderChange(change) => format!("docs/folder-{change}"),
+        })
+    }
+
+    /// Its merge commit's message and its pull request's title.
+    fn titles(&self, tools: &ToolDeps) -> Result<(String, String), OrchestratorError> {
+        match self {
+            Self::Task(task_id) => {
+                let title = tools
+                    .projections
+                    .task(task_id)?
+                    .map(|row| row.title)
+                    .unwrap_or_default();
+                let id = task_id.as_str();
+                Ok((format!("Merge {id}: {title}"), format!("{id}: {title}")))
+            }
+            Self::FolderChange(change) => {
+                let paths = folder_change(tools, *change)?
+                    .paths
+                    .iter()
+                    .map(|path| {
+                        path.strip_prefix("docs/catervas/")
+                            .unwrap_or(path)
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Ok((
+                    format!("Merge docs/folder-{change}: {paths}"),
+                    format!("Folder change {change}: {paths}"),
+                ))
+            }
+        }
+    }
+}
+
+/// The folder change numbered `change`, or `no_such_folder_change`.
+fn folder_change(tools: &ToolDeps, change: u64) -> Result<FolderChange, OrchestratorError> {
+    folder_docs(&tools.log)?
+        .changes
+        .into_iter()
+        .find(|known| known.change == change)
+        .ok_or_else(|| {
+            refused(format!(
+                "no_such_folder_change: there is no folder change {change}"
+            ))
+        })
+}
+
+/// Rule 2's second half: each folder change not integrated is integrated the way the team's policy
+/// says, as `awaiting` does for each accepted task, in a tick scoped to no task. One that was
+/// escalated is the human's to settle through `integrate_folder_change`; `manual` has no rule.
+pub(super) async fn awaiting_folder_changes(
+    orchestrator: &Orchestrator,
+    team: &Team,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if team.policy.integration == Integration::Manual {
+        return Ok(None);
+    }
+    let waiting: Vec<u64> = folder_docs(&orchestrator.deps.tools.log)?
+        .changes
+        .iter()
+        .filter(|change| !change.integrated && !change.escalated)
+        .map(|change| change.change)
+        .collect();
+    for change in waiting {
+        let subject = Subject::FolderChange(change);
+        let Some(outcome) = attempt(orchestrator, team, &subject, Asker::Tick).await? else {
+            continue;
+        };
+        let what = match outcome {
+            IntegrationOutcome::Merged { sha, .. } => format!("integrated at {sha}"),
+            IntegrationOutcome::PullRequestOpened { url } => {
+                format!("opened the pull request {url}")
+            }
+            IntegrationOutcome::Escalated { detail, .. } => {
+                format!("escalated its integration to the human: {detail}")
+            }
+            IntegrationOutcome::AwaitingForge => continue,
+        };
+        return Ok(Some(TickReport::FolderChange { change, what }));
+    }
+    Ok(None)
+}
+
+/// The human's integration of a folder change, whatever escalations it carries.
+pub(super) async fn integrate_folder_change(
+    orchestrator: &Orchestrator,
+    change: u64,
+) -> Result<IntegrationOutcome, OrchestratorError> {
+    let team = orchestrator.deps.tools.files.read_team()?;
+    let subject = Subject::FolderChange(change);
+    attempt(orchestrator, &team, &subject, Asker::Human)
+        .await?
+        .ok_or_else(|| refused(format!("nothing_to_do: {}", subject.name())))
+}
+
 /// One integration, under the lock and off the async threads, because it runs git; `None` when
 /// the tick finds nothing to do once it holds the lock.
 async fn attempt(
     orchestrator: &Orchestrator,
     team: &Team,
-    task_id: &TaskId,
+    subject: &Subject,
     asker: Asker,
 ) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
     let tools = Arc::clone(&orchestrator.deps.tools);
     let forge = Arc::clone(&orchestrator.deps.forge);
     let team = team.clone();
-    let task_id = task_id.clone();
+    let subject = subject.clone();
     let finished = tokio::task::spawn_blocking(move || {
         let _lock = lock(tools.files.root())?;
-        integrate_locked(&tools, &forge, &team, &task_id, asker)
+        integrate_locked(&tools, &forge, &team, &subject, asker)
     })
     .await;
     match finished {
@@ -141,22 +263,28 @@ async fn attempt(
     }
 }
 
-/// What the policy does for the task, with the lock held: the board is brought up to what other
+/// What the policy does for the subject, with the lock held: the board is brought up to what other
 /// processes appended first, so that a task another one integrated is answered, not merged again.
 fn integrate_locked(
     tools: &ToolDeps,
     forge: &Forge,
     team: &Team,
-    task_id: &TaskId,
+    subject: &Subject,
     asker: Asker,
 ) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
     tools.projections.catch_up()?;
-    let Some(row) = tools.projections.task(task_id)? else {
-        return Err(refused(format!("no_such_task: {}", task_id.as_str())));
+    let awaiting = match subject {
+        Subject::Task(task_id) => {
+            let Some(row) = tools.projections.task(task_id)? else {
+                return Err(refused(format!("no_such_task: {}", task_id.as_str())));
+            };
+            refuse_unless_integrable(&row)?;
+            row.awaiting_integration
+        }
+        Subject::FolderChange(change) => !folder_change(tools, *change)?.integrated,
     };
-    refuse_unless_integrable(&row)?;
-    if !row.awaiting_integration {
-        return match last_integrated_sha(tools, task_id)? {
+    if !awaiting {
+        return match last_integrated_sha(tools, subject)? {
             Some(sha) => Ok(Some(IntegrationOutcome::Merged {
                 sha,
                 scan: ScanRefresh::Unchanged,
@@ -164,28 +292,32 @@ fn integrate_locked(
             None if asker == Asker::Tick => Ok(None),
             None => Err(refused(format!(
                 "never_integrated: {} is not awaiting integration and was never integrated",
-                task_id.as_str()
+                subject.name()
             ))),
         };
     }
-    if asker == Asker::Tick && escalated_since_accepted(tools, task_id)? {
+    if asker == Asker::Tick && escalated_since_accepted(tools, subject)? {
         return Ok(None);
     }
     let into = match integration_branch(team, &tools.git) {
         Ok(into) => into,
-        Err(error) => return escalate(tools, task_id, git_words(&error)).map(Some),
+        Err(error) => return escalate(tools, subject, git_words(&error)).map(Some),
     };
     let integrated_by = match asker {
         Asker::Tick => TaskIntegratedBodyIntegratedBy::Governor,
         Asker::Human => TaskIntegratedBodyIntegratedBy::Human,
     };
-    let integrated_before = integrations_of(tools, task_id)?;
+    let integrated_before = integrations_of(tools, subject)?;
     let outcome = match team.policy.integration {
-        Integration::Manual => Some(merge(tools, &row, &into, integrated_by, false)?),
-        Integration::AutoMerge => Some(merge(tools, &row, &into, integrated_by, true)?),
-        Integration::PullRequest => through_the_forge(tools, forge, &row, &into, asker)?,
+        Integration::Manual => Some(merge(tools, subject, &into, integrated_by, false)?),
+        Integration::AutoMerge => Some(merge(tools, subject, &into, integrated_by, true)?),
+        Integration::PullRequest => through_the_forge(tools, forge, subject, &into, asker)?,
     };
-    if integrations_of(tools, task_id)? == integrated_before {
+    // A folder change touches no language, toolchain, test or criterion: no scan to refresh.
+    let Subject::Task(task_id) = subject else {
+        return Ok(outcome);
+    };
+    if integrations_of(tools, subject)? == integrated_before {
         return Ok(outcome);
     }
     let scan = refresh_the_scan(tools, task_id, &into);
@@ -199,16 +331,30 @@ fn integrate_locked(
     }))
 }
 
-/// How many times the task was integrated, so that a caller can tell whether it just was.
-fn integrations_of(tools: &ToolDeps, task_id: &TaskId) -> Result<usize, OrchestratorError> {
-    Ok(tools
-        .log
-        .read(&EventQuery {
-            task_id: Some(task_id.clone()),
-            kinds: vec![EventKind::TaskIntegrated],
-            ..EventQuery::default()
-        })?
-        .len())
+/// How many times the subject was integrated, so that a caller can tell whether it just was.
+fn integrations_of(tools: &ToolDeps, subject: &Subject) -> Result<usize, OrchestratorError> {
+    Ok(match subject {
+        Subject::Task(task_id) => tools
+            .log
+            .read(&EventQuery {
+                task_id: Some(task_id.clone()),
+                kinds: vec![EventKind::TaskIntegrated],
+                ..EventQuery::default()
+            })?
+            .len(),
+        Subject::FolderChange(change) => tools
+            .log
+            .read(&EventQuery {
+                kinds: vec![EventKind::FolderChangeIntegrated],
+                ..EventQuery::default()
+            })?
+            .iter()
+            .filter(|event| {
+                matches!(&event.body, EventBody::FolderChangeIntegrated(body)
+                if body.change.get() == *change)
+            })
+            .count(),
+    })
 }
 
 /// Scans the project again once work landed in it (5.8), and writes `project.md` and the
@@ -307,28 +453,19 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
 fn through_the_forge(
     tools: &ToolDeps,
     forge: &Forge,
-    row: &TaskProjection,
+    subject: &Subject,
     into: &str,
     asker: Asker,
 ) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
-    let task_id = &row.task_id;
-    let branch = task_branch(&tools.files.read_contract(task_id)?);
-    let opened = since_accepted(tools, task_id, &[EventKind::PullRequestOpened])?
-        .into_iter()
-        .rev()
-        .find_map(|event| match event.body {
-            EventBody::PullRequestOpened(body) => Some(body),
-            _ => None,
-        });
-    let Some(opened) = opened else {
-        return open(tools, forge, row, into, &branch).map(Some);
+    let branch = subject.branch(tools)?;
+    let Some(url) = opened_url(tools, subject)? else {
+        return open(tools, forge, subject, into, &branch).map(Some);
     };
-    let url = opened.url;
     let state = match forge.pull_request_state(&url) {
         Ok(state) => state,
         Err(error) => {
             let detail = format!("reading the pull request {url} failed: {error}");
-            return escalate(tools, task_id, detail).map(Some);
+            return escalate(tools, subject, detail).map(Some);
         }
     };
     match state {
@@ -336,7 +473,7 @@ fn through_the_forge(
         PullRequestState::Merged { sha } => {
             record_integrated(
                 tools,
-                task_id,
+                subject,
                 &sha,
                 into,
                 TaskIntegratedBodyIntegratedBy::Human,
@@ -347,7 +484,7 @@ fn through_the_forge(
                      brought up to it: {}",
                     git_words(&error)
                 );
-                return escalate(tools, task_id, detail).map(Some);
+                return escalate(tools, subject, detail).map(Some);
             }
             Ok(Some(IntegrationOutcome::Merged {
                 sha,
@@ -356,19 +493,47 @@ fn through_the_forge(
         }
         PullRequestState::Closed if asker == Asker::Tick => {
             let detail = format!("the pull request {url} was closed without merging");
-            escalate(tools, task_id, detail).map(Some)
+            escalate(tools, subject, detail).map(Some)
         }
         PullRequestState::Closed => {
-            closed_for_the_human(tools, task_id, &url, into, &branch).map(Some)
+            closed_for_the_human(tools, subject, &url, into, &branch).map(Some)
         }
     }
 }
 
-/// A closed pull request the human asks about: the task is integrated when its branch is in the
+/// The address of the pull request opened for the subject: the latest since a task was accepted,
+/// the latest for a folder change.
+fn opened_url(tools: &ToolDeps, subject: &Subject) -> Result<Option<String>, OrchestratorError> {
+    Ok(match subject {
+        Subject::Task(task_id) => since_accepted(tools, task_id, &[EventKind::PullRequestOpened])?
+            .into_iter()
+            .rev()
+            .find_map(|event| match event.body {
+                EventBody::PullRequestOpened(body) => Some(body.url),
+                _ => None,
+            }),
+        Subject::FolderChange(change) => tools
+            .log
+            .read(&EventQuery {
+                kinds: vec![EventKind::FolderChangeOpened],
+                ..EventQuery::default()
+            })?
+            .into_iter()
+            .rev()
+            .find_map(|event| match event.body {
+                EventBody::FolderChangeOpened(body) if body.change.get() == *change => {
+                    Some(body.url.to_string())
+                }
+                _ => None,
+            }),
+    })
+}
+
+/// A closed pull request the human asks about: the subject is integrated when its branch is in the
 /// integration branch as the forge has it, merged by hand or through another pull request.
 fn closed_for_the_human(
     tools: &ToolDeps,
-    task_id: &TaskId,
+    subject: &Subject,
     url: &str,
     into: &str,
     branch: &str,
@@ -382,7 +547,7 @@ fn closed_for_the_human(
             let head = tools.git.merge_base(into, into)?;
             record_integrated(
                 tools,
-                task_id,
+                subject,
                 &head,
                 into,
                 TaskIntegratedBodyIntegratedBy::Human,
@@ -397,7 +562,7 @@ fn closed_for_the_human(
                 "the pull request {url} was closed without merging, and {branch} is not in \
                  {into}: reopen it on the forge or merge the branch, then run catervas integrate"
             );
-            escalate(tools, task_id, detail)
+            escalate(tools, subject, detail)
         }
         Err(error) => {
             let detail = format!(
@@ -405,7 +570,7 @@ fn closed_for_the_human(
                  {into} could not be read: {}",
                 git_words(&error)
             );
-            escalate(tools, task_id, detail)
+            escalate(tools, subject, detail)
         }
     }
 }
@@ -414,11 +579,10 @@ fn closed_for_the_human(
 fn open(
     tools: &ToolDeps,
     forge: &Forge,
-    row: &TaskProjection,
+    subject: &Subject,
     into: &str,
     branch: &str,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
-    let task_id = &row.task_id;
     match tools.git.has_remote("origin") {
         Ok(true) => {}
         Ok(false) => {
@@ -426,41 +590,74 @@ fn open(
                 "the pull_request policy pushes {branch} to origin, and there is no remote named \
                  origin"
             );
-            return escalate(tools, task_id, detail);
+            return escalate(tools, subject, detail);
         }
-        Err(error) => return escalate(tools, task_id, git_words(&error)),
+        Err(error) => return escalate(tools, subject, git_words(&error)),
     }
     if let Err(error) = tools.git.push("origin", &format!("refs/heads/{branch}")) {
         let detail = format!("pushing {branch} to origin failed: {}", git_words(&error));
-        return escalate(tools, task_id, detail);
+        return escalate(tools, subject, detail);
     }
-    let title = format!("{}: {}", task_id.as_str(), row.title);
-    let body = pull_request_body(tools, task_id)?;
+    let (_, title) = subject.titles(tools)?;
+    let body = pull_request_body(tools, subject)?;
     let pull_request = match forge.open_pull_request(into, branch, &title, &body) {
         Ok(pull_request) => pull_request,
         Err(error) => {
             let detail = format!("opening a pull request for {branch} failed: {error}");
-            return escalate(tools, task_id, detail);
+            return escalate(tools, subject, detail);
         }
     };
-    append(
-        tools,
-        task_id,
-        None,
-        None,
-        EventBody::PullRequestOpened(PullRequestOpenedBody {
-            url: pull_request.url.clone(),
-            number: pull_request.number,
-            branch: branch.to_string(),
-        }),
-    )?;
+    match subject {
+        Subject::Task(task_id) => append(
+            tools,
+            task_id,
+            None,
+            None,
+            EventBody::PullRequestOpened(PullRequestOpenedBody {
+                url: pull_request.url.clone(),
+                number: pull_request.number,
+                branch: branch.to_string(),
+            }),
+        )?,
+        Subject::FolderChange(change) => {
+            let body = serde_json::from_value(serde_json::json!({
+                "change": change, "url": pull_request.url, "number": pull_request.number,
+            }));
+            let Ok(body) = body else {
+                let detail = format!(
+                    "the forge answered {} for the pull request of {branch}, which is no pull \
+                     request number",
+                    pull_request.number
+                );
+                return escalate(tools, subject, detail);
+            };
+            append_stamped(
+                tools,
+                tools.ids.clone(),
+                EventBody::FolderChangeOpened(body),
+            )?;
+        }
+    }
     Ok(IntegrationOutcome::PullRequestOpened {
         url: pull_request.url,
     })
 }
 
-/// The pull request's body: the contract's intent, then the last completion and review notes.
-fn pull_request_body(tools: &ToolDeps, task_id: &TaskId) -> Result<String, OrchestratorError> {
+/// The pull request's body: a task's contract intent, then the last completion and review notes; a
+/// folder change's paths, one per line, then a line for the owner's approval.
+fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, OrchestratorError> {
+    let task_id = match subject {
+        Subject::Task(task_id) => task_id,
+        Subject::FolderChange(change) => {
+            let held = folder_change(tools, *change)?;
+            let mut body = held.paths.join("\n");
+            body.push('\n');
+            if held.approved {
+                body.push_str("\nApproved by the owner on Today.\n");
+            }
+            return Ok(body);
+        }
+    };
     let contract = tools.files.read_contract(task_id)?;
     let intent = contract.intent.as_str();
     let notes = tools.log.read(&EventQuery {
@@ -485,20 +682,20 @@ fn pull_request_body(tools: &ToolDeps, task_id: &TaskId) -> Result<String, Orche
     ))
 }
 
-/// Merges the task's branch into `into`, records it, and, when `push` and there is an `origin`,
+/// Merges the subject's branch into `into`, records it, and, when `push` and there is an `origin`,
 /// pushes `into` there. A conflict, a git failure, or a failed push is an escalation; the merge
 /// stays when only the push failed, since the local integration branch is what dependents start
 /// from.
 fn merge(
     tools: &ToolDeps,
-    row: &TaskProjection,
+    subject: &Subject,
     into: &str,
     integrated_by: TaskIntegratedBodyIntegratedBy,
     push: bool,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
-    let id = row.task_id.as_str();
-    let branch = task_branch(&tools.files.read_contract(&row.task_id)?);
-    let message = format!("Merge {id}: {}", row.title);
+    let id = subject.name();
+    let branch = subject.branch(tools)?;
+    let (message, _) = subject.titles(tools)?;
     let sha = match tools.git.merge(into, &branch, &message) {
         Ok(MergeOutcome::Merged { sha }) => sha,
         Ok(MergeOutcome::Conflicts(paths)) => {
@@ -507,14 +704,14 @@ fn merge(
                  catervas integrate {id}",
                 paths.join(", ")
             );
-            return escalate(tools, &row.task_id, detail);
+            return escalate(tools, subject, detail);
         }
         Err(error) => {
             let detail = format!("merging {branch} into {into} failed: {}", git_words(&error));
-            return escalate(tools, &row.task_id, detail);
+            return escalate(tools, subject, detail);
         }
     };
-    record_integrated(tools, &row.task_id, &sha, into, integrated_by)?;
+    record_integrated(tools, subject, &sha, into, integrated_by)?;
     if push {
         let pushed = tools.git.has_remote("origin").and_then(|has| {
             if has {
@@ -529,7 +726,7 @@ fn merge(
                  {into} once it can be pushed",
                 git_words(&error)
             );
-            return escalate(tools, &row.task_id, detail);
+            return escalate(tools, subject, detail);
         }
     }
     Ok(IntegrationOutcome::Merged {
@@ -538,43 +735,83 @@ fn merge(
     })
 }
 
-/// Appends `task.integrated`.
+/// Appends `task.integrated`, or `folder_change.integrated`.
 fn record_integrated(
     tools: &ToolDeps,
-    task_id: &TaskId,
+    subject: &Subject,
     sha: &str,
     into: &str,
     integrated_by: TaskIntegratedBodyIntegratedBy,
 ) -> Result<(), OrchestratorError> {
-    append(
-        tools,
-        task_id,
-        None,
-        None,
-        EventBody::TaskIntegrated(TaskIntegratedBody {
-            sha: sha.to_string(),
-            into: into.to_string(),
-            integrated_by,
-        }),
-    )
+    match subject {
+        Subject::Task(task_id) => append(
+            tools,
+            task_id,
+            None,
+            None,
+            EventBody::TaskIntegrated(TaskIntegratedBody {
+                sha: sha.to_string(),
+                into: into.to_string(),
+                integrated_by,
+            }),
+        ),
+        Subject::FolderChange(change) => {
+            let by = match integrated_by {
+                TaskIntegratedBodyIntegratedBy::Governor => "governor",
+                TaskIntegratedBodyIntegratedBy::Human => "human",
+            };
+            let body = serde_json::from_value(serde_json::json!({
+                "change": change, "sha": sha, "into": into, "integrated_by": by,
+            }))
+            .map_err(|error| refused(format!("folder_change_unrecordable: {error}")))?;
+            append_stamped(
+                tools,
+                tools.ids.clone(),
+                EventBody::FolderChangeIntegrated(body),
+            )
+        }
+    }
 }
 
-/// Appends an integration escalation, which moves nothing, and answers it.
+/// Appends an integration escalation, which moves nothing, and answers it. A folder change's is
+/// also said in the channel, since Today lists the escalations of tasks.
 fn escalate(
     tools: &ToolDeps,
-    task_id: &TaskId,
+    subject: &Subject,
     detail: String,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
-    append(
-        tools,
-        task_id,
-        None,
-        None,
-        EventBody::EscalationRaised(EscalationRaisedBody {
-            reason: EscalationRaisedBodyReason::Integration,
-            detail: detail.clone(),
-        }),
-    )?;
+    match subject {
+        Subject::Task(task_id) => append(
+            tools,
+            task_id,
+            None,
+            None,
+            EventBody::EscalationRaised(EscalationRaisedBody {
+                reason: EscalationRaisedBodyReason::Integration,
+                detail: detail.clone(),
+            }),
+        )?,
+        Subject::FolderChange(change) => {
+            // The detail is cut to the event's bound; the channel says what the log keeps.
+            let kept: String = detail.chars().take(4_000).collect();
+            let body = serde_json::from_value(serde_json::json!({
+                "change": change, "detail": kept,
+            }))
+            .map_err(|error| refused(format!("folder_change_unrecordable: {error}")))?;
+            append_stamped(
+                tools,
+                tools.ids.clone(),
+                EventBody::FolderChangeEscalated(body),
+            )?;
+            post_system(
+                &tools.log,
+                tools.clock.as_ref(),
+                &tools.ids,
+                None,
+                &format!("Folder change {change} could not be added to the project: {detail}"),
+            )?;
+        }
+    }
     Ok(IntegrationOutcome::Escalated { detail, scan: None })
 }
 
@@ -610,55 +847,57 @@ fn since_accepted(
         .collect())
 }
 
-/// Whether an integration escalation was raised since the task was accepted.
-fn escalated_since_accepted(tools: &ToolDeps, task_id: &TaskId) -> Result<bool, OrchestratorError> {
-    Ok(
-        since_accepted(tools, task_id, &[EventKind::EscalationRaised])?
-            .iter()
-            .any(|event| {
-                matches!(&event.body, EventBody::EscalationRaised(body)
-                if body.reason == EscalationRaisedBodyReason::Integration)
-            }),
-    )
+/// Whether an integration escalation was raised since the task was accepted, or for the folder
+/// change since it was recorded.
+fn escalated_since_accepted(
+    tools: &ToolDeps,
+    subject: &Subject,
+) -> Result<bool, OrchestratorError> {
+    match subject {
+        Subject::Task(task_id) => {
+            Ok(
+                since_accepted(tools, task_id, &[EventKind::EscalationRaised])?
+                    .iter()
+                    .any(|event| {
+                        matches!(&event.body, EventBody::EscalationRaised(body)
+                    if body.reason == EscalationRaisedBodyReason::Integration)
+                    }),
+            )
+        }
+        Subject::FolderChange(change) => Ok(folder_change(tools, *change)?.escalated),
+    }
 }
 
-/// The commit the task was last integrated at.
+/// The commit the subject was last integrated at.
 fn last_integrated_sha(
     tools: &ToolDeps,
-    task_id: &TaskId,
+    subject: &Subject,
 ) -> Result<Option<String>, OrchestratorError> {
+    let (task_id, kind) = match subject {
+        Subject::Task(task_id) => (Some(task_id.clone()), EventKind::TaskIntegrated),
+        Subject::FolderChange(_) => (None, EventKind::FolderChangeIntegrated),
+    };
     let integrated = tools.log.read(&EventQuery {
-        task_id: Some(task_id.clone()),
-        kinds: vec![EventKind::TaskIntegrated],
+        task_id,
+        kinds: vec![kind],
         ..EventQuery::default()
     })?;
-    Ok(integrated
-        .into_iter()
-        .rev()
-        .find_map(|event| match event.body {
-            EventBody::TaskIntegrated(body) => Some(body.sha),
-            _ => None,
-        }))
+    Ok(integrated.into_iter().rev().find_map(|event| match event.body {
+        EventBody::TaskIntegrated(body) => Some(body.sha),
+        EventBody::FolderChangeIntegrated(body)
+            if matches!(subject, Subject::FolderChange(change) if body.change.get() == *change) =>
+        {
+            Some(body.sha.to_string())
+        }
+        _ => None,
+    }))
 }
 
-/// Takes the integration lock, waiting for whoever holds it, process or thread; it is let go when
-/// the file is dropped.
+/// Takes the integration lock, mapping its error.
 fn lock(root: &Path) -> Result<File, OrchestratorError> {
-    let path = root.join(LOCK);
-    let failed = |error: std::io::Error| OrchestratorError::Lock {
-        detail: format!("{}: {error}", path.display()),
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(failed)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(failed)?;
-    file.lock().map_err(failed)?;
-    Ok(file)
+    integration_lock(root).map_err(|error| OrchestratorError::Lock {
+        detail: format!("{}: {error}", root.join(INTEGRATION_LOCK).display()),
+    })
 }
 
 /// Rule 1: a task `accepted` or `cancelled` whose worktree, or whose base worktree, is still
@@ -1875,5 +2114,271 @@ mod tests {
         );
         assert!(harness.events(&[EventKind::ProjectScanned]).is_empty());
         assert!(harness.events(&[EventKind::CriteriaUpdated]).is_empty());
+    }
+
+    const CADENCE: &str = "docs/catervas/delivery/cadence.md";
+
+    fn folder_events(harness: &Harness, kind: EventKind) -> Vec<serde_json::Value> {
+        harness
+            .events(&[kind])
+            .iter()
+            .map(|event| {
+                assert!(
+                    event.envelope.ids.task_id.is_none(),
+                    "{kind}: about no task"
+                );
+                catervas_protocol::event::event_to_value(event)
+            })
+            .collect()
+    }
+
+    fn folder_report(report: TickReport) -> (u64, String) {
+        match report {
+            TickReport::FolderChange { change, what } => (change, what),
+            other => panic!("a folder change's report, not {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn merges_a_folder_change_on_the_next_tick() {
+        let harness = under("int-folder-merge", "auto_merge");
+        let origin = harness.with_origin();
+        harness.accepted("CTV-1");
+        assert_eq!(harness.folder_change(CADENCE, "a\n"), 1);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        // The accepted task goes first, the folder change on the tick after it.
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&first, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{first:?}"
+        );
+        assert!(folder_events(&harness, EventKind::FolderChangeIntegrated).is_empty());
+        let (change, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
+
+        let head = at_root(&harness, &["rev-parse", "refs/heads/main"]);
+        assert_eq!((change, what), (1, format!("integrated at {head}")));
+        assert_eq!(
+            at_root(&harness, &["log", "-1", "--format=%s", "main"]),
+            "Merge docs/folder-1: delivery/cadence.md"
+        );
+        assert_eq!(git_output_in(&origin, &["rev-parse", "main"]), head);
+        let integrated = folder_events(&harness, EventKind::FolderChangeIntegrated);
+        assert_eq!(integrated.len(), 1);
+        assert_eq!(
+            integrated[0]["body"],
+            json!({ "change": 1, "sha": head, "into": "main", "integrated_by": "governor" })
+        );
+        assert_eq!(
+            at_root(
+                &harness,
+                &["show", "main:docs/catervas/delivery/cadence.md"]
+            ),
+            "a"
+        );
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn opens_a_pull_request_for_a_folder_change() {
+        let harness = under("int-folder-pr", "pull_request");
+        let origin = harness.with_origin();
+        harness.folder_change(CADENCE, "a\n");
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let (change, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
+
+        assert_eq!(
+            (change, what),
+            (1, format!("opened the pull request {PULL_URL}"))
+        );
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", "docs/folder-1"]),
+            at_root(&harness, &["rev-parse", "docs/folder-1"])
+        );
+        let create = harness
+            .gh
+            .calls()
+            .into_iter()
+            .find(|call| call.get(1).map(String::as_str) == Some("create"))
+            .expect("a pull request is created");
+        assert!(
+            create.contains(&"Folder change 1: delivery/cadence.md".to_string()),
+            "{create:?}"
+        );
+        assert_eq!(harness.gh.stdin_of("create"), format!("{CADENCE}\n"));
+        let opened = folder_events(&harness, EventKind::FolderChangeOpened);
+        assert_eq!(
+            opened[0]["body"],
+            json!({ "change": 1, "url": PULL_URL, "number": 7 })
+        );
+
+        // Once the forge says merged, the next tick records it as the human's and brings main up.
+        let sha = harness.merge_branch_on_the_forge(&origin, "docs/folder-1");
+        harness.gh.answers(
+            "view",
+            &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
+            "",
+            0,
+        );
+        let (_, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
+        assert_eq!(what, format!("integrated at {sha}"));
+        let integrated = folder_events(&harness, EventKind::FolderChangeIntegrated);
+        assert_eq!(integrated[0]["body"]["integrated_by"], "human");
+        assert_eq!(integrated[0]["body"]["sha"], sha);
+        assert_eq!(at_root(&harness, &["rev-parse", "main"]), sha);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_folder_change_whose_pull_request_was_closed() {
+        let harness = under("int-folder-pr-closed", "pull_request");
+        let origin = harness.with_origin();
+        harness.folder_change(CADENCE, "a\n");
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the pull request opens");
+        harness
+            .gh
+            .answers("view", r#"{"mergeCommit":null,"state":"CLOSED"}"#, "", 0);
+
+        let (_, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
+
+        assert!(
+            what.starts_with("escalated its integration to the human: ")
+                && what.contains("was closed without merging"),
+            "{what}"
+        );
+        let escalated = folder_events(&harness, EventKind::FolderChangeEscalated);
+        assert_eq!(escalated.len(), 1);
+        let detail = escalated[0]["body"]["detail"].as_str().expect("a detail");
+        assert!(detail.contains("was closed without merging"), "{detail}");
+        let said = harness.events(&[EventKind::MessagePosted]);
+        assert!(
+            said.iter()
+                .any(|event| matches!(&event.body, EventBody::MessagePosted(body)
+                if body.text.contains(detail))),
+            "the detail is said in the channel"
+        );
+        let calls = harness.gh.calls().len();
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        assert_eq!(harness.gh.calls().len(), calls, "not tried again");
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_folder_change_for_the_human_under_manual() {
+        use catervas_protocol::command::Command;
+
+        let harness = under("int-folder-manual", "manual");
+        let origin = harness.with_origin();
+        harness.folder_change(CADENCE, "a\n");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let main_before = at_root(&harness, &["rev-parse", "main"]);
+
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        assert_eq!(at_root(&harness, &["rev-parse", "main"]), main_before);
+
+        let report = orchestrator
+            .handle(Command::FolderChangeIntegrate { change: 1 })
+            .await
+            .expect("the human integrates it");
+        let head = at_root(&harness, &["rev-parse", "main"]);
+        assert_ne!(head, main_before);
+        assert!(report.said.contains(&head), "{}", report.said);
+        let integrated = folder_events(&harness, EventKind::FolderChangeIntegrated);
+        assert_eq!(
+            integrated[0]["body"],
+            json!({ "change": 1, "sha": head, "into": "main", "integrated_by": "human" })
+        );
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", "main"]),
+            main_before,
+            "manual pushes nothing"
+        );
+        assert_eq!(
+            orchestrator.integrate_folder_change(1).await,
+            Ok(IntegrationOutcome::Merged {
+                sha: head,
+                scan: ScanRefresh::Unchanged
+            })
+        );
+        assert_eq!(
+            folder_events(&harness, EventKind::FolderChangeIntegrated).len(),
+            1
+        );
+        let refusal = orchestrator.integrate_folder_change(9).await;
+        assert!(
+            matches!(&refusal, Err(OrchestratorError::Refused { reason })
+                if reason.starts_with("no_such_folder_change: ")),
+            "{refusal:?}"
+        );
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_folder_change_that_cannot_land() {
+        use catervas_protocol::command::Command;
+
+        let harness = under("int-folder-escalates", "auto_merge");
+        harness.folder_change(CADENCE, "a\n");
+        // The owner's own file at the path, made after the write: the merge would overwrite it.
+        harness.project.repo.write(CADENCE, "the owner's\n");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let (change, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
+
+        assert_eq!(change, 1);
+        assert!(
+            what.starts_with("escalated its integration to the human: "),
+            "{what}"
+        );
+        let escalated = folder_events(&harness, EventKind::FolderChangeEscalated);
+        assert_eq!(escalated.len(), 1);
+        let detail = escalated[0]["body"]["detail"].as_str().expect("a detail");
+        assert!(
+            detail.contains("merging docs/folder-1 into main failed"),
+            "{detail}"
+        );
+        // The channel keeps a message on one line.
+        let one_line = detail.replace('\n', " ");
+        assert!(
+            harness
+                .events(&[EventKind::MessagePosted])
+                .iter()
+                .any(|event| matches!(&event.body, EventBody::MessagePosted(body)
+                    if body.text.contains(&one_line)))
+        );
+        assert!(folder_events(&harness, EventKind::FolderChangeIntegrated).is_empty());
+        // Not tried again by a tick.
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        assert_eq!(
+            folder_events(&harness, EventKind::FolderChangeEscalated).len(),
+            1
+        );
+
+        // The human's word tries again, once the owner's file is out of the way.
+        std::fs::remove_file(harness.project.repo.path.join(CADENCE)).expect("removed");
+        // An escalated change no longer holds its path: the next write of it is change 2.
+        assert_eq!(harness.folder_change(CADENCE, "b\n"), 2);
+        orchestrator
+            .handle(Command::FolderChangeIntegrate { change: 1 })
+            .await
+            .expect("the human integrates it");
+        let integrated = folder_events(&harness, EventKind::FolderChangeIntegrated);
+        assert_eq!(integrated[0]["body"]["integrated_by"], "human");
     }
 }

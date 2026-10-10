@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use catervas_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
 use catervas_core::criteria::{CriteriaLibrary, validate_criteria};
-use catervas_core::governor::paths::normalise;
 use catervas_core::pricing::prices::PRICE_TABLE;
 use catervas_core::pricing::{PriceTable, validate_price_table};
 use catervas_core::sprint::{Sprint, validate_sprint};
@@ -158,15 +157,7 @@ impl ProjectFiles {
     /// `Io` when a directory or a file cannot be made, `Invalid` when the team is not one
     /// `validate_team` accepts — which it must be, since it is what a later read will be held to.
     pub fn init(&self, team: &Team) -> Result<(), FilesError> {
-        for directory in [
-            "",
-            "team",
-            "contracts",
-            "agents",
-            "decisions",
-            "product",
-            "local",
-        ] {
+        for directory in ["", "team", "contracts", "agents", "decisions", "local"] {
             self.make_directory(&self.catervas().join(directory))?;
         }
         self.write_if_absent(LOCAL_GITIGNORE_PATH, LOCAL_GITIGNORE)?;
@@ -694,25 +685,6 @@ impl ProjectFiles {
         Ok(files)
     }
 
-    /// A product document, by its path under `product/`.
-    ///
-    /// # Errors
-    ///
-    /// `Invalid` when the path climbs out of `product/`, `NotFound` when there is no such document,
-    /// `Io` when it cannot be read.
-    pub fn read_product_doc(&self, path: &str) -> Result<String, FilesError> {
-        self.read_text(&self.inside_product(path)?)
-    }
-
-    /// Writes a product document.
-    ///
-    /// # Errors
-    ///
-    /// `Invalid` when the path climbs out of `product/`, `Io` when it cannot be written.
-    pub fn write_product_doc(&self, path: &str, text: &str) -> Result<(), FilesError> {
-        self.write_text(&self.inside_product(path)?, text)
-    }
-
     /// The price table this project overrides the shipped one with, or nothing when it does not.
     ///
     /// # Errors
@@ -928,21 +900,6 @@ fn slug(title: &str) -> String {
     }
 }
 
-/// A product document's path, or a refusal when it climbs out of `product/`.
-///
-/// The path comes from a tool call, so it is a string an agent chose. `catervas-core`'s own path rule
-/// is what answers: empty, absolute, or holding a `..` segment is refused, and `.` segments and
-/// backslashes are dropped on the way. Everything else is somewhere under `product/`, which is the
-/// only place 5.6 lets a product document be written.
-fn product_path(path: &str) -> Result<String, FilesError> {
-    let normalised = normalise(path).ok_or_else(|| FilesError::Invalid {
-        path: ProjectFiles::named(&format!("product/{path}")),
-        detail: "a product document lives under product/, and this path climbs out of it"
-            .to_string(),
-    })?;
-    Ok(format!("product/{normalised}"))
-}
-
 /// Every refusal a validator gave, as one `Invalid`.
 fn refused(relative: &str, errors: &[ValidationError]) -> FilesError {
     FilesError::Invalid {
@@ -970,35 +927,6 @@ fn as_wire<T: Serialize>(relative: &str, value: &T) -> Result<Value, FilesError>
         path: ProjectFiles::named(relative),
         detail: error.to_string(),
     })
-}
-
-/// The path with every part of it that exists resolved, and the rest as it was written.
-///
-/// Only the resolved prefix decides anything for the one caller there is: a symlink can only lead
-/// somewhere through a component that exists, so both sides of `inside_product`'s comparison are
-/// shortened by the same components when the rest is left off. The rest is put back for the words of
-/// the refusal, and for a later caller that wants the whole path.
-///
-/// `canonicalize` refuses a path that is not there, and most of these are not there yet. So the
-/// deepest part that does exist is resolved — which is what follows a symlink — and what is left is
-/// put back on the end, where there is no existing directory for a link to hide in.
-fn resolved(path: &Path) -> Result<PathBuf, std::io::Error> {
-    let mut left = Vec::new();
-    let mut existing = path.to_path_buf();
-    while !existing.exists() {
-        match (existing.file_name(), existing.parent()) {
-            (Some(name), Some(parent)) => {
-                left.push(name.to_os_string());
-                existing = parent.to_path_buf();
-            }
-            _ => break,
-        }
-    }
-    let mut answer = std::fs::canonicalize(&existing)?;
-    while let Some(name) = left.pop() {
-        answer.push(name);
-    }
-    Ok(answer)
 }
 
 impl ProjectFiles {
@@ -1043,41 +971,6 @@ impl ProjectFiles {
             return Ok(());
         }
         self.write_text(relative, text)
-    }
-
-    /// A product document's path, once the file system has been asked as well as the string.
-    ///
-    /// `product_path` answers what the text says; this answers where it lands. A directory under
-    /// `product/` may be a symlink pointing anywhere, and following one would put a tool call's
-    /// chosen path outside `.catervas/` entirely — the string rule alone cannot see that, because
-    /// there is no `..` in it. So the path and `product/` itself are each resolved as far as they
-    /// exist, and the one has to be under the other.
-    ///
-    /// Nothing is made here, not even the directory the answer is about. A read that conjured
-    /// `.catervas/` would make a project of whatever directory it was pointed at.
-    ///
-    /// The answer is about the file system as it was when the question was asked. Nothing in this
-    /// module makes a symlink, so no caller can move the ground under itself, but a `git checkout`
-    /// or another program could between this and the write. What that costs is bounded by who can
-    /// write inside `.catervas/` at all, which is the person whose project it is.
-    fn inside_product(&self, path: &str) -> Result<String, FilesError> {
-        let relative = product_path(path)?;
-        let refuse = |detail: String| FilesError::Invalid {
-            path: Self::named(&relative),
-            detail,
-        };
-        let boundary = resolved(&self.path_of("product"))
-            .map_err(|error| refuse(format!("the project root could not be resolved: {error}")))?;
-        let landing =
-            resolved(&self.path_of(&relative)).map_err(|error| refuse(error.to_string()))?;
-        if landing.starts_with(&boundary) {
-            Ok(relative)
-        } else {
-            Err(refuse(format!(
-                "it leads out of product/, to {}, which a product document may not be",
-                landing.display()
-            )))
-        }
     }
 
     /// One file's text.
@@ -1184,8 +1077,7 @@ mod tests {
 
     use super::fixtures::TempProject;
     use super::{
-        DecisionEntry, FilesError, contract_path, memory_path, product_path, slug, template_yaml,
-        yaml_value,
+        DecisionEntry, FilesError, contract_path, memory_path, slug, template_yaml, yaml_value,
     };
 
     #[test]
@@ -1250,49 +1142,6 @@ mod tests {
             memory_path(&AgentId::try_from("ada").expect("an id")),
             "agents/ada/memory.md"
         );
-    }
-
-    #[test]
-    fn keeps_a_product_document_under_product() {
-        assert_eq!(
-            product_path("roadmap.md").expect("a path"),
-            "product/roadmap.md"
-        );
-        assert_eq!(
-            product_path("./areas/login.md").expect("a path"),
-            "product/areas/login.md",
-            "a . segment is dropped rather than refused"
-        );
-        assert_eq!(
-            product_path("areas\\login.md").expect("a path"),
-            "product/areas/login.md",
-            "and a backslash is a separator"
-        );
-    }
-
-    #[test]
-    fn refuses_a_product_path_that_climbs_out_of_product() {
-        // The path comes from a tool call, so it is a string an agent chose. 5.6 puts product
-        // documents under product/ and nowhere else, and one `..` would put this one in the
-        // repository's own source.
-        for path in [
-            "../team.yaml",
-            "../../etc/passwd",
-            "/etc/passwd",
-            "",
-            "a/../../b",
-        ] {
-            let refused = product_path(path);
-            let Err(FilesError::Invalid {
-                path: named,
-                detail,
-            }) = refused
-            else {
-                panic!("{path:?} climbs out: {refused:?}");
-            };
-            assert_eq!(named, format!(".catervas/product/{path}"));
-            assert!(detail.contains("climbs out of it"), "{detail}");
-        }
     }
 
     /// The day every decision in these tests is written on.

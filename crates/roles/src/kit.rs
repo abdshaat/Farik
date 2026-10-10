@@ -2391,7 +2391,7 @@ mod tests {
             (
                 "keeping-the-brand-kit",
                 "Use when the task touches the business's name, logo, colours, type, pictures or voice",
-                "docs/marketing/brand/brand-kit.md",
+                "docs/catervas/marketing/brand/brand-kit.md",
             ),
             (
                 "writing-the-brand-persona",
@@ -2512,7 +2512,7 @@ mod tests {
             .expect("the skill's third section");
         for phrase in [
             "the business's own",
-            "docs/marketing/brand/assets/",
+            "docs/catervas/marketing/brand/assets/",
             "catervas_ask_human",
             "never make a logo",
             "generated picture",

@@ -37,6 +37,7 @@ then `verifying`. The Architect reviews it, or a Developer when the team has no 
 - Diffs inside the contract's `allowed_paths`, and commits on the task's branch.
 - Completion notes: what changed on which screens, what was not done, and what the reviewer should
   look at first.
+- Your folder, `docs/catervas/design/`, which only UI/UX Designers write while one is active, and everyone reads: the UI inventory and design notes.
 
 ## What you may not do
 

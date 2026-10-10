@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use crate::exec::Executor;
 use crate::preview::RunningPreview;
-use crate::session::SessionPurpose;
+use crate::session::{SessionPurpose, works_on_a_task};
 use crate::transitions::Transitions;
 
 mod channel;
@@ -36,6 +36,7 @@ mod evaluation;
 mod exec;
 #[cfg(test)]
 pub(crate) mod fixtures;
+pub(crate) mod folders;
 mod git;
 mod marketing;
 pub(crate) mod media;
@@ -258,10 +259,10 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "Ask the human a question; end your turn after asking.",
         ),
-        tool::<work::WriteProductDocInput>(
-            "catervas_write_product_doc",
+        tool::<folders::WriteFolderDocInput>(
+            "catervas_write_folder_doc",
             Read,
-            "Write a product document under .catervas/product/ for the approved epic of this session.",
+            "At a sprint planning, review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. The product's spec.md and roadmap.md are proposed to the owner at the sprint review, with agent_text (their .agent.md version) and summary (what changed and why, for the owner), and wait for the owner's approval.",
         ),
         tool::<channel::PostMessageInput>(
             "catervas_post_message",
@@ -416,7 +417,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<marketing::ProposeMarketingPlanInput>(
             "catervas_propose_marketing_plan",
             WriteWorkspace,
-            "End your session with a marketing plan for the owner to approve: its dates, budget by channel and campaign, post slots and measures. Catervas checks it, writes its text to docs/marketing/plans/ and the owner decides; end your turn after proposing.",
+            "End your session with a marketing plan for the owner to approve: its dates, budget by channel and campaign, post slots and measures. Catervas checks it, writes its text and its agent_text to docs/catervas/marketing/plans/ and the owner decides; end your turn after proposing.",
         ),
         tool::<posts::SchedulePostInput>(
             "catervas_schedule_post",
@@ -435,6 +436,18 @@ pub(crate) struct NoInput {}
 #[must_use]
 pub fn tool_descriptors() -> Vec<CatervasTool> {
     TOOLS.clone()
+}
+
+/// Whether a tool changes the project: one of tier `write_workspace`, `execute` or `git_remote`,
+/// and `catervas_git_commit`, whose `git_local` tier it shares with the reads `catervas_git_status`
+/// and `catervas_git_diff`. Catervas's `read`-tier tools that write under `.catervas/` keep their
+/// own rules, and a connector is judged by its tag.
+#[must_use]
+pub(crate) fn writes_the_project(name: &str, tier: PermissionTier) -> bool {
+    matches!(
+        tier,
+        PermissionTier::WriteWorkspace | PermissionTier::Execute | PermissionTier::GitRemote
+    ) || name == "catervas_git_commit"
 }
 
 /// Whether an agent of `status` works in a session for `purpose`: an active agent in any, and a
@@ -502,7 +515,7 @@ pub async fn call_tool(
         "catervas_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
-        "catervas_write_product_doc" => work::write_product_doc(&call, parse(input)?),
+        "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
         "catervas_append_retro" => retro::append_retro(&call, &parse(input)?),
         "catervas_write_memory" => memory::write_memory(&call, &parse(input)?),
@@ -551,18 +564,12 @@ pub async fn call_tool(
     }
 }
 
-/// The paths a call touches, for the permission check: `.catervas/product/<path>` for a product
-/// document, the named paths of a commit, and the plans folder for a marketing plan (its number
-/// is not taken yet, so the check is of the folder; the tool asks again with the file's own path);
-/// nothing for every other tool. Read leniently, since the input is parsed strictly afterwards.
+/// The paths a call touches, for the permission check: the named paths of a commit, and the plans
+/// folder for a marketing plan (its number is not taken yet, so the check is of the folder; the
+/// tool asks again with the file's own path); nothing for every other tool. Read leniently, since the input is parsed strictly afterwards.
 pub(crate) fn paths_of(name: &str, input: &Value) -> Vec<String> {
     match name {
         "catervas_propose_marketing_plan" => vec![marketing::plan_file(0)],
-        "catervas_write_product_doc" => input
-            .get("path")
-            .and_then(Value::as_str)
-            .map(|path| vec![format!(".catervas/product/{path}")])
-            .unwrap_or_default(),
         "catervas_git_commit" => input
             .get("paths")
             .and_then(Value::as_array)
@@ -649,7 +656,8 @@ impl Call<'_> {
             })
     }
 
-    /// The tier check and the path checks of 5.6 for this tool and these paths.
+    /// The tier check and the path checks of 5.6 for this tool and these paths, then the
+    /// Designer's plan gate and the rule that only a task's implement session changes the project.
     fn permit(&self, tool: &CatervasTool, paths: Vec<String>) -> Result<(), ToolError> {
         let allowed_paths = match &self.context.task_id {
             Some(task) => self
@@ -688,7 +696,16 @@ impl Call<'_> {
             self.role(),
             tool.tier,
             self.context.task_id.as_ref(),
-        )
+        )?;
+        if writes_the_project(tool.name, tool.tier)
+            && !works_on_a_task(self.context.purpose, self.context.task_id.is_some())
+        {
+            return Err(Refusal::NoTaskNoWrite {
+                tool: tool.name.to_string(),
+            }
+            .into());
+        }
+        Ok(())
     }
 
     /// The ids an event of this call is stamped with: the agent, the session, and `task`.
@@ -733,8 +750,43 @@ mod tests {
     use serde_json::json;
 
     use super::fixtures::{TestProject, a_team_of_three};
-    use super::{ToolError, tool_descriptors};
+    use super::{ToolError, tool_descriptors, writes_the_project};
+    use crate::daemon::builtin_tool_tier;
     use catervas_core::governor::permissions::PermissionTier;
+
+    #[test]
+    fn writes_the_project_names_the_tools_that_change_it() {
+        let writing: Vec<&str> = tool_descriptors()
+            .iter()
+            .filter(|tool| writes_the_project(tool.name, tool.tier))
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(
+            writing,
+            [
+                "catervas_exec",
+                "catervas_git_commit",
+                "catervas_git_push",
+                "catervas_propose_marketing_plan",
+            ]
+        );
+        for builtin in ["Edit", "Write", "MultiEdit", "NotebookEdit"] {
+            let tier = builtin_tool_tier(builtin).expect("a built-in with a tier");
+            assert!(writes_the_project(builtin, tier), "{builtin}");
+        }
+        for builtin in [
+            "Read",
+            "Glob",
+            "Grep",
+            "LS",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+        ] {
+            let tier = builtin_tool_tier(builtin).expect("a built-in with a tier");
+            assert!(!writes_the_project(builtin, tier), "{builtin}");
+        }
+    }
 
     #[test]
     fn lists_every_tool_with_its_tier() {
@@ -756,7 +808,7 @@ mod tests {
             "catervas_record_criterion_result",
             "catervas_write_note",
             "catervas_ask_human",
-            "catervas_write_product_doc",
+            "catervas_write_folder_doc",
             "catervas_post_message",
             "catervas_append_retro",
             "catervas_write_memory",

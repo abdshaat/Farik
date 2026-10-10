@@ -558,6 +558,11 @@ impl Harness {
     /// Merges `task`'s branch into `origin`'s `main` from a clone of `origin` of its own, as the
     /// human merging its pull request on the forge would, and answers the merge commit.
     pub(crate) fn merge_on_the_forge(&self, origin: &Path, task: &str) -> String {
+        self.merge_branch_on_the_forge(origin, &self.branch(task))
+    }
+
+    /// `merge_on_the_forge` for any branch of the project, a folder change's among them.
+    pub(crate) fn merge_branch_on_the_forge(&self, origin: &Path, branch: &str) -> String {
         let clone = self.project.repo.path.with_extension("forge");
         let _ = std::fs::remove_dir_all(&clone);
         let parent = clone.parent().expect("a parent");
@@ -573,17 +578,14 @@ impl Harness {
         git_in(&clone, &["config", "user.email", "test@catervas.invalid"]);
         git_in(&clone, &["config", "commit.gpgsign", "false"]);
         let root = self.project.repo.path.to_str().expect("a path").to_string();
-        git_in(
-            &clone,
-            &["fetch", &root, &format!("refs/heads/{}", self.branch(task))],
-        );
+        git_in(&clone, &["fetch", &root, &format!("refs/heads/{branch}")]);
         git_in(
             &clone,
             &[
                 "merge",
                 "--no-ff",
                 "-m",
-                &format!("Merge pull request for {task}"),
+                &format!("Merge pull request for {branch}"),
                 "FETCH_HEAD",
             ],
         );
@@ -591,6 +593,30 @@ impl Harness {
         let sha = git_output_in(&clone, &["rev-parse", "HEAD"]);
         let _ = std::fs::remove_dir_all(&clone);
         sha
+    }
+
+    /// Folder change 1 of `path` holding `text`, as the Scrum Master's write at a ceremony leaves
+    /// it: the branch `docs/folder-1` from the integration branch, and `folder_doc.written`.
+    pub(crate) fn folder_change(&self, path: &str, text: &str) -> u64 {
+        let deps = &self.project.deps;
+        let team = deps.files.read_team().expect("the team reads");
+        let landed = crate::tools::folders::land(
+            deps,
+            &team,
+            &[(path.to_string(), text.to_string())],
+            "docs(delivery): cadence.md by Sol",
+            "Sol (Catervas) <catervas@localhost>",
+        )
+        .expect("the change is made")
+        .expect("the files differ");
+        self.project.record_in(
+            Some("sm"),
+            Some("session-1"),
+            "",
+            "folder_doc.written",
+            &json!({ "path": path, "written_by": "sm", "change": landed.change, "sha": landed.sha }),
+        );
+        landed.change
     }
 
     /// `origin` added at a path where there is no repository, so that every push to it fails.

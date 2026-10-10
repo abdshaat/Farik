@@ -6,7 +6,7 @@
 //! and they cannot rot unnoticed (`docs/standards/code.md`, "Rust integration test").
 
 use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
-use catervas_store::{Git, GitError, MergeOutcome};
+use catervas_store::{CommitOutcome, Git, GitError, MergeOutcome};
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -994,5 +994,294 @@ fn commits_and_merges_as_the_user_when_git_knows_them() {
     assert_eq!(
         author("main"),
         "Catervas Test <test@catervas.invalid> Catervas Test <test@catervas.invalid>"
+    );
+}
+
+const CADENCE: &str = "docs/catervas/delivery/cadence.md";
+const SOL: &str = "Sol (Catervas) <catervas@localhost>";
+
+fn file(path: &str, text: &str) -> Vec<(String, String)> {
+    vec![(path.to_string(), text.to_string())]
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_named_files_on_a_new_branch_and_nothing_else() {
+    let repository = TempRepo::new("commit-files");
+    repository.write("src/x.rs", "fn a() {}\n");
+    repository.commit("add a source file");
+    // The owner's work outside Catervas: one change staged, one not.
+    repository.write("README.md", "the owner's staged line\n");
+    repository.git(&["add", "README.md"]);
+    repository.write("src/x.rs", "fn b() {}\n");
+    let main_before = repository.git_output(&["rev-parse", "main"]);
+
+    let outcome = repository
+        .adapter()
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(CADENCE, "a\n"),
+            "docs(delivery): cadence.md by Sol",
+            Some(SOL),
+        )
+        .expect("the commit is made");
+
+    let CommitOutcome::Committed { sha } = outcome else {
+        panic!("it committed: {outcome:?}");
+    };
+    assert_eq!(sha, repository.git_output(&["rev-parse", "docs/folder-1"]));
+    assert_eq!(
+        repository.git_output(&["rev-list", "--count", "main..docs/folder-1"]),
+        "1"
+    );
+    assert_eq!(
+        repository.git_output(&["rev-parse", "docs/folder-1~1"]),
+        main_before
+    );
+    assert_eq!(
+        repository.git_output(&["diff", "--name-only", "main", "docs/folder-1"]),
+        CADENCE
+    );
+    assert_eq!(
+        repository.git_output(&[
+            "log",
+            "-1",
+            "--format=%an <%ae>|%cn <%ce>|%s",
+            "docs/folder-1"
+        ]),
+        format!("{SOL}|Catervas Test <test@catervas.invalid>|docs(delivery): cadence.md by Sol")
+    );
+    assert_eq!(repository.git_output(&["rev-parse", "main"]), main_before);
+    assert_eq!(repository.git_output(&["branch", "--show-current"]), "main");
+    assert_eq!(
+        repository.git_output(&["diff", "--cached", "--name-only"]),
+        "README.md",
+        "the owner's staged change is still staged, and not in the commit"
+    );
+    assert_eq!(
+        repository.git_output(&["diff", "--name-only"]),
+        "src/x.rs",
+        "the owner's other change is still a change"
+    );
+    assert!(!repository.path.join(CADENCE).exists());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_from_the_branch_named_whatever_is_checked_out() {
+    let repository = TempRepo::new("commit-files-from");
+    repository.git(&["checkout", "-b", "feature/x"]);
+    repository.write("feature.txt", "work in progress\n");
+    repository.commit("a commit only the feature branch has");
+    repository
+        .adapter()
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(CADENCE, "a\n"),
+            "docs: x",
+            None,
+        )
+        .expect("the commit is made");
+    assert_eq!(
+        repository.git_output(&["rev-parse", "docs/folder-1~1"]),
+        repository.git_output(&["rev-parse", "main"])
+    );
+    assert_eq!(
+        repository.git_output(&["branch", "--show-current"]),
+        "feature/x"
+    );
+    assert!(repository.path.join("feature.txt").exists());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_file_changed_outside() {
+    let repository = TempRepo::new("commit-files-busy");
+    repository.write(CADENCE, "old\n");
+    repository.commit("the first cadence");
+    repository.write(CADENCE, "the owner's edit\n");
+    let git = repository.adapter();
+    let branches = || repository.git_output(&["branch", "--list", "docs/folder-1"]);
+
+    let changed = git
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(CADENCE, "a\n"),
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(changed, CommitOutcome::Busy(vec![CADENCE.to_string()]));
+    assert_eq!(branches(), "");
+    assert_eq!(
+        std::fs::read_to_string(repository.path.join(CADENCE)).expect("kept"),
+        "the owner's edit\n"
+    );
+
+    let other = "docs/catervas/delivery/notes.md";
+    repository.write(other, "not yet in git\n");
+    let untracked = git
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(other, "a\n"),
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(untracked, CommitOutcome::Busy(vec![other.to_string()]));
+    assert_eq!(branches(), "");
+    assert_eq!(
+        std::fs::read_to_string(repository.path.join(other)).expect("kept"),
+        "not yet in git\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_write_through_a_link() {
+    use std::os::unix::fs::symlink;
+
+    let repository = TempRepo::new("commit-files-link");
+    let elsewhere = repository.path.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("a directory");
+    std::fs::create_dir_all(repository.path.join("docs")).expect("docs");
+    symlink(&elsewhere, repository.path.join("docs/catervas")).expect("a link");
+    let git = repository.adapter();
+    let answer = git
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(CADENCE, "a\n"),
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(answer, CommitOutcome::Linked("docs/catervas".to_string()));
+    assert!(!elsewhere.join("delivery").exists(), "nothing was written");
+    assert_eq!(
+        repository.git_output(&["branch", "--list", "docs/folder-1"]),
+        ""
+    );
+
+    std::fs::remove_file(repository.path.join("docs/catervas")).expect("link removed");
+    std::fs::create_dir_all(repository.path.join("docs/catervas/delivery")).expect("real");
+    std::fs::write(elsewhere.join("target.md"), "x\n").expect("a file");
+    symlink(elsewhere.join("target.md"), repository.path.join(CADENCE)).expect("a link");
+    let answer = git
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(CADENCE, "a\n"),
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(answer, CommitOutcome::Linked(CADENCE.to_string()));
+    assert_eq!(
+        std::fs::read_to_string(elsewhere.join("target.md")).expect("kept"),
+        "x\n"
+    );
+    assert_eq!(
+        repository.git_output(&["branch", "--list", "docs/folder-1"]),
+        ""
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn makes_nothing_the_branch_already_says() {
+    let repository = TempRepo::new("commit-files-unchanged");
+    repository.write(CADENCE, "a\n");
+    repository.commit("the cadence");
+    let answer = repository
+        .adapter()
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(CADENCE, "a\n"),
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(answer, CommitOutcome::Unchanged);
+    assert_eq!(
+        repository.git_output(&["branch", "--list", "docs/folder-1"]),
+        ""
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn cleans_up_a_commit_that_fails() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repository = TempRepo::new("commit-files-cleanup");
+    repository.write(CADENCE, "old\n");
+    repository.write("src/x.rs", "fn a() {}\n");
+    repository.commit("the first cadence");
+    let hooks = repository.path.join(".git/refusing-hooks");
+    std::fs::create_dir_all(&hooks).expect("a hooks directory");
+    let hook = hooks.join("pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").expect("a hook");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    repository.git(&["config", "core.hooksPath", hooks.to_str().expect("text")]);
+    // The owner's work outside Catervas: one change staged, one not.
+    repository.write("README.md", "the owner's staged line\n");
+    repository.git(&["add", "README.md"]);
+    repository.write("src/x.rs", "fn b() {}\n");
+    let git = repository.adapter();
+    let new = "docs/catervas/delivery/new.md";
+    let files = vec![
+        (CADENCE.to_string(), "changed\n".to_string()),
+        (new.to_string(), "new\n".to_string()),
+    ];
+
+    let answer = git.commit_files("docs/folder-1", "main", &files, "docs: x", None);
+    assert!(
+        matches!(answer, Err(GitError::CommandFailed { .. })),
+        "{answer:?}"
+    );
+    assert_eq!(
+        repository.git_output(&["branch", "--list", "docs/folder-1"]),
+        ""
+    );
+    assert_eq!(repository.git_output(&["branch", "--show-current"]), "main");
+    assert!(!repository.path.join(new).exists(), "the new file is gone");
+    assert_eq!(
+        std::fs::read_to_string(repository.path.join(CADENCE)).expect("restored"),
+        "old\n"
+    );
+    assert_eq!(
+        repository.git_output(&["status", "--porcelain", "--untracked-files=all"]),
+        "M  README.md\n M src/x.rs",
+        "only the owner's own changes are left, staged and unstaged as they were"
+    );
+
+    repository.git(&["checkout", "--detach"]);
+    let answer = git.commit_files("docs/folder-2", "main", &files, "docs: x", None);
+    assert!(
+        matches!(answer, Err(GitError::CommandFailed { .. })),
+        "{answer:?}"
+    );
+    assert!(!repository.path.join(new).exists(), "nothing was written");
+    assert!(
+        !std::process::Command::new("git")
+            .current_dir(&repository.path)
+            .args(["symbolic-ref", "-q", "HEAD"])
+            .output()
+            .expect("git runs")
+            .status
+            .success(),
+        "HEAD is still detached"
+    );
+    assert_eq!(
+        repository.git_output(&["branch", "--list", "docs/folder-2"]),
+        ""
     );
 }

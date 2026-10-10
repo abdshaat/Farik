@@ -451,6 +451,110 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_commit_outside_the_tasks_implement_session() {
+        let project = TestProject::new("tools-git-refine", &a_team_of_three(|_| {}));
+        project.filed("CTV-1", "assigned", "task", None);
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
+        let commit = json!({ "message": "add the login form", "paths": ["src/login/form.ts"] });
+        let git = &project.deps.git;
+
+        let mut refine = project.context("dev-a", Some("CTV-1"));
+        refine.purpose = crate::session::SessionPurpose::Refine;
+        match crate::tools::fixtures::run(&refine, "catervas_git_commit", commit.clone()) {
+            Err(ToolError::Refused { reason }) => assert!(
+                reason.starts_with("no_task_no_write: catervas_git_commit "),
+                "{reason}"
+            ),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert_eq!(
+            git.commit_count("main", &project.branch("CTV-1"))
+                .expect("git counts"),
+            0
+        );
+        project
+            .call("dev-a", Some("CTV-1"), "catervas_git_commit", commit)
+            .expect("an implement session commits");
+        assert_eq!(
+            git.commit_count("main", &project.branch("CTV-1"))
+                .expect("git counts"),
+            1
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_product_manager_commits_in_its_docs_task() {
+        let project = TestProject::new("tools-git-pm-docs", &a_team_of_three(|_| {}));
+        project.filed_with("CTV-1", "assigned", "task", None, |wire| {
+            wire["allowed_paths"] = json!(["docs/catervas/product/**"]);
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("architect");
+        });
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm", "reviewer": "dev-a" }),
+        );
+        let branch = project.branch("CTV-1");
+        assert_eq!(branch, "docs/CTV-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, &branch, "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("docs/catervas/product")).expect("a directory");
+        for file in ["spec.md", "spec.agent.md"] {
+            std::fs::write(
+                worktree.join("docs/catervas/product").join(file),
+                "# Spec\n",
+            )
+            .expect("a file");
+        }
+
+        project
+            .call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({
+                    "message": "docs(product): write the spec",
+                    "paths": ["docs/catervas/product/spec.md", "docs/catervas/product/spec.agent.md"]
+                }),
+            )
+            .expect("the Product Manager commits its docs task");
+        let git = &project.deps.git;
+        assert_eq!(git.commit_count("main", &branch).expect("git counts"), 1);
+        let mut changed = git
+            .changed_paths("main", &branch)
+            .expect("git lists the paths");
+        changed.sort();
+        assert_eq!(
+            changed,
+            [
+                "docs/catervas/product/spec.agent.md",
+                "docs/catervas/product/spec.md"
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_git_tools_without_a_task() {
         // `git_remote` too, so that the push is refused for the task it lacks, not the tier.
         let project = TestProject::new(
@@ -466,9 +570,15 @@ mod tests {
             ),
             ("catervas_git_push", json!({})),
         ] {
+            // A commit and a push change the project, which only a task's session does.
+            let expected = if matches!(name, "catervas_git_commit" | "catervas_git_push") {
+                "no_task_no_write: "
+            } else {
+                "no_task: "
+            };
             match project.call("dev-a", None, name, input) {
                 Err(ToolError::Refused { reason }) => {
-                    assert!(reason.starts_with("no_task: "), "{name}: {reason}");
+                    assert!(reason.starts_with(expected), "{name}: {reason}");
                 }
                 other => panic!("{name}: expected a refusal, got {other:?}"),
             }
