@@ -868,6 +868,8 @@ mod tests {
             named_in_subject("Merge docs/folder-3: architecture/plans/CTV-12.md"),
             change(3)
         );
+        assert_eq!(named_in_subject("subfolder-3"), None);
+        assert_eq!(named_in_subject("ACTV-1: x"), None);
         assert_eq!(named_in_subject("docs(product): edit roadmap.md"), None);
         assert_eq!(named_in_subject("folder-x and CTV-x"), None);
     }
