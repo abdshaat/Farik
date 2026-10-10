@@ -1,5 +1,5 @@
-import type { Event } from "@farik/protocol-client";
-import { Table } from "@farik/ui";
+import type { Event } from "@catervas/protocol-client";
+import { Table } from "@catervas/ui";
 import { useEvents } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";

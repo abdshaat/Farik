@@ -6,16 +6,16 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::Arc;
 
-use farik_core::branch::task_branch;
-use farik_core::contract::{TaskId, TaskKind, TaskStatus};
-use farik_core::team::{Integration, Team, task_private_folder};
-use farik_protocol::event::{
-    EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
+use catervas_core::branch::task_branch;
+use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
+use catervas_core::team::{Integration, Team, task_private_folder};
+use catervas_protocol::event::{
+    CatervasEvent, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind,
     NoteWrittenBodyKind, PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
 };
-use farik_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
-use farik_store::files::FilesError;
-use farik_store::{
+use catervas_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
+use catervas_store::files::FilesError;
+use catervas_store::{
     EventQuery, Git, GitError, MergeOutcome, TaskProjection, material, names_of, project_document,
     scan_project, seeded_library,
 };
@@ -29,7 +29,7 @@ use crate::tools::ToolDeps;
 use crate::transitions::{integration_branch, is_move_into};
 
 /// Where the integration lock lives, under the project root.
-const LOCK: &str = ".farik/local/integration.lock";
+const LOCK: &str = ".catervas/local/integration.lock";
 
 /// Who asked for an integration: the tick, on the team's policy, or the human.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,7 +395,7 @@ fn closed_for_the_human(
         Ok(_) => {
             let detail = format!(
                 "the pull request {url} was closed without merging, and {branch} is not in \
-                 {into}: reopen it on the forge or merge the branch, then run farik integrate"
+                 {into}: reopen it on the forge or merge the branch, then run catervas integrate"
             );
             escalate(tools, task_id, detail)
         }
@@ -504,7 +504,7 @@ fn merge(
         Ok(MergeOutcome::Conflicts(paths)) => {
             let detail = format!(
                 "merging {branch} into {into} conflicts in {}: resolve them on {into}, then run \
-                 farik integrate {id}",
+                 catervas integrate {id}",
                 paths.join(", ")
             );
             return escalate(tools, &row.task_id, detail);
@@ -591,7 +591,7 @@ fn since_accepted(
     tools: &ToolDeps,
     task_id: &TaskId,
     kinds: &[EventKind],
-) -> Result<Vec<FarikEvent>, OrchestratorError> {
+) -> Result<Vec<CatervasEvent>, OrchestratorError> {
     let mut asked = vec![EventKind::TaskTransitioned];
     asked.extend_from_slice(kinds);
     let history = tools.log.read(&EventQuery {
@@ -718,7 +718,7 @@ pub(super) fn remove_workspace(
         .tools
         .files
         .root()
-        .join(".farik/local/browser")
+        .join(".catervas/local/browser")
         .join(task_id.as_str());
     match std::fs::remove_dir_all(&browser) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
@@ -759,13 +759,13 @@ fn remove_worktree(git: &Git, path: &Path) -> Result<(), OrchestratorError> {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::TaskStatus;
-    use farik_protocol::event::{
+    use catervas_core::contract::TaskStatus;
+    use catervas_protocol::event::{
         EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind, NewEvent,
         PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
         event_from_value,
     };
-    use farik_store::git::fixtures::{git_in, git_output_in};
+    use catervas_store::git::fixtures::{git_in, git_output_in};
     use serde_json::json;
 
     use crate::orchestrator::fixtures::Harness;
@@ -814,7 +814,7 @@ mod tests {
         git_output_in(&harness.project.repo.path, arguments)
     }
 
-    fn task(id: &str) -> farik_core::contract::TaskId {
+    fn task(id: &str) -> catervas_core::contract::TaskId {
         id.parse().expect("a task id")
     }
 
@@ -1154,8 +1154,8 @@ mod tests {
         let wire = json!({
             "seq": 1,
             "recorded_at": crate::tools::fixtures::at().to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "task_id": task,
             "kind": kind,
             "body": body,
@@ -1575,7 +1575,7 @@ mod tests {
             harness.recorded(Vec::new()),
             std::sync::Arc::new(crate::sandbox::host::HostSandboxFactory),
             crate::forge::Forge {
-                program: "/nonexistent/farik/gh".into(),
+                program: "/nonexistent/catervas/gh".into(),
                 root: harness.project.repo.path.clone(),
             },
         );
@@ -1585,7 +1585,7 @@ mod tests {
         let raised = escalations(&harness);
         assert_eq!(raised.len(), 1, "{raised:?}");
         assert!(
-            raised[0].detail.contains("/nonexistent/farik/gh"),
+            raised[0].detail.contains("/nonexistent/catervas/gh"),
             "{}",
             raised[0].detail
         );
@@ -1791,7 +1791,7 @@ mod tests {
 
         let harness = under("int-rescan-retry", "auto_merge");
         accepted_adding(&harness, "FRK-1", PACKAGE);
-        let team = harness.project.repo.path.join(".farik/team");
+        let team = harness.project.repo.path.join(".catervas/team");
         let mode = |bits| {
             std::fs::set_permissions(&team, std::fs::Permissions::from_mode(bits))
                 .expect("the team directory's mode");
@@ -1838,7 +1838,7 @@ mod tests {
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let reply = orchestrator
-            .handle(farik_protocol::command::Command::TaskIntegrate {
+            .handle(catervas_protocol::command::Command::TaskIntegrate {
                 task_id: task("FRK-1"),
             })
             .await
@@ -1860,7 +1860,7 @@ mod tests {
     async fn keeps_the_integration_when_the_scan_fails() {
         let harness = under("int-rescan-fails", "auto_merge");
         accepted_adding(&harness, "FRK-1", PACKAGE);
-        let document = harness.project.repo.path.join(".farik/project.md");
+        let document = harness.project.repo.path.join(".catervas/project.md");
         let _ = std::fs::remove_file(&document);
         std::fs::create_dir_all(&document).expect("project.md is a directory");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));

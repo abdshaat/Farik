@@ -4,12 +4,12 @@
 //! dismissing count only from an envelope that names no agent and no session, so that no agent can
 //! make any of them happen by recording it.
 
-use chrono::{DateTime, NaiveDate, Utc};
-use farik_core::contract::TaskId;
-use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, SellerMessageDraftedBody, SellerMessagePurpose,
+use catervas_core::contract::TaskId;
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventKind, SellerMessageDraftedBody, SellerMessagePurpose,
     SellerMessageSentBody, SellerReplyReceivedBody,
 };
+use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::purchase_orders::{OrderState, purchase_orders};
 use crate::{EventLog, EventQuery, StoreError};
@@ -56,7 +56,7 @@ pub struct SellerMessageRecord {
     pub drafted_at: DateTime<Utc>,
     /// Where it stands.
     pub state: MessageState,
-    /// Farik's sentence about the last try that failed, while the message waits.
+    /// Catervas's sentence about the last try that failed, while the message waits.
     pub why: Option<String>,
     /// When that try failed: the `recorded_at` of the latest `seller_message.failed`, while the
     /// message waits.
@@ -74,9 +74,9 @@ pub struct SellerReplyRecord {
     pub reply: u64,
     /// The task of the message it answers.
     pub task_id: TaskId,
-    /// What Farik read. Untrusted.
+    /// What Catervas read. Untrusted.
     pub received: SellerReplyReceivedBody,
-    /// When Farik read it.
+    /// When Catervas read it.
     pub received_at: DateTime<Utc>,
     /// Whether the owner dismissed it on Today.
     pub dismissed: bool,
@@ -93,9 +93,9 @@ pub struct SellerMail {
     pub replies: Vec<SellerReplyRecord>,
 }
 
-/// Whether `event` was recorded by the owner or by Farik: its envelope names no agent and no
+/// Whether `event` was recorded by the owner or by Catervas: its envelope names no agent and no
 /// session.
-fn is_unattended(event: &FarikEvent) -> bool {
+fn is_unattended(event: &CatervasEvent) -> bool {
     event.envelope.ids.agent_id.is_none() && event.envelope.ids.session_id.is_none()
 }
 
@@ -190,7 +190,7 @@ pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
                     record.state = MessageState::Discarded;
                 }
             }
-            // An order ended by the owner or by Farik ends its message with it, from that moment:
+            // An order ended by the owner or by Catervas ends its message with it, from that moment:
             // a send recorded later is no send.
             EventBody::PurchaseOrderRejected(body) if is_unattended(event) => {
                 close_orders_message(&mut mail, body.order.get());
@@ -324,7 +324,7 @@ mod tests {
         );
     }
 
-    /// The founder's or Farik's step: no task, no agent, no session.
+    /// The founder's or Catervas's step: no task, no agent, no session.
     fn unattended(board: &Board, minute: u32, kind: &str, body: Value) {
         board.put(at(10, minute), None, None, kind, body);
     }
@@ -549,7 +549,7 @@ mod tests {
         draft(&board, 1, 1, "quote_request", None);
         draft(&board, 2, 2, "quote_request", None);
         unattended(&board, 11, "seller_message.sent", sent_body(1));
-        // Replies: one counts from Farik and one from a session does not; one is dismissed.
+        // Replies: one counts from Catervas and one from a session does not; one is dismissed.
         unattended(&board, 15, "seller_reply.received", reply_body(1, 1));
         board.session(
             at(10, 16),

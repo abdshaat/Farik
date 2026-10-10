@@ -4,15 +4,15 @@
 
 use std::sync::Arc;
 
-use chrono::{TimeZone, Utc};
-use farik_core::contract::{TaskContract, TaskId, TaskStatus, validate_contract};
-use farik_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
-use farik_protocol::event::{EventKind, NewEvent, event_from_value};
-use farik_store::files::ProjectFiles;
-use farik_store::files::fixtures::TempProject;
-use farik_store::{
+use catervas_core::contract::{TaskContract, TaskId, TaskStatus, validate_contract};
+use catervas_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
+use catervas_protocol::event::{EventKind, NewEvent, event_from_value};
+use catervas_store::files::ProjectFiles;
+use catervas_store::files::fixtures::TempProject;
+use catervas_store::{
     Drift, EventLog, IN_MEMORY, Projections, ReconcileError, open_event_log, open_projections,
 };
+use chrono::{TimeZone, Utc};
 use serde_json::json;
 
 /// A log and the projections of it, both empty.
@@ -67,7 +67,7 @@ fn on_the_board(
 
 /// A contract of that id, at that status, held or not.
 fn a_contract(id: &str, status: TaskStatus, locked: bool) -> TaskContract {
-    let mut wire = farik_core::contract::fixtures::a_contract_wire();
+    let mut wire = catervas_core::contract::fixtures::a_contract_wire();
     wire["id"] = json!(id);
     wire["status"] = json!(status.to_string());
     wire["locked"] = json!(locked);
@@ -79,7 +79,7 @@ fn an_id(id: &str) -> TaskId {
 }
 
 fn drifts(files: &ProjectFiles, projections: &Projections) -> Vec<Drift> {
-    farik_store::reconcile(files, projections).expect("it reconciles")
+    catervas_store::reconcile(files, projections).expect("it reconciles")
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn reports_a_contract_it_cannot_read_rather_than_stopping_at_it() {
         .write_contract(&a_contract("FRK-2", TaskStatus::Ready, false))
         .expect("written");
     std::fs::write(
-        project.root.join(".farik/contracts/FRK-1.yaml"),
+        project.root.join(".catervas/contracts/FRK-1.yaml"),
         "id: FRK-1\ntitle: half a contract\n",
     )
     .expect("a person edits one");
@@ -268,7 +268,10 @@ fn reports_a_contract_it_cannot_read_rather_than_stopping_at_it() {
         panic!("the broken one, and then the other: {found:?}");
     };
     assert_eq!(task_id, &an_id("FRK-1"));
-    assert!(detail.contains(".farik/contracts/FRK-1.yaml"), "{detail}");
+    assert!(
+        detail.contains(".catervas/contracts/FRK-1.yaml"),
+        "{detail}"
+    );
     assert!(
         matches!(&found[1], Drift::StatusMismatch { task_id, .. } if task_id == &an_id("FRK-2")),
         "{found:?}"
@@ -280,7 +283,7 @@ fn says_what_it_could_not_compare_and_why() {
     assert_eq!(
         [
             ReconcileError::Files {
-                detail: ".farik/contracts could not be used: Permission denied (os error 13)"
+                detail: ".catervas/contracts could not be used: Permission denied (os error 13)"
                     .to_string()
             }
             .to_string(),
@@ -290,7 +293,7 @@ fn says_what_it_could_not_compare_and_why() {
             .to_string(),
         ],
         [
-            "the files could not be read: .farik/contracts could not be used: Permission denied \
+            "the files could not be read: .catervas/contracts could not be used: Permission denied \
              (os error 13)",
             "the board could not be read: sqlite refused: database is locked",
         ]
@@ -368,7 +371,7 @@ fn orders_two_spellings_of_one_number_by_the_id_itself() {
 }
 
 #[test]
-fn a_project_with_no_farik_directory_at_all_has_nothing_to_report() {
+fn a_project_with_no_catervas_directory_at_all_has_nothing_to_report() {
     let project = TempProject::new("reconcile-nothing");
     let (_log, projections) = a_board();
     assert_eq!(drifts(&project.files(), &projections), []);

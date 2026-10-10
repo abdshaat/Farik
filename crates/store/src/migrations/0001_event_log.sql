@@ -31,7 +31,7 @@ CREATE INDEX events_by_task ON events (task_id, seq) WHERE task_id IS NOT NULL;
 CREATE INDEX events_by_agent ON events (agent_id, seq) WHERE agent_id IS NOT NULL;
 CREATE INDEX events_by_kind ON events (kind, seq);
 
--- Append-only in the engine, not only in the code above it: `farik doctor`, a migration, a repair
+-- Append-only in the engine, not only in the code above it: `catervas doctor`, a migration, a repair
 -- script, and a person with the sqlite3 shell all go through these.
 CREATE TRIGGER events_refuse_update
 BEFORE UPDATE ON events

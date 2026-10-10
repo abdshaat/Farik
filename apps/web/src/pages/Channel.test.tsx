@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	fireEvent,
@@ -126,7 +126,7 @@ describe("channel", () => {
 	it("shows_each_kind_of_message", async () => {
 		const { container } = await channel([
 			message("theo", "reaction", "Started on the menu page."),
-			message("farik", "system", "Sprint 2 started."),
+			message("catervas", "system", "Sprint 2 started."),
 			message("human", "human", "Thanks, all."),
 			message("theo", "reply", "Glad to.", { in_reply_to: seq }),
 		]);
@@ -156,7 +156,7 @@ describe("channel", () => {
 		expect(within(theo).getByTitle("Developer")).toBeTruthy();
 		expect(within(theo).getByText("09:02")).toBeTruthy();
 
-		// Farik's line: small and muted, with no avatar and no role.
+		// Catervas's line: small and muted, with no avatar and no role.
 		const system = row("Sprint 2 started.");
 		expect(system.className).toBe(styles.system);
 		expect(within(system).queryByRole("img")).toBeNull();
@@ -170,30 +170,30 @@ describe("channel", () => {
 		await expectNoAxeViolations(container);
 	});
 
-	it("words_farik_move_lines_as_the_history_tab_does", async () => {
+	it("words_catervas_move_lines_as_the_history_tab_does", async () => {
 		await channel([
-			message("farik", "system", "FRK-1 refining → ready (by the governor)"),
+			message("catervas", "system", "FRK-1 refining → ready (by the governor)"),
 			message(
-				"farik",
+				"catervas",
 				"system",
 				"FRK-2 verifying → rejected (by theo): C1 failed: <b>no</b> file",
 			),
 			message(
-				"farik",
+				"catervas",
 				"system",
 				"FRK-3 escalated → in_progress (by the human): go on",
 			),
-			message("farik", "system", "FRK-4 dreaming → flying (by theo)"),
+			message("catervas", "system", "FRK-4 dreaming → flying (by theo)"),
 		]);
 		const list = await screen.findByRole("list", { name: en.channelMessages });
 		const rows = within(list).getAllByRole("listitem");
 		expect(rows.map((li) => li.textContent?.replace(/\d\d:\d\d$/, ""))).toEqual(
 			[
-				"Farik moved FRK-1 to To do. ",
+				"Catervas moved FRK-1 to To do. ",
 				"Theo sent FRK-2 back. Why: C1 failed: <b>no</b> file ",
 				"You moved FRK-3 to In progress. Why: go on ",
-				// A line of another shape stays as Farik wrote it.
-				"Farik FRK-4 dreaming → flying (by theo) ",
+				// A line of another shape stays as Catervas wrote it.
+				"Catervas FRK-4 dreaming → flying (by theo) ",
 			],
 		);
 		// The task is a link to it; the agent's words stay words, never markup.
@@ -396,7 +396,7 @@ describe("channel", () => {
 		await s.reply(sent, { said: "posted", events: [5] });
 		await waitFor(() => expect(box.value).toBe(""));
 
-		// The length is counted in characters, as Farik counts it: 2000 emoji pass.
+		// The length is counted in characters, as Catervas counts it: 2000 emoji pass.
 		fireEvent.change(box, { target: { value: "😀".repeat(2000) } });
 		fireEvent.click(screen.getByRole("button", { name: en.channelPost }));
 		await waitFor(() => expect(s.calls("command")).toHaveLength(2));
@@ -672,7 +672,7 @@ describe("channel", () => {
 				message("theo", "reaction", "An older one."),
 				message("mira", "ambient", "The plan is nearly done."),
 				message("human", "human", "Thanks, Mira."),
-				message("farik", "system", "Sprint 2 started."),
+				message("catervas", "system", "Sprint 2 started."),
 			],
 		});
 		const preview = await screen.findByRole("region", {

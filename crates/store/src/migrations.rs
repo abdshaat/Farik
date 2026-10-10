@@ -12,7 +12,7 @@ struct Migration {
 }
 
 /// Every migration, in the order they apply. A migration is never edited once it has shipped; a
-/// change to the shape is a new one, so that a database written by an older Farik reaches the same
+/// change to the shape is a new one, so that a database written by an older Catervas reaches the same
 /// shape as one made today.
 const MIGRATIONS: [Migration; 15] = [
     Migration {
@@ -93,7 +93,7 @@ pub(crate) fn apply(connection: &mut Connection, now: DateTime<Utc>) -> Result<(
     apply_through(connection, last, now)
 }
 
-/// `apply`, stopping after the migration numbered `last_version`: the shape an older Farik left,
+/// `apply`, stopping after the migration numbered `last_version`: the shape an older Catervas left,
 /// which is what a test of a later migration starts from.
 ///
 /// # Errors
@@ -118,7 +118,7 @@ pub(crate) fn apply_through(
         // transaction that reads first and then finds it needs to write cannot wait for the lock,
         // because another reader may be waiting to write the same rows, so SQLite refuses it at
         // once instead of after `busy_timeout` — and two processes that both read "not applied"
-        // both run the migration, and the loser is told the tables already exist. Several `farik`
+        // both run the migration, and the loser is told the tables already exist. Several `catervas`
         // commands starting on a fresh repository at the same moment is the ordinary case.
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if is_applied(&transaction, migration.version)? {

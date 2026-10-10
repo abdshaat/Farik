@@ -1,4 +1,4 @@
-import { Button, Choice, Dialog, Stepper, TextField } from "@farik/ui";
+import { Button, Choice, Dialog, Stepper, TextField } from "@catervas/ui";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, refusalsOf } from "../app/refusals.ts";
@@ -10,7 +10,7 @@ import type { McpServer } from "./setup/TeamSetup.tsx";
 export type Tag = "network" | "external_effect" | "denied";
 type Listed = { name: string; description: string; usable: boolean };
 type Key = { name: string; value: string };
-/** One of Farik's own apps signing the user in (phase 7 step 03b): its name, the code to type, where to install it. */
+/** One of Catervas's own apps signing the user in (phase 7 step 03b): its name, the code to type, where to install it. */
 type AppSignIn = { provider: string; userCode?: string; installUrl?: string };
 /** How signing in to the service stands (ADR 0033). `keys` is the key fields, with a sentence when the service said why. */
 type SignIn =
@@ -44,7 +44,7 @@ export function hostOf(url: string | undefined): string {
 	}
 }
 
-/** The card the boards draw around one of Farik's own apps signing the user in; no card for a service that signs in by itself. */
+/** The card the boards draw around one of Catervas's own apps signing the user in; no card for a service that signs in by itself. */
 export function SigningIn({
 	app,
 	children,
@@ -76,7 +76,7 @@ function copy(code: string) {
 }
 
 /**
- * The board that shows the code one of Farik's own apps signs the user in with (phase 7 step 03b),
+ * The board that shows the code one of Catervas's own apps signs the user in with (phase 7 step 03b),
  * and where to type it. Neither button runs until pressed: the page opens in the click itself, so
  * a pop-up blocker lets it through.
  */
@@ -144,7 +144,7 @@ export const TAGS: [Tag, keyof typeof en, keyof typeof en][] = [
 	["denied", "tagDenied", "tagDeniedNote"],
 ];
 
-/** "2 Only reads, 1 Never, 1 Farik can’t use": each label's count, none left out but zeros. */
+/** "2 Only reads, 1 Never, 1 Catervas can’t use": each label's count, none left out but zeros. */
 export function labelsSaid(tags: Tag[], unusable = 0): string {
 	const said = TAGS.map(([tag, words]) => [
 		tags.filter((x) => x === tag).length,
@@ -253,7 +253,7 @@ export function ConnectorAdd({
 	again?: McpServer | undefined;
 	/** The service ended the sign-in `again` holds, so the page says so and signs in at once. */
 	ended?: boolean | undefined;
-	/** Who ended it when one of Farik's own apps signed it in: the provider's name, not the address's host. */
+	/** Who ended it when one of Catervas's own apps signed it in: the provider's name, not the address's host. */
 	endedBy?: string | undefined;
 	/** Whether sessions run in Docker's sandbox, the one mode where no command of the agent reaches its keys. */
 	sandboxed: boolean;
@@ -588,7 +588,7 @@ export function ConnectorAdd({
 	// The key fields show unless the service offers a sign-in, which stands in for them.
 	const showsKeys = !http || sign.kind === "idle" || sign.kind === "keys";
 	const issuerHost = "issuer" in sign ? hostOf(sign.issuer) : "";
-	/** Who signs the user in: one of Farik's own apps by name, else the issuer's host. */
+	/** Who signs the user in: one of Catervas's own apps by name, else the issuer's host. */
 	const signer = "app" in sign && sign.app ? sign.app.provider : issuerHost;
 	const title =
 		again || step > 0 ? t("addTitleNamed", fill) : t("addTitle", { name });

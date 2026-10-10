@@ -7,8 +7,8 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use catervas_core::team::OAuthSettings;
 use chrono::{DateTime, Utc};
-use farik_core::team::OAuthSettings;
 use oauth2::{CsrfToken, PkceCodeChallenge};
 use reqwest::Url;
 use rmcp::transport::auth::{
@@ -52,7 +52,7 @@ pub struct OAuthGrant {
     pub scopes: Vec<String>,
     /// Whether the service ended the sign-in.
     pub lapsed: bool,
-    /// The id of the app of Farik's own this grant was made with (`RegisteredApp::id`), when it
+    /// The id of the app of Catervas's own this grant was made with (`RegisteredApp::id`), when it
     /// was; none for a client the user gave or the service registered.
     pub app: Option<String>,
 }
@@ -78,13 +78,13 @@ impl fmt::Debug for OAuthGrant {
 pub enum SignInError {
     /// The server does not say it can be signed in to.
     NotOffered,
-    /// It can, but Farik has no way to register as a client.
+    /// It can, but Catervas has no way to register as a client.
     NotSupported,
     /// The service does not do PKCE with S256.
     PkceNotSupported,
     /// The user said no on the service's page.
     Denied(String),
-    /// The way back from the service did not match what Farik sent.
+    /// The way back from the service did not match what Catervas sent.
     Mismatch,
     /// The user took more than ten minutes.
     TimedOut,
@@ -103,7 +103,7 @@ const MAX_BODY: usize = 1024 * 1024;
 /// How long a connection to the callback listener may take to say what it wants.
 const CONNECTION_READ: Duration = Duration::from_secs(5);
 
-/// Whether Farik may talk to `url`: `https`, or `http` to this computer, which the tests need.
+/// Whether Catervas may talk to `url`: `https`, or `http` to this computer, which the tests need.
 fn allowed(url: &Url) -> bool {
     match url.scheme() {
         "https" => url.host_str().is_some(),
@@ -295,20 +295,20 @@ fn host_of(url: &str) -> String {
         .unwrap_or_else(|| "the service".to_string())
 }
 
-/// A sign-in under way: a page to send the user to, and what Farik waits for after: a listener
-/// for the way back, or, for one of Farik's own apps, the service saying yes to a code.
+/// A sign-in under way: a page to send the user to, and what Catervas waits for after: a listener
+/// for the way back, or, for one of Catervas's own apps, the service saying yes to a code.
 pub struct SignIn {
     way: Way,
     setup: Setup,
 }
 
-/// How Farik learns the user said yes.
+/// How Catervas learns the user said yes.
 enum Way {
     /// Step 03's: the service sends the browser back to a listener on this computer.
     Redirect(Box<Redirect>),
-    /// The device flow (RFC 8628): the user types a code on the service's page and Farik polls.
+    /// The device flow (RFC 8628): the user types a code on the service's page and Catervas polls.
     Device(Device),
-    /// Farik's own authorization-code flow with PKCE, for one of its own connectors: the service
+    /// Catervas's own authorization-code flow with PKCE, for one of its own connectors: the service
     /// sends the browser back to a listener on this computer.
     Loopback(Box<Loopback>),
 }
@@ -323,7 +323,7 @@ struct Redirect {
     requested_scopes: Vec<String>,
 }
 
-/// What the way back of Farik's own loopback sign-in needs: the listener, the `state` it answers
+/// What the way back of Catervas's own loopback sign-in needs: the listener, the `state` it answers
 /// to, and the verifier that proves the exchange comes from the program that started the sign-in.
 struct Loopback {
     listeners: Vec<Listener>,
@@ -335,7 +335,7 @@ struct Loopback {
     scopes: Vec<String>,
 }
 
-/// What polling a device code needs. The code never leaves Farik: the user types the other one.
+/// What polling a device code needs. The code never leaves Catervas: the user types the other one.
 struct Device {
     code: Secret,
     user_code: String,
@@ -398,13 +398,13 @@ impl SignIn {
         }
     }
 
-    /// What Farik's own app for the service is called, when one is signing in.
+    /// What Catervas's own app for the service is called, when one is signing in.
     #[must_use]
     pub fn provider(&self) -> Option<&str> {
         self.setup.app.as_ref().map(|app| app.name)
     }
 
-    /// Where the user installs Farik's own app on what an agent is to read, when it must be.
+    /// Where the user installs Catervas's own app on what an agent is to read, when it must be.
     #[must_use]
     pub fn install_url(&self) -> Option<&str> {
         self.setup.app.as_ref().and_then(|app| app.install_url)
@@ -446,7 +446,7 @@ impl Setup {
         outcome
     }
 
-    /// The same for Farik's own loopback sign-in, whose tab names the provider.
+    /// The same for Catervas's own loopback sign-in, whose tab names the provider.
     async fn finish_loopback(
         &self,
         mut loopback: Loopback,
@@ -462,9 +462,9 @@ impl Setup {
         outcome
     }
 
-    /// What the callback of Farik's own loopback sign-in comes to: `iss` checked, the code
+    /// What the callback of Catervas's own loopback sign-in comes to: `iss` checked, the code
     /// exchanged with the verifier (and the app's client secret, when it has one), and the
-    /// answer held to what Farik needs of it.
+    /// answer held to what Catervas needs of it.
     async fn complete_loopback(
         &self,
         loopback: &Loopback,
@@ -515,13 +515,13 @@ impl Setup {
             .is_some_and(|kind| kind.eq_ignore_ascii_case("bearer"))
         {
             return Err(SignInError::Failed(format!(
-                "{} did not give Farik a bearer token",
+                "{} did not give Catervas a bearer token",
                 app.name
             )));
         }
         if body["refresh_token"].as_str().is_none() {
             return Err(SignInError::Failed(format!(
-                "{} did not give Farik a lasting sign-in",
+                "{} did not give Catervas a lasting sign-in",
                 app.name
             )));
         }
@@ -536,7 +536,7 @@ impl Setup {
             .any(|asked| !granted.contains(&asked.as_str()))
         {
             return Err(SignInError::Failed(format!(
-                "you did not allow Farik all it asks of {}; sign in again and tick every box",
+                "you did not allow Catervas all it asks of {}; sign in again and tick every box",
                 app.name
             )));
         }
@@ -578,8 +578,9 @@ impl Setup {
                     self.guard.status_note()
                 )),
             })?;
-        let token = serde_json::to_value(&token)
-            .map_err(|_| SignInError::Failed(format!("{host} sent a token Farik cannot read")))?;
+        let token = serde_json::to_value(&token).map_err(|_| {
+            SignInError::Failed(format!("{host} sent a token Catervas cannot read"))
+        })?;
         self.grant_from(&token, &redirect.requested_scopes)
     }
 
@@ -645,7 +646,8 @@ impl Setup {
         requested_scopes: &[String],
     ) -> Result<OAuthGrant, SignInError> {
         let host = host_of(&self.issuer);
-        let unreadable = || SignInError::Failed(format!("{host} sent a token Farik cannot read"));
+        let unreadable =
+            || SignInError::Failed(format!("{host} sent a token Catervas cannot read"));
         if !token["token_type"]
             .as_str()
             .is_some_and(|kind| kind.eq_ignore_ascii_case("bearer"))
@@ -702,7 +704,7 @@ impl SignInError {
         match self {
             SignInError::Denied(_) => format!("you said no on {host}'s page"),
             SignInError::Mismatch => format!(
-                "something didn't match on the way back from {host}, so Farik stopped to keep you safe"
+                "something didn't match on the way back from {host}, so Catervas stopped to keep you safe"
             ),
             SignInError::TimedOut => "it took longer than 10 minutes".to_string(),
             _ => format!("{host} did not accept the sign-in"),
@@ -720,15 +722,15 @@ async fn tell_the_tab(
         Ok(_) => (
             200,
             format!("You're signed in to {host}."),
-            "You can close this tab and go back to Farik.",
+            "You can close this tab and go back to Catervas.",
         ),
         Err(error) => (
             400,
             format!(
-                "Farik couldn't finish signing in: {}.",
+                "Catervas couldn't finish signing in: {}.",
                 error.sentence(host)
             ),
-            "Close this tab and try again in Farik.",
+            "Close this tab and try again in Catervas.",
         ),
     };
     let _ = respond(stream, status, &headline, rest).await;
@@ -756,8 +758,8 @@ fn page(headline: &str, rest: &str) -> String {
         format!("<p>{}</p>", escaped(rest))
     };
     format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Farik</title></head>\
-         <body><img alt=\"Farik\" width=\"48\" height=\"48\" src=\"data:image/png;base64,{mark}\">\
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Catervas</title></head>\
+         <body><img alt=\"Catervas\" width=\"48\" height=\"48\" src=\"data:image/png;base64,{mark}\">\
          <h1>{}</h1>{rest}</body></html>",
         escaped(headline)
     )
@@ -826,7 +828,7 @@ async fn serve_connection(
         let _ = respond(
             &mut stream,
             400,
-            "This is not the page Farik is waiting for.",
+            "This is not the page Catervas is waiting for.",
             "",
         )
         .await;
@@ -902,7 +904,7 @@ async fn wait_for_callback(
     }
 }
 
-/// The callback port a registered client fixes; none when Farik registers its own client.
+/// The callback port a registered client fixes; none when Catervas registers its own client.
 fn fixed_port(settings: &OAuthSettings) -> Option<u16> {
     (settings.client_id.is_some()).then(|| settings.callback_port.unwrap_or(DEFAULT_CALLBACK_PORT))
 }
@@ -969,7 +971,7 @@ async fn discover(url: &str, guard: &Arc<Guarded>) -> Result<Discovered, SignInE
                 "jsonrpc": "2.0", "id": 1, "method": "initialize",
                 "params": {
                     "protocolVersion": "2025-06-18", "capabilities": {},
-                    "clientInfo": { "name": "Farik", "version": "0" },
+                    "clientInfo": { "name": "Catervas", "version": "0" },
                 },
             })
             .to_string(),
@@ -999,7 +1001,7 @@ async fn discover(url: &str, guard: &Arc<Guarded>) -> Result<Discovered, SignInE
     })
 }
 
-/// Farik's checks on what a service published, before anything is registered.
+/// Catervas's checks on what a service published, before anything is registered.
 fn check_metadata(
     metadata: &AuthorizationMetadata,
     settings: &OAuthSettings,
@@ -1037,7 +1039,7 @@ fn check_metadata(
     Ok(())
 }
 
-/// Starts signing a user in to the server at `url`. If `apps` has one of Farik's own apps for the
+/// Starts signing a user in to the server at `url`. If `apps` has one of Catervas's own apps for the
 /// server's address (and the team file gives no client of its own), the user signs in with it;
 /// otherwise the server's sign-in is found out, a client registered, the listener bound and the
 /// address made, as step 03 does. A client id of one of `apps` is used only for its own servers.
@@ -1069,7 +1071,7 @@ async fn start(
 ) -> Result<SignIn, SignInError> {
     let serving = app_for(apps, url);
     let given = settings.client_id.as_deref();
-    // Farik's client ids are for Farik's own apps' servers: another address is refused before any
+    // Catervas's client ids are for Catervas's own apps' servers: another address is refused before any
     // request is made.
     if let Some(app) = apps.iter().find(|app| given == Some(app.client_id))
         && serving.is_none_or(|serving| serving.id != app.id)
@@ -1085,14 +1087,14 @@ async fn start(
                 device_endpoint,
                 verification_uri,
             } => start_device(app, device_endpoint, verification_uri, url, now).await,
-            // Its sign-in is for a connector Farik starts, not for an address.
+            // Its sign-in is for a connector Catervas starts, not for an address.
             AppFlow::Loopback { .. } => Err(SignInError::NotSupported),
         },
         _ => start_redirect(url, settings, now).await,
     }
 }
 
-/// The device flow (RFC 8628) with one of Farik's own apps: asks the service for a code.
+/// The device flow (RFC 8628) with one of Catervas's own apps: asks the service for a code.
 async fn start_device(
     app: &RegisteredApp,
     device_endpoint: &str,
@@ -1121,13 +1123,13 @@ async fn start_device(
         text("verification_uri"),
     ) else {
         return Err(SignInError::Failed(format!(
-            "{host} sent a sign-in code Farik cannot read"
+            "{host} sent a sign-in code Catervas cannot read"
         )));
     };
     // The page the user is sent to, and told to type a code on, is the table's and no other.
     if page != verification_uri {
         return Err(SignInError::Failed(format!(
-            "{host} named a sign-in page Farik does not use"
+            "{host} named a sign-in page Catervas does not use"
         )));
     }
     // RFC 8628's default is five seconds; never a busy loop.
@@ -1153,7 +1155,7 @@ async fn start_device(
     })
 }
 
-/// Starts signing a user in for one of Farik's own connectors with `app`, whose flow is the
+/// Starts signing a user in for one of Catervas's own connectors with `app`, whose flow is the
 /// loopback one: the listener is bound, and the address the user is sent to carries the app's
 /// client id, the redirect, the scopes (the app's own, or the team file's when each is one of
 /// them), `state` and an S256 challenge. Nothing is requested yet.
@@ -1182,7 +1184,7 @@ pub async fn start_app_sign_in(
         .any(|scope| !app.scopes.contains(&scope.as_str()))
     {
         return Err(SignInError::Failed(format!(
-            "Farik's {} sign-in asks only for {}",
+            "Catervas's {} sign-in asks only for {}",
             app.name,
             app.scopes.join(", ")
         )));
@@ -1264,7 +1266,7 @@ async fn start_redirect(
         .and_then(serde_json::Value::as_str)
         .map(ToString::to_string);
     manager.set_metadata(metadata);
-    let mut request = AuthorizationRequest::new(redirect).with_client_name("Farik");
+    let mut request = AuthorizationRequest::new(redirect).with_client_name("Catervas");
     if let Some(client_id) = &settings.client_id {
         request = request.with_preregistered_client(client_id);
     }
@@ -1338,9 +1340,9 @@ const ENDED: [&str; 5] = [
 /// will. A grant with no refresh token is `Ok(None)` while its access token holds, and lapses once
 /// it has expired. The rotated refresh token is the answer's; one left out keeps the old.
 ///
-/// A grant of one of Farik's own apps (`app` set) is refreshed with no `resource`, and with the
+/// A grant of one of Catervas's own apps (`app` set) is refreshed with no `resource`, and with the
 /// client secret its entry of `apps` has, if it has one, at that entry's token endpoint and never
-/// at the one the kept grant names, since the secret goes only where Farik's table says; a grant
+/// at the one the kept grant names, since the secret goes only where Catervas's table says; a grant
 /// whose app `apps` lacks has lapsed.
 /// Every grant is asked for JSON, and an `error` in the answer is read whatever its status, since
 /// GitHub answers one with status 200.
@@ -1637,7 +1639,7 @@ mod tests {
         drop((again, copies));
     }
 
-    /// A grant made with one of Farik's own apps is told so after a restart: its refresh depends on it.
+    /// A grant made with one of Catervas's own apps is told so after a restart: its refresh depends on it.
     #[test]
     fn a_grant_keeps_its_app_in_the_stored_form() {
         let grant = OAuthGrant {
@@ -1686,8 +1688,8 @@ mod tests {
         assert_eq!(grant.client_id, "client-1");
     }
 
-    /// rmcp refuses metadata without an issuer before Farik's own check runs, so the check is
-    /// held up directly: the plan lists it as Farik's.
+    /// rmcp refuses metadata without an issuer before Catervas's own check runs, so the check is
+    /// held up directly: the plan lists it as Catervas's.
     #[test]
     fn refuses_metadata_that_does_not_name_its_issuer() {
         let mut metadata: AuthorizationMetadata = serde_json::from_value(serde_json::json!({

@@ -1,5 +1,5 @@
 //! The renewals a register of vendors says are coming up (`docs/SPEC.md` 6.10, ADR 0039): which
-//! rows are due to be put on Today, and how many rows hold a date Farik cannot read. Pure: the
+//! rows are due to be put on Today, and how many rows hold a date Catervas cannot read. Pure: the
 //! caller reads the sheet and passes each row's four cells as text, and today's date.
 
 use std::collections::BTreeSet;

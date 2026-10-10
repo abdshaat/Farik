@@ -23,31 +23,31 @@ const ruleFor = (token: string) =>
 	rules.find(
 		(r) =>
 			r.selector.split(/,\s*/).includes(token) &&
-			r.body.includes("--farik-color-page"),
+			r.body.includes("--catervas-color-page"),
 	);
 
 describe("generate", () => {
 	it("writes every colour token of the light theme under the light selectors", () => {
 		const root = block(LIGHT);
 		for (const [name, hex] of Object.entries(source.color.light)) {
-			expect(root).toContain(`--farik-color-${name}: ${hex};`);
+			expect(root).toContain(`--catervas-color-${name}: ${hex};`);
 		}
-		expect(root).toContain("--farik-color-page: #F3E7D3;");
+		expect(root).toContain("--catervas-color-page: #F3E7D3;");
 	});
 
 	it("writes every colour token of the dark theme under the dark selectors", () => {
 		const dark = block(DARK);
 		for (const [name, hex] of Object.entries(source.color.dark)) {
-			expect(dark).toContain(`--farik-color-${name}: ${hex};`);
+			expect(dark).toContain(`--catervas-color-${name}: ${hex};`);
 		}
-		expect(dark).toContain("--farik-color-page: #161616;");
+		expect(dark).toContain("--catervas-color-page: #161616;");
 	});
 
 	it("writes the dark theme for any element that asks for it", () => {
 		const dark = ruleFor('[data-theme="dark"]');
-		expect(dark?.body).toContain("--farik-color-page: #161616;");
+		expect(dark?.body).toContain("--catervas-color-page: #161616;");
 		const light = ruleFor('[data-theme="light"]');
-		expect(light?.body).toContain("--farik-color-page: #F3E7D3;");
+		expect(light?.body).toContain("--catervas-color-page: #F3E7D3;");
 	});
 
 	it("a themed element paints its own text and ground", () => {
@@ -56,19 +56,21 @@ describe("generate", () => {
 				r.selector.split(/,\s*/).includes('[data-theme="dark"]') &&
 				r.body.includes("background-color"),
 		);
-		expect(paint?.body).toContain("color: var(--farik-color-ink);");
-		expect(paint?.body).toContain("background-color: var(--farik-color-page);");
+		expect(paint?.body).toContain("color: var(--catervas-color-ink);");
+		expect(paint?.body).toContain(
+			"background-color: var(--catervas-color-page);",
+		);
 	});
 
 	it("writes each type step as size, line height, weight and family", () => {
 		for (const line of [
-			"--farik-type-body-size: 16px;",
-			"--farik-type-body-line-height: 24px;",
-			"--farik-type-body-weight: 400;",
-			"--farik-type-title-weight: 600;",
-			"--farik-type-body-family: 'Space Grotesk', system-ui, sans-serif;",
-			"--farik-type-display-family: 'Silkscreen', monospace;",
-			"--farik-type-code-family: 'JetBrains Mono', ui-monospace, monospace;",
+			"--catervas-type-body-size: 16px;",
+			"--catervas-type-body-line-height: 24px;",
+			"--catervas-type-body-weight: 400;",
+			"--catervas-type-title-weight: 600;",
+			"--catervas-type-body-family: 'Space Grotesk', system-ui, sans-serif;",
+			"--catervas-type-display-family: 'Silkscreen', monospace;",
+			"--catervas-type-code-family: 'JetBrains Mono', ui-monospace, monospace;",
 		]) {
 			expect(css).toContain(line);
 		}

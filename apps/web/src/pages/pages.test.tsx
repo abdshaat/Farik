@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -35,10 +35,10 @@ describe("pages", () => {
 
 		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
 		fireEvent.click(advanced);
-		expect(localStorage.getItem("farik.advanced")).toBe("true");
+		expect(localStorage.getItem("catervas.advanced")).toBe("true");
 		expect(advanced.getAttribute("aria-checked")).toBe("true");
 		fireEvent.click(advanced);
-		expect(localStorage.getItem("farik.advanced")).toBe("false");
+		expect(localStorage.getItem("catervas.advanced")).toBe("false");
 
 		fireEvent.click(screen.getByRole("button", { name: en.disconnect }));
 		expect(
@@ -56,9 +56,9 @@ describe("pages", () => {
 			await screen.findByRole("heading", { name: en.noSessionTitle }),
 		).toBeTruthy();
 		const code = first.container.querySelector("code");
-		expect(code?.textContent).toBe("farik serve");
+		expect(code?.textContent).toBe("catervas serve");
 		expect(screen.getByRole("button", { name: en.copy })).toBeTruthy();
-		// The mark is decoration beside the wordmark, which names Farik.
+		// The mark is decoration beside the wordmark, which names Catervas.
 		expect(screen.getByRole("img", { name: en.brand })).toBeTruthy();
 		expect(first.container.querySelectorAll('img[alt=""]').length).toBe(1);
 		await expectNoAxeViolations(first.container);

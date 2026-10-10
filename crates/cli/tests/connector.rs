@@ -1,4 +1,4 @@
-//! `farik connect` and `farik disconnect` (`docs/SPEC.md` 5.6, ADR 0030): the command lists the
+//! `catervas connect` and `catervas disconnect` (`docs/SPEC.md` 5.6, ADR 0030): the command lists the
 //! server's tools and keeps its keys in its own process, and only names reach the team file, the
 //! log, or the process driving the project.
 //!
@@ -12,14 +12,14 @@ mod project;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use farik_protocol::command::{Command, command_to_value};
-use farik_protocol::event::{EventBody, EventKind};
-use farik_runtime::connectors::{
+use catervas_protocol::command::{Command, command_to_value};
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_runtime::connectors::{
     ConnectorEntry, ConnectorSecretStores, ConnectorSecrets, MemoryConnectorSecrets, SecretAt,
     SecretStore,
 };
-use farik_runtime::credential::CredentialError;
-use farik_store::git::fixtures::TempRepo;
+use catervas_runtime::credential::CredentialError;
+use catervas_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
 use project::{LiveDriver, a_team, a_team_with, events, files_of, log_of, run_with, scratch};
@@ -33,7 +33,7 @@ mod ports;
 const KEY: &str = "a-key-typed-at-the-terminal";
 
 /// The stdio MCP server of the runtime's tests, written for `test`: its tools are `search`, `env`,
-/// `delete_repo`, and `repo.delete`, a name Farik can't use.
+/// `delete_repo`, and `repo.delete`, a name Catervas can't use.
 fn fixture(test: &str) -> PathBuf {
     let path = scratch(test).join("server.sh");
     std::fs::write(
@@ -49,9 +49,9 @@ fn config_of(repository: &TempRepo) -> PathBuf {
     PathBuf::from(format!("{}-config", repository.path.display()))
 }
 
-/// The user's state folder for `repository`'s tests: `farik` in [`config_of`].
+/// The user's state folder for `repository`'s tests: `catervas` in [`config_of`].
 fn state_of(repository: &TempRepo) -> PathBuf {
-    config_of(repository).join("farik")
+    config_of(repository).join("catervas")
 }
 
 /// Where `agent`'s keys for `server` are kept in `repository`'s project: where the daemon looks
@@ -60,9 +60,9 @@ fn kept_at(repository: &TempRepo, agent: &str, server: &str) -> SecretAt {
     let at =
         SecretAt::of(&state_of(repository), &repository.path, agent, server).expect("an address");
     let first = log_of(repository)
-        .read(&farik_store::EventQuery {
+        .read(&catervas_store::EventQuery {
             limit: Some(1),
-            ..farik_store::EventQuery::default()
+            ..catervas_store::EventQuery::default()
         })
         .expect("the log reads");
     // So that a command keeping keys under either of the log's ids is caught (carry M15).
@@ -75,7 +75,7 @@ fn kept_at(repository: &TempRepo, agent: &str, server: &str) -> SecretAt {
     at
 }
 
-/// `farik connect <agent> fixture` against `script`, with `extra` arguments, `stdin` on standard
+/// `catervas connect <agent> fixture` against `script`, with `extra` arguments, `stdin` on standard
 /// input, and its keys kept in `store`.
 fn connect(
     repository: &TempRepo,
@@ -127,7 +127,7 @@ fn loaded(store: &dyn ConnectorSecrets, at: &SecretAt) -> Option<ConnectorEntry>
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_reads_keys_from_stdin() {
+fn catervas_connect_reads_keys_from_stdin() {
     let repository = a_team("connect-stdin");
     let script = fixture("connect-stdin");
     let store = Arc::new(MemoryConnectorSecrets::default());
@@ -171,7 +171,7 @@ fn farik_connect_reads_keys_from_stdin() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_starts_nothing_when_farik_settings_are_inside_the_project() {
+fn catervas_connect_starts_nothing_when_catervas_settings_are_inside_the_project() {
     // Re-review 2 m1: `XDG_CONFIG_HOME` inside the project puts the connector's folder back in
     // the repository, where a pulled `.npmrc` chooses what runs.
     let repository = a_team("connect-state-inside");
@@ -202,7 +202,7 @@ fn farik_connect_starts_nothing_when_farik_settings_are_inside_the_project() {
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(
         ran.err
-            .contains("state_inside_project: Farik's settings folder"),
+            .contains("state_inside_project: Catervas's settings folder"),
         "{}",
         ran.err
     );
@@ -212,7 +212,7 @@ fn farik_connect_starts_nothing_when_farik_settings_are_inside_the_project() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_labels_with_tag_flags_and_defaults_to_external_effect() {
+fn catervas_connect_labels_with_tag_flags_and_defaults_to_external_effect() {
     let repository = a_team("connect-tags");
     let script = fixture("connect-tags");
 
@@ -235,7 +235,7 @@ fn farik_connect_labels_with_tag_flags_and_defaults_to_external_effect() {
         "search: network",
         "env: external_effect",
         "delete_repo: external_effect",
-        "repo.delete: Farik can't use this tool",
+        "repo.delete: Catervas can't use this tool",
     ] {
         assert!(lines.contains(&said), "{said} in {}", ran.out);
     }
@@ -283,7 +283,7 @@ impl ConnectorSecrets for NoKeychain {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_says_which_store_kept_the_keys() {
+fn catervas_connect_says_which_store_kept_the_keys() {
     let repository = a_team("connect-store");
     let script = fixture("connect-store");
     let file = scratch("connect-store-state").join("connectors.json");
@@ -330,7 +330,7 @@ fn farik_connect_says_which_store_kept_the_keys() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_sends_names_when_something_drives() {
+fn catervas_connect_sends_names_when_something_drives() {
     let repository = a_team("connect-sends");
     let script = fixture("connect-sends");
     let store = Arc::new(MemoryConnectorSecrets::default());
@@ -373,7 +373,7 @@ fn farik_connect_sends_names_when_something_drives() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_disconnect_deletes_the_keys_and_the_entry() {
+fn catervas_disconnect_deletes_the_keys_and_the_entry() {
     let repository = a_team("disconnect");
     let script = fixture("disconnect");
     let store = Arc::new(MemoryConnectorSecrets::default());
@@ -423,7 +423,7 @@ fn farik_disconnect_deletes_the_keys_and_the_entry() {
     assert_eq!(ran.code, 1, "{}", ran.out);
 }
 
-/// `dev-a` given a `google-ads` entry and its keys, and a campaign Farik made, in `repository`.
+/// `dev-a` given a `google-ads` entry and its keys, and a campaign Catervas made, in `repository`.
 fn google_ads_with_a_campaign(
     repository: &TempRepo,
     script: &std::path::Path,
@@ -435,7 +435,7 @@ fn google_ads_with_a_campaign(
         "args": [script.display().to_string()], "tools": { "search": "network" }
     }]);
     files_of(repository)
-        .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+        .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
         .expect("the team is written");
     let store = Arc::new(MemoryConnectorSecrets::default());
     store
@@ -464,7 +464,7 @@ fn google_ads_with_a_campaign(
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_disconnect_sends_google_ads_to_the_browser() {
+fn catervas_disconnect_sends_google_ads_to_the_browser() {
     let repository = a_team("disconnect-google-ads");
     let script = fixture("disconnect-google-ads");
     let store = google_ads_with_a_campaign(&repository, &script);
@@ -482,12 +482,12 @@ fn farik_disconnect_sends_google_ads_to_the_browser() {
         )
     };
 
-    // A campaign Farik made is not recorded paused, and with no process driving the project there
-    // is no daemon to pause it with: the browser, where Farik pauses first, is the way.
+    // A campaign Catervas made is not recorded paused, and with no process driving the project there
+    // is no daemon to pause it with: the browser, where Catervas pauses first, is the way.
     let ran = disconnect(&store);
     assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
     assert!(
-        ran.err.contains("disconnect_in_the_browser: remove Google Ads on dev-a's page in the browser, where Farik pauses its running ads first"),
+        ran.err.contains("disconnect_in_the_browser: remove Google Ads on dev-a's page in the browser, where Catervas pauses its running ads first"),
         "{}",
         ran.err
     );
@@ -526,7 +526,7 @@ fn farik_disconnect_sends_google_ads_to_the_browser() {
     );
 }
 
-/// `farik disconnect dev-a google-ads` in `repository`, with `store` holding its keys.
+/// `catervas disconnect dev-a google-ads` in `repository`, with `store` holding its keys.
 fn disconnect_google_ads(
     repository: &TempRepo,
     store: &Arc<MemoryConnectorSecrets>,
@@ -546,7 +546,7 @@ fn disconnect_google_ads(
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_disconnect_counts_a_pause_made_for_an_earlier_removal() {
+fn catervas_disconnect_counts_a_pause_made_for_an_earlier_removal() {
     let removed = |repository: &TempRepo| {
         project::record(
             repository,
@@ -559,9 +559,9 @@ fn farik_disconnect_counts_a_pause_made_for_an_earlier_removal() {
         );
     };
 
-    // Google Ads was removed from another agent before, and Farik paused the campaign for it. But
+    // Google Ads was removed from another agent before, and Catervas paused the campaign for it. But
     // dev-a still has Google Ads, and its sign-in could have enabled the campaign since, with no
-    // connection recorded: the browser is the way, where Farik pauses first.
+    // connection recorded: the browser is the way, where Catervas pauses first.
     let repository = a_team("disconnect-google-ads-removed");
     let store = google_ads_with_a_campaign(&repository, &fixture("disconnect-google-ads-removed"));
     removed(&repository);
@@ -587,7 +587,8 @@ fn farik_disconnect_counts_a_pause_made_for_an_earlier_removal() {
     let store =
         google_ads_with_a_campaign(&repository, &fixture("disconnect-google-ads-reconnected"));
     removed(&repository);
-    let mut connected = farik_protocol::event::fixtures::a_body_wire(EventKind::ConnectorConnected);
+    let mut connected =
+        catervas_protocol::event::fixtures::a_body_wire(EventKind::ConnectorConnected);
     connected["agent"] = json!("dev-a");
     connected["server"] = json!("google-ads");
     project::record(&repository, "", "connector.connected", &connected);
@@ -598,7 +599,7 @@ fn farik_disconnect_counts_a_pause_made_for_an_earlier_removal() {
 }
 
 /// An opener that follows the address as a browser would, on `runtime`.
-fn following(runtime: &tokio::runtime::Runtime) -> farik::Opener {
+fn following(runtime: &tokio::runtime::Runtime) -> catervas::Opener {
     let handle = runtime.handle().clone();
     Arc::new(move |url: &str| {
         let url = url.to_string();
@@ -609,12 +610,12 @@ fn following(runtime: &tokio::runtime::Runtime) -> farik::Opener {
     })
 }
 
-/// `farik connect dev-a fixture --url <fixture> --sign-in <extra>`, opened with `opener`.
+/// `catervas connect dev-a fixture --url <fixture> --sign-in <extra>`, opened with `opener`.
 fn sign_in(
     repository: &TempRepo,
     fixture: &oauth_fixture::Fixture,
     extra: &[&str],
-    opener: farik::Opener,
+    opener: catervas::Opener,
     store: Arc<dyn ConnectorSecrets>,
 ) -> project::Ran {
     sign_in_after(&[], repository, fixture, extra, opener, store)
@@ -626,7 +627,7 @@ fn sign_in_after(
     repository: &TempRepo,
     fixture: &oauth_fixture::Fixture,
     extra: &[&str],
-    opener: farik::Opener,
+    opener: catervas::Opener,
     store: Arc<dyn ConnectorSecrets>,
 ) -> project::Ran {
     let mut args = before.to_vec();
@@ -652,8 +653,8 @@ fn sign_in_after(
 /// address. Leaked: a table is `'static`, and a test's leak is small.
 fn dev_table(
     fixture: &oauth_fixture::Fixture,
-) -> &'static [farik_runtime::registered_apps::RegisteredApp] {
-    use farik_runtime::registered_apps::{AppFlow, RegisteredApp};
+) -> &'static [catervas_runtime::registered_apps::RegisteredApp] {
+    use catervas_runtime::registered_apps::{AppFlow, RegisteredApp};
     fn leaked(text: String) -> &'static str {
         Box::leak(text.into_boxed_str())
     }
@@ -662,7 +663,7 @@ fn dev_table(
         id: "dev",
         name: "Dev",
         host: Some("127.0.0.1"),
-        farik_connector: None,
+        catervas_connector: None,
         flow: AppFlow::Device {
             device_endpoint: leaked(format!("{origin}/device/code")),
             verification_uri: leaked(format!("{origin}/login/device")),
@@ -680,14 +681,14 @@ fn dev_table(
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_prints_the_device_code() {
+fn catervas_connect_prints_the_device_code() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
     let repository = a_team("connect-device");
     let store = Arc::new(MemoryConnectorSecrets::default());
     let _driver = LiveDriver::new(&repository);
     let pages = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let opener: farik::Opener = {
+    let opener: catervas::Opener = {
         let pages = Arc::clone(&pages);
         Arc::new(move |url: &str| {
             pages.lock().expect("pages").push(url.to_string());
@@ -729,7 +730,7 @@ fn farik_connect_prints_the_device_code() {
                 fixture.origin
             )
             .as_str(),
-            "Only enter a code that this page shows you. Farik never sends you a code in a chat.",
+            "Only enter a code that this page shows you. Catervas never sends you a code in a chat.",
             "Signed in to Dev.",
         ],
         "{}",
@@ -752,7 +753,7 @@ fn farik_connect_prints_the_device_code() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_names_the_provider_when_a_device_sign_in_is_refused() {
+fn catervas_connect_names_the_provider_when_a_device_sign_in_is_refused() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
     fixture.set(|flags| flags.device_error = Some("access_denied".to_string()));
@@ -794,7 +795,7 @@ fn farik_connect_names_the_provider_when_a_device_sign_in_is_refused() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_signs_in_and_keeps_the_grant() {
+fn catervas_connect_signs_in_and_keeps_the_grant() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
     let repository = a_team("connect-sign-in");
@@ -853,7 +854,7 @@ fn farik_connect_signs_in_and_keeps_the_grant() {
     let store = Arc::new(MemoryConnectorSecrets::default());
     let printed = Arc::new(std::sync::Mutex::new(String::new()));
     let (seen, handle) = (Arc::clone(&printed), runtime.handle().clone());
-    let by_hand: farik::Opener = Arc::new(move |url: &str| {
+    let by_hand: catervas::Opener = Arc::new(move |url: &str| {
         *seen.lock().expect("a lock") = url.to_string();
         let url = url.to_string();
         // Followed later, not by the opener, after the address was printed.
@@ -894,7 +895,7 @@ fn farik_connect_signs_in_and_keeps_the_grant() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_again_revokes_the_replaced_grant() {
+fn catervas_connect_again_revokes_the_replaced_grant() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
     let repository = a_team("connect-sign-in-again");
@@ -922,7 +923,7 @@ fn farik_connect_again_revokes_the_replaced_grant() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_again_with_the_same_client_revokes_nothing() {
+fn catervas_connect_again_with_the_same_client_revokes_nothing() {
     // Some services end every grant of a client when one is revoked.
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
@@ -944,7 +945,7 @@ fn farik_connect_again_with_the_same_client_revokes_nothing() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_sign_in_takes_no_key() {
+fn catervas_connect_sign_in_takes_no_key() {
     let repository = a_team("connect-sign-in-no-key");
     for extra in [["--key", "A"], ["--command", "x"]] {
         let ran = run_with(
@@ -972,7 +973,7 @@ fn farik_connect_sign_in_takes_no_key() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_says_when_a_service_offers_no_sign_in() {
+fn catervas_connect_says_when_a_service_offers_no_sign_in() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
     fixture.set(|flags| {
@@ -1001,7 +1002,7 @@ fn farik_connect_says_when_a_service_offers_no_sign_in() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_disconnect_asks_the_service_to_forget_the_sign_in() {
+fn catervas_disconnect_asks_the_service_to_forget_the_sign_in() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
     let repository = a_team("disconnect-sign-in");
@@ -1041,7 +1042,7 @@ fn farik_disconnect_asks_the_service_to_forget_the_sign_in() {
 /// The Developer's kit with one service, `fixture`: the stdio fixture server at `script` with one
 /// key, or, given `oauth_url`, the sign-in fixture's web address. Its tags: `search` network,
 /// `env` external effect, `delete_repo` denied (and `whoami` network for the sign-in one).
-fn a_kit(script: &std::path::Path, oauth_url: Option<&str>) -> farik_runtime::KitSource {
+fn a_kit(script: &std::path::Path, oauth_url: Option<&str>) -> catervas_runtime::KitSource {
     a_kit_of(script, oauth_url, false)
 }
 
@@ -1051,7 +1052,7 @@ fn a_kit_of(
     script: &std::path::Path,
     oauth_url: Option<&str>,
     allowing: bool,
-) -> farik_runtime::KitSource {
+) -> catervas_runtime::KitSource {
     let mut connector = json!({
         "name": "fixture", "title": "Fixture", "about": "A stand-in service.",
         "why": "Lets the Developer search it.", "setup": "Make a key on its page and paste it.",
@@ -1077,26 +1078,26 @@ fn a_kit_of(
         }
     }
     let file = json!({ "role": "software_developer", "skills": [], "connectors": [connector] });
-    let kit = farik_roles::parse_fixture_kit(
-        farik_core::contract::Role::SoftwareDeveloper,
+    let kit = catervas_roles::parse_fixture_kit(
+        catervas_core::contract::Role::SoftwareDeveloper,
         &file.to_string(),
         &[],
         &[],
     )
     .expect("the fixture kit loads");
     Arc::new(move |role| {
-        if role == farik_core::contract::Role::SoftwareDeveloper {
+        if role == catervas_core::contract::Role::SoftwareDeveloper {
             Ok(kit.clone())
         } else {
-            farik_roles::load_kit(role)
+            catervas_roles::load_kit(role)
         }
     })
 }
 
-/// `farik connect <agent> <name> <extra>` against `kits`, with `stdin` on standard input.
+/// `catervas connect <agent> <name> <extra>` against `kits`, with `stdin` on standard input.
 fn connect_by_name(
     repository: &TempRepo,
-    kits: farik_runtime::KitSource,
+    kits: catervas_runtime::KitSource,
     agent: &str,
     name: &str,
     extra: &[&str],
@@ -1167,7 +1168,7 @@ fn connects_a_kit_connector_with_its_keys_from_standard_input() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_takes_allowances() {
+fn catervas_connect_takes_allowances() {
     let repository = a_team("connect-allowances");
     let script = fixture("connect-allowances");
     let store = Arc::new(MemoryConnectorSecrets::default());
@@ -1398,12 +1399,12 @@ fn signs_in_to_a_kit_connector_with_oauth() {
     assert_eq!(kept.oauth.expect("a grant").issuer, fixture.origin);
 }
 
-/// A table of one loopback app, `Google test`, which signs in for Farik's connector `osv`, whose
+/// A table of one loopback app, `Google test`, which signs in for Catervas's connector `osv`, whose
 /// endpoints are `fixture`'s. Leaked: a table is `'static`, and a test's leak is small.
 fn google_table(
     fixture: &oauth_fixture::Fixture,
-) -> &'static [farik_runtime::registered_apps::RegisteredApp] {
-    use farik_runtime::registered_apps::{AppFlow, RegisteredApp};
+) -> &'static [catervas_runtime::registered_apps::RegisteredApp] {
+    use catervas_runtime::registered_apps::{AppFlow, RegisteredApp};
     fn leaked(text: String) -> &'static str {
         Box::leak(text.into_boxed_str())
     }
@@ -1412,7 +1413,7 @@ fn google_table(
         id: "google-test",
         name: "Google test",
         host: None,
-        farik_connector: Some("osv"),
+        catervas_connector: Some("osv"),
         flow: AppFlow::Loopback {
             authorization_endpoint: leaked(format!("{origin}/o/oauth2/v2/auth")),
         },
@@ -1427,55 +1428,55 @@ fn google_table(
     }]))
 }
 
-/// The Developer's kit with one service, Farik's own connector `osv`, which signs in.
-fn a_farik_connector_kit() -> farik_runtime::KitSource {
-    a_farik_connector_kit_asking(&json!({}))
+/// The Developer's kit with one service, Catervas's own connector `osv`, which signs in.
+fn a_catervas_connector_kit() -> catervas_runtime::KitSource {
+    a_catervas_connector_kit_asking(&json!({}))
 }
 
-/// [`a_farik_connector_kit`], its `oauth` being `oauth`.
-fn a_farik_connector_kit_asking(oauth: &Value) -> farik_runtime::KitSource {
+/// [`a_catervas_connector_kit`], its `oauth` being `oauth`.
+fn a_catervas_connector_kit_asking(oauth: &Value) -> catervas_runtime::KitSource {
     let file = json!({
         "role": "software_developer", "skills": [],
         "connectors": [{
-            "name": "osv", "transport": "stdio", "command": "farik",
+            "name": "osv", "transport": "stdio", "command": "catervas",
             "args": ["connector", "osv"], "oauth": oauth,
             "title": "OSV", "about": "A stand-in.", "why": "Lets the Developer look up.",
             "setup": "Sign in.", "labels": { "search": "search the fixture" },
             "tools": { "search": "network", "env": "external_effect", "delete_repo": "denied" }
         }]
     });
-    let kit = farik_roles::parse_fixture_kit(
-        farik_core::contract::Role::SoftwareDeveloper,
+    let kit = catervas_roles::parse_fixture_kit(
+        catervas_core::contract::Role::SoftwareDeveloper,
         &file.to_string(),
         &[],
         &[],
     )
     .expect("the fixture kit loads");
     Arc::new(move |role| {
-        if role == farik_core::contract::Role::SoftwareDeveloper {
+        if role == catervas_core::contract::Role::SoftwareDeveloper {
             Ok(kit.clone())
         } else {
-            farik_roles::load_kit(role)
+            catervas_roles::load_kit(role)
         }
     })
 }
 
-/// `farik connect` signs in for Farik's own connector with the app the table names: the page is
+/// `catervas connect` signs in for Catervas's own connector with the app the table names: the page is
 /// printed and opened, the connector (here the fixture's stdio server, run by a program standing
-/// in for Farik's own) lists its tools, and the grant is kept as the app's.
+/// in for Catervas's own) lists its tools, and the grant is kept as the app's.
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_signs_in_a_farik_connector() {
+fn catervas_connect_signs_in_a_catervas_connector() {
     use std::os::unix::fs::PermissionsExt as _;
 
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
     fixture.set(|flags| flags.client_secret = Some("the-test-secret".to_string()));
-    let repository = a_team("connect-farik-sign-in");
+    let repository = a_team("connect-catervas-sign-in");
     let store = Arc::new(MemoryConnectorSecrets::default());
-    let script = self::fixture("connect-farik-sign-in");
-    // Whatever it is asked, the program runs the fixture's server: `farik connector osv`.
-    let program = script.with_file_name("farik");
+    let script = self::fixture("connect-catervas-sign-in");
+    // Whatever it is asked, the program runs the fixture's server: `catervas connector osv`.
+    let program = script.with_file_name("catervas");
     std::fs::write(
         &program,
         format!("#!/bin/sh\nexec sh '{}'\n", script.display()),
@@ -1483,7 +1484,7 @@ fn farik_connect_signs_in_a_farik_connector() {
     .expect("the program is written");
     std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
         .expect("the program is made executable");
-    let kits = a_farik_connector_kit();
+    let kits = a_catervas_connector_kit();
     let table = google_table(&fixture);
     let opener = following(&runtime);
     let config = config_of(&repository);
@@ -1525,22 +1526,22 @@ fn farik_connect_signs_in_a_farik_connector() {
 /// A guard: the connector asks for the app's scopes and no others, the kit's own among them.
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_asks_only_for_the_apps_scopes() {
+fn catervas_connect_asks_only_for_the_apps_scopes() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
-    let repository = a_team("connect-farik-scopes");
+    let repository = a_team("connect-catervas-scopes");
     let store = Arc::new(MemoryConnectorSecrets::default());
     let table = google_table(&fixture);
     let pages = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     for (scope, said) in [
         (
             "https://example.test/auth/other",
-            Some("Farik's Google test sign-in asks only for https://example.test/auth/ads"),
+            Some("Catervas's Google test sign-in asks only for https://example.test/auth/ads"),
         ),
         ("https://example.test/auth/ads", None),
     ] {
-        let kits = a_farik_connector_kit_asking(&json!({ "scopes": [scope] }));
-        let opener: farik::Opener = {
+        let kits = a_catervas_connector_kit_asking(&json!({ "scopes": [scope] }));
+        let opener: catervas::Opener = {
             let pages = Arc::clone(&pages);
             Arc::new(move |url: &str| {
                 pages.lock().expect("pages").push(url.to_string());
@@ -1591,10 +1592,10 @@ fn farik_connect_asks_only_for_the_apps_scopes() {
 /// no way to sign in, and nothing is kept.
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_says_when_no_app_signs_in_for_a_connector() {
-    let repository = a_team("connect-farik-no-app");
+fn catervas_connect_says_when_no_app_signs_in_for_a_connector() {
+    let repository = a_team("connect-catervas-no-app");
     let store = Arc::new(MemoryConnectorSecrets::default());
-    let kits = a_farik_connector_kit();
+    let kits = a_catervas_connector_kit();
     let config = config_of(&repository);
     let kept_in = Arc::clone(&store);
     let ran = run_with(&repository.path, &["connect", "dev-a", "osv"], move |io| {
@@ -1606,7 +1607,7 @@ fn farik_connect_says_when_no_app_signs_in_for_a_connector() {
     assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
     assert!(
         ran.err
-            .contains("osv does not let Farik sign in by itself yet"),
+            .contains("osv does not let Catervas sign in by itself yet"),
         "{}",
         ran.err
     );
@@ -1614,25 +1615,27 @@ fn farik_connect_says_when_no_app_signs_in_for_a_connector() {
 }
 
 /// A guard: the app that signs a connector in is the one whose connector it is, and not any app
-/// that serves one of Farik's connectors. With a table whose one entry is for another connector,
+/// that serves one of Catervas's connectors. With a table whose one entry is for another connector,
 /// `osv` has no way to sign in, no page is opened, and nothing is kept.
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_uses_only_the_app_for_the_connector_s_name() {
+fn catervas_connect_uses_only_the_app_for_the_connector_s_name() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
-    let repository = a_team("connect-farik-other-app");
+    let repository = a_team("connect-catervas-other-app");
     let store = Arc::new(MemoryConnectorSecrets::default());
-    let kits = a_farik_connector_kit();
-    let for_another: &'static [farik_runtime::registered_apps::RegisteredApp] =
-        Box::leak(Box::new([farik_runtime::registered_apps::RegisteredApp {
-            farik_connector: Some("other"),
-            ..google_table(&fixture)[0]
-        }]));
+    let kits = a_catervas_connector_kit();
+    let for_another: &'static [catervas_runtime::registered_apps::RegisteredApp] =
+        Box::leak(Box::new([
+            catervas_runtime::registered_apps::RegisteredApp {
+                catervas_connector: Some("other"),
+                ..google_table(&fixture)[0]
+            },
+        ]));
     let pages = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     // A page that is opened is followed, as a browser would, so that a sign-in that was wrongly
     // started ends in a failed assertion here and not in ten minutes of waiting.
-    let opener: farik::Opener = {
+    let opener: catervas::Opener = {
         let pages = Arc::clone(&pages);
         Arc::new(move |url: &str| {
             pages.lock().expect("pages").push(url.to_string());
@@ -1660,7 +1663,7 @@ fn farik_connect_uses_only_the_app_for_the_connector_s_name() {
     assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
     assert!(
         ran.err
-            .contains("osv does not let Farik sign in by itself yet"),
+            .contains("osv does not let Catervas sign in by itself yet"),
         "{}",
         ran.err
     );
@@ -1672,11 +1675,11 @@ fn farik_connect_uses_only_the_app_for_the_connector_s_name() {
     assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "osv")).is_none());
 }
 
-/// `farik connect` starts Farik's own connector as the program the process was found at (ADR
-/// 0038), with `PATH` empty so no `farik` there can stand in; without that program it says so.
+/// `catervas connect` starts Catervas's own connector as the program the process was found at (ADR
+/// 0038), with `PATH` empty so no `catervas` there can stand in; without that program it says so.
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_connect_starts_farik_s_own_connector_as_its_own_program() {
+fn catervas_connect_starts_catervas_s_own_connector_as_its_own_program() {
     let repository = a_team("connect-own");
     let connect_osv = |agent: &str, own: Option<PathBuf>| {
         let state = config_of(&repository);
@@ -1687,7 +1690,7 @@ fn farik_connect_starts_farik_s_own_connector_as_its_own_program() {
                 agent,
                 "osv",
                 "--command",
-                "farik",
+                "catervas",
                 "--arg",
                 "connector",
                 "--arg",
@@ -1702,7 +1705,7 @@ fn farik_connect_starts_farik_s_own_connector_as_its_own_program() {
         )
     };
 
-    let ran = connect_osv("dev-a", Some(PathBuf::from(env!("CARGO_BIN_EXE_farik"))));
+    let ran = connect_osv("dev-a", Some(PathBuf::from(env!("CARGO_BIN_EXE_catervas"))));
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     for tool in ["query_package", "query_packages", "get_vulnerability"] {
         assert!(ran.out.contains(tool), "{tool} in {}", ran.out);
@@ -1711,7 +1714,7 @@ fn farik_connect_starts_farik_s_own_connector_as_its_own_program() {
     let ran = connect_osv("dev-b", None);
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(
-        ran.err.contains("farik could not find its own program"),
+        ran.err.contains("catervas could not find its own program"),
         "{}",
         ran.err
     );

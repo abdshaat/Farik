@@ -1,4 +1,4 @@
-import { Avatar, type AvatarKey, RoleTag } from "@farik/ui";
+import { Avatar, type AvatarKey, RoleTag } from "@catervas/ui";
 import { NavLink, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
 import { useWide } from "../shell/Shell.tsx";

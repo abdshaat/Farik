@@ -7,11 +7,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use farik_core::budget::{DEFAULT_SESSION_LIMITS, SessionLimits};
-use farik_protocol::clock::Clock;
-use farik_protocol::event::{EventKind, FarikEvent};
-use farik_store::git::fixtures::TempRepo;
-use farik_store::open_event_log;
+use catervas_core::budget::{DEFAULT_SESSION_LIMITS, SessionLimits};
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::{CatervasEvent, EventKind};
+use catervas_store::git::fixtures::TempRepo;
+use catervas_store::open_event_log;
 use serde_json::{Value, json};
 
 use super::{DaemonState, HookRequest, SessionRegistration};
@@ -29,8 +29,8 @@ pub(crate) const PRE_WRITE: &str = include_str!("fixtures/pre_tool_use_write.jso
 /// The recorded `PostToolUse` input of a `Read`.
 pub(crate) const POST_READ: &str = include_str!("fixtures/post_tool_use_read.json");
 
-/// The name of every Farik tool.
-pub(crate) fn every_farik_tool() -> Vec<&'static str> {
+/// The name of every Catervas tool.
+pub(crate) fn every_catervas_tool() -> Vec<&'static str> {
     tool_descriptors().iter().map(|tool| tool.name).collect()
 }
 
@@ -50,14 +50,14 @@ impl TestDaemon {
             wire["assignee"] = json!("dev-a");
         });
         before(&project.repo);
-        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/FRK-1");
         project
             .repo
             .adapter()
             .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the worktree is made");
         let state = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
-        // The user's state folder, beside the repository and outside it, as `~/.config/farik` is.
+        // The user's state folder, beside the repository and outside it, as `~/.config/catervas` is.
         state.set_state_dir(std::path::PathBuf::from(format!(
             "{}-state",
             project.repo.path.display()
@@ -95,7 +95,7 @@ impl TestDaemon {
             files: Arc::clone(&deps.files),
             transitions: Arc::clone(&deps.transitions),
             git: self.project.repo.adapter(),
-            clock: Arc::new(farik_protocol::clock::FixedClock::new(now)),
+            clock: Arc::new(catervas_protocol::clock::FixedClock::new(now)),
             ids: deps.ids.clone(),
             kits: Arc::clone(&deps.kits),
         })));
@@ -108,7 +108,7 @@ impl TestDaemon {
         self
     }
 
-    /// Registers a session of `agent` in the worktree, given every Farik tool, so that its tiers
+    /// Registers a session of `agent` in the worktree, given every Catervas tool, so that its tiers
     /// alone decide which it may call.
     pub(crate) fn register(
         &self,
@@ -117,10 +117,10 @@ impl TestDaemon {
         task: Option<&str>,
         limits: SessionLimits,
     ) {
-        self.register_with_tools(session_id, agent, task, limits, &every_farik_tool());
+        self.register_with_tools(session_id, agent, task, limits, &every_catervas_tool());
     }
 
-    /// Registers a session of `agent` in the worktree, given only the Farik tools `farik_tools`
+    /// Registers a session of `agent` in the worktree, given only the Catervas tools `catervas_tools`
     /// names.
     pub(crate) fn register_with_tools(
         &self,
@@ -128,7 +128,7 @@ impl TestDaemon {
         agent: &str,
         task: Option<&str>,
         limits: SessionLimits,
-        farik_tools: &[&str],
+        catervas_tools: &[&str],
     ) {
         self.state.register_session(SessionRegistration {
             session_id: session_id.to_string(),
@@ -138,7 +138,7 @@ impl TestDaemon {
             cwd: self.worktree.clone(),
             executor: None,
             limits,
-            farik_tools: farik_tools.iter().map(ToString::to_string).collect(),
+            catervas_tools: catervas_tools.iter().map(ToString::to_string).collect(),
             tiers: tiers_of(&self.project.deps, agent),
             connectors: Vec::new(),
             preview: None,
@@ -152,9 +152,9 @@ impl TestDaemon {
 
     /// How far `agent`'s web reading reaches, from its role as the team file says now: what a
     /// session of it is registered with. An agent the team does not have is open, as no one asks.
-    pub(crate) fn web_of(&self, agent: &str) -> farik_core::governor::sites::WebAccess {
-        use farik_core::contract::Role;
-        use farik_core::governor::sites::{WebAccess, web_access};
+    pub(crate) fn web_of(&self, agent: &str) -> catervas_core::governor::sites::WebAccess {
+        use catervas_core::contract::Role;
+        use catervas_core::governor::sites::{WebAccess, web_access};
 
         self.project
             .deps
@@ -198,7 +198,7 @@ impl TestDaemon {
     /// A daemon on the same project and sessions' worktree whose log is a file made read-only
     /// after it was opened and closed, so that every append is refused.
     pub(crate) fn with_a_log_that_refuses(&self) -> DaemonState {
-        let path = self.project.repo.path.join(".farik/local/read-only.db");
+        let path = self.project.repo.path.join(".catervas/local/read-only.db");
         drop(open_event_log(&path, at()).expect("the log is made"));
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444))
             .expect("the log is made read-only");
@@ -216,13 +216,16 @@ impl TestDaemon {
         }));
         state.register_session(SessionRegistration {
             session_id: DEV_SESSION.to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             cwd: self.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
+            catervas_tools: every_catervas_tool()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             tiers: tiers_of(deps, "dev-a"),
             connectors: Vec::new(),
             preview: None,
@@ -239,7 +242,7 @@ impl TestDaemon {
     /// it was opened, so that every read of it is refused, with `proc`'s session registered on it
     /// as `session-proc`, about FRK-1.
     pub(crate) fn with_a_log_that_cannot_be_read(&self) -> DaemonState {
-        let path = self.project.repo.path.join(".farik/local/unreadable.db");
+        let path = self.project.repo.path.join(".catervas/local/unreadable.db");
         let log = Arc::new(open_event_log(&path, at()).expect("the log is made"));
         rusqlite::Connection::open(&path)
             .expect("the file opens")
@@ -264,14 +267,17 @@ impl TestDaemon {
             cwd: self.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
+            catervas_tools: every_catervas_tool()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             tiers: tiers_of(deps, "proc"),
-            connectors: vec![farik_core::governor::permissions::SessionConnector {
+            connectors: vec![catervas_core::governor::permissions::SessionConnector {
                 server: "github".to_string(),
                 origin: None,
                 tools: [(
                     "search_issues".to_string(),
-                    farik_core::governor::permissions::ConnectorTag::Network,
+                    catervas_core::governor::permissions::ConnectorTag::Network,
                 )]
                 .into(),
                 allowances: std::collections::BTreeMap::new(),
@@ -288,7 +294,7 @@ impl TestDaemon {
     }
 
     /// Every event of this kind in the log, oldest first.
-    pub(crate) fn events(&self, kind: EventKind) -> Vec<FarikEvent> {
+    pub(crate) fn events(&self, kind: EventKind) -> Vec<CatervasEvent> {
         self.project.events(&[kind])
     }
 }
@@ -323,17 +329,20 @@ pub(crate) async fn answered(state: &Arc<DaemonState>, method: &str, params: &Va
     super::web::answer(state, &frame.to_string(), &mut None).await
 }
 
-/// An executable standing in for Farik's own program, written for `test`: it runs the stdio
-/// fixture server of `tests/fixtures/mcp_server.sh` whatever its arguments are, so that `farik
+/// An executable standing in for Catervas's own program, written for `test`: it runs the stdio
+/// fixture server of `tests/fixtures/mcp_server.sh` whatever its arguments are, so that `catervas
 /// connector osv` lists that server's tools.
 pub(crate) fn own_program_serving_the_fixture(test: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("farik-own-program-{}-{test}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "catervas-own-program-{}-{test}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the folder is made");
     let server = dir.join("server.sh");
     std::fs::write(&server, include_str!("../../tests/fixtures/mcp_server.sh"))
         .expect("the script is written");
-    let program = dir.join("farik");
+    let program = dir.join("catervas");
     std::fs::write(
         &program,
         format!("#!/bin/sh\nexec sh '{}'\n", server.display()),

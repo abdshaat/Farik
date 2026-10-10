@@ -1,8 +1,8 @@
-//! The `farik` command line: the commands the first release ships, and the shape they share.
+//! The `catervas` command line: the commands the first release ships, and the shape they share.
 //!
 //! Everything a command does is a function in one of the modules below, taking what it needs and
 //! returning either a `Report` — the lines a person reads and the JSON a script reads — or the one
-//! sentence that says why Farik would not do it. `run_cli` parses the arguments, picks the
+//! sentence that says why Catervas would not do it. `run_cli` parses the arguments, picks the
 //! function, and writes the answer to the streams it was given, so a test runs a command without
 //! spawning a process (`docs/SPEC.md` sections 5.11, 5.16, F2, F3).
 
@@ -12,11 +12,11 @@ pub mod board;
 pub mod channel;
 /// The human's one-to-one chats.
 pub mod chat;
-/// `farik connect` and `farik disconnect`: one agent's MCP server, its keys kept by this process
+/// `catervas connect` and `catervas disconnect`: one agent's MCP server, its keys kept by this process
 /// and only names sent on (ADR 0030).
 #[cfg(unix)]
 mod connector;
-/// `farik connector run` and `farik connector headers`: a custom connector's keys, from the
+/// `catervas connector run` and `catervas connector headers`: a custom connector's keys, from the
 /// daemon to the server, never through a file (ADR 0030).
 #[cfg(unix)]
 pub mod connector_run;
@@ -36,7 +36,7 @@ pub mod hook;
 pub mod human;
 /// The wall clock and the session ids the binary hands the command line.
 pub mod ids;
-/// Making a repository a Farik project.
+/// Making a repository a Catervas project.
 pub mod init;
 /// The event log, filtered and exported.
 pub mod log;
@@ -54,13 +54,13 @@ pub mod project;
 /// The governor's refusals in words.
 pub mod refusal;
 pub mod renewal;
-/// `farik run` and `farik plan`.
+/// `catervas run` and `catervas plan`.
 #[cfg(unix)]
 mod run;
-/// `farik serve`.
+/// `catervas serve`.
 #[cfg(unix)]
 mod serve;
-/// What `farik serve` does for the first-run wizard before there is a project.
+/// What `catervas serve` does for the first-run wizard before there is a project.
 #[cfg(unix)]
 mod setup;
 /// One contract, and what happened to it.
@@ -92,21 +92,21 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clap::{Parser, Subcommand, ValueEnum};
-use farik_core::contract::{TaskId, TaskStatus};
-use farik_protocol::clock::{Clock, IdSource, SequentialIds};
-use farik_protocol::command::{AcceptSubject, Command};
+use catervas_core::contract::{TaskId, TaskStatus};
+use catervas_protocol::clock::{Clock, IdSource, SequentialIds};
+use catervas_protocol::command::{AcceptSubject, Command};
 #[cfg(unix)]
-use farik_runtime::RuntimeAdapter;
+use catervas_runtime::RuntimeAdapter;
 #[cfg(unix)]
-use farik_runtime::connectors::{
+use catervas_runtime::connectors::{
     ConnectorSecretStores, ConnectorSecrets, KeychainConnectorSecrets, MemoryConnectorSecrets,
 };
 #[cfg(unix)]
-use farik_runtime::credential::{CredentialStore, FileStore, KeychainStore, MemoryStore};
+use catervas_runtime::credential::{CredentialStore, FileStore, KeychainStore, MemoryStore};
 #[cfg(unix)]
-use farik_runtime::daemon::DaemonState;
-use farik_runtime::sleep::Sleeper;
+use catervas_runtime::daemon::DaemonState;
+use catervas_runtime::sleep::Sleeper;
+use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 
 pub use project::{Project, open_project};
@@ -119,9 +119,9 @@ pub type AdapterFactory = Arc<dyn Fn(Arc<DaemonState>) -> Arc<dyn RuntimeAdapter
 /// What runs a driving process's sessions.
 #[cfg(unix)]
 pub enum Engine {
-    /// The Claude Code program, with the credential in the environment: what `farik` runs.
+    /// The Claude Code program, with the credential in the environment: what `catervas` runs.
     Claude,
-    /// The adapter the factory makes: what a test runs. Nothing a user sets makes `farik` replay.
+    /// The adapter the factory makes: what a test runs. Nothing a user sets makes `catervas` replay.
     Given(AdapterFactory),
 }
 
@@ -142,14 +142,14 @@ pub enum Interrupts {
 /// section 8.4).
 pub struct CliIo<'a> {
     /// What a command reads: the hook commands' JSON from Claude Code, and the answers
-    /// `farik contract new` asks for. Owned, so that one reader thread can hold it.
+    /// `catervas contract new` asks for. Owned, so that one reader thread can hold it.
     pub stdin: Box<dyn Read + Send>,
     /// Whether `stdin` is a terminal, where a key is read with its echo off: `false` here, and
     /// what the process's standard input is in `main`.
     pub stdin_is_terminal: bool,
     /// What a person or a script asked for.
     pub stdout: Box<dyn Write + 'a>,
-    /// Why Farik would not do something, and warnings.
+    /// Why Catervas would not do something, and warnings.
     pub stderr: Box<dyn Write + 'a>,
     /// Where the command was run, which is how the project is found.
     pub cwd: PathBuf,
@@ -168,7 +168,7 @@ pub struct CliIo<'a> {
     /// What a driving process waits on while every agent with work is asleep: the machine's timer
     /// over `clock` when `None`, a test's own otherwise.
     pub sleeper: Option<Arc<dyn Sleeper>>,
-    /// What `farik serve` opens its link with: nothing here, and the system's opener in `main`.
+    /// What `catervas serve` opens its link with: nothing here, and the system's opener in `main`.
     pub open_url: Opener,
     /// Where the model credential is kept: one store in memory here, so that no test touches a
     /// real keychain, and the keychain then the file in `main`.
@@ -176,19 +176,19 @@ pub struct CliIo<'a> {
     pub credential_stores: CredentialStores,
     /// Where each role's kit comes from (ADR 0036): the shipped kits here and in `main`, which a
     /// test replaces with a fixture kit whose server is its own.
-    pub kits: farik_runtime::KitSource,
-    /// The apps Farik has registered with a service (ADR 0035), which `farik connect` signs in with:
+    pub kits: catervas_runtime::KitSource,
+    /// The apps Catervas has registered with a service (ADR 0035), which `catervas connect` signs in with:
     /// `REGISTERED_APPS` here and in `main`, which a test replaces with a table of its fixture's
     /// addresses.
-    pub registered_apps: &'static [farik_runtime::registered_apps::RegisteredApp],
+    pub registered_apps: &'static [catervas_runtime::registered_apps::RegisteredApp],
     /// Where each agent's connector keys are kept (ADR 0030): in memory here, so that no test
     /// touches a real keychain, and the keychain then `connectors.json` in `main`.
     #[cfg(unix)]
     pub connector_secrets: Arc<dyn ConnectorSecrets>,
-    /// Farik's own executable, which runs Farik's own connectors (ADR 0038): none here, so a
+    /// Catervas's own executable, which runs Catervas's own connectors (ADR 0038): none here, so a
     /// test names the binary it built, and `std::env::current_exe()` in `main`.
     pub own_program: Option<PathBuf>,
-    /// Whether `farik serve` lets a browser at `http://localhost:<port>` in without a code: the
+    /// Whether `catervas serve` lets a browser at `http://localhost:<port>` in without a code: the
     /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
     #[cfg(feature = "e2e")]
     pub admit_local_preview: bool,
@@ -268,8 +268,8 @@ impl<'a> CliIo<'a> {
                 let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
-            kits: Arc::new(farik_roles::load_kit),
-            registered_apps: farik_runtime::registered_apps::REGISTERED_APPS,
+            kits: Arc::new(catervas_roles::load_kit),
+            registered_apps: catervas_runtime::registered_apps::REGISTERED_APPS,
             own_program: None,
             #[cfg(unix)]
             connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
@@ -290,7 +290,7 @@ pub struct Report {
     pub lines: Vec<String>,
     /// The same, as an object a script can read.
     pub json: Value,
-    /// When this is set, `--json` prints one of these per line instead of `json`. `farik log` is the
+    /// When this is set, `--json` prints one of these per line instead of `json`. `catervas log` is the
     /// one command that uses it: F11 calls the log an export, and an export read a line at a time is
     /// what survives being large.
     pub json_lines: Option<Vec<Value>>,
@@ -298,7 +298,7 @@ pub struct Report {
 
 /// The command ran and did what it said.
 const OK: i32 = 0;
-/// Farik refused: a project that is not there, a file that is not a contract, a rule in section 5.
+/// Catervas refused: a project that is not there, a file that is not a contract, a rule in section 5.
 const REFUSED: i32 = 1;
 /// The command line itself was wrong. Two is what clap exits with, and the shape of a wrong
 /// invocation is not ours to redefine.
@@ -310,7 +310,7 @@ pub const HUMAN: &str = "human";
 
 #[derive(Parser)]
 #[command(
-    name = "farik",
+    name = "catervas",
     version,
     about = "An operating system for a small team of AI agents.",
     long_about = None
@@ -325,7 +325,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Make the repository this is run in a Farik project.
+    /// Make the repository this is run in a Catervas project.
     Init,
     /// Work with one task.
     Task {
@@ -418,7 +418,7 @@ enum Commands {
         /// Sign in to the server's service in your browser instead of giving a key (ADR 0033).
         #[arg(long, conflicts_with_all = ["keys", "command"])]
         sign_in: bool,
-        /// The client the service's app registration gave Farik, when it offers no registration.
+        /// The client the service's app registration gave Catervas, when it offers no registration.
         #[arg(long)]
         client_id: Option<String>,
         /// The port that client's redirect address names (33418 when left out).
@@ -489,7 +489,7 @@ enum Commands {
     },
     /// Answer a question an agent asked (5.7).
     Answer {
-        /// The question's number, as farik run prints it.
+        /// The question's number, as catervas run prints it.
         question_id: u64,
         /// Your answer.
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
@@ -563,7 +563,7 @@ enum Commands {
         #[command(subcommand)]
         command: SprintCommands,
     },
-    /// Pause the whole team: no rule runs and no session starts until `farik resume`.
+    /// Pause the whole team: no rule runs and no session starts until `catervas resume`.
     Pause,
     /// Resume a paused team.
     Resume,
@@ -668,7 +668,7 @@ impl WhoseSkill {
     }
 }
 
-/// What `farik skill` does.
+/// What `catervas skill` does.
 #[cfg(unix)]
 #[derive(Subcommand)]
 enum SkillCommands {
@@ -694,7 +694,7 @@ enum SkillCommands {
         /// Add without asking, once you have read it.
         #[arg(long)]
         yes: bool,
-        /// Let it replace a skill Farik ships with its name.
+        /// Let it replace a skill Catervas ships with its name.
         #[arg(long)]
         replace: bool,
     },
@@ -711,15 +711,15 @@ enum SkillCommands {
         name: String,
         #[command(flatten)]
         whose: WhoseSkill,
-        /// The Hash `farik skill show` printed: all of it, or its first 12 digits.
+        /// The Hash `catervas skill show` printed: all of it, or its first 12 digits.
         hash: String,
-        /// Let it replace a skill Farik ships with its name.
+        /// Let it replace a skill Catervas ships with its name.
         #[arg(long)]
         replace: bool,
     },
 }
 
-/// Which session's server `farik connector` asks the daemon for.
+/// Which session's server `catervas connector` asks the daemon for.
 #[derive(clap::Args)]
 struct ConnectorAsk {
     /// The daemon's `daemon.json`.
@@ -735,7 +735,7 @@ struct ConnectorAsk {
 
 #[derive(Subcommand)]
 enum ConnectorCommands {
-    /// Start the server with only its keys and the variables Farik keeps.
+    /// Start the server with only its keys and the variables Catervas keeps.
     Run(ConnectorAsk),
     /// Print the server's headers, filled with its keys, as one JSON object.
     Headers(ConnectorAsk),
@@ -781,9 +781,9 @@ enum ProcurementCommands {
     Check,
     /// The messages that wait to be sent, whole.
     Messages,
-    /// Send a message that waits, exactly as printed: nothing leaves Farik but by this.
+    /// Send a message that waits, exactly as printed: nothing leaves Catervas but by this.
     Send {
-        /// The message's number, as `farik procurement messages` prints it.
+        /// The message's number, as `catervas procurement messages` prints it.
         message: u64,
     },
     /// Do not send a message that waits.
@@ -815,10 +815,10 @@ enum MailboxCommands {
         /// The sign-in name, the address when left out.
         #[arg(long)]
         username: Option<String>,
-        /// The folder Farik reads (INBOX when left out).
+        /// The folder Catervas reads (INBOX when left out).
         #[arg(long)]
         folder: Option<String>,
-        /// What Farik adds under every message.
+        /// What Catervas adds under every message.
         #[arg(long)]
         signature: Option<String>,
         /// Leave out the line that says an AI assistant wrote the message.
@@ -833,11 +833,11 @@ enum MailboxCommands {
 
 #[derive(Subcommand)]
 enum SiteCommands {
-    /// Farik's approved sites, on or off, the sites you allowed, and the requests that wait.
+    /// Catervas's approved sites, on or off, the sites you allowed, and the requests that wait.
     List,
     /// Allow a site the Procurement Specialist asked to read.
     Approve {
-        /// The request's number, as farik run prints it.
+        /// The request's number, as catervas run prints it.
         request: u64,
         /// A note for the Procurement Specialist's next session.
         #[arg(long)]
@@ -845,18 +845,18 @@ enum SiteCommands {
     },
     /// Do not allow a site the Procurement Specialist asked to read.
     Decline {
-        /// The request's number, as farik run prints it.
+        /// The request's number, as catervas run prints it.
         request: u64,
         /// A note for the Procurement Specialist's next session.
         #[arg(long)]
         note: Option<String>,
     },
-    /// Allow a site no one asked for, or turn one of Farik's back on.
+    /// Allow a site no one asked for, or turn one of Catervas's back on.
     Add {
         /// A name like shop.com, or the address of any page on it.
         site: String,
     },
-    /// Take a site away: one you allowed, or one of Farik's, which this turns off.
+    /// Take a site away: one you allowed, or one of Catervas's, which this turns off.
     Remove {
         /// A name like shop.com, or the address of any page on it.
         host: String,
@@ -867,8 +867,8 @@ enum SiteCommands {
 enum OrderCommands {
     /// Every purchase order, oldest first, with where it stands.
     List,
-    /// Approve an order the Procurement Specialist suggested. Farik places nothing: you place it
-    /// yourself, then say so with `farik order placed`.
+    /// Approve an order the Procurement Specialist suggested. Catervas places nothing: you place it
+    /// yourself, then say so with `catervas order placed`.
     Approve {
         /// The order, as 12 or PO-12.
         order: String,
@@ -945,7 +945,7 @@ enum PipelineCommands {
     /// Approve a data source: the team gets a request, in your name, to set it up. Nothing is
     /// connected or paid for.
     Approve {
-        /// The request's number, as `farik pipeline list` prints it.
+        /// The request's number, as `catervas pipeline list` prints it.
         pipeline: u64,
         /// A note for the Procurement Specialist's next piece of work.
         #[arg(long)]
@@ -953,7 +953,7 @@ enum PipelineCommands {
     },
     /// Do not set a data source up.
     Decline {
-        /// The request's number, as `farik pipeline list` prints it.
+        /// The request's number, as `catervas pipeline list` prints it.
         pipeline: u64,
         /// A note for the Procurement Specialist's next piece of work.
         #[arg(long)]
@@ -967,7 +967,7 @@ enum RenewalCommands {
     List,
     /// Dismiss a renewal coming up.
     Dismiss {
-        /// The renewal's number, as `farik renewal list` prints it.
+        /// The renewal's number, as `catervas renewal list` prints it.
         renewal: u64,
     },
 }
@@ -997,12 +997,12 @@ enum PostCommands {
     },
     /// Allow a post the Marketing Specialist asked about, which is not in the plan.
     Send {
-        /// The post's number, as farik run prints it.
+        /// The post's number, as catervas run prints it.
         post: u64,
     },
     /// Do not allow a post the Marketing Specialist asked about.
     Decline {
-        /// The post's number, as farik run prints it.
+        /// The post's number, as catervas run prints it.
         post: u64,
         /// A note for the Marketing Specialist's next session.
         #[arg(long)]
@@ -1047,7 +1047,7 @@ enum PlanCommands {
 enum ToolCommands {
     /// Allow the call once, with exactly the input the agent asked with.
     Approve {
-        /// The approval's number, as farik run prints it.
+        /// The approval's number, as catervas run prints it.
         approval: u64,
         /// A note for the agent's next session.
         #[arg(long)]
@@ -1055,7 +1055,7 @@ enum ToolCommands {
     },
     /// Refuse the call.
     Refuse {
-        /// The approval's number, as farik run prints it.
+        /// The approval's number, as catervas run prints it.
         approval: u64,
         /// Why, for the agent's next session.
         #[arg(long)]
@@ -1079,7 +1079,7 @@ enum CriteriaCommands {
 enum TaskCommands {
     /// File a contract as a draft request, or as a task of an epic in progress.
     Create {
-        /// The YAML contract to file. Farik assigns the id.
+        /// The YAML contract to file. Catervas assigns the id.
         file: PathBuf,
         /// The epic the task is filed under (5.16).
         #[arg(long)]
@@ -1135,7 +1135,7 @@ enum SizeArgument {
     Small,
 }
 
-impl From<SizeArgument> for farik_protocol::command::RequestSize {
+impl From<SizeArgument> for catervas_protocol::command::RequestSize {
     fn from(size: SizeArgument) -> Self {
         match size {
             SizeArgument::Large => Self::Large,
@@ -1145,7 +1145,7 @@ impl From<SizeArgument> for farik_protocol::command::RequestSize {
 }
 
 /// Runs one command and returns the code the process should exit with: 0 when it did what it said,
-/// 1 when Farik refused, 2 when the command line itself was wrong.
+/// 1 when Catervas refused, 2 when the command line itself was wrong.
 ///
 /// `args` is the whole invocation, program name first, as `std::env::args` gives it.
 #[must_use]
@@ -1180,7 +1180,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
     if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {
         say(
             &mut io.stderr,
-            "farik: farik serve prints lines for a person; --json is not available for it",
+            "catervas: catervas serve prints lines for a person; --json is not available for it",
         );
         return MISUSE;
     }
@@ -1376,7 +1376,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
     report(outcome, parsed.json, io)
 }
 
-/// `farik procurement`: the reads here, the writes through the process that drives the project.
+/// `catervas procurement`: the reads here, the writes through the process that drives the project.
 fn procurement_arm(
     command: &ProcurementCommands,
     io: &mut CliIo<'_>,
@@ -1441,7 +1441,7 @@ fn procurement_arm(
         ),
         #[cfg(not(unix))]
         _ => Err(
-            "this farik procurement command needs the daemon, which runs on Linux and macOS"
+            "this catervas procurement command needs the daemon, which runs on Linux and macOS"
                 .to_string(),
         ),
     }
@@ -1646,7 +1646,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 },
             ),
             PlanCommands::Show { .. } => {
-                return Err("farik marketing plan show only reads".to_string());
+                return Err("catervas marketing plan show only reads".to_string());
             }
         },
         Commands::Marketing {
@@ -1673,7 +1673,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 },
             ),
             PostCommands::List => {
-                return Err("farik marketing post list only reads".to_string());
+                return Err("catervas marketing post list only reads".to_string());
             }
         },
         Commands::Site { command } => match command {
@@ -1697,7 +1697,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             SiteCommands::Remove { host } => {
                 ("site remove", Command::SiteRemove { host: host.clone() })
             }
-            SiteCommands::List => return Err("farik site list only reads".to_string()),
+            SiteCommands::List => return Err("catervas site list only reads".to_string()),
         },
         Commands::Pipeline { command } => match command {
             PipelineCommands::Approve { pipeline, note } => (
@@ -1716,7 +1716,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                     note: note.clone(),
                 },
             ),
-            PipelineCommands::List => return Err("farik pipeline list only reads".to_string()),
+            PipelineCommands::List => return Err("catervas pipeline list only reads".to_string()),
         },
         Commands::Order { command } => match command {
             OrderCommands::Approve { order, note } => (
@@ -1786,14 +1786,14 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                     note: note.clone(),
                 },
             ),
-            OrderCommands::List => return Err("farik order list only reads".to_string()),
+            OrderCommands::List => return Err("catervas order list only reads".to_string()),
         },
         Commands::Renewal { command } => match command {
             RenewalCommands::Dismiss { renewal } => (
                 "renewal dismiss",
                 Command::RenewalDismiss { renewal: *renewal },
             ),
-            RenewalCommands::List => return Err("farik renewal list only reads".to_string()),
+            RenewalCommands::List => return Err("catervas renewal list only reads".to_string()),
         },
         _ => return Err("this is not one of the human's commands".to_string()),
     })
@@ -1835,15 +1835,15 @@ fn human_command(
     _io: &CliIo<'_>,
 ) -> Result<Report, String> {
     Err(format!(
-        "farik {name} needs the daemon, which runs on Linux and macOS"
+        "catervas {name} needs the daemon, which runs on Linux and macOS"
     ))
 }
 
-/// `farik run`, `farik plan`, or `farik contract new`, which drive the project, write as they go,
+/// `catervas run`, `catervas plan`, or `catervas contract new`, which drive the project, write as they go,
 /// and answer their own exit code.
 #[cfg(unix)]
 fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
-    use farik_runtime::orchestrator::TickRules;
+    use catervas_runtime::orchestrator::TickRules;
 
     if let Commands::Serve { port, no_open } = command {
         return serve::serve(*port, *no_open, io);
@@ -1888,7 +1888,7 @@ fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
 #[cfg(not(unix))]
 fn drive(_command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
     report(
-        Err("farik run needs the daemon, which runs on Linux and macOS".to_string()),
+        Err("catervas run needs the daemon, which runs on Linux and macOS".to_string()),
         as_json,
         io,
     )
@@ -1901,7 +1901,7 @@ fn stop(project: &Project, target: Option<&str>) -> Result<Report, String> {
 
 #[cfg(not(unix))]
 fn stop(_project: &Project, _target: Option<&str>) -> Result<Report, String> {
-    Err("farik stop needs the daemon, which runs on Linux and macOS".to_string())
+    Err("catervas stop needs the daemon, which runs on Linux and macOS".to_string())
 }
 
 /// Writes what the command did, or why it would not, and answers with the exit code.
@@ -1928,7 +1928,7 @@ fn report(outcome: Result<Report, String>, as_json: bool, io: &mut CliIo<'_>) ->
             if as_json {
                 say(&mut io.stderr, &format!("{}", json!({ "error": refusal })));
             } else {
-                say(&mut io.stderr, &format!("farik: {refusal}"));
+                say(&mut io.stderr, &format!("catervas: {refusal}"));
             }
             REFUSED
         }

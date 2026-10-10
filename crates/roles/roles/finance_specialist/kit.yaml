@@ -2,7 +2,7 @@
 # services it reads. It only reads: every tool that changes anything at a service is `denied`, and
 # no tool is `external_effect`, so no service has an allowance.
 #
-# Stripe is the service's official server, signed in to by route 1 (it registers Farik itself). The
+# Stripe is the service's official server, signed in to by route 1 (it registers Catervas itself). The
 # scope is pinned, since `oauth: {}` would ask for every scope Stripe advertises, a wider one added
 # later included. The user chooses the account, live or a sandbox, and the permissions on Stripe's
 # own page. Its tools are from docs.stripe.com/mcp, read 2026-10-07.
@@ -14,7 +14,7 @@
 # 2026-10-07), which warns that the tools listed vary by the grant's scope; the pin run (step 10's
 # Task 6) settles it against a live listing. Kick's `list_kick_skills` and `load_kick_skill` load
 # Kick's own instructions into the session, so they are `denied`: the role's instructions are
-# Farik's skills.
+# Catervas's skills.
 role: finance_specialist
 skills:
   - categorising-expenses
@@ -31,7 +31,7 @@ connectors:
     title: Stripe
     about: "Your payments"
     why: "Books revenue, fees and payouts from Stripe's own numbers. Read-only."
-    setup: "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see your customers' names, emails, addresses and the last four digits of their cards; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
+    setup: "Sign in with your Stripe account. On Stripe's page, choose the account and give Catervas read access only; Catervas refuses every change anyway. Catervas can see your customers' names, emails, addresses and the last four digits of their cards; it keeps only totals and Stripe's references in your books. To end Catervas's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
     labels:
       stripe_api_search: "find what Stripe can answer"
       stripe_api_details: "read how to ask Stripe"
@@ -58,7 +58,7 @@ connectors:
     title: Digits
     about: "Your books"
     why: "Reads the books you already keep there. Read-only."
-    setup: "Sign in with your Digits account and choose the business. Digits gives Farik read access only."
+    setup: "Sign in with your Digits account and choose the business. Digits gives Catervas read access only."
     labels:
       list_businesses: "list businesses"
       select_business: "choose a business"
@@ -87,7 +87,7 @@ connectors:
     title: Kick
     about: "Your books, from your bank"
     why: "Reads the books you already keep there. Read-only."
-    setup: "Sign in with your Kick account. Farik asks Kick for read access only, so it cannot change your books, and it refuses every change anyway."
+    setup: "Sign in with your Kick account. Catervas asks Kick for read access only, so it cannot change your books, and it refuses every change anyway."
     labels:
       context_browse: "list workspaces"
       context_resolve: "find a workspace"

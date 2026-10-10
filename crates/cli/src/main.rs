@@ -1,11 +1,11 @@
-//! The `farik` command line. Everything it does is in the library beside this file, so that the
+//! The `catervas` command line. Everything it does is in the library beside this file, so that the
 //! tests run a command without spawning a process.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use farik::ids::{RandomSessionIds, SystemClock};
-use farik::{CliIo, Engine, Interrupts, run_cli};
+use catervas::ids::{RandomSessionIds, SystemClock};
+use catervas::{CliIo, Engine, Interrupts, run_cli};
 
 fn main() -> std::process::ExitCode {
     let arguments: Vec<String> = std::env::args().collect();
@@ -29,8 +29,8 @@ fn main() -> std::process::ExitCode {
     io.interrupts = Interrupts::CtrlC;
     io.session_ids = Arc::new(RandomSessionIds);
     io.open_url = Arc::new(open_in_browser);
-    io.credential_stores = farik::system_credential_stores(&io.env, true);
-    io.connector_secrets = farik::system_connector_secrets(&io.env);
+    io.credential_stores = catervas::system_credential_stores(&io.env, true);
+    io.connector_secrets = catervas::system_connector_secrets(&io.env);
     io.own_program = std::env::current_exe().ok();
     let code = run_cli(&arguments, &mut io);
     std::process::ExitCode::from(u8::try_from(code).unwrap_or(1))

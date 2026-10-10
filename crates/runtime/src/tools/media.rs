@@ -1,12 +1,12 @@
 //! The pictures and clips of a post (ADR 0042, and the founder's decision of 2026-10-06: a post's
 //! pictures are the ones the agent made, the owner's own, or any public address of theirs). A post
-//! names up to four `https` addresses, and Farik checks each one twice, when the post is written and
+//! names up to four `https` addresses, and Catervas checks each one twice, when the post is written and
 //! again when it is handed to Buffer: that it is a public address, never a loopback or a private
-//! one, and that it answers with an image or a video of a size Buffer will take. Farik asks the
+//! one, and that it answers with an image or a video of a size Buffer will take. Catervas asks the
 //! address for its headers only, and never follows a redirect.
 //!
 //! Where an address leads is the agent's to choose, so the check stands between an agent and
-//! whatever Farik's own computer can reach: an address that is an IP literal is judged by the
+//! whatever Catervas's own computer can reach: an address that is an IP literal is judged by the
 //! literal, and a name by every address it resolves to, at the moment the connection is made.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};

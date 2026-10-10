@@ -1,4 +1,4 @@
-import { Button, StatusWord } from "@farik/ui";
+import { Button, StatusWord } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";

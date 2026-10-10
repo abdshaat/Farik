@@ -2,7 +2,7 @@ import { defineConfig, type ProxyOptions } from "vite";
 
 // The dev server stands in for the daemon's own origin (step 02): the daemon
 // checks Origin and Host, so the proxy rewrites both to the daemon's.
-const daemon = `http://127.0.0.1:${process.env.FARIK_PORT}`;
+const daemon = `http://127.0.0.1:${process.env.CATERVAS_PORT}`;
 const toDaemon: ProxyOptions = {
 	target: daemon,
 	changeOrigin: true,

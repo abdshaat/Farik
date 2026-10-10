@@ -5,8 +5,8 @@ use std::fmt::Write as _;
 use std::hash::{BuildHasher, RandomState};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use catervas_protocol::clock::{Clock, IdSource};
 use chrono::{DateTime, Utc};
-use farik_protocol::clock::{Clock, IdSource};
 
 /// The wall clock.
 pub struct SystemClock;
@@ -56,7 +56,7 @@ impl IdSource for RandomSessionIds {
 mod tests {
     use std::collections::BTreeSet;
 
-    use farik_protocol::clock::IdSource;
+    use catervas_protocol::clock::IdSource;
 
     use super::RandomSessionIds;
 

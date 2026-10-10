@@ -1,9 +1,9 @@
-//! The connectors Farik runs itself (`docs/SPEC.md` 5.6): each one's pinned image, its arguments, and
+//! The connectors Catervas runs itself (`docs/SPEC.md` 5.6): each one's pinned image, its arguments, and
 //! every tool's tag, read from the kit that ships it.
 
 use std::collections::BTreeMap;
 
-use farik_core::governor::permissions::ConnectorTag;
+use catervas_core::governor::permissions::ConnectorTag;
 use serde::Deserialize;
 
 /// A built-in connector, as the UI/UX Designer's kit defines it.
@@ -22,13 +22,13 @@ pub struct ConnectorDefinition {
     pub tools: BTreeMap<String, ConnectorTag>,
 }
 
-/// The connector Farik ships under `name`, or `None` for a name Farik does not ship: the
+/// The connector Catervas ships under `name`, or `None` for a name Catervas does not ship: the
 /// `container` connector of the UI/UX Designer's kit (`roles/ui_ux_designer/kit.yaml`).
 #[must_use]
 pub fn builtin_connector(name: &str) -> Option<ConnectorDefinition> {
     // The Designer's kit is the only one that ships a container, and the tests over every shipped
     // kit rule out its failing to load.
-    let kit = crate::load_kit(farik_core::contract::Role::UiUxDesigner).ok()?;
+    let kit = crate::load_kit(catervas_core::contract::Role::UiUxDesigner).ok()?;
     kit.connectors
         .into_iter()
         .find_map(|connector| match connector {
@@ -41,7 +41,7 @@ pub fn builtin_connector(name: &str) -> Option<ConnectorDefinition> {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::team::BUILTIN_CONNECTORS;
+    use catervas_core::team::BUILTIN_CONNECTORS;
 
     use super::builtin_connector;
 

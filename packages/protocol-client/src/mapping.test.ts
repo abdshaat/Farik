@@ -164,7 +164,7 @@ describe("mapping", () => {
 			issuer: "https://github.com/login/oauth",
 			provider: "GitHub",
 			user_code: "WDJB-MJHT",
-			install_url: "https://github.com/apps/farik/installations/new",
+			install_url: "https://github.com/apps/catervas/installations/new",
 		};
 		const camel = {
 			attempt: "0123",
@@ -172,7 +172,7 @@ describe("mapping", () => {
 			issuer: "https://github.com/login/oauth",
 			provider: "GitHub",
 			userCode: "WDJB-MJHT",
-			installUrl: "https://github.com/apps/farik/installations/new",
+			installUrl: "https://github.com/apps/catervas/installations/new",
 		};
 		expect(toCamel(wire)).toEqual(camel);
 		expect(toSnake(camel)).toEqual(wire);

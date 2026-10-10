@@ -9,20 +9,20 @@ use std::fmt::Display;
 use std::path::Path;
 use std::sync::Arc;
 
-use farik_core::contract::Role;
-use farik_core::criteria::validate_criteria;
-use farik_core::governor::gates::DesignerBrowser;
-use farik_core::governor::paths::{PathRefusal, check_protected_paths};
-use farik_core::team::{
+use catervas_core::contract::Role;
+use catervas_core::criteria::validate_criteria;
+use catervas_core::governor::gates::DesignerBrowser;
+use catervas_core::governor::paths::{PathRefusal, check_protected_paths};
+use catervas_core::team::{
     Agent, AgentStatus, CustomServer, CustomTransport, MODEL_FAMILIES, McpServerSource,
     McpServerWire, Team, ValidationError, custom_server, describe_change, spec_sha256,
     validate_team,
 };
-use farik_protocol::command::{Command, CommandReply};
-use farik_protocol::event::{EventBody, new_event};
-use farik_protocol::generated::event::{CriteriaUpdatedBody, TeamUpdatedBody};
-use farik_roles::{Kit, KitConnector, load_role};
-use farik_store::{EventQuery, names_of, scan_project};
+use catervas_protocol::command::{Command, CommandReply};
+use catervas_protocol::event::{EventBody, new_event};
+use catervas_protocol::generated::event::{CriteriaUpdatedBody, TeamUpdatedBody};
+use catervas_roles::{Kit, KitConnector, load_role};
+use catervas_store::{EventQuery, names_of, scan_project};
 use serde_json::{Value, json};
 
 use super::signed_in::Binding;
@@ -58,7 +58,7 @@ pub(super) const METHODS: [&str; 16] = [
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
-pub const SETUP_PENDING: &str = ".farik/local/setup-pending";
+pub const SETUP_PENDING: &str = ".catervas/local/setup-pending";
 
 /// How deep `project.scan` looks for private files, and how many entries it looks at at most.
 const WALK_DEPTH: u32 = 4;
@@ -100,7 +100,7 @@ pub(super) fn query(
             answer["connectors"] = json!(connector_states(state, deps, &team));
             answer["kits"] = json!(kits_of(deps, &team, state.registered_apps())?);
             answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
-            answer["max_agents"] = json!(farik_core::team::MAX_AGENTS);
+            answer["max_agents"] = json!(catervas_core::team::MAX_AGENTS);
             answer["sandboxed"] = json!(deps.transitions.sandboxed());
             Ok(answer)
         }
@@ -126,12 +126,12 @@ pub(super) fn query(
         }
         "models.list" => models(deps),
         "settings.defaults" => {
-            let defaults = farik_core::team::defaults();
+            let defaults = catervas_core::team::defaults();
             Ok(json!({
                 "budgets": serde_json::to_value(defaults.budgets).map_err(|e| internal(&e))?,
                 "policy": serde_json::to_value(defaults.policy).map_err(|e| internal(&e))?,
                 "rules": {},
-                "ui_paths": farik_core::governor::team_rules::DEFAULT_UI_PATHS,
+                "ui_paths": catervas_core::governor::team_rules::DEFAULT_UI_PATHS,
             }))
         }
         "project.scan" => scanned(deps),
@@ -157,14 +157,14 @@ fn skills_list(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let kit = (deps.kits)(Role::from(held.role)).map_err(|e| internal(&e))?;
     let events = deps
         .log
-        .read(&farik_store::EventQuery {
+        .read(&catervas_store::EventQuery {
             kinds: vec![
-                farik_protocol::event::EventKind::SkillAdded,
-                farik_protocol::event::EventKind::SkillChanged,
-                farik_protocol::event::EventKind::SkillRemoved,
-                farik_protocol::event::EventKind::SkillConfirmed,
+                catervas_protocol::event::EventKind::SkillAdded,
+                catervas_protocol::event::EventKind::SkillChanged,
+                catervas_protocol::event::EventKind::SkillRemoved,
+                catervas_protocol::event::EventKind::SkillConfirmed,
             ],
-            ..farik_store::EventQuery::default()
+            ..catervas_store::EventQuery::default()
         })
         .map_err(|e| internal(&e))?;
     let rows = crate::skills::skill_rows(
@@ -178,7 +178,7 @@ fn skills_list(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
 }
 
 /// `skill.get { level, agent?, name }`: every file of the skill as its folder holds it, its hash,
-/// and the frontmatter keys Farik ignores; the refusal's code when the folder is one the checks
+/// and the frontmatter keys Catervas ignores; the refusal's code when the folder is one the checks
 /// refuse.
 fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let name = params["name"].as_str().unwrap_or_default();
@@ -195,7 +195,7 @@ fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             ));
         }
     };
-    if !farik_roles::skill_name_ok(name) {
+    if !catervas_roles::skill_name_ok(name) {
         return Err(Failure::new(
             REFUSED,
             "skill_name_invalid: a skill's name is lower-case words joined by hyphens, up to 64 characters",
@@ -218,39 +218,41 @@ fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             format!("there is no skill {name} there"),
         ));
     }
-    let refused = |refusal: farik_roles::SkillRefusal| Failure::new(REFUSED, refusal.to_string());
+    let refused =
+        |refusal: catervas_roles::SkillRefusal| Failure::new(REFUSED, refusal.to_string());
     let files = crate::skills::read_skill_folder(&folder).map_err(refused)?;
-    let checked = farik_roles::check_skill(name, &files).map_err(refused)?;
+    let checked = catervas_roles::check_skill(name, &files).map_err(refused)?;
     // `check_skill` refused any file that is not UTF-8, so what is shown is what is hashed.
     let mut texts = BTreeMap::new();
     for (path, bytes) in &files {
         let text = String::from_utf8(bytes.clone())
-            .map_err(|_| refused(farik_roles::SkillRefusal::FileNotText(path.clone())))?;
+            .map_err(|_| refused(catervas_roles::SkillRefusal::FileNotText(path.clone())))?;
         texts.insert(path.clone(), text);
     }
     Ok(json!({
         "files": texts,
-        "sha256": farik_core::skill::skill_sha256(&files),
+        "sha256": catervas_core::skill::skill_sha256(&files),
         "ignored_fields": checked.ignored_fields,
     }))
 }
 
-/// `skill.get { level: "role", role, name }`: the `SKILL.md` Farik ships for `role`, with no hash,
+/// `skill.get { level: "role", role, name }`: the `SKILL.md` Catervas ships for `role`, with no hash,
 /// since it is trusted and pinned in the binary. `role` and `name` are checked before any lookup,
 /// and nothing here builds a path.
 fn role_skill_get(deps: &ToolDeps, params: &Value, name: &str) -> Result<Value, Failure> {
-    if !farik_roles::skill_name_ok(name) {
+    if !catervas_roles::skill_name_ok(name) {
         return Err(Failure::new(
             REFUSED,
             "skill_name_invalid: a skill's name is lower-case words joined by hyphens, up to 64 characters",
         ));
     }
-    let asked = serde_json::from_value::<farik_core::contract::Role>(params["role"].clone()).ok();
-    let role = asked.and_then(|role| farik_roles::load_role(role).ok());
+    let asked =
+        serde_json::from_value::<catervas_core::contract::Role>(params["role"].clone()).ok();
+    let role = asked.and_then(|role| catervas_roles::load_role(role).ok());
     let (Some(role), Some(asked)) = (role, asked) else {
         return Err(Failure::new(
             REFUSED,
-            "a role's skill names a role Farik ships",
+            "a role's skill names a role Catervas ships",
         ));
     };
     if let Some(skill) = role.skills.iter().find(|skill| skill.name == name) {
@@ -274,7 +276,7 @@ fn role_skill_get(deps: &ToolDeps, params: &Value, name: &str) -> Result<Value, 
 }
 
 /// `account.status` on a daemon with a project: the credential read afresh from the environment
-/// and the stores `farik serve` was given.
+/// and the stores `catervas serve` was given.
 pub(super) fn account_status(state: &DaemonState) -> Result<Value, Failure> {
     let web = web_of(state)?;
     let mut status = match load_credential(&web.env, &web.stores) {
@@ -306,8 +308,8 @@ pub(super) async fn connect(state: &DaemonState, params: &Value) -> Result<Value
         return Err(Failure::new(
             REFUSED,
             format!(
-                "your AI account's key comes from {variable}, which Farik cannot change: change \
-                 it where Farik runs, then start Farik again"
+                "your AI account's key comes from {variable}, which Catervas cannot change: change \
+                 it where Catervas runs, then start Catervas again"
             ),
         ));
     }
@@ -368,7 +370,7 @@ pub(super) fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team
                 .map_or(Kept::Unavailable, |at| state.kept(&at));
             let signs_in = server.oauth().is_some();
             let ended = matches!(&kept, Kept::Entry { spec_sha256, signed_in: Some(grant), .. }
-                if grant.lapsed && *spec_sha256 == farik_core::team::spec_sha256(&server));
+                if grant.lapsed && *spec_sha256 == catervas_core::team::spec_sha256(&server));
             // A kit's service the kit no longer says is as it is stays unconnected until the user
             // connects it again, and one the kit no longer has cannot be (ADR 0036).
             let kit_says = if server.kit {
@@ -512,7 +514,7 @@ fn described(
 
 /// `wire`, a custom server as the user describes it, as `agent`'s entry in `team` with `tools`,
 /// held to the team's rules: the entry and the server it describes. What `connector.connect` and
-/// `farik connect` both build (ADR 0030).
+/// `catervas connect` both build (ADR 0030).
 ///
 /// # Errors
 ///
@@ -556,12 +558,12 @@ fn entry_in(
 
 /// The service `name` of `kit` as `agent`'s entry in `team`: `source: kit`, every field from the
 /// kit and the kit's tags as its tools, held to the team's rules (ADR 0036). What
-/// `connector.connect` and `farik connect` both build for a kit's service.
+/// `connector.connect` and `catervas connect` both build for a kit's service.
 ///
 /// # Errors
 ///
 /// `connector_not_in_kit` at `/agents/<i>/mcp_servers` when `kit` is not the agent's role's, lacks
-/// `name`, or holds a `container` connector of that name, which Farik runs itself; an agent the
+/// `name`, or holds a `container` connector of that name, which Catervas runs itself; an agent the
 /// team lacks at `/agents`; `allowance_not_offered` or `allowance_out_of_range` at
 /// `/agents/<i>/mcp_servers` for an `asked` allowance (ADR 0037); else the team's errors, each at
 /// its field. The entry's allowances are the kit's defaults overlaid by `asked`.
@@ -669,8 +671,8 @@ pub fn plan_tools_of(kit: &Kit, server: &CustomServer) -> std::collections::BTre
         .unwrap_or_default()
 }
 
-/// Whether `entry` is a service that signs in through one of Farik's own connectors while the
-/// daemon's table has no app of Farik's for it (ADR 0044): until Farik Cloud signs customers in
+/// Whether `entry` is a service that signs in through one of Catervas's own connectors while the
+/// daemon's table has no app of Catervas's for it (ADR 0044): until Catervas Cloud signs customers in
 /// at the web launch, nothing here can connect it, and the page says so in place of Connect.
 fn at_launch(entry: &McpServerWire, apps: &[crate::registered_apps::RegisteredApp]) -> bool {
     let Some(server) = kit_server(entry) else {
@@ -680,8 +682,8 @@ fn at_launch(entry: &McpServerWire, apps: &[crate::registered_apps::RegisteredAp
         && matches!(
             &server.transport,
             CustomTransport::Stdio { command, args, .. }
-                if farik_roles::is_farik_connector(command, args)
-                    && crate::registered_apps::app_for_farik_connector(apps, command, args)
+                if catervas_roles::is_catervas_connector(command, args)
+                    && crate::registered_apps::app_for_catervas_connector(apps, command, args)
                         .is_none()
         )
 }
@@ -780,7 +782,7 @@ pub fn labelled(
         .find(|name| !usable.contains(&name.as_str()))
     {
         return Err(format!(
-            "tag_unknown_tool: {unknown} is not a tool this server lists that Farik can use; its \
+            "tag_unknown_tool: {unknown} is not a tool this server lists that Catervas can use; its \
              tools are {}",
             usable.join(", ")
         ));
@@ -912,9 +914,9 @@ async fn list_with(
         Authority::Keys(keys) => (keys.clone(), None),
         Authority::SignedIn(grant) => (BTreeMap::new(), Some(grant.access_token.clone())),
     };
-    let farik = crate::connectors::own_program(server, state.own_program())
+    let catervas = crate::connectors::own_program(server, state.own_program())
         .map_err(|why| Failure::new(REFUSED, why.to_string()))?;
-    list_tools(server, &keys, bearer.as_ref(), &folder, &farik)
+    list_tools(server, &keys, bearer.as_ref(), &folder, &catervas)
         .await
         .map_err(not_listed)
 }
@@ -1279,7 +1281,7 @@ async fn connector_disconnect(
         params["agent"].as_str().unwrap_or_default(),
         params["server"].as_str().unwrap_or_default(),
     );
-    // Without this connection Farik could no longer stop the ads at their budget, so it pauses
+    // Without this connection Catervas could no longer stop the ads at their budget, so it pauses
     // them first, once the command's own checks pass: a refused removal pauses nothing. A refusal
     // by Google is no reason to keep the connection: it is removed all the same, and Today says
     // the ads keep running (the owner's answer of 2026-10-07). The writes' lock is held until the
@@ -1414,7 +1416,7 @@ fn newest(deps: &ToolDeps) -> Result<Vec<(String, &'static str)>, Failure> {
 }
 
 /// The words for `id`: its family's, marked older when a newer one of the family is priced, or
-/// the id itself when no family Farik names it.
+/// the id itself when no family Catervas names it.
 fn model_label(id: &str, newest: &[(String, &str)]) -> String {
     match MODEL_FAMILIES
         .iter()
@@ -1458,7 +1460,7 @@ fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     };
     let mut auto = team.clone();
     if let Some(judgment) = auto.policy.judgment.as_mut() {
-        judgment.judge = farik_core::team::JudgeChoice::Auto;
+        judgment.judge = catervas_core::team::JudgeChoice::Auto;
     }
     Ok(json!({
         "agents": agents,
@@ -1484,8 +1486,8 @@ fn scanned(deps: &ToolDeps) -> Result<Value, Failure> {
     walk(deps.files.root(), "", 1, &mut on_disk);
     let kept_private: Vec<&String> = globs
         .iter()
-        // Farik's own local folder is not the user's private file.
-        .filter(|glob| !glob.starts_with(".farik/local"))
+        // Catervas's own local folder is not the user's private file.
+        .filter(|glob| !glob.starts_with(".catervas/local"))
         .filter(|glob| {
             matches!(
                 check_protected_paths(&on_disk, std::slice::from_ref(glob)),
@@ -1690,7 +1692,7 @@ pub(super) fn worked(deps: &ToolDeps, agent_id: &str) -> Result<bool, Failure> {
 fn replacement(
     deps: &ToolDeps,
     params: &Value,
-) -> Result<(String, Option<farik_core::team::Agent>), Failure> {
+) -> Result<(String, Option<catervas_core::team::Agent>), Failure> {
     let agent_id = params["agent_id"].as_str().unwrap_or_default();
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
     let mut wire = serde_json::to_value(&team).map_err(|e| internal(&e))?;
@@ -1726,7 +1728,7 @@ fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), F
         deps,
         state,
         &agent_id,
-        farik_core::team::AgentStatus::Retired,
+        catervas_core::team::AgentStatus::Retired,
         newcomer,
     );
     drop(writing);
@@ -1779,14 +1781,14 @@ pub(super) fn team_updated(team: &Team, template: Option<&str>) -> EventBody {
 }
 
 /// The criterion library `wire` is, or the refusal with the schema's errors.
-fn library(wire: &Value) -> Result<farik_core::criteria::CriteriaLibrary, Failure> {
+fn library(wire: &Value) -> Result<catervas_core::criteria::CriteriaLibrary, Failure> {
     validate_criteria(wire).map_err(|errors| Refused::Errors(errors).into())
 }
 
 /// Writes the library and records `criteria.updated`.
 fn write_criteria(
     deps: &ToolDeps,
-    library: &farik_core::criteria::CriteriaLibrary,
+    library: &catervas_core::criteria::CriteriaLibrary,
 ) -> Result<(), Failure> {
     deps.files
         .write_criteria(library)
@@ -1990,7 +1992,7 @@ fn words(error: &CredentialError) -> String {
     }
 }
 
-/// A mailbox command's refusal as the browser is shown it: the code, then Farik's words, with no
+/// A mailbox command's refusal as the browser is shown it: the code, then Catervas's words, with no
 /// data, as `account.connect`'s.
 fn mailbox_failure(refusal: &crate::procurement::MailboxRefusal) -> Failure {
     Failure::new(REFUSED, refusal.to_string())
@@ -2089,12 +2091,12 @@ pub(super) mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::{EventKind, NewEvent, event_from_value};
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::{Value, json};
 
-    use farik_protocol::command::{command_from_value, command_to_value};
-    use farik_protocol::event::event_to_value;
+    use catervas_protocol::command::{command_from_value, command_to_value};
+    use catervas_protocol::event::event_to_value;
 
     use crate::claude::{ClaudeCredential, Secret, SharedCredential};
     use crate::connectors::{
@@ -2108,7 +2110,7 @@ pub(super) mod tests {
     use crate::pause::paused;
     use crate::tools::fixtures::at;
 
-    const MARKER: &str = ".farik/local/setup-pending";
+    const MARKER: &str = ".catervas/local/setup-pending";
 
     /// `harness`'s daemon with its browser routes on, its credential kept in `store`, and `env`;
     /// answered with the credential its sessions start with.
@@ -2147,7 +2149,7 @@ pub(super) mod tests {
     /// An event `agent` produced, which is work the log has seen.
     pub(crate) fn worked(harness: &Harness, agent: &str) {
         let event = event_from_value(&json!({
-            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "farik", "project_id": "farik",
+            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "catervas", "project_id": "catervas",
             "agent_id": agent, "kind": "tool.called", "body": { "tool": "Read", "input": "{}" },
         }))
         .expect("the fixture is schema-valid");
@@ -2284,9 +2286,9 @@ pub(super) mod tests {
             .project
             .repo
             .path
-            .join(".farik/agents/dev-a/skills/api-style");
+            .join(".catervas/agents/dev-a/skills/api-style");
         let held = crate::skills::read_skill_folder(&folder).expect("readable");
-        assert_eq!(got["sha256"], farik_core::skill::skill_sha256(&held));
+        assert_eq!(got["sha256"], catervas_core::skill::skill_sha256(&held));
         assert_eq!(got["ignored_fields"], json!(["allowed-tools"]));
         let files: BTreeMap<String, String> = held
             .iter()
@@ -2454,7 +2456,7 @@ pub(super) mod tests {
             "level": "role", "role": "software_developer", "name": "implementing-a-contract"
         });
         let got = query(&harness.daemon, "skill.get", &asked, "skillGetResult");
-        let shipped = farik_roles::load_role(farik_core::contract::Role::SoftwareDeveloper)
+        let shipped = catervas_roles::load_role(catervas_core::contract::Role::SoftwareDeveloper)
             .expect("ships")
             .skills
             .remove(0);
@@ -2503,9 +2505,9 @@ pub(super) mod tests {
         let saved = crate::skills::save_skill(&harness.project.deps, &level, &files, false)
             .expect_err("refused at save");
         assert_eq!(saved.code(), "skill_file_not_text");
-        // A folder edited outside Farik is refused at read and at confirm, naming the file.
+        // A folder edited outside Catervas is refused at read and at confirm, naming the file.
         save_a_skill(&harness, None, "api-style", "");
-        let folder = harness.project.repo.path.join(".farik/skills/api-style");
+        let folder = harness.project.repo.path.join(".catervas/skills/api-style");
         std::fs::write(folder.join("references/a.md"), [0xff, 0xfe, b'x']).expect("edit");
         let reply = rpc(
             &harness.daemon,
@@ -2518,7 +2520,7 @@ pub(super) mod tests {
             "{reply}"
         );
         let held = crate::skills::read_skill_folder(&folder).expect("readable");
-        let hash = farik_core::skill::skill_sha256(&held);
+        let hash = catervas_core::skill::skill_sha256(&held);
         let confirmed =
             crate::skills::confirm_skill(&harness.project.deps, &level, "api-style", &hash, false)
                 .expect_err("refused at confirm");
@@ -2574,7 +2576,7 @@ pub(super) mod tests {
 
         // An agent a save adds has no pins either, whatever it carries.
         let mut added = team_file(&harness);
-        let mut zed = farik_core::team::fixtures::an_agent_wire("zed", "architect");
+        let mut zed = catervas_core::team::fixtures::an_agent_wire("zed", "architect");
         zed["skills"] = json!([{ "name": "forged", "sha256": "0".repeat(64) }]);
         added["agents"].as_array_mut().expect("agents").push(zed);
         call(
@@ -2587,7 +2589,8 @@ pub(super) mod tests {
         assert_eq!(pins(&harness), (team_pins.clone(), agent_pins.clone()));
 
         // A replacement keeps every pin and gives the newcomer none.
-        let mut newcomer = farik_core::team::fixtures::an_agent_wire("noor", "software_developer");
+        let mut newcomer =
+            catervas_core::team::fixtures::an_agent_wire("noor", "software_developer");
         newcomer["skills"] = json!([{ "name": "forged", "sha256": "0".repeat(64) }]);
         call(
             &harness.daemon,
@@ -2610,7 +2613,7 @@ pub(super) mod tests {
         let proposed_with = |name: &str, previews: Arc<dyn crate::preview::PreviewFactory>| {
             let mut harness = Harness::new(name, |_| {});
             harness.previews = previews;
-            // The orchestrator tells the governor's door what runs previews, as `farik serve` does.
+            // The orchestrator tells the governor's door what runs previews, as `catervas serve` does.
             let _ = harness.orchestrator(harness.recorded(Vec::new()));
             query(
                 &harness.daemon,
@@ -2695,7 +2698,7 @@ pub(super) mod tests {
         // Docker per request held up every other request of the page behind `docker info`, which
         // `UnaskedPreviews` fails.
         use crate::preview::fixtures::UnaskedPreviews;
-        use farik_store::files::Sandbox;
+        use catervas_store::files::Sandbox;
 
         for (name, setting, sandboxed) in [
             ("team-get-sandboxed", Some(Sandbox::Docker), true),
@@ -2811,7 +2814,7 @@ pub(super) mod tests {
         // Planning in sprints, as every new team does (ADR 0028).
         team["policy"]["plan_in_sprints"] = json!(true);
         assert_eq!(proposed["team"]["policy"], team["policy"]);
-        farik_core::team::validate_team(&proposed["team"]).expect("a team");
+        catervas_core::team::validate_team(&proposed["team"]).expect("a team");
         assert_eq!(
             proposed["criteria"],
             serde_json::to_value(harness.project.deps.files.read_criteria().expect("reads"))
@@ -2859,7 +2862,7 @@ pub(super) mod tests {
             ("1234567890", 21),
             ("total", "500.00"),
         );
-        // A campaign of MP-1 that Farik paused when the plan ended is not paused again.
+        // A campaign of MP-1 that Catervas paused when the plan ended is not paused again.
         ads.made_campaign(
             ("MP-1", "search-done"),
             ("1234567890", 22),
@@ -2936,7 +2939,7 @@ pub(super) mod tests {
             .into_iter()
             // Campaign 22 was recorded paused before, when its plan ended.
             .filter(|event| {
-                !matches!(&event.body, farik_protocol::event::EventBody::MarketingCampaignPaused(body)
+                !matches!(&event.body, catervas_protocol::event::EventBody::MarketingCampaignPaused(body)
                     if body.campaign.as_str().ends_with("/22"))
             })
             .collect();
@@ -2955,7 +2958,7 @@ pub(super) mod tests {
         );
         let why = |campaign: &str| {
             events.iter().find_map(|event| match &event.body {
-                farik_protocol::event::EventBody::MarketingCampaignPaused(body)
+                catervas_protocol::event::EventBody::MarketingCampaignPaused(body)
                     if body.campaign.as_str() == campaign =>
                 {
                     Some(body.why.to_string())
@@ -3080,7 +3083,7 @@ pub(super) mod tests {
             ])
             .into_iter()
             .filter(|event| {
-                !matches!(&event.body, farik_protocol::event::EventBody::MarketingCampaignPaused(body)
+                !matches!(&event.body, catervas_protocol::event::EventBody::MarketingCampaignPaused(body)
                     if body.campaign.as_str().ends_with("/22"))
             })
             .map(|event| event.body.kind().to_string())
@@ -3212,7 +3215,7 @@ pub(super) mod tests {
     /// once its `pauses` have reached Google; an enable by Kai's session sent then waits too, and
     /// is refused once the write is done and his keys are gone, without reaching Google. With the
     /// lock let go after the pause, the enable would run in between and turn a paused campaign
-    /// on after Farik stopped it.
+    /// on after Catervas stopped it.
     #[allow(
         clippy::await_holding_lock,
         reason = "the team's lock is held across the removal so that its write waits on it"
@@ -3498,7 +3501,7 @@ pub(super) mod tests {
             |wire| {
                 crate::tools::fixtures::with_the_marketing_specialist(wire);
                 wire["agents"].as_array_mut().expect("agents").push(
-                    farik_core::team::fixtures::an_agent_wire("lia", "marketing_specialist"),
+                    catervas_core::team::fixtures::an_agent_wire("lia", "marketing_specialist"),
                 );
             },
             |_, _| {},
@@ -3736,9 +3739,9 @@ pub(super) mod tests {
         let updated = harness.project.events(&[EventKind::TeamUpdated]);
         assert_eq!(updated.len(), 1);
         assert_eq!(
-            farik_protocol::event::event_to_value(&updated[0])["body"],
+            catervas_protocol::event::event_to_value(&updated[0])["body"],
             json!({
-                "team_name": "Farik",
+                "team_name": "Catervas",
                 "agent_ids": ["pm", "dev-a", "dev-b"],
                 "updated_by": "human",
                 "plan_in_sprints": false
@@ -3799,7 +3802,7 @@ pub(super) mod tests {
                 },
             ])
         );
-        // A paused Architect checks nothing: Farik's choice is the Product Manager.
+        // A paused Architect checks nothing: Catervas's choice is the Product Manager.
         let pm = json!({ "agent_id": "pm", "display_name": "pm", "role": "product_manager" });
         assert_eq!(
             got["judges"],
@@ -4059,20 +4062,20 @@ pub(super) mod tests {
             rpc(
                 &daemon,
                 "agent.replace",
-                &json!({ "agent_id": "dev-b", "newcomer": farik_core::team::fixtures::an_agent_wire("lin", "software_developer") }),
+                &json!({ "agent_id": "dev-b", "newcomer": catervas_core::team::fixtures::an_agent_wire("lin", "software_developer") }),
             )
         });
         std::thread::sleep(std::time::Duration::from_millis(300));
         // While another write holds the team, it adds a Lin of its own: the newcomer's id is taken.
         let mut wire = team_file(&harness);
         wire["agents"].as_array_mut().expect("agents").push(
-            farik_core::team::fixtures::an_agent_wire("lin", "architect"),
+            catervas_core::team::fixtures::an_agent_wire("lin", "architect"),
         );
         harness
             .project
             .deps
             .files
-            .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
             .expect("written");
         drop(writing);
         let reply = asking.join().expect("the replace ends");
@@ -4275,7 +4278,7 @@ pub(super) mod tests {
         let updated = harness.project.events(&[EventKind::CriteriaUpdated]);
         assert_eq!(updated.len(), 1);
         assert_eq!(
-            farik_protocol::event::event_to_value(&updated[0])["body"]["updated_by"],
+            catervas_protocol::event::event_to_value(&updated[0])["body"]["updated_by"],
             "human"
         );
         let (code, _) = refused(
@@ -4373,10 +4376,10 @@ pub(super) mod tests {
         assert!(harness.project.events(&[EventKind::TeamPaused]).is_empty());
     }
 
-    /// Appends a `team.paused` with `body`, as Farik or the human would.
+    /// Appends a `team.paused` with `body`, as Catervas or the human would.
     fn paused_with(harness: &Harness, body: &Value) {
         let event = event_from_value(&json!({
-            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "farik", "project_id": "farik",
+            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "catervas", "project_id": "catervas",
             "kind": "team.paused", "body": body.clone(),
         }))
         .expect("the fixture is schema-valid");
@@ -4409,7 +4412,7 @@ pub(super) mod tests {
         assert_eq!(status().get("key_refused"), None);
         paused_with(
             &harness,
-            &json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+            &json!({ "by": "catervas", "reason": "credential_refused", "detail": "401" }),
         );
         assert_eq!(status()["key_refused"], json!(true));
 
@@ -4460,9 +4463,9 @@ pub(super) mod tests {
         let handler: crate::daemon::CommandHandler = Arc::new(move |command| {
             let orchestrator = Arc::clone(&orchestrator);
             Box::pin(async move {
-                if matches!(command, farik_protocol::command::Command::TeamResume) {
+                if matches!(command, catervas_protocol::command::Command::TeamResume) {
                     orchestrator
-                        .handle(farik_protocol::command::Command::TeamResume)
+                        .handle(catervas_protocol::command::Command::TeamResume)
                         .await
                         .expect("the human's resume");
                 }
@@ -4474,7 +4477,7 @@ pub(super) mod tests {
         served(&harness, &store, &[]);
         paused_with(
             &harness,
-            &json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+            &json!({ "by": "catervas", "reason": "credential_refused", "detail": "401" }),
         );
 
         let reply = rpc(
@@ -4523,7 +4526,7 @@ pub(super) mod tests {
             "settingsDefaultsResult",
         );
         assert_eq!(defaults["budgets"], json!({}), "no daily limit (ADR 0015)");
-        assert_eq!(defaults["rules"], json!({}), "the rules Farik ships");
+        assert_eq!(defaults["rules"], json!({}), "the rules Catervas ships");
         assert_eq!(
             defaults["policy"],
             json!({
@@ -4591,7 +4594,7 @@ pub(super) mod tests {
             &json!({}),
             "projectScanResult",
         );
-        let found = farik_store::scan_project(&harness.project.deps.git, at()).expect("scans");
+        let found = catervas_store::scan_project(&harness.project.deps.git, at()).expect("scans");
         assert_eq!(
             scanned["facts"],
             json!({
@@ -4643,9 +4646,9 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn leaves_farik_own_folder_out_of_kept_private() {
+    fn leaves_catervas_own_folder_out_of_kept_private() {
         let harness = driven("project-scan-own");
-        let local = harness.project.repo.path.join(".farik/local/x");
+        let local = harness.project.repo.path.join(".catervas/local/x");
         std::fs::create_dir_all(local.parent().expect("a parent")).expect("made");
         std::fs::write(local, "x").expect("written");
         let scanned = query(
@@ -4658,7 +4661,7 @@ pub(super) mod tests {
             !scanned["kept_private"]
                 .as_array()
                 .expect("a list")
-                .contains(&json!(".farik/local/**")),
+                .contains(&json!(".catervas/local/**")),
             "{}",
             scanned["kept_private"]
         );
@@ -4757,10 +4760,10 @@ pub(super) mod tests {
 
     /// The stdio MCP server of `tests/fixtures/mcp_server.sh`, written for `test`, as
     /// `connector.connect` takes it: its tools are `search`, `env`, `delete_repo`, and
-    /// `repo.delete`, a name Farik can't use.
+    /// `repo.delete`, a name Catervas can't use.
     fn fixture_server(test: &str) -> Value {
         let dir = std::env::temp_dir().join(format!(
-            "farik-team-connector-{}-{test}",
+            "catervas-team-connector-{}-{test}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -4816,8 +4819,8 @@ pub(super) mod tests {
     }
 
     /// The custom server `entry` describes.
-    fn custom(entry: &Value) -> farik_core::team::CustomServer {
-        farik_core::team::custom_server(
+    fn custom(entry: &Value) -> catervas_core::team::CustomServer {
+        catervas_core::team::custom_server(
             &serde_json::from_value(entry.clone()).expect("an mcp_servers entry"),
         )
         .expect("a custom server")
@@ -4849,7 +4852,7 @@ pub(super) mod tests {
 
     /// The Developer's kit with one service, `fixture`: the fixture server, with its copy and its
     /// tags (`search` network, `env` external effect, `delete_repo` denied).
-    pub(crate) fn fixture_kit(test: &str) -> farik_roles::Kit {
+    pub(crate) fn fixture_kit(test: &str) -> catervas_roles::Kit {
         fixture_kit_with(test, &json!({}), &json!({}))
     }
 
@@ -4858,7 +4861,7 @@ pub(super) mod tests {
         test: &str,
         more: &Value,
         allowances: &Value,
-    ) -> farik_roles::Kit {
+    ) -> catervas_roles::Kit {
         let mut connector = fixture_server(test);
         connector["title"] = json!("Fixture");
         connector["about"] = json!("A server that stands in for a service.");
@@ -4878,8 +4881,8 @@ pub(super) mod tests {
             connector["allowances"] = allowances.clone();
         }
         let kit = json!({ "role": "software_developer", "skills": [], "connectors": [connector] });
-        farik_roles::parse_fixture_kit(
-            farik_core::contract::Role::SoftwareDeveloper,
+        catervas_roles::parse_fixture_kit(
+            catervas_core::contract::Role::SoftwareDeveloper,
             &kit.to_string(),
             &[],
             &[],
@@ -4900,7 +4903,7 @@ pub(super) mod tests {
 
     /// The fixture kit with a spending tool `make`, which may run 20 times a sprint unasked, and
     /// `post`, which publishes and so always asks.
-    fn allowance_kit(test: &str) -> farik_roles::Kit {
+    fn allowance_kit(test: &str) -> catervas_roles::Kit {
         fixture_kit_with(
             test,
             &json!({ "make": "external_effect", "post": "external_effect" }),
@@ -4972,7 +4975,7 @@ pub(super) mod tests {
         assert_eq!(refusal("nobody", "fixture")[0].0, "/agents");
         // The Designer's container connector is no service to connect by name.
         let team = crate::tools::fixtures::a_team_of_three(crate::tools::fixtures::browsing);
-        let designer = farik_roles::load_kit(farik_core::contract::Role::UiUxDesigner)
+        let designer = catervas_roles::load_kit(catervas_core::contract::Role::UiUxDesigner)
             .expect("the Designer's kit");
         let container = super::kit_entry(&designer, &team, "iris", "playwright", &BTreeMap::new())
             .expect_err("a container is not connected by name");
@@ -4984,29 +4987,29 @@ pub(super) mod tests {
     /// by name, GitHub being each of the first two's own entry (step 07c).
     #[test]
     fn connects_every_shipped_kit_connector_by_name() {
-        use farik_core::contract::Role;
+        use catervas_core::contract::Role;
         let team = crate::tools::fixtures::a_team_of_three(|wire| {
             let agents = wire["agents"].as_array_mut().expect("agents");
-            agents.push(farik_core::team::fixtures::an_agent_wire(
+            agents.push(catervas_core::team::fixtures::an_agent_wire(
                 "sam",
                 "scrum_master",
             ));
-            agents.push(farik_core::team::fixtures::an_agent_wire(
+            agents.push(catervas_core::team::fixtures::an_agent_wire(
                 "archie",
                 "architect",
             ));
         });
-        let pm = farik_roles::load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let pm = catervas_roles::load_kit(Role::ProductManager).expect("the Product Manager's kit");
         for name in ["amplitude", "linear", "notion", "github"] {
             let (_, server) = super::kit_entry(&pm, &team, "pm", name, &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
             assert!(super::matches_kit(&pm, &server), "{name}");
         }
-        let scrum = farik_roles::load_kit(Role::ScrumMaster).expect("the Scrum Master's kit");
+        let scrum = catervas_roles::load_kit(Role::ScrumMaster).expect("the Scrum Master's kit");
         let refused = super::kit_entry(&scrum, &team, "sam", "notion", &BTreeMap::new())
             .expect_err("the Scrum Master has no Notion");
         assert!(refused[0].message.starts_with("connector_not_in_kit: "));
-        let architect = farik_roles::load_kit(Role::Architect).expect("the Architect's kit");
+        let architect = catervas_roles::load_kit(Role::Architect).expect("the Architect's kit");
         for name in ["context7", "grep", "osv", "github"] {
             let (_, server) = super::kit_entry(&architect, &team, "archie", name, &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
@@ -5025,7 +5028,7 @@ pub(super) mod tests {
             .expect_err("the Product Manager has no OSV");
         assert!(refused[0].message.starts_with("connector_not_in_kit: "));
         let developer =
-            farik_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+            catervas_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
         let (_, server) =
             super::kit_entry(&developer, &team, "dev-a", "context7", &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("context7: {refused:?}"));
@@ -5041,11 +5044,13 @@ pub(super) mod tests {
     }
 
     /// The kit's entry named `name`, as the daemon reads it.
-    fn kit_entry_of(kit: &farik_roles::Kit, name: &str) -> farik_core::team::McpServerWire {
+    fn kit_entry_of(kit: &catervas_roles::Kit, name: &str) -> catervas_core::team::McpServerWire {
         kit.connectors
             .iter()
             .find_map(|connector| match connector {
-                farik_roles::KitConnector::Server { entry, .. } if entry.name.as_str() == name => {
+                catervas_roles::KitConnector::Server { entry, .. }
+                    if entry.name.as_str() == name =>
+                {
                     Some(entry.clone())
                 }
                 _ => None,
@@ -5053,15 +5058,15 @@ pub(super) mod tests {
             .unwrap_or_else(|| panic!("the kit has no {name}"))
     }
 
-    /// An entry that signs in for one of Farik's own connectors, as a literal: nothing here is an
-    /// app of Farik's.
+    /// An entry that signs in for one of Catervas's own connectors, as a literal: nothing here is an
+    /// app of Catervas's.
     fn app_for(connector: &'static str) -> crate::registered_apps::RegisteredApp {
         use crate::registered_apps::{AppFlow, RegisteredApp};
         RegisteredApp {
             id: "a-test-app",
             name: "A test app",
             host: None,
-            farik_connector: Some(connector),
+            catervas_connector: Some(connector),
             flow: AppFlow::Loopback {
                 authorization_endpoint: "https://accounts.example/auth",
             },
@@ -5076,13 +5081,13 @@ pub(super) mod tests {
         }
     }
 
-    /// Until Farik Cloud signs customers in (ADR 0044), a kit's service that signs in through one
-    /// of Farik's own connectors comes at the launch when the table has no app for that connector,
+    /// Until Catervas Cloud signs customers in (ADR 0044), a kit's service that signs in through one
+    /// of Catervas's own connectors comes at the launch when the table has no app for that connector,
     /// and no other service does.
     #[test]
     fn a_kit_row_without_an_app_comes_at_launch() {
-        use farik_core::contract::Role;
-        let marketing = farik_roles::load_kit(Role::MarketingSpecialist)
+        use catervas_core::contract::Role;
+        let marketing = catervas_roles::load_kit(Role::MarketingSpecialist)
             .expect("the Marketing Specialist's kit");
         let ads = kit_entry_of(&marketing, "google-ads");
         assert!(
@@ -5095,9 +5100,9 @@ pub(super) mod tests {
         );
         assert!(
             super::at_launch(&ads, &[app_for("osv")]),
-            "an app for another of Farik's connectors is no app for this one"
+            "an app for another of Catervas's connectors is no app for this one"
         );
-        // A service signed in to by route 1 has nothing to wait for, and neither has a Farik
+        // A service signed in to by route 1 has nothing to wait for, and neither has a Catervas
         // connector that signs in to nothing.
         for name in ["higgsfield", "recraft", "buffer", "kit"] {
             assert!(
@@ -5105,7 +5110,7 @@ pub(super) mod tests {
                 "{name}"
             );
         }
-        let architect = farik_roles::load_kit(Role::Architect).expect("the Architect's kit");
+        let architect = catervas_roles::load_kit(Role::Architect).expect("the Architect's kit");
         assert!(!super::at_launch(&kit_entry_of(&architect, "osv"), &[]));
     }
 
@@ -5115,13 +5120,13 @@ pub(super) mod tests {
         let (harness, _) = keeping_a_kit("kit-at-launch");
         let mut team = team_file(&harness);
         team["agents"].as_array_mut().expect("agents").push(
-            farik_core::team::fixtures::an_agent_wire("kai", "marketing_specialist"),
+            catervas_core::team::fixtures::an_agent_wire("kai", "marketing_specialist"),
         );
         harness
             .project
             .deps
             .files
-            .write_team(&farik_core::team::validate_team(&team).expect("a team"))
+            .write_team(&catervas_core::team::validate_team(&team).expect("a team"))
             .expect("the team is written");
         let rows = |harness: &Harness| -> Vec<Value> {
             let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
@@ -5140,7 +5145,7 @@ pub(super) mod tests {
                 .cloned()
                 .unwrap_or_else(|| panic!("no {name}"))
         };
-        // No build carries an app of Farik's: Google Ads waits for the launch, the others do not.
+        // No build carries an app of Catervas's: Google Ads waits for the launch, the others do not.
         let before = rows(&harness);
         assert_eq!(row(&before, "google-ads")["at_launch"], json!(true));
         assert_eq!(row(&before, "google-ads")["auth"], "oauth");
@@ -5163,13 +5168,13 @@ pub(super) mod tests {
     /// role's.
     #[test]
     fn connects_each_marketing_service_by_name() {
-        use farik_core::contract::Role;
+        use catervas_core::contract::Role;
         let team = crate::tools::fixtures::a_team_of_three(|wire| {
             wire["agents"].as_array_mut().expect("agents").push(
-                farik_core::team::fixtures::an_agent_wire("kai", "marketing_specialist"),
+                catervas_core::team::fixtures::an_agent_wire("kai", "marketing_specialist"),
             );
         });
-        let marketing = farik_roles::load_kit(Role::MarketingSpecialist)
+        let marketing = catervas_roles::load_kit(Role::MarketingSpecialist)
             .expect("the Marketing Specialist's kit");
         for (name, allowed) in [
             (
@@ -5212,7 +5217,7 @@ pub(super) mod tests {
         }
         // None is the Developer's: not by its role, and not by its kit.
         let developer =
-            farik_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+            catervas_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
         for name in ["higgsfield", "recraft", "buffer", "kit", "google-ads"] {
             let refused = super::kit_entry(&marketing, &team, "dev-a", name, &BTreeMap::new())
                 .expect_err("the Developer is not the Marketing Specialist");
@@ -5233,15 +5238,15 @@ pub(super) mod tests {
     /// with the scope the kit pins and no allowance, and is no other role's (step 10).
     #[test]
     fn connects_each_finance_service_by_name() {
-        use farik_core::contract::Role;
-        use farik_core::team::CustomTransport;
+        use catervas_core::contract::Role;
+        use catervas_core::team::CustomTransport;
         let team = crate::tools::fixtures::a_team_of_three(|wire| {
             wire["agents"].as_array_mut().expect("agents").push(
-                farik_core::team::fixtures::an_agent_wire("fin", "finance_specialist"),
+                catervas_core::team::fixtures::an_agent_wire("fin", "finance_specialist"),
             );
         });
-        let finance =
-            farik_roles::load_kit(Role::FinanceSpecialist).expect("the Finance Specialist's kit");
+        let finance = catervas_roles::load_kit(Role::FinanceSpecialist)
+            .expect("the Finance Specialist's kit");
         for (name, scopes) in [
             ("stripe", vec!["mcp".to_string()]),
             ("digits", Vec::new()),
@@ -5262,7 +5267,7 @@ pub(super) mod tests {
         }
         // None is the Developer's: not by its role, and not by its kit.
         let developer =
-            farik_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+            catervas_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
         for name in ["stripe", "digits", "kick"] {
             let refused = super::kit_entry(&finance, &team, "dev-a", name, &BTreeMap::new())
                 .expect_err("the Developer is not the Finance Specialist");
@@ -5284,14 +5289,14 @@ pub(super) mod tests {
     /// and none is the Finance Specialist's (steps 10d and 10g).
     #[test]
     fn connects_each_procurement_service_by_name() {
-        use farik_core::contract::Role;
+        use catervas_core::contract::Role;
         let team = crate::tools::fixtures::a_team_of_three(|wire| {
             crate::tools::fixtures::with_the_procurement_specialist(wire);
             wire["agents"].as_array_mut().expect("agents").push(
-                farik_core::team::fixtures::an_agent_wire("fin", "finance_specialist"),
+                catervas_core::team::fixtures::an_agent_wire("fin", "finance_specialist"),
             );
         });
-        let procurement = farik_roles::load_kit(Role::ProcurementSpecialist)
+        let procurement = catervas_roles::load_kit(Role::ProcurementSpecialist)
             .expect("the Procurement Specialist's kit");
         let names = [
             "fx",
@@ -5326,8 +5331,8 @@ pub(super) mod tests {
             assert_eq!(server.allowances, allowed, "{name}");
         }
         // None is the Finance Specialist's: not by its role, and not by its kit.
-        let finance =
-            farik_roles::load_kit(Role::FinanceSpecialist).expect("the Finance Specialist's kit");
+        let finance = catervas_roles::load_kit(Role::FinanceSpecialist)
+            .expect("the Finance Specialist's kit");
         for name in names {
             let refused = super::kit_entry(&procurement, &team, "fin", name, &BTreeMap::new())
                 .expect_err("the Finance Specialist is not the Procurement Specialist");
@@ -5344,29 +5349,29 @@ pub(super) mod tests {
         }
     }
 
-    /// A guard: every `farik_*` tool a role's skill or a kit's skill names is one Farik lists.
+    /// A guard: every `catervas_*` tool a role's skill or a kit's skill names is one Catervas lists.
     #[test]
-    fn kit_skills_name_only_tools_farik_lists() {
+    fn kit_skills_name_only_tools_catervas_lists() {
         let listed: Vec<&str> = crate::tools::tool_descriptors()
             .iter()
             .map(|tool| tool.name)
             .collect();
         let mut named = 0;
-        for role in farik_roles::SHIPPED_ROLES {
-            let mut texts: Vec<(String, String)> = farik_roles::load_role(role)
+        for role in catervas_roles::SHIPPED_ROLES {
+            let mut texts: Vec<(String, String)> = catervas_roles::load_role(role)
                 .expect("a role")
                 .skills
                 .into_iter()
                 .map(|skill| (skill.name, skill.text))
                 .collect();
-            for skill in farik_roles::load_kit(role).expect("a kit").skills {
+            for skill in catervas_roles::load_kit(role).expect("a kit").skills {
                 for text in skill.session_files.values() {
                     texts.push((skill.name.clone(), text.clone()));
                 }
             }
             for (name, text) in &texts {
                 for word in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
-                    if word.starts_with("farik_") {
+                    if word.starts_with("catervas_") {
                         assert!(listed.contains(&word), "{role}/{name}: {word}");
                         named += 1;
                     }
@@ -5386,11 +5391,11 @@ pub(super) mod tests {
         let mut wider = server.clone();
         wider.tools.insert(
             "search".to_string(),
-            farik_core::governor::permissions::ConnectorTag::ExternalEffect,
+            catervas_core::governor::permissions::ConnectorTag::ExternalEffect,
         );
         wider.tools.insert(
             "delete_repo".to_string(),
-            farik_core::governor::permissions::ConnectorTag::Network,
+            catervas_core::governor::permissions::ConnectorTag::Network,
         );
         assert!(!super::matches_kit(&kit, &wider));
         let mut renamed = server.clone();
@@ -5422,7 +5427,7 @@ pub(super) mod tests {
         let written = entry(&harness, 1, "fixture").expect("the entry is written");
         assert_eq!(written["source"], "kit");
         assert_eq!(written["tools"], KIT_TAGS());
-        let spec = farik_core::team::spec_sha256(&custom(&written));
+        let spec = catervas_core::team::spec_sha256(&custom(&written));
         let kept = store
             .load(&kept_at(&harness, "dev-a", "fixture"))
             .expect("the store reads")
@@ -5457,7 +5462,7 @@ pub(super) mod tests {
         connected(&harness, "dev-a", &kit_server(), &json!({}));
         let written = entry(&harness, 1, "fixture").expect("the entry is written");
         assert_eq!(written["allowances"], json!({ "make": 20 }));
-        let spec = farik_core::team::spec_sha256(&custom(&written));
+        let spec = catervas_core::team::spec_sha256(&custom(&written));
         assert_eq!(
             bodies(&harness, EventKind::ConnectorConnected),
             [json!({
@@ -5541,7 +5546,7 @@ pub(super) mod tests {
         );
         let written = entry(&harness, 1, "fixture").expect("the entry stays");
         assert_eq!(written["allowances"], json!({ "make": 30 }));
-        let spec = farik_core::team::spec_sha256(&custom(&written));
+        let spec = catervas_core::team::spec_sha256(&custom(&written));
         assert_ne!(spec, before.spec_sha256, "an allowance is in the hash");
         let after = store
             .load(&kept_at(&harness, "dev-a", "fixture"))
@@ -5627,7 +5632,7 @@ pub(super) mod tests {
             .project
             .deps
             .files
-            .write_team(&farik_core::team::validate_team(&team).expect("a team"))
+            .write_team(&catervas_core::team::validate_team(&team).expect("a team"))
             .expect("the team is written");
         let (_, message) = refused(
             &harness,
@@ -5799,7 +5804,7 @@ pub(super) mod tests {
             .iter()
             .filter(|event| {
                 event.envelope.ids.agent_id.as_deref() == Some("dev-a")
-                    && matches!(&event.body, farik_protocol::event::EventBody::ToolCalled(body)
+                    && matches!(&event.body, catervas_protocol::event::EventBody::ToolCalled(body)
                         if body.tool == "mcp__fixture__make")
             })
             .count();
@@ -5840,7 +5845,7 @@ pub(super) mod tests {
             .project
             .deps
             .files
-            .write_team(&farik_core::team::validate_team(&team).expect("a team"))
+            .write_team(&catervas_core::team::validate_team(&team).expect("a team"))
             .expect("the team is written");
         assert_eq!(allowance_rows(&harness)["rows"], json!([]));
     }
@@ -5891,8 +5896,8 @@ pub(super) mod tests {
         )
         .expect("an entry");
         written["tools"]["env"] = json!("network");
-        let spec = farik_core::team::spec_sha256(&custom(&written));
-        let command = farik_protocol::command::Command::ConnectorConnect {
+        let spec = catervas_core::team::spec_sha256(&custom(&written));
+        let command = catervas_protocol::command::Command::ConnectorConnect {
             agent: "dev-a".to_string(),
             server: written.as_object().cloned().unwrap_or_default(),
             spec_sha256: spec,
@@ -5916,10 +5921,10 @@ pub(super) mod tests {
         )
         .expect("an entry");
         other["tools"] = KIT_TAGS();
-        let command = farik_protocol::command::Command::ConnectorConnect {
+        let command = catervas_protocol::command::Command::ConnectorConnect {
             agent: "pm".to_string(),
             server: other.as_object().cloned().unwrap_or_default(),
-            spec_sha256: farik_core::team::spec_sha256(&custom(&other)),
+            spec_sha256: catervas_core::team::spec_sha256(&custom(&other)),
             issuer: None,
         };
         let reply = rpc(
@@ -6006,17 +6011,17 @@ pub(super) mod tests {
         // A role with no one on it left is not listed: every Developer retires.
         // A role whose agents have all retired is not listed: an Architect, who may retire.
         let mut architect_kit = fixture_kit("kit-team-get-architect");
-        architect_kit.role = farik_core::contract::Role::Architect;
+        architect_kit.role = catervas_core::contract::Role::Architect;
         harness.project.set_kit(architect_kit);
         let mut team = team_file(&harness);
         team["agents"].as_array_mut().expect("agents").push(
-            farik_core::team::fixtures::an_agent_wire("ada", "architect"),
+            catervas_core::team::fixtures::an_agent_wire("ada", "architect"),
         );
         harness
             .project
             .deps
             .files
-            .write_team(&farik_core::team::validate_team(&team).expect("a team"))
+            .write_team(&catervas_core::team::validate_team(&team).expect("a team"))
             .expect("the team is written");
         let roles = |harness: &Harness| {
             let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
@@ -6136,7 +6141,7 @@ pub(super) mod tests {
         let written = entry(&harness, 1, "fixture").expect("the entry is written");
         assert_eq!(written["source"], "custom");
         assert_eq!(written["tools"], tools);
-        let spec = farik_core::team::spec_sha256(&custom(&written));
+        let spec = catervas_core::team::spec_sha256(&custom(&written));
         let kept = store
             .load(&kept_at(&harness, "dev-a", "fixture"))
             .expect("the store reads")
@@ -6158,7 +6163,7 @@ pub(super) mod tests {
         );
         assert!(!log_text(&harness).contains(KEY));
         assert!(
-            !std::fs::read_to_string(harness.project.repo.path.join(".farik/team.yaml"))
+            !std::fs::read_to_string(harness.project.repo.path.join(".catervas/team.yaml"))
                 .expect("the team file reads")
                 .contains(KEY)
         );
@@ -6172,7 +6177,7 @@ pub(super) mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_label_for_a_tool_not_listed_is_refused() {
         // `delete_rep=denied` must not leave `delete_repo` unlabelled while its user believes it
-        // denied (carry: a misspelled --tag), nor may a tool Farik can't use be labelled.
+        // denied (carry: a misspelled --tag), nor may a tool Catervas can't use be labelled.
         let (harness, store) = keeping("connector-misspelled");
         for tags in [
             json!({ "delete_rep": "denied" }),
@@ -6230,7 +6235,7 @@ pub(super) mod tests {
         broken["args"] = json!([]);
         for server in [broken, {
             let mut reserved = fixture_server("refused-name");
-            reserved["name"] = json!("farik");
+            reserved["name"] = json!("catervas");
             reserved
         }] {
             let reply = rpc(
@@ -6266,7 +6271,7 @@ pub(super) mod tests {
         let mut server = fixture_server("command");
         server["source"] = json!("custom");
         server["tools"] = json!({ "search": "network" });
-        let spec = farik_core::team::spec_sha256(&custom(&server));
+        let spec = catervas_core::team::spec_sha256(&custom(&server));
         let wire = |server: &Value, spec: &str| {
             json!({ "command": "connector_connect",
                     "body": { "agent": "dev-a", "server": server, "spec_sha256": spec } })
@@ -6339,10 +6344,10 @@ pub(super) mod tests {
         assert_eq!(code, -32005);
         assert!(load("dev-b").is_some());
 
-        // A connector Farik ships is no custom one to disconnect (carry H3).
+        // A connector Catervas ships is no custom one to disconnect (carry H3).
         let mut wire = team_file(&harness);
         wire["agents"][1]["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
-        let team = farik_core::team::validate_team(&wire).expect("a team");
+        let team = catervas_core::team::validate_team(&wire).expect("a team");
         harness
             .project
             .deps
@@ -6365,7 +6370,7 @@ pub(super) mod tests {
         // The entry put back by hand, as a revert would: its keys are gone, so it runs nothing.
         let mut wire = team_file(&harness);
         wire["agents"][1]["mcp_servers"] = wire["agents"][2]["mcp_servers"].clone();
-        let team = farik_core::team::validate_team(&wire).expect("a team");
+        let team = catervas_core::team::validate_team(&wire).expect("a team");
         harness
             .project
             .deps
@@ -6394,7 +6399,7 @@ pub(super) mod tests {
             "name": "notion", "source": "custom", "transport": "http",
             "url": fixture.mcp_url, "oauth": {}, "tools": { "whoami": "network" }
         }]);
-        let team = farik_core::team::validate_team(&wire).expect("a team");
+        let team = catervas_core::team::validate_team(&wire).expect("a team");
         harness
             .project
             .deps
@@ -6409,7 +6414,7 @@ pub(super) mod tests {
             .save(
                 &at,
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    spec_sha256: catervas_core::team::spec_sha256(&server),
                     keys: std::collections::BTreeMap::new(),
                     oauth: Some(crate::sign_in::OAuthGrant {
                         issuer: fixture.origin.clone(),
@@ -6512,7 +6517,7 @@ pub(super) mod tests {
         }
 
         /// `notion` as the daemon holds it.
-        fn described(&self) -> farik_core::team::CustomServer {
+        fn described(&self) -> catervas_core::team::CustomServer {
             let wire = json!({
                 "name": "notion", "source": "custom", "transport": "http",
                 "url": self.fixture.mcp_url, "oauth": {}, "tools": { "whoami": "network" }
@@ -6675,7 +6680,7 @@ pub(super) mod tests {
             id: "dev",
             name: "Dev",
             host: Some("127.0.0.1"),
-            farik_connector: None,
+            catervas_connector: None,
             flow: AppFlow::Device {
                 device_endpoint: leaked(format!("{origin}/device/code")),
                 verification_uri: leaked(format!("{origin}/login/device")),
@@ -6701,9 +6706,9 @@ pub(super) mod tests {
             );
         }
 
-        /// The daemon signs in for Farik's connector `osv` with `Google test`, whose endpoints are
+        /// The daemon signs in for Catervas's connector `osv` with `Google test`, whose endpoints are
         /// the fixture's, and starts that connector as the fixture's stdio server.
-        fn serving_farik(&self, test: &str) {
+        fn serving_catervas(&self, test: &str) {
             assert!(
                 self.harness.daemon.set_registered_apps(
                     crate::registered_apps::fixtures::google_apps(&self.fixture)
@@ -6714,10 +6719,10 @@ pub(super) mod tests {
             ));
         }
 
-        /// Farik's own connector `osv`, as `connector.sign_in` takes it.
-        fn farik_server() -> Value {
+        /// Catervas's own connector `osv`, as `connector.sign_in` takes it.
+        fn catervas_server() -> Value {
             json!({
-                "name": "osv", "transport": "stdio", "command": "farik",
+                "name": "osv", "transport": "stdio", "command": "catervas",
                 "args": ["connector", "osv"], "oauth": {}
             })
         }
@@ -6781,7 +6786,7 @@ pub(super) mod tests {
         assert_eq!(started["issuer"], format!("{origin}/login/oauth"));
         assert_eq!(signing.status(&started["attempt"])["state"], "waiting");
         assert_eq!(signing.waited_for(&started)["state"], "signed_in");
-        // The code the user types is for the browser; the one Farik polls with never leaves it.
+        // The code the user types is for the browser; the one Catervas polls with never leaves it.
         for reply in crate::locked(&signing.replies).iter() {
             assert!(!reply.contains("dc-1"), "{reply}");
         }
@@ -6833,10 +6838,10 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn signs_in_and_connects_a_farik_connector() {
-        let signing = Signing::new("connector-sign-in-farik");
-        signing.serving_farik("connector-sign-in-farik");
-        let server = Signing::farik_server();
+    fn signs_in_and_connects_a_catervas_connector() {
+        let signing = Signing::new("connector-sign-in-catervas");
+        signing.serving_catervas("connector-sign-in-catervas");
+        let server = Signing::catervas_server();
         let started = signing.sign_in(&server);
         let origin = &signing.fixture.origin;
         assert_eq!(started["provider"], "Google test");
@@ -6878,7 +6883,7 @@ pub(super) mod tests {
         );
         let written = entry(&signing.harness, 1, "osv").expect("the team file has osv");
         assert_eq!(written["oauth"], json!({}));
-        assert_eq!(written["command"], "farik");
+        assert_eq!(written["command"], "catervas");
         let grant = signing.grant_of("osv").expect("a grant is kept");
         assert_eq!(grant.app.as_deref(), Some("google-test"));
         assert_eq!(
@@ -6896,8 +6901,8 @@ pub(super) mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_attempt_holds_only_for_its_whole_transport() {
         let signing = Signing::new("connector-sign-in-whole-transport");
-        signing.serving_farik("connector-sign-in-whole-transport");
-        let pair = Signing::farik_server();
+        signing.serving_catervas("connector-sign-in-whole-transport");
+        let pair = Signing::catervas_server();
         let mut scoped = pair.clone();
         scoped["oauth"] = json!({ "scopes": ["https://example.test/auth/other"] });
         let web = json!({
@@ -6952,18 +6957,18 @@ pub(super) mod tests {
     /// cannot be signed in to; and one that does asks for the app's scopes alone.
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn a_farik_connector_signs_in_only_with_an_app_and_its_scopes() {
-        let signing = Signing::new("connector-sign-in-farik-no-app");
+    fn a_catervas_connector_signs_in_only_with_an_app_and_its_scopes() {
+        let signing = Signing::new("connector-sign-in-catervas-no-app");
         let (code, message) = signing.refused(
             "connector.sign_in",
-            &json!({ "agent": "dev-a", "server": Signing::farik_server() }),
+            &json!({ "agent": "dev-a", "server": Signing::catervas_server() }),
         );
         assert_eq!(code, -32005);
         assert!(message.starts_with("sign_in_not_supported: "), "{message}");
         assert!(signing.fixture.seen().is_empty());
 
-        signing.serving_farik("connector-sign-in-farik-scopes");
-        let mut asks_more = Signing::farik_server();
+        signing.serving_catervas("connector-sign-in-catervas-scopes");
+        let mut asks_more = Signing::catervas_server();
         asks_more["oauth"] = json!({ "scopes": ["https://example.test/auth/other"] });
         let (code, message) = signing.refused(
             "connector.sign_in",
@@ -6973,11 +6978,11 @@ pub(super) mod tests {
         assert_eq!(
             message,
             format!(
-                "sign_in_failed: Farik's Google test sign-in asks only for {}",
+                "sign_in_failed: Catervas's Google test sign-in asks only for {}",
                 crate::registered_apps::fixtures::SCOPE
             )
         );
-        let mut asks_its_own = Signing::farik_server();
+        let mut asks_its_own = Signing::catervas_server();
         asks_its_own["oauth"] = json!({ "scopes": [crate::registered_apps::fixtures::SCOPE] });
         let started = signing.sign_in(&asks_its_own);
         let address = reqwest::Url::parse(started["authorize_url"].as_str().expect("an address"))
@@ -6993,21 +6998,21 @@ pub(super) mod tests {
     }
 
     /// A guard: the app that signs a connector in is the one whose connector it is, and not any
-    /// app that serves one of Farik's connectors. With a table whose one entry is for another
+    /// app that serves one of Catervas's connectors. With a table whose one entry is for another
     /// connector, `osv` has no way to sign in, and no page is made for it.
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn a_farik_connector_is_signed_in_only_by_the_app_for_its_name() {
-        let signing = Signing::new("connector-sign-in-farik-other-app");
+    fn a_catervas_connector_is_signed_in_only_by_the_app_for_its_name() {
+        let signing = Signing::new("connector-sign-in-catervas-other-app");
         let for_another: &'static [crate::registered_apps::RegisteredApp] =
             Box::leak(Box::new([crate::registered_apps::RegisteredApp {
-                farik_connector: Some("other"),
+                catervas_connector: Some("other"),
                 ..crate::registered_apps::fixtures::google_apps(&signing.fixture)[0]
             }]));
         assert!(signing.harness.daemon.set_registered_apps(for_another));
         let (code, message) = signing.refused(
             "connector.sign_in",
-            &json!({ "agent": "dev-a", "server": Signing::farik_server() }),
+            &json!({ "agent": "dev-a", "server": Signing::catervas_server() }),
         );
         assert_eq!(code, -32005);
         assert!(message.starts_with("sign_in_not_supported: "), "{message}");
@@ -7018,9 +7023,9 @@ pub(super) mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn sign_in_status_names_the_provider() {
         let signing = Signing::new("connector-sign-in-status-provider");
-        signing.serving_farik("connector-sign-in-status-provider");
+        signing.serving_catervas("connector-sign-in-status-provider");
         signing.fixture.set(|flags| flags.access_denied = true);
-        let status = signing.approve(&signing.sign_in(&Signing::farik_server()));
+        let status = signing.approve(&signing.sign_in(&Signing::catervas_server()));
         assert_eq!(status["state"], "failed");
         assert_eq!(status["reason"]["code"], "access_denied");
         assert_eq!(
@@ -7032,7 +7037,7 @@ pub(super) mod tests {
             flags.access_denied = false;
             flags.iss = crate::oauth_fixture::Iss::Absent;
         });
-        let status = signing.approve(&signing.sign_in(&Signing::farik_server()));
+        let status = signing.approve(&signing.sign_in(&Signing::catervas_server()));
         assert_eq!(status["reason"]["code"], "sign_in_mismatch");
         assert_eq!(
             status["reason"]["message"],
@@ -7071,7 +7076,7 @@ pub(super) mod tests {
         for token in &tokens {
             assert!(!seen.contains(token), "a reply or an event holds a token");
         }
-        // No file Farik wrote holds one either: the repository, `.farik/local/events.db` and
+        // No file Catervas wrote holds one either: the repository, `.catervas/local/events.db` and
         // `team.yaml` among them, and the state folder.
         let root = signing.harness.project.repo.path.clone();
         let state = std::path::PathBuf::from(format!("{}-state", root.display()));
@@ -7271,7 +7276,7 @@ pub(super) mod tests {
             .save(
                 &kept_at(&signing.harness, "dev-a", "notion"),
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    spec_sha256: catervas_core::team::spec_sha256(&server),
                     keys: BTreeMap::new(),
                     oauth: Some(grant.clone()),
                 },
@@ -7745,7 +7750,7 @@ pub(super) mod tests {
             .project
             .repo
             .path
-            .join(".farik/local/state/connectors.json");
+            .join(".catervas/local/state/connectors.json");
         assert!(harness.daemon.set_connector_secrets(Arc::new(
             crate::connectors::ConnectorSecretStores::new(Arc::new(NoKeychain), Some(file))
         )));
@@ -7768,14 +7773,14 @@ pub(super) mod tests {
             "headers": { "Authorization": "Bearer {API_KEY}" },
             "credential_keys": ["API_KEY"], "tools": { "search": "network" },
         }]);
-        let team = farik_core::team::validate_team(&wire).expect("a team");
+        let team = catervas_core::team::validate_team(&wire).expect("a team");
         deps.files.write_team(&team).expect("written");
         let linear = custom(&wire["agents"][1]["mcp_servers"][0]);
         store
             .save(
                 &kept_at(&harness, "dev-a", "linear"),
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&linear),
+                    spec_sha256: catervas_core::team::spec_sha256(&linear),
                     keys: [("API_KEY".to_string(), Secret::new(KEY.to_string()))].into(),
                     oauth: None,
                 },
@@ -7795,7 +7800,7 @@ pub(super) mod tests {
         );
 
         wire["agents"][1]["mcp_servers"][0]["url"] = json!("https://elsewhere.example/mcp");
-        let team = farik_core::team::validate_team(&wire).expect("a team");
+        let team = catervas_core::team::validate_team(&wire).expect("a team");
         deps.files.write_team(&team).expect("written");
         let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
         // The keys read last are still kept somewhere, which Remove says.
@@ -7803,6 +7808,6 @@ pub(super) mod tests {
             got["connectors"],
             json!([{ "source": "custom", "agent": "dev-a", "server": "linear", "auth": "keys", "state": "connect_again", "stored_in": "keychain" }])
         );
-        farik_core::team::validate_team(&got["team"]).expect("team is still the team file");
+        catervas_core::team::validate_team(&got["team"]).expect("team is still the team file");
     }
 }

@@ -37,7 +37,7 @@ export function App() {
 	const { status } = useConnection();
 	// The one theme state: Settings changes it, and it applies on every page.
 	const [theme, setTheme] = useTheme();
-	// Without a session, or while Farik is not answering, every path shows why.
+	// Without a session, or while Catervas is not answering, every path shows why.
 	if (status === "no_session" || status === "lost") return <Connect />;
 	return (
 		<Routes>

@@ -2,18 +2,18 @@
 //! decision on it, and its end, folded from the four `marketing_plan.` kinds; and the posts, folded
 //! from the six `social_post.` kinds.
 
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
-use farik_core::contract::TaskId;
-use farik_core::marketing::{
+use catervas_core::contract::TaskId;
+use catervas_core::marketing::{
     Amount, BudgetKind, CapScope, CreatedCampaign, EndReason, PlanCampaign, PlanProposal,
     PlanRecord, PostChannel, PostDetails, PostSlot, parse_amount,
 };
-use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, MarketingBudgetReachedBodyScope,
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventKind, MarketingBudgetReachedBodyScope,
     MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBodyWhy,
     MarketingPlanEndedBodyWhy, MarketingPlanProposedBody, SocialPostMediaKind,
     SocialPostMissedBodyWhy, SocialPostScheduledBodyApprovedBy, SocialPostStoppedBodyBy,
 };
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 
 use crate::{EventLog, EventQuery, StoreError};
 
@@ -72,7 +72,7 @@ impl PlanState {
 
 impl MarketingPlan {
     /// Where this plan stands, given the id of the plan that is active today, when one is
-    /// (`farik_core::marketing::active_plan`).
+    /// (`catervas_core::marketing::active_plan`).
     #[must_use]
     pub fn state(&self, active: Option<&str>) -> PlanState {
         if self.record.ended.is_some() {
@@ -90,7 +90,7 @@ impl MarketingPlan {
 }
 
 /// Every marketing plan the log holds, oldest first. A decision or an end counts only when its
-/// envelope names no agent and no session, since only the owner and Farik decide or end a plan;
+/// envelope names no agent and no session, since only the owner and Catervas decide or end a plan;
 /// the first decision on a plan is the only one, and so is the first end.
 ///
 /// # Errors
@@ -111,7 +111,7 @@ pub fn marketing_plans(log: &EventLog) -> Result<Vec<MarketingPlan>, StoreError>
         let ids = &event.envelope.ids;
         let at = event.envelope.recorded_at;
         let seq = event.envelope.seq;
-        // Only the owner decides and only the owner or Farik ends a plan: an event an agent's
+        // Only the owner decides and only the owner or Catervas ends a plan: an event an agent's
         // session recorded is no decision.
         let is_not_an_agents = ids.agent_id.is_none() && ids.session_id.is_none();
         match &event.body {
@@ -170,7 +170,7 @@ fn undecided<'a>(plans: &'a mut [MarketingPlan], id: &str) -> Option<&'a mut Mar
 }
 
 fn proposed(
-    event: &FarikEvent,
+    event: &CatervasEvent,
     body: &MarketingPlanProposedBody,
 ) -> Result<MarketingPlan, StoreError> {
     let seq = event.envelope.seq;
@@ -329,13 +329,13 @@ pub struct SocialPost {
     pub state_seq: u64,
     /// Who stopped it, `owner`, `declined` or `plan_ended`, once stopped.
     pub stopped_by: Option<String>,
-    /// Whether Farik took it back from Buffer when it was stopped.
+    /// Whether Catervas took it back from Buffer when it was stopped.
     pub taken_back: bool,
     /// What the owner said when they did not allow it or stopped it, as they wrote it.
     pub note: Option<String>,
     /// Why it was missed.
     pub missed_why: Option<String>,
-    /// Why it failed: Farik's sentence, then Buffer's words.
+    /// Why it failed: Catervas's sentence, then Buffer's words.
     pub reason: Option<String>,
 }
 
@@ -359,7 +359,7 @@ fn details_of<T: serde::Serialize>(details: Option<&T>) -> Option<PostDetails> {
 /// The post a `requested` or an agent's `scheduled` event makes, or `None` for an event whose
 /// fields cannot be read.
 fn written(
-    event: &FarikEvent,
+    event: &CatervasEvent,
     channel: &impl ToString,
     fields: (&str, &str, &[(String, bool)], &str),
     details: Option<PostDetails>,
@@ -400,7 +400,7 @@ fn written(
 }
 
 /// A body's media as the pairs `written` takes.
-fn media_pairs(media: &[farik_protocol::event::SocialPostMedia]) -> Vec<(String, bool)> {
+fn media_pairs(media: &[catervas_protocol::event::SocialPostMedia]) -> Vec<(String, bool)> {
     media
         .iter()
         .map(|item| {
@@ -419,7 +419,7 @@ pub enum PostMoveKind {
     Wrote,
     /// The owner allowed a request.
     Allowed,
-    /// Farik handed it to Buffer.
+    /// Catervas handed it to Buffer.
     Sent,
     /// Buffer would not take it.
     Failed,
@@ -454,7 +454,7 @@ pub struct PostMove {
 
 /// Every post the log holds, oldest first. An agent's session makes a post (`requested`, or
 /// `scheduled` in the plan) and nothing else about it: the owner's allowance, stop and decline, and
-/// Farik's hand-over, count only when the envelope names no agent and no session, as for a plan's
+/// Catervas's hand-over, count only when the envelope names no agent and no session, as for a plan's
 /// decision. A post goes through its states once: what happens to it counts only from the state it
 /// may happen in, so the first outcome stands.
 ///
@@ -497,7 +497,7 @@ fn fold_posts(log: &EventLog) -> Result<(Vec<SocialPost>, Vec<PostMove>), StoreE
         let ids = &event.envelope.ids;
         let at = event.envelope.recorded_at;
         let seq = event.envelope.seq;
-        // Only the owner and Farik decide, hand over and stop: an event an agent's session
+        // Only the owner and Catervas decide, hand over and stop: an event an agent's session
         // recorded is none of those.
         let is_not_an_agents = ids.agent_id.is_none() && ids.session_id.is_none();
         let mut moves = |post: u64,
@@ -655,7 +655,7 @@ fn fold_posts(log: &EventLog) -> Result<(Vec<SocialPost>, Vec<PostMove>), StoreE
     Ok((posts, trail))
 }
 
-/// Every Google Ads campaign Farik made for a plan campaign, oldest first, each with the UTC day
+/// Every Google Ads campaign Catervas made for a plan campaign, oldest first, each with the UTC day
 /// it was made on (`marketing_campaign.created`, ADR 0042). A campaign recorded twice counts once.
 ///
 /// # Errors
@@ -696,7 +696,7 @@ pub fn created_campaigns_on(
     Ok(made)
 }
 
-/// Every Google Ads campaign Farik made for a plan campaign, oldest first.
+/// Every Google Ads campaign Catervas made for a plan campaign, oldest first.
 ///
 /// # Errors
 ///
@@ -742,7 +742,7 @@ pub fn raises(log: &EventLog) -> Result<Vec<Raise>, StoreError> {
         .collect())
 }
 
-/// Why Farik paused a campaign it made.
+/// Why Catervas paused a campaign it made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PausedWhy {
     /// No active plan carries it.
@@ -790,7 +790,7 @@ pub struct BudgetReached {
     pub seq: u64,
 }
 
-/// A campaign Farik paused on its own, as `marketing_campaign.paused` says.
+/// A campaign Catervas paused on its own, as `marketing_campaign.paused` says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CampaignPaused {
     /// The plan the campaign was made under.
@@ -807,7 +807,7 @@ pub struct CampaignPaused {
     pub seq: u64,
 }
 
-/// Every budget reached, oldest first. Only Farik records one: an event with an agent or a
+/// Every budget reached, oldest first. Only Catervas records one: an event with an agent or a
 /// session on its envelope is not read.
 ///
 /// # Errors
@@ -859,7 +859,7 @@ pub fn budgets_reached(log: &EventLog) -> Result<Vec<BudgetReached>, StoreError>
 }
 
 /// The campaigns recorded paused for their plan's end, by resource name, oldest first: each that
-/// Farik paused because its plan ended, and each it paused because Google Ads was removed
+/// Catervas paused because its plan ended, and each it paused because Google Ads was removed
 /// (`connection_removed`) while no connection of `server` has been recorded since and no other
 /// agent `held` an entry of it, since until then nothing could have started it again. `held` is
 /// whether an agent that is not retired has a `server` entry in the team file
@@ -900,7 +900,7 @@ pub fn paused_for_end(log: &EventLog, server: &str, held: bool) -> Result<Vec<St
         .collect())
 }
 
-/// Every pause Farik made on its own, oldest first. An event with an agent or a session on its
+/// Every pause Catervas made on its own, oldest first. An event with an agent or a session on its
 /// envelope is not read.
 ///
 /// # Errors
@@ -943,10 +943,10 @@ pub fn campaigns_paused(log: &EventLog) -> Result<Vec<CampaignPaused>, StoreErro
 mod tests {
     use std::path::Path;
 
+    use catervas_core::marketing::{Amount, EndReason, PostChannel, PostDetails};
+    use catervas_protocol::event::fixtures::an_event_wire;
+    use catervas_protocol::event::{EventKind, NewEvent, event_from_value};
     use chrono::{DateTime, TimeZone, Utc};
-    use farik_core::marketing::{Amount, EndReason, PostChannel, PostDetails};
-    use farik_protocol::event::fixtures::an_event_wire;
-    use farik_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::{Value, json};
 
     use super::{PostState, marketing_plans, social_posts};
@@ -1158,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn counts_only_the_owners_first_decision_and_farik_s_first_end() {
+    fn counts_only_the_owners_first_decision_and_catervas_s_first_end() {
         let log = a_log();
         proposed(&log, "MP-1", 9);
         // A decision with an agent or a session on its envelope was not the owner's.
@@ -1248,7 +1248,7 @@ mod tests {
         })
     }
 
-    /// What happens to post `post`: Farik's or the owner's event, with no agent and no session.
+    /// What happens to post `post`: Catervas's or the owner's event, with no agent and no session.
     fn then(log: &EventLog, kind: EventKind, hour: u32, body: Value) -> u64 {
         append(log, kind, hour, |wire| wire["body"] = body)
     }
@@ -1517,7 +1517,7 @@ mod tests {
             PostState::Requested,
             "a request is declined, not stopped"
         );
-        // And a post that is going out is stopped, not declined; Farik's plan ending is no stop of
+        // And a post that is going out is stopped, not declined; Catervas's plan ending is no stop of
         // a request.
         let going = kai_wrote(&log, EventKind::SocialPostScheduled, 14, |_| {});
         then(
@@ -1574,7 +1574,7 @@ mod tests {
 
     #[test]
     fn the_store_folds_the_campaigns_made() {
-        use farik_core::marketing::{BudgetKind, CreatedCampaign};
+        use catervas_core::marketing::{BudgetKind, CreatedCampaign};
 
         let log = a_log();
         assert_eq!(super::created_campaigns(&log).expect("reads"), []);
@@ -1663,7 +1663,7 @@ mod tests {
             paused_for_end(&log, "google-ads", false).expect("reads"),
             [campaign(11), campaign(13)]
         );
-        // A connection after it: Farik could read and an agent could enable again, so it no longer
+        // A connection after it: Catervas could read and an agent could enable again, so it no longer
         // counts, and a plan's end still does.
         connect(12, "google-ads");
         pause(13, 14, "connection_removed");
@@ -1685,7 +1685,7 @@ mod tests {
 
     #[test]
     fn the_store_folds_the_budgets_reached_and_the_pauses() {
-        use farik_core::marketing::CapScope;
+        use catervas_core::marketing::CapScope;
 
         use super::{PausedWhy, budgets_reached, campaigns_paused};
 
@@ -1704,7 +1704,7 @@ mod tests {
             wire["body"]["failed"] = json!("Google answered “quota”");
         });
         append(&log, EventKind::MarketingBudgetReached, 10, |_| {});
-        // Only Farik records one: an agent's, or a session's, is not read.
+        // Only Catervas records one: an agent's, or a session's, is not read.
         append(&log, EventKind::MarketingBudgetReached, 11, |wire| {
             wire["agent_id"] = json!("kai");
         });
@@ -1720,7 +1720,7 @@ mod tests {
         });
 
         let reached = budgets_reached(&log).expect("reads");
-        assert_eq!(reached.len(), 2, "the agent's is not Farik's");
+        assert_eq!(reached.len(), 2, "the agent's is not Catervas's");
         assert_eq!(reached[0].scope, CapScope::Plan);
         assert_eq!(reached[0].key, None);
         assert_eq!(reached[0].spent, Amount(100_000));
@@ -1761,7 +1761,7 @@ mod tests {
                     at(14)
                 ),
             ],
-            "the session's is not Farik's"
+            "the session's is not Catervas's"
         );
         assert_eq!(
             (paused[0].plan.as_str(), paused[0].key.as_str()),

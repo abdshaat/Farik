@@ -1,5 +1,5 @@
 {
-	"name": "@farik/ui",
+	"name": "@catervas/ui",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -8,7 +8,7 @@
 		"gallery": "vite build --config gallery/vite.config.ts"
 	},
 	"dependencies": {
-		"@farik/brand": "workspace:*",
+		"@catervas/brand": "workspace:*",
 		"react": "19.3.0",
 		"react-dom": "19.3.0"
 	},

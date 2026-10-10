@@ -1,35 +1,37 @@
-//! `farik connector run` and `farik connector headers` against a served daemon (ADR 0030): a
+//! `catervas connector run` and `catervas connector headers` against a served daemon (ADR 0030): a
 //! custom connector gets its keys from the daemon, with nothing else of the session's environment,
 //! and nothing at all when the team file changed it since it was connected.
 //!
 //! Each test serves a daemon on a repository, and so needs the `git` program: it is `#[ignore]`d
 //! and run by `cargo xtask check --integration`. The launcher replaces its process with the
-//! server, so it is run as the `farik` binary, never in this process.
+//! server, so it is run as the `catervas` binary, never in this process.
 #![cfg(unix)]
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, TimeZone, Utc};
-use farik::{CliIo, run_cli};
-use farik_core::budget::DEFAULT_SESSION_LIMITS;
-use farik_core::governor::permissions::SessionConnector;
-use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-use farik_core::team::{CustomServer, Team, custom_server, spec_sha256, validate_team};
-use farik_protocol::clock::{Clock, FixedClock};
-use farik_protocol::event::EventIds;
-use farik_runtime::claude::Secret;
-use farik_runtime::connectors::{
+use catervas::{CliIo, run_cli};
+use catervas_core::budget::DEFAULT_SESSION_LIMITS;
+use catervas_core::governor::permissions::SessionConnector;
+use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+use catervas_core::team::{CustomServer, Team, custom_server, spec_sha256, validate_team};
+use catervas_protocol::clock::{Clock, FixedClock};
+use catervas_protocol::event::EventIds;
+use catervas_runtime::claude::Secret;
+use catervas_runtime::connectors::{
     ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
 };
-use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, SessionRegistration, serve};
-use farik_runtime::sign_in::OAuthGrant;
-use farik_runtime::transitions::Transitions;
-use farik_runtime::{SessionPurpose, ToolDeps};
-use farik_store::files::ProjectFiles;
-use farik_store::git::fixtures::TempRepo;
-use farik_store::{IN_MEMORY, open_event_log, open_projections};
+use catervas_runtime::daemon::{
+    DaemonConfig, DaemonHandle, DaemonState, SessionRegistration, serve,
+};
+use catervas_runtime::sign_in::OAuthGrant;
+use catervas_runtime::transitions::Transitions;
+use catervas_runtime::{SessionPurpose, ToolDeps};
+use catervas_store::files::ProjectFiles;
+use catervas_store::git::fixtures::TempRepo;
+use catervas_store::{IN_MEMORY, open_event_log, open_projections};
+use chrono::{DateTime, TimeZone, Utc};
 use serde_json::{Value, json};
 
 const SESSION: &str = "5a1c2a9e-8b7d-4e6f-9a01-2b3c4d5e6f71";
@@ -71,12 +73,12 @@ fn a_team(change: impl FnOnce(&mut Value)) -> Team {
         },
         {
             "name": "osv", "source": "custom", "transport": "stdio",
-            "command": "farik", "args": ["connector", "osv"], "credential_keys": [],
+            "command": "catervas", "args": ["connector", "osv"], "credential_keys": [],
             "tools": { "query_package": "network" }
         },
         {
             "name": "google-ads", "source": "custom", "transport": "stdio",
-            "command": "farik", "args": ["connector", "google-ads"], "oauth": {},
+            "command": "catervas", "args": ["connector", "google-ads"], "oauth": {},
             "tools": { "report": "network" }
         }
     ]);
@@ -121,7 +123,7 @@ struct Served {
 }
 
 impl Served {
-    /// The user's state folder for `repo`: beside it and outside it, as `~/.config/farik` is.
+    /// The user's state folder for `repo`: beside it and outside it, as `~/.config/catervas` is.
     fn state_of(repo: &TempRepo) -> PathBuf {
         PathBuf::from(format!("{}-state", repo.path.display()))
     }
@@ -130,13 +132,13 @@ impl Served {
         let repo = TempRepo::new(name);
         let team = a_team(|_| {});
         let files = Arc::new(ProjectFiles::open(repo.path.clone()));
-        files.init(&team).expect(".farik/ is made");
+        files.init(&team).expect(".catervas/ is made");
         let log = Arc::new(open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens"));
         let projections = Arc::new(open_projections(Arc::clone(&log)).expect("projections"));
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(FixedClock::new(at()));
         let ids = EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             ..EventIds::default()
         };
         let transitions = Arc::new(Transitions::new(
@@ -155,7 +157,7 @@ impl Served {
             git: repo.adapter(),
             clock,
             ids,
-            kits: Arc::new(farik_roles::load_kit),
+            kits: Arc::new(catervas_roles::load_kit),
         })));
         let store = Arc::new(MemoryConnectorSecrets::default());
         for server in servers(&team) {
@@ -181,13 +183,13 @@ impl Served {
         state.set_state_dir(Served::state_of(&repo));
         state.register_session(SessionRegistration {
             session_id: SESSION.to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             cwd: repo.path.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: Vec::new(),
             connectors: servers(&team)
                 .into_iter()
@@ -210,11 +212,11 @@ impl Served {
             .enable_all()
             .build()
             .expect("a runtime");
-        let daemon_file = repo.path.join(".farik/local/daemon.json");
+        let daemon_file = repo.path.join(".catervas/local/daemon.json");
         let handle = runtime
             .block_on(serve(
                 DaemonConfig {
-                    port: farik_runtime::daemon::PortChoice::Any,
+                    port: catervas_runtime::daemon::PortChoice::Any,
                     daemon_file: Some(daemon_file.clone()),
                 },
                 state,
@@ -235,9 +237,9 @@ impl Served {
             .expect("the team is changed");
     }
 
-    /// `farik connector <verb>` for `server`, run as the binary with `env` alone.
+    /// `catervas connector <verb>` for `server`, run as the binary with `env` alone.
     fn binary(&self, verb: &str, server: &str, env: &[(&str, &str)]) -> std::process::Output {
-        std::process::Command::new(env!("CARGO_BIN_EXE_farik"))
+        std::process::Command::new(env!("CARGO_BIN_EXE_catervas"))
             .args(["connector", verb, "--daemon"])
             .arg(&self.daemon_file)
             .args(["--session", SESSION, "--server", server])
@@ -247,10 +249,10 @@ impl Served {
             .envs(env.iter().copied())
             .stdin(std::process::Stdio::null())
             .output()
-            .expect("farik runs")
+            .expect("catervas runs")
     }
 
-    /// `farik connector headers` for `server`, in this process: it prints and never execs.
+    /// `catervas connector headers` for `server`, in this process: it prints and never execs.
     fn headers(&self, server: &str) -> (i32, String, String) {
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -263,7 +265,7 @@ impl Served {
             );
             let daemon = self.daemon_file.display().to_string();
             let arguments: Vec<String> = [
-                "farik",
+                "catervas",
                 "connector",
                 "headers",
                 "--daemon",
@@ -303,7 +305,7 @@ fn session_env(temp: &str) -> Vec<(&'static str, String)> {
         ("TMPDIR", temp.to_string()),
         ("ANTHROPIC_API_KEY", "sk-ant-model-secret".to_string()),
         ("CLAUDE_CODE_OAUTH_TOKEN", "oauth-model-secret".to_string()),
-        ("FARIK_OTHER", "anything".to_string()),
+        ("CATERVAS_OTHER", "anything".to_string()),
     ]
 }
 
@@ -360,7 +362,7 @@ fn a_server_changed_since_connect_gets_nothing() {
     // A pulled commit moves `linear` and has `printenv` run something else.
     served.change_team(|wire| {
         wire["agents"][1]["mcp_servers"][1]["url"] = json!("https://attacker.example/mcp");
-        wire["agents"][1]["mcp_servers"][0]["args"] = json!(["FARIK_RAN=1"]);
+        wire["agents"][1]["mcp_servers"][0]["args"] = json!(["CATERVAS_RAN=1"]);
     });
 
     let (code, out, err) = served.headers("linear");
@@ -404,7 +406,7 @@ fn the_launcher_refuses_a_server_the_session_was_not_given() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn connector_run_starts_the_server_in_a_folder_farik_keeps() {
+fn connector_run_starts_the_server_in_a_folder_catervas_keeps() {
     // Claude Code starts the launcher in the task's worktree, which agents write to: a server
     // started there would run `node_modules/.bin` or a `server.py` an agent left (finding C1).
     let served = Served::new("connector-run-folder");
@@ -439,13 +441,13 @@ fn connector_run_starts_the_server_in_a_folder_farik_keeps() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn the_launcher_starts_its_own_executable_for_farik() {
+fn the_launcher_starts_its_own_executable_for_catervas() {
     use std::io::{BufRead as _, Write as _};
 
-    // `command: farik` is Farik's own program, run as this very binary, with no PATH at all to
-    // find another `farik` in (ADR 0038).
-    let served = Served::new("connector-run-farik");
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_farik"))
+    // `command: catervas` is Catervas's own program, run as this very binary, with no PATH at all to
+    // find another `catervas` in (ADR 0038).
+    let served = Served::new("connector-run-catervas");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_catervas"))
         .args(["connector", "run", "--daemon"])
         .arg(&served.daemon_file)
         .args(["--session", SESSION, "--server", "osv"])
@@ -457,7 +459,7 @@ fn the_launcher_starts_its_own_executable_for_farik() {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("farik runs");
+        .expect("catervas runs");
     let mut stdin = child.stdin.take().expect("stdin");
     writeln!(
         stdin,
@@ -476,7 +478,7 @@ fn the_launcher_starts_its_own_executable_for_farik() {
     });
     let answered = receiver.recv_timeout(std::time::Duration::from_secs(30));
     let _ = child.kill();
-    let output = child.wait_with_output().expect("farik ends");
+    let output = child.wait_with_output().expect("catervas ends");
     let line = answered.unwrap_or_else(|_| {
         panic!(
             "no answer to initialize: {}",
@@ -490,7 +492,7 @@ fn the_launcher_starts_its_own_executable_for_farik() {
         )
     });
     assert_eq!(
-        reply["result"]["serverInfo"]["name"], "farik-osv",
+        reply["result"]["serverInfo"]["name"], "catervas-osv",
         "{reply}"
     );
 }
@@ -500,12 +502,12 @@ fn the_launcher_starts_its_own_executable_for_farik() {
 fn the_launched_shim_reaches_the_daemon_with_its_ticket() {
     use std::io::{BufRead as _, Write as _};
 
-    // `farik connector run` starts Google Ads' shim with the ticket and the daemon's address, so
+    // `catervas connector run` starts Google Ads' shim with the ticket and the daemon's address, so
     // a call reaches the daemon's route, which knows the session by the ticket: here it answers
     // that the entry is not the kit's, which only a call it accepted gets (a ticket it did not
-    // accept is a 401, and a shim with no ticket says it runs only inside a Farik session).
+    // accept is a 401, and a shim with no ticket says it runs only inside a Catervas session).
     let served = Served::new("connector-run-ads-shim");
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_farik"))
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_catervas"))
         .args(["connector", "run", "--daemon"])
         .arg(&served.daemon_file)
         .args(["--session", SESSION, "--server", "google-ads"])
@@ -517,7 +519,7 @@ fn the_launched_shim_reaches_the_daemon_with_its_ticket() {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("farik runs");
+        .expect("catervas runs");
     let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -548,7 +550,7 @@ fn the_launched_shim_reaches_the_daemon_with_its_ticket() {
     );
     assert_eq!(
         answer_to(1)["result"]["serverInfo"]["name"],
-        "farik-google-ads"
+        "catervas-google-ads"
     );
     send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
     send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
@@ -560,7 +562,7 @@ fn the_launched_shim_reaches_the_daemon_with_its_ticket() {
     );
     let called = answer_to(3);
     let _ = child.kill();
-    let output = child.wait_with_output().expect("farik ends");
+    let output = child.wait_with_output().expect("catervas ends");
     assert_eq!(called["result"]["isError"], json!(true), "{called}");
     let said = called["result"]["content"][0]["text"]
         .as_str()

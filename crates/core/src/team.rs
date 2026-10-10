@@ -18,12 +18,13 @@ use crate::governor::team_rules::TeamRules;
 
 pub use crate::contract::{Role, ValidationError};
 pub use crate::generated::team::{
-    Agent, AgentId, AgentStatus, Budgets as TeamBudgets, ConnectorTag as ConnectorTagWire,
-    FarikTeam as Team, JudgmentJudge as JudgeChoice, JudgmentRequired, McpServer as McpServerWire,
-    McpServerSource, McpServerTransport, Model as AgentModel, ModelEffort as Effort,
-    PermissionTier as PermissionTierWire, Permissions as TeamPermissions, Policy as TeamPolicy,
-    PolicyHumanAcceptsContracts as HumanAcceptsContracts, PolicyIntegration as Integration,
-    Role as RoleWire, Rules as RulesWire, SessionLimits as SessionLimitsWire, SkillPin,
+    Agent, AgentId, AgentStatus, Budgets as TeamBudgets, CatervasTeam as Team,
+    ConnectorTag as ConnectorTagWire, JudgmentJudge as JudgeChoice, JudgmentRequired,
+    McpServer as McpServerWire, McpServerSource, McpServerTransport, Model as AgentModel,
+    ModelEffort as Effort, PermissionTier as PermissionTierWire, Permissions as TeamPermissions,
+    Policy as TeamPolicy, PolicyHumanAcceptsContracts as HumanAcceptsContracts,
+    PolicyIntegration as Integration, Role as RoleWire, Rules as RulesWire,
+    SessionLimits as SessionLimitsWire, SkillPin,
 };
 
 /// Wire fixtures for tests, in this crate and in others.
@@ -65,7 +66,7 @@ const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
     (RoleWire::SoftwareDeveloper, "do the work"),
 ];
 
-/// The connectors Farik ships, by name (spec 5.6); `farik-roles` holds their definitions.
+/// The connectors Catervas ships, by name (spec 5.6); `catervas-roles` holds their definitions.
 pub const BUILTIN_CONNECTORS: [&str; 1] = ["playwright"];
 
 /// The most agents a team has that are not retired (spec 4.1). A retired agent stays in the file
@@ -106,14 +107,14 @@ pub fn changes_code(role: Role) -> bool {
 }
 
 /// The folder, under the project root, that only one role's sessions work in (`docs/SPEC.md` 6.6,
-/// 6.10, D5): the Finance Specialist's books, `.farik/local/finance`, and the Procurement
-/// Specialist's register and comparisons, `.farik/local/procurement`. Each lies under
-/// `.farik/local/`, which Farik keeps out of git, so it is never committed. No other role has one.
+/// 6.10, D5): the Finance Specialist's books, `.catervas/local/finance`, and the Procurement
+/// Specialist's register and comparisons, `.catervas/local/procurement`. Each lies under
+/// `.catervas/local/`, which Catervas keeps out of git, so it is never committed. No other role has one.
 #[must_use]
 pub fn private_folder(role: Role) -> Option<&'static str> {
     match role {
-        Role::FinanceSpecialist => Some(".farik/local/finance"),
-        Role::ProcurementSpecialist => Some(".farik/local/procurement"),
+        Role::FinanceSpecialist => Some(".catervas/local/finance"),
+        Role::ProcurementSpecialist => Some(".catervas/local/procurement"),
         _ => None,
     }
 }
@@ -296,7 +297,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
         errors.push(ValidationError {
             path: "/policy/judgment/judge".to_string(),
             message: format!(
-                "No active {} can check plans. Let Farik choose, or add one.",
+                "No active {} can check plans. Let Catervas choose, or add one.",
                 plain_role(role)
             ),
         });
@@ -326,7 +327,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
 }
 
 /// Every connector rule the schema cannot say (spec 5.6, F8), each refusal at its own field: a
-/// built-in one Farik ships and nothing else; a custom one named for nothing Farik reserves, with
+/// built-in one Catervas ships and nothing else; a custom one named for nothing Catervas reserves, with
 /// the fields of its transport and no other's, an address that holds no secret, and headers that
 /// name only its own keys; and one name once on an agent.
 fn connector_errors(team: &Team) -> Vec<ValidationError> {
@@ -395,7 +396,7 @@ pub fn server_errors(server: &McpServerWire) -> Vec<(String, String)> {
             refuse(
                 "name",
                 format!(
-                    "unknown_connector: {name} is not a connector Farik ships; the one it ships \
+                    "unknown_connector: {name} is not a connector Catervas ships; the one it ships \
                      is playwright."
                 ),
             );
@@ -403,16 +404,16 @@ pub fn server_errors(server: &McpServerWire) -> Vec<(String, String)> {
         for field in given {
             refuse(
                 field,
-                format!("A connector Farik ships has no {field}: Farik knows it."),
+                format!("A connector Catervas ships has no {field}: Catervas knows it."),
             );
         }
         return refused;
     }
-    if name == "farik" || BUILTIN_CONNECTORS.contains(&name) {
+    if name == "catervas" || BUILTIN_CONNECTORS.contains(&name) {
         refuse(
             "name",
             format!(
-                "connector_name_reserved: {name} is a name Farik keeps for itself. Name this \
+                "connector_name_reserved: {name} is a name Catervas keeps for itself. Name this \
                  connector something else."
             ),
         );
@@ -421,7 +422,7 @@ pub fn server_errors(server: &McpServerWire) -> Vec<(String, String)> {
         None => {
             refuse(
                 "transport",
-                "Say how this connector is reached: stdio, a command Farik starts, or http, a \
+                "Say how this connector is reached: stdio, a command Catervas starts, or http, a \
                  web address."
                     .to_string(),
             );
@@ -484,7 +485,7 @@ fn allowance_errors(server: &McpServerWire) -> Vec<(String, String)> {
             ) {
                 format!(
                     "allowance_not_external: {tool} is not a tool that spends or changes \
-                     something outside Farik, so it has no allowance."
+                     something outside Catervas, so it has no allowance."
                 )
             } else {
                 return None;
@@ -501,11 +502,12 @@ fn oauth_errors(server: &McpServerWire) -> Vec<(String, String)> {
     };
     let mut refused = Vec::new();
     let stdio = server.transport == Some(McpServerTransport::Stdio);
-    let own = stdio && names_farik_connector(server);
+    let own = stdio && names_catervas_connector(server);
     if stdio && !own {
         refused.push((
             "oauth".to_string(),
-            "oauth_on_stdio: a connector Farik starts has no sign-in; give it a key.".to_string(),
+            "oauth_on_stdio: a connector Catervas starts has no sign-in; give it a key."
+                .to_string(),
         ));
     }
     if server
@@ -529,7 +531,7 @@ fn oauth_errors(server: &McpServerWire) -> Vec<(String, String)> {
         }
     }
     if own {
-        // The app's id and port are Farik's own, in the table of the program that signs in.
+        // The app's id and port are Catervas's own, in the table of the program that signs in.
         for (given, field) in [
             (oauth.client_id.is_some(), "client_id"),
             (oauth.callback_port.is_some(), "callback_port"),
@@ -537,7 +539,7 @@ fn oauth_errors(server: &McpServerWire) -> Vec<(String, String)> {
             if given {
                 refused.push((
                     format!("oauth/{field}"),
-                    "farik_connector_client: Farik's own connector signs in with Farik's own app"
+                    "catervas_connector_client: Catervas's own connector signs in with Catervas's own app"
                         .to_string(),
                 ));
             }
@@ -546,19 +548,19 @@ fn oauth_errors(server: &McpServerWire) -> Vec<(String, String)> {
         refused.push((
             "oauth/callback_port".to_string(),
             "callback_port_without_client: the port belongs to a client the service registered \
-             for Farik, so give its client_id too."
+             for Catervas, so give its client_id too."
                 .to_string(),
         ));
     }
     refused
 }
 
-/// Whether a `stdio` entry is, in shape, Farik's own connector (ADR 0038): the command `farik`
-/// and exactly `connector` and a word of the shape a connector's name has. Which words are Farik's
+/// Whether a `stdio` entry is, in shape, Catervas's own connector (ADR 0038): the command `catervas`
+/// and exactly `connector` and a word of the shape a connector's name has. Which words are Catervas's
 /// connectors is the kit loader's to hold (this crate does not know them).
-fn names_farik_connector(server: &McpServerWire) -> bool {
+fn names_catervas_connector(server: &McpServerWire) -> bool {
     let args: Vec<&str> = server.args.iter().map(|arg| arg.as_str()).collect();
-    server.command.as_deref().map(String::as_str) == Some("farik")
+    server.command.as_deref().map(String::as_str) == Some("catervas")
         && matches!(args.as_slice(), ["connector", word] if is_connector_word(word))
 }
 
@@ -836,7 +838,7 @@ fn connector_tag(tag: ConnectorTagWire) -> ConnectorTag {
 pub struct CustomServer {
     /// Its name on the agent, and its tools' `mcp__<name>__` prefix.
     pub name: String,
-    /// How Farik starts or reaches it.
+    /// How Catervas starts or reaches it.
     pub transport: CustomTransport,
     /// The names of the agent's keys it is given; their values are never in the team file.
     pub credential_keys: Vec<String>,
@@ -864,14 +866,14 @@ impl CustomServer {
 /// How a custom connector is started or reached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CustomTransport {
-    /// A program Farik starts on the host, spoken to over its standard input and output.
+    /// A program Catervas starts on the host, spoken to over its standard input and output.
     Stdio {
         /// The program, found on `PATH`.
         command: String,
         /// Its arguments.
         args: Vec<String>,
-        /// Present when the connector is Farik's own and signs in with Farik's own app
-        /// (ADR 0033, ADR 0038): `farik connector <name>` alone may.
+        /// Present when the connector is Catervas's own and signs in with Catervas's own app
+        /// (ADR 0033, ADR 0038): `catervas connector <name>` alone may.
         oauth: Option<OAuthSettings>,
     },
     /// A web address, spoken to over streamable HTTP.
@@ -888,7 +890,7 @@ pub enum CustomTransport {
 /// How an http connector signs in (ADR 0033).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthSettings {
-    /// A public client the service's app registration gave, else Farik registers one.
+    /// A public client the service's app registration gave, else Catervas registers one.
     pub client_id: Option<String>,
     /// The port the pre-registered client's redirect names.
     pub callback_port: Option<u16>,
@@ -1065,7 +1067,7 @@ pub struct JudgmentPolicy {
     pub judge: JudgeChoice,
 }
 
-/// How Farik opens the project's app for the UI/UX Designer (the founder's D2): `prepare` installs
+/// How Catervas opens the project's app for the UI/UX Designer (the founder's D2): `prepare` installs
 /// and builds with the network on, `start` serves on `port` with it off, and `path` is the first
 /// page.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1154,7 +1156,7 @@ impl Team {
     }
 
     /// The rules the governor applies, with what the team left out filled in from what
-    /// `farik-core` ships (`docs/SPEC.md` section 5.12).
+    /// `catervas-core` ships (`docs/SPEC.md` section 5.12).
     ///
     /// The shipped protected paths are kept whatever the team writes, and the team's are added to
     /// them: 5.12 says rules only narrow what a tier allows, and a team that could delete `.env`
@@ -1233,7 +1235,7 @@ impl Team {
     }
 
     /// Whether an agent that is not retired has the server `name` among its `mcp_servers`: one
-    /// that can still run a session with it. A retired agent runs none, and retiring it in Farik
+    /// that can still run a session with it. A retired agent runs none, and retiring it in Catervas
     /// deletes its keys (ADR 0030), so its entry in the team file starts nothing.
     #[must_use]
     pub fn has_connector(&self, name: &str) -> bool {
@@ -1379,7 +1381,7 @@ mod tests {
             .expect("the fixture's budgets are an object")
             .remove("daily_usd");
         let team = team(&wire);
-        assert_eq!(team.name.as_str(), "Farik");
+        assert_eq!(team.name.as_str(), "Catervas");
         assert_eq!(team.agents.len(), 2);
         assert!(
             team.budgets.daily_usd.is_none(),
@@ -1580,7 +1582,7 @@ mod tests {
         assert_eq!(
             rules.protected_paths,
             DEFAULT_PROTECTED_PATHS.map(str::to_string),
-            "the five farik-core ships"
+            "the five catervas-core ships"
         );
         assert!(rules.allowed_paths_ceiling.is_empty(), "no ceiling");
         assert!(rules.required_criteria.is_empty());
@@ -1713,7 +1715,7 @@ mod tests {
             refusals(&wire),
             [(
                 "/agents/1/mcp_servers/1/name".to_string(),
-                "unknown_connector: selenium is not a connector Farik ships; the one it ships is playwright."
+                "unknown_connector: selenium is not a connector Catervas ships; the one it ships is playwright."
                     .to_string()
             )]
         );
@@ -2058,7 +2060,7 @@ mod tests {
             refusals(&wire),
             [(
                 "/policy/judgment/judge".to_string(),
-                "No active Architect can check plans. Let Farik choose, or add one.".to_string()
+                "No active Architect can check plans. Let Catervas choose, or add one.".to_string()
             )]
         );
 
@@ -2073,7 +2075,8 @@ mod tests {
             refusals(&wire),
             [(
                 "/policy/judgment/judge".to_string(),
-                "No active Scrum Master can check plans. Let Farik choose, or add one.".to_string()
+                "No active Scrum Master can check plans. Let Catervas choose, or add one."
+                    .to_string()
             )],
             "a paused one is not active"
         );
@@ -2154,7 +2157,7 @@ mod tests {
             }
         );
 
-        // `farik init`'s starter team, as it was written before the defaults moved to core.
+        // `catervas init`'s starter team, as it was written before the defaults moved to core.
         let starter = team(&json!({
             "name": "notes",
             "agents": [
@@ -2353,11 +2356,11 @@ mod tests {
     fn the_procurement_folder_is_its_own() {
         assert_eq!(
             private_folder(Role::FinanceSpecialist),
-            Some(".farik/local/finance")
+            Some(".catervas/local/finance")
         );
         assert_eq!(
             private_folder(Role::ProcurementSpecialist),
-            Some(".farik/local/procurement")
+            Some(".catervas/local/procurement")
         );
         for role in [
             Role::ProductManager,
@@ -2374,7 +2377,7 @@ mod tests {
 
     #[test]
     fn a_procurement_folder_holds_workbooks_and_notes() {
-        let procurement = ".farik/local/procurement";
+        let procurement = ".catervas/local/procurement";
         for path in ["vendors.xlsx", "evaluations/email-sending.md", "a b/c.md"] {
             assert_eq!(private_file_fault(procurement, path), None, "{path}");
         }
@@ -2391,7 +2394,7 @@ mod tests {
             assert!(private_file_fault(procurement, path).is_some(), "{path:?}");
         }
         // The finance folder holds workbooks alone, and the shape rules are the workbook path's.
-        let finance = ".farik/local/finance";
+        let finance = ".catervas/local/finance";
         assert_eq!(private_file_fault(finance, "books.xlsx"), None);
         assert_eq!(
             private_file_fault(finance, "notes.md"),
@@ -2449,10 +2452,10 @@ mod tests {
             ("/tmp/x.xlsx", "has a part that is not a name"),
             (".history/x.xlsx", "has a part that is not a name"),
             (
-                ".farik/local/finance/books.xlsx",
+                ".catervas/local/finance/books.xlsx",
                 "is not a path of 1 to 200 characters and at most 3 parts",
             ),
-            (".farik/books.xlsx", "has a part that is not a name"),
+            (".catervas/books.xlsx", "has a part that is not a name"),
             ("a//b.xlsx", "has a part that is not a name"),
             (&part_too_long, "has a part that is not a name"),
             (
@@ -2478,7 +2481,10 @@ mod tests {
         let mut contract = validate_contract(&a_contract_wire()).expect("a contract");
         assert_eq!(task_private_folder(&contract), None);
         contract.assignee_role = Role::FinanceSpecialist;
-        assert_eq!(task_private_folder(&contract), Some(".farik/local/finance"));
+        assert_eq!(
+            task_private_folder(&contract),
+            Some(".catervas/local/finance")
+        );
         contract.kind = crate::contract::TaskKind::Epic;
         assert_eq!(task_private_folder(&contract), None);
     }
@@ -2619,8 +2625,8 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_custom_server_named_farik_or_playwright() {
-        for name in ["farik", "playwright"] {
+    fn refuses_a_custom_server_named_catervas_or_playwright() {
+        for name in ["catervas", "playwright"] {
             let mut server = a_stdio_server();
             server["name"] = json!(name);
             let refused = refusals(&with_servers(json!([server])));
@@ -2685,7 +2691,7 @@ mod tests {
         let at = |field: &str| format!("/agents/0/mcp_servers/0/{field}");
         for (field, value) in [
             ("url", json!("https://mcp.example.com/mcp")),
-            ("headers", json!({ "X-Team": "farik" })),
+            ("headers", json!({ "X-Team": "catervas" })),
         ] {
             let mut server = a_stdio_server();
             server[field] = value;
@@ -2759,7 +2765,7 @@ mod tests {
             );
         }
         let mut server = an_http_server();
-        server["url"] = json!("https://x.example/team@farik/mcp");
+        server["url"] = json!("https://x.example/team@catervas/mcp");
         assert!(
             validate_team(&with_servers(json!([server]))).is_ok(),
             "an @ in the path is not userinfo"
@@ -2825,7 +2831,7 @@ mod tests {
         }
         let mut server = an_http_server();
         server["headers"] = json!({
-            "Authorization": "Bearer {API_KEY}", "X-Team": "farik", "Accept": "text/plain"
+            "Authorization": "Bearer {API_KEY}", "X-Team": "catervas", "Accept": "text/plain"
         });
         assert!(validate_team(&with_servers(json!([server]))).is_ok());
     }
@@ -3017,7 +3023,7 @@ mod tests {
             );
         }
         let mut server = an_http_server();
-        server["headers"] = json!({ "Authorization": "Bearer {API_KEY}", "X-Team": "farik" });
+        server["headers"] = json!({ "Authorization": "Bearer {API_KEY}", "X-Team": "catervas" });
         assert!(validate_team(&with_servers(json!([server]))).is_ok());
         let mut server = an_http_server();
         server["credential_keys"] = json!(["api_key"]);
@@ -3230,13 +3236,13 @@ mod tests {
         );
     }
 
-    /// Farik's own connector as a team file or a kit spells it: `farik connector <word>`.
-    fn a_farik_connector(word: &str, oauth: Value) -> Value {
+    /// Catervas's own connector as a team file or a kit spells it: `catervas connector <word>`.
+    fn a_catervas_connector(word: &str, oauth: Value) -> Value {
         let mut server = json!({
             "name": "osv",
             "source": "custom",
             "transport": "stdio",
-            "command": "farik",
+            "command": "catervas",
             "args": ["connector", word],
             "tools": { "query_package": "network" }
         });
@@ -3245,8 +3251,8 @@ mod tests {
     }
 
     #[test]
-    fn the_farik_connector_may_sign_in() {
-        let wire = with_servers(json!([a_farik_connector(
+    fn the_catervas_connector_may_sign_in() {
+        let wire = with_servers(json!([a_catervas_connector(
             "osv",
             json!({ "scopes": ["a"] })
         )]));
@@ -3256,9 +3262,9 @@ mod tests {
         let settings = server.oauth().expect("signs in");
         assert_eq!(settings.scopes, ["a".to_string()]);
         assert_eq!(settings.client_id, None);
-        // The word is held to Farik's own connectors by the kit loader; here it is its shape alone.
+        // The word is held to Catervas's own connectors by the kit loader; here it is its shape alone.
         for word in ["a", "osv-2", &format!("a{}", "b".repeat(39))] {
-            let wire = with_servers(json!([a_farik_connector(word, json!({}))]));
+            let wire = with_servers(json!([a_catervas_connector(word, json!({}))]));
             assert!(validate_team(&wire).is_ok(), "{word}");
         }
     }
@@ -3270,19 +3276,19 @@ mod tests {
         let long = "x".repeat(41);
         let cases: [(&str, Vec<&str>); 11] = [
             ("npx", vec!["x@1.0.0"]),
-            ("farik", vec!["serve"]),
-            ("farik", vec!["connector", "a", "b"]),
-            ("farik", vec!["connector"]),
-            ("farik", vec!["connector", "Osv"]),
-            ("farik", vec!["connector", "1x"]),
-            ("farik", vec!["connector", "a_b"]),
-            ("farik", vec!["connector", &long]),
-            ("farik", vec!["other", "osv"]),
-            ("FARIK", vec!["connector", "osv"]),
-            ("/usr/bin/farik", vec!["connector", "osv"]),
+            ("catervas", vec!["serve"]),
+            ("catervas", vec!["connector", "a", "b"]),
+            ("catervas", vec!["connector"]),
+            ("catervas", vec!["connector", "Osv"]),
+            ("catervas", vec!["connector", "1x"]),
+            ("catervas", vec!["connector", "a_b"]),
+            ("catervas", vec!["connector", &long]),
+            ("catervas", vec!["other", "osv"]),
+            ("CATERVAS", vec!["connector", "osv"]),
+            ("/usr/bin/catervas", vec!["connector", "osv"]),
         ];
         for (command, args) in cases {
-            let mut server = a_farik_connector("osv", json!({}));
+            let mut server = a_catervas_connector("osv", json!({}));
             server["command"] = json!(command);
             server["args"] = json!(args);
             let found = refusals(&with_servers(json!([server])));
@@ -3296,10 +3302,10 @@ mod tests {
     }
 
     #[test]
-    fn the_farik_connector_takes_no_client_of_its_own() {
+    fn the_catervas_connector_takes_no_client_of_its_own() {
         let at = |field: &str| format!("/agents/0/mcp_servers/0/oauth/{field}");
         let said = |oauth: Value| {
-            let found = refusals(&with_servers(json!([a_farik_connector("osv", oauth)])));
+            let found = refusals(&with_servers(json!([a_catervas_connector("osv", oauth)])));
             found
                 .into_iter()
                 .map(|(path, message)| {
@@ -3308,7 +3314,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        let own = "farik_connector_client".to_string();
+        let own = "catervas_connector_client".to_string();
         assert_eq!(
             said(json!({ "client_id": "abc" })),
             [(at("client_id"), own.clone())]
@@ -3322,20 +3328,20 @@ mod tests {
             said(json!({ "client_id": "abc", "callback_port": 33418 })),
             [(at("client_id"), own.clone()), (at("callback_port"), own)]
         );
-        let found = refusals(&with_servers(json!([a_farik_connector(
+        let found = refusals(&with_servers(json!([a_catervas_connector(
             "osv",
             json!({ "client_id": "abc" })
         )])));
         assert_eq!(
             found[0].1,
-            "farik_connector_client: Farik's own connector signs in with Farik's own app"
+            "catervas_connector_client: Catervas's own connector signs in with Catervas's own app"
         );
     }
 
-    /// A guard: `oauth_with_keys` holds for Farik's own connector as for any entry.
+    /// A guard: `oauth_with_keys` holds for Catervas's own connector as for any entry.
     #[test]
-    fn the_farik_connector_that_signs_in_takes_no_keys() {
-        let mut server = a_farik_connector("osv", json!({}));
+    fn the_catervas_connector_that_signs_in_takes_no_keys() {
+        let mut server = a_catervas_connector("osv", json!({}));
         server["credential_keys"] = json!(["API_KEY"]);
         let found = refusals(&with_servers(json!([server])));
         assert_eq!(found.len(), 1, "{found:?}");

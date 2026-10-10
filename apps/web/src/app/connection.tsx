@@ -3,7 +3,7 @@ import {
 	type DaemonClient,
 	type Event,
 	type SocketLike,
-} from "@farik/protocol-client";
+} from "@catervas/protocol-client";
 import {
 	createContext,
 	type ReactNode,
@@ -29,7 +29,7 @@ type Connection = {
 	events: Event[];
 	/** Revokes this browser's session and closes the socket; the page then asks for a start link. */
 	disconnect: () => Promise<void>;
-	/** Farik is about to restart on the chosen project: its close is expected, and the page reconnects at once. */
+	/** Catervas is about to restart on the chosen project: its close is expected, and the page reconnects at once. */
 	reopen: () => void;
 };
 
@@ -68,7 +68,7 @@ export function ConnectionProvider(props: {
 		let lastSeq = 0;
 		let retry: ReturnType<typeof setTimeout> | undefined;
 		let current: DaemonClient | null = null;
-		// While Farik restarts on a chosen project: until when to keep trying, and whether it was tried yet.
+		// While Catervas restarts on a chosen project: until when to keep trying, and whether it was tried yet.
 		let reopenUntil: number | undefined;
 		let retried = false;
 

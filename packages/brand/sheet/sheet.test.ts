@@ -77,7 +77,9 @@ describe("brand sheet", () => {
 
 	it("puts the light wordmark on a band tile", () => {
 		const light = root.querySelector('section[data-theme="light"]') as Element;
-		let tile = light.querySelector('img[alt="Farik wordmark"]')?.parentElement;
+		let tile = light.querySelector(
+			'img[alt="Catervas wordmark"]',
+		)?.parentElement;
 		while (
 			tile &&
 			tile !== light &&
@@ -94,11 +96,11 @@ describe("brand sheet", () => {
 		const rules = page.match(/[^{}]+\{[^{}]*\}/g) ?? [];
 		for (const rule of rules) {
 			if (/\.(chip|sample|swatch|pair|lockup)\b|\.themes/.test(rule))
-				expect(rule).not.toContain("var(--farik-color");
+				expect(rule).not.toContain("var(--catervas-color");
 		}
 		for (const theme of THEMES) {
 			const col = root.querySelector(`section[data-theme="${theme}"]`);
-			expect(col?.outerHTML).not.toContain("var(--farik-color");
+			expect(col?.outerHTML).not.toContain("var(--catervas-color");
 		}
 	});
 

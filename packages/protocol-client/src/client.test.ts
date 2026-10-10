@@ -140,7 +140,7 @@ describe("client", () => {
 			jsonrpc: "2.0",
 			id: 2,
 			result: {
-				folder: "/h/.config/farik/templates",
+				folder: "/h/.config/catervas/templates",
 				templates: [
 					{ slug: "pair", template: { name: "Pair", saved_at: "t" } },
 				],
@@ -155,12 +155,12 @@ describe("client", () => {
 				event: {
 					seq: 9,
 					kind: "team.updated",
-					body: { team_name: "Farik", template: "Pair" },
+					body: { team_name: "Catervas", template: "Pair" },
 				},
 			},
 		});
 		expect(await listed).toEqual({
-			folder: "/h/.config/farik/templates",
+			folder: "/h/.config/catervas/templates",
 			templates: [{ slug: "pair", template: { name: "Pair", savedAt: "t" } }],
 			unreadable: [],
 		});
@@ -169,7 +169,7 @@ describe("client", () => {
 			{
 				seq: 9,
 				kind: "team.updated",
-				body: { teamName: "Farik", template: "Pair" },
+				body: { teamName: "Catervas", template: "Pair" },
 			},
 		]);
 	});

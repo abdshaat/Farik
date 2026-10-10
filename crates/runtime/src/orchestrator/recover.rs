@@ -2,10 +2,10 @@
 
 use std::collections::BTreeSet;
 
-use farik_core::contract::TaskStatus;
-use farik_core::pricing::Usage;
-use farik_protocol::event::{EventBody, EventIds, EventKind, SessionStartedBodyPurpose};
-use farik_store::EventQuery;
+use catervas_core::contract::TaskStatus;
+use catervas_core::pricing::Usage;
+use catervas_protocol::event::{EventBody, EventIds, EventKind, SessionStartedBodyPurpose};
+use catervas_store::EventQuery;
 
 use super::integrate::remove_workspace;
 use super::{Orchestrator, OrchestratorError, RecoveryReport};
@@ -14,7 +14,7 @@ use crate::session::{EndReason, SessionPurpose};
 use crate::sessions::record_session_ended;
 
 /// What a session a stopped run left open is recorded as ending with.
-const INTERRUPTED: &str = "interrupted: farik stopped before the session ended";
+const INTERRUPTED: &str = "interrupted: catervas stopped before the session ended";
 
 /// `Orchestrator::recover`.
 pub(super) fn recover(orchestrator: &Orchestrator) -> Result<RecoveryReport, OrchestratorError> {
@@ -115,10 +115,10 @@ fn purpose(wire: SessionStartedBodyPurpose) -> SessionPurpose {
 mod tests {
     use std::sync::Arc;
 
-    use farik_protocol::event::{
-        CostRecordedBodyPurpose, EventBody, EventKind, FarikEvent, SessionEndedBodyReason,
+    use catervas_protocol::event::{
+        CatervasEvent, CostRecordedBodyPurpose, EventBody, EventKind, SessionEndedBodyReason,
     };
-    use farik_store::git::fixtures::git_output_in;
+    use catervas_store::git::fixtures::git_output_in;
     use serde_json::json;
 
     use crate::orchestrator::RecoveryReport;
@@ -193,7 +193,7 @@ mod tests {
     }
 
     /// The events of `kind` about `session`.
-    fn of_session(harness: &Harness, kind: EventKind, session: &str) -> Vec<FarikEvent> {
+    fn of_session(harness: &Harness, kind: EventKind, session: &str) -> Vec<CatervasEvent> {
         harness
             .events(&[kind])
             .into_iter()

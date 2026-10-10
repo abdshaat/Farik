@@ -10,7 +10,7 @@ you check by reading the code and the screen.
 
 ## 1. Read the automated results
 
-When your session offers `farik_check_page`, run it for each screen at phone and desktop width, in
+When your session offers `catervas_check_page`, run it for each screen at phone and desktop width, in
 the light and dark themes. Each violation names its rule, its impact, the element and a help text.
 Fix every `critical` and `serious` one, and name any other in the completion note. When your session
 has no such tool, check the rules below from the code.

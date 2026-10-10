@@ -15,7 +15,7 @@ describe("theme", () => {
 		const { result } = renderHook(() => useTheme());
 		act(() => result.current[1]("dark"));
 		expect(shown()).toBe("dark");
-		expect(localStorage.getItem("farik.theme")).toBe("dark");
+		expect(localStorage.getItem("catervas.theme")).toBe("dark");
 
 		act(() => result.current[1]("system"));
 		expect(result.current[0]).toBe("system");

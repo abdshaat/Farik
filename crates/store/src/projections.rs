@@ -4,13 +4,14 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use chrono::NaiveDate;
-use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
-use farik_protocol::event::{
-    ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus,
-    CostRecordedBody, EscalationRaisedBodyReason, EventBody, FarikEvent, RequestTriagedBodySize,
-    TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
+use catervas_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
+use catervas_protocol::event::{
+    CatervasEvent, ContractSummary, ContractSummaryKind, ContractSummaryRisk,
+    ContractSummaryStatus, CostRecordedBody, EscalationRaisedBodyReason, EventBody,
+    RequestTriagedBodySize, TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
+    TransitionActorWire,
 };
+use chrono::NaiveDate;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::error::StoreError;
@@ -217,7 +218,7 @@ impl Projections {
     ///
     /// `Sqlite` when the write or the cursor read fails; `InvalidEvent` when the log holds a row
     /// that is not an event, which only a gap can reach.
-    pub fn apply(&self, event: &FarikEvent) -> Result<(), StoreError> {
+    pub fn apply(&self, event: &CatervasEvent) -> Result<(), StoreError> {
         if event.envelope.seq > self.cursor()?.saturating_add(1) {
             self.catch_up()?;
             return Ok(());
@@ -226,12 +227,12 @@ impl Projections {
     }
 
     /// Applies one event that is the next one, or one already applied.
-    fn apply_in_order(&self, event: &FarikEvent) -> Result<(), StoreError> {
+    fn apply_in_order(&self, event: &CatervasEvent) -> Result<(), StoreError> {
         let mut connection = self.connection();
         // `Immediate`, for the reason `migrations::apply` gives at length: this transaction reads
         // the cursor before it writes, and a transaction that takes its read lock first cannot wait
         // for the write lock it turns out to need — SQLite refuses it at once rather than after
-        // `busy_timeout`. Two `farik` commands projecting what they appended is the ordinary case.
+        // `busy_timeout`. Two `catervas` commands projecting what they appended is the ordinary case.
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if event.envelope.seq <= read_cursor(&transaction)? {
             return Ok(());
@@ -533,7 +534,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
 ///
 /// A refusal here fails the whole board, which is what the step 02 review refused for the log's own
 /// `read`. The difference is the repair: a board is derived, so `rebuild` throws these rows away and
-/// reads the log again without parsing any of them, and `farik doctor` reaches a board in this state
+/// reads the log again without parsing any of them, and `catervas doctor` reaches a board in this state
 /// that way. The log has no such door — a row of it that cannot be read is the only copy.
 fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
     let (
@@ -599,7 +600,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
 
 /// Applies one event to the projection tables, leaving the cursor to the caller.
 #[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
-fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), StoreError> {
+fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), StoreError> {
     let seq = i64::try_from(event.envelope.seq).map_err(|_| StoreError::Sqlite {
         detail: format!(
             "event {} is past what the engine can hold",
@@ -782,7 +783,7 @@ fn apply_move(
     seq: i64,
 ) -> Result<(), StoreError> {
     // The wire's status is the contract schema's own list, which a test in
-    // `farik-protocol` holds to it, so every value it can carry reads here.
+    // `catervas-protocol` holds to it, so every value it can carry reads here.
     let to = TaskStatus::from_str(&body.to.to_string()).map_err(|_| StoreError::InvalidEvent {
         detail: format!("event {seq} moves {id} to {}, which is no status", body.to),
     })?;
@@ -969,7 +970,7 @@ fn apply_sprint(
 /// task is in now, so that the cost stays with that sprint after the task leaves it.
 fn write_cost(
     transaction: &Transaction<'_>,
-    event: &FarikEvent,
+    event: &CatervasEvent,
     body: &CostRecordedBody,
     seq: i64,
 ) -> Result<(), StoreError> {
@@ -999,7 +1000,7 @@ fn write_cost(
 ///
 /// An upsert rather than an insert, and an upsert rather than a refusal: a `contract.written` whose
 /// `task.created` is missing means a log that cannot be right, and refusing it here would make the
-/// whole board unreadable over one row. `farik doctor` is what reports a log and its files
+/// whole board unreadable over one row. `catervas doctor` is what reports a log and its files
 /// disagreeing (5.1), and it needs a board it can read to do that.
 fn write_summary(
     transaction: &Transaction<'_>,
@@ -1083,7 +1084,7 @@ fn write_cursor(transaction: &Transaction<'_>, seq: u64) -> Result<(), StoreErro
 
 /// The three vocabularies an event repeats from the contract schema, in the contract's own types.
 ///
-/// The two spellings are generated from two schemas, and a test in `farik-protocol` fails when they
+/// The two spellings are generated from two schemas, and a test in `catervas-protocol` fails when they
 /// drift, so these mappings are total and stay total.
 fn kind_of(kind: ContractSummaryKind) -> TaskKind {
     match kind {
@@ -1118,19 +1119,19 @@ fn risk_of(risk: ContractSummaryRisk) -> Risk {
 
 #[cfg(test)]
 mod tests {
+    use catervas_protocol::event::fixtures::{a_contract_summary_wire, a_new_event, an_event_wire};
+    use catervas_protocol::event::{EventKind, NewEvent, event_from_value};
     use chrono::{DateTime, TimeZone, Utc};
-    use farik_protocol::event::fixtures::{a_contract_summary_wire, a_new_event, an_event_wire};
-    use farik_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::json;
 
     use super::{
-        Arc, CostProjection, CostScope, EventLog, FarikEvent, Projections, SprintProjection,
+        Arc, CatervasEvent, CostProjection, CostScope, EventLog, Projections, SprintProjection,
         TaskProjection, open_projections,
     };
     use crate::error::StoreError;
     use crate::event_log::{IN_MEMORY, open_event_log};
     use crate::migrations;
-    use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
+    use catervas_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 
     fn at(hour: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 9, 17, hour, 0, 0)
@@ -1152,7 +1153,7 @@ mod tests {
     }
 
     /// Appends one event and hands it to the projections, the way a command does.
-    fn record(log: &EventLog, projections: &Projections, event: &NewEvent) -> FarikEvent {
+    fn record(log: &EventLog, projections: &Projections, event: &NewEvent) -> CatervasEvent {
         let appended = log.append(event).expect("appends");
         projections.apply(&appended).expect("projects");
         appended
@@ -1361,7 +1362,7 @@ mod tests {
     #[test]
     fn refuses_a_projected_row_it_cannot_read_back() {
         // Nothing this crate writes can produce such a row, so this is about the file having been
-        // changed by something else, or written by a Farik this one does not understand.
+        // changed by something else, or written by a Catervas this one does not understand.
         let (log, projections) = a_board();
         record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
         log.connection()
@@ -1597,7 +1598,7 @@ mod tests {
         // the log for good, with nothing to notice — so the events in between are read from the
         // log, which is the one place they certainly are.
         let (log, projections) = a_board();
-        let events: Vec<FarikEvent> = ["FRK-1", "FRK-2", "FRK-3"]
+        let events: Vec<CatervasEvent> = ["FRK-1", "FRK-2", "FRK-3"]
             .iter()
             .map(|id| {
                 log.append(&about(EventKind::TaskCreated, id))
@@ -1762,13 +1763,13 @@ mod tests {
     #[test]
     fn reads_an_older_accepted_task_as_awaiting() {
         let directory = std::env::temp_dir().join(format!(
-            "farik-older-accepted-{}-{:?}",
+            "catervas-older-accepted-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
-        let path = directory.join("farik.db");
+        let path = directory.join("catervas.db");
         {
             let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
             migrations::apply_through(&mut connection, 4, at(9)).expect("version 4 applies");
@@ -1837,7 +1838,7 @@ mod tests {
         );
         assert!(row_of(&projections, "FRK-1").waiting_on_human);
 
-        let answer = |question: &FarikEvent| {
+        let answer = |question: &CatervasEvent| {
             with_body(
                 EventKind::QuestionAnswered,
                 "FRK-1",
@@ -1951,14 +1952,14 @@ mod tests {
         );
 
         // An approval that answers a request lowers the count, as a decline does.
-        let approves = |request: &FarikEvent| {
+        let approves = |request: &CatervasEvent| {
             with_body(
                 EventKind::SiteApproved,
                 "FRK-1",
                 json!({ "host": "shop.example", "request": request.envelope.seq }),
             )
         };
-        let declines = |request: &FarikEvent| {
+        let declines = |request: &CatervasEvent| {
             with_body(
                 EventKind::SiteDeclined,
                 "FRK-1",
@@ -2023,13 +2024,13 @@ mod tests {
     #[test]
     fn reads_an_older_log_into_the_new_columns() {
         let directory = std::env::temp_dir().join(format!(
-            "farik-older-human-{}-{:?}",
+            "catervas-older-human-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
-        let path = directory.join("farik.db");
+        let path = directory.join("catervas.db");
         {
             let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
             migrations::apply_through(&mut connection, 5, at(9)).expect("version 5 applies");
@@ -2037,19 +2038,19 @@ mod tests {
                 .execute_batch(
                     "INSERT INTO events (seq, recorded_at, team_id, project_id, task_id, kind, body)
                      VALUES
-                       (1, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-1', 'task.transitioned',
+                       (1, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-1', 'task.transitioned',
                         '{\"from\":\"refining\",\"to\":\"escalated\",\"actor\":\"governor\",\"requested_by\":\"governor\",\"gate\":\"contract_requires_human\",\"effects\":[\"raise_escalation\"],\"iteration\":0}'),
-                       (2, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-1', 'escalation.raised',
+                       (2, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-1', 'escalation.raised',
                         '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
-                       (3, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-2', 'question.asked',
+                       (3, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-2', 'question.asked',
                         '{\"question\":\"Should done.txt be empty?\",\"asked_by\":\"pm\"}'),
-                       (4, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-3', 'escalation.raised',
+                       (4, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-3', 'escalation.raised',
                         '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
-                       (5, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-3', 'task.transitioned',
+                       (5, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-3', 'task.transitioned',
                         '{\"from\":\"escalated\",\"to\":\"ready\",\"actor\":\"human\",\"requested_by\":\"human\",\"effects\":[],\"iteration\":0}'),
-                       (6, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-4', 'escalation.raised',
+                       (6, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-4', 'escalation.raised',
                         '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
-                       (7, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-4', 'escalation.raised',
+                       (7, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-4', 'escalation.raised',
                         '{\"reason\":\"iterations\",\"detail\":\"too many\"}');
                      INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
@@ -2445,16 +2446,16 @@ mod tests {
 
     #[test]
     fn replays_an_older_project_into_the_new_counts() {
-        use farik_protocol::event::fixtures::a_body_wire;
+        use catervas_protocol::event::fixtures::a_body_wire;
 
         let directory = std::env::temp_dir().join(format!(
-            "farik-older-metrics-{}-{:?}",
+            "catervas-older-metrics-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
-        let path = directory.join("farik.db");
+        let path = directory.join("catervas.db");
         {
             let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
             migrations::apply_through(&mut connection, 6, at(9)).expect("version 6 applies");
@@ -2483,7 +2484,7 @@ mod tests {
                         "INSERT INTO events
                              (seq, recorded_at, team_id, project_id, task_id, agent_id,
                               session_id, kind, body)
-                         VALUES (?1, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-1', 'dev-a',
+                         VALUES (?1, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-1', 'dev-a',
                                  's1', ?2, ?3)",
                         (seq, kind.to_string(), body.to_string()),
                     )
@@ -2570,7 +2571,8 @@ mod tests {
     }
 
     fn team_updated(plan_in_sprints: Option<bool>) -> NewEvent {
-        let mut body = json!({ "team_name": "farik", "agent_ids": ["pm"], "updated_by": "human" });
+        let mut body =
+            json!({ "team_name": "catervas", "agent_ids": ["pm"], "updated_by": "human" });
         if let Some(on) = plan_in_sprints {
             body["plan_in_sprints"] = json!(on);
         }
@@ -2604,7 +2606,7 @@ mod tests {
             &planned("S2", &["FRK-1", "FRK-2", "FRK-3"]),
         );
         let mut end = ended("S2", &["FRK-1", "FRK-2"]);
-        let farik_protocol::event::EventBody::SprintEnded(body) = &mut end.body else {
+        let catervas_protocol::event::EventBody::SprintEnded(body) = &mut end.body else {
             panic!("a sprint.ended");
         };
         body.backlog = Some(true);
@@ -2633,7 +2635,7 @@ mod tests {
         let (log, projections) = a_board();
         record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
         let mut raise = about(EventKind::TaskCreated, "FRK-2");
-        let farik_protocol::event::EventBody::TaskCreated(body) = &mut raise.body else {
+        let catervas_protocol::event::EventBody::TaskCreated(body) = &mut raise.body else {
             panic!("a task.created");
         };
         body.raises = Some("MP-1".to_string().try_into().expect("a plan id"));
@@ -2800,16 +2802,16 @@ mod tests {
 
     #[test]
     fn replays_the_sprints_after_the_migration() {
-        use farik_protocol::event::fixtures::a_body_wire;
+        use catervas_protocol::event::fixtures::a_body_wire;
 
         let directory = std::env::temp_dir().join(format!(
-            "farik-older-sprints-{}-{:?}",
+            "catervas-older-sprints-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
-        let path = directory.join("farik.db");
+        let path = directory.join("catervas.db");
         {
             let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
             migrations::apply_through(&mut connection, 7, at(9)).expect("version 7 applies");
@@ -2825,7 +2827,7 @@ mod tests {
                         "INSERT INTO events
                              (seq, recorded_at, team_id, project_id, task_id, agent_id,
                               session_id, kind, body)
-                         VALUES (?1, '2026-09-17T10:00:00Z', 'farik', 'farik', ?2, 'dev-a',
+                         VALUES (?1, '2026-09-17T10:00:00Z', 'catervas', 'catervas', ?2, 'dev-a',
                                  's1', ?3, ?4)",
                         (
                             seq,
@@ -2836,7 +2838,7 @@ mod tests {
                     )
                     .expect("an older event is written");
             }
-            // What a Farik that knew no sprints projected from those events.
+            // What a Catervas that knew no sprints projected from those events.
             connection
                 .execute_batch(
                     "INSERT INTO task_projections
@@ -2866,13 +2868,13 @@ mod tests {
     #[test]
     fn frees_a_task_left_in_an_ended_sprint_by_the_migration() {
         let directory = std::env::temp_dir().join(format!(
-            "farik-stranded-sprint-{}-{:?}",
+            "catervas-stranded-sprint-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
-        let path = directory.join("farik.db");
+        let path = directory.join("catervas.db");
         {
             let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
             migrations::apply_through(&mut connection, 8, at(9)).expect("version 8 applies");
@@ -2933,7 +2935,7 @@ mod tests {
 
     #[test]
     fn splits_a_tasks_cost_by_purpose() {
-        use farik_protocol::event::{CostRecordedBodyPurpose, EventBody};
+        use catervas_protocol::event::{CostRecordedBodyPurpose, EventBody};
         let (log, projections) = a_board();
         for task_id in ["FRK-1", "FRK-2"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task_id));
@@ -3048,7 +3050,7 @@ mod tests {
     #[test]
     fn sums_costs_by_purpose() {
         use super::CostWindow;
-        use farik_protocol::event::{CostRecordedBodyPurpose, EventBody};
+        use catervas_protocol::event::{CostRecordedBodyPurpose, EventBody};
         let (log, projections) = a_board();
         record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
         let with = |purpose, task_id, session, day, usd| {

@@ -13,7 +13,7 @@ code, a secret or a customer's data in it.
 
 ## 2. The browser, for the task's preview
 
-The browser opens the task's preview and nothing else. Use it after Farik has prepared and started
+The browser opens the task's preview and nothing else. Use it after Catervas has prepared and started
 the preview, never before.
 
 - Read a page with `browser_snapshot`.

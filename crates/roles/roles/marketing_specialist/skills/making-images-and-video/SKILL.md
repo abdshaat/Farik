@@ -6,7 +6,7 @@ description: Use when Higgsfield or Recraft is connected and the task needs a pi
 # Making images and video
 
 Higgsfield and Recraft make pictures, clips and voice-overs from a description. Every one uses the
-user's credits, so you make what the task needs and no more. Farik counts each request and asks
+user's credits, so you make what the task needs and no more. Catervas counts each request and asks
 the user before you go past the number they allowed.
 
 ## 1. Describe what you need first
@@ -69,7 +69,7 @@ with the contract.
 
 For each result, write down its address and what it is for in the deliverable, so the user can
 find it and use it. A social post in the owner's approved marketing plan goes out through
-`farik_schedule_post`, with the picture's address in it, and any other post waits for the owner;
+`catervas_schedule_post`, with the picture's address in it, and any other post waits for the owner;
 otherwise the human publishes, and you hand over the pictures and clips for them to place. Use only
 the business's own pictures, ones the owner gave you, or ones you made with your creative services,
 never another's.

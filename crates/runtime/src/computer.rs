@@ -1,5 +1,5 @@
 //! What the first-run wizard's "Checking your computer" finds (`docs/SPEC.md` section 4.1):
-//! Claude Code, git, Docker, and Farik's sandbox image, which it can build on request.
+//! Claude Code, git, Docker, and Catervas's sandbox image, which it can build on request.
 
 use std::collections::BTreeMap;
 use std::os::unix::process::CommandExt as _;
@@ -29,7 +29,7 @@ pub enum ItemState {
     Ready,
     /// Not there, or it did not answer in time.
     Missing,
-    /// There, but older than Farik needs.
+    /// There, but older than Catervas needs.
     TooOld,
     /// Docker is there, but its daemon does not answer.
     NotRunning,
@@ -70,7 +70,7 @@ pub struct ComputerCheck {
     pub git: Item,
     /// Docker, and whether its daemon answers.
     pub docker: Item,
-    /// Farik's sandbox image, `SANDBOX_IMAGE`; missing whenever Docker is not ready.
+    /// Catervas's sandbox image, `SANDBOX_IMAGE`; missing whenever Docker is not ready.
     pub sandbox_image: Item,
     /// The UI/UX Designer's browser, the Playwright connector's pinned image; only for a team with
     /// a Designer, and missing whenever Docker is not ready.
@@ -132,7 +132,8 @@ pub fn check_computer(env: &BTreeMap<String, String>, designer: bool) -> Compute
 /// The Designer's browser image, the Playwright connector's, pinned by digest.
 #[must_use]
 pub fn browser_image() -> String {
-    farik_roles::builtin_connector("playwright").map_or_else(String::new, |shipped| shipped.image)
+    catervas_roles::builtin_connector("playwright")
+        .map_or_else(String::new, |shipped| shipped.image)
 }
 
 /// Pulls the Designer's browser image by its digest, and answers it.
@@ -273,7 +274,7 @@ mod tests {
     /// A folder of programs, each a shell script, as the `PATH` of an environment.
     fn programs(test: &str, scripts: &[(&str, &str)]) -> BTreeMap<String, String> {
         let bin =
-            std::env::temp_dir().join(format!("farik-computer-{test}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("catervas-computer-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&bin);
         std::fs::create_dir_all(&bin).expect("the folder is made");
         for (name, body) in scripts {
@@ -294,7 +295,7 @@ mod tests {
 
     #[test]
     fn lists_the_designer_browser_row_only_with_a_designer() {
-        let image = farik_roles::builtin_connector("playwright")
+        let image = catervas_roles::builtin_connector("playwright")
             .expect("shipped")
             .image;
         let pulled = programs(
@@ -326,7 +327,8 @@ mod tests {
 
     #[test]
     fn retries_a_program_that_is_busy_being_written() {
-        let bin = std::env::temp_dir().join(format!("farik-computer-busy-{}", std::process::id()));
+        let bin =
+            std::env::temp_dir().join(format!("catervas-computer-busy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&bin);
         std::fs::create_dir_all(&bin).expect("the folder is made");
         // Held open for writing, as while it is being updated: running it fails with ETXTBSY.

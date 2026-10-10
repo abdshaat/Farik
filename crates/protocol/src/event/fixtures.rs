@@ -11,8 +11,8 @@ pub fn an_event_wire(kind: EventKind) -> Value {
     let mut event = json!({
         "seq": 1,
         "recorded_at": "2026-09-17T10:00:00Z",
-        "team_id": "farik",
-        "project_id": "farik",
+        "team_id": "catervas",
+        "project_id": "catervas",
         "kind": kind.to_string(),
         "body": a_body_wire(kind)
     });
@@ -62,7 +62,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::ContractLocked | EventKind::ContractUnlocked => a_hold_body_wire(kind),
         EventKind::DriftDetected | EventKind::ProjectScanned => a_project_body_wire(kind),
         EventKind::TeamUpdated => json!({
-            "team_name": "Farik",
+            "team_name": "Catervas",
             "agent_ids": ["maya-chen", "sam-ortiz"],
             "updated_by": "human"
         }),
@@ -547,7 +547,7 @@ fn an_integration_body_wire(kind: EventKind) -> Value {
     if kind == EventKind::TaskIntegrated {
         json!({ "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "into": "main", "integrated_by": "governor" })
     } else {
-        json!({ "url": "https://github.com/o/r/pull/7", "number": 7, "branch": "farik/FRK-1" })
+        json!({ "url": "https://github.com/o/r/pull/7", "number": 7, "branch": "catervas/FRK-1" })
     }
 }
 

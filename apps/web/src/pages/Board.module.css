@@ -1,32 +1,32 @@
 .page {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 }
 
 .head {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .head p {
 	margin: 0;
 	flex: 1 1 16rem;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .head a {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .title {
 	margin: 0;
 	flex-basis: 100%;
 	font:
-		var(--farik-type-title-weight) var(--farik-type-title-size) /
-		var(--farik-type-title-line-height) var(--farik-type-title-family);
+		var(--catervas-type-title-weight) var(--catervas-type-title-size) /
+		var(--catervas-type-title-line-height) var(--catervas-type-title-family);
 }
 
 .filters,
@@ -38,28 +38,28 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .chip {
-	padding: var(--farik-space-1) var(--farik-space-3);
-	border: 1px solid var(--farik-color-rule);
+	padding: var(--catervas-space-1) var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-rule);
 	border-radius: 999px;
 	background: transparent;
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 	font: inherit;
 	cursor: pointer;
 }
 
 .chip[aria-pressed="true"] {
-	background: var(--farik-color-ink);
-	color: var(--farik-color-page);
-	border-color: var(--farik-color-ink);
+	background: var(--catervas-color-ink);
+	color: var(--catervas-color-page);
+	border-color: var(--catervas-color-ink);
 }
 
 .chip:focus-visible,
 .more summary:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -69,26 +69,26 @@
 
 .more summary {
 	cursor: pointer;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .more label {
 	display: inline-flex;
 	align-items: center;
-	gap: var(--farik-space-1);
-	margin: var(--farik-space-2) var(--farik-space-4) 0 0;
+	gap: var(--catervas-space-1);
+	margin: var(--catervas-space-2) var(--catervas-space-4) 0 0;
 }
 
 .lanes {
 	display: grid;
 	grid-template-columns: repeat(6, minmax(0, 1fr));
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	align-items: start;
 }
 
 .rows {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -97,22 +97,22 @@
 .row {
 	display: flex;
 	align-items: flex-start;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-2);
-	background: var(--farik-color-page);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-2);
+	background: var(--catervas-color-page);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 }
 
 .rowText {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
 
 .rowText a {
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 	font-weight: 600;
 }
 
@@ -128,10 +128,10 @@
 
 .small {
 	margin: 0;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-small-family);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
 }
 
 .hidden {
@@ -146,7 +146,7 @@
 .allowances {
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	margin: 0;
 	padding: 0;
 	list-style: none;

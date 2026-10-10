@@ -4,16 +4,16 @@
 use std::collections::HashSet;
 use std::num::NonZeroU64;
 
-use farik_core::contract::TaskId;
-use farik_core::team::Team;
-use farik_core::text::tokens;
-use farik_protocol::clock::Clock;
-use farik_protocol::event::{
-    EventBody, EventIds, EventKind, FarikEvent, MessageKind, MessagePostedBody,
+use catervas_core::contract::TaskId;
+use catervas_core::team::Team;
+use catervas_core::text::tokens;
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventIds, EventKind, MessageKind, MessagePostedBody,
     SessionEndedBodyReason, SessionStartedBodyPurpose, Thread, new_event,
 };
-use farik_store::files::{FilesError, ProjectFiles};
-use farik_store::{EventLog, EventQuery, StoreError};
+use catervas_store::files::{FilesError, ProjectFiles};
+use catervas_store::{EventLog, EventQuery, StoreError};
 
 /// The most a message holds, in characters (5.9).
 pub const TEXT_LIMIT: usize = 2_000;
@@ -50,11 +50,11 @@ pub fn mentions_in(text: &str, team: &Team, author: &str) -> Vec<String> {
 /// A message to post, as whoever posts it knows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewMessage {
-    /// An agent id, `human`, or `farik`.
+    /// An agent id, `human`, or `catervas`.
     pub author: String,
     /// The agent on the envelope: the author when an agent wrote it, nobody otherwise.
     pub agent_id: Option<String>,
-    /// What kind of message it is, decided by Farik rather than the author.
+    /// What kind of message it is, decided by Catervas rather than the author.
     pub kind: MessageKind,
     /// What was said.
     pub text: String,
@@ -120,7 +120,7 @@ impl From<FilesError> for ChannelError {
 /// # Errors
 ///
 /// `StoreError` when the log cannot be read.
-pub fn pending_mentions(log: &EventLog, agent_id: &str) -> Result<Vec<FarikEvent>, StoreError> {
+pub fn pending_mentions(log: &EventLog, agent_id: &str) -> Result<Vec<CatervasEvent>, StoreError> {
     // ponytail: each tick reads, for every active agent, its session starts and ends and then
     // every message since its last conversation (every message ever for one never mentioned):
     // linear in the log, fine at a team's size. Upgrade: a projection holding each agent's last answered seq and its
@@ -174,7 +174,7 @@ const SUMMARY_TOKENS: usize = 2_000;
 
 /// The channel as an agent is shown it, derived with no model: the latest messages that fit
 /// `SUMMARY_TOKENS`, oldest first, one line each (`<author> [<thread>]: <text>`). It is written to
-/// `.farik/local/channel-summary.md` each time, so that the human can read what the agents saw.
+/// `.catervas/local/channel-summary.md` each time, so that the human can read what the agents saw.
 ///
 /// # Errors
 ///
@@ -257,7 +257,7 @@ pub fn post(
     Ok(log.append(&event)?.envelope.seq)
 }
 
-/// Posts one of Farik's own lines (`author: farik, kind: system`) about `task_id`, cut to the
+/// Posts one of Catervas's own lines (`author: catervas, kind: system`) about `task_id`, cut to the
 /// channel's limit ending with `…`, so that a line never fails what it reports. It names nobody,
 /// and no agent is on its envelope.
 ///
@@ -283,7 +283,7 @@ pub fn post_system(
         clock,
         ids,
         NewMessage {
-            author: "farik".to_string(),
+            author: "catervas".to_string(),
             agent_id: None,
             kind: MessageKind::System,
             text,
@@ -298,15 +298,15 @@ pub fn post_system(
 
 #[cfg(test)]
 mod tests {
-    use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-    use farik_core::team::validate_team;
+    use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+    use catervas_core::team::validate_team;
     use serde_json::json;
 
     use std::path::Path;
 
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::{EventBody, EventIds, MessageKind};
-    use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log};
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::{EventBody, EventIds, MessageKind};
+    use catervas_store::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 
     use super::{NewMessage, mentions_in, pending_mentions, post};
     use crate::recorded::fixtures::a_session_spec;
@@ -337,8 +337,8 @@ mod tests {
     fn posts_a_message_as_one_line() {
         let log = open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens");
         let ids = EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             ..EventIds::default()
         };
 
@@ -368,10 +368,10 @@ mod tests {
         assert_eq!(body.text, "one two three four");
     }
 
-    fn farik_ids() -> EventIds {
+    fn catervas_ids() -> EventIds {
         EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             ..EventIds::default()
         }
     }
@@ -381,7 +381,7 @@ mod tests {
         post(
             log,
             &FixedClock::new(at()),
-            &farik_ids(),
+            &catervas_ids(),
             NewMessage {
                 author: "human".to_string(),
                 agent_id: None,
@@ -413,7 +413,7 @@ mod tests {
         };
         let ids = EventIds {
             agent_id: Some("dev-a".to_string()),
-            ..farik_ids()
+            ..catervas_ids()
         };
         record_session_started(
             &log,
@@ -447,7 +447,7 @@ mod tests {
         };
         let ids = EventIds {
             agent_id: Some("dev-a".to_string()),
-            ..farik_ids()
+            ..catervas_ids()
         };
         record_session_started(&log, &spec, None, None, None, &ids, &FixedClock::new(at()))
             .expect("recorded");

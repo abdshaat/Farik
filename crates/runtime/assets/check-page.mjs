@@ -1,6 +1,6 @@
-// Farik's page check (docs/SPEC.md 5.4, step 12): opens one page of the preview at one width and in
+// Catervas's page check (docs/SPEC.md 5.4, step 12): opens one page of the preview at one width and in
 // one theme, saves a screenshot, runs axe-core over it for the given tags, and prints the violations
-// as one JSON line. Farik runs it with `node --input-type=module -` in the pinned Playwright MCP
+// as one JSON line. Catervas runs it with `node --input-type=module -` in the pinned Playwright MCP
 // image, in the preview's network namespace, as the user; `AXE_SOURCE` is defined before this text.
 // The agent never gets it.
 import { createRequire } from "node:module";
@@ -51,7 +51,7 @@ try {
 	const { frameTree } = await cdp.send("Page.getFrameTree");
 	const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
 		frameId: frameTree.frame.id,
-		worldName: "farik-axe",
+		worldName: "catervas-axe",
 	});
 	const options = { runOnly: { type: "tag", values: values.tags.split(",") }, resultTypes: ["violations"] };
 	const evaluated = await cdp.send("Runtime.evaluate", {

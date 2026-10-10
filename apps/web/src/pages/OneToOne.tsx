@@ -1,5 +1,5 @@
-import type { Event } from "@farik/protocol-client";
-import { Avatar, type AvatarKey, Button, RoleTag } from "@farik/ui";
+import type { Event } from "@catervas/protocol-client";
+import { Avatar, type AvatarKey, Button, RoleTag } from "@catervas/ui";
 import {
 	type FormEvent,
 	type ReactNode,

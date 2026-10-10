@@ -5,7 +5,7 @@ import {
 	Choice,
 	Dialog,
 	RoleTag,
-} from "@farik/ui";
+} from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../../app/connection.tsx";

@@ -1,4 +1,4 @@
-import { Button, Dialog, InfoTip } from "@farik/ui";
+import { Button, Dialog, InfoTip } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -15,7 +15,7 @@ const codeOfMessage = (e: unknown) =>
 
 /**
  * "Procurement mailbox" on the Procurement Specialist's page (spec 6.10): where it writes from,
- * when Farik last read the replies or why it could not, and "Check now", "Change" and
+ * when Catervas last read the replies or why it could not, and "Check now", "Change" and
  * "Disconnect"; or the way to connect one.
  */
 export function MailboxSection({ id, name }: { id: string; name: string }) {

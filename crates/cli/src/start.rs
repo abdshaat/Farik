@@ -8,25 +8,25 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use farik_protocol::command::{Command, command_to_value, reply_from_value};
-use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
-use farik_runtime::credential::{Source, load_credential};
-use farik_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
-use farik_runtime::daemon::{
+use catervas_protocol::command::{Command, command_to_value, reply_from_value};
+use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
+use catervas_runtime::credential::{Source, load_credential};
+use catervas_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
+use catervas_runtime::daemon::{
     DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve, serve_held,
 };
-use farik_runtime::forge::Forge;
-use farik_runtime::orchestrator::{
+use catervas_runtime::forge::Forge;
+use catervas_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, OrchestratorError, RecoveryReport,
     command_handler, result_of,
 };
-use farik_runtime::sleep::{Sleeper, TokioSleeper};
-use farik_runtime::{
+use catervas_runtime::sleep::{Sleeper, TokioSleeper};
+use catervas_runtime::{
     AVAILABLE_FOR, DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews,
     PolledPreviews, PreviewFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory,
     SessionHandle, SessionSpec, Templates,
 };
-use farik_store::files::Sandbox;
+use catervas_store::files::Sandbox;
 use serde_json::Value;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -37,10 +37,10 @@ use crate::project::{Project, tool_deps};
 use crate::state::{make_state_dir, state_dir};
 use crate::{CliIo, Engine, Interrupts};
 
-/// The lock the process driving a project holds, under the gitignored `.farik/local/`.
-pub(crate) const RUN_LOCK: &str = ".farik/local/run.lock";
+/// The lock the process driving a project holds, under the gitignored `.catervas/local/`.
+pub(crate) const RUN_LOCK: &str = ".catervas/local/run.lock";
 /// Where the driving process's daemon says how to reach it.
-pub(crate) const DAEMON_FILE: &str = ".farik/local/daemon.json";
+pub(crate) const DAEMON_FILE: &str = ".catervas/local/daemon.json";
 /// How long a command sent to the driving process may take: `integrate` may push.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -107,7 +107,7 @@ pub(crate) fn command(
 }
 
 /// `report`, the answer to ending `plan` in a process that drives nothing, with the sentence that
-/// Farik pauses the plan's ads when a process does, when it made some that are still to pause.
+/// Catervas pauses the plan's ads when a process does, when it made some that are still to pause.
 fn saying_when_ads_pause(
     project: &Project,
     io: &CliIo<'_>,
@@ -116,10 +116,10 @@ fn saying_when_ads_pause(
 ) -> CommandReport {
     let left = tool_deps(project, io)
         .ok()
-        .and_then(|tools| farik_runtime::marketing::ads::ads_left_to_pause(&tools, plan).ok());
+        .and_then(|tools| catervas_runtime::marketing::ads::ads_left_to_pause(&tools, plan).ok());
     if left == Some(true) {
         report.said = format!(
-            "{}. Farik pauses {plan}'s ads when it next runs.",
+            "{}. Catervas pauses {plan}'s ads when it next runs.",
             report.said
         );
     }
@@ -158,7 +158,7 @@ pub(crate) fn here_or_sent(
 pub(crate) fn send(root: &Path, command: &Command) -> Result<CommandReport, CommandError> {
     let may_still = |detail: String| CommandError::Failed {
         detail: format!(
-            "{detail}; the command may still take effect: farik log shows whether it did"
+            "{detail}; the command may still take effect: catervas log shows whether it did"
         ),
     };
     let answer = match exchange(
@@ -170,7 +170,7 @@ pub(crate) fn send(root: &Path, command: &Command) -> Result<CommandReport, Comm
         Ok(answer) => answer,
         Err(ClientError::NoDaemon { .. }) => {
             return Err(CommandError::Failed {
-                detail: "another farik process holds this project's run lock and serves no \
+                detail: "another catervas process holds this project's run lock and serves no \
                          daemon yet: try again in a moment"
                     .to_string(),
             });
@@ -255,7 +255,7 @@ pub(crate) fn command_deps(
 /// A daemon over `tools` that keeps connector keys where `io` says, and runs each stdio
 /// connector in a folder of the user's state folder (ADR 0030).
 pub(crate) fn connected_daemon(
-    tools: &Arc<farik_runtime::tools::ToolDeps>,
+    tools: &Arc<catervas_runtime::tools::ToolDeps>,
     io: &CliIo<'_>,
 ) -> Arc<DaemonState> {
     let daemon = Arc::new(DaemonState::new(Arc::clone(tools)));
@@ -288,7 +288,7 @@ pub(crate) fn forge(root: &Path, io: &CliIo<'_>) -> Forge {
 
 /// The first executable called `program` on the environment's `PATH`.
 pub(crate) fn on_path(program: &str, io: &CliIo<'_>) -> Option<PathBuf> {
-    farik_runtime::computer::on_path(program, &io.env)
+    catervas_runtime::computer::on_path(program, &io.env)
 }
 
 /// The adapter of a command handled in this process, which starts no session: answering a
@@ -300,7 +300,7 @@ struct NoSessions {
 impl NoSessions {
     fn refusal(&self) -> RuntimeError {
         RuntimeError::Spawn {
-            detail: format!("farik {} starts no sessions", self.command),
+            detail: format!("catervas {} starts no sessions", self.command),
         }
     }
 }
@@ -323,20 +323,19 @@ impl RuntimeAdapter for NoSessions {
 pub(crate) fn driven_elsewhere(root: &Path) -> String {
     match read_daemon_file(&root.join(DAEMON_FILE)) {
         Ok(DaemonAddress { pid: Some(pid), .. }) => {
-            format!("another farik process is driving this project (pid {pid} in {DAEMON_FILE})")
+            format!("another catervas process is driving this project (pid {pid} in {DAEMON_FILE})")
         }
-        _ => {
-            "another farik process is driving this project, and it serves no daemon yet".to_string()
-        }
+        _ => "another catervas process is driving this project, and it serves no daemon yet"
+            .to_string(),
     }
 }
 
 /// What every start in no-sandbox mode says on standard error (`docs/SPEC.md` 8.3).
-pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.farik/local/settings.json \
+pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.catervas/local/settings.json \
     says sandbox: none). Agents' commands run on this machine as you, with your HOME: they can \
     read your credential files (~/.git-credentials, ~/.ssh, ~/.claude/.credentials.json, the gh \
-    configuration), push with a git hidden in a script, which farik_exec's check does not see, and \
-    read .farik/local/daemon.json, whose token lets them act as you through farik: approve, \
+    configuration), push with a git hidden in a script, which catervas_exec's check does not see, and \
+    read .catervas/local/daemon.json, whose token lets them act as you through catervas: approve, \
     accept, answer, add skills, mark orders placed and received, and integrate, and get the keys \
     you gave a connector, which they can also read from a running connector's /proc/<pid>/environ. \
     The governor still checks every path and permission it is asked about.";
@@ -347,10 +346,10 @@ const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"
 /// What a start is told besides the project: how the process differs from `run`'s.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct StartOptions<'l> {
-    /// The socket `farik serve` holds for all its daemons, which the daemon listens on; without
+    /// The socket `catervas serve` holds for all its daemons, which the daemon listens on; without
     /// one, it listens on a port the system picks.
     pub(crate) listener: Option<&'l std::net::TcpListener>,
-    /// Whether the daemon answers the browser routes (`farik serve` alone), with a first connect
+    /// Whether the daemon answers the browser routes (`catervas serve` alone), with a first connect
     /// code for the link it prints.
     pub(crate) web: bool,
 }
@@ -379,7 +378,7 @@ pub(crate) struct Driver {
 }
 
 /// What the end of the spend watch says of the run, when it ended on its own with an error (a
-/// store error, which stopped the orchestrator): the sentence to report, so that `farik serve`
+/// store error, which stopped the orchestrator): the sentence to report, so that `catervas serve`
 /// ends saying why. `None` when it was still watching, or ended without a fault.
 fn watch_failure(
     ended: Option<Result<Result<(), OrchestratorError>, tokio::task::JoinError>>,
@@ -491,7 +490,7 @@ async fn start_listening(
     let claude = match &io.engine {
         Engine::Claude => {
             let found = load_credential(&io.env, &(io.credential_stores)()).ok_or(
-                "no credential for Claude Code: connect your AI account in the browser farik \
+                "no credential for Claude Code: connect your AI account in the browser catervas \
                  serve opens, or set ANTHROPIC_API_KEY to an API key, or \
                  CLAUDE_CODE_OAUTH_TOKEN to the token claude setup-token prints",
             )?;
@@ -630,7 +629,7 @@ fn supervised(
 /// for here, before the daemon listens, and nowhere else: from then on the answer is what Docker
 /// said, and no request waits for it.
 async fn told_factories(
-    tools: &farik_runtime::tools::ToolDeps,
+    tools: &catervas_runtime::tools::ToolDeps,
     sandbox: Sandbox,
     image: &str,
 ) -> Result<(Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>), String> {
@@ -666,7 +665,7 @@ fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn
             Arc::new(PolledPreviews::new(
                 Arc::new(DockerPreviewFactory::new(
                     image.to_string(),
-                    farik_runtime::computer::browser_image(),
+                    catervas_runtime::computer::browser_image(),
                 )),
                 AVAILABLE_FOR,
             )),
@@ -732,20 +731,21 @@ fn adapter(
         (Engine::Claude, Some((credential, claude_path))) => {
             let config = ClaudeConfig {
                 claude_path,
-                hook_command: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("farik")),
+                hook_command: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("catervas")),
                 daemon_file: project.root.join(DAEMON_FILE),
                 daemon: handle.info.clone(),
-                sessions_dir: project.root.join(".farik/local/sessions"),
+                sessions_dir: project.root.join(".catervas/local/sessions"),
                 // No state folder, or no id for the project: the orchestrator offers no skills
                 // either, so nothing is written here.
                 skills_dir: state_dir(&io.env)
                     .and_then(|state| {
-                        let id = farik_runtime::connectors::local_project_id(&state, &project.root)
-                            .ok()?;
-                        Some(farik_runtime::skills::skills_dir(&state, &id))
+                        let id =
+                            catervas_runtime::connectors::local_project_id(&state, &project.root)
+                                .ok()?;
+                        Some(catervas_runtime::skills::skills_dir(&state, &id))
                     })
                     .unwrap_or_default(),
-                team_file: project.root.join(".farik/team.yaml"),
+                team_file: project.root.join(".catervas/team.yaml"),
                 env: SESSION_ENV
                     .iter()
                     .filter_map(|name| {
@@ -791,11 +791,11 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use farik_protocol::clock::FixedClock;
-    use farik_runtime::connectors::{ConnectorSecrets, MemoryConnectorSecrets};
-    use farik_store::git::fixtures::TempRepo;
+    use catervas_protocol::clock::FixedClock;
+    use catervas_runtime::connectors::{ConnectorSecrets, MemoryConnectorSecrets};
+    use catervas_store::git::fixtures::TempRepo;
 
-    use farik_runtime::orchestrator::OrchestratorError;
+    use catervas_runtime::orchestrator::OrchestratorError;
 
     use super::{command_deps, supervised, watch_failure};
     use crate::{CliIo, open_project, run_cli};
@@ -904,7 +904,7 @@ mod tests {
             Box::new(&mut err),
             Arc::new(FixedClock::new(at)),
         );
-        let init = ["farik", "init"].map(String::from);
+        let init = ["catervas", "init"].map(String::from);
         assert_eq!(run_cli(&init, &mut io), 0);
         let project = open_project(&repository.path, at).expect("the project opens");
 

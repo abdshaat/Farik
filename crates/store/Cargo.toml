@@ -1,5 +1,5 @@
 [package]
-name = "farik-store"
+name = "catervas-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,8 +8,8 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
-farik-core.workspace = true
-farik-protocol.workspace = true
+catervas-core.workspace = true
+catervas-protocol.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde-saphyr.workspace = true

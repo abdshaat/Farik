@@ -4,16 +4,16 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroU64;
 
+use catervas_core::contract::Role;
+use catervas_core::team::{AgentStatus, Team};
 use chrono::{DateTime, Utc};
-use farik_core::contract::Role;
-use farik_core::team::{AgentStatus, Team};
 
-use farik_protocol::clock::Clock;
-use farik_protocol::event::{
-    ChatMessagePostedBody, EventBody, EventIds, EventKind, FarikEvent, SessionStartedBodyPurpose,
-    new_event,
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::{
+    CatervasEvent, ChatMessagePostedBody, EventBody, EventIds, EventKind,
+    SessionStartedBodyPurpose, new_event,
 };
-use farik_store::{EventLog, EventQuery, Projections, StoreError};
+use catervas_store::{EventLog, EventQuery, Projections, StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -138,7 +138,7 @@ pub fn post_chat(
         in_reply_to: message.in_reply_to.and_then(NonZeroU64::new),
         request: message
             .request
-            .map(|request| farik_protocol::event::ProposedRequest {
+            .map(|request| catervas_protocol::event::ProposedRequest {
                 title: request.title,
                 text: request.text,
             }),
@@ -158,7 +158,7 @@ pub fn chat_page(
     agent_id: &str,
     before_seq: Option<u64>,
     limit: usize,
-) -> Result<Vec<FarikEvent>, StoreError> {
+) -> Result<Vec<CatervasEvent>, StoreError> {
     let mut page = log.read(&EventQuery {
         agent_id: Some(agent_id.to_string()),
         kinds: vec![EventKind::ChatMessagePosted],
@@ -398,28 +398,30 @@ pub fn chat_history(log: &EventLog, agent_id: &str) -> Result<Option<String>, St
 mod tests {
     use std::path::Path;
 
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::{EventBody, EventIds, EventKind, event_from_value, event_to_value};
-    use farik_store::{EventQuery, IN_MEMORY, open_event_log};
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::{
+        EventBody, EventIds, EventKind, event_from_value, event_to_value,
+    };
+    use catervas_store::{EventQuery, IN_MEMORY, open_event_log};
     use serde_json::json;
 
-    use farik_store::event_log::fixtures::append_unreadable;
+    use catervas_store::event_log::fixtures::append_unreadable;
 
     use super::{NewChatMessage, ProposedRequest, pending_chat, post_chat};
     use crate::tools::fixtures::at;
 
-    fn farik_ids() -> EventIds {
+    fn catervas_ids() -> EventIds {
         EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             ..EventIds::default()
         }
     }
 
     /// A chat `session.started` of `agent` answering `in_reply_to`.
-    fn chat_started(log: &farik_store::EventLog, agent: &str, in_reply_to: u64) -> u64 {
+    fn chat_started(log: &catervas_store::EventLog, agent: &str, in_reply_to: u64) -> u64 {
         let event = event_from_value(&json!({
-            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "farik", "project_id": "farik",
+            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "catervas", "project_id": "catervas",
             "agent_id": agent, "session_id": format!("chat-{in_reply_to}"),
             "kind": "session.started",
             "body": {
@@ -428,7 +430,7 @@ mod tests {
             },
         }))
         .expect("the fixture is schema-valid");
-        log.append(&farik_protocol::event::NewEvent {
+        log.append(&catervas_protocol::event::NewEvent {
             recorded_at: event.envelope.recorded_at,
             ids: event.envelope.ids,
             body: event.body,
@@ -439,11 +441,11 @@ mod tests {
     }
 
     /// The user's or `agent`'s message in `agent`'s chat.
-    fn said(log: &farik_store::EventLog, agent: &str, author: &str) -> u64 {
+    fn said(log: &catervas_store::EventLog, agent: &str, author: &str) -> u64 {
         post_chat(
             log,
             &FixedClock::new(at()),
-            &farik_ids(),
+            &catervas_ids(),
             NewChatMessage {
                 chat: agent.to_string(),
                 author: author.to_string(),
@@ -513,7 +515,7 @@ mod tests {
         let asked = post_chat(
             &log,
             &clock,
-            &farik_ids(),
+            &catervas_ids(),
             NewChatMessage {
                 chat: "mira".to_string(),
                 author: "human".to_string(),
@@ -527,7 +529,7 @@ mod tests {
         let replied = post_chat(
             &log,
             &clock,
-            &farik_ids(),
+            &catervas_ids(),
             NewChatMessage {
                 chat: "mira".to_string(),
                 author: "mira".to_string(),

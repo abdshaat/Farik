@@ -1,7 +1,7 @@
-//! `farik channel`: the team's channel, from the log (`docs/SPEC.md` sections 3 and 5.9).
+//! `catervas channel`: the team's channel, from the log (`docs/SPEC.md` sections 3 and 5.9).
 
-use farik_protocol::event::{EventBody, EventKind};
-use farik_store::EventQuery;
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_store::EventQuery;
 use serde_json::{Value, json};
 
 use crate::Report;
@@ -43,7 +43,7 @@ pub fn channel(project: &Project, last: usize) -> Result<Report, String> {
         messages.push(message);
     }
     if lines.is_empty() {
-        lines.push("no messages yet: farik say posts one".to_string());
+        lines.push("no messages yet: catervas say posts one".to_string());
     }
     Ok(Report {
         lines,

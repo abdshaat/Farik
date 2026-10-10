@@ -7,9 +7,9 @@ use jsonschema::Validator;
 use serde_json::Value;
 
 pub use crate::contract::ValidationError;
-pub use crate::generated::prices::{FarikPriceTable as PriceTable, ModelPrice};
+pub use crate::generated::prices::{CatervasPriceTable as PriceTable, ModelPrice};
 
-/// The price table Farik ships.
+/// The price table Catervas ships.
 pub mod prices;
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/prices.schema.json");

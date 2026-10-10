@@ -39,7 +39,7 @@ says what to do.
 
 ## 4. Write it down
 
-Write the comparison with `farik_write_evaluation`, as a note named for the need, such as
+Write the comparison with `catervas_write_evaluation`, as a note named for the need, such as
 `baby-car-mirrors`: the need, a table of the offers side by side, then the recommendation in two
 plain sentences, then what would change your mind. Say that it is a buying recommendation, not
 legal advice, a contract or a payment. Anything an order rests on is written here first.

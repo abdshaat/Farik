@@ -1,10 +1,10 @@
 # The Marketing Specialist's kit: fifteen skills written for any business (ADR 0040) and the services it
 # signs in to (route 1, ADR 0035): two creative ones that spend the user's credits inside an allowance
-# (ADR 0037), then Buffer, whose writes are Farik's own (the agent's posts go out through
-# `farik_schedule_post`, in the plan the owner approved, and Farik calls `create_post` itself), and
-# Kit, whose email broadcasts are only drafts the human sends (ADR 0042); and Google Ads, Farik's own
+# (ADR 0037), then Buffer, whose writes are Catervas's own (the agent's posts go out through
+# `catervas_schedule_post`, in the plan the owner approved, and Catervas calls `create_post` itself), and
+# Kit, whose email broadcasts are only drafts the human sends (ADR 0042); and Google Ads, Catervas's own
 # connector, whose seven writes run only inside the plan the owner approved (`plan_approved`, ADR 0042;
-# its ten tools are listed by `farik connector google-ads` itself, pinned offline by
+# its ten tools are listed by `catervas connector google-ads` itself, pinned offline by
 # `google_ads_server_lists_the_kits_tools`). Tool lists of the services are pinned against each
 # service's live listing by `live_kit_pins`; a tool a service lists that is not here is never offered
 # (`tool_not_tagged`) until a pin update tags it.
@@ -33,7 +33,7 @@ connectors:
     title: Higgsfield
     about: "AI images and videos"
     why: "Makes pictures and clips. Uses your credits; asks before going past your limit."
-    setup: "Higgsfield needs a paid plan for this. Sign in with your Higgsfield account and allow Farik to use it. Every picture or clip your agent makes uses your Higgsfield credits; you choose how many it may make without asking. Farik counts each request, a price check included, and one request can hold up to four pictures."
+    setup: "Higgsfield needs a paid plan for this. Sign in with your Higgsfield account and allow Catervas to use it. Every picture or clip your agent makes uses your Higgsfield credits; you choose how many it may make without asking. Catervas counts each request, a price check included, and one request can hold up to four pictures."
     labels:
       generate_image: "make an image"
       generate_video: "make a video or check its price"
@@ -199,7 +199,7 @@ connectors:
     title: Recraft
     about: "AI logos and graphics"
     why: "Makes on-brand graphics and icons. Uses your credits; asks before going past your limit."
-    setup: "Sign in with your Recraft account and allow Farik to use it. Every graphic your agent makes uses your Recraft credits; you choose how many it may make without asking. Farik counts each request, and one request can hold up to six pictures. Recraft may ask you to sign in again from time to time."
+    setup: "Sign in with your Recraft account and allow Catervas to use it. Every graphic your agent makes uses your Recraft credits; you choose how many it may make without asking. Catervas counts each request, and one request can hold up to six pictures. Recraft may ask you to sign in again from time to time."
     labels:
       generate_image: "make an image"
       image_to_image: "change an image"
@@ -234,7 +234,7 @@ connectors:
     title: Buffer
     about: "Schedules social posts"
     why: "Reads your channels and past posts. Sends posts from your approved plan; asks about others."
-    setup: "Sign in with your Buffer account and allow Farik to read and schedule posts. Farik can reach every channel your Buffer account has. A post in a plan you approved shows on Today before it goes out, with a Stop button; Farik asks you about any other. To remove Farik completely, also remove it in Buffer's settings."
+    setup: "Sign in with your Buffer account and allow Catervas to read and schedule posts. Catervas can reach every channel your Buffer account has. A post in a plan you approved shows on Today before it goes out, with a Stop button; Catervas asks you about any other. To remove Catervas completely, also remove it in Buffer's settings."
     labels:
       get_account: "read the account"
       list_channels: "list channels"
@@ -270,7 +270,7 @@ connectors:
     title: Kit
     about: "Email newsletters"
     why: "Drafts emails and landing pages. You send every email."
-    setup: "Kit needs a paid plan for this. Sign in with your Kit account and allow Farik to use it. Farik drafts emails for you to send from Kit, asks you before changing a page or an email series, and never reads your subscribers' own details."
+    setup: "Kit needs a paid plan for this. Sign in with your Kit account and allow Catervas to use it. Catervas drafts emails for you to send from Kit, asks you before changing a page or an email series, and never reads your subscribers' own details."
     labels:
       create_broadcast: "draft an email"
       update_broadcast: "change a draft email"
@@ -378,13 +378,13 @@ connectors:
       update_tag_name: denied
   - name: google-ads
     transport: stdio
-    command: farik
+    command: catervas
     args: [connector, google-ads]
     oauth: { scopes: ["https://www.googleapis.com/auth/adwords"] }
     title: Google Ads
     about: "Google search ads"
     why: "Finds what customers search for. Runs ads from your approved plan, within budget."
-    setup: "Sign in with the Google account that manages your ads and allow Farik to manage them. Farik makes and changes search ads only inside a marketing plan you approved, never deletes anything, and never touches billing or who can use your account. The ads cost money at Google, up to the budget in your plan."
+    setup: "Sign in with the Google account that manages your ads and allow Catervas to manage them. Catervas makes and changes search ads only inside a marketing plan you approved, never deletes anything, and never touches billing or who can use your account. The ads cost money at Google, up to the budget in your plan."
     labels:
       list_accounts: "list ad accounts"
       report: "read ad results"

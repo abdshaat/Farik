@@ -3,10 +3,11 @@
 //! contract and the evidence gathered for it.
 
 use crate::contract::{ExitCriterion, TaskContract, TaskStatus, wire_method};
-use crate::generated::task_contract::FarikTaskContractKind as Kind;
-use crate::generated::task_contract::FarikTaskContractRisk as Risk;
+use crate::generated::task_contract::CatervasTaskContractKind as Kind;
+use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::paths::{
-    GlobError, PathRefusal, check_allowed_paths, check_protected_paths, reaches_the_farik_directory,
+    GlobError, PathRefusal, check_allowed_paths, check_protected_paths,
+    reaches_the_catervas_directory,
 };
 use crate::team::task_private_folder;
 use crate::text::{distinct, listed};
@@ -81,8 +82,8 @@ pub enum DoneRule {
     PathsWithinAllowed,
     /// The diff touches no path the team protects.
     NoProtectedPathChanged,
-    /// The diff touches nothing under `.farik/`, whose files change only through Farik's tools.
-    NoFarikPathChanged,
+    /// The diff touches nothing under `.catervas/`, whose files change only through Catervas's tools.
+    NoCatervasPathChanged,
     /// The assignee wrote a completion note.
     CompletionNotePresent,
     /// The reviewer wrote a review note.
@@ -135,7 +136,7 @@ const CHECKS: [Check; 10] = [
     human_criterion_accepted,
     paths_within_allowed,
     no_protected_path_changed,
-    no_farik_path_changed,
+    no_catervas_path_changed,
     completion_note_present,
     review_note_present,
     design_review_passed,
@@ -145,7 +146,7 @@ const CHECKS: [Check; 10] = [
 /// Checks a task against the Definition of Done (`docs/SPEC.md` section 5.4): every exit
 /// criterion run by the reviewer independently and passed, every `human` criterion accepted by
 /// the human, no change outside the contract's allowed paths, no change to a path the team
-/// protects or under `.farik/`, a completion note, a review note, the UI/UX Designer's pass of a
+/// protects or under `.catervas/`, a completion note, a review note, the UI/UX Designer's pass of a
 /// UI change, and the human's acceptance where the risk or the kind requires it. Refuses with
 /// every rule the task fails.
 ///
@@ -290,8 +291,8 @@ fn paths_within_allowed(contract: &TaskContract, evidence: &DoneEvidence) -> Opt
 }
 
 /// The changed paths that a task's own private folder does not hold (5.6, 6.6): every one for a
-/// task with no folder. The folder is the one place under `.farik/` that a task's changes may be,
-/// so it is excepted from the protected paths and from `.farik/`, and nothing else is: a path that
+/// task with no folder. The folder is the one place under `.catervas/` that a task's changes may be,
+/// so it is excepted from the protected paths and from `.catervas/`, and nothing else is: a path that
 /// climbs out of it, or names its sibling, is not within it.
 fn outside_its_folder(contract: &TaskContract, evidence: &DoneEvidence) -> Vec<String> {
     let Some(folder) = task_private_folder(contract) else {
@@ -337,21 +338,24 @@ fn no_protected_path_changed(
     }
 }
 
-/// No change under `.farik/` (5.4, 5.8), whatever the allowed paths say: a decision, a notebook,
-/// the retro, or a contract changes only through Farik's tools, never through a task's commit. A
+/// No change under `.catervas/` (5.4, 5.8), whatever the allowed paths say: a decision, a notebook,
+/// the retro, or a contract changes only through Catervas's tools, never through a task's commit. A
 /// task in a private folder has no commit and may change what is in its folder.
-fn no_farik_path_changed(contract: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
+fn no_catervas_path_changed(
+    contract: &TaskContract,
+    evidence: &DoneEvidence,
+) -> Option<DoneFailure> {
     let changed: Vec<String> = outside_its_folder(contract, evidence)
         .into_iter()
-        .filter(|path| reaches_the_farik_directory(path))
+        .filter(|path| reaches_the_catervas_directory(path))
         .collect();
     if changed.is_empty() {
         return None;
     }
     Some(failure(
-        DoneRule::NoFarikPathChanged,
+        DoneRule::NoCatervasPathChanged,
         format!(
-            "the diff changes {} under .farik/, whose files change only through Farik's tools",
+            "the diff changes {} under .catervas/, whose files change only through Catervas's tools",
             distinct(&changed)
         ),
     ))
@@ -414,8 +418,8 @@ mod tests {
         requires_human_acceptance,
     };
     use crate::contract::{ExitCriterion, Role, TaskContract, VerificationWire};
-    use crate::generated::task_contract::FarikTaskContractKind as Kind;
-    use crate::generated::task_contract::FarikTaskContractRisk as Risk;
+    use crate::generated::task_contract::CatervasTaskContractKind as Kind;
+    use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
     use crate::governor::readiness::fixtures::a_contract;
     use crate::governor::team_rules::DEFAULT_PROTECTED_PATHS;
 
@@ -491,9 +495,9 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_diff_that_changes_a_path_under_the_farik_directory() {
+    fn refuses_a_diff_that_changes_a_path_under_the_catervas_directory() {
         // A contract that allows everything still may not commit a decision, a notebook, or the
-        // retro: those change only through Farik's tools (5.8), whoever the assignee is.
+        // retro: those change only through Catervas's tools (5.8), whoever the assignee is.
         for role in [Role::SoftwareDeveloper, Role::Architect] {
             let mut contract = a_contract();
             contract.assignee_role = role;
@@ -501,17 +505,17 @@ mod tests {
             let mut evidence = an_evidence();
             evidence.changed_paths = vec![
                 "src/login/form.rs".to_string(),
-                ".farik/decisions/0001-x.md".to_string(),
-                "./.FARIK/agents/dev-a/memory.md".to_string(),
+                ".catervas/decisions/0001-x.md".to_string(),
+                "./.CATERVAS/agents/dev-a/memory.md".to_string(),
             ];
             assert_eq!(
                 failed_rules(&contract, &evidence),
-                [R::NoFarikPathChanged],
+                [R::NoCatervasPathChanged],
                 "{role:?}"
             );
             assert_eq!(
-                message_of(&contract, &evidence, R::NoFarikPathChanged),
-                "the diff changes .farik/decisions/0001-x.md, ./.FARIK/agents/dev-a/memory.md under .farik/, whose files change only through Farik's tools"
+                message_of(&contract, &evidence, R::NoCatervasPathChanged),
+                "the diff changes .catervas/decisions/0001-x.md, ./.CATERVAS/agents/dev-a/memory.md under .catervas/, whose files change only through Catervas's tools"
             );
         }
     }
@@ -519,38 +523,38 @@ mod tests {
     #[test]
     fn its_own_folder_is_not_a_protected_change() {
         // A finance task's diff is the workbooks it changed in its own folder, which lies under
-        // the protected `.farik/local/**` (5.6) and under `.farik/` (5.4): its own folder is not
+        // the protected `.catervas/local/**` (5.6) and under `.catervas/` (5.4): its own folder is not
         // a protected change for it, and is one for every other role.
         let mut finance = a_contract();
         finance.assignee_role = Role::FinanceSpecialist;
-        finance.allowed_paths = vec![".farik/local/finance/**".to_string()];
+        finance.allowed_paths = vec![".catervas/local/finance/**".to_string()];
         let mut evidence = an_evidence();
         evidence.changed_paths = vec![
-            ".farik/local/finance/books.xlsx".to_string(),
-            ".farik/local/finance/2026/pricing.xlsx".to_string(),
+            ".catervas/local/finance/books.xlsx".to_string(),
+            ".catervas/local/finance/2026/pricing.xlsx".to_string(),
         ];
         assert_eq!(evaluate_done(&finance, &evidence), Ok(()));
         let mut developer = finance.clone();
         developer.assignee_role = Role::SoftwareDeveloper;
         assert_eq!(
             failed_rules(&developer, &evidence),
-            [R::NoProtectedPathChanged, R::NoFarikPathChanged]
+            [R::NoProtectedPathChanged, R::NoCatervasPathChanged]
         );
         // The exception is the folder alone: a finance task that changed any other path under
-        // `.farik/`, a path that climbs out of the folder, or its sibling folder is refused, and
-        // refused as protected too where the team protects it (`.farik/local/**`).
+        // `.catervas/`, a path that climbs out of the folder, or its sibling folder is refused, and
+        // refused as protected too where the team protects it (`.catervas/local/**`).
         for (outside, protected) in [
-            (".farik/team/team.yaml", false),
-            (".farik/local/farik.db", true),
-            (".farik/local/financeX/books.xlsx", true),
-            (".farik/local/finance/../farik.db", true),
-            (".farik/local/finance", true),
+            (".catervas/team/team.yaml", false),
+            (".catervas/local/catervas.db", true),
+            (".catervas/local/financeX/books.xlsx", true),
+            (".catervas/local/finance/../catervas.db", true),
+            (".catervas/local/finance", true),
         ] {
             let mut stray = evidence.clone();
             stray.changed_paths.push(outside.to_string());
             let failed = failed_rules(&finance, &stray);
             assert!(
-                failed.contains(&R::NoFarikPathChanged),
+                failed.contains(&R::NoCatervasPathChanged),
                 "{outside}: {failed:?}"
             );
             assert_eq!(
@@ -563,7 +567,7 @@ mod tests {
         let mut epic = finance.clone();
         epic.kind = Kind::Epic;
         let failed = failed_rules(&epic, &evidence);
-        assert!(failed.contains(&R::NoFarikPathChanged), "{failed:?}");
+        assert!(failed.contains(&R::NoCatervasPathChanged), "{failed:?}");
     }
 
     #[test]
@@ -887,7 +891,7 @@ mod tests {
             "Cargo.toml".to_string(),
             ".env".to_string(),
             "src/login/k.pem".to_string(),
-            ".farik/team.yaml".to_string(),
+            ".catervas/team.yaml".to_string(),
         ];
         evidence.completion_note = None;
         evidence.review_note = None;
@@ -899,7 +903,7 @@ mod tests {
                 R::HumanCriterionAccepted,
                 R::PathsWithinAllowed,
                 R::NoProtectedPathChanged,
-                R::NoFarikPathChanged,
+                R::NoCatervasPathChanged,
                 R::CompletionNotePresent,
                 R::ReviewNotePresent,
                 R::HumanAccepted
@@ -919,7 +923,7 @@ mod tests {
         );
         assert_eq!(
             message_of(&contract, &evidence, R::PathsWithinAllowed),
-            "the diff changes README.md, Cargo.toml, .env, .farik/team.yaml outside the contract's allowed paths src/login/**"
+            "the diff changes README.md, Cargo.toml, .env, .catervas/team.yaml outside the contract's allowed paths src/login/**"
         );
         assert_eq!(
             message_of(&contract, &evidence, R::NoProtectedPathChanged),

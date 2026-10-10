@@ -13,13 +13,13 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use farik::Engine;
-use farik_protocol::command::{AcceptSubject, Command, RequestSize};
-use farik_protocol::event::{EventBody, EventKind, HumanAcceptedBodySubject};
-use farik_runtime::orchestrator::CommandError;
-use farik_runtime::recorded::fixtures::tool_runner;
-use farik_runtime::sprints::{PlannedBy, plan_sprint};
-use farik_runtime::{RecordedAdapter, RuntimeAdapter};
+use catervas::Engine;
+use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
+use catervas_protocol::event::{EventBody, EventKind, HumanAcceptedBodySubject};
+use catervas_runtime::orchestrator::CommandError;
+use catervas_runtime::recorded::fixtures::tool_runner;
+use catervas_runtime::sprints::{PlannedBy, plan_sprint};
+use catervas_runtime::{RecordedAdapter, RuntimeAdapter};
 use serde_json::{Value, json};
 
 use project::{
@@ -29,7 +29,7 @@ use project::{
 };
 
 /// Records a question from `pm` on `task`, and answers its sequence number.
-fn asked(repository: &farik_store::git::fixtures::TempRepo, task: &str) -> u64 {
+fn asked(repository: &catervas_store::git::fixtures::TempRepo, task: &str) -> u64 {
     record(
         repository,
         task,
@@ -79,7 +79,7 @@ fn refuses_with_the_words_of_handle() {
     let ran = run(&repository.path, &["approve", &task]);
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(
-        ran.err.starts_with("farik: not_awaiting_approval"),
+        ran.err.starts_with("catervas: not_awaiting_approval"),
         "{}",
         ran.err
     );
@@ -149,7 +149,7 @@ fn sends_a_command_to_the_driving_process() {
     let n = asked(&repository, &task);
     let contract = repository
         .path
-        .join(format!(".farik/contracts/{task}.yaml"));
+        .join(format!(".catervas/contracts/{task}.yaml"));
     let before = std::fs::read_to_string(&contract).expect("the contract reads");
     let driver = LiveDriver::new(&repository);
 
@@ -165,7 +165,7 @@ fn sends_a_command_to_the_driving_process() {
     let ran = run(&repository.path, &["contract", "lock", &task]);
     assert_eq!(ran.code, 0, "{}", ran.err);
 
-    let id: farik_core::contract::TaskId = task.parse().expect("a task id");
+    let id: catervas_core::contract::TaskId = task.parse().expect("a task id");
     assert_eq!(
         driver.commands(),
         vec![
@@ -195,7 +195,8 @@ fn stops_only_a_driving_process() {
     let ran = run(&repository.path, &["stop"]);
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(
-        ran.err.contains("no farik process is driving this project"),
+        ran.err
+            .contains("no catervas process is driving this project"),
         "{}",
         ran.err
     );
@@ -351,14 +352,14 @@ fn prints_the_refusal_the_driving_process_answered() {
             CommandError::NotFound {
                 what: "FRK-9".to_string(),
             },
-            "farik: FRK-9 is not in this project",
+            "catervas: FRK-9 is not in this project",
         ),
         (
             "human-routed-refused",
             CommandError::Refused {
                 reason: "not_awaiting_approval: FRK-1 is a draft".to_string(),
             },
-            "farik: not_awaiting_approval: FRK-1 is a draft",
+            "catervas: not_awaiting_approval: FRK-1 is a draft",
         ),
     ] {
         let repository = a_project(name);
@@ -376,12 +377,12 @@ fn prints_the_refusal_the_driving_process_answered() {
 /// Replaces `task`'s contract with a named pipe, so that whatever reads it next waits until the
 /// test writes it; answers the pipe's path and the contract's text.
 fn a_contract_that_waits(
-    repository: &farik_store::git::fixtures::TempRepo,
+    repository: &catervas_store::git::fixtures::TempRepo,
     task: &str,
 ) -> (PathBuf, String) {
     let path = repository
         .path
-        .join(format!(".farik/contracts/{task}.yaml"));
+        .join(format!(".catervas/contracts/{task}.yaml"));
     let text = std::fs::read_to_string(&path).expect("the contract reads");
     std::fs::remove_file(&path).expect("the contract is removed");
     let made = std::process::Command::new("mkfifo")
@@ -433,7 +434,7 @@ fn holds_the_run_lock_while_it_handles_a_command_here() {
                     }));
                 })
             }),
-            "farik run",
+            "catervas run",
         );
         writer
             .write_all(text.as_bytes())
@@ -445,7 +446,7 @@ fn holds_the_run_lock_while_it_handles_a_command_here() {
         assert!(
             second
                 .err
-                .contains("another farik process is driving this project"),
+                .contains("another catervas process is driving this project"),
             "{args:?}: {}",
             second.err
         );
@@ -516,7 +517,7 @@ fn run_on_a_paused_team_says_so_and_exits() {
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     assert!(
         ran.out
-            .contains("idle: the team is paused; farik resume starts it again"),
+            .contains("idle: the team is paused; catervas resume starts it again"),
         "{}",
         ran.out
     );
@@ -529,7 +530,7 @@ fn says_an_empty_sprint_whose_planning_is_spent_waits_for_its_end() {
     let repository = a_team("human-sprint-empty");
     let started = run(&repository.path, &["sprint", "start"]);
     assert_eq!(started.code, 0, "{}", started.err);
-    let empty = "empty: end it with farik sprint end";
+    let empty = "empty: end it with catervas sprint end";
     let shown = run(&repository.path, &["sprint", "show"]);
     assert!(!shown.out.contains(empty), "{}", shown.out);
 
@@ -575,7 +576,7 @@ fn files_a_task_whose_join_fails_and_says_so() {
     let repository = a_team("human-sprint-child-ending");
     let epic = an_epic_in_the_open_sprint(&repository);
     // The human's end has written S1's file and not yet recorded `sprint.ended`.
-    let path = repository.path.join(".farik/sprints/S1.yaml");
+    let path = repository.path.join(".catervas/sprints/S1.yaml");
     let text = std::fs::read_to_string(&path).expect("S1 reads");
     let ending = text.replace(
         "status: open",
@@ -596,7 +597,7 @@ fn files_a_task_whose_join_fails_and_says_so() {
 }
 
 /// An epic, in progress with the Product Manager, planned into S1, which is open.
-fn an_epic_in_the_open_sprint(repository: &farik_store::git::fixtures::TempRepo) -> String {
+fn an_epic_in_the_open_sprint(repository: &catervas_store::git::fixtures::TempRepo) -> String {
     let epic = filed(repository, "A whole board");
     let ran = run(
         &repository.path,
@@ -630,8 +631,8 @@ fn an_epic_in_the_open_sprint(repository: &farik_store::git::fixtures::TempRepo)
     epic
 }
 
-/// `farik task create` of a request under `epic`.
-fn file_under(repository: &farik_store::git::fixtures::TempRepo, epic: &str) -> project::Ran {
+/// `catervas task create` of a request under `epic`.
+fn file_under(repository: &catervas_store::git::fixtures::TempRepo, epic: &str) -> project::Ran {
     let child = repository.path.join("child.yaml");
     std::fs::write(&child, project::a_request("One row of the board")).expect("written");
     run(
@@ -763,11 +764,11 @@ fn chats_from_the_command_line() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_tool_approve_sends_the_command() {
+fn catervas_tool_approve_sends_the_command() {
     let repository = a_project("human-tool-approve-sent");
     let driver = LiveDriver::answering(
         &repository,
-        Ok(farik_runtime::orchestrator::CommandReport {
+        Ok(catervas_runtime::orchestrator::CommandReport {
             said: "Allowed create_issue once for theo (approval 12).".to_string(),
             events: Vec::new(),
         }),
@@ -791,11 +792,11 @@ fn farik_tool_approve_sends_the_command() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_tool_refuse_carries_the_note() {
+fn catervas_tool_refuse_carries_the_note() {
     let repository = a_project("human-tool-refuse-sent");
     let driver = LiveDriver::answering(
         &repository,
-        Ok(farik_runtime::orchestrator::CommandReport {
+        Ok(catervas_runtime::orchestrator::CommandReport {
             said: "Not allowed: create_issue for theo (approval 12).".to_string(),
             events: Vec::new(),
         }),
@@ -822,7 +823,7 @@ fn farik_tool_refuse_carries_the_note() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_tool_approve_writes_here_when_nothing_drives() {
+fn catervas_tool_approve_writes_here_when_nothing_drives() {
     let repository = a_project("human-tool-approve-here");
     let task = filed(&repository, "Add done.txt");
     let n = record_as(
@@ -863,7 +864,7 @@ fn farik_tool_approve_writes_here_when_nothing_drives() {
     let again = run(&repository.path, &["tool", "refuse", &n.to_string()]);
     assert_eq!(again.code, 1, "{}", again.out);
     assert!(
-        again.err.starts_with("farik: approval_decided"),
+        again.err.starts_with("catervas: approval_decided"),
         "{}",
         again.err
     );
@@ -871,7 +872,7 @@ fn farik_tool_approve_writes_here_when_nothing_drives() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_tool_refuse_shows_the_input_escaped() {
+fn catervas_tool_refuse_shows_the_input_escaped() {
     let repository = a_project("human-tool-refuse-input");
     let task = filed(&repository, "Add done.txt");
     let n = record_as(
@@ -906,8 +907,8 @@ fn farik_tool_refuse_shows_the_input_escaped() {
 }
 
 /// What the driver answers to a marketing plan command.
-fn a_plan_answer(said: &str) -> farik_runtime::orchestrator::CommandReport {
-    farik_runtime::orchestrator::CommandReport {
+fn a_plan_answer(said: &str) -> catervas_runtime::orchestrator::CommandReport {
+    catervas_runtime::orchestrator::CommandReport {
         said: said.to_string(),
         events: Vec::new(),
     }
@@ -995,7 +996,7 @@ fn marketing_plan_end_sends_the_end() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn ending_with_no_process_says_when_ads_pause() {
-    // A plan whose ads Farik made: with no process driving the project nothing pauses them until
+    // A plan whose ads Catervas made: with no process driving the project nothing pauses them until
     // one does, and the command says so.
     let repository = a_project("human-plan-end-ads");
     let task = filed(&repository, "Add done.txt");
@@ -1023,7 +1024,7 @@ fn ending_with_no_process_says_when_ads_pause() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert_eq!(
         ran.out.trim(),
-        "ended marketing plan MP-1. Farik pauses MP-1's ads when it next runs."
+        "ended marketing plan MP-1. Catervas pauses MP-1's ads when it next runs."
     );
 
     // A plan with no ads says nothing of them.
@@ -1044,7 +1045,7 @@ fn ending_with_no_process_says_when_ads_pause() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn ending_with_no_process_counts_a_pause_made_for_a_removal() {
-    // The owner removed Google Ads: Farik paused the plan's ads first and recorded it. Ending the
+    // The owner removed Google Ads: Catervas paused the plan's ads first and recorded it. Ending the
     // plan leaves nothing to pause, and the command says nothing of it, until Google Ads is
     // connected again.
     let repository = a_plan_whose_campaign_was_paused_for_a_removal("human-plan-end-removed");
@@ -1058,7 +1059,7 @@ fn ending_with_no_process_counts_a_pause_made_for_a_removal() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn ending_with_no_process_does_not_count_a_removal_s_pause_while_an_agent_has_google_ads() {
-    // Google Ads was removed from one agent and Farik paused the campaign for it, but another
+    // Google Ads was removed from one agent and Catervas paused the campaign for it, but another
     // agent still has it, and its sign-in could have enabled the campaign since, with no
     // connection recorded: ending the plan still leaves ads to pause.
     let repository = a_plan_whose_campaign_was_paused_for_a_removal("human-plan-end-held");
@@ -1070,7 +1071,7 @@ fn ending_with_no_process_does_not_count_a_removal_s_pause_while_an_agent_has_go
         "args": ["server"], "tools": { "search": "network" }
     }]);
     files
-        .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+        .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
         .expect("the team is written");
 
     let ran = run(&repository.path, &["marketing", "plan", "end", "MP-1"]);
@@ -1078,15 +1079,15 @@ fn ending_with_no_process_does_not_count_a_removal_s_pause_while_an_agent_has_go
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert_eq!(
         ran.out.trim(),
-        "ended marketing plan MP-1. Farik pauses MP-1's ads when it next runs."
+        "ended marketing plan MP-1. Catervas pauses MP-1's ads when it next runs."
     );
 }
 
-/// A project with MP-1 approved and one campaign made for it, which Farik paused because Google
+/// A project with MP-1 approved and one campaign made for it, which Catervas paused because Google
 /// Ads was removed.
 fn a_plan_whose_campaign_was_paused_for_a_removal(
     name: &str,
-) -> farik_store::git::fixtures::TempRepo {
+) -> catervas_store::git::fixtures::TempRepo {
     let repository = a_project(name);
     let task = filed(&repository, "Add done.txt");
     a_plan_proposed(&repository, &task, "MP-1", "Spring launch", (-1, 10));
@@ -1158,7 +1159,7 @@ fn marketing_plan_return_needs_a_reason() {
 
 /// Kai's plan `plan` on `task`, proposed with `title`, between `from` and `to` days from today.
 fn a_plan_proposed(
-    repository: &farik_store::git::fixtures::TempRepo,
+    repository: &catervas_store::git::fixtures::TempRepo,
     task: &str,
     plan: &str,
     title: &str,
@@ -1166,7 +1167,8 @@ fn a_plan_proposed(
 ) {
     let today = project::at().date_naive();
     let day = |days: i64| (today + chrono::Duration::days(days)).to_string();
-    let mut body = farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+    let mut body =
+        catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
     body["plan"] = json!(plan);
     body["title"] = json!(title);
     body["starts_on"] = json!(day(from));
@@ -1281,7 +1283,8 @@ fn marketing_plan_show_prices_a_campaign_already_made_by_its_budget() {
     let task = filed(&repository, "Add done.txt");
     let today = project::at().date_naive();
     let day = |days: i64| (today + chrono::Duration::days(days)).to_string();
-    let mut body = farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+    let mut body =
+        catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
     body["plan"] = json!("MP-1");
     body["starts_on"] = json!(day(-1));
     body["ends_on"] = json!(day(60));
@@ -1306,7 +1309,7 @@ fn marketing_plan_show_prices_a_campaign_already_made_by_its_budget() {
         "marketing_plan.approved",
         &json!({ "plan": "MP-1", "note": "" }),
     );
-    let price = |repository: &farik_store::git::fixtures::TempRepo| {
+    let price = |repository: &catervas_store::git::fixtures::TempRepo| {
         let shown = run(
             &repository.path,
             &["--json", "marketing", "plan", "show", "MP-1"],
@@ -1404,7 +1407,7 @@ fn post_send_and_decline_send_the_decision() {
 
 /// Kai's post of `text` on `channel` in plan MP-1, going out `hours` from the tests' now.
 fn a_post_scheduled(
-    repository: &farik_store::git::fixtures::TempRepo,
+    repository: &catervas_store::git::fixtures::TempRepo,
     task: &str,
     (channel, text): (&str, &str),
     hours: i64,
@@ -1509,7 +1512,7 @@ fn post_stop_with_no_driver_records_it() {
     assert_eq!(body.post.get(), post);
     assert_eq!(
         body.by,
-        farik_protocol::event::SocialPostStoppedBodyBy::Owner
+        catervas_protocol::event::SocialPostStoppedBodyBy::Owner
     );
 }
 
@@ -1519,7 +1522,7 @@ fn post_stop_with_no_driver_records_it() {
     clippy::too_many_lines,
     reason = "one project, from the waiting line to the list after every command"
 )]
-fn farik_site_lists_and_decides() {
+fn catervas_site_lists_and_decides() {
     let repository = a_project("human-site");
     let task = filed(&repository, "Add done.txt");
     let ask = |host: &str| {
@@ -1538,7 +1541,7 @@ fn farik_site_lists_and_decides() {
         ask("other.example"),
         ask("third.example"),
     );
-    let farik = farik_roles::sites::farik_sites()[0].host.clone();
+    let catervas = catervas_roles::sites::catervas_sites()[0].host.clone();
 
     // A process driving the project says what waits, with both commands.
     let ran = run_with(&repository.path, &["run"], |io| {
@@ -1553,7 +1556,7 @@ fn farik_site_lists_and_decides() {
     assert!(line.starts_with(&format!("{task} waits: ")), "{line}");
     assert!(
         line.ends_with(&format!(
-            "asks to read shop.example: farik site approve {shop}, or farik site decline {shop}"
+            "asks to read shop.example: catervas site approve {shop}, or catervas site decline {shop}"
         )),
         "{line}"
     );
@@ -1563,14 +1566,14 @@ fn farik_site_lists_and_decides() {
     let last: Value = serde_json::from_str(json.out.lines().last().expect("a line")).expect("JSON");
     assert_eq!(last["waiting_on_you"][0]["request"], shop, "{last}");
 
-    // The list shows Farik's sites on, the owner's, and what waits.
+    // The list shows Catervas's sites on, the owner's, and what waits.
     let listed = run(&repository.path, &["site", "list"]);
     assert_eq!(listed.code, 0, "{}", listed.err);
     assert!(
         listed
             .out
             .lines()
-            .any(|line| line.contains(&farik) && line.contains(" on")),
+            .any(|line| line.contains(&catervas) && line.contains(" on")),
         "{}",
         listed.out
     );
@@ -1605,17 +1608,17 @@ fn farik_site_lists_and_decides() {
     let again = run(&repository.path, &["site", "approve", &shop.to_string()]);
     assert_eq!(again.code, 1, "{}", again.out);
     assert!(
-        again.err.starts_with("farik: site_request_decided"),
+        again.err.starts_with("catervas: site_request_decided"),
         "{}",
         again.err
     );
-    let removed = run(&repository.path, &["site", "remove", &farik]);
+    let removed = run(&repository.path, &["site", "remove", &catervas]);
     assert_eq!(removed.code, 0, "{}", removed.err);
     let off = events(&repository, &[EventKind::SiteRemoved]);
     let EventBody::SiteRemoved(body) = &off[0].body else {
         panic!("a removal");
     };
-    assert_eq!(body.host.as_str(), farik);
+    assert_eq!(body.host.as_str(), catervas);
     let added = run(
         &repository.path,
         &["site", "add", "https://www.shop2.example/x"],
@@ -1626,7 +1629,7 @@ fn farik_site_lists_and_decides() {
         after
             .out
             .lines()
-            .any(|line| line.contains(&farik) && line.contains(" off")),
+            .any(|line| line.contains(&catervas) && line.contains(" off")),
         "{}",
         after.out
     );
@@ -1640,12 +1643,12 @@ fn farik_site_lists_and_decides() {
     assert_eq!(machine.code, 0, "{}", machine.err);
     let wire: Value = serde_json::from_str(machine.out.trim()).expect("JSON");
     assert_eq!(wire["waiting"][0]["request"], third, "{wire}");
-    assert_eq!(wire["farik"][0]["on"], false, "{wire}");
+    assert_eq!(wire["catervas"][0]["on"], false, "{wire}");
 }
 
 /// Order `number` that `theo` drafted in his session on `task`: 59.98 USD from `seller`.
 fn order_drafted(
-    repository: &farik_store::git::fixtures::TempRepo,
+    repository: &catervas_store::git::fixtures::TempRepo,
     task: &str,
     number: u64,
     seller: &str,
@@ -1677,7 +1680,7 @@ fn order_drafted(
     clippy::too_many_lines,
     reason = "one project, from the waiting line to the list after every command"
 )]
-fn farik_pipeline_lists_and_decides() {
+fn catervas_pipeline_lists_and_decides() {
     let repository = a_project("human-pipeline");
     let task = filed(&repository, "Add done.txt");
     let ask = |name: &str, cost: &str, sends: bool| {
@@ -1699,7 +1702,7 @@ fn farik_pipeline_lists_and_decides() {
     };
     let first = ask("Firecrawl\u{1b}[31m", "paid", false);
     let second = ask("Shippo", "free", true);
-    // The manager passes the first on in its decision session, with a reason; Farik the second.
+    // The manager passes the first on in its decision session, with a reason; Catervas the second.
     record_as(
         &repository,
         "",
@@ -1738,7 +1741,7 @@ fn farik_pipeline_lists_and_decides() {
     assert!(line.starts_with(&format!("{task} waits: ")), "{line}");
     assert!(
         line.ends_with(&format!(
-            "asks for a data source: Shippo: farik pipeline approve {second}, or farik pipeline decline {second}"
+            "asks for a data source: Shippo: catervas pipeline approve {second}, or catervas pipeline decline {second}"
         )),
         "{line}"
     );
@@ -1798,7 +1801,7 @@ fn farik_pipeline_lists_and_decides() {
     assert!(shippo.contains("  free  "), "{shippo}");
     assert!(
         !shippo.contains("The Product Manager did not decide"),
-        "Farik's passing on is no reason of the manager's: {shippo}"
+        "Catervas's passing on is no reason of the manager's: {shippo}"
     );
     assert!(
         !listed.out.contains('\u{1b}'),
@@ -1877,7 +1880,7 @@ fn farik_pipeline_lists_and_decides() {
     );
     assert_eq!(not_yet.code, 1, "{}", not_yet.out);
     assert!(
-        not_yet.err.starts_with("farik: pipeline_not_escalated"),
+        not_yet.err.starts_with("catervas: pipeline_not_escalated"),
         "{}",
         not_yet.err
     );
@@ -1887,7 +1890,7 @@ fn farik_pipeline_lists_and_decides() {
     );
     assert_eq!(again.code, 1, "{}", again.out);
     assert!(
-        again.err.starts_with("farik: pipeline_decided"),
+        again.err.starts_with("catervas: pipeline_decided"),
         "{}",
         again.err
     );
@@ -1909,7 +1912,7 @@ fn farik_pipeline_lists_and_decides() {
     clippy::too_many_lines,
     reason = "one project, from the waiting line to the list after every command"
 )]
-fn farik_order_lists_and_decides() {
+fn catervas_order_lists_and_decides() {
     let repository = a_project("human-order");
     let task = filed(&repository, "Add done.txt");
     order_drafted(&repository, &task, 1, "Acme\u{1b}[31m");
@@ -1932,7 +1935,7 @@ fn farik_order_lists_and_decides() {
     assert!(line.starts_with(&format!("{task} waits: ")), "{line}");
     assert!(
         line.ends_with(
-            "set up an order from Bolt: 59.98 USD: farik order approve 2, or farik order reject 2"
+            "set up an order from Bolt: 59.98 USD: catervas order approve 2, or catervas order reject 2"
         ),
         "{line}"
     );
@@ -2030,7 +2033,7 @@ fn farik_order_lists_and_decides() {
     let again = run(&repository.path, &["order", "approve", "1"]);
     assert_eq!(again.code, 1, "{}", again.out);
     assert!(
-        again.err.starts_with("farik: purchase_order_decided"),
+        again.err.starts_with("catervas: purchase_order_decided"),
         "{}",
         again.err
     );
@@ -2061,7 +2064,7 @@ fn farik_order_lists_and_decides() {
     clippy::too_many_lines,
     reason = "one order's life, from placing to closing, and what each command sent"
 )]
-fn farik_order_placed_and_received_send_what_was_paid() {
+fn catervas_order_placed_and_received_send_what_was_paid() {
     let repository = a_project("human-order-steps");
     let task = filed(&repository, "Add done.txt");
     for number in [1, 2] {
@@ -2213,7 +2216,7 @@ fn farik_order_placed_and_received_send_what_was_paid() {
     assert!(
         refused
             .err
-            .starts_with("farik: purchase_order_status_invalid"),
+            .starts_with("catervas: purchase_order_status_invalid"),
         "{}",
         refused.err
     );
@@ -2277,7 +2280,7 @@ fn farik_order_placed_and_received_send_what_was_paid() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn farik_renewal_lists_and_dismisses() {
+fn catervas_renewal_lists_and_dismisses() {
     let repository = a_project("human-renewal");
     let none = run(&repository.path, &["renewal", "list"]);
     assert_eq!(none.code, 0, "{}", none.err);
@@ -2319,7 +2322,7 @@ fn farik_renewal_lists_and_dismisses() {
     assert!(
         listed
             .out
-            .contains("3 rows in the register have a renewal date Farik can't read"),
+            .contains("3 rows in the register have a renewal date Catervas can't read"),
         "{}",
         listed.out
     );
@@ -2348,7 +2351,7 @@ fn farik_renewal_lists_and_dismisses() {
     );
     assert_eq!(again.code, 1, "{}", again.out);
     assert!(
-        again.err.starts_with("farik: renewal_dismissed"),
+        again.err.starts_with("catervas: renewal_dismissed"),
         "{}",
         again.err
     );
@@ -2357,7 +2360,7 @@ fn farik_renewal_lists_and_dismisses() {
 /// Message `number` that `theo` drafted on `task` for `seller` with `purpose` (and about `order`,
 /// when it names one), its draft kept as the tool keeps it.
 fn message_drafted(
-    repository: &farik_store::git::fixtures::TempRepo,
+    repository: &catervas_store::git::fixtures::TempRepo,
     task: &str,
     number: u64,
     body: &str,
@@ -2379,7 +2382,7 @@ fn message_drafted(
         "seller_message.drafted",
         &drafted,
     );
-    let out = repository.path.join(".farik/local/procurement/mail/out");
+    let out = repository.path.join(".catervas/local/procurement/mail/out");
     std::fs::create_dir_all(&out).expect("the folder");
     std::fs::write(out.join(format!("{number}.txt")), body).expect("the draft");
 }
@@ -2390,7 +2393,7 @@ fn message_drafted(
     clippy::too_many_lines,
     reason = "one project, from the waiting message to the commands the driver was sent"
 )]
-fn farik_procurement_lists_sends_and_discards() {
+fn catervas_procurement_lists_sends_and_discards() {
     let repository = a_project("human-procurement");
     let task = filed(&repository, "Source pie boxes");
     message_drafted(
@@ -2527,7 +2530,7 @@ fn farik_procurement_lists_sends_and_discards() {
     let checked = run(&repository.path, &["procurement", "check"]);
     assert_ne!(checked.code, 0);
     assert!(
-        checked.err.contains("another farik process"),
+        checked.err.contains("another catervas process"),
         "{}",
         checked.err
     );
@@ -2610,7 +2613,7 @@ fn mailbox_connect_sends_the_password_it_read() {
     assert_ne!(bare.code, 0);
     assert!(bare.err.contains("--imap"), "{}", bare.err);
 
-    // Servers that cannot be reached refuse in Farik's words, which never quote the password.
+    // Servers that cannot be reached refuse in Catervas's words, which never quote the password.
     let down = with_password(&[
         "procurement",
         "mailbox",
@@ -2640,13 +2643,16 @@ fn mailbox_connect_sends_the_password_it_read() {
     );
 }
 
-/// `farik <args>` with the mailbox's password on standard input, in a state folder of its own and
+/// `catervas <args>` with the mailbox's password on standard input, in a state folder of its own and
 /// with no keychain.
-fn with_password(repository: &farik_store::git::fixtures::TempRepo, args: &[&str]) -> project::Ran {
+fn with_password(
+    repository: &catervas_store::git::fixtures::TempRepo,
+    args: &[&str],
+) -> project::Ran {
     run_with(&repository.path, args, |io| {
         io.stdin = Box::new(std::io::Cursor::new(b"swordfish\n".to_vec()));
         io.connector_secrets =
-            Arc::new(farik_runtime::connectors::MemoryConnectorSecrets::default());
+            Arc::new(catervas_runtime::connectors::MemoryConnectorSecrets::default());
         io.env.insert(
             "XDG_CONFIG_HOME".to_string(),
             format!("{}-config", repository.path.display()),
@@ -2678,7 +2684,7 @@ fn mailbox_connect_is_the_web_app_s_while_another_process_drives() {
     );
     assert_ne!(driven.code, 0);
     assert!(
-        driven.err.contains("another farik process"),
+        driven.err.contains("another catervas process"),
         "{}",
         driven.err
     );

@@ -6,7 +6,7 @@ use std::io;
 use std::os::unix::fs::DirBuilderExt as _;
 use std::path::{Path, PathBuf};
 
-use farik_core::contract::TaskId;
+use catervas_core::contract::TaskId;
 
 use crate::StoreError;
 
@@ -14,7 +14,7 @@ use crate::StoreError;
 /// each task and one file each version of a workbook the tools replaced.
 const HISTORY: &str = ".history";
 
-/// What Farik writes in the Procurement Specialist's folder, and not the task: its messages to
+/// What Catervas writes in the Procurement Specialist's folder, and not the task: its messages to
 /// sellers and their replies (step 10f). The copy and the changes leave it out as they leave
 /// `.history` out, so a reply that arrives while a task runs is no change the task made.
 const MAIL: &str = "mail";
@@ -56,8 +56,8 @@ pub fn make_private_directory(path: &Path) -> Result<(), StoreError> {
 }
 
 /// The private folder `folder` of the project at `root`, `folder` being as the roles name it
-/// (`.farik/local/finance`, its parts joined by `/`). It is refused when any part from `root` down
-/// is a link, `.farik` and `.farik/local` included, since a folder reached through one is
+/// (`.catervas/local/finance`, its parts joined by `/`). It is refused when any part from `root` down
+/// is a link, `.catervas` and `.catervas/local` included, since a folder reached through one is
 /// somewhere else, and what is read or written there is not the folder's. A part that is not
 /// there is no link.
 ///
@@ -292,13 +292,13 @@ mod tests {
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
 
-    use farik_core::contract::TaskId;
+    use catervas_core::contract::TaskId;
 
     use super::{changes_since_baseline, copy_baseline, folder_in};
 
     fn a_folder(name: &str) -> PathBuf {
         let folder = std::env::temp_dir()
-            .join(format!("farik-baseline-{}-{name}", std::process::id()))
+            .join(format!("catervas-baseline-{}-{name}", std::process::id()))
             .join("finance");
         let _ = fs::remove_dir_all(&folder);
         fs::create_dir_all(folder.join("2026")).expect("the folder is made");
@@ -351,7 +351,7 @@ mod tests {
     /// A procurement folder: the register, and `mail/` with a draft and a reply in it.
     fn a_procurement_folder(name: &str) -> PathBuf {
         let folder = std::env::temp_dir()
-            .join(format!("farik-baseline-{}-{name}", std::process::id()))
+            .join(format!("catervas-baseline-{}-{name}", std::process::id()))
             .join("procurement");
         let _ = fs::remove_dir_all(&folder);
         fs::create_dir_all(folder.join("mail/out")).expect("the folder is made");
@@ -370,7 +370,7 @@ mod tests {
         assert_eq!(read(&copy.join("vendors.xlsx")).as_deref(), Some("vendors"));
         assert!(
             !copy.join("mail").exists(),
-            "Farik writes mail/, not the task"
+            "Catervas writes mail/, not the task"
         );
         // A reply written after the copy, a draft written and one sent, are no change of the task.
         fs::write(folder.join("mail/in/2026-10/2.txt"), "later").expect("written");
@@ -493,23 +493,23 @@ mod tests {
 
     #[test]
     fn finds_a_folder_reached_through_no_link() {
-        let root = std::env::temp_dir().join(format!("farik-folder-in-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("catervas-folder-in-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("made");
         // Not made yet: no link, so the path is answered for the caller to make.
         assert_eq!(
-            folder_in(&root, ".farik/local/finance").expect("found"),
-            root.join(".farik/local/finance")
+            folder_in(&root, ".catervas/local/finance").expect("found"),
+            root.join(".catervas/local/finance")
         );
-        fs::create_dir_all(root.join(".farik/local/finance")).expect("made");
-        assert!(folder_in(&root, ".farik/local/finance").is_ok());
+        fs::create_dir_all(root.join(".catervas/local/finance")).expect("made");
+        assert!(folder_in(&root, ".catervas/local/finance").is_ok());
         // A link at any level, from the project's root down, is refused.
         let elsewhere = root.join("elsewhere");
         fs::create_dir_all(elsewhere.join("local/finance")).expect("made");
         for (linked, target) in [
-            (".farik", elsewhere.clone()),
-            (".farik/local", elsewhere.join("local")),
-            (".farik/local/finance", elsewhere.join("local/finance")),
+            (".catervas", elsewhere.clone()),
+            (".catervas/local", elsewhere.join("local")),
+            (".catervas/local/finance", elsewhere.join("local/finance")),
         ] {
             let held = root.join("held");
             let _ = fs::remove_dir_all(&held);
@@ -518,7 +518,7 @@ mod tests {
             fs::create_dir_all(&copy).expect("made");
             fs::create_dir_all(copy.join(linked).parent().expect("a parent")).expect("made");
             symlink(&target, copy.join(linked)).expect("a link");
-            let error = folder_in(&copy, ".farik/local/finance").expect_err("refused");
+            let error = folder_in(&copy, ".catervas/local/finance").expect_err("refused");
             assert!(error.to_string().contains("is a link"), "{linked}: {error}");
         }
     }

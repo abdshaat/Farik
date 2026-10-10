@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 
 pub use crate::session::SessionSkill;
 use crate::tools::ToolDeps;
-use farik_core::skill::skill_sha256;
-use farik_core::team::{SkillPin, Team};
-use farik_protocol::event::{EventBody, FarikEvent};
-use farik_roles::{
+use catervas_core::skill::skill_sha256;
+use catervas_core::team::{SkillPin, Team};
+use catervas_protocol::event::{CatervasEvent, EventBody};
+use catervas_roles::{
     CheckedSkill, SHIPPED_ROLES, SkillRefusal, check_skill, core_skill_names,
     declared_name_and_description, shipped_skill_names,
 };
@@ -19,9 +19,9 @@ use farik_roles::{
 /// Whose skill: the team's, or one agent's.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SkillLevel {
-    /// `.farik/skills/<name>/`.
+    /// `.catervas/skills/<name>/`.
     Team,
-    /// `.farik/agents/<agent id>/skills/<name>/`.
+    /// `.catervas/agents/<agent id>/skills/<name>/`.
     Agent(String),
 }
 
@@ -62,16 +62,20 @@ pub fn confirmed_sentence(name: &str, level: &SkillLevel) -> String {
 /// Where a skill's folder is, in the project at `root`.
 #[must_use]
 pub fn skill_folder(root: &Path, level: &SkillLevel, name: &str) -> PathBuf {
-    let farik = root.join(".farik");
+    let catervas = root.join(".catervas");
     match level {
-        SkillLevel::Team => farik.join("skills").join(name),
-        SkillLevel::Agent(agent) => farik.join("agents").join(agent).join("skills").join(name),
+        SkillLevel::Team => catervas.join("skills").join(name),
+        SkillLevel::Agent(agent) => catervas
+            .join("agents")
+            .join(agent)
+            .join("skills")
+            .join(name),
     }
 }
 
 /// `skill_folder`, refused `PathInvalid` when the folder or any folder between the project's root
-/// and it (`.farik`, `skills` / `agents`, `<agent>`, `skills`) is a link: a clone can commit links,
-/// and Farik reads, writes and deletes here.
+/// and it (`.catervas`, `skills` / `agents`, `<agent>`, `skills`) is a link: a clone can commit links,
+/// and Catervas reads, writes and deletes here.
 ///
 /// # Errors
 ///
@@ -169,7 +173,7 @@ pub fn read_skill_folder(folder: &Path) -> Result<BTreeMap<String, Vec<u8>>, Ski
 /// first: the newest `skill.added`, `skill.changed` or `skill.confirmed`, cleared by a later
 /// `skill.removed`.
 #[must_use]
-pub fn confirmed_skills(events: &[FarikEvent]) -> BTreeMap<(SkillLevel, String), String> {
+pub fn confirmed_skills(events: &[CatervasEvent]) -> BTreeMap<(SkillLevel, String), String> {
     let mut confirmed = BTreeMap::new();
     for event in events {
         match &event.body {
@@ -277,13 +281,13 @@ pub(crate) fn evaluate(
     }
 }
 
-/// The name of every skill Farik ships: each shipped role's, and each of its kit's from `kits`.
+/// The name of every skill Catervas ships: each shipped role's, and each of its kit's from `kits`.
 /// What a user's skill may not take without `replace_shipped` (ADR 0034).
 #[must_use]
 pub fn shipped_names(kits: &crate::tools::KitSource) -> BTreeSet<String> {
     let roles: Vec<_> = SHIPPED_ROLES
         .into_iter()
-        .filter_map(|role| farik_roles::load_role(role).ok())
+        .filter_map(|role| catervas_roles::load_role(role).ok())
         .collect();
     let kits: Vec<_> = SHIPPED_ROLES
         .into_iter()
@@ -295,7 +299,7 @@ pub fn shipped_names(kits: &crate::tools::KitSource) -> BTreeSet<String> {
 /// The skills `agent_id`'s sessions load: its own pinned skills, the team's that it has no skill
 /// of the same name for, then its role's kit's (`kit_skills`) that neither pins a skill of the
 /// name of, each only when its folder, its pin and this computer's confirmations agree; a kit's
-/// skill is Farik's own, neither pinned nor confirmed (ADR 0034).
+/// skill is Catervas's own, neither pinned nor confirmed (ADR 0034).
 #[must_use]
 pub fn session_skills(
     root: &Path,
@@ -411,7 +415,7 @@ impl std::fmt::Display for SkillCommandError {
             ),
             Self::NameTaken => write!(
                 formatter,
-                "{code}: that is the name of a skill Farik ships; replacing it needs your say so \
+                "{code}: that is the name of a skill Catervas ships; replacing it needs your say so \
                  (replace)."
             ),
             Self::LimitReached => write!(
@@ -470,7 +474,7 @@ fn with_pin(
         (None, _) => pins.retain(|pin| pin["name"] != name),
     }
     *list = serde_json::Value::Array(pins);
-    farik_core::team::validate_team(&wire).map_err(|errors| {
+    catervas_core::team::validate_team(&wire).map_err(|errors| {
         io_other(format!(
             "the team file would not be valid: {}",
             errors
@@ -484,7 +488,7 @@ fn with_pin(
 
 /// Records one skill event as the human's and projects it, answering its sequence number.
 fn record(tools: &ToolDeps, body: EventBody) -> Result<u64, SkillCommandError> {
-    let event = farik_protocol::event::new_event(body, tools.clock.now(), tools.ids.clone())
+    let event = catervas_protocol::event::new_event(body, tools.clock.now(), tools.ids.clone())
         .map_err(|error| io_other(format!("the event cannot be recorded: {error:?}")))?;
     let appended = tools.log.append(&event).map_err(io_other)?;
     tools.projections.apply(&appended).map_err(io_other)?;
@@ -652,7 +656,7 @@ pub fn remove_skill(
 
 /// Confirms the skill `name` of `level` as its folder is now: the person read the folder that
 /// hashes to `sha256`. The pin is rewritten to that hash when the folder or the pin changed outside
-/// Farik, then `skill.confirmed` is recorded, which answers its sequence number.
+/// Catervas, then `skill.confirmed` is recorded, which answers its sequence number.
 ///
 /// # Errors
 ///
@@ -754,7 +758,7 @@ pub fn skill_rows(
     };
     let mut rows = Vec::new();
     if let Some(agent) = agent
-        && let Ok(role) = farik_roles::load_role(farik_core::contract::Role::from(agent.role))
+        && let Ok(role) = catervas_roles::load_role(catervas_core::contract::Role::from(agent.role))
     {
         // The skill that stands for a name for this agent: its own, else the team's.
         let in_use = |name: &str| {
@@ -831,7 +835,7 @@ pub fn write_plugin(plugin_dir: &Path, skills: &[SessionSkill]) -> io::Result<()
     private_folder(&plugin_dir.join(".claude-plugin"))?;
     crate::write_private(
         &plugin_dir.join(".claude-plugin/plugin.json"),
-        br#"{"name":"farik"}"#,
+        br#"{"name":"catervas"}"#,
     )?;
     for skill in skills {
         for (path, text) in &skill.files {
@@ -851,14 +855,14 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::{Path, PathBuf};
 
-    use farik_core::skill::skill_sha256;
-    use farik_core::team::fixtures::a_team_wire;
-    use farik_core::team::{Team, validate_team};
-    use farik_protocol::event::fixtures::an_event_wire;
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent, event_from_value};
+    use catervas_core::skill::skill_sha256;
+    use catervas_core::team::fixtures::a_team_wire;
+    use catervas_core::team::{Team, validate_team};
+    use catervas_protocol::event::fixtures::an_event_wire;
+    use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, event_from_value};
     use std::sync::Arc;
 
-    use farik_roles::{SkillRefusal, check_skill};
+    use catervas_roles::{SkillRefusal, check_skill};
     use serde_json::{Value, json};
 
     use super::{
@@ -867,7 +871,8 @@ mod tests {
     };
 
     fn scratch(test: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("farik-skills-{}-{test}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("catervas-skills-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a scratch folder");
         dir
@@ -893,7 +898,7 @@ mod tests {
         (files, sha)
     }
 
-    fn event(kind: EventKind, level: &str, name: &str, sha: &str) -> FarikEvent {
+    fn event(kind: EventKind, level: &str, name: &str, sha: &str) -> CatervasEvent {
         let mut wire = an_event_wire(kind);
         let mut body = json!({ "level": level, "name": name });
         if level == "agent" {
@@ -941,11 +946,11 @@ mod tests {
         let root = Path::new("/p");
         assert_eq!(
             skill_folder(root, &SkillLevel::Team, "api-style"),
-            Path::new("/p/.farik/skills/api-style")
+            Path::new("/p/.catervas/skills/api-style")
         );
         assert_eq!(
             skill_folder(root, &agent(), "api-style"),
-            Path::new("/p/.farik/agents/linus/skills/api-style")
+            Path::new("/p/.catervas/agents/linus/skills/api-style")
         );
     }
 
@@ -1128,10 +1133,10 @@ mod tests {
         let root = scratch("linked");
         let elsewhere = scratch("linked-elsewhere");
         let (_, sha) = put(&elsewhere, &SkillLevel::Team, "api-style", "body");
-        std::fs::create_dir_all(root.join(".farik/skills")).expect("a folder");
+        std::fs::create_dir_all(root.join(".catervas/skills")).expect("a folder");
         std::os::unix::fs::symlink(
             skill_folder(&elsewhere, &SkillLevel::Team, "api-style"),
-            root.join(".farik/skills/api-style"),
+            root.join(".catervas/skills/api-style"),
         )
         .expect("a link");
         let team = team_with(&[("api-style", &sha)], &[]);
@@ -1169,7 +1174,7 @@ mod tests {
     }
 
     /// The kit skill `name` with `body`, as `check_skill` hands it over.
-    fn a_kit_skill(name: &str, body: &str) -> farik_roles::CheckedSkill {
+    fn a_kit_skill(name: &str, body: &str) -> catervas_roles::CheckedSkill {
         let files = BTreeMap::from([("SKILL.md".to_string(), skill_md(name, body).into_bytes())]);
         check_skill(name, &files).expect("a skill")
     }
@@ -1210,16 +1215,16 @@ mod tests {
     #[test]
     fn counts_a_kit_skill_among_the_names_a_command_checks() {
         let kits: crate::tools::KitSource = Arc::new(|role| match role {
-            farik_core::contract::Role::SoftwareDeveloper => Ok(
+            catervas_core::contract::Role::SoftwareDeveloper => Ok(
                 crate::tools::fixtures::a_developer_kit(&[("launch-plans", "x")], None),
             ),
-            other => farik_roles::load_kit(other),
+            other => catervas_roles::load_kit(other),
         });
         let names = super::shipped_names(&kits);
         assert!(names.contains("launch-plans"));
         assert!(names.contains("writing-task-contracts"));
         assert!(
-            !super::shipped_names(&(Arc::new(farik_roles::load_kit) as crate::tools::KitSource))
+            !super::shipped_names(&(Arc::new(catervas_roles::load_kit) as crate::tools::KitSource))
                 .contains("launch-plans")
         );
     }
@@ -1270,7 +1275,7 @@ mod tests {
             std::fs::read_to_string(dir.join(".claude-plugin/plugin.json")).expect("a manifest");
         assert_eq!(
             serde_json::from_str::<Value>(&manifest).expect("JSON"),
-            json!({ "name": "farik" })
+            json!({ "name": "catervas" })
         );
         assert_eq!(
             std::fs::read_to_string(dir.join("skills/api-style/SKILL.md")).expect("a copy"),
@@ -1383,7 +1388,8 @@ mod tests {
         // The rows: the kit's skill is the role's, after the role's own, and replaced now.
         let team = project.deps.files.read_team().expect("the team");
         let root = project.repo.path.clone();
-        let kit = (project.deps.kits)(farik_core::contract::Role::SoftwareDeveloper).expect("kit");
+        let kit =
+            (project.deps.kits)(catervas_core::contract::Role::SoftwareDeveloper).expect("kit");
         let rows = skill_rows(
             &root,
             &team,
@@ -1429,7 +1435,7 @@ mod tests {
             ("api-style", sha.as_str(), false)
         );
         let root = &project.repo.path;
-        let folder = root.join(".farik/agents/dev-a/skills/api-style");
+        let folder = root.join(".catervas/agents/dev-a/skills/api-style");
         assert_eq!(read_skill_folder(&folder).expect("a folder"), files);
         assert_eq!(
             pins(&project, &level),
@@ -1485,7 +1491,7 @@ mod tests {
             })
             .collect();
         assert_eq!(beside, ["api-style"]);
-        // A team skill goes under .farik/skills.
+        // A team skill goes under .catervas/skills.
         save_skill(
             &project.deps,
             &SkillLevel::Team,
@@ -1493,7 +1499,7 @@ mod tests {
             false,
         )
         .expect("saved");
-        assert!(root.join(".farik/skills/team-style/SKILL.md").exists());
+        assert!(root.join(".catervas/skills/team-style/SKILL.md").exists());
         let EventBody::SkillAdded(body) = &project.events(&[EventKind::SkillAdded])[1].body else {
             panic!("added")
         };
@@ -1514,7 +1520,7 @@ mod tests {
             "skill_runs_commands"
         );
         assert!(
-            !project.repo.path.join(".farik/agents/dev-a").exists(),
+            !project.repo.path.join(".catervas/agents/dev-a").exists(),
             "nothing was written"
         );
         assert!(pins(&project, &dev_a()).is_empty());
@@ -1585,7 +1591,7 @@ mod tests {
         )
         .expect("one of the twenty again");
         assert_eq!(pins(&project, &SkillLevel::Team).len(), 20);
-        assert!(!project.repo.path.join(".farik/skills/s20").exists());
+        assert!(!project.repo.path.join(".catervas/skills/s20").exists());
         // The agent's own list is counted apart.
         save_skill(&project.deps, &dev_a(), &skill_files("s20", "x"), false)
             .expect("the agent's own");
@@ -1603,11 +1609,12 @@ mod tests {
             false,
         )
         .expect("saved");
-        let outside = std::env::temp_dir().join(format!("farik-linked-out-{}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("catervas-linked-out-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&outside);
         std::fs::create_dir_all(&outside).expect("a folder");
-        std::fs::rename(root.join(".farik/skills"), &outside).expect("moved out");
-        std::os::unix::fs::symlink(&outside, root.join(".farik/skills")).expect("a link");
+        std::fs::rename(root.join(".catervas/skills"), &outside).expect("moved out");
+        std::os::unix::fs::symlink(&outside, root.join(".catervas/skills")).expect("a link");
         assert_eq!(
             code(remove_skill(&project.deps, &SkillLevel::Team, "api-style")),
             "skill_path_invalid"
@@ -1660,14 +1667,18 @@ mod tests {
         .expect("saved");
         let removed = remove_skill(&project.deps, &dev_a(), "api-style").expect("removed");
         let root = &project.repo.path;
-        assert!(!root.join(".farik/agents/dev-a/skills/api-style").exists());
+        assert!(
+            !root
+                .join(".catervas/agents/dev-a/skills/api-style")
+                .exists()
+        );
         assert!(pins(&project, &dev_a()).is_empty());
         assert_eq!(
             project.events(&[EventKind::SkillRemoved])[0].envelope.seq,
             removed
         );
         // The team's skill of the same name is untouched.
-        assert!(root.join(".farik/skills/api-style/SKILL.md").exists());
+        assert!(root.join(".catervas/skills/api-style/SKILL.md").exists());
         assert_eq!(pins(&project, &SkillLevel::Team).len(), 1);
         assert_eq!(
             code(remove_skill(&project.deps, &dev_a(), "api-style")),
@@ -1686,7 +1697,7 @@ mod tests {
             false,
         )
         .expect("saved");
-        let parent = root.join(".farik/agents/dev-a/skills");
+        let parent = root.join(".catervas/agents/dev-a/skills");
         std::fs::set_permissions(&parent, std::os::unix::fs::PermissionsExt::from_mode(0o555))
             .expect("read-only");
         let count = project.event_count();
@@ -1697,7 +1708,7 @@ mod tests {
         assert_eq!(pins(&project, &dev_a()).len(), 1);
         assert_eq!(project.event_count(), count);
         // A missing skill is unpinned all the same.
-        std::fs::remove_dir_all(root.join(".farik/skills/api-style")).expect("gone by hand");
+        std::fs::remove_dir_all(root.join(".catervas/skills/api-style")).expect("gone by hand");
         remove_skill(&project.deps, &SkillLevel::Team, "api-style")
             .expect("a missing skill is removed");
         assert!(pins(&project, &SkillLevel::Team).is_empty());
@@ -1722,8 +1733,9 @@ mod tests {
         let folder = project
             .repo
             .path
-            .join(".farik/agents/dev-a/skills/api-style");
-        std::fs::write(folder.join("references/a.md"), "changed outside Farik").expect("an edit");
+            .join(".catervas/agents/dev-a/skills/api-style");
+        std::fs::write(folder.join("references/a.md"), "changed outside Catervas")
+            .expect("an edit");
         let now = skill_sha256(&read_skill_folder(&folder).expect("readable"));
         assert_ne!(now, old);
         let before = project.event_count();
@@ -1811,7 +1823,7 @@ mod tests {
                 &project
                     .repo
                     .path
-                    .join(".farik/skills/writing-task-contracts"),
+                    .join(".catervas/skills/writing-task-contracts"),
             )
             .expect("readable"),
         );
@@ -1875,11 +1887,11 @@ mod tests {
         )
         .expect("saved");
         let root = project.repo.path.clone();
-        std::fs::remove_dir_all(root.join(".farik/agents/dev-a/skills/vanished"))
+        std::fs::remove_dir_all(root.join(".catervas/agents/dev-a/skills/vanished"))
             .expect("gone by hand");
         // The agent's api-style is edited after it was confirmed: review.
         std::fs::write(
-            root.join(".farik/agents/dev-a/skills/api-style/references/a.md"),
+            root.join(".catervas/agents/dev-a/skills/api-style/references/a.md"),
             "edited",
         )
         .expect("an edit");
@@ -1932,7 +1944,7 @@ mod tests {
         let role = by_name(SkillRowLevel::Role, "implementing-a-contract");
         assert_eq!(
             role.bytes,
-            farik_roles::load_role(farik_core::contract::Role::SoftwareDeveloper)
+            catervas_roles::load_role(catervas_core::contract::Role::SoftwareDeveloper)
                 .expect("a role")
                 .skills[0]
                 .bytes as u64
@@ -1987,7 +1999,7 @@ mod tests {
         );
         // A role's skill replaced by a team skill in review is not replaced.
         std::fs::write(
-            root.join(".farik/skills/implementing-a-contract/references/a.md"),
+            root.join(".catervas/skills/implementing-a-contract/references/a.md"),
             "edited",
         )
         .expect("an edit");

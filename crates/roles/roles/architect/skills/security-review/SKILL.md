@@ -8,7 +8,7 @@ description: Use when you review a diff for security, or when a contract asks fo
 ## 1. What a review session can do
 
 You have the contract, the diff and the completion note, and read-tier tools only: no
-`farik_exec` and no `WebFetch`. The services connected to you (a verify session is given them)
+`catervas_exec` and no `WebFetch`. The services connected to you (a verify session is given them)
 may help. Say what you could not check rather than guessing.
 
 ## 2. The checklist
@@ -26,7 +26,7 @@ Read the diff for each, and cite the file and line of every finding.
 ## 3. Record what you found
 
 A finding that a `review` criterion covers fails that criterion: record it with
-`farik_record_criterion_result`, citing the file and line. A finding no criterion covers goes in
+`catervas_record_criterion_result`, citing the file and line. A finding no criterion covers goes in
 the review note for the Product Manager. Never invent a criterion for it. Then end the review as
 your role's prompt says: the review note, and `rejected` when a criterion failed.
 

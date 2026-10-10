@@ -5,18 +5,18 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
-use farik_core::contract::Role;
-use farik_core::marketing::{
+use catervas_core::contract::Role;
+use catervas_core::marketing::{
     Amount, Cap, CapScope, CreatedCampaign, Lineage, PlanRecord, PlanSpend, active_plan,
     caps_reached, is_carried, to_pause_for_end,
 };
-use farik_core::team::{Agent, AgentStatus};
-use farik_protocol::event::{EventBody, new_event};
-use farik_store::marketing::{
+use catervas_core::team::{Agent, AgentStatus};
+use catervas_protocol::event::{EventBody, new_event};
+use catervas_store::marketing::{
     MarketingPlan, PausedWhy, budgets_reached, campaigns_paused, created_campaigns_on,
     marketing_plans, paused_for_end,
 };
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde_json::json;
 
 use super::{Orchestrator, OrchestratorError, RECHECK};
@@ -27,7 +27,7 @@ use crate::daemon::ads_calls::{
 use crate::marketing::ads::google_ads_held;
 
 /// How long a plan's spend, or a pause that was refused, waits before it is tried again. A failed
-/// try counts: a retry every minute would spend Farik Cloud's shared quota (ADR 0044) on failures
+/// try counts: a retry every minute would spend Catervas Cloud's shared quota (ADR 0044) on failures
 /// that rarely clear within a minute.
 const TRY_EVERY: Duration = Duration::minutes(15);
 
@@ -335,11 +335,11 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// The agents whose Google Ads connection Farik may use for `plan`: every Marketing Specialist
+    /// The agents whose Google Ads connection Catervas may use for `plan`: every Marketing Specialist
     /// in the team file, whatever its status, since stopping spend is never paused (ADR 0042). A
     /// paused agent keeps its sign-in. A retired agent is tried last and finds one only when it
-    /// was retired outside Farik (a hand edit of the team file, or a pulled one): retiring it in
-    /// Farik pauses its ads first and deletes its keys (ADR 0030), so it is passed over
+    /// was retired outside Catervas (a hand edit of the team file, or a pulled one): retiring it in
+    /// Catervas pauses its ads first and deletes its keys (ADR 0030), so it is passed over
     /// otherwise. The plan's proposer comes first, then the active ones, then the paused, then
     /// the retired, each in the team file's order. The reason, when the team file cannot be read.
     fn agents_for(&self, plan: Option<&MarketingPlan>) -> Result<Vec<String>, String> {
@@ -368,7 +368,7 @@ impl Orchestrator {
             .collect())
     }
 
-    /// Records that Farik paused `made`, for `why`.
+    /// Records that Catervas paused `made`, for `why`.
     fn record_paused(
         &self,
         made: &CreatedCampaign,
@@ -380,7 +380,7 @@ impl Orchestrator {
         self.record(&body, EventBody::MarketingCampaignPaused)
     }
 
-    /// Records Farik's own act: the event `body` reads as, with no task, no agent and no session.
+    /// Records Catervas's own act: the event `body` reads as, with no task, no agent and no session.
     fn record<T: serde::de::DeserializeOwned>(
         &self,
         body: &serde_json::Value,
@@ -432,13 +432,13 @@ mod tests {
 
     use std::collections::BTreeMap;
 
+    use catervas_core::marketing::{Amount, PlanSpend};
+    use catervas_core::team::fixtures::an_agent_wire;
+    use catervas_protocol::clock::MovableClock;
+    use catervas_protocol::event::{CatervasEvent, EventBody, EventKind};
+    use catervas_store::event_log::fixtures::refuse_appends_of;
+    use catervas_store::marketing::marketing_plans;
     use chrono::{DateTime, Utc};
-    use farik_core::marketing::{Amount, PlanSpend};
-    use farik_core::team::fixtures::an_agent_wire;
-    use farik_protocol::clock::MovableClock;
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent};
-    use farik_store::event_log::fixtures::refuse_appends_of;
-    use farik_store::marketing::marketing_plans;
     use serde_json::{Value, json};
 
     use super::super::{Orchestrator, OrchestratorError};
@@ -448,7 +448,7 @@ mod tests {
     use crate::orchestrator::fixtures::UsageThenWaitAdapter;
     use crate::sleep::Sleeper;
     use crate::tools::fixtures::{at, with_the_marketing_specialist};
-    use farik_core::pricing::Usage;
+    use catervas_core::pricing::Usage;
 
     /// The ad account of the plans, ten digits.
     const CUSTOMER: &str = "1234567890";
@@ -530,13 +530,13 @@ mod tests {
             );
         }
 
-        /// The campaigns Farik recorded as paused for `why`, in order, as `(plan, key, campaign)`.
+        /// The campaigns Catervas recorded as paused for `why`, in order, as `(plan, key, campaign)`.
         fn paused_for(&self, why: &str) -> Vec<(String, String, String)> {
             self.events(EventKind::MarketingCampaignPaused)
                 .iter()
                 .filter_map(|event| match &event.body {
                     EventBody::MarketingCampaignPaused(body) if body.why.to_string() == why => {
-                        assert_eq!(event.envelope.ids.agent_id, None, "Farik records it");
+                        assert_eq!(event.envelope.ids.agent_id, None, "Catervas records it");
                         assert_eq!(event.envelope.ids.session_id, None);
                         Some((
                             body.plan.as_str().to_string(),
@@ -596,7 +596,7 @@ mod tests {
                 .collect()
         }
 
-        fn events(&self, kind: EventKind) -> Vec<FarikEvent> {
+        fn events(&self, kind: EventKind) -> Vec<CatervasEvent> {
             self.ads.harness.project.events(&[kind])
         }
 
@@ -604,7 +604,7 @@ mod tests {
         fn reached(&self, index: usize) -> serde_json::Value {
             let events = self.events(EventKind::MarketingBudgetReached);
             let event = events.get(index).expect("a budget was reached");
-            assert_eq!(event.envelope.ids.agent_id, None, "Farik records it");
+            assert_eq!(event.envelope.ids.agent_id, None, "Catervas records it");
             assert_eq!(event.envelope.ids.session_id, None);
             assert_eq!(event.envelope.ids.task_id, None);
             let EventBody::MarketingBudgetReached(body) = &event.body else {
@@ -1264,7 +1264,7 @@ mod tests {
         Watching::over(ads, Arc::new(Counting::default()))
     }
 
-    /// Kai, `status` in the team file, has a campaign at its cap: Farik still reads, pauses and
+    /// Kai, `status` in the team file, has a campaign at its cap: Catervas still reads, pauses and
     /// records it, since a sign-in is not revoked by pausing or retiring its agent.
     async fn stops_spend_with_kai(name: &str, status: &'static str) {
         let watching = watching_with_kai(name, status).await;
@@ -1610,7 +1610,7 @@ mod tests {
         assert_eq!(unstopped, None);
     }
 
-    /// The owner removed Kai's Google Ads: the entry is out of the team file, Farik paused
+    /// The owner removed Kai's Google Ads: the entry is out of the team file, Catervas paused
     /// `campaign` of MP-1 first and recorded it for the removal, and `connector.disconnected`.
     fn kai_loses_google_ads(watching: &Watching, campaign: &str) {
         let files = &watching.ads.harness.project.deps.files;
@@ -1646,7 +1646,7 @@ mod tests {
         watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
         let campaign = campaign_name(CUSTOMER, 11);
 
-        // The owner removed Kai's Google Ads: Farik paused the campaign first and recorded it, and
+        // The owner removed Kai's Google Ads: Catervas paused the campaign first and recorded it, and
         // the entry and its sign-in went.
         kai_loses_google_ads(&watching, &campaign);
         let project = &watching.ads.harness.project;
@@ -1670,7 +1670,7 @@ mod tests {
         // is paused for the end, as before.
         watching.ads.connect("kai");
         let mut connected =
-            farik_protocol::event::fixtures::a_body_wire(EventKind::ConnectorConnected);
+            catervas_protocol::event::fixtures::a_body_wire(EventKind::ConnectorConnected);
         connected["agent"] = json!("kai");
         connected["server"] = json!("google-ads");
         project.record("", "connector.connected", &connected);
@@ -1705,7 +1705,7 @@ mod tests {
         watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
         let campaign = campaign_name(CUSTOMER, 11);
 
-        // The owner removed Kai's Google Ads, and Farik paused the campaign first. Lia's sign-in
+        // The owner removed Kai's Google Ads, and Catervas paused the campaign first. Lia's sign-in
         // can still enable it, and no connection is recorded when she does: it is running again.
         kai_loses_google_ads(&watching, &campaign);
         watching.status((CUSTOMER, 11), "ENABLED");
@@ -1753,12 +1753,12 @@ mod tests {
             .iter_mut()
             .find(|agent| agent.id.as_str() == "kai")
             .expect("Kai");
-        kai.status = farik_core::team::AgentStatus::Retired;
+        kai.status = catervas_core::team::AgentStatus::Retired;
         deps.files.write_team(&team).expect("the team is written");
         assert!(!google_ads_held(deps));
 
         // A team file that cannot be read: nothing is counted paused on a guess.
-        std::fs::write(deps.files.root().join(".farik/team.yaml"), "not: a team")
+        std::fs::write(deps.files.root().join(".catervas/team.yaml"), "not: a team")
             .expect("the file is written");
         assert!(google_ads_held(deps));
     }
@@ -1773,13 +1773,13 @@ mod tests {
         watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
         let campaign = campaign_name(CUSTOMER, 11);
 
-        // The owner retires Kai, the only Marketing Specialist: Farik pauses the campaign first,
+        // The owner retires Kai, the only Marketing Specialist: Catervas pauses the campaign first,
         // and retiring deletes his keys. His entry stays in the team file.
         watching
             .orchestrator
-            .handle(farik_protocol::command::Command::AgentUpdate {
+            .handle(catervas_protocol::command::Command::AgentUpdate {
                 agent_id: "kai".to_string(),
-                status: farik_core::team::AgentStatus::Retired,
+                status: catervas_core::team::AgentStatus::Retired,
             })
             .await
             .expect("Kai is retired");

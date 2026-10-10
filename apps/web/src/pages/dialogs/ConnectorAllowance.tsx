@@ -1,4 +1,4 @@
-import { Button, Dialog } from "@farik/ui";
+import { Button, Dialog } from "@catervas/ui";
 import { useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { refusalsOf } from "../../app/refusals.ts";
@@ -15,7 +15,7 @@ import type { KitService } from "../Team.tsx";
 /**
  * "Change how many": the numbers an agent may make of a kit service's spending tools each sprint
  * without asking, from the agent's page (ADR 0037). It starts at the numbers the entry holds, says
- * how many were made so far, and refuses a number over 1,000 at its field. When Farik has changed
+ * how many were made so far, and refuses a number over 1,000 at its field. When Catervas has changed
  * the service since it was connected, the numbers cannot change until it is connected again.
  */
 export function ConnectorAllowance({

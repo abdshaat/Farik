@@ -10,11 +10,11 @@ mod project;
 use std::path::Path;
 use std::sync::Arc;
 
+use catervas::{CliIo, run_cli};
+use catervas_protocol::clock::FixedClock;
+use catervas_runtime::sprints::{PlannedBy, plan_sprint};
+use catervas_store::git::fixtures::TempRepo;
 use chrono::{DateTime, Utc};
-use farik::{CliIo, run_cli};
-use farik_protocol::clock::FixedClock;
-use farik_runtime::sprints::{PlannedBy, plan_sprint};
-use farik_store::git::fixtures::TempRepo;
 use serde_json::Value;
 
 /// The moment every test runs at, fixed rather than read from the wall clock (code.md).
@@ -46,7 +46,7 @@ fn run_in(cwd: &Path, args: &[&str]) -> Ran {
             Box::new(&mut err),
             Arc::new(FixedClock::new(at())),
         );
-        let arguments: Vec<String> = std::iter::once("farik")
+        let arguments: Vec<String> = std::iter::once("catervas")
             .chain(args.iter().copied())
             .map(ToString::to_string)
             .collect();
@@ -59,7 +59,7 @@ fn run_in(cwd: &Path, args: &[&str]) -> Ran {
     }
 }
 
-/// A repository that is a Farik project with one filed, triaged request.
+/// A repository that is a Catervas project with one filed, triaged request.
 fn a_project_with_a_task(name: &str) -> TempRepo {
     let repository = TempRepo::new(name);
     repository.write("Cargo.lock", "version = 4\n");
@@ -136,7 +136,7 @@ fn says_when_the_board_is_empty() {
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
-        ran.out.contains("no tasks yet") && ran.out.contains("farik task create"),
+        ran.out.contains("no tasks yet") && ran.out.contains("catervas task create"),
         "an empty board says what to do next: {}",
         ran.out
     );
@@ -252,7 +252,7 @@ fn shows_the_team_rules_and_the_criterion_library() {
     assert_eq!(rules.code, 0, "{}", rules.err);
     assert!(
         rules.out.contains(".env"),
-        "the protected paths farik-core ships are rules whatever the team wrote (5.12): {}",
+        "the protected paths catervas-core ships are rules whatever the team wrote (5.12): {}",
         rules.out
     );
     assert!(rules.out.contains("new tests"), "{}", rules.out);
@@ -302,14 +302,18 @@ fn says_when_a_project_agrees_with_itself() {
 fn reports_a_contract_the_log_has_never_heard_of() {
     let repository = a_project_with_a_task("read-doctor-drift");
     std::fs::copy(
-        repository.path.join(".farik/contracts/FRK-1.yaml"),
-        repository.path.join(".farik/contracts/FRK-7.yaml"),
+        repository.path.join(".catervas/contracts/FRK-1.yaml"),
+        repository.path.join(".catervas/contracts/FRK-7.yaml"),
     )
     .expect("a second contract file");
-    let written = std::fs::read_to_string(repository.path.join(".farik/contracts/FRK-7.yaml"))
+    let written = std::fs::read_to_string(repository.path.join(".catervas/contracts/FRK-7.yaml"))
         .expect("read")
         .replace("id: FRK-1", "id: FRK-7");
-    std::fs::write(repository.path.join(".farik/contracts/FRK-7.yaml"), written).expect("write");
+    std::fs::write(
+        repository.path.join(".catervas/contracts/FRK-7.yaml"),
+        written,
+    )
+    .expect("write");
 
     let ran = run_in(&repository.path, &["doctor"]);
 
@@ -350,10 +354,10 @@ fn reports_a_team_rule_that_does_not_compile() {
 }
 
 /// Replaces the whole top-level `rules:` block of the project's team.yaml with `rules`, which is
-/// that block written out. `farik init` writes the rules a team starts with (the default document
+/// that block written out. `catervas init` writes the rules a team starts with (the default document
 /// paths among them), so the block is whatever lines follow `rules:` up to the next top-level key.
 fn replace_the_rules(project: &Path, rules: &str) {
-    let path = project.join(".farik/team.yaml");
+    let path = project.join(".catervas/team.yaml");
     let team = std::fs::read_to_string(&path).expect("read");
     let start = team
         .find("\nrules:")
@@ -421,10 +425,10 @@ fn reports_a_document_path_that_does_not_compile() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn reports_a_setting_farik_does_not_know() {
+fn reports_a_setting_catervas_does_not_know() {
     let repository = a_project_with_a_task("read-doctor-settings");
     std::fs::write(
-        repository.path.join(".farik/local/settings.json"),
+        repository.path.join(".catervas/local/settings.json"),
         "{\"sandbox\": \"docker\", \"sandbox_mode\": \"none\"}\n",
     )
     .expect("write");
@@ -444,7 +448,7 @@ fn reports_a_setting_farik_does_not_know() {
 fn reports_a_criterion_whose_verification_matches_no_branch() {
     let repository = a_project_with_a_task("read-doctor-criteria");
     std::fs::write(
-        repository.path.join(".farik/team/criteria.yaml"),
+        repository.path.join(".catervas/team/criteria.yaml"),
         "criteria:\n  - name: the-docs-are-updated\n    text: The documents say what changed.\n    source: human\n    verification:\n      method: test\n      new_tests_required: true\n",
     )
     .expect("write");
@@ -469,7 +473,7 @@ fn reports_a_criterion_whose_verification_matches_no_branch() {
 fn reports_a_team_file_that_cannot_be_read() {
     let repository = a_project_with_a_task("read-doctor-team");
     std::fs::write(
-        repository.path.join(".farik/team.yaml"),
+        repository.path.join(".catervas/team.yaml"),
         "name: one\nagents: []\n",
     )
     .expect("write");
@@ -490,12 +494,12 @@ fn reports_a_team_file_that_cannot_be_read() {
 fn a_team_on_an_unpriced_model(name: &str) -> TempRepo {
     project::a_team_with(name, |wire| {
         let on_unknown_9 = |id: &str| {
-            let mut dev = farik_core::team::fixtures::an_agent_wire(id, "software_developer");
+            let mut dev = catervas_core::team::fixtures::an_agent_wire(id, "software_developer");
             dev["model"] = serde_json::json!({ "id": "claude-unknown-9" });
             dev
         };
         wire["agents"] = serde_json::json!([
-            farik_core::team::fixtures::an_agent_wire("pm", "product_manager"),
+            catervas_core::team::fixtures::an_agent_wire("pm", "product_manager"),
             on_unknown_9("dev"),
             on_unknown_9("dev-2"),
         ]);
@@ -503,9 +507,9 @@ fn a_team_on_an_unpriced_model(name: &str) -> TempRepo {
 }
 
 /// What doctor says of `claude-unknown-9`, used by `dev` and `dev-2`.
-const UNPRICED_FINDING: &str = ".farik/team.yaml: no price table prices claude-unknown-9 (used by \
+const UNPRICED_FINDING: &str = ".catervas/team.yaml: no price table prices claude-unknown-9 (used by \
     dev, dev-2): its usage is recorded at no cost, and no dollar limit counts it. Add it to \
-    .farik/prices.json to price it (5.5)";
+    .catervas/prices.json to price it (5.5)";
 
 #[cfg(unix)]
 #[test]
@@ -522,11 +526,11 @@ fn reports_a_model_no_price_table_prices() {
         ran.out
     );
 
-    let mut prices: Value =
-        serde_json::from_str(farik_core::pricing::prices::PRICES_JSON).expect("the shipped table");
+    let mut prices: Value = serde_json::from_str(catervas_core::pricing::prices::PRICES_JSON)
+        .expect("the shipped table");
     prices["prices"]["claude-unknown-9"] = prices["prices"]["claude-opus-5"].clone();
     std::fs::write(
-        repository.path.join(".farik/prices.json"),
+        repository.path.join(".catervas/prices.json"),
         prices.to_string(),
     )
     .expect("the override is written");
@@ -543,7 +547,7 @@ fn reports_a_model_no_price_table_prices() {
 fn reports_a_price_table_it_cannot_read() {
     let repository = a_team_on_an_unpriced_model("read-doctor-prices");
     std::fs::write(
-        repository.path.join(".farik/prices.json"),
+        repository.path.join(".catervas/prices.json"),
         "{\"version\": 2}",
     )
     .expect("the override is written");
@@ -551,11 +555,11 @@ fn reports_a_price_table_it_cannot_read() {
     let ran = run_in(&repository.path, &["doctor"]);
 
     assert_eq!(ran.code, 1, "{}", ran.out);
-    assert!(ran.out.contains(".farik/prices.json"), "{}", ran.out);
+    assert!(ran.out.contains(".catervas/prices.json"), "{}", ran.out);
     assert!(
         !ran.out
             .lines()
-            .any(|line| line.starts_with(".farik/team.yaml: no price table prices")),
+            .any(|line| line.starts_with(".catervas/team.yaml: no price table prices")),
         "{}",
         ran.out
     );
@@ -565,8 +569,8 @@ fn reports_a_price_table_it_cannot_read() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn shows_a_tasks_events_cost_and_children() {
-    use farik_protocol::event::EventIds;
-    use farik_store::requests::file_request;
+    use catervas_protocol::event::EventIds;
+    use catervas_store::requests::file_request;
     use serde_json::json;
 
     let repository = a_project_with_a_task("read-show-story");
@@ -591,7 +595,7 @@ fn shows_a_tasks_events_cost_and_children() {
     file_request(
         &project::files_of(&repository),
         &log,
-        farik_store::files::yaml_value(&a_request("Show one row"), "child.yaml")
+        catervas_store::files::yaml_value(&a_request("Show one row"), "child.yaml")
             .expect("the child is YAML"),
         "human",
         Some(&"FRK-1".parse().expect("a task id")),
@@ -729,7 +733,7 @@ fn shows_no_diff_for_a_task_in_a_private_folder() {
     let request = a_request("Record the spending")
         .replace("software_developer", "finance_specialist")
         .replace("reviewer_role: architect", "reviewer_role: product_manager")
-        .replace("crates/cli/**", ".farik/local/finance/**")
+        .replace("crates/cli/**", ".catervas/local/finance/**")
         .replace(
             "method: test\n      command: cargo test --workspace\n      new_tests_required: true",
             "method: artifact\n      path: books.xlsx",
@@ -737,11 +741,11 @@ fn shows_no_diff_for_a_task_in_a_private_folder() {
     repository.write("request.yaml", &request);
     let filed = run_in(&repository.path, &["task", "create", "request.yaml"]);
     assert_eq!(filed.code, 0, "{}{}", filed.out, filed.err);
-    let folder = repository.path.join(".farik/local/finance");
+    let folder = repository.path.join(".catervas/local/finance");
     std::fs::create_dir_all(&folder).expect("the folder is made");
     std::fs::write(folder.join("books.xlsx"), "books").expect("written");
     let task = "FRK-1".parse().expect("a task id");
-    farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+    catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
     std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
 
     let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
@@ -764,7 +768,7 @@ fn shows_no_diff_for_a_task_in_a_private_folder() {
 /// - FRK-1 (one `test` criterion) is verified twice, the human unblocking it once and one
 ///   escalation raised; FRK-2 (a `command` and a `review` criterion) is verified once and accepted
 ///   first time, and escalated once after. So two accepted tasks, 50% first pass, 1.50
-///   interventions each, and two criteria of three run by Farik.
+///   interventions each, and two criteria of three run by Catervas.
 /// - Three sessions cost $0.50 of implement, $1.00 of verify, and $0.50 of triage, each in an ISO
 ///   week of its own: $1.00 per accepted task, of which the largest purpose is $0.50, over three
 ///   active weeks.
@@ -792,7 +796,7 @@ fn accepted_project(name: &str) -> TempRepo {
       - R1
     verification:
       method: command
-      command: farik board
+      command: catervas board
       expect:
         exit_code: 0
   - id: C2

@@ -1,4 +1,4 @@
-//! `farik connector run` and `farik connector headers` (ADR 0030). A session's `mcp.json` names
+//! `catervas connector run` and `catervas connector headers` (ADR 0030). A session's `mcp.json` names
 //! them in place of a custom connector's command or headers, so that no key is written to a file:
 //! each asks the daemon's `POST /connector/launch` for the session's server.
 //!
@@ -11,8 +11,8 @@ use std::os::unix::process::CommandExt as _;
 use std::path::Path;
 use std::time::Duration;
 
-use farik_runtime::claude::Secret;
-use farik_runtime::connectors::{KEPT_ENV, own_program_for, program};
+use catervas_runtime::claude::Secret;
+use catervas_runtime::connectors::{KEPT_ENV, own_program_for, program};
 use serde_json::Value;
 
 use crate::CliIo;
@@ -59,13 +59,13 @@ pub fn run(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'_>) 
         let owned: Vec<String> = args.iter().map(ToString::to_string).collect();
         let own =
             own_program_for(command, &owned, io.own_program.as_deref()).map_err(str::to_string)?;
-        // A Farik connector that signs in calls the daemon this file names, with its ticket.
+        // A Catervas connector that signs in calls the daemon this file names, with its ticket.
         let port = read_daemon_file(daemon_file)
             .map_err(|error| error.to_string())?
             .port;
-        // Farik's own connector is this executable, never a `farik` the PATH finds (ADR 0038).
+        // Catervas's own connector is this executable, never a `catervas` the PATH finds (ADR 0038).
         let mut process = std::process::Command::new(program(command, &owned, &own));
-        // The folder Farik keeps for the server, never the worktree Claude Code started this in.
+        // The folder Catervas keeps for the server, never the worktree Claude Code started this in.
         process.args(args).current_dir(folder).env_clear();
         process.envs(environment(&answer, keys, port, &io.env));
         // Only returns when the server could not be started.
@@ -77,7 +77,7 @@ pub fn run(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'_>) 
     let Err(why) = started else {
         return 0;
     };
-    let _ = writeln!(io.stderr, "farik connector run {server}: {why}");
+    let _ = writeln!(io.stderr, "catervas connector run {server}: {why}");
     1
 }
 
@@ -94,16 +94,16 @@ pub fn headers(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'
             i32::from(writeln!(io.stdout, "{printed}").is_err())
         }
         Err(why) => {
-            let _ = writeln!(io.stderr, "farik connector headers {server}: {why}");
+            let _ = writeln!(io.stderr, "catervas connector headers {server}: {why}");
             1
         }
     }
 }
 
 /// Serves Google Ads' shim (ADR 0038, ADR 0042) on standard input and output until its client
-/// leaves: it lists its tools, and forwards a call to the daemon at `FARIK_CONNECTOR_URL` with the
-/// ticket in `FARIK_CONNECTOR_TICKET`, both set by the launcher. With neither it still lists them,
-/// and a call says Google Ads runs only inside a Farik session. Answers 1, saying why on standard
+/// leaves: it lists its tools, and forwards a call to the daemon at `CATERVAS_CONNECTOR_URL` with the
+/// ticket in `CATERVAS_CONNECTOR_TICKET`, both set by the launcher. With neither it still lists them,
+/// and a call says Google Ads runs only inside a Catervas session. Answers 1, saying why on standard
 /// error, when it cannot run.
 pub fn google_ads(io: &mut CliIo<'_>) -> i32 {
     let (url, ticket) = (
@@ -116,7 +116,7 @@ pub fn google_ads(io: &mut CliIo<'_>) -> i32 {
         .map_err(|error| error.to_string())
         .and_then(|runtime| {
             runtime
-                .block_on(farik_runtime::google_ads::serve_shim(
+                .block_on(catervas_runtime::google_ads::serve_shim(
                     url.as_deref(),
                     ticket.as_deref(),
                 ))
@@ -125,7 +125,7 @@ pub fn google_ads(io: &mut CliIo<'_>) -> i32 {
     match served {
         Ok(()) => 0,
         Err(why) => {
-            let _ = writeln!(io.stderr, "farik connector google-ads: {why}");
+            let _ = writeln!(io.stderr, "catervas connector google-ads: {why}");
             1
         }
     }
@@ -140,13 +140,15 @@ pub fn osv(io: &mut CliIo<'_>) -> i32 {
         .map_err(|error| error.to_string())
         .and_then(|runtime| {
             runtime
-                .block_on(farik_runtime::osv::serve_stdio(farik_runtime::osv::OSV_API))
+                .block_on(catervas_runtime::osv::serve_stdio(
+                    catervas_runtime::osv::OSV_API,
+                ))
                 .map_err(|error| error.to_string())
         });
     match served {
         Ok(()) => 0,
         Err(why) => {
-            let _ = writeln!(io.stderr, "farik connector osv: {why}");
+            let _ = writeln!(io.stderr, "catervas connector osv: {why}");
             1
         }
     }
@@ -161,13 +163,15 @@ pub fn fx(io: &mut CliIo<'_>) -> i32 {
         .map_err(|error| error.to_string())
         .and_then(|runtime| {
             runtime
-                .block_on(farik_runtime::fx::serve_stdio(farik_runtime::fx::FX_API))
+                .block_on(catervas_runtime::fx::serve_stdio(
+                    catervas_runtime::fx::FX_API,
+                ))
                 .map_err(|error| error.to_string())
         });
     match served {
         Ok(()) => 0,
         Err(why) => {
-            let _ = writeln!(io.stderr, "farik connector fx: {why}");
+            let _ = writeln!(io.stderr, "catervas connector fx: {why}");
             1
         }
     }
@@ -177,7 +181,7 @@ pub fn fx(io: &mut CliIo<'_>) -> i32 {
 /// and vPIC's one address each, until its client leaves. Answers 1, saying why on standard error,
 /// when it cannot.
 pub fn recalls(io: &mut CliIo<'_>) -> i32 {
-    use farik_runtime::recalls::{CPSC_API, NHTSA_API, VPIC_API, serve_stdio};
+    use catervas_runtime::recalls::{CPSC_API, NHTSA_API, VPIC_API, serve_stdio};
 
     let served = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -191,7 +195,7 @@ pub fn recalls(io: &mut CliIo<'_>) -> i32 {
     match served {
         Ok(()) => 0,
         Err(why) => {
-            let _ = writeln!(io.stderr, "farik connector recalls: {why}");
+            let _ = writeln!(io.stderr, "catervas connector recalls: {why}");
             1
         }
     }
@@ -203,7 +207,7 @@ pub fn recalls(io: &mut CliIo<'_>) -> i32 {
 /// so that the server still lists its tools and every call says it is not set up. Answers 1,
 /// saying why on standard error, when it cannot run.
 pub fn ebay(io: &mut CliIo<'_>) -> i32 {
-    use farik_runtime::ebay::{EBAY_API, serve_stdio};
+    use catervas_runtime::ebay::{EBAY_API, serve_stdio};
 
     let (client_id, client_secret) = ebay_keys(&io.env);
     let served = tokio::runtime::Builder::new_current_thread()
@@ -218,7 +222,7 @@ pub fn ebay(io: &mut CliIo<'_>) -> i32 {
     match served {
         Ok(()) => 0,
         Err(why) => {
-            let _ = writeln!(io.stderr, "farik connector ebay: {why}");
+            let _ = writeln!(io.stderr, "catervas connector ebay: {why}");
             1
         }
     }
@@ -231,13 +235,13 @@ fn ebay_keys(env: &BTreeMap<String, String>) -> (Secret, Secret) {
     (key("EBAY_CLIENT_ID"), key("EBAY_CLIENT_SECRET"))
 }
 
-/// The variables a Farik connector's shim reads: where the daemon is, and the session's ticket.
-pub const CONNECTOR_URL: &str = "FARIK_CONNECTOR_URL";
+/// The variables a Catervas connector's shim reads: where the daemon is, and the session's ticket.
+pub const CONNECTOR_URL: &str = "CATERVAS_CONNECTOR_URL";
 /// See [`CONNECTOR_URL`].
-pub const CONNECTOR_TICKET: &str = "FARIK_CONNECTOR_TICKET";
+pub const CONNECTOR_TICKET: &str = "CATERVAS_CONNECTOR_TICKET";
 
-/// What the server's process is given: the variables Farik keeps from its own environment, the
-/// server's keys, and, for a Farik connector the daemon gave a ticket, the ticket and the
+/// What the server's process is given: the variables Catervas keeps from its own environment, the
+/// server's keys, and, for a Catervas connector the daemon gave a ticket, the ticket and the
 /// address of the daemon's route on `port`; nothing else.
 fn environment(
     answer: &Value,
@@ -276,7 +280,7 @@ mod tests {
             ("TMPDIR", "/tmp"),
             ("ANTHROPIC_API_KEY", "sk-ant-model-secret"),
             ("CLAUDE_CODE_OAUTH_TOKEN", "oauth-model-secret"),
-            ("FARIK_OTHER", "anything"),
+            ("CATERVAS_OTHER", "anything"),
         ]
         .into_iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
@@ -310,10 +314,10 @@ mod tests {
 
     #[test]
     fn the_launcher_gives_the_shim_its_ticket_and_url() {
-        let answer = json!({ "command": "farik", "args": ["connector", "google-ads"], "env": {}, "cwd": "/x", "ticket": "ab12" });
+        let answer = json!({ "command": "catervas", "args": ["connector", "google-ads"], "env": {}, "cwd": "/x", "ticket": "ab12" });
         let given = environment(&answer, BTreeMap::new(), 4242, &session_env());
-        // The four variables Farik keeps, and the two of the shim, and no others: not the model's
-        // credential, not another of Farik's.
+        // The four variables Catervas keeps, and the two of the shim, and no others: not the model's
+        // credential, not another of Catervas's.
         assert_eq!(
             given,
             BTreeMap::from([
@@ -328,7 +332,7 @@ mod tests {
                 ),
             ])
         );
-        // No ticket, as for a server that is not a Farik connector that signs in: a key and the
+        // No ticket, as for a server that is not a Catervas connector that signs in: a key and the
         // four, and neither variable.
         let plain = json!({ "command": "env", "args": [], "env": { "API_KEY": "k" }, "cwd": "/x" });
         let keys = BTreeMap::from([("API_KEY".to_string(), "k".to_string())]);

@@ -12,7 +12,7 @@ produces:
   - epic contracts and standalone task contracts
   - the questions it asks the user
   - product decisions
-  - the product roadmap and requirements under .farik/product/, only for approved epics
+  - the product roadmap and requirements under .catervas/product/, only for approved epics
   - release scope
 forbidden:
   - write application code

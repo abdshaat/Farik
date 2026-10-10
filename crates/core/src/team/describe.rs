@@ -63,7 +63,8 @@ pub fn describe_change(old: &Team, new: &Team, work: &SprintWork<'_>) -> Vec<Str
         } else {
             said.push("Developers and Architects may no longer run commands.".to_string());
             said.push(
-                "Farik still runs every check itself; the agents cannot run commands.".to_string(),
+                "Catervas still runs every check itself; the agents cannot run commands."
+                    .to_string(),
             );
         }
     }
@@ -199,7 +200,7 @@ pub const MODEL_FAMILIES: [(&str, &str, &str); 4] = [
 ];
 
 /// The words a sentence names the model `id` by: its family's, the role's when there is none, or
-/// the id itself when no family Farik names it.
+/// the id itself when no family Catervas names it.
 fn model_words(id: Option<&str>) -> &str {
     let Some(id) = id else {
         return "the role's model";
@@ -326,7 +327,7 @@ mod tests {
                 "ada now works in a balanced way.",
                 "linus's model changes from the quick model to local-model.",
             ],
-            "a model of no family Farik names keeps its id"
+            "a model of no family Catervas names keeps its id"
         );
         let mut fable = serde_json::to_value(&old).expect("a team is JSON");
         fable["agents"][0]["model"] = json!({ "id": "claude-fable-5", "effort": "high" });
@@ -370,7 +371,7 @@ mod tests {
                 "The team may spend up to $10 a day.",
                 "Finished work is merged on its own.",
                 "Developers and Architects may no longer run commands.",
-                "Farik still runs every check itself; the agents cannot run commands.",
+                "Catervas still runs every check itself; the agents cannot run commands.",
                 "Developers may now push their work and open pull requests.",
                 "Every plan is checked before work starts.",
                 "Plans are checked against 1 question.",

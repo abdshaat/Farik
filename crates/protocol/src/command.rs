@@ -4,19 +4,19 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use farik_core::contract::{TaskStatus, validate_contract};
-use farik_core::team::AgentStatus;
+use catervas_core::contract::{TaskStatus, validate_contract};
+use catervas_core::team::AgentStatus;
 use jsonschema::Validator;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
+pub use catervas_core::contract::{TaskContract, TaskId, ValidationError};
 
 pub use crate::generated::command::CommandName;
 use crate::generated::command::{
-    AgentUpdateBody, ChatMessagePostBody, ConnectorConnectBody, ConnectorDisconnectBody,
-    DataPipelineDecideBody, DataPipelineDecideBodyDecision, EmptyBody, EscalationResolveBody,
-    FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
+    AgentUpdateBody, CatervasCommand as CommandWire, ChatMessagePostBody, ConnectorConnectBody,
+    ConnectorDisconnectBody, DataPipelineDecideBody, DataPipelineDecideBodyDecision, EmptyBody,
+    EscalationResolveBody, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
     HumanSendBackBodySubject, MarketingPlanDecideBody, MarketingPlanDecideBodyDecision,
     MarketingPlanEndBody, MessagePostBody, PurchaseOrderDecideBody,
     PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody, PurchaseOrderStepBody,
@@ -302,12 +302,12 @@ pub enum Command {
         /// What the owner says to the agent.
         note: Option<String>,
     },
-    /// Allow a site no agent asked for, or turn one of Farik's back on (ADR 0039).
+    /// Allow a site no agent asked for, or turn one of Catervas's back on (ADR 0039).
     SiteAdd {
         /// A name like `shop.com`, or the address of any page on the site.
         site: String,
     },
-    /// Take a site away from the Procurement Specialist: one the owner allowed, or one of Farik's
+    /// Take a site away from the Procurement Specialist: one the owner allowed, or one of Catervas's
     /// (ADR 0039).
     SiteRemove {
         /// The site, as a name or as the address of a page on it.
@@ -329,7 +329,7 @@ pub enum Command {
         /// The subject, as the owner saw it and may have edited it.
         subject: String,
         /// The body, as the owner saw it and may have edited it, without the signature and the
-        /// line Farik adds.
+        /// line Catervas adds.
         body: String,
     },
     /// Discard message `message` to a seller: nothing is sent (ADR 0039).
@@ -343,7 +343,7 @@ pub enum Command {
         reply: u64,
     },
     /// Approve an order and email it, with its workbook, to its seller in one press, which records
-    /// it placed: the owner pays the seller outside Farik (ADR 0039).
+    /// it placed: the owner pays the seller outside Catervas (ADR 0039).
     PurchaseOrderSend {
         /// The order's number, the n of PO-n.
         order: u64,
@@ -427,7 +427,7 @@ pub enum Command {
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
 /// typed command. The contract inside `task_create` goes through
-/// `farik_core::contract::validate_contract`, so that a contract arriving inside a command is held
+/// `catervas_core::contract::validate_contract`, so that a contract arriving inside a command is held
 /// to exactly the rules one arriving alone is, the repeated id rules among them.
 ///
 /// # Errors
@@ -1433,11 +1433,11 @@ fn pointer(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::fixtures::{a_contract_wire, a_full_contract_wire};
+    use catervas_core::contract::fixtures::{a_contract_wire, a_full_contract_wire};
     use serde_json::{Value, json};
 
-    use farik_core::contract::TaskStatus;
-    use farik_core::team::AgentStatus;
+    use catervas_core::contract::TaskStatus;
+    use catervas_core::team::AgentStatus;
 
     use std::collections::BTreeMap;
 

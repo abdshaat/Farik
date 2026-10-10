@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -85,7 +85,7 @@ describe("a post going out", () => {
 	it("says_what_stopping_takes_back_from_buffer", async () => {
 		const { s } = await todayWith({ posts: GOING_OUT });
 
-		// A post Buffer has: Farik takes it back from Buffer, and no day of the plan is freed.
+		// A post Buffer has: Catervas takes it back from Buffer, and no day of the plan is freed.
 		const row = await rowOf("We open at 10 today");
 		fireEvent.click(within(row).getByRole("button", { name: "Stop" }));
 		const dialog = await screen.findByRole("dialog", {
@@ -93,7 +93,7 @@ describe("a post going out", () => {
 		});
 		expect(within(dialog).getByText("It will not go out.")).toBeTruthy();
 		expect(dialog.textContent).toContain(
-			"Buffer already has it, so Farik takes it back from Buffer.",
+			"Buffer already has it, so Catervas takes it back from Buffer.",
 		);
 		expect(dialog.textContent).not.toContain("free again");
 		fireEvent.click(
@@ -117,7 +117,7 @@ describe("a post going out", () => {
 
 		const row = await rowOf("Pie pre-orders are open");
 		expect(row.textContent).toContain(
-			"You allowed this. Farik hands it to Buffer",
+			"You allowed this. Catervas hands it to Buffer",
 		);
 		fireEvent.click(within(row).getByRole("button", { name: "Stop" }));
 		const dialog = await screen.findByRole("dialog", {
@@ -162,7 +162,7 @@ describe("a post going out", () => {
 		expect(await rowOf("We open at 10 today")).toBeTruthy();
 		await expectNoAxeViolations(container);
 
-		// Farik is handing a post over this moment: the owner is told to wait a minute.
+		// Catervas is handing a post over this moment: the owner is told to wait a minute.
 		const second = await screen.findByRole("dialog", {
 			name: "Stop this post?",
 		});
@@ -173,12 +173,12 @@ describe("a post going out", () => {
 			error: {
 				kind: "refused",
 				detail:
-					"post_being_handed_over: Farik is giving it to Buffer now; stop it again in a minute",
+					"post_being_handed_over: Catervas is giving it to Buffer now; stop it again in a minute",
 			},
 		});
 		await waitFor(() =>
 			expect(within(second).getByRole("alert").textContent).toBe(
-				"Farik is giving it to Buffer now. Stop it again in a minute.",
+				"Catervas is giving it to Buffer now. Stop it again in a minute.",
 			),
 		);
 		expect(

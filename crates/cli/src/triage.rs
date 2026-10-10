@@ -1,10 +1,10 @@
-//! `farik triage`: record how big a request is, or overrule the triage that did (`docs/SPEC.md`
+//! `catervas triage`: record how big a request is, or overrule the triage that did (`docs/SPEC.md`
 //! section 5.16).
 
+use catervas_core::contract::TaskKind;
+use catervas_protocol::command::{Command, RequestSize, command_from_value};
+use catervas_store::requests::triage_by_human;
 use chrono::{DateTime, Utc};
-use farik_core::contract::TaskKind;
-use farik_protocol::command::{Command, RequestSize, command_from_value};
-use farik_store::requests::triage_by_human;
 use serde_json::json;
 
 use crate::Report;

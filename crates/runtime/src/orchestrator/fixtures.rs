@@ -1,6 +1,6 @@
-//! The orchestrator's test harness: a repository with `.farik/` initialised, a team of a Product
+//! The orchestrator's test harness: a repository with `.catervas/` initialised, a team of a Product
 //! Manager `pm` and two Software Developers `dev-a` and `dev-b` with a WIP limit of one, a daemon
-//! that is not served, and a runner that answers a replayed session's Farik tool calls the way the
+//! that is not served, and a runner that answers a replayed session's Catervas tool calls the way the
 //! daemon's MCP server would.
 
 use std::collections::BTreeMap;
@@ -9,13 +9,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use catervas_core::contract::TaskId;
+use catervas_protocol::clock::{Clock, IdSource, MovableClock, SequentialIds};
+use catervas_protocol::event::{CatervasEvent, EventKind, NewEvent, event_from_value};
+use catervas_store::TaskProjection;
+use catervas_store::git::fixtures::{git_in, git_output_in};
+use catervas_store::requests::file_request;
 use chrono::{DateTime, Utc};
-use farik_core::contract::TaskId;
-use farik_protocol::clock::{Clock, IdSource, MovableClock, SequentialIds};
-use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
-use farik_store::TaskProjection;
-use farik_store::git::fixtures::{git_in, git_output_in};
-use farik_store::requests::file_request;
 use serde_json::{Value, json};
 
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
@@ -55,7 +55,7 @@ impl Harness {
         });
         let project = TestProject::new(name, &team);
         let daemon = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
-        // The user's state folder, beside the repository and outside it, as `~/.config/farik` is.
+        // The user's state folder, beside the repository and outside it, as `~/.config/catervas` is.
         daemon.set_state_dir(std::path::PathBuf::from(format!(
             "{}-state",
             project.repo.path.display()
@@ -69,7 +69,7 @@ impl Harness {
         }
     }
 
-    /// A recorded adapter playing `transcripts`, whose Farik tool calls this harness's daemon
+    /// A recorded adapter playing `transcripts`, whose Catervas tool calls this harness's daemon
     /// answers.
     pub(crate) fn recorded(&self, transcripts: Vec<Transcript>) -> Arc<RecordedAdapter> {
         Arc::new(RecordedAdapter::with_tools(
@@ -111,7 +111,7 @@ impl Harness {
         forge: Forge,
         session_ids: Arc<dyn IdSource + Send + Sync>,
     ) -> Orchestrator {
-        // As `farik serve` does: the governor's door and the orchestrator judge by one factory.
+        // As `catervas serve` does: the governor's door and the orchestrator judge by one factory.
         self.project
             .deps
             .transitions
@@ -194,12 +194,12 @@ impl Harness {
             .log
             .append(&NewEvent {
                 recorded_at: at(),
-                ids: farik_protocol::event::EventIds {
+                ids: catervas_protocol::event::EventIds {
                     agent_id: Some(agent.to_string()),
                     ..deps.ids.clone()
                 },
-                body: farik_protocol::event::EventBody::AgentSlept(
-                    farik_protocol::event::AgentSleptBody {
+                body: catervas_protocol::event::EventBody::AgentSlept(
+                    catervas_protocol::event::AgentSleptBody {
                         until,
                         detail: "Claude AI usage limit reached".to_string(),
                     },
@@ -296,7 +296,7 @@ impl Harness {
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
-                .push(farik_core::team::fixtures::an_agent_wire(
+                .push(catervas_core::team::fixtures::an_agent_wire(
                     "fin-2",
                     "finance_specialist",
                 ));
@@ -305,7 +305,7 @@ impl Harness {
 
     /// The Finance Specialists' private folder in this project.
     pub(crate) fn finance_folder(&self) -> PathBuf {
-        self.project.repo.path.join(".farik/local/finance")
+        self.project.repo.path.join(".catervas/local/finance")
     }
 
     /// Files `task` `ready` as a Finance Specialist's task in its folder, ended by its books,
@@ -315,7 +315,7 @@ impl Harness {
         self.file(task, "ready", |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("product_manager");
-            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+            wire["allowed_paths"] = json!([".catervas/local/finance/**"]);
             wire["exit_criteria"] = json!([{
                 "id": "C1",
                 "text": "The books exist.",
@@ -341,7 +341,7 @@ impl Harness {
                 wire["agents"]
                     .as_array_mut()
                     .expect("a list of agents")
-                    .push(farik_core::team::fixtures::an_agent_wire(
+                    .push(catervas_core::team::fixtures::an_agent_wire(
                         id,
                         "procurement_specialist",
                     ));
@@ -351,7 +351,7 @@ impl Harness {
 
     /// The Procurement Specialists' private folder in this project.
     pub(crate) fn procurement_folder(&self) -> PathBuf {
-        self.project.repo.path.join(".farik/local/procurement")
+        self.project.repo.path.join(".catervas/local/procurement")
     }
 
     /// Files `task` `ready` as a Procurement Specialist's task in its folder, ended by its
@@ -361,7 +361,7 @@ impl Harness {
         self.file(task, "ready", |wire| {
             wire["assignee_role"] = json!("procurement_specialist");
             wire["reviewer_role"] = json!("product_manager");
-            wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+            wire["allowed_paths"] = json!([".catervas/local/procurement/**"]);
             wire["exit_criteria"] = json!([{
                 "id": "C1",
                 "text": "The comparison is written.",
@@ -506,7 +506,7 @@ impl Harness {
     }
 
     /// Writes `text` to `path` at the root, on the branch checked out there, and commits that path
-    /// alone, leaving `.farik/` out of it.
+    /// alone, leaving `.catervas/` out of it.
     pub(crate) fn commit_at_root(&self, path: &str, text: &str, message: &str) {
         let root = &self.project.repo.path;
         std::fs::write(root.join(path), text).expect("the file is written");
@@ -569,8 +569,8 @@ impl Harness {
                 clone.to_str().expect("a path"),
             ],
         );
-        git_in(&clone, &["config", "user.name", "Farik Test"]);
-        git_in(&clone, &["config", "user.email", "test@farik.invalid"]);
+        git_in(&clone, &["config", "user.name", "Catervas Test"]);
+        git_in(&clone, &["config", "user.email", "test@catervas.invalid"]);
         git_in(&clone, &["config", "commit.gpgsign", "false"]);
         let root = self.project.repo.path.to_str().expect("a path").to_string();
         git_in(
@@ -663,8 +663,8 @@ impl Harness {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "agent_id": "dev-a",
             "session_id": session,
             "kind": "cost.recorded",
@@ -702,8 +702,8 @@ impl Harness {
         let wire = json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "task_id": task,
             "agent_id": agent,
             "session_id": session,
@@ -723,12 +723,12 @@ impl Harness {
         deps.projections.apply(&appended).expect("projects");
     }
 
-    /// The task's worktree, `.farik/local/worktrees/<task>`.
+    /// The task's worktree, `.catervas/local/worktrees/<task>`.
     pub(crate) fn worktree(&self, task: &str) -> PathBuf {
         self.project
             .repo
             .path
-            .join(".farik/local/worktrees")
+            .join(".catervas/local/worktrees")
             .join(task)
     }
 
@@ -756,7 +756,7 @@ impl Harness {
     }
 
     /// Every event of these kinds, oldest first; every event when `kinds` is empty.
-    pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<FarikEvent> {
+    pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<CatervasEvent> {
         self.project.events(kinds)
     }
 }
@@ -834,7 +834,7 @@ impl IdSource for LaterIds {
 }
 
 /// An adapter that says, for each session it starts, whether the daemon registered it with an
-/// executor, which Farik tools it registered it with, and which its MCP server lists to it, and
+/// executor, which Catervas tools it registered it with, and which its MCP server lists to it, and
 /// starts it with the adapter it wraps.
 pub(crate) struct ExecutorWitness {
     inner: Arc<dyn RuntimeAdapter>,
@@ -842,7 +842,7 @@ pub(crate) struct ExecutorWitness {
     seen: Mutex<Vec<bool>>,
     tools: Mutex<Vec<Vec<String>>>,
     listed: Mutex<Vec<Vec<String>>>,
-    tiers: Mutex<Vec<Vec<farik_core::governor::permissions::PermissionTier>>>,
+    tiers: Mutex<Vec<Vec<catervas_core::governor::permissions::PermissionTier>>>,
     connectors: Mutex<Vec<Vec<String>>>,
     probes: Vec<String>,
     /// What a probe calls its tool with, until a session's prompt tells it better.
@@ -913,7 +913,7 @@ impl ExecutorWitness {
     /// For each session started, in order, the tiers its registration holds it to.
     pub(crate) fn given_tiers(
         &self,
-    ) -> Vec<Vec<farik_core::governor::permissions::PermissionTier>> {
+    ) -> Vec<Vec<catervas_core::governor::permissions::PermissionTier>> {
         self.tiers
             .lock()
             .expect("no test panics holding it")
@@ -928,7 +928,7 @@ impl ExecutorWitness {
             .clone()
     }
 
-    /// For each session started, in order, the Farik tools its registration was given.
+    /// For each session started, in order, the Catervas tools its registration was given.
     pub(crate) fn given_tools(&self) -> Vec<Vec<String>> {
         self.tools
             .lock()
@@ -1001,7 +1001,7 @@ impl RuntimeAdapter for ExecutorWitness {
             .push(executor);
         self.tools.lock().expect("no test panics holding it").push(
             self.daemon
-                .farik_tools(&spec.session_id)
+                .catervas_tools(&spec.session_id)
                 .expect("the session is registered before it starts"),
         );
         self.listed.lock().expect("no test panics holding it").push(
@@ -1273,7 +1273,7 @@ impl FakeGh {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = std::env::temp_dir().join(format!(
-            "farik-fake-gh-{name}-{}-{:?}",
+            "catervas-fake-gh-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

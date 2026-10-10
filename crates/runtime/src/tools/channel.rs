@@ -1,8 +1,8 @@
-//! `farik_post_message` (`docs/SPEC.md` 5.9): an agent says something in the team's channel from
-//! its session, and Farik decides what kind of message it is from the session's purpose.
+//! `catervas_post_message` (`docs/SPEC.md` 5.9): an agent says something in the team's channel from
+//! its session, and Catervas decides what kind of message it is from the session's purpose.
 
-use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind};
-use farik_store::EventQuery;
+use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, MessageKind};
+use catervas_store::EventQuery;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -12,7 +12,7 @@ use super::{Call, ToolError, failed};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::session::SessionPurpose;
 
-/// `farik_post_message`'s input.
+/// `catervas_post_message`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PostMessageInput {
@@ -124,7 +124,7 @@ fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
         .date_naive()
         .and_time(chrono::NaiveTime::MIN)
         .and_utc();
-    let in_window = |event: &FarikEvent| match started {
+    let in_window = |event: &CatervasEvent| match started {
         Some(seq) => event.envelope.seq > seq,
         None => event.envelope.recorded_at >= day,
     };
@@ -157,9 +157,9 @@ fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
 mod tests {
     use std::num::NonZeroU64;
 
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, MessageKind, Thread};
     use chrono::Duration;
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind, Thread};
     use serde_json::json;
 
     use crate::channel::{NewMessage, post};
@@ -169,7 +169,7 @@ mod tests {
     use crate::tools::ToolError;
     use crate::tools::fixtures::{TestProject, a_team_of_three, at, run};
 
-    fn kinds(messages: &[FarikEvent]) -> Vec<MessageKind> {
+    fn kinds(messages: &[CatervasEvent]) -> Vec<MessageKind> {
         messages
             .iter()
             .filter_map(|event| match &event.body {
@@ -183,7 +183,7 @@ mod tests {
         project.call(
             "dev-a",
             Some("FRK-1"),
-            "farik_post_message",
+            "catervas_post_message",
             json!({ "text": text }),
         )
     }
@@ -335,7 +335,7 @@ mod tests {
         let mut context = project.context("dev-a", None);
         context.purpose = SessionPurpose::Ceremony;
         context.thread = Some(Thread::Standup);
-        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
 
         for text in [
             "FRK-1 moved.",
@@ -363,7 +363,7 @@ mod tests {
         let mut context = project.context("dev-a", None);
         context.purpose = SessionPurpose::Ceremony;
         context.thread = Some(Thread::Retro);
-        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
         for text in ["One.", "Two.", "Three."] {
             say(text).expect("within the cap");
         }
@@ -384,7 +384,7 @@ mod tests {
         let project = TestProject::new("channel-reply", &a_team_of_three(|_| {}));
         let mut context = project.context("dev-a", None);
         context.purpose = SessionPurpose::Conversation;
-        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
 
         say("I can take it.").expect("the reply");
         let refused = say("And more.").expect_err("a conversation replies once");
@@ -406,7 +406,7 @@ mod tests {
         let mut context = project.context("dev-a", None);
         context.purpose = SessionPurpose::Conversation;
         context.in_reply_to = Some(7);
-        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        let say = |text: &str| run(&context, "catervas_post_message", json!({ "text": text }));
 
         say("On it.").expect("the reply");
         let before = project.event_count();

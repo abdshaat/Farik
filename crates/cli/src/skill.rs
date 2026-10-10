@@ -1,4 +1,4 @@
-//! `farik skill` (`docs/SPEC.md` 6.7, ADR 0034): a skill is instructions an agent follows, so it
+//! `catervas skill` (`docs/SPEC.md` 6.7, ADR 0034): a skill is instructions an agent follows, so it
 //! is shown whole before it is added, and added, confirmed or removed through the command the
 //! process driving the project handles, or here when nothing drives.
 
@@ -6,16 +6,16 @@ use std::collections::BTreeMap;
 use std::io::{BufRead as _, Write as _};
 use std::path::Path;
 
-use farik_core::skill::skill_sha256;
-use farik_protocol::command::{Command, SkillScope};
-use farik_protocol::event::EventKind;
-use farik_roles::{CheckedSkill, SkillRefusal, check_skill, declared_name_and_description};
-use farik_runtime::skills::{
+use catervas_core::skill::skill_sha256;
+use catervas_protocol::command::{Command, SkillScope};
+use catervas_protocol::event::EventKind;
+use catervas_roles::{CheckedSkill, SkillRefusal, check_skill, declared_name_and_description};
+use catervas_runtime::skills::{
     SkillLevel, SkillState, confirm_skill, confirmed_sentence, confirmed_skills, read_skill_folder,
     remove_skill, removed_sentence, save_skill, saved_sentence, shipped_names,
     skill_folder_unlinked, skill_rows,
 };
-use farik_store::EventQuery;
+use catervas_store::EventQuery;
 use serde_json::json;
 
 use crate::printable::printable;
@@ -72,7 +72,7 @@ fn state_words(state: SkillState) -> &'static str {
     }
 }
 
-/// `farik skill list [--agent <id>]`: one line per skill, `<level>  <name>  <state>`: with an
+/// `catervas skill list [--agent <id>]`: one line per skill, `<level>  <name>  <state>`: with an
 /// agent its role's, the team's and its own, in `skill_rows`' order; without, the team's alone.
 ///
 /// # Errors
@@ -107,7 +107,7 @@ pub(crate) fn list(
             .find(|held| held.id.as_str() == id)
     }) {
         Some(held) => {
-            (io.kits)(farik_core::contract::Role::from(held.role))
+            (io.kits)(catervas_core::contract::Role::from(held.role))
                 .map_err(|error| error.to_string())?
                 .skills
         }
@@ -120,7 +120,7 @@ pub(crate) fn list(
         &confirmed_skills(&events),
         &kit_skills,
     );
-    let level = |row: &farik_runtime::skills::SkillRow| {
+    let level = |row: &catervas_runtime::skills::SkillRow| {
         serde_json::to_value(row.level)
             .ok()
             .and_then(|value| value.as_str().map(str::to_string))
@@ -155,7 +155,7 @@ fn read_checked(folder: &Path) -> Result<(BTreeMap<String, Vec<u8>>, CheckedSkil
 }
 
 /// What `show` and `add` print: the skill's name and description, each file's name and size, what
-/// Farik ignores in its frontmatter, every file escaped, and the hash.
+/// Catervas ignores in its frontmatter, every file escaped, and the hash.
 fn shown(
     files: &BTreeMap<String, Vec<u8>>,
     checked: &CheckedSkill,
@@ -172,7 +172,7 @@ fn shown(
     }
     if !checked.ignored_fields.is_empty() {
         lines.push(format!(
-            "Farik ignores: {}",
+            "Catervas ignores: {}",
             printable(&checked.ignored_fields.join(", "))
         ));
     }
@@ -190,7 +190,7 @@ fn shown(
     lines
 }
 
-/// `farik skill show <name> (--team | --agent <id>)`: every file as the folder holds it, escaped,
+/// `catervas skill show <name> (--team | --agent <id>)`: every file as the folder holds it, escaped,
 /// and the hash.
 ///
 /// # Errors
@@ -220,12 +220,12 @@ pub(crate) fn show(project: &Project, name: &str, whom: &Whom<'_>) -> Result<Rep
 /// The sentence for a shipped skill's name used without `--replace`.
 fn shipped_sentence(name: &str) -> String {
     format!(
-        "{name} is the name of a skill Farik ships. Add --replace to give {name} in its place, \
+        "{name} is the name of a skill Catervas ships. Add --replace to give {name} in its place, \
          which agents then load when they use it"
     )
 }
 
-/// `farik skill add <folder> (--team | --agent <id>) [--yes] [--replace]`: the folder read and
+/// `catervas skill add <folder> (--team | --agent <id>) [--yes] [--replace]`: the folder read and
 /// checked in this process and shown whole; then, at a terminal, asked about; then added.
 ///
 /// # Errors
@@ -249,8 +249,8 @@ pub(crate) fn add(
     }
     if !yes && !io.stdin_is_terminal {
         return Err(format!(
-            "farik skill add shows {name} and asks before it is added, and there is no terminal \
-             here to ask on: read it with farik skill show, then give --yes"
+            "catervas skill add shows {name} and asks before it is added, and there is no terminal \
+             here to ask on: read it with catervas skill show, then give --yes"
         ));
     }
     let mut report_lines = Vec::new();
@@ -319,7 +319,7 @@ fn done(said: &str, events: &[u64]) -> Report {
     }
 }
 
-/// `farik skill remove <name> (--team | --agent <id>)`.
+/// `catervas skill remove <name> (--team | --agent <id>)`.
 ///
 /// # Errors
 ///
@@ -348,7 +348,7 @@ pub(crate) fn remove(
     )
 }
 
-/// `farik skill confirm <name> (--team | --agent <id>) <hash> [--replace]`: the skill confirmed as
+/// `catervas skill confirm <name> (--team | --agent <id>) <hash> [--replace]`: the skill confirmed as
 /// its folder is now, given the hash `show` printed: all of it, or its first twelve digits.
 ///
 /// # Errors
@@ -374,7 +374,7 @@ pub(crate) fn confirm(
     let is_prefix = given.len() == 12 && hash.starts_with(&given);
     if !is_whole && !is_prefix {
         return Err(format!(
-            "{given} is not the hash of {name} as it is now: give all of the Hash farik skill \
+            "{given} is not the hash of {name} as it is now: give all of the Hash catervas skill \
              show prints, or its first 12 digits"
         ));
     }

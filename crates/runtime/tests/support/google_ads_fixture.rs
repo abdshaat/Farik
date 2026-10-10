@@ -1,4 +1,4 @@
-//! A stand-in for the Google Ads API, in one axum server on loopback, for the tests of Farik's own
+//! A stand-in for the Google Ads API, in one axum server on loopback, for the tests of Catervas's own
 //! Google Ads connector (phase 7 step 08f): it records every request and answers
 //! `customers:listAccessibleCustomers`, `googleAds:search`, `googleAds:mutate` and
 //! `generateKeywordIdeas` as Google does, with ways to answer an error with a long message, a
@@ -50,7 +50,7 @@ pub enum Mode {
     LongError(usize),
     /// `403 PERMISSION_DENIED`.
     PermissionDenied,
-    /// A redirect to another address, which Farik never follows.
+    /// A redirect to another address, which Catervas never follows.
     Redirect,
     /// A success whose body is one byte over 4 MiB.
     Oversized,
@@ -175,7 +175,11 @@ fn mutate_answer(customer: &str, body: &Value, next: &AtomicU64) -> Response<Bod
             return error_answer(400, "INVALID_ARGUMENT", "an empty operation");
         };
         let Some((collection, result)) = collection_of(name) else {
-            return error_answer(400, "INVALID_ARGUMENT", "an operation Farik does not make");
+            return error_answer(
+                400,
+                "INVALID_ARGUMENT",
+                "an operation Catervas does not make",
+            );
         };
         let named = value["update"]["resourceName"].as_str().or_else(|| {
             value["create"]["resourceName"]

@@ -1,4 +1,4 @@
-import { TextArea } from "@farik/ui";
+import { TextArea } from "@catervas/ui";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 

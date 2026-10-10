@@ -1,5 +1,5 @@
 //! Governed transitions (`docs/SPEC.md` sections 5.2, 5.3, 5.4, 5.7, and 8.4): a request to move a
-//! contract is judged by `farik-core`'s governor on facts read from Farik's own store, never on
+//! contract is judged by `catervas-core`'s governor on facts read from Catervas's own store, never on
 //! evidence the requester supplies, and the answer is recorded either way.
 
 use std::collections::BTreeMap;
@@ -8,45 +8,48 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
-use farik_core::branch::task_branch;
-use farik_core::budget::{BudgetState, SessionLedger};
-use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
-use farik_core::generated::team::Judgment;
-pub(crate) use farik_core::governor::done::result_awaits_human;
-use farik_core::governor::done::{
+use catervas_core::branch::task_branch;
+use catervas_core::budget::{BudgetState, SessionLedger};
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
+use catervas_core::generated::team::Judgment;
+pub(crate) use catervas_core::governor::done::result_awaits_human;
+use catervas_core::governor::done::{
     CriterionResult, DesignReviewNeed, DoneEvidence, RunBy, requires_human_acceptance,
 };
-use farik_core::governor::escalation::EscalationReason;
-use farik_core::governor::gates::{
+use catervas_core::governor::escalation::EscalationReason;
+use catervas_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
     FolderWork, Rejection, WorkState, waits_for_a_sprint,
 };
-use farik_core::governor::readiness::{
+use catervas_core::governor::readiness::{
     JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
 };
-use farik_core::governor::team_rules::is_ui_change;
-use farik_core::governor::transition::{
+use catervas_core::governor::team_rules::is_ui_change;
+use catervas_core::governor::transition::{
     ContractAcceptance, GateFailure, TransitionContext, TransitionDecision, TransitionEffect,
     TransitionRefusal, TransitionRequest, evaluate_transition,
 };
-use farik_core::governor::transition_table::{GateId, TransitionActor};
-use farik_core::team::{
+use catervas_core::governor::transition_table::{GateId, TransitionActor};
+use catervas_core::team::{
     AgentStatus, HumanAcceptsContracts, JudgmentRequired, Team, private_folder, task_private_folder,
 };
-use farik_protocol::clock::Clock;
-use farik_protocol::event::{
-    BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractJudgedBody,
-    CriterionRecordedBodyRunBy, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody,
-    EventIds, EventKind, FarikEvent, GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind,
-    RejectionWire, TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
-    TransitionActorWire, TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::{
+    BlockerWire, CatervasEvent, ContractEvaluatedBody, ContractEvaluatedBodyGate,
+    ContractJudgedBody, CriterionRecordedBodyRunBy, EscalationRaisedBody,
+    EscalationRaisedBodyReason, EventBody, EventIds, EventKind, GateWire, HumanAcceptedBodySubject,
+    NoteWrittenBodyKind, RejectionWire, TaskStatusWire, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TransitionActorWire, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal, new_event,
 };
-use farik_store::baseline::{changes_since_baseline, folder_in};
-use farik_store::files::{FilesError, ProjectFiles, Sandbox};
-pub use farik_store::git::integration_branch;
-pub(crate) use farik_store::waiting::{is_move_into, last_move_into, review_passed};
-use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
+use catervas_store::baseline::{changes_since_baseline, folder_in};
+use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
+pub use catervas_store::git::integration_branch;
+pub(crate) use catervas_store::waiting::{is_move_into, last_move_into, review_passed};
+use catervas_store::{
+    EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection,
+};
+use chrono::{DateTime, Utc};
 
 use crate::channel::{ChannelError, post_system};
 use crate::cost::{CostError, budget_state, extra_tries};
@@ -90,7 +93,7 @@ pub struct TransitionAsk {
     pub permission_denied: bool,
     /// The session the request came from, when it came from one.
     pub session_id: Option<String>,
-    /// Why Farik could not run one of the task's criteria for its reviewer, for a reason that is
+    /// Why Catervas could not run one of the task's criteria for its reviewer, for a reason that is
     /// not the work's: the words of the governor's escalation (5.4).
     pub criterion_unrunnable: Option<String>,
     /// Why the task's preview could not be made ready: the words of the governor's `preview`
@@ -99,9 +102,9 @@ pub struct TransitionAsk {
     /// The human's words for a move they asked for, recorded on the move; into `escalated` they
     /// are also the escalation's.
     pub reason: Option<String>,
-    /// Whether Farik files this move in the named agent's name, as it files a reviewer's rejection
+    /// Whether Catervas files this move in the named agent's name, as it files a reviewer's rejection
     /// from the note of a session that has ended (5.4); such a move is said in the channel.
-    pub filed_by_farik: bool,
+    pub filed_by_catervas: bool,
     /// Whether the human's resolve grants more tries (ADR 0024): the attempt it starts is counted,
     /// so the move increments the iteration.
     pub grants_tries: bool,
@@ -388,9 +391,9 @@ impl Transitions {
                 escalation = Some(detail);
             }
         }
-        // A move the governor or the human made has no session to say it, and a rejection Farik
-        // files is said nowhere else (5.9); the moves Farik makes on an agent's behalf are not news.
-        if ask.filed_by_farik
+        // A move the governor or the human made has no session to say it, and a rejection Catervas
+        // files is said nowhere else (5.9); the moves Catervas makes on an agent's behalf are not news.
+        if ask.filed_by_catervas
             || matches!(
                 request.actor,
                 TransitionActor::Governor | TransitionActor::Human
@@ -414,7 +417,7 @@ impl Transitions {
     /// The gate that opened an escalation, and the words it was about when there are any: the
     /// rejection's reasons, the blocker's description, which for `blocked -> escalated` (asked by
     /// the governor with an empty ask) is read from the task's last move into `blocked`, the
-    /// human's reason, or why Farik could not run a criterion.
+    /// human's reason, or why Catervas could not run a criterion.
     fn escalation_detail(
         &self,
         request: &TransitionRequest,
@@ -614,7 +617,7 @@ impl Transitions {
         team: &Team,
         contract: &TaskContract,
         changed_paths: &[String],
-        history: &[FarikEvent],
+        history: &[CatervasEvent],
     ) -> (bool, DesignReview) {
         let ui_change = is_ui_change(
             contract,
@@ -657,7 +660,7 @@ impl Transitions {
         &self,
         board: &[TaskProjection],
         row: &TaskProjection,
-        history: &[FarikEvent],
+        history: &[CatervasEvent],
         team: &Team,
         contract: &TaskContract,
         now: DateTime<Utc>,
@@ -702,7 +705,7 @@ impl Transitions {
     }
 
     /// What the task's branch holds, read from git only when its worktree
-    /// `.farik/local/worktrees/<id>` exists; otherwise no commits, not clean, and no paths, which
+    /// `.catervas/local/worktrees/<id>` exists; otherwise no commits, not clean, and no paths, which
     /// refuses `verifying` truthfully. The integration branch is resolved only then, so that no git
     /// error can arise for a task with no worktree. A task in a private folder has no branch: what
     /// it did is read from its folder (`folder_work`).
@@ -718,7 +721,7 @@ impl Transitions {
         let worktree = self
             .files
             .root()
-            .join(".farik/local/worktrees")
+            .join(".catervas/local/worktrees")
             .join(contract.id.as_str());
         if !worktree.is_dir() {
             return Ok((WorkState::default(), Vec::new()));
@@ -744,7 +747,7 @@ impl Transitions {
         named: &[String],
     ) -> Result<(WorkState, Vec<String>), TransitionError> {
         let root = self.files.root();
-        let files = |error: farik_store::StoreError| TransitionError::Files {
+        let files = |error: catervas_store::StoreError| TransitionError::Files {
             detail: error.to_string(),
         };
         let changed: Vec<String> =
@@ -815,7 +818,7 @@ impl Transitions {
     }
 }
 
-/// Farik's line about a move: `<id> <from> → <to> (by <who>)`, then `: <reason>` when the move
+/// Catervas's line about a move: `<id> <from> → <to> (by <who>)`, then `: <reason>` when the move
 /// carries one, the escalation it raised coming first.
 fn move_line(
     request: &TransitionRequest,
@@ -1065,7 +1068,7 @@ pub(crate) fn refusal_wire(refusal: &TransitionRefusal) -> TransitionRefusedBody
     }
 }
 
-/// A status as the wire spells it. The two lists are one, which a test in `farik-protocol` pins.
+/// A status as the wire spells it. The two lists are one, which a test in `catervas-protocol` pins.
 pub(crate) fn status_wire(status: TaskStatus) -> Result<TaskStatusWire, TransitionError> {
     TaskStatusWire::from_str(&status.to_string()).map_err(|_| TransitionError::Event {
         detail: format!("the event vocabulary has no status {status}"),
@@ -1304,7 +1307,7 @@ pub(crate) fn open_tasks(
 /// The failed Definition of Ready evaluations since refining last started over: the later of the
 /// task's last move into `refining` and its last triage (a re-triage from `small` to `large` starts
 /// refining over), or its first event when there is neither.
-fn readiness_failed_attempts(history: &[FarikEvent]) -> u32 {
+fn readiness_failed_attempts(history: &[CatervasEvent]) -> u32 {
     let since = refining_began(history);
     let failed = history
         .iter()
@@ -1322,7 +1325,7 @@ fn readiness_failed_attempts(history: &[FarikEvent]) -> u32 {
 
 /// Where refining last began: the later of the task's last move into `refining` and its last
 /// triage, or 0.
-pub(crate) fn refining_began(history: &[FarikEvent]) -> u64 {
+pub(crate) fn refining_began(history: &[CatervasEvent]) -> u64 {
     history
         .iter()
         .filter(|event| {
@@ -1337,7 +1340,7 @@ pub(crate) fn refining_began(history: &[FarikEvent]) -> u64 {
 /// The judge's review of the contract the task has now (5.3): the last `contract.judged`
 /// after both the task's last `contract.written` and where refining last began, else none, since a
 /// contract written again, or refined over, is not the one that was judged.
-pub(crate) fn judgment_since_written(history: &[FarikEvent]) -> Option<JudgmentReview> {
+pub(crate) fn judgment_since_written(history: &[CatervasEvent]) -> Option<JudgmentReview> {
     let since = history
         .iter()
         .filter(|event| event.body.kind() == EventKind::ContractWritten)
@@ -1390,7 +1393,7 @@ fn judgment_review(body: &ContractJudgedBody) -> JudgmentReview {
 /// Whether the human accepted the contract the task has now (5.16 item 2): a `human.accepted
 /// { subject: contract }` after the task's last `contract.written` and its last move into
 /// `refining`, since a contract written or refined again is not the one the human approved.
-pub(crate) fn contract_accepted(history: &[FarikEvent]) -> bool {
+pub(crate) fn contract_accepted(history: &[CatervasEvent]) -> bool {
     let since = history
         .iter()
         .filter(|event| {
@@ -1411,7 +1414,7 @@ pub(crate) fn contract_accepted(history: &[FarikEvent]) -> bool {
 
 /// The human's acceptance of the task's result since its last move into `verifying`, the last
 /// one when there are several: its sequence number and its words.
-pub(crate) fn result_accepted(history: &[FarikEvent]) -> Option<(u64, Option<String>)> {
+pub(crate) fn result_accepted(history: &[CatervasEvent]) -> Option<(u64, Option<String>)> {
     let since =
         last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq);
     history
@@ -1433,7 +1436,7 @@ pub(crate) fn result_accepted(history: &[FarikEvent]) -> Option<(u64, Option<Str
 /// row's reviewer.
 fn with_the_humans_acceptance(
     contract: &TaskContract,
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     mut done: DoneEvidence,
 ) -> DoneEvidence {
     let Some((seq, message)) = result_accepted(history) else {
@@ -1468,7 +1471,7 @@ fn with_the_humans_acceptance(
 /// rejected iteration's evidence does not pass the next: the latest result per criterion and
 /// runner, and the latest completion and review notes.
 fn evidence_since_work_began(
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
 ) -> (Vec<CriterionResult>, Option<String>, Option<String>) {
     let since =
         last_move_into(history, TaskStatus::InProgress).map_or(0, |event| event.envelope.seq);
@@ -1509,29 +1512,29 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use chrono::{DateTime, TimeZone, Utc};
-    use farik_core::branch::task_branch;
-    use farik_core::budget::default_session_limits;
-    use farik_core::contract::fixtures::a_contract_wire;
-    use farik_core::contract::{Role, TaskStatus, validate_contract};
-    use farik_core::governor::gates::{Blocker, DependencyState, Rejection};
-    use farik_core::governor::readiness::{ReadinessRule, evaluate_readiness};
-    use farik_core::governor::transition::TransitionRefusal;
-    use farik_core::governor::transition::TransitionRequest;
-    use farik_core::governor::transition_table::GateId;
-    use farik_core::governor::transition_table::TransitionActor;
-    use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-    use farik_core::team::{Team, validate_team};
-    use farik_protocol::clock::{Clock, MovableClock};
-    use farik_protocol::event::{
-        ContractEvaluatedBodyGate, EscalationRaisedBodyReason, EventBody, EventIds, EventKind,
-        FarikEvent, GateWire, MessageKind, NewEvent, TaskStatusWire,
+    use catervas_core::branch::task_branch;
+    use catervas_core::budget::default_session_limits;
+    use catervas_core::contract::fixtures::a_contract_wire;
+    use catervas_core::contract::{Role, TaskStatus, validate_contract};
+    use catervas_core::governor::gates::{Blocker, DependencyState, Rejection};
+    use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
+    use catervas_core::governor::transition::TransitionRefusal;
+    use catervas_core::governor::transition::TransitionRequest;
+    use catervas_core::governor::transition_table::GateId;
+    use catervas_core::governor::transition_table::TransitionActor;
+    use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+    use catervas_core::team::{Team, validate_team};
+    use catervas_protocol::clock::{Clock, MovableClock};
+    use catervas_protocol::event::{
+        CatervasEvent, ContractEvaluatedBodyGate, EscalationRaisedBodyReason, EventBody, EventIds,
+        EventKind, GateWire, MessageKind, NewEvent, TaskStatusWire,
         TaskTransitionedBodyEffectsItem, TransitionRefusedBodyRefusal, event_from_value,
     };
-    use farik_store::EventQuery;
-    use farik_store::files::ProjectFiles;
-    use farik_store::git::fixtures::{TempRepo, git_in};
-    use farik_store::{EventLog, IN_MEMORY, Projections, open_event_log, open_projections};
+    use catervas_store::EventQuery;
+    use catervas_store::files::ProjectFiles;
+    use catervas_store::git::fixtures::{TempRepo, git_in};
+    use catervas_store::{EventLog, IN_MEMORY, Projections, open_event_log, open_projections};
+    use chrono::{DateTime, TimeZone, Utc};
     use serde_json::{Value, json};
 
     use super::{
@@ -1557,7 +1560,7 @@ mod tests {
         validate_team(&wire).expect("the fixture is a team")
     }
 
-    /// A repository with `.farik/` initialised, a log in memory, and the door over both, its clock
+    /// A repository with `.catervas/` initialised, a log in memory, and the door over both, its clock
     /// stopped at `now`.
     struct Project {
         repo: TempRepo,
@@ -1573,7 +1576,7 @@ mod tests {
         fn new(name: &str, team: Team, now: DateTime<Utc>) -> Self {
             let repo = TempRepo::new(name);
             let files = Arc::new(ProjectFiles::open(repo.path.clone()));
-            files.init(&team).expect(".farik/ is made");
+            files.init(&team).expect(".catervas/ is made");
             let log = Arc::new(open_event_log(Path::new(IN_MEMORY), now).expect("the log opens"));
             let projections =
                 Arc::new(open_projections(Arc::clone(&log)).expect("the projections open"));
@@ -1585,8 +1588,8 @@ mod tests {
                 repo.adapter(),
                 Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
                 EventIds {
-                    team_id: "farik".to_string(),
-                    project_id: "farik".to_string(),
+                    team_id: "catervas".to_string(),
+                    project_id: "catervas".to_string(),
                     ..EventIds::default()
                 },
             );
@@ -1608,12 +1611,12 @@ mod tests {
             kind: &str,
             body: &Value,
             recorded_at: DateTime<Utc>,
-        ) -> FarikEvent {
+        ) -> CatervasEvent {
             self.append_wire(&json!({
                 "seq": 1,
                 "recorded_at": recorded_at.to_rfc3339(),
-                "team_id": "farik",
-                "project_id": "farik",
+                "team_id": "catervas",
+                "project_id": "catervas",
                 "task_id": task,
                 "kind": kind,
                 "body": body,
@@ -1625,8 +1628,8 @@ mod tests {
             self.append_wire(&json!({
                 "seq": 1,
                 "recorded_at": at(10).to_rfc3339(),
-                "team_id": "farik",
-                "project_id": "farik",
+                "team_id": "catervas",
+                "project_id": "catervas",
                 "task_id": task,
                 "agent_id": "dev-a",
                 "session_id": "s-1",
@@ -1661,15 +1664,15 @@ mod tests {
                 self.append_wire(&json!({
                     "seq": 1,
                     "recorded_at": at(9).to_rfc3339(),
-                    "team_id": "farik",
-                    "project_id": "farik",
+                    "team_id": "catervas",
+                    "project_id": "catervas",
                     "kind": kind,
                     "body": body,
                 }));
             }
         }
 
-        fn append_wire(&self, wire: &Value) -> FarikEvent {
+        fn append_wire(&self, wire: &Value) -> CatervasEvent {
             let event = event_from_value(wire).expect("the fixture is schema-valid");
             let appended = self
                 .log
@@ -1709,7 +1712,7 @@ mod tests {
             to: &str,
             extra: &Value,
             recorded_at: DateTime<Utc>,
-        ) -> FarikEvent {
+        ) -> CatervasEvent {
             let mut body = json!({
                 "from": from,
                 "to": to,
@@ -1762,7 +1765,7 @@ mod tests {
             &self,
             request: &TransitionRequest,
             ask: &TransitionAsk,
-        ) -> farik_core::governor::transition::TransitionContext {
+        ) -> catervas_core::governor::transition::TransitionContext {
             self.transitions
                 .context(request, ask, &self.team)
                 .expect("the context reads")
@@ -1776,7 +1779,7 @@ mod tests {
         }
 
         /// Every event the log holds about `task`, of these kinds, oldest first.
-        fn events(&self, task: &str, kinds: &[EventKind]) -> Vec<FarikEvent> {
+        fn events(&self, task: &str, kinds: &[EventKind]) -> Vec<CatervasEvent> {
             self.log
                 .read(&EventQuery {
                     task_id: Some(task.parse().expect("a task id")),
@@ -1963,7 +1966,7 @@ mod tests {
     fn as_a_finance_task(wire: &mut Value) {
         wire["assignee_role"] = json!("finance_specialist");
         wire["reviewer_role"] = json!("product_manager");
-        wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+        wire["allowed_paths"] = json!([".catervas/local/finance/**"]);
         wire["exit_criteria"] = json!([{
             "id": "C1",
             "text": "The books exist.",
@@ -2109,7 +2112,7 @@ mod tests {
     fn as_a_procurement_task(wire: &mut Value) {
         wire["assignee_role"] = json!("procurement_specialist");
         wire["reviewer_role"] = json!("product_manager");
-        wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+        wire["allowed_paths"] = json!([".catervas/local/procurement/**"]);
         wire["exit_criteria"] = json!([{
             "id": "C1",
             "text": "The comparison is written.",
@@ -2220,13 +2223,13 @@ mod tests {
     fn a_procurement_task_ends_at_accepted() {
         let project = Project::new("procurement-accepted", a_procurement_team(), at(12));
         a_procurement_task(&project, "FRK-1", Some("in_progress"));
-        let folder = project.repo.path.join(".farik/local/procurement");
+        let folder = project.repo.path.join(".catervas/local/procurement");
         std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
         std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
         std::fs::write(folder.join("evaluations/old.md"), "an old comparison").expect("written");
-        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
         // Assignment's copy holds the notes as well as the workbooks (a guard: it copies all).
-        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         assert!(folder.join(".history/FRK-1/vendors.xlsx").is_file());
         assert!(folder.join(".history/FRK-1/evaluations/old.md").is_file());
         // The task writes its comparison and edits the register.
@@ -2309,7 +2312,7 @@ mod tests {
         };
         assert_eq!(
             decision.effects,
-            [farik_core::governor::transition::TransitionEffect::NothingToIntegrate]
+            [catervas_core::governor::transition::TransitionEffect::NothingToIntegrate]
         );
         let after = assigning_second().assignment.expect("an assignment");
         assert!(after.dependencies[0].integrated, "{after:?}");
@@ -2368,8 +2371,8 @@ mod tests {
         project.append_wire(&json!({
             "seq": 1,
             "recorded_at": at(11).to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "kind": "sprint.ended",
             "body": { "sprint_id": "S1", "ended_by": "human", "left": ["FRK-1"], "backlog": true },
         }));
@@ -2460,7 +2463,7 @@ mod tests {
             project.file(task, |_| {});
             project.created(task, "in_progress");
         }
-        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/FRK-1");
         project
             .repo
             .adapter()
@@ -2813,7 +2816,7 @@ mod tests {
         for name in ["main:other", "-f"] {
             let team = a_team(|wire| wire["policy"]["integration_branch"] = json!(name));
             match super::integration_branch(&team, &project.repo.adapter()) {
-                Err(farik_store::GitError::CommandFailed { stderr, .. }) => {
+                Err(catervas_store::GitError::CommandFailed { stderr, .. }) => {
                     assert!(stderr.contains(name), "{name}: {stderr}");
                 }
                 other => panic!("{name}: expected a refusal, got {other:?}"),
@@ -2882,7 +2885,7 @@ mod tests {
             project.file(task, |_| {});
             project.created(task, "in_progress");
         }
-        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/FRK-1");
         project
             .repo
             .adapter()
@@ -2928,21 +2931,21 @@ mod tests {
         );
     }
 
-    fn moved_body(event: &FarikEvent) -> &farik_protocol::event::TaskTransitionedBody {
+    fn moved_body(event: &CatervasEvent) -> &catervas_protocol::event::TaskTransitionedBody {
         match &event.body {
             EventBody::TaskTransitioned(body) => body,
             other => panic!("expected a task.transitioned, got {other:?}"),
         }
     }
 
-    fn refused_body(event: &FarikEvent) -> &farik_protocol::event::TransitionRefusedBody {
+    fn refused_body(event: &CatervasEvent) -> &catervas_protocol::event::TransitionRefusedBody {
         match &event.body {
             EventBody::TransitionRefused(body) => body,
             other => panic!("expected a transition.refused, got {other:?}"),
         }
     }
 
-    fn escalation_body(event: &FarikEvent) -> &farik_protocol::event::EscalationRaisedBody {
+    fn escalation_body(event: &CatervasEvent) -> &catervas_protocol::event::EscalationRaisedBody {
         match &event.body {
             EventBody::EscalationRaised(body) => body,
             other => panic!("expected an escalation.raised, got {other:?}"),
@@ -3381,7 +3384,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn escalates_a_task_whose_criterion_farik_could_not_run() {
+    fn escalates_a_task_whose_criterion_catervas_could_not_run() {
         let project = Project::new("unrunnable-escalation", a_team(|_| {}), at(9));
         project.file("FRK-1", |_| {});
         project.created("FRK-1", "assigned");
@@ -4075,7 +4078,12 @@ mod tests {
     }
 
     /// A `human.accepted` of `subject` about `task`, with `message` when given.
-    fn accepted(project: &Project, task: &str, subject: &str, message: Option<&str>) -> FarikEvent {
+    fn accepted(
+        project: &Project,
+        task: &str,
+        subject: &str,
+        message: Option<&str>,
+    ) -> CatervasEvent {
         let mut body = json!({ "subject": subject, "accepted_by": "human" });
         if let Some(message) = message {
             body["message"] = json!(message);
@@ -4083,8 +4091,8 @@ mod tests {
         project.record(task, "human.accepted", &body, at(11))
     }
 
-    /// A passing result for `criterion` of `task`, as the reviewer's run Farik recorded.
-    fn governor_result(project: &Project, task: &str, criterion: &str) -> FarikEvent {
+    /// A passing result for `criterion` of `task`, as the reviewer's run Catervas recorded.
+    fn governor_result(project: &Project, task: &str, criterion: &str) -> CatervasEvent {
         project.record(
             task,
             "criterion.recorded",
@@ -4254,7 +4262,7 @@ mod tests {
         let project = Project::new("folder-accepted", a_finance_team(), at(12));
         a_finance_task(&project, "FRK-1", Some("in_progress"));
         // The books are in the folder, and the task has no branch, no commit and no worktree.
-        let folder = project.repo.path.join(".farik/local/finance");
+        let folder = project.repo.path.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
         governor_result(&project, "FRK-1", "C1");
@@ -4293,7 +4301,7 @@ mod tests {
         };
         assert_eq!(
             decision.effects,
-            [farik_core::governor::transition::TransitionEffect::NothingToIntegrate]
+            [catervas_core::governor::transition::TransitionEffect::NothingToIntegrate]
         );
         let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
         assert_eq!(
@@ -4330,12 +4338,12 @@ mod tests {
     fn the_acceptance_carries_the_changed_files() {
         let project = Project::new("folder-accepted-changed", a_finance_team(), at(12));
         a_finance_task(&project, "FRK-1", Some("in_progress"));
-        let folder = project.repo.path.join(".farik/local/finance");
+        let folder = project.repo.path.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
         std::fs::write(folder.join("old.xlsx"), "an old one").expect("written");
-        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         // The task edited the books and left the old workbook alone.
         std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
         governor_result(&project, "FRK-1", "C1");
@@ -4422,13 +4430,13 @@ mod tests {
         a_finance_task(&project, "FRK-1", Some("in_progress"));
         project.file("FRK-1", |wire| {
             as_a_finance_task(wire);
-            wire["allowed_paths"] = json!([".farik/local/finance/books.xlsx"]);
+            wire["allowed_paths"] = json!([".catervas/local/finance/books.xlsx"]);
         });
-        let folder = project.repo.path.join(".farik/local/finance");
+        let folder = project.repo.path.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
-        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
         std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
         governor_result(&project, "FRK-1", "C1");
@@ -4450,8 +4458,8 @@ mod tests {
         let details = super::refusal_details(&refusal);
         assert!(
             details.iter().any(|detail| detail.contains(
-                "the diff changes .farik/local/finance/forecast.xlsx outside the contract's \
-                 allowed paths .farik/local/finance/books.xlsx"
+                "the diff changes .catervas/local/finance/forecast.xlsx outside the contract's \
+                 allowed paths .catervas/local/finance/books.xlsx"
             )),
             "{details:?}"
         );
@@ -4535,8 +4543,8 @@ mod tests {
             project.append_wire(&json!({
                 "seq": 1,
                 "recorded_at": at(11).to_rfc3339(),
-                "team_id": "farik",
-                "project_id": "farik",
+                "team_id": "catervas",
+                "project_id": "catervas",
                 "task_id": "FRK-1",
                 "agent_id": "iris",
                 "session_id": "s-1",
@@ -4574,7 +4582,7 @@ mod tests {
             .done
             .results
             .iter()
-            .filter(|result| result.run_by == farik_core::governor::done::RunBy::Human)
+            .filter(|result| result.run_by == catervas_core::governor::done::RunBy::Human)
             .map(|result| {
                 (
                     result.criterion_id.clone(),
@@ -4596,7 +4604,7 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn keeps_the_review_of_an_epic_its_reviewer_holds_without_a_scrum_master() {
-        use farik_core::governor::done::RunBy;
+        use catervas_core::governor::done::RunBy;
         // A Scrum Master's epic, reviewed by `maya`; the team has no active Scrum Master now.
         let project = Project::new("epic-reviewer-kept", a_team(|_| {}), at(12));
         let criteria = json!([
@@ -4635,7 +4643,7 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn takes_the_humans_acceptance_as_an_epics_review_answers() {
-        use farik_core::governor::done::RunBy;
+        use catervas_core::governor::done::RunBy;
         let project = Project::new("epic-review-answers", a_team(|_| {}), at(12));
         let criteria = json!([
             { "id": "C1", "text": "done.txt exists.", "verification": { "method": "command", "command": "test -f done.txt", "expect": {} } },
@@ -4664,7 +4672,7 @@ mod tests {
         assert_eq!(
             of("C1", RunBy::Reviewer),
             Some((true, "at abc: exit 0".to_string())),
-            "C1 is still Farik's run"
+            "C1 is still Catervas's run"
         );
         assert_eq!(
             of("C2", RunBy::Reviewer).map(|(passed, _)| passed),
@@ -4764,12 +4772,12 @@ mod tests {
     }
 
     /// The one system line about `task`, and the seq of its last move.
-    fn system_line(project: &Project, task: &str) -> (FarikEvent, u64) {
+    fn system_line(project: &Project, task: &str) -> (CatervasEvent, u64) {
         let events = project.events(
             task,
             &[EventKind::TaskTransitioned, EventKind::MessagePosted],
         );
-        let lines: Vec<&FarikEvent> = events
+        let lines: Vec<&CatervasEvent> = events
             .iter()
             .filter(|event| event.body.kind() == EventKind::MessagePosted)
             .collect();
@@ -4782,7 +4790,7 @@ mod tests {
         (lines[0].clone(), moved.envelope.seq)
     }
 
-    fn posted_body(event: &FarikEvent) -> &farik_protocol::event::MessagePostedBody {
+    fn posted_body(event: &CatervasEvent) -> &catervas_protocol::event::MessagePostedBody {
         match &event.body {
             EventBody::MessagePosted(body) => body,
             other => panic!("expected a message.posted, got {other:?}"),
@@ -4831,7 +4839,7 @@ mod tests {
         let (line, moved) = system_line(&project, "FRK-1");
         assert!(line.envelope.seq > moved);
         let body = posted_body(&line);
-        assert_eq!(body.author, "farik");
+        assert_eq!(body.author, "catervas");
         assert_eq!(body.kind, MessageKind::System);
         assert_eq!(body.text, "FRK-1 refining → ready (by the governor)");
         assert_eq!(line.envelope.ids.agent_id, None);

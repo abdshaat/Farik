@@ -1,7 +1,7 @@
 # The Procurement Specialist's kit (ADR 0039; phase 7 steps 10d and 10e): the fourteen skills of its
 # work, loaded on demand (step 10e added the thirteenth, `requesting-a-data-pipeline`, and step 10f the fourteenth, `contacting-sellers`), and five
 # services, none of which can buy: the role recommends and the founder decides (ADR 0039). `fx` is
-# Farik's own server over Frankfurter, started by `farik connector fx` (ADR 0038). Exa is searched
+# Catervas's own server over Frankfurter, started by `catervas connector fx` (ADR 0038). Exa is searched
 # and never asked for a page: its `web_fetch_exa` fetches on Exa's own servers and follows a
 # redirect to another site, out of the approved-sites check's sight (spec 8.6), so it is `denied`;
 # its search results carry text from any site, which the copy says. SerpApi takes a key, and its
@@ -11,7 +11,7 @@
 # write a folder on the user's computer are `denied`. Tool lists were read on 2026-10-07 and
 # 2026-10-08 (the plan's Execution notes); the live pin test lists the four third-party ones, and
 # `fx`'s pin is the offline test `fx_server_lists_the_kits_tools`. Step 10g adds the role's two
-# servers of Farik's own. Its one skill in every prompt, `sourcing-a-product`, is the role's own
+# servers of Catervas's own. Its one skill in every prompt, `sourcing-a-product`, is the role's own
 # (ADR 0011); no kit skill repeats its loop or its section on the sites it may read.
 role: procurement_specialist
 skills:
@@ -32,12 +32,12 @@ skills:
 connectors:
   - name: fx
     transport: stdio
-    command: farik
+    command: catervas
     args: [connector, fx]
     title: Exchange rates
     about: "Daily central-bank rates"
     why: "Compares prices in one currency, rate and date shown. Read-only."
-    setup: "Nothing to set up: Farik looks rates up in Frankfurter itself, with no account. Farik sends Frankfurter only currency codes and a date."
+    setup: "Nothing to set up: Catervas looks rates up in Frankfurter itself, with no account. Catervas sends Frankfurter only currency codes and a date."
     labels:
       latest_rates: "latest exchange rates"
       rate_on: "an exchange rate on a day"
@@ -68,7 +68,7 @@ connectors:
     title: Shopping prices
     about: "Prices across big shops"
     why: "Google Shopping, Amazon, eBay, Walmart in one search. Each uses one of your SerpApi searches."
-    setup: "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its ‘Api Key’ page and paste it here. What your agent searches for goes to SerpApi as written. Some of SerpApi's searches open a picture or page address on SerpApi's own servers. Farik only lets your agent give it addresses on sites you approved, but SerpApi may follow a link from there to another site."
+    setup: "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its ‘Api Key’ page and paste it here. What your agent searches for goes to SerpApi as written. Some of SerpApi's searches open a picture or page address on SerpApi's own servers. Catervas only lets your agent give it addresses on sites you approved, but SerpApi may follow a link from there to another site."
     allowances:
       search: { calls: 50, what: "shopping searches" }
     labels:
@@ -84,7 +84,7 @@ connectors:
     title: Brex
     about: "Your company cards and bills"
     why: "Sees what you pay vendors, and repeat charges nobody listed. Read-only."
-    setup: "First, an account admin or card admin in Brex accepts the Developer API agreement under ‘Settings’, then ‘Developer’. Then sign in with your Brex account and allow Farik to read your vendors, card spending and departments; Farik asks for reading only."
+    setup: "First, an account admin or card admin in Brex accepts the Developer API agreement under ‘Settings’, then ‘Developer’. Then sign in with your Brex account and allow Catervas to read your vendors, card spending and departments; Catervas asks for reading only."
     labels:
       list_vendors: "list vendors"
       get_vendor_by_id: "read a vendor"
@@ -170,12 +170,12 @@ connectors:
       generate_cost_report: denied
   - name: recalls
     transport: stdio
-    command: farik
+    command: catervas
     args: [connector, recalls]
     title: Safety recalls
     about: "Product and car recalls"
     why: "Never suggests a recalled product; checks a used car's VIN. Read-only."
-    setup: "Nothing to set up: Farik reads the CPSC's and NHTSA's public lists itself, with no account. It covers products and vehicles sold in the United States. What your agent looks up goes to them as written."
+    setup: "Nothing to set up: Catervas reads the CPSC's and NHTSA's public lists itself, with no account. It covers products and vehicles sold in the United States. What your agent looks up goes to them as written."
     labels:
       product_recalls: "look up product recalls"
       vehicle_recalls: "look up a car's recalls"
@@ -190,14 +190,14 @@ connectors:
       decode_vin: network
   - name: ebay
     transport: stdio
-    command: farik
+    command: catervas
     args: [connector, ebay]
     credential_keys: [EBAY_CLIENT_ID, EBAY_CLIENT_SECRET]
     key_page: https://developer.ebay.com/my/keys
     title: eBay listings
     about: "eBay asking prices"
     why: "Real prices and seller ratings. Read-only; never bids or buys."
-    setup: "Make a free eBay developer account and create an application. Before its production keys work, eBay asks how you handle account deletions: choose ‘Not persisting eBay data’, since Farik never keeps an eBay member's name. Then paste the ‘App ID (Client ID)’ and ‘Cert ID (Client Secret)’ from its production keys. Farik only searches and reads listings; eBay allows 5,000 searches a day. What your agent searches for goes to eBay as written."
+    setup: "Make a free eBay developer account and create an application. Before its production keys work, eBay asks how you handle account deletions: choose ‘Not persisting eBay data’, since Catervas never keeps an eBay member's name. Then paste the ‘App ID (Client ID)’ and ‘Cert ID (Client Secret)’ from its production keys. Catervas only searches and reads listings; eBay allows 5,000 searches a day. What your agent searches for goes to eBay as written."
     labels:
       search_items: "search eBay listings"
       get_item: "read an eBay listing"

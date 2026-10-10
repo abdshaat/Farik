@@ -12,7 +12,7 @@ test("on a phone a page's sticky bar rests above the places bar, never under it"
 		const places = page.getByRole("navigation", { name: "Places" });
 		await expect(places).toBeVisible();
 
-		// A page sticks its own bar above `--farik-shell-bar-height`: here a bar of 100 px at the
+		// A page sticks its own bar above `--catervas-shell-bar-height`: here a bar of 100 px at the
 		// end of a page 3000 px long, scrolled to its middle, as the marketing plan's decision bar is.
 		await page.evaluate(() => {
 			const long = document.createElement("div");
@@ -22,7 +22,7 @@ test("on a phone a page's sticky bar rests above the places bar, never under it"
 			const bar = document.createElement("div");
 			bar.id = "probe-bar";
 			bar.style.cssText =
-				"position:sticky;bottom:var(--farik-shell-bar-height, 0);height:100px";
+				"position:sticky;bottom:var(--catervas-shell-bar-height, 0);height:100px";
 			long.append(spacer, bar);
 			document.querySelector("main")?.append(long);
 			window.scrollTo(0, 1200);

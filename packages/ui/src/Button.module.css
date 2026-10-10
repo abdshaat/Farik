@@ -1,15 +1,15 @@
 .button {
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
-	padding: var(--farik-space-2) var(--farik-space-4);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
+	padding: var(--catervas-space-2) var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
 	cursor: pointer;
 }
 
 .button:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -19,19 +19,19 @@
 }
 
 .primary {
-	background: var(--farik-color-action);
-	color: var(--farik-color-action-ink);
-	border-color: var(--farik-color-action);
+	background: var(--catervas-color-action);
+	color: var(--catervas-color-action-ink);
+	border-color: var(--catervas-color-action);
 }
 
 .secondary {
-	background: var(--farik-color-surface);
-	color: var(--farik-color-ink);
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
 }
 
 .quiet {
 	background: none;
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 	border-color: transparent;
 	text-decoration: underline;
 }

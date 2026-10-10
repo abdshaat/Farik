@@ -20,35 +20,35 @@ import type { Readable } from "node:stream";
 import { test } from "@playwright/test";
 import { FOLDERS } from "./cleanup-reporter.ts";
 
-// Both built by `cargo xtask check --integration`: farik by its cargo tests, the server by its build step.
+// Both built by `cargo xtask check --integration`: catervas by its cargo tests, the server by its build step.
 const target = resolve(import.meta.dirname, "../../../../target/debug");
 
-// Farik's state folder for these runs, so the developer's own is never read or written.
+// Catervas's state folder for these runs, so the developer's own is never read or written.
 const env = {
 	...process.env,
-	XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "farik-e2e-config-")),
+	XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "catervas-e2e-config-")),
 };
 
-/** Farik's state folder, which every serve with a project shares: saved teams are kept in it. */
-export const stateFolder = join(env.XDG_CONFIG_HOME, "farik");
+/** Catervas's state folder, which every serve with a project shares: saved teams are kept in it. */
+export const stateFolder = join(env.XDG_CONFIG_HOME, "catervas");
 
-/** Runs `farik <args>` in the project and answers what it printed. */
-export function farik(project: string, args: string[]): string {
-	return execFileSync(join(target, "farik"), args, {
+/** Runs `catervas <args>` in the project and answers what it printed. */
+export function catervas(project: string, args: string[]): string {
+	return execFileSync(join(target, "catervas"), args, {
 		cwd: project,
 		env,
 		encoding: "utf8",
 	});
 }
 
-/** The project's events, as `farik --json log` prints them. */
+/** The project's events, as `catervas --json log` prints them. */
 export function events(project: string): {
 	kind: string;
 	task_id?: string;
 	agent_id?: string;
 	body: Record<string, unknown>;
 }[] {
-	return farik(project, ["--json", "log"])
+	return catervas(project, ["--json", "log"])
 		.trim()
 		.split("\n")
 		.map((line) => JSON.parse(line));
@@ -76,7 +76,7 @@ function link(
 			if (said?.[1]) found(said[1]);
 		});
 		server.on("exit", (code) =>
-			failed(new Error(`farik-e2e-serve exited with ${code}`)),
+			failed(new Error(`catervas-e2e-serve exited with ${code}`)),
 		);
 	});
 }
@@ -111,9 +111,9 @@ export function gitProject(
 }
 
 /**
- * `farik-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
+ * `catervas-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
  * With `project: false` it starts in an empty folder, for the first-run wizard: `HOME` is `home`,
- * which holds Farik's state folder too, the fake `claude` and `docker` come first on `PATH`, no
+ * which holds Catervas's state folder too, the fake `claude` and `docker` come first on `PATH`, no
  * key is in the environment, and the key is kept in a file, never the keychain. A team with a
  * Designer runs in Docker's sandbox, and its first `docker info` answers after 8 seconds.
  */
@@ -123,7 +123,7 @@ export async function startServe(o: {
 	/** A paused project that still waits for the team's setup, as a fresh take-on leaves it. */
 	setupPending?: boolean;
 	home?: string;
-	/** The team to write in place of `farik init`'s two. */
+	/** The team to write in place of `catervas init`'s two. */
 	team?: "pm-architect-developer" | "pm-architect-developer-designer";
 	/** How long each recorded session waits before it plays, so a page sees each state it leaves. */
 	paceMs?: number;
@@ -135,7 +135,7 @@ export async function startServe(o: {
 	project: string;
 	stop(): Promise<void>;
 }> {
-	const project = mkdtempSync(join(tmpdir(), "farik-e2e-project-"));
+	const project = mkdtempSync(join(tmpdir(), "catervas-e2e-project-"));
 	const made = [project, env.XDG_CONFIG_HOME];
 	const args: string[] = [];
 	const docker = o.project !== false && o.team?.endsWith("-designer") === true;
@@ -147,7 +147,7 @@ export async function startServe(o: {
 			XDG_CONFIG_HOME: _config,
 			...rest
 		} = process.env;
-		const home = o.home ?? mkdtempSync(join(tmpdir(), "farik-e2e-home-"));
+		const home = o.home ?? mkdtempSync(join(tmpdir(), "catervas-e2e-home-"));
 		if (!o.home) made.push(home);
 		serveEnv = {
 			...rest,
@@ -162,15 +162,15 @@ export async function startServe(o: {
 		if (docker) {
 			args.push("--sandbox-image", SANDBOX_IMAGE);
 			// Today must not wait for Docker: the first `info` answers after 8 seconds.
-			const asked = mkdtempSync(join(tmpdir(), "farik-e2e-docker-"));
+			const asked = mkdtempSync(join(tmpdir(), "catervas-e2e-docker-"));
 			made.push(asked);
 			serveEnv = {
 				...env,
 				PATH: `${resolve(import.meta.dirname, "slow-docker")}:${process.env.PATH}`,
-				FARIK_E2E_DOCKER: execFileSync("sh", ["-c", "command -v docker"], {
+				CATERVAS_E2E_DOCKER: execFileSync("sh", ["-c", "command -v docker"], {
 					encoding: "utf8",
 				}).trim(),
-				FARIK_E2E_INFO_ASKED: join(asked, "asked"),
+				CATERVAS_E2E_INFO_ASKED: join(asked, "asked"),
 			};
 		}
 	}
@@ -180,7 +180,7 @@ export async function startServe(o: {
 	if (o.transcripts.length > 0)
 		args.push("--transcripts", o.transcripts.join(","));
 	if (o.paceMs) args.push("--pace", String(o.paceMs));
-	const server = spawn(join(target, "farik-e2e-serve"), args, {
+	const server = spawn(join(target, "catervas-e2e-serve"), args, {
 		cwd: project,
 		env: serveEnv,
 		stdio: ["ignore", "pipe", "inherit"],
@@ -222,16 +222,16 @@ function setUp(
 	} else {
 		gitProject(project);
 	}
-	farik(project, ["init"]);
+	catervas(project, ["init"]);
 	// What the CLI tests' `no_sandbox` writes: this machine runs tasks without Docker.
-	mkdirSync(join(project, ".farik/local"), { recursive: true });
+	mkdirSync(join(project, ".catervas/local"), { recursive: true });
 	writeFileSync(
-		join(project, ".farik/local/settings.json"),
+		join(project, ".catervas/local/settings.json"),
 		designer ? '{"sandbox":"docker"}' : '{"sandbox":"none"}',
 	);
 	if (setupPending) {
-		farik(project, ["pause"]);
-		writeFileSync(join(project, ".farik/local/setup-pending"), "");
+		catervas(project, ["pause"]);
+		writeFileSync(join(project, ".catervas/local/setup-pending"), "");
 	}
 }
 
@@ -244,7 +244,7 @@ function setUp(
 function writeTeam(project: string, designer: boolean, sprints: boolean): void {
 	const agent = (id: string, name: string, role: string, extra = "") =>
 		`- display_name: ${name}\n  id: ${id}\n${extra}  model:\n    effort: high\n    id: claude-opus-5-5\n  persona: ${name}.\n  role: ${role}\n  status: active\n`;
-	const path = join(project, ".farik/team.yaml");
+	const path = join(project, ".catervas/team.yaml");
 	let yaml = readFileSync(path, "utf8");
 	const agents =
 		agent("mira", "Mira", "product_manager") +
@@ -286,9 +286,9 @@ const SITE = {
  * fetched once per machine by a container with the network on.
  */
 function busybox(): string {
-	const file = join(tmpdir(), "farik-e2e-busybox-extras");
+	const file = join(tmpdir(), "catervas-e2e-busybox-extras");
 	if (!existsSync(file)) {
-		const out = mkdtempSync(join(tmpdir(), "farik-e2e-busybox-"));
+		const out = mkdtempSync(join(tmpdir(), "catervas-e2e-busybox-"));
 		const { uid, gid } = userInfo();
 		execFileSync("docker", [
 			"run",
@@ -305,14 +305,14 @@ function busybox(): string {
 	return file;
 }
 
-/** Removes every container Farik left for `project`: a task that still waits keeps its sandbox. */
+/** Removes every container Catervas left for `project`: a task that still waits keeps its sandbox. */
 function removeContainers(project: string): void {
-	const first = farik(project, ["--json", "log"]).split("\n")[0];
+	const first = catervas(project, ["--json", "log"]).split("\n")[0];
 	const id = first ? JSON.parse(first).project_id : undefined;
 	if (!id) return;
 	const names = execFileSync(
 		"docker",
-		["ps", "-aq", "--filter", `label=farik.project=${id}`],
+		["ps", "-aq", "--filter", `label=catervas.project=${id}`],
 		{ encoding: "utf8" },
 	)
 		.split("\n")

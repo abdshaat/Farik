@@ -1,6 +1,6 @@
-# Farik web UI design
+# Catervas web UI design
 
-Status: approved by the founder on 2026-09-26, who then asked for every page to be mocked up before any code. It is the design input to phase 6. Phase 6's step plans build from it, and step 03's component library takes its tokens from `@farik/brand` (phase 6 step 01).
+Status: approved by the founder on 2026-09-26, who then asked for every page to be mocked up before any code. It is the design input to phase 6. Phase 6's step plans build from it, and step 03's component library takes its tokens from `@catervas/brand` (phase 6 step 01).
 Sources:
 - the brand, `docs/brand/brand.md` and the founder's kit, `docs/brand/brand-kit.png`;
 - the spec: section 2 (who it is for), 4 (journeys), 5.4 (Definition of Done), 10 (non-functional requirements) and 14 (brand);
@@ -91,7 +91,7 @@ Each "Waiting on you" row's button (Answer, Review, Help, Add, Connect again) is
 
 1. **The team is the interface.** Every piece of work has a face on it: the avatar of the agent who did it or who is asking. The user deals with people, not with records.
 2. **One boldness: the team band.** The dark band of pixel characters across the top of Today is the product's signature. It echoes the kit's hero and the office scene. Everything below it is quiet and flat.
-3. **Plain words first; the machinery one click away.** Every human gate leads with the agent's plain-language summary and Farik's checks in plain words. "See the code changes" opens the diff. Nothing requires reading code (spec 5.4, the phase 6 decisions).
+3. **Plain words first; the machinery one click away.** Every human gate leads with the agent's plain-language summary and Catervas's checks in plain words. "See the code changes" opens the diff. Nothing requires reading code (spec 5.4, the phase 6 decisions).
 4. **The terminal is a voice, not a costume.** The `>` prompt and the block cursor appear in one place: the box where the user tells the team what they want. That is the one place the user "types to the machine", so the metaphor means something there.
 5. **Pixel art is for people and the logo.** Characters, the icon, the wordmark and the welcome screen are pixel art. Controls, text, the board and the diff are clean.
 
@@ -117,9 +117,9 @@ The screens map to phase 6's steps as follows:
 
 | Screen | Step | What it shows |
 |---|---|---|
-| Welcome and first-run wizard | 05, 06 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Farik asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the six characters with their suggested names, the UI/UX Designer among them (`designer-chats-templates.md`). Phase 8 step 02 (now phase 7 step 09) adds the Finance Specialist to it as an optional sixth (ADR 0019). |
+| Welcome and first-run wizard | 05, 06 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Catervas asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the six characters with their suggested names, the UI/UX Designer among them (`designer-chats-templates.md`). Phase 8 step 02 (now phase 7 step 09) adds the Finance Specialist to it as an optional sixth (ADR 0019). |
 | Today | 08 | The team band, the request box, "Waiting on you", and "What moved". |
-| A human gate: approve a plan, or accept work | 08 | The agent's summary as a short letter signed by the agent's avatar. Then "What Farik checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
+| A human gate: approve a plan, or accept work | 08 | The agent's summary as a short letter signed by the agent's avatar. Then "What Catervas checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
 | A question from an agent | 08 | The question with its avatar, the choices the agent offered, and a free-text answer. |
 | Help needed (an escalation) | 08 | What happened in plain words, what the agent tried, and the user's options. |
 | Board | 09 | Lanes named for the kit's sprint board (To do, In progress, Review, Done) plus Planning before them and Stuck after In progress. Each task is a row showing its assignee's avatar, its title, and a status word. Filters are chips. Sprint controls sit at the top. |

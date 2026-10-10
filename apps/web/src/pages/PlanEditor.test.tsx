@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	fireEvent,
@@ -391,7 +391,7 @@ describe("plan editor", () => {
 
 	it("saves_in_place_while_refining", async () => {
 		const { s } = await opened({ ...CONTRACT, status: "refining" });
-		// Without Advanced, no check can become a command Farik runs.
+		// Without Advanced, no check can become a command Catervas runs.
 		expect(
 			await screen.findAllByRole("radio", { name: en.criterionReview }),
 		).not.toHaveLength(0);

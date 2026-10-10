@@ -1,4 +1,4 @@
-//! What `farik serve` does for the first-run wizard before there is a project (`docs/SPEC.md`
+//! What `catervas serve` does for the first-run wizard before there is a project (`docs/SPEC.md`
 //! 4.1): the CLI's side of runtime's `SetupHost`, which opens or makes the project, keeps the
 //! credential, and says on a watch which project the wizard chose.
 
@@ -6,16 +6,16 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use farik_protocol::clock::Clock;
-use farik_protocol::event::EventBody;
-use farik_runtime::claude::CredentialKind;
-use farik_runtime::computer::on_path;
-use farik_runtime::credential::{
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::EventBody;
+use catervas_runtime::claude::CredentialKind;
+use catervas_runtime::computer::on_path;
+use catervas_runtime::credential::{
     CredentialError, CredentialStore, Source, credential_of_kind, load_credential, save_credential,
 };
-use farik_runtime::daemon::{SETUP_PENDING, SetupError, SetupHost};
-use farik_store::files::{LocalSettings, Sandbox};
-use farik_store::requests::{
+use catervas_runtime::daemon::{SETUP_PENDING, SetupError, SetupHost};
+use catervas_store::files::{LocalSettings, Sandbox};
+use catervas_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_brief,
 };
 use tokio::sync::watch;
@@ -26,20 +26,20 @@ use crate::state::{make_state_dir, state_dir};
 use crate::{HUMAN, init};
 
 /// What `open` and `create` refuse a project another process drives with.
-const BUSY: &str = "another farik is already running this project";
+const BUSY: &str = "another catervas is already running this project";
 /// What `open` and `create` refuse with before a credential is kept.
 const NO_ACCOUNT: &str = "connect your AI account first";
 /// What `open` refuses a folder outside home with.
 const OUTSIDE_HOME: &str = "that folder is outside your home folder";
-/// What `open` refuses home itself with: Farik's settings folder, `~/.config/farik`, would be in
+/// What `open` refuses home itself with: Catervas's settings folder, `~/.config/catervas`, would be in
 /// the project, where a commit could write it (re-review 2 m1).
 const HOME_ITSELF: &str = "your home folder itself cannot be a project; choose a folder inside it";
 
 /// The CLI's setup host.
 pub(crate) struct CliHost {
-    /// The environment `farik serve` was given.
+    /// The environment `catervas serve` was given.
     pub(crate) env: BTreeMap<String, String>,
-    /// Home: `HOME`, else where `farik serve` was run.
+    /// Home: `HOME`, else where `catervas serve` was run.
     pub(crate) home: PathBuf,
     /// The time the events it records are stamped with.
     pub(crate) clock: Arc<dyn Clock + Send + Sync>,
@@ -73,11 +73,11 @@ impl CliHost {
         }
     }
 
-    /// Makes `root` a Farik project when it is not one: `init`, the team paused, and the marker.
+    /// Makes `root` a Catervas project when it is not one: `init`, the team paused, and the marker.
     /// Answers the project, and whether it was made.
     fn taken_on(&self, root: &Path, no_sandbox: bool) -> Result<(Project, bool), SetupError> {
         let now = self.clock.now();
-        let made = !root.join(".farik/team.yaml").exists();
+        let made = !root.join(".catervas/team.yaml").exists();
         if made {
             init::init(root, now).map_err(failed)?;
         }
@@ -109,11 +109,11 @@ impl CliHost {
         root
     }
 
-    /// Runs `git <args>` in `directory`, as farik, with `git` from the environment's `PATH`.
+    /// Runs `git <args>` in `directory`, as catervas, with `git` from the environment's `PATH`.
     fn git(&self, directory: &Path, args: &[&str]) -> Result<(), SetupError> {
         let program = on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
         let output = std::process::Command::new(program)
-            .args(farik_store::git::FARIK_IDENTITY)
+            .args(catervas_store::git::CATERVAS_IDENTITY)
             .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(directory)

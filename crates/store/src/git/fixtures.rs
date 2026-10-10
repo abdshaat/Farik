@@ -21,7 +21,7 @@ impl TempRepo {
     #[must_use]
     pub fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "farik-git-{name}-{}-{:?}",
+            "catervas-git-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -31,8 +31,8 @@ impl TempRepo {
         repository.git(&["init", "-b", "main"]);
         // An identity, because a machine that has none cannot commit at all, and no signing,
         // because that would ask for a key nobody here has.
-        repository.git(&["config", "user.name", "Farik Test"]);
-        repository.git(&["config", "user.email", "test@farik.invalid"]);
+        repository.git(&["config", "user.name", "Catervas Test"]);
+        repository.git(&["config", "user.email", "test@catervas.invalid"]);
         repository.git(&["config", "commit.gpgsign", "false"]);
         // And nothing of the person's own runs or is read inside a fixture. `Git` spawns its own
         // children and honours their configuration on purpose, so the fixture's own configuration
@@ -133,7 +133,7 @@ impl Drop for TempRepo {
 /// The setup is held away from whatever the person running the tests has configured — a global
 /// `core.hooksPath` would otherwise run their hooks inside the fixture. What this cannot do is
 /// isolate the adapter: `Git` spawns its own children, and it honours the user's configuration on
-/// purpose, which is the whole reason Farik shells out to git at all. So no assertion resting on
+/// purpose, which is the whole reason Catervas shells out to git at all. So no assertion resting on
 /// anything a setting can reshape is safe — where one would, the adapter names the flag that makes
 /// the answer its own rather than the configuration's.
 ///

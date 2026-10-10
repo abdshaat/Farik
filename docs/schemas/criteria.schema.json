@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/criteria.schema.json",
-  "title": "FarikCriteriaLibrary",
-  "description": "The named, reusable exit criteria a project verifies its work with, stored as .farik/team/criteria.yaml: the project's own check and test commands found by the project scan, and any the human adds. Referenced by name when a contract is written and expanded into it, so that contracts across a project verify the same way. See docs/SPEC.md section 5.13.",
+  "$id": "https://catervas.dev/schemas/criteria.schema.json",
+  "title": "CatervasCriteriaLibrary",
+  "description": "The named, reusable exit criteria a project verifies its work with, stored as .catervas/team/criteria.yaml: the project's own check and test commands found by the project scan, and any the human adds. Referenced by name when a contract is written and expanded into it, so that contracts across a project verify the same way. See docs/SPEC.md section 5.13.",
   "type": "object",
   "additionalProperties": false,
   "required": [

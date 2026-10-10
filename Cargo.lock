@@ -545,6 +545,123 @@ dependencies = [
 ]
 
 [[package]]
+name = "catervas"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "catervas-core",
+ "catervas-protocol",
+ "catervas-roles",
+ "catervas-runtime",
+ "catervas-store",
+ "chrono",
+ "clap",
+ "futures-util",
+ "reqwest",
+ "rmcp",
+ "rpassword",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
+name = "catervas-core"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "globset",
+ "jsonschema",
+ "regress",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "typify",
+ "url",
+]
+
+[[package]]
+name = "catervas-protocol"
+version = "0.0.0"
+dependencies = [
+ "catervas-core",
+ "chrono",
+ "jsonschema",
+ "regress",
+ "serde",
+ "serde_json",
+ "typify",
+]
+
+[[package]]
+name = "catervas-roles"
+version = "0.0.0"
+dependencies = [
+ "catervas-core",
+ "jsonschema",
+ "regress",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "typify",
+]
+
+[[package]]
+name = "catervas-runtime"
+version = "0.0.0"
+dependencies = [
+ "async-imap",
+ "axum",
+ "base64 0.23.1",
+ "calamine",
+ "catervas-core",
+ "catervas-protocol",
+ "catervas-roles",
+ "catervas-store",
+ "chrono",
+ "futures-util",
+ "http",
+ "jsonschema",
+ "keyring",
+ "keyring-core",
+ "lettre",
+ "mail-parser",
+ "oauth2",
+ "reqwest",
+ "rmcp",
+ "rusqlite",
+ "rust-embed",
+ "rust_xlsxwriter",
+ "rustls-platform-verifier",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "socket2",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tower",
+ "url",
+]
+
+[[package]]
+name = "catervas-store"
+version = "0.0.0"
+dependencies = [
+ "catervas-core",
+ "catervas-protocol",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+]
+
+[[package]]
 name = "cbc"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1002,123 +1119,6 @@ dependencies = [
  "bit-set",
  "regex-automata",
  "regex-syntax",
-]
-
-[[package]]
-name = "farik"
-version = "0.0.0"
-dependencies = [
- "axum",
- "base64 0.23.1",
- "chrono",
- "clap",
- "farik-core",
- "farik-protocol",
- "farik-roles",
- "farik-runtime",
- "farik-store",
- "futures-util",
- "reqwest",
- "rmcp",
- "rpassword",
- "serde_json",
- "sha2 0.11.0",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
-name = "farik-core"
-version = "0.0.0"
-dependencies = [
- "chrono",
- "globset",
- "jsonschema",
- "regress",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "typify",
- "url",
-]
-
-[[package]]
-name = "farik-protocol"
-version = "0.0.0"
-dependencies = [
- "chrono",
- "farik-core",
- "jsonschema",
- "regress",
- "serde",
- "serde_json",
- "typify",
-]
-
-[[package]]
-name = "farik-roles"
-version = "0.0.0"
-dependencies = [
- "farik-core",
- "jsonschema",
- "regress",
- "serde",
- "serde-saphyr",
- "serde_json",
- "typify",
-]
-
-[[package]]
-name = "farik-runtime"
-version = "0.0.0"
-dependencies = [
- "async-imap",
- "axum",
- "base64 0.23.1",
- "calamine",
- "chrono",
- "farik-core",
- "farik-protocol",
- "farik-roles",
- "farik-store",
- "futures-util",
- "http",
- "jsonschema",
- "keyring",
- "keyring-core",
- "lettre",
- "mail-parser",
- "oauth2",
- "reqwest",
- "rmcp",
- "rusqlite",
- "rust-embed",
- "rust_xlsxwriter",
- "rustls-platform-verifier",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "socket2",
- "tokio",
- "tokio-rustls",
- "tokio-tungstenite",
- "tokio-util",
- "tower",
- "url",
-]
-
-[[package]]
-name = "farik-store"
-version = "0.0.0"
-dependencies = [
- "chrono",
- "farik-core",
- "farik-protocol",
- "rusqlite",
- "serde",
- "serde-saphyr",
- "serde_json",
 ]
 
 [[package]]

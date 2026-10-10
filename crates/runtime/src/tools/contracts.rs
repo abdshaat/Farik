@@ -1,19 +1,21 @@
 //! Triage, contract writing, filing tasks, and planning a sprint: the tools that decide what a task
 //! is and when it is worked on.
 
-use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract};
-use farik_core::criteria::expand_criteria;
-use farik_core::governor::gates::{
+use catervas_core::contract::{
+    Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract,
+};
+use catervas_core::criteria::expand_criteria;
+use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteOutcome, ParentEpic, check_child_creation,
     check_contract_write,
 };
-use farik_core::governor::transition_table::TransitionActor;
-use farik_protocol::event::{
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_protocol::event::{
     ContractJudgedBody, ContractWrittenBody, EventBody, EventKind, JudgmentAnswer,
     RequestTriagedBody, RequestTriagedBodySize, Thread,
 };
-use farik_store::EventQuery;
-use farik_store::requests::{RequestError, file_request, summary_of};
+use catervas_store::EventQuery;
+use catervas_store::requests::{RequestError, file_request, summary_of};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -33,7 +35,7 @@ pub(crate) enum Size {
     Small,
 }
 
-/// `farik_triage_request`'s input.
+/// `catervas_triage_request`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TriageInput {
@@ -43,7 +45,7 @@ pub(crate) struct TriageInput {
     reason: String,
 }
 
-/// One answer of `farik_record_judgment`, to the question of the same number.
+/// One answer of `catervas_record_judgment`, to the question of the same number.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct JudgmentAnswerInput {
@@ -53,7 +55,7 @@ pub(crate) struct JudgmentAnswerInput {
     pub(crate) reason: String,
 }
 
-/// `farik_record_judgment`'s input.
+/// `catervas_record_judgment`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordJudgmentInput {
@@ -73,7 +75,7 @@ pub(crate) struct CriterionRef {
     name: String,
 }
 
-/// `farik_write_contract`'s input.
+/// `catervas_write_contract`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteContractInput {
@@ -85,7 +87,7 @@ pub(crate) struct WriteContractInput {
     criteria: Vec<CriterionRef>,
 }
 
-/// `farik_create_task`'s input.
+/// `catervas_create_task`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreateTaskInput {
@@ -95,7 +97,7 @@ pub(crate) struct CreateTaskInput {
     parent: Option<String>,
 }
 
-/// `farik_plan_sprint`'s input.
+/// `catervas_plan_sprint`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PlanSprintInput {
@@ -286,7 +288,7 @@ pub(super) fn write_contract(
     Ok(json!({ "task_id": task.as_str(), "changed": changed, "seq": event.envelope.seq }))
 }
 
-/// Files a new `draft` request as `farik task create` does, or with `parent` a task of that epic
+/// Files a new `draft` request as `catervas task create` does, or with `parent` a task of that epic
 /// once `check_child_creation` allows the caller. A `reviewer_role` left out is filled with the
 /// role the team can staff, when there is one.
 pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Value, ToolError> {
@@ -470,7 +472,7 @@ fn fill_reviewer_role(call: &Call<'_>, wire: &mut Map<String, Value>, kind: Task
     else {
         return;
     };
-    if let Some(reviewer) = farik_roles::default_reviewer_role(&call.team, kind, assignee_role) {
+    if let Some(reviewer) = catervas_roles::default_reviewer_role(&call.team, kind, assignee_role) {
         wire.insert("reviewer_role".to_string(), json!(reviewer.to_string()));
     }
 }
@@ -496,7 +498,7 @@ pub(crate) fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent, Thread};
+    use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, Thread};
     use serde_json::{Value, json};
 
     use crate::session::SessionPurpose;
@@ -526,7 +528,12 @@ mod tests {
         let project = a_project("tools-triage-pm");
         project.filed("FRK-1", "draft", "task", None);
         project
-            .call("pm", Some("FRK-1"), "farik_triage_request", triage("large"))
+            .call(
+                "pm",
+                Some("FRK-1"),
+                "catervas_triage_request",
+                triage("large"),
+            )
             .expect("the Product Manager triages when there is no Scrum Master");
 
         assert_eq!(project.file("FRK-1")["kind"], "epic");
@@ -554,7 +561,7 @@ mod tests {
             project.call(
                 "dev-a",
                 Some("FRK-1"),
-                "farik_triage_request",
+                "catervas_triage_request",
                 triage("small"),
             ),
             "triage_not_allowed",
@@ -574,7 +581,12 @@ mod tests {
         );
         let before = project.event_count();
         refused_with(
-            project.call("pm", Some("FRK-1"), "farik_triage_request", triage("small")),
+            project.call(
+                "pm",
+                Some("FRK-1"),
+                "catervas_triage_request",
+                triage("small"),
+            ),
             "triage_not_allowed",
         );
         assert_eq!(project.event_count(), before);
@@ -592,7 +604,12 @@ mod tests {
         );
         let before = project.event_count();
         refused_with(
-            project.call("pm", Some("FRK-1"), "farik_triage_request", triage("large")),
+            project.call(
+                "pm",
+                Some("FRK-1"),
+                "catervas_triage_request",
+                triage("large"),
+            ),
             "triage_not_allowed",
         );
         assert_eq!(project.event_count(), before);
@@ -607,7 +624,12 @@ mod tests {
         project.filed("FRK-2", "draft", "task", Some("FRK-1"));
         let before = project.event_count();
         refused_with(
-            project.call("pm", Some("FRK-2"), "farik_triage_request", triage("small")),
+            project.call(
+                "pm",
+                Some("FRK-2"),
+                "catervas_triage_request",
+                triage("small"),
+            ),
             "triage_not_allowed",
         );
         assert_eq!(project.event_count(), before);
@@ -620,7 +642,7 @@ mod tests {
             name,
             &a_team_of_three(|wire| {
                 wire["agents"].as_array_mut().expect("agents").push(
-                    farik_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+                    catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
                 );
                 wire["policy"]["judgment"] = json!({ "required": "always" });
             }),
@@ -647,7 +669,7 @@ mod tests {
             .call(
                 "sm",
                 Some("FRK-1"),
-                "farik_record_judgment",
+                "catervas_record_judgment",
                 judgment(true, false, "It fits, but the checks miss the failure."),
             )
             .expect("the judge answers each question");
@@ -707,7 +729,7 @@ mod tests {
             let refused = project.call(
                 "sm",
                 Some("FRK-1"),
-                "farik_record_judgment",
+                "catervas_record_judgment",
                 json!({ "answers": answers, "reason": "One file." }),
             );
             assert!(
@@ -728,7 +750,7 @@ mod tests {
             .call(
                 "sm",
                 Some("FRK-1"),
-                "farik_record_judgment",
+                "catervas_record_judgment",
                 judgment(
                     true,
                     false,
@@ -767,7 +789,7 @@ mod tests {
                 project.call(
                     agent,
                     Some("FRK-1"),
-                    "farik_record_judgment",
+                    "catervas_record_judgment",
                     judgment(
                         true,
                         true,
@@ -790,7 +812,7 @@ mod tests {
             project.call(
                 "sm",
                 Some("FRK-1"),
-                "farik_record_judgment",
+                "catervas_record_judgment",
                 judgment(
                     true,
                     true,
@@ -812,7 +834,7 @@ mod tests {
             project.call(
                 "sm",
                 Some("FRK-1"),
-                "farik_record_judgment",
+                "catervas_record_judgment",
                 judgment(true, true, "  "),
             ),
             "blank_reason",
@@ -829,7 +851,7 @@ mod tests {
             .call(
                 "pm",
                 Some("FRK-1"),
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({
                     "fields": { "intent": "A person signs in and sees only their own work." },
                     "criteria": [{ "id": "C2", "name": "unit-tests" }]
@@ -869,7 +891,7 @@ mod tests {
             project.call(
                 "pm",
                 Some("FRK-1"),
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             ),
             "contract_locked",
@@ -887,7 +909,7 @@ mod tests {
             .call(
                 "pm",
                 None,
-                "farik_create_task",
+                "catervas_create_task",
                 json!({ "contract": request }),
             )
             .expect("the request is filed");
@@ -902,7 +924,7 @@ mod tests {
             .call(
                 "pm",
                 Some(&task),
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({ "fields": { "assignee_role": "software_developer", "reviewer_role": "architect" } }),
             )
             .expect("a draft is the Product Manager's to write");
@@ -928,7 +950,7 @@ mod tests {
             project.call(
                 "dev-a",
                 Some("FRK-1"),
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             ),
             "not_a_contract_writer",
@@ -949,7 +971,7 @@ mod tests {
             project.call(
                 "pm",
                 Some("FRK-1"),
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             ),
             "question_unanswered",
@@ -970,7 +992,7 @@ mod tests {
             project.call(
                 "pm",
                 Some("FRK-1"),
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             )
         };
@@ -1006,7 +1028,7 @@ mod tests {
         };
         let first = asked("Who signs in?");
         let second = asked("Do they stay signed in?");
-        let answer = |question: &FarikEvent| {
+        let answer = |question: &CatervasEvent| {
             project.record(
                 "FRK-1",
                 "question.answered",
@@ -1021,7 +1043,7 @@ mod tests {
             project.call(
                 "pm",
                 Some("FRK-1"),
-                "farik_write_contract",
+                "catervas_write_contract",
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             )
         };
@@ -1047,7 +1069,7 @@ mod tests {
 
         let filed = run(
             &context,
-            "farik_create_task",
+            "catervas_create_task",
             json!({ "contract": a_request() }),
         )
         .expect("a request is filed from a conversation");
@@ -1058,7 +1080,7 @@ mod tests {
         refused_with(
             run(
                 &context,
-                "farik_create_task",
+                "catervas_create_task",
                 json!({ "contract": a_request(), "parent": "FRK-1" }),
             ),
             "channel_limit",
@@ -1081,7 +1103,7 @@ mod tests {
             .call(
                 "pm",
                 None,
-                "farik_create_task",
+                "catervas_create_task",
                 json!({ "contract": a_request(), "parent": "FRK-1" }),
             )
             .expect("the epic's assignee files its tasks");
@@ -1097,7 +1119,7 @@ mod tests {
             project.call(
                 "dev-a",
                 None,
-                "farik_create_task",
+                "catervas_create_task",
                 json!({ "contract": a_request(), "parent": "FRK-1" }),
             ),
             "gate_failed",
@@ -1112,12 +1134,16 @@ mod tests {
         });
     }
 
-    /// `agent` calls `farik_plan_sprint` of `tasks` from a planning ceremony session.
+    /// `agent` calls `catervas_plan_sprint` of `tasks` from a planning ceremony session.
     fn plan(project: &TestProject, agent: &str, tasks: &[&str]) -> Result<Value, ToolError> {
         let mut context = project.context(agent, None);
         context.purpose = SessionPurpose::Ceremony;
         context.thread = Some(Thread::Planning);
-        run(&context, "farik_plan_sprint", json!({ "task_ids": tasks }))
+        run(
+            &context,
+            "catervas_plan_sprint",
+            json!({ "task_ids": tasks }),
+        )
     }
 
     #[test]
@@ -1133,7 +1159,7 @@ mod tests {
             context.purpose = purpose;
             let refused = run(
                 &context,
-                "farik_plan_sprint",
+                "catervas_plan_sprint",
                 json!({ "task_ids": ["FRK-1"] }),
             )
             .expect_err("only the planning ceremony plans");
@@ -1296,14 +1322,14 @@ mod tests {
         project.filed("FRK-1", "ready", "task", None);
         project.open_sprint("S1", None, &[]);
         // An end has written S1's file and not yet recorded `sprint.ended`.
-        let mut ending = farik_core::sprint::fixtures::an_open_sprint_wire();
+        let mut ending = catervas_core::sprint::fixtures::an_open_sprint_wire();
         ending["id"] = json!("S1");
         ending["status"] = json!("ended");
         ending["ended_at"] = json!("2026-09-24T01:00:00Z");
         project
             .deps
             .files
-            .write_sprint(&farik_core::sprint::validate_sprint(&ending).expect("a sprint"))
+            .write_sprint(&catervas_core::sprint::validate_sprint(&ending).expect("a sprint"))
             .expect("S1 is written");
 
         plan_refused(&project, "sm", &["FRK-1"], &["S1", "ended"]);
@@ -1334,7 +1360,7 @@ mod tests {
             .call(
                 "sm",
                 None,
-                "farik_assign_task",
+                "catervas_assign_task",
                 json!({ "task_id": "FRK-4", "assignee_id": "dev-a", "reviewer_id": "dev-b" }),
             )
             .expect("FRK-4 is assigned while S1 is open");
@@ -1382,7 +1408,7 @@ mod tests {
             .call(
                 "pm",
                 None,
-                "farik_create_task",
+                "catervas_create_task",
                 json!({ "contract": a_request(), "parent": "FRK-1" }),
             )
             .expect("the epic's assignee files its tasks");
@@ -1415,7 +1441,7 @@ mod tests {
         );
         project.open_sprint("S1", None, &["FRK-1"]);
         // The human's end has written S1's file and not yet recorded `sprint.ended`.
-        let mut ending = farik_core::sprint::fixtures::an_open_sprint_wire();
+        let mut ending = catervas_core::sprint::fixtures::an_open_sprint_wire();
         ending["id"] = json!("S1");
         ending["task_ids"] = json!(["FRK-1"]);
         ending["status"] = json!("ended");
@@ -1423,14 +1449,14 @@ mod tests {
         project
             .deps
             .files
-            .write_sprint(&farik_core::sprint::validate_sprint(&ending).expect("a sprint"))
+            .write_sprint(&catervas_core::sprint::validate_sprint(&ending).expect("a sprint"))
             .expect("S1 is written");
 
         let answer = project
             .call(
                 "pm",
                 None,
-                "farik_create_task",
+                "catervas_create_task",
                 json!({ "contract": a_request(), "parent": "FRK-1" }),
             )
             .expect("the task is filed though it joins no sprint");
@@ -1444,7 +1470,7 @@ mod tests {
 
     /// A request as its author writes it.
     fn a_request() -> serde_json::Map<String, Value> {
-        let mut wire = farik_core::contract::fixtures::a_contract_wire();
+        let mut wire = catervas_core::contract::fixtures::a_contract_wire();
         let object = wire.as_object_mut().expect("a mapping");
         object.remove("id");
         object.remove("status");

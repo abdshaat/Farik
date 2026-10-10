@@ -1,4 +1,4 @@
-//! Setup mode (`docs/SPEC.md` section 4.1): the daemon `farik serve` runs before there is a
+//! Setup mode (`docs/SPEC.md` section 4.1): the daemon `catervas serve` runs before there is a
 //! project, answering the first-run wizard through a host the CLI gives it, since runtime cannot
 //! call the CLI's `init` or request filing.
 

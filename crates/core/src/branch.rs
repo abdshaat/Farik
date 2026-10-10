@@ -3,7 +3,7 @@
 //! `docs/<id>` for every other role's task, because only those two change code.
 
 use crate::contract::TaskContract;
-use crate::generated::task_contract::FarikTaskContractChange as Change;
+use crate::generated::task_contract::CatervasTaskContractChange as Change;
 use crate::team::changes_code;
 
 /// The branch a task works on. A Software Developer's or a UI/UX Designer's task works on
@@ -26,7 +26,7 @@ pub fn task_branch(contract: &TaskContract) -> String {
 mod tests {
     use super::task_branch;
     use crate::contract::Role;
-    use crate::generated::task_contract::FarikTaskContractChange as Change;
+    use crate::generated::task_contract::CatervasTaskContractChange as Change;
     use crate::governor::readiness::fixtures::a_contract;
 
     fn a_task(role: Role, change: Option<Change>) -> crate::contract::TaskContract {

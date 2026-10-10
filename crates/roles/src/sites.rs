@@ -1,4 +1,4 @@
-//! Farik's approved sites (`docs/SPEC.md` 6.10, ADR 0039): the long-established shops the
+//! Catervas's approved sites (`docs/SPEC.md` 6.10, ADR 0039): the long-established shops the
 //! Procurement Specialist may read from its first task, shipped in its folder as public data.
 //! The file is held to `docs/schemas/approved-sites.schema.json`, and then to the rule the schema
 //! cannot say: each host is a bare site, and none is listed twice.
@@ -7,11 +7,11 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::LazyLock;
 
-use farik_core::governor::sites::site_of;
+use catervas_core::governor::sites::site_of;
 use jsonschema::Validator;
 use serde_json::Value;
 
-use crate::generated::approved_sites::FarikApprovedSites;
+use crate::generated::approved_sites::CatervasApprovedSites;
 pub use crate::generated::approved_sites::SiteCategory;
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/approved-sites.schema.json");
@@ -28,9 +28,9 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     )
 });
 
-/// One shop on Farik's list.
+/// One shop on Catervas's list.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FarikSite {
+pub struct CatervasSite {
     /// The shop's primary domain, as `site_of` gives it back.
     pub host: String,
     /// The shop's name as the owner reads it.
@@ -42,7 +42,7 @@ pub struct FarikSite {
 /// Why a list of sites could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SitesError {
-    /// The file is not Farik's list of sites.
+    /// The file is not Catervas's list of sites.
     Invalid {
         /// Each refusal as `<json pointer>: <code>: <words>`, joined by `; `.
         detail: String,
@@ -71,7 +71,7 @@ impl std::error::Error for SitesError {}
 /// # Errors
 ///
 /// `Invalid`, naming each refusal at its entry as `<json pointer>: <code>: <words>`.
-pub fn parse_farik_sites(yaml: &str) -> Result<Vec<FarikSite>, SitesError> {
+pub fn parse_catervas_sites(yaml: &str) -> Result<Vec<CatervasSite>, SitesError> {
     let invalid = |detail: String| SitesError::Invalid { detail };
     let value = crate::yaml_value(yaml, "approved_sites.yaml").map_err(invalid)?;
     let schema: Vec<String> = VALIDATOR
@@ -81,7 +81,7 @@ pub fn parse_farik_sites(yaml: &str) -> Result<Vec<FarikSite>, SitesError> {
     if !schema.is_empty() {
         return Err(invalid(schema.join("; ")));
     }
-    let file: FarikApprovedSites = serde_json::from_value(value).map_err(|error| {
+    let file: CatervasApprovedSites = serde_json::from_value(value).map_err(|error| {
         invalid(format!(
             "the schema passed but the typed list could not be built: {error}"
         ))
@@ -105,7 +105,7 @@ pub fn parse_farik_sites(yaml: &str) -> Result<Vec<FarikSite>, SitesError> {
                 site.host
             ));
         }
-        sites.push(FarikSite {
+        sites.push(CatervasSite {
             host: site.host,
             shop: site.shop.to_string(),
             category: site.category,
@@ -118,25 +118,25 @@ pub fn parse_farik_sites(yaml: &str) -> Result<Vec<FarikSite>, SitesError> {
     }
 }
 
-static FARIK_SITES: LazyLock<Vec<FarikSite>> = LazyLock::new(|| {
-    parse_farik_sites(SITES_YAML).expect(
+static CATERVAS_SITES: LazyLock<Vec<CatervasSite>> = LazyLock::new(|| {
+    parse_catervas_sites(SITES_YAML).expect(
         "the shipped approved_sites.yaml is a valid list: the test \
-         farik_s_approved_sites_are_well_formed rules the failure out",
+         catervas_s_approved_sites_are_well_formed rules the failure out",
     )
 });
 
-/// Farik's approved sites in the order the file lists them, read once: every team's Procurement
+/// Catervas's approved sites in the order the file lists them, read once: every team's Procurement
 /// Specialist may read these from its first task, unless its owner turned one off.
 #[must_use]
-pub fn farik_sites() -> &'static [FarikSite] {
-    &FARIK_SITES
+pub fn catervas_sites() -> &'static [CatervasSite] {
+    &CATERVAS_SITES
 }
 
 #[cfg(test)]
 mod tests {
-    use farik_core::governor::sites::site_of;
+    use catervas_core::governor::sites::site_of;
 
-    use super::{FarikSite, SiteCategory, SitesError, farik_sites, parse_farik_sites};
+    use super::{CatervasSite, SiteCategory, SitesError, catervas_sites, parse_catervas_sites};
 
     /// One entry of a hand-written list.
     fn entry(host: &str, shop: &str, category: &str) -> String {
@@ -148,7 +148,7 @@ mod tests {
     }
 
     fn refusal_of(yaml: &str) -> String {
-        match parse_farik_sites(yaml) {
+        match parse_catervas_sites(yaml) {
             Err(SitesError::Invalid { detail }) => detail,
             other => panic!("expected a refusal, got {other:?}"),
         }
@@ -192,14 +192,14 @@ mod tests {
             entry("a.example", "Ay", "software"),
         ]);
         assert_eq!(
-            parse_farik_sites(&yaml),
+            parse_catervas_sites(&yaml),
             Ok(vec![
-                FarikSite {
+                CatervasSite {
                     host: "b.example".to_string(),
                     shop: "Bee".to_string(),
                     category: SiteCategory::Furniture,
                 },
-                FarikSite {
+                CatervasSite {
                     host: "a.example".to_string(),
                     shop: "Ay".to_string(),
                     category: SiteCategory::Software,
@@ -209,8 +209,8 @@ mod tests {
     }
 
     #[test]
-    fn farik_s_approved_sites_are_well_formed() {
-        let sites = farik_sites();
+    fn catervas_s_approved_sites_are_well_formed() {
+        let sites = catervas_sites();
         assert!(!sites.is_empty());
         let mut seen = std::collections::BTreeSet::new();
         for site in sites {

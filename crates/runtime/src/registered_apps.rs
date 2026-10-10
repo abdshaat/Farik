@@ -1,5 +1,5 @@
-//! The apps Farik has registered with a service (ADR 0035, route 2): a public client Farik owns,
-//! used only for the servers whose address the table names, so that a token from Farik's app is
+//! The apps Catervas has registered with a service (ADR 0035, route 2): a public client Catervas owns,
+//! used only for the servers whose address the table names, so that a token from Catervas's app is
 //! never sent to a host the app does not serve.
 
 use std::fmt;
@@ -9,8 +9,8 @@ use url::{Host, Url};
 /// How a registered app signs a user in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppFlow {
-    /// The device flow (RFC 8628): Farik asks the service for a code, the user types it on the
-    /// service's page, and Farik polls until the service says yes.
+    /// The device flow (RFC 8628): Catervas asks the service for a code, the user types it on the
+    /// service's page, and Catervas polls until the service says yes.
     Device {
         /// Where the device code is asked for.
         device_endpoint: &'static str,
@@ -18,7 +18,7 @@ pub enum AppFlow {
         verification_uri: &'static str,
     },
     /// The authorization-code flow with PKCE, back to a listener on this computer, for an app
-    /// that signs in for one of Farik's own connectors: Farik makes the requests itself, since
+    /// that signs in for one of Catervas's own connectors: Catervas makes the requests itself, since
     /// there is no MCP server whose metadata to discover.
     Loopback {
         /// The page the user is sent to, which asks them to say yes.
@@ -26,7 +26,7 @@ pub enum AppFlow {
     },
 }
 
-/// One app Farik has registered with a service.
+/// One app Catervas has registered with a service.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RegisteredApp {
     /// What a kept grant names it by.
@@ -34,11 +34,11 @@ pub struct RegisteredApp {
     /// What the screens call it.
     pub name: &'static str,
     /// The one host it serves, by the server's address and never by what the server's metadata
-    /// says; none for an app that signs in for one of Farik's own connectors, whose server is no
+    /// says; none for an app that signs in for one of Catervas's own connectors, whose server is no
     /// address.
     pub host: Option<&'static str>,
-    /// The one of Farik's own connectors (`farik connector <name>`) it signs in for, if it does.
-    pub farik_connector: Option<&'static str>,
+    /// The one of Catervas's own connectors (`catervas connector <name>`) it signs in for, if it does.
+    pub catervas_connector: Option<&'static str>,
     /// How a user signs in to it.
     pub flow: AppFlow,
     /// The app's client id, which is public.
@@ -68,7 +68,7 @@ impl fmt::Debug for RegisteredApp {
             .field("id", &self.id)
             .field("name", &self.name)
             .field("host", &self.host)
-            .field("farik_connector", &self.farik_connector)
+            .field("catervas_connector", &self.catervas_connector)
             .field("flow", &self.flow)
             .field("client_id", &self.client_id)
             .field("client_secret", &self.client_secret.map(|_| "***"))
@@ -82,17 +82,17 @@ impl fmt::Debug for RegisteredApp {
     }
 }
 
-/// Farik's Google app, which signs in for Farik's `google-ads` connector alone (ADR 0042) with
+/// Catervas's Google app, which signs in for Catervas's `google-ads` connector alone (ADR 0042) with
 /// the one scope it needs, `id` and `secret` being its client id and client secret. No build holds
 /// either (ADR 0044): the tests make an entry from ids of their own, and phase 8's sign-in
-/// through Farik Cloud, which holds Farik's, builds on these facts.
+/// through Catervas Cloud, which holds Catervas's, builds on these facts.
 #[cfg(test)]
 const fn google(id: &'static str, secret: &'static str) -> RegisteredApp {
     RegisteredApp {
         id: "google",
         name: "Google",
         host: None,
-        farik_connector: Some("google-ads"),
+        catervas_connector: Some("google-ads"),
         flow: AppFlow::Loopback {
             authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
         },
@@ -109,8 +109,8 @@ const fn google(id: &'static str, secret: &'static str) -> RegisteredApp {
     }
 }
 
-/// Every app Farik has registered: none. No build carries an app of Farik's, and from phase 8
-/// Farik Cloud serves Farik's apps (ADR 0044); the tests pass tables of their own.
+/// Every app Catervas has registered: none. No build carries an app of Catervas's, and from phase 8
+/// Catervas Cloud serves Catervas's apps (ADR 0044); the tests pass tables of their own.
 pub static REGISTERED_APPS: &[RegisteredApp] = &[];
 
 /// The app of `apps` that serves the server at `url`, if one does.
@@ -133,22 +133,22 @@ pub fn app_for<'a>(apps: &'a [RegisteredApp], url: &str) -> Option<&'a Registere
 }
 
 /// The app of `apps` that signs in for the connector `command` and `args` start, when they are,
-/// exactly, `farik connector <name>` for one of Farik's own connectors and the app's is `<name>`.
+/// exactly, `catervas connector <name>` for one of Catervas's own connectors and the app's is `<name>`.
 #[must_use]
-pub fn app_for_farik_connector<'a>(
+pub fn app_for_catervas_connector<'a>(
     apps: &'a [RegisteredApp],
     command: &str,
     args: &[String],
 ) -> Option<&'a RegisteredApp> {
-    if !farik_roles::is_farik_connector(command, args) {
+    if !catervas_roles::is_catervas_connector(command, args) {
         return None;
     }
     let connector = args.get(1)?;
     apps.iter()
-        .find(|app| app.farik_connector == Some(connector.as_str()))
+        .find(|app| app.catervas_connector == Some(connector.as_str()))
 }
 
-/// Whether `url` names this computer, which is the only place Farik talks to over `http`.
+/// Whether `url` names this computer, which is the only place Catervas talks to over `http`.
 fn is_loopback(url: &Url) -> bool {
     match url.host() {
         Some(Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
@@ -158,7 +158,7 @@ fn is_loopback(url: &Url) -> bool {
     }
 }
 
-/// What the tests of other modules need: a table whose one entry signs in for Farik's connector
+/// What the tests of other modules need: a table whose one entry signs in for Catervas's connector
 /// `osv` at the OAuth fixture.
 #[cfg(all(test, unix))]
 pub(crate) mod fixtures {
@@ -183,7 +183,7 @@ pub(crate) mod fixtures {
             id: "google-test",
             name: "Google test",
             host: None,
-            farik_connector: Some("osv"),
+            catervas_connector: Some("osv"),
             flow: AppFlow::Loopback {
                 authorization_endpoint: leaked(format!("{origin}/o/oauth2/v2/auth")),
             },
@@ -208,7 +208,7 @@ mod tests {
         id: "github",
         name: "GitHub",
         host: Some("api.githubcopilot.com"),
-        farik_connector: None,
+        catervas_connector: None,
         flow: AppFlow::Device {
             device_endpoint: "https://auth.example/device/code",
             verification_uri: "https://auth.example/device",
@@ -219,7 +219,7 @@ mod tests {
         issuer: "https://auth.example/oauth",
         token_endpoint: "https://auth.example/oauth/access_token",
         revocation_endpoint: None,
-        install_url: Some("https://auth.example/apps/farik/installations/new"),
+        install_url: Some("https://auth.example/apps/catervas/installations/new"),
         settings_url: "https://auth.example/settings/apps",
     };
 
@@ -230,12 +230,12 @@ mod tests {
         }
     }
 
-    /// An entry that signs in for one of Farik's own connectors, whose server answers no address.
+    /// An entry that signs in for one of Catervas's own connectors, whose server answers no address.
     fn signing_in_for(connector: &'static str, id: &'static str) -> RegisteredApp {
         RegisteredApp {
             id,
             host: None,
-            farik_connector: Some(connector),
+            catervas_connector: Some(connector),
             client_secret: Some("a-secret"),
             scopes: &["a-scope"],
             issuer: "https://accounts.example",
@@ -290,8 +290,8 @@ mod tests {
         assert!(app_for(&table, "http://10.0.0.1:4000/mcp").is_none());
     }
 
-    /// No build carries an app of Farik's (ADR 0044): the table is empty, so it holds no Google
-    /// entry and no entry for a connector of Farik's or for an address, whatever the build's
+    /// No build carries an app of Catervas's (ADR 0044): the table is empty, so it holds no Google
+    /// entry and no entry for a connector of Catervas's or for an address, whatever the build's
     /// environment. A guard, proved by a mutation: a table built from `google(..)` fails it.
     #[test]
     fn the_shipped_table_is_empty_in_every_build() {
@@ -301,7 +301,7 @@ mod tests {
         assert!(
             REGISTERED_APPS
                 .iter()
-                .all(|app| app.farik_connector.is_none())
+                .all(|app| app.catervas_connector.is_none())
         );
     }
 
@@ -311,7 +311,7 @@ mod tests {
         assert_eq!(google.id, "google");
         assert_eq!(google.name, "Google");
         assert_eq!(google.host, None, "it serves no address");
-        assert_eq!(google.farik_connector, Some("google-ads"));
+        assert_eq!(google.catervas_connector, Some("google-ads"));
         assert_eq!(
             google.flow,
             AppFlow::Loopback {
@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_a_farik_connector_by_its_exact_pair() {
+    fn matches_a_catervas_connector_by_its_exact_pair() {
         // The entry for the word, not the table's first, nor one whose word it begins.
         let table = [
             signing_in_for("ads", "for-ads"),
@@ -351,18 +351,18 @@ mod tests {
             signing_in_for("osv", "for-osv"),
         ];
         let found = |command: &str, args: &[&str]| {
-            app_for_farik_connector(&table, command, &words(args)).map(|app| app.id)
+            app_for_catervas_connector(&table, command, &words(args)).map(|app| app.id)
         };
-        assert_eq!(found("farik", &["connector", "osv"]), Some("for-osv"));
+        assert_eq!(found("catervas", &["connector", "osv"]), Some("for-osv"));
         for (command, args) in [
-            ("farik", vec!["connector", "osv", "x"]),
-            // `ads` is not one of Farik's own connectors, so its entry is never answered.
-            ("farik", vec!["connector", "ads"]),
-            ("farik-osv", vec!["connector", "osv"]),
-            ("/usr/bin/farik", vec!["connector", "osv"]),
-            ("FARIK", vec!["connector", "osv"]),
+            ("catervas", vec!["connector", "osv", "x"]),
+            // `ads` is not one of Catervas's own connectors, so its entry is never answered.
+            ("catervas", vec!["connector", "ads"]),
+            ("catervas-osv", vec!["connector", "osv"]),
+            ("/usr/bin/catervas", vec!["connector", "osv"]),
+            ("CATERVAS", vec!["connector", "osv"]),
             ("npx", vec!["connector", "osv"]),
-            ("farik", vec!["osv"]),
+            ("catervas", vec!["osv"]),
         ] {
             assert_eq!(found(command, &args), None, "{command} {args:?}");
         }

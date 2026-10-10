@@ -5,8 +5,13 @@ use crate::governor::paths::check_protected_paths;
 
 /// The protected paths every team starts with (`docs/SPEC.md` section 5.6): secrets that no
 /// tool may read or write.
-pub const DEFAULT_PROTECTED_PATHS: [&str; 5] =
-    [".env", ".env.*", "**/*.pem", "**/*.key", ".farik/local/**"];
+pub const DEFAULT_PROTECTED_PATHS: [&str; 5] = [
+    ".env",
+    ".env.*",
+    "**/*.pem",
+    "**/*.key",
+    ".catervas/local/**",
+];
 
 /// The document paths every team starts with (`docs/SPEC.md` section 5.12): where a task for any
 /// role but the Software Developer may make changes. `team.schema.json` holds the same three as
@@ -26,7 +31,7 @@ pub const DEFAULT_UI_PATHS: [&str; 7] = [
     "**/*.html",
 ];
 
-/// Constraints the human writes once in `.farik/team.yaml` under `rules`, applied by the governor
+/// Constraints the human writes once in `.catervas/team.yaml` under `rules`, applied by the governor
 /// to every contract and every tool call (`docs/SPEC.md` section 5.12). Rules never loosen a
 /// permission tier; they only narrow what a granted tier allows.
 #[derive(Debug, Clone, PartialEq)]
@@ -150,7 +155,13 @@ mod tests {
         let rules = TeamRules::default();
         assert_eq!(
             rules.protected_paths,
-            [".env", ".env.*", "**/*.pem", "**/*.key", ".farik/local/**"]
+            [
+                ".env",
+                ".env.*",
+                "**/*.pem",
+                "**/*.key",
+                ".catervas/local/**"
+            ]
         );
         assert_eq!(rules.max_task_budget_usd, None);
     }

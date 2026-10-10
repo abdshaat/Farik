@@ -1,4 +1,4 @@
-import { Button, Dialog, TextField } from "@farik/ui";
+import { Button, Dialog, TextField } from "@catervas/ui";
 import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import { calendarDay, type OrderItem, todayIso } from "../orders.ts";
@@ -11,7 +11,7 @@ import { visibly } from "./ToolApproval.tsx";
 /**
  * "Mark PO-n placed" (spec 6.10): the day the owner placed it and, if they know, what they paid.
  * Ticked, it also files their request to follow the order up until it arrives, in words they may
- * change first. Farik places nothing: this records what the owner did.
+ * change first. Catervas places nothing: this records what the owner did.
  */
 export function MarkPlaced({
 	order,

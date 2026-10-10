@@ -1,4 +1,4 @@
-import { Button, Dialog, TextArea, TextField } from "@farik/ui";
+import { Button, Dialog, TextArea, TextField } from "@catervas/ui";
 import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import { calendarDay, todayIso } from "../orders.ts";

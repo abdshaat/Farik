@@ -13,7 +13,7 @@ one step.
 
 ## 2. Forward, and a way back
 
-A migration runs forward and has a way back. Run both with `farik_exec`, against the database the
+A migration runs forward and has a way back. Run both with `catervas_exec`, against the database the
 project's own tools start in the sandbox, when the project has one. When it has none, say in the
 completion note that they were not run.
 

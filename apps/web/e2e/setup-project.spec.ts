@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { farik, gitProject, startServe } from "./fixtures/serve.ts";
+import { catervas, gitProject, startServe } from "./fixtures/serve.ts";
 
 const shots = new URL("./screenshots/", import.meta.url).pathname;
 
@@ -20,8 +20,8 @@ async function screenshots(page: Page, name: string) {
 test("a first run checks the computer, keeps the key, and takes the project on", async ({
 	page,
 }) => {
-	// A home with one git project, and Farik started in an empty folder with no key anywhere.
-	const home = realpathSync(mkdtempSync(join(tmpdir(), "farik-e2e-home-")));
+	// A home with one git project, and Catervas started in an empty folder with no key anywhere.
+	const home = realpathSync(mkdtempSync(join(tmpdir(), "catervas-e2e-home-")));
 	const project = join(home, "Projects", "corner-bakery");
 	gitProject(project);
 	const serve = await startServe({ transcripts: [], project: false, home });
@@ -49,9 +49,11 @@ test("a first run checks the computer, keeps the key, and takes the project on",
 		await page.getByRole("button", { name: "Save and continue" }).click();
 
 		await expect(page).toHaveURL(/\/setup\/project$/);
-		// No keychain here, so the key went to a private file in Farik's state folder.
+		// No keychain here, so the key went to a private file in Catervas's state folder.
 		await expect(page.getByText(/saved in a private file/)).toBeVisible();
-		expect(existsSync(join(home, ".config/farik/credential.json"))).toBe(true);
+		expect(existsSync(join(home, ".config/catervas/credential.json"))).toBe(
+			true,
+		);
 		await screenshots(page, "setup-question");
 		await page.getByRole("button", { name: "Continue" }).click();
 		const folders = page.getByRole("group", { name: "Folders" });
@@ -60,14 +62,14 @@ test("a first run checks the computer, keeps the key, and takes the project on",
 		await screenshots(page, "setup-folders");
 		await page.getByRole("button", { name: "Use this folder" }).click();
 
-		// Farik restarts on the project, the page reconnects by itself, and the team's setup
+		// Catervas restarts on the project, the page reconnects by itself, and the team's setup
 		// starts from what the scan found.
 		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/setup/scan`, {
 			timeout: 30_000,
 		});
 		await expect(
 			page.getByRole("heading", {
-				name: "Here is what Farik found in your project",
+				name: "Here is what Catervas found in your project",
 			}),
 		).toBeVisible();
 		await expect(page.getByText("What it is")).toBeVisible();
@@ -75,7 +77,7 @@ test("a first run checks the computer, keeps the key, and takes the project on",
 		// Until the team is set up, a deep link goes back to where setup stands.
 		await page.goto(`http://127.0.0.1:${serve.port}/settings`);
 		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/setup/scan`);
-		const kinds = farik(project, ["--json", "log"])
+		const kinds = catervas(project, ["--json", "log"])
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line).kind);

@@ -1,6 +1,6 @@
-import { toCamel } from "@farik/protocol-client";
-import { AVATAR_URLS } from "@farik/ui";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { toCamel } from "@catervas/protocol-client";
+import { AVATAR_URLS } from "@catervas/ui";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	cleanup,
 	fireEvent,
@@ -42,7 +42,7 @@ const FIVE = [
 	agent("kai", "Kai", "marketing_specialist", "marketing-specialist"),
 ];
 const IRIS = agent("iris", "Iris", "ui_ux_designer", "extra-1");
-/** The six Farik suggests: the five, with the Designer after the Developer. */
+/** The six Catervas suggests: the five, with the Designer after the Developer. */
 const SIX = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
 const TESTS_PASS = {
 	name: "the-tests-pass",
@@ -326,7 +326,7 @@ describe("team setup", () => {
 		const face = include.closest("li")?.querySelector("img") as HTMLElement;
 		expect(face.getAttribute("src")).toBe(AVATAR_URLS["extra-1"]);
 		expect(face.style.getPropertyValue("--ring")).toBe(
-			"var(--farik-color-role-ui-ux-designer)",
+			"var(--catervas-color-role-ui-ux-designer)",
 		);
 		await expectNoAxeViolations(container);
 
@@ -451,7 +451,7 @@ describe("team setup", () => {
 			expect(
 				(within(row).getByRole("checkbox") as HTMLInputElement).checked,
 			).toBe(true);
-		// "More roles" follows "Add someone" and offers the two roles Farik does not suggest.
+		// "More roles" follows "Add someone" and offers the two roles Catervas does not suggest.
 		const more = screen.getByRole("region", { name: en.setupMoreRoles });
 		expect(within(more).getByText(en.setupMoreRolesNote)).toBeTruthy();
 		expect(
@@ -476,14 +476,14 @@ describe("team setup", () => {
 				"Finance Specialist",
 				"Noor",
 				AVATAR_URLS["finance-specialist"],
-				"var(--farik-color-role-finance-specialist)",
+				"var(--catervas-color-role-finance-specialist)",
 			],
 			[
 				false,
 				"Procurement Specialist",
 				"Ivo",
 				AVATAR_URLS["extra-5"],
-				"var(--farik-color-role-procurement-specialist)",
+				"var(--catervas-color-role-procurement-specialist)",
 			],
 		]);
 		expect(
@@ -1027,7 +1027,7 @@ describe("team setup", () => {
 		expect(
 			(
 				screen.getByRole("radio", {
-					name: /^Farik adds it/,
+					name: /^Catervas adds it/,
 				}) as HTMLInputElement
 			).checked,
 		).toBe(true);
@@ -1076,7 +1076,7 @@ describe("team setup", () => {
 		});
 		expect(
 			await screen.findByRole("radio", {
-				name: "Farik chooses: Mira, the Product Manager",
+				name: "Catervas chooses: Mira, the Product Manager",
 			}),
 		).toBeTruthy();
 		expect(
@@ -1152,7 +1152,7 @@ describe("team setup", () => {
 				.disabled,
 		).toBe(true);
 
-		fireEvent.click(screen.getByRole("radio", { name: /^Farik chooses/ }));
+		fireEvent.click(screen.getByRole("radio", { name: /^Catervas chooses/ }));
 		await answerQuery(s, "team.validate", { errors: [], effects: [] });
 		await waitFor(() =>
 			expect(
@@ -1288,7 +1288,7 @@ describe("team setup", () => {
 		expect(
 			(
 				screen.getByRole("radio", {
-					name: /^Farik adds it/,
+					name: /^Catervas adds it/,
 				}) as HTMLInputElement
 			).checked,
 		).toBe(true);
@@ -1419,7 +1419,10 @@ const THREE = {
 		budgets: { daily_usd: 20 },
 	},
 };
-const LISTED = { folder: "/home/me/.config/farik/templates", unreadable: [] };
+const LISTED = {
+	folder: "/home/me/.config/catervas/templates",
+	unreadable: [],
+};
 /** A saved team that holds a Procurement Specialist. */
 const SHOP = {
 	slug: "shop-team",
@@ -1701,7 +1704,7 @@ describe("team setup's three starts", () => {
 			if (!f) throw new Error("no templates.list was asked");
 			return f;
 		});
-		await t2.fail(listing, -32005, "farik has no state folder", {
+		await t2.fail(listing, -32005, "catervas has no state folder", {
 			errors: [{ path: "/", message: "no folder", code: "no_state_folder" }],
 		});
 		const nowhere = (await screen.findByRole("radio", {

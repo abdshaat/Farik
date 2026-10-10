@@ -70,7 +70,9 @@ test("a Designer's task and a design review run through the real server and brow
 		expect(explored?.body.width).toBe("phone");
 		const shot = String(explored?.body.screenshot);
 		expect(
-			existsSync(join(serve.project, ".farik/local/screenshots/FRK-1", shot)),
+			existsSync(
+				join(serve.project, ".catervas/local/screenshots/FRK-1", shot),
+			),
 		).toBe(true);
 
 		// 3 and 4. The plan waits for Mira and is approved; Iris implements, Ada reviews, and it is

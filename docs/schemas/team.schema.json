@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/team.schema.json",
-  "title": "FarikTeam",
-  "description": "A team and everything the human configures about it, stored as .farik/team.yaml and read by the governor on every decision. See docs/SPEC.md sections 3, 5.12, 5.14 and 5.16, and decision D18 in docs/plans/project-plan.md.",
+  "$id": "https://catervas.dev/schemas/team.schema.json",
+  "title": "CatervasTeam",
+  "description": "A team and everything the human configures about it, stored as .catervas/team.yaml and read by the governor on every decision. See docs/SPEC.md sections 3, 5.12, 5.14 and 5.16, and decision D18 in docs/plans/project-plan.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -45,7 +45,7 @@
       "items": {
         "$ref": "#/$defs/skillPin"
       },
-      "description": "The skills given to the whole team, each pinned by the hash of its folder `.farik/skills/<name>/` (spec 6.7, ADR 0034). Only skill_save, skill_remove and skill_confirm change a pin. A name appears once in a list (validate_team: skill_name_twice)."
+      "description": "The skills given to the whole team, each pinned by the hash of its folder `.catervas/skills/<name>/` (spec 6.7, ADR 0034). Only skill_save, skill_remove and skill_confirm change a pin. A name appears once in a list (validate_team: skill_name_twice)."
     }
   },
   "$defs": {
@@ -82,7 +82,7 @@
           "description": "The page to open first. Left out, /."
         }
       },
-      "description": "How Farik opens the project's app for the ui_ux_designer (ADR 0026, the founder's D2): set once in Settings, under How to open your app. Without it a Designer's task is not assigned and a design review waits. Templates leave it out."
+      "description": "How Catervas opens the project's app for the ui_ux_designer (ADR 0026, the founder's D2): set once in Settings, under How to open your app. Without it a Designer's task is not assigned and a design review waits. Templates leave it out."
     },
     "mcpServer": {
       "type": "object",
@@ -91,12 +91,12 @@
         "name",
         "source"
       ],
-      "description": "One connector an agent's task sessions get (spec 5.6). A builtin one is its name alone. A kit one is written whole, as a custom one is, with source kit. A custom one says how it is started (stdio: command and args) or reached (http: url and headers), the names of the agent's keys it is given, and the label of each of its tools. validate_team checks what this schema does not, each at its own field: transport is required with source custom and absent with builtin; command and args go with stdio only; url and headers with http only; command with stdio and url with http are required; a command holding a / starts with one (command_not_absolute); a url holds no userinfo or query (url_holds_secret); a header names only a key in credential_keys (header_key_unknown); a header named Authorization, or holding key, token, secret or auth in its name, holds a {KEY} rather than a value (header_holds_secret); a custom name is not farik or a builtin's (connector_name_reserved); and one name appears once on an agent (connector_name_twice).",
+      "description": "One connector an agent's task sessions get (spec 5.6). A builtin one is its name alone. A kit one is written whole, as a custom one is, with source kit. A custom one says how it is started (stdio: command and args) or reached (http: url and headers), the names of the agent's keys it is given, and the label of each of its tools. validate_team checks what this schema does not, each at its own field: transport is required with source custom and absent with builtin; command and args go with stdio only; url and headers with http only; command with stdio and url with http are required; a command holding a / starts with one (command_not_absolute); a url holds no userinfo or query (url_holds_secret); a header names only a key in credential_keys (header_key_unknown); a header named Authorization, or holding key, token, secret or auth in its name, holds a {KEY} rather than a value (header_holds_secret); a custom name is not catervas or a builtin's (connector_name_reserved); and one name appears once on an agent (connector_name_twice).",
       "properties": {
         "name": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]{0,39}$",
-          "description": "The connector's name on this agent, and its tools' mcp__<name>__ prefix: lower-case letters, digits and hyphens, never an underscore. validate_team refuses a builtin one Farik does not ship with unknown_connector; the one it ships is playwright."
+          "description": "The connector's name on this agent, and its tools' mcp__<name>__ prefix: lower-case letters, digits and hyphens, never an underscore. validate_team refuses a builtin one Catervas does not ship with unknown_connector; the one it ships is playwright."
         },
         "source": {
           "type": "string",
@@ -105,7 +105,7 @@
             "custom",
             "kit"
           ],
-          "description": "Where the connector's definition comes from: builtin, shipped in the farik binary; custom, added by the user to this agent; kit, a service of the agent's role's kit, written whole with the kit's tags as its tools (ADR 0036). A kit entry is held to every rule of a custom one, and the daemon refuses one that is not exactly the kit's (connector_not_in_kit)."
+          "description": "Where the connector's definition comes from: builtin, shipped in the catervas binary; custom, added by the user to this agent; kit, a service of the agent's role's kit, written whole with the kit's tags as its tools (ADR 0036). A kit entry is held to every rule of a custom one, and the daemon refuses one that is not exactly the kit's (connector_not_in_kit)."
         },
         "transport": {
           "type": "string",
@@ -113,7 +113,7 @@
             "stdio",
             "http"
           ],
-          "description": "How a custom connector is reached: stdio, a program Farik starts on the host; http, a web address spoken to over streamable HTTP. The old SSE transport is not supported."
+          "description": "How a custom connector is reached: stdio, a program Catervas starts on the host; http, a web address spoken to over streamable HTTP. The old SSE transport is not supported."
         },
         "command": {
           "type": "string",
@@ -186,13 +186,13 @@
         "oauth": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Present when the user signed in to this http connector's service instead of pasting a key (ADR 0033), or to Farik's own connector's, which Farik signs in with its own app (ADR 0038): the stdio entry with command farik and args connector and a name, and no other stdio entry. The tokens are never here; they are kept with the agent's keys. validate_team refuses it on any other stdio connector (oauth_on_stdio), beside credential_keys (oauth_with_keys), beside a header named Authorization in any case (oauth_header_conflict), callback_port without client_id (callback_port_without_client), and, on Farik's own connector, client_id and callback_port (farik_connector_client): the app's id and port are Farik's.",
+          "description": "Present when the user signed in to this http connector's service instead of pasting a key (ADR 0033), or to Catervas's own connector's, which Catervas signs in with its own app (ADR 0038): the stdio entry with command catervas and args connector and a name, and no other stdio entry. The tokens are never here; they are kept with the agent's keys. validate_team refuses it on any other stdio connector (oauth_on_stdio), beside credential_keys (oauth_with_keys), beside a header named Authorization in any case (oauth_header_conflict), callback_port without client_id (callback_port_without_client), and, on Catervas's own connector, client_id and callback_port (catervas_connector_client): the app's id and port are Catervas's.",
           "properties": {
             "client_id": {
               "type": "string",
               "minLength": 1,
               "maxLength": 200,
-              "description": "A public client the service's app registration gave Farik. Left out, Farik registers one with the service each time the user signs in."
+              "description": "A public client the service's app registration gave Catervas. Left out, Catervas registers one with the service each time the user signs in."
             },
             "callback_port": {
               "type": "integer",
@@ -207,7 +207,7 @@
                 "type": "string",
                 "pattern": "^[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,200}$"
               },
-              "description": "What to ask the service for, each one RFC 6749's scope characters (no space, no double quote or backslash). Left out, Farik takes the service's own selection."
+              "description": "What to ask the service for, each one RFC 6749's scope characters (no space, no double quote or backslash). Left out, Catervas takes the service's own selection."
             }
           }
         }
@@ -268,7 +268,7 @@
         "avatar": {
           "type": "string",
           "maxLength": 200,
-          "description": "The name of a shipped avatar or a path under .farik/team/avatars/."
+          "description": "The name of a shipped avatar or a path under .catervas/team/avatars/."
         },
         "status": {
           "type": "string",
@@ -324,7 +324,7 @@
           "items": {
             "$ref": "#/$defs/skillPin"
           },
-          "description": "The skills given to this agent alone, each pinned by the hash of its folder `.farik/agents/<id>/skills/<name>/` (spec 6.7, ADR 0034). An agent's skill replaces the team's of the same name. A name appears once in a list (validate_team: skill_name_twice)."
+          "description": "The skills given to this agent alone, each pinned by the hash of its folder `.catervas/agents/<id>/skills/<name>/` (spec 6.7, ADR 0034). An agent's skill replaces the team's of the same name. A name appears once in a list (validate_team: skill_name_twice)."
         }
       }
     },
@@ -358,7 +358,7 @@
             "medium",
             "high"
           ],
-          "description": "How hard the model thinks. The runtime passes this value to the program as it is (farik_runtime::SessionSpec::effort)."
+          "description": "How hard the model thinks. The runtime passes this value to the program as it is (catervas_runtime::SessionSpec::effort)."
         }
       }
     },
@@ -369,7 +369,7 @@
         "daily_usd": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "What the team may spend in a day before it pauses (spec 5.5). Left out, the day has no dollar limit: Farik ships none (ADR 0015). A sprint's own budget belongs to the sprint, not here."
+          "description": "What the team may spend in a day before it pauses (spec 5.5). Left out, the day has no dollar limit: Catervas ships none (ADR 0015). A sprint's own budget belongs to the sprint, not here."
         },
         "session": {
           "$ref": "#/$defs/sessionLimits"
@@ -401,7 +401,7 @@
           "maximum": 9007199254740991
         }
       },
-      "description": "Overrides for one session's limits. What is left out keeps the role's default (farik-core's default_session_limits). The ceiling is the largest integer JSON holds exactly: a number past it is refused here, naming the field, rather than by the typed build, naming serde."
+      "description": "Overrides for one session's limits. What is left out keeps the role's default (catervas-core's default_session_limits). The ceiling is the largest integer JSON holds exactly: a number past it is refused here, naming the field, rather than by the typed build, naming serde."
     },
     "policy": {
       "type": "object",
@@ -474,11 +474,11 @@
           "minimum": 500,
           "maximum": 16000,
           "default": 8000,
-          "description": "How long each agent's notebook, .farik/agents/<id>/memory.md, may be, in tokens counted as a quarter of its characters; a longer write is refused (spec 5.8). Left out, 8000."
+          "description": "How long each agent's notebook, .catervas/agents/<id>/memory.md, may be, in tokens counted as a quarter of its characters; a longer write is refused (spec 5.8). Left out, 8000."
         },
         "plan_in_sprints": {
           "type": "boolean",
-          "description": "Whether the team plans its work in sprints (ADR 0028): ready tasks wait in the Backlog until a sprint plans them, and no task is assigned outside the open sprint. Left out, false, so a team file written before the key works as it did; setup and farik init write true."
+          "description": "Whether the team plans its work in sprints (ADR 0028): ready tasks wait in the Backlog until a sprint plans them, and no task is assigned outside the open sprint. Left out, false, so a team file written before the key works as it did; setup and catervas init write true."
         },
         "judgment": {
           "$ref": "#/$defs/judgment"
@@ -535,7 +535,7 @@
         "run_commands": {
           "type": "boolean",
           "default": true,
-          "description": "Whether Developers and Architects run commands (the execute tier). Farik still runs every check itself. Left out, true."
+          "description": "Whether Developers and Architects run commands (the execute tier). Catervas still runs every check itself. Left out, true."
         },
         "push": {
           "type": "boolean",
@@ -556,7 +556,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Globs no tool may read or write, whatever its tier (spec 5.6). Left out, the five farik-core ships."
+          "description": "Globs no tool may read or write, whatever its tier (spec 5.6). Left out, the five catervas-core ships."
         },
         "allowed_paths_ceiling": {
           "type": "array",
@@ -590,7 +590,7 @@
         "max_task_budget_usd": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "The most one task's budget may be. Left out, no cap: Farik ships no dollar limit (ADR 0015). An absent rule narrows nothing, and so it loosens nothing either (spec 5.12)."
+          "description": "The most one task's budget may be. Left out, no cap: Catervas ships no dollar limit (ADR 0015). An absent rule narrows nothing, and so it loosens nothing either (spec 5.12)."
         },
         "forbidden_commands": {
           "type": "array",

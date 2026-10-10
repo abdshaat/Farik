@@ -1,4 +1,4 @@
-import { Button, Choice, Switch } from "@farik/ui";
+import { Button, Choice, Switch } from "@catervas/ui";
 import { Link, useNavigate } from "react-router";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";

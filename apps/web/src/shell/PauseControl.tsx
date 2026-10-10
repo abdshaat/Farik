@@ -1,4 +1,4 @@
-import { Button } from "@farik/ui";
+import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { sentence } from "../app/words.ts";

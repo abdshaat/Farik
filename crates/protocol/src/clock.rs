@@ -13,7 +13,7 @@ pub trait Clock {
     fn now(&self) -> DateTime<Utc>;
 }
 
-/// Where an identifier that Farik cannot derive from what it already has comes from.
+/// Where an identifier that Catervas cannot derive from what it already has comes from.
 pub trait IdSource {
     /// A new session id.
     fn session_id(&self) -> String;

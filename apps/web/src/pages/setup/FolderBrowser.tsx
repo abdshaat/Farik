@@ -1,4 +1,4 @@
-import { Button } from "@farik/ui";
+import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { daemonSaid } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";

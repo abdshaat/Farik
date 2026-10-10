@@ -4,7 +4,7 @@ rest, as the task's page has its cost beside it. */
 .page {
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-6);
+	gap: var(--catervas-space-6);
 	min-width: 0;
 	max-width: 66rem;
 }
@@ -17,14 +17,14 @@ rest, as the task's page has its cost beside it. */
 		"head"
 		"side"
 		"main";
-	gap: var(--farik-space-6);
+	gap: var(--catervas-space-6);
 }
 
 .head,
 .main {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
-	gap: var(--farik-space-6);
+	gap: var(--catervas-space-6);
 	align-content: start;
 }
 
@@ -39,7 +39,7 @@ rest, as the task's page has its cost beside it. */
 .side {
 	grid-area: side;
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	min-width: 0;
 }
 
@@ -50,7 +50,7 @@ rest, as the task's page has its cost beside it. */
 			"head side"
 			"main side";
 		grid-template-rows: auto 1fr;
-		column-gap: var(--farik-space-7);
+		column-gap: var(--catervas-space-7);
 		align-items: start;
 	}
 }
@@ -73,12 +73,12 @@ stays there for a screen reader. */
 
 .letter {
 	display: flex;
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 	align-items: flex-start;
-	padding: var(--farik-space-4);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-raised);
+	padding: var(--catervas-space-4);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-raised);
 }
 
 .letter img {
@@ -87,7 +87,7 @@ stays there for a screen reader. */
 
 .letter > div {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	min-width: 0;
 }
 
@@ -100,27 +100,27 @@ stays there for a screen reader. */
 .state {
 	justify-self: start;
 	margin: 0;
-	padding: 0 var(--farik-space-2);
-	border: 2px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	padding: 0 var(--catervas-space-2);
+	border: 2px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 	font-weight: 600;
 }
 
 .state[data-state="proposed"] {
-	border-color: var(--farik-color-status-waiting);
+	border-color: var(--catervas-color-status-waiting);
 }
 
 .state[data-state="approved"],
 .state[data-state="active"] {
-	border-color: var(--farik-color-status-working);
+	border-color: var(--catervas-color-status-working);
 }
 
 /* The owner's own decision, with their words, as the page's one quotation. */
 .decision {
 	display: grid;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-3) var(--farik-space-4);
-	border-left: 3px solid var(--farik-color-rule);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	border-left: 3px solid var(--catervas-color-rule);
 }
 
 .decision p,
@@ -136,9 +136,9 @@ stays there for a screen reader. */
 
 .allows {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	margin: 0;
-	padding-left: var(--farik-space-5);
+	padding-left: var(--catervas-space-5);
 	max-width: 65ch;
 }
 
@@ -147,7 +147,7 @@ stays there for a screen reader. */
 }
 
 .scroll:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -158,20 +158,20 @@ stays there for a screen reader. */
 
 .budget th,
 .budget td {
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border-bottom: 1px solid var(--farik-color-rule);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-bottom: 1px solid var(--catervas-color-rule);
 	text-align: start;
 	vertical-align: top;
 	overflow-wrap: anywhere;
 }
 
 .budget thead th {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	font-weight: 600;
 }
 
 .budget .number {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 	font-variant-numeric: tabular-nums;
 	text-align: end;
 	white-space: nowrap;
@@ -185,17 +185,17 @@ stays there for a screen reader. */
 
 .sub {
 	display: block;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .campaign td:first-child {
-	padding-inline-start: var(--farik-space-5);
+	padding-inline-start: var(--catervas-space-5);
 }
 
-/* Where Farik left a campaign, beside its name: it paused it, and why. */
+/* Where Catervas left a campaign, beside its name: it paused it, and why. */
 .state {
 	display: block;
-	color: var(--farik-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 	font-weight: 600;
 }
 
@@ -203,11 +203,11 @@ stays there for a screen reader. */
 .adv,
 .price {
 	display: block;
-	margin-top: var(--farik-space-1);
+	margin-top: var(--catervas-space-1);
 }
 
 .price[data-price="not-fixed"] {
-	color: var(--farik-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 }
 
 /* Why a price is not fixed, once, under the table. */
@@ -218,32 +218,32 @@ stays there for a screen reader. */
 /* The spend against the budget: the figures large, a bar under them. */
 .big {
 	margin: 0;
-	font-family: var(--farik-type-code-family);
-	font-size: var(--farik-type-heading-size);
+	font-family: var(--catervas-type-code-family);
+	font-size: var(--catervas-type-heading-size);
 	font-variant-numeric: tabular-nums;
 }
 
 .meter {
-	height: var(--farik-space-2);
+	height: var(--catervas-space-2);
 	max-width: 32rem;
-	background: var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	background: var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 	overflow: hidden;
 }
 
 .meter > span {
 	display: block;
 	height: 100%;
-	background: var(--farik-color-ink);
+	background: var(--catervas-color-ink);
 }
 
-/* Farik cannot read the spend: said where the owner reads the spend. */
+/* Catervas cannot read the spend: said where the owner reads the spend. */
 .unread {
 	margin: 0;
-	padding: var(--farik-space-3);
+	padding: var(--catervas-space-3);
 	max-width: 65ch;
-	border: 1px solid var(--farik-color-status-waiting);
-	border-radius: var(--farik-radius-control);
+	border: 1px solid var(--catervas-color-status-waiting);
+	border-radius: var(--catervas-radius-control);
 }
 
 .pauses {
@@ -251,17 +251,17 @@ stays there for a screen reader. */
 	margin: 0;
 	padding: 0;
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .pauses li {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-3);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
 }
 
 .pauses time {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	white-space: nowrap;
 }
 
@@ -288,7 +288,7 @@ stays there for a screen reader. */
 }
 
 .week {
-	margin: var(--farik-space-3) 0 0;
+	margin: var(--catervas-space-3) 0 0;
 	font-weight: 600;
 }
 
@@ -299,15 +299,15 @@ post's state at the row's right end. */
 	margin: 0;
 	padding: 0;
 	list-style: none;
-	border-top: 1px solid var(--farik-color-rule);
+	border-top: 1px solid var(--catervas-color-rule);
 }
 
 .posts li {
 	display: grid;
 	grid-template-columns: 6.5rem 6rem minmax(0, 1fr);
-	gap: var(--farik-space-1) var(--farik-space-3);
-	padding: var(--farik-space-2) 0;
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
+	padding: var(--catervas-space-2) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
 	overflow-wrap: anywhere;
 }
 
@@ -316,19 +316,19 @@ post's state at the row's right end. */
 }
 
 .posts time {
-	color: var(--farik-color-ink-muted);
-	font-family: var(--farik-type-code-family);
-	font-size: var(--farik-type-small-size);
+	color: var(--catervas-color-ink-muted);
+	font-family: var(--catervas-type-code-family);
+	font-size: var(--catervas-type-small-size);
 }
 
 .channel {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 /* The topic, the post's own words under it, and an earlier failure. */
 .slotMain {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	min-width: 0;
 }
 
@@ -336,9 +336,9 @@ post's state at the row's right end. */
 .slotText {
 	display: block;
 	overflow: hidden;
-	color: var(--farik-color-ink-muted);
-	font-size: var(--farik-type-small-size);
-	line-height: var(--farik-type-small-line-height);
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+	line-height: var(--catervas-type-small-line-height);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -349,20 +349,20 @@ post's state at the row's right end. */
 	gap: 2px;
 	align-content: start;
 	justify-items: end;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	text-align: right;
 }
 
 .slotState strong[data-standing="sent"] {
-	color: var(--farik-color-status-done);
+	color: var(--catervas-color-status-done);
 }
 
 .slotState strong[data-standing="going_out"] {
-	color: var(--farik-color-status-working);
+	color: var(--catervas-color-status-working);
 }
 
 .slotState strong[data-standing="missed"] {
-	color: var(--farik-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 }
 
 @media not (min-width: 640px) {
@@ -419,13 +419,13 @@ post's state at the row's right end. */
 /* The agent's whole plan, as typed: wrapped, never cut off, never marked up. */
 .text {
 	margin: 0;
-	padding: var(--farik-space-3);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	padding: var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 	font:
-		var(--farik-type-code-weight) var(--farik-type-code-size) /
-		var(--farik-type-code-line-height) var(--farik-type-code-family);
+		var(--catervas-type-code-weight) var(--catervas-type-code-size) /
+		var(--catervas-type-code-line-height) var(--catervas-type-code-family);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 }
@@ -433,7 +433,7 @@ post's state at the row's right end. */
 .facts {
 	display: grid;
 	grid-template-columns: max-content minmax(0, 1fr);
-	gap: var(--farik-space-1) var(--farik-space-4);
+	gap: var(--catervas-space-1) var(--catervas-space-4);
 	margin: 0;
 }
 
@@ -450,7 +450,7 @@ post's state at the row's right end. */
 }
 
 .facts dt {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .facts dd {
@@ -462,12 +462,12 @@ post's state at the row's right end. */
 just above the shell's own bar of places. */
 .bar {
 	position: sticky;
-	bottom: var(--farik-shell-bar-height, 0);
+	bottom: var(--catervas-shell-bar-height, 0);
 	display: grid;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-3) var(--farik-space-4);
-	background: var(--farik-color-surface);
-	border-top: 1px solid var(--farik-color-control-border);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	background: var(--catervas-color-surface);
+	border-top: 1px solid var(--catervas-color-control-border);
 }
 
 .bar p {
@@ -477,6 +477,6 @@ just above the shell's own bar of places. */
 
 .over {
 	margin: 0;
-	color: var(--farik-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 	font-weight: 600;
 }

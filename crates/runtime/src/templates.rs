@@ -6,9 +6,9 @@ use std::io::ErrorKind;
 use std::os::unix::fs::DirBuilderExt as _;
 use std::path::PathBuf;
 
-use farik_core::contract::ValidationError;
-use farik_core::team::{TeamTemplate, template_slug, validate_template};
-use farik_store::files::{template_yaml, yaml_value};
+use catervas_core::contract::ValidationError;
+use catervas_core::team::{TeamTemplate, template_slug, validate_template};
+use catervas_store::files::{template_yaml, yaml_value};
 use sha2::{Digest as _, Sha256};
 
 /// The folder saved templates are kept in, one file per template, named by its slug.
@@ -284,14 +284,14 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::{Path, PathBuf};
 
-    use farik_core::team::fixtures::a_template_wire;
-    use farik_core::team::{TeamTemplate, validate_template};
+    use catervas_core::team::fixtures::a_template_wire;
+    use catervas_core::team::{TeamTemplate, validate_template};
 
     use super::{TemplateError, Templates};
 
     fn scratch(test: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("farik-templates-{}-{test}", std::process::id()));
+            std::env::temp_dir().join(format!("catervas-templates-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("the folder is made");
         dir
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn saves_privately() {
-        let state = scratch("private").join("farik");
+        let state = scratch("private").join("catervas");
         let templates = Templates::new(state.join("templates"));
         let template = named("My usual team");
         assert_eq!(
@@ -376,10 +376,11 @@ mod tests {
 
     #[test]
     fn maps_a_refused_name_from_the_team() {
-        let team = farik_core::team::validate_team(&farik_core::team::fixtures::a_team_wire())
-            .expect("a team");
+        let team =
+            catervas_core::team::validate_team(&catervas_core::team::fixtures::a_team_wire())
+                .expect("a team");
         let at = "2026-09-30T12:00:00Z".parse().expect("a date-time");
-        let refused = farik_core::team::template_from_team(&team, &"a".repeat(61), at)
+        let refused = catervas_core::team::template_from_team(&team, &"a".repeat(61), at)
             .map_err(TemplateError::from);
         assert_eq!(refused.err(), Some(TemplateError::Name));
     }
@@ -387,7 +388,7 @@ mod tests {
     #[test]
     fn refuses_a_path_through_a_name_or_a_slug() {
         let root = scratch("traversal");
-        let dir = root.join("farik/templates");
+        let dir = root.join("catervas/templates");
         let templates = Templates::new(dir.clone());
         assert_eq!(
             templates.save(&named("../../outside"), false),
@@ -395,7 +396,7 @@ mod tests {
         );
         assert!(dir.join("outside.yaml").exists());
         assert!(!root.join("outside.yaml").exists());
-        std::fs::write(root.join("farik/kept.yaml"), "kept").expect("written");
+        std::fs::write(root.join("catervas/kept.yaml"), "kept").expect("written");
         for slug in ["../kept", "..", "", "a/b", "/etc/passwd", "Outside"] {
             let missing = Err(TemplateError::NotFound {
                 slug: slug.to_string(),
@@ -409,7 +410,7 @@ mod tests {
             );
         }
         assert!(
-            root.join("farik/kept.yaml").exists(),
+            root.join("catervas/kept.yaml").exists(),
             "nothing outside is touched"
         );
         assert_eq!(
@@ -418,7 +419,7 @@ mod tests {
         );
         assert!(dir.join("kept.yaml").exists());
         assert_eq!(
-            std::fs::read_to_string(root.join("farik/kept.yaml")).ok(),
+            std::fs::read_to_string(root.join("catervas/kept.yaml")).ok(),
             Some("kept".into())
         );
     }

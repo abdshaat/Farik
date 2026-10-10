@@ -1,5 +1,5 @@
-import type { RpcError } from "@farik/protocol-client";
-import { AVATAR_URLS, type AvatarKey, Button } from "@farik/ui";
+import type { RpcError } from "@catervas/protocol-client";
+import { AVATAR_URLS, type AvatarKey, Button } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -29,13 +29,13 @@ export type Listing = {
 	unreadable: { slug: string }[];
 };
 
-/** The saved teams, or why there are none to read: Farik has no state folder. */
+/** The saved teams, or why there are none to read: Catervas has no state folder. */
 export function useTemplates() {
 	const { data, error, again } = useQuery<Listing>("templates.list", {});
 	return { listing: data, noFolder: noFolder(error), again };
 }
 
-/** Whether a refusal says Farik has no folder to keep saved teams in. */
+/** Whether a refusal says Catervas has no folder to keep saved teams in. */
 export function noFolder(error: RpcError | undefined): boolean {
 	return !!error && refusalsOf(error).some((e) => e.code === "no_state_folder");
 }
@@ -75,7 +75,7 @@ export function Faces({ agents }: { agents: Template["agents"] }) {
 	);
 }
 
-/** Settings' "Saved teams": each saved team with Rename and Delete, and a file Farik cannot read. */
+/** Settings' "Saved teams": each saved team with Rename and Delete, and a file Catervas cannot read. */
 export function SavedTeams() {
 	const { listing, noFolder, again } = useTemplates();
 	return (
@@ -116,7 +116,7 @@ export function SavedTeams() {
 	);
 }
 
-/** One saved team, or a file Farik cannot read (no `template`), which offers Delete alone. */
+/** One saved team, or a file Catervas cannot read (no `template`), which offers Delete alone. */
 function SavedRow({
 	slug,
 	template,

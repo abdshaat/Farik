@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 #[must_use]
 pub fn a_team_wire() -> Value {
     json!({
-        "name": "Farik",
+        "name": "Catervas",
         "agents": [an_agent_wire("ada", "product_manager"), an_agent_wire("linus", "software_developer")],
         "budgets": { "daily_usd": 20 },
         "policy": {
@@ -37,7 +37,7 @@ pub fn an_agent_wire(id: &str, role: &str) -> Value {
 #[must_use]
 pub fn a_full_team_wire() -> Value {
     json!({
-        "name": "Farik",
+        "name": "Catervas",
         "agents": [
             {
                 "id": "ada",

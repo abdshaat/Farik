@@ -8,14 +8,14 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret};
-use farik_runtime::daemon::DaemonInfo;
-use farik_runtime::recorded::fixtures::{a_session_spec, reads_a_file};
-use farik_runtime::session::SessionSkill;
-use farik_runtime::{
+use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret};
+use catervas_runtime::daemon::DaemonInfo;
+use catervas_runtime::recorded::fixtures::{a_session_spec, reads_a_file};
+use catervas_runtime::session::SessionSkill;
+use catervas_runtime::{
     EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionSpec, StreamParser,
 };
-use farik_store::files::fixtures::{TempProject, a_team};
+use catervas_store::files::fixtures::{TempProject, a_team};
 
 const API_KEY: &str = "sk-the-test-key";
 
@@ -73,19 +73,19 @@ impl Fake {
     }
 
     fn config(&self) -> ClaudeConfig {
-        let farik = self.project.root.join(".farik");
+        let catervas = self.project.root.join(".catervas");
         ClaudeConfig {
             claude_path: self.dir.join("claude"),
-            hook_command: PathBuf::from("/usr/local/bin/farik"),
-            daemon_file: farik.join("local/daemon.json"),
+            hook_command: PathBuf::from("/usr/local/bin/catervas"),
+            daemon_file: catervas.join("local/daemon.json"),
             daemon: DaemonInfo {
                 port: 47_123,
                 token: "a-token".to_string(),
                 pid: 1,
             },
-            sessions_dir: farik.join("local/sessions"),
+            sessions_dir: catervas.join("local/sessions"),
             skills_dir: self.project.root.join("skills-state"),
-            team_file: farik.join("team.yaml"),
+            team_file: catervas.join("team.yaml"),
             env: BTreeMap::from([
                 ("PATH".to_string(), "/usr/bin:/bin".to_string()),
                 (
@@ -204,7 +204,7 @@ async fn plays_a_session_through_the_process() {
     let prompt = fake
         .project
         .root
-        .join(".farik/local/sessions")
+        .join(".catervas/local/sessions")
         .join(&spec.session_id)
         .join("system-prompt.md");
     assert_eq!(
@@ -693,7 +693,7 @@ fn refuses_to_start_a_session_outside_a_tokio_runtime() {
 }
 
 /// A credential as the adapter holds it.
-fn shared(credential: ClaudeCredential) -> farik_runtime::claude::SharedCredential {
+fn shared(credential: ClaudeCredential) -> catervas_runtime::claude::SharedCredential {
     std::sync::Arc::new(std::sync::Mutex::new(credential))
 }
 

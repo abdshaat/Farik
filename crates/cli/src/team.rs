@@ -1,13 +1,13 @@
-//! `farik rules show` and `farik criteria list`: the two team files a person hand-edits (F15, F16).
+//! `catervas rules show` and `catervas criteria list`: the two team files a person hand-edits (F15, F16).
 
-use farik_store::requests::{criteria_json, criterion_how, criterion_method, rules_json};
+use catervas_store::requests::{criteria_json, criterion_how, criterion_method, rules_json};
 
 use crate::Report;
 use crate::project::Project;
 
 /// The rules every command and every path check is held to (`docs/SPEC.md` section 5.12).
 ///
-/// These are the team's rules plus the ones `farik-core` ships, which is what the governor actually
+/// These are the team's rules plus the ones `catervas-core` ships, which is what the governor actually
 /// applies: a rule only ever narrows what a tier allows, so the shipped protected paths are kept
 /// whatever the team wrote.
 ///
@@ -58,7 +58,7 @@ pub fn criteria(project: &Project) -> Result<Report, String> {
     if library.criteria.is_empty() {
         return Ok(Report {
             lines: vec![
-                "no criteria: farik init seeds them from what the repository says about itself"
+                "no criteria: catervas init seeds them from what the repository says about itself"
                     .to_string(),
             ],
             json: criteria_json(&library),

@@ -16,7 +16,7 @@ export type Mailbox = {
 	signature?: string;
 	discloseAi?: boolean;
 	checkedAt?: string;
-	/** Farik's sentence about why the last check failed. */
+	/** Catervas's sentence about why the last check failed. */
 	error?: string;
 	restartedAt?: string;
 	sentToday: number;
@@ -39,7 +39,7 @@ export type SellerMessageItem = {
 	agentId: string;
 	draftedAt: string;
 	purchaseOrder?: number;
-	/** Farik's sentence about the last try that failed. */
+	/** Catervas's sentence about the last try that failed. */
 	why?: string;
 	/** When that try failed. */
 	failedAt?: string;
@@ -69,7 +69,7 @@ export type SellerReplyItem = {
 	reply: number;
 	message: number;
 	seller: string;
-	/** The subject Farik sent. */
+	/** The subject Catervas sent. */
 	sentSubject: string;
 	from: string;
 	subject: string;
@@ -102,7 +102,7 @@ export function timeWords(when: string, now: Date = new Date()): string {
 	return day === t("postToday") ? at : `${day} ${at}`;
 }
 
-/** "Farik could not send it at 10:14: <why>. …"; with no time known, without the time. */
+/** "Catervas could not send it at 10:14: <why>. …"; with no time known, without the time. */
 export const failedWords = (why: string, failedAt: string | undefined) =>
 	t("sellerFailed", { time: failedAt ? timeWords(failedAt) : "", why }).replace(
 		" :",

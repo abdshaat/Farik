@@ -27,7 +27,7 @@ email-sending service for 3,000 emails a month.
 ## 2. Ask only what changes the short list
 
 Read the request and the task first, and do not ask what they already answer. For a missing fact
-that would change which sellers or offers you consider, ask with `farik_ask_human`: one question
+that would change which sellers or offers you consider, ask with `catervas_ask_human`: one question
 for each call, at most four choices, each short, with a hint where a choice needs saying what it
 means. The founder may still answer in words. Do not ask what a search will tell you, such as a
 price or a model number.
@@ -38,6 +38,6 @@ assumed for the rest.
 
 ## 3. Write the need down
 
-Open your comparison, written later with `farik_write_evaluation`, with the need as a short list.
+Open your comparison, written later with `catervas_write_evaluation`, with the need as a short list.
 Mark each line "must" (an offer without it is out) or "nice" (it only breaks a tie). The reviewer
 checks every offer against that list.

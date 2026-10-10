@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -61,7 +61,7 @@ describe("setup", () => {
 		// The warning names what the command line's does, the connectors' keys among it (8.6).
 		expect(
 			screen.getByText(
-				"Without Docker, a mistaken or tricked agent command can reach any file you can, and the keys you gave your agents’ connectors. Farik reminds you of this every time it starts.",
+				"Without Docker, a mistaken or tricked agent command can reach any file you can, and the keys you gave your agents’ connectors. Catervas reminds you of this every time it starts.",
 			),
 		).toBeTruthy();
 		const onward = screen.getByRole("button", { name: en.continue });
@@ -74,7 +74,7 @@ describe("setup", () => {
 		expect(
 			await screen.findByRole("heading", { name: en.accountTitle }),
 		).toBeTruthy();
-		expect(sessionStorage.getItem("farik.noSandbox")).toBe("true");
+		expect(sessionStorage.getItem("catervas.noSandbox")).toBe("true");
 		cleanup();
 
 		const second = await renderApp("/setup/computer");
@@ -94,7 +94,7 @@ describe("setup", () => {
 				.getByRole("button", { name: new RegExp(en.prepare) })
 				.getAttribute("aria-busy"),
 		).toBe("true");
-		await again.reply(build, { image: "farik/sandbox:1" });
+		await again.reply(build, { image: "catervas/sandbox:1" });
 		// The image is looked for again once it is built.
 		await waitFor(() =>
 			expect(
@@ -160,7 +160,7 @@ describe("setup", () => {
 
 	it("says_each_setup_refusal_in_plain_words", async () => {
 		// The folder browser: a folder it cannot read, said without the system's words.
-		sessionStorage.setItem("farik.noSandbox", "true");
+		sessionStorage.setItem("catervas.noSandbox", "true");
 		const project = await renderApp("/setup/project");
 		const s = project.socket as FakeSocket;
 		await answerStatus(s, false, 1, NO_PROJECT);
@@ -181,7 +181,7 @@ describe("setup", () => {
 		expect(screen.queryByText(/os error/)).toBeNull();
 		cleanup();
 
-		// A new project Farik could not make, for a reason it has no words for: a plain sentence.
+		// A new project Catervas could not make, for a reason it has no words for: a plain sentence.
 		const fresh = await renderApp("/setup/project");
 		const n = fresh.socket as FakeSocket;
 		await answerStatus(n, false, 1, NO_PROJECT);
@@ -263,7 +263,7 @@ describe("setup", () => {
 	});
 
 	it("browses_folders_and_uses_one", async () => {
-		sessionStorage.setItem("farik.noSandbox", "true");
+		sessionStorage.setItem("catervas.noSandbox", "true");
 		const { container, socket } = await renderApp("/setup/project");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false, 1, NO_PROJECT);
@@ -357,7 +357,7 @@ describe("setup", () => {
 		expect(fetch).toHaveBeenCalledTimes(2);
 		const next = sockets[1] as FakeSocket;
 		act(() => next.emit("open", {}));
-		// "/" is Today's shell, which shows once Farik answers.
+		// "/" is Today's shell, which shows once Catervas answers.
 		await answerStatus(next, true);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(

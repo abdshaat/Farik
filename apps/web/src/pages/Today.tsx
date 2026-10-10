@@ -1,4 +1,10 @@
-import { Avatar, type AvatarKey, Button, RoleTag, uiStrings } from "@farik/ui";
+import {
+	Avatar,
+	type AvatarKey,
+	Button,
+	RoleTag,
+	uiStrings,
+} from "@catervas/ui";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -679,7 +685,7 @@ function SiteRequestRow({
 
 /**
  * A data source the Procurement Specialist asked for and the Product Manager passed on: why it
- * comes to the owner in Farik's words, then everything others wrote, each in a frame that says
+ * comes to the owner in Catervas's words, then everything others wrote, each in a frame that says
  * whose words they are, and "Approve" or "Decline", each of which asks for a note (spec 6.10).
  */
 function PipelineRow({
@@ -816,7 +822,7 @@ function ToolApprovalRow({
 	item: Waiting;
 	agent: Agent | undefined;
 	allowances: Allowances | undefined;
-	/** What Farik offers each role, to name the service by its kit's title. */
+	/** What Catervas offers each role, to name the service by its kit's title. */
 	kits: RoleKit[];
 }) {
 	const [open, setOpen] = useState(false);
@@ -907,7 +913,7 @@ function KeyRefusedRow() {
 	);
 }
 
-/** "All N of Farik's checks passed.", shown only when every check of the task passed. */
+/** "All N of Catervas's checks passed.", shown only when every check of the task passed. */
 function ChecksPassed({ taskId }: { taskId: string }) {
 	const { data } = useQuery<{ checks: Check[] }>("task.checks", {
 		task_id: taskId,

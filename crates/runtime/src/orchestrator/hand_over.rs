@@ -1,17 +1,17 @@
 //! The hand-over of posts to Buffer (`docs/SPEC.md` 6.5, ADR 0042): a rule with no model, which
 //! every tick that names no task runs, right after the ends the plans' dates bring. A post the
 //! owner's plan approved, or the owner allowed, goes to Buffer an hour before its time with
-//! Farik's own `create_post`, made with the connection of the agent that wrote it. A post is
+//! Catervas's own `create_post`, made with the connection of the agent that wrote it. A post is
 //! handed over once: a failure is recorded and never tried again, since Buffer may already have
 //! the post.
 //!
 //! The hand-over runs between sessions, and a session runs to its end before the next tick, so a
 //! post can be handed over late by one running session.
 
+use catervas_core::marketing::PostDetails;
+use catervas_protocol::event::EventBody;
+use catervas_store::marketing::{PostState, SocialPost, social_posts};
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use farik_core::marketing::PostDetails;
-use farik_protocol::event::EventBody;
-use farik_store::marketing::{PostState, SocialPost, social_posts};
 use serde_json::{Map, Value, json};
 
 use super::{OrchestratorDeps, OrchestratorError};
@@ -63,7 +63,7 @@ pub(crate) fn is_too_late(post: &SocialPost, now: DateTime<Utc>) -> bool {
     post.at.with_timezone(&Utc) <= now + TOO_LATE
 }
 
-/// When Farik hands the post over: an hour before its time, or, for a post the owner allowed
+/// When Catervas hands the post over: an hour before its time, or, for a post the owner allowed
 /// later than that, when they allowed it.
 pub(crate) fn hand_over_time(post: &SocialPost) -> DateTime<Utc> {
     let hour_before = post.at.with_timezone(&Utc) - HAND_OVER_BEFORE;
@@ -72,7 +72,7 @@ pub(crate) fn hand_over_time(post: &SocialPost) -> DateTime<Utc> {
 }
 
 /// Hands over every post whose time has come, and records those that were missed. Only a pause by
-/// the owner holds it: Farik's own pause for a refused key does not, since Buffer needs no model.
+/// the owner holds it: Catervas's own pause for a refused key does not, since Buffer needs no model.
 ///
 /// # Errors
 ///
@@ -165,7 +165,7 @@ fn claim(
     Ok(Some((post, claim)))
 }
 
-/// What Farik asks Buffer to create for `post`.
+/// What Catervas asks Buffer to create for `post`.
 fn create_input(post: &SocialPost) -> Map<String, Value> {
     let mut input = Map::new();
     input.insert("channelId".to_string(), json!(post.buffer_channel));
@@ -272,7 +272,7 @@ async fn deliver(deps: &OrchestratorDeps, post: &SocialPost) -> Result<String, S
             called(deps, &post.agent_id)
         )),
         Err(OwnCallError::Failed(_) | OwnCallError::NotListed) => {
-            Err("Farik could not reach Buffer.".to_string())
+            Err("Catervas could not reach Buffer.".to_string())
         }
     }
 }
@@ -283,10 +283,10 @@ async fn deliver(deps: &OrchestratorDeps, post: &SocialPost) -> Result<String, S
 pub(crate) mod fixtures {
     use std::sync::Arc;
 
+    use catervas_core::team::CustomServer;
+    use catervas_protocol::clock::MovableClock;
+    use catervas_protocol::event::EventKind;
     use chrono::{DateTime, Duration, Utc};
-    use farik_core::team::CustomServer;
-    use farik_protocol::clock::MovableClock;
-    use farik_protocol::event::EventKind;
     use serde_json::{Map, Value, json};
 
     use crate::connectors::{MemoryConnectorSecrets, SecretAt};
@@ -382,7 +382,7 @@ pub(crate) mod fixtures {
             self.records("social_post.scheduled", &self.a_post(going_out))
         }
 
-        /// Records what Farik or the owner did to a post: no agent and no session.
+        /// Records what Catervas or the owner did to a post: no agent and no session.
         pub(crate) fn happens(&self, kind: &str, body: &Value) {
             self.harness.project.record("", kind, body);
         }
@@ -404,7 +404,10 @@ pub(crate) mod fixtures {
                 .expect("the hand-over runs");
         }
 
-        pub(crate) fn events(&self, kind: EventKind) -> Vec<farik_protocol::event::FarikEvent> {
+        pub(crate) fn events(
+            &self,
+            kind: EventKind,
+        ) -> Vec<catervas_protocol::event::CatervasEvent> {
             self.harness.project.events(&[kind])
         }
 
@@ -416,7 +419,7 @@ pub(crate) mod fixtures {
         pub(crate) fn the_event(&self, kind: EventKind) -> Value {
             let events = self.events(kind);
             assert_eq!(events.len(), 1, "{kind:?}: {events:?}");
-            farik_protocol::event::event_to_value(&events[0])["body"].clone()
+            catervas_protocol::event::event_to_value(&events[0])["body"].clone()
         }
     }
 
@@ -427,8 +430,8 @@ pub(crate) mod fixtures {
 
 #[cfg(test)]
 mod tests {
+    use catervas_protocol::event::EventKind;
     use chrono::Duration;
-    use farik_protocol::event::EventKind;
     use serde_json::{Value, json};
 
     use super::fixtures::{Handing, after};
@@ -538,7 +541,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn sends_a_late_hand_over_and_misses_a_past_one() {
         let _here = LoopbackAllowed::new();
-        // Farik was not ticking until ten minutes before: the post is still sent.
+        // Catervas was not ticking until ten minutes before: the post is still sent.
         let late = Handing::new("hand-over-late").await;
         let post = late.schedules(&after(10));
         late.hands_over().await;
@@ -581,7 +584,7 @@ mod tests {
             handing
                 .events(EventKind::SocialPostFailed)
                 .iter()
-                .map(farik_protocol::event::event_to_value)
+                .map(catervas_protocol::event::event_to_value)
                 .find(|event| event["body"]["post"] == post)
                 .expect("the post failed")["body"]["reason"]
                 .as_str()
@@ -732,7 +735,7 @@ mod tests {
             .expect("Kai is on the team");
         agent["display_name"] = json!("Kai");
         files
-            .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
             .expect("the team is written");
         let kai = handing
             .harness
@@ -754,7 +757,7 @@ mod tests {
         );
         assert!(handing.created().is_empty());
 
-        // Buffer ended the sign-in when Farik refreshed it: the owner reads the same words.
+        // Buffer ended the sign-in when Catervas refreshed it: the owner reads the same words.
         handing
             .fixture
             .set(|flags| flags.refresh_error = Some((400, "invalid_grant".to_string())));
@@ -771,7 +774,7 @@ mod tests {
         let reasons: Vec<Value> = handing
             .events(EventKind::SocialPostFailed)
             .iter()
-            .map(farik_protocol::event::event_to_value)
+            .map(catervas_protocol::event::event_to_value)
             .filter(|event| event["body"]["post"] == lapsed)
             .map(|event| event["body"]["reason"].clone())
             .collect();
@@ -803,11 +806,11 @@ mod tests {
             json!({ "post": near, "why": "paused" })
         );
 
-        // Farik's own pause, for a refused key, does not stop Buffer, which needs no model.
+        // Catervas's own pause, for a refused key, does not stop Buffer, which needs no model.
         handing.happens("team.resumed", &json!({ "by": "human" }));
         handing.happens(
             "team.paused",
-            &json!({ "by": "farik", "reason": "credential_refused", "detail": "refused" }),
+            &json!({ "by": "catervas", "reason": "credential_refused", "detail": "refused" }),
         );
         handing.hands_over().await;
         assert_eq!(
@@ -912,7 +915,7 @@ mod tests {
         // MP-1, from 2026-09-22 to 2026-11-30, with a slot on 5 November and one on 12 November.
         let project = &handing.harness.project;
         let mut plan =
-            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
         plan["starts_on"] = json!("2026-09-22");
         plan["ends_on"] = json!("2026-11-30");
         plan["campaigns"] = json!([]);
@@ -938,7 +941,7 @@ mod tests {
             "social_post.sent",
             &json!({ "post": with_buffer, "buffer_post": "buf-9" }),
         );
-        // One that Farik is handing to Buffer this moment is left alone.
+        // One that Catervas is handing to Buffer this moment is left alone.
         let claimed = crate::marketing::claim_post(
             &crate::marketing::hold_plans(),
             &handing.harness.project.deps,
@@ -951,7 +954,7 @@ mod tests {
         let stopped: Vec<(u64, String)> = handing
             .events(EventKind::SocialPostStopped)
             .iter()
-            .map(farik_protocol::event::event_to_value)
+            .map(catervas_protocol::event::event_to_value)
             .map(|event| {
                 (
                     event["body"]["post"].as_u64().expect("a post"),
@@ -1005,7 +1008,7 @@ mod tests {
             .events(EventKind::SocialPostStopped)
             .iter()
             .map(|event| {
-                farik_protocol::event::event_to_value(event)["body"]["post"]
+                catervas_protocol::event::event_to_value(event)["body"]["post"]
                     .as_u64()
                     .expect("a post")
             })

@@ -1,27 +1,27 @@
-//! The project a command runs against: the repository it is in, the files under `.farik/`, the
+//! The project a command runs against: the repository it is in, the files under `.catervas/`, the
 //! event log, and the two ids every event carries.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use catervas_core::team::{Team, template_slug};
+use catervas_protocol::event::{EventBody, EventIds, NewEvent, new_event};
+use catervas_runtime::ToolDeps;
+use catervas_runtime::transitions::Transitions;
+use catervas_store::files::ProjectFiles;
+use catervas_store::{EventLog, EventQuery, Git, open_event_log, open_projections};
 use chrono::{DateTime, Utc};
-use farik_core::team::{Team, template_slug};
-use farik_protocol::event::{EventBody, EventIds, NewEvent, new_event};
-use farik_runtime::ToolDeps;
-use farik_runtime::transitions::Transitions;
-use farik_store::files::ProjectFiles;
-use farik_store::{EventLog, EventQuery, Git, open_event_log, open_projections};
 
 use crate::CliIo;
 
-/// Where the event log lives, under the gitignored `.farik/local/` (D5).
-pub(crate) const DATABASE: &str = ".farik/local/farik.db";
+/// Where the event log lives, under the gitignored `.catervas/local/` (D5).
+pub(crate) const DATABASE: &str = ".catervas/local/catervas.db";
 
 /// An open project: everything a command needs to read what is there and record what it did.
 pub struct Project {
     /// The repository root, which is what a project is (`docs/SPEC.md` section 3).
     pub root: PathBuf,
-    /// The files under `.farik/`.
+    /// The files under `.catervas/`.
     pub files: ProjectFiles,
     /// The log every command appends to.
     pub log: Arc<EventLog>,
@@ -33,7 +33,7 @@ pub struct Project {
 
 /// The team and the project an event belongs to (`docs/SPEC.md` section 8.5).
 ///
-/// Both are fixed by `farik init` and read back from the log's first event afterwards, so that
+/// Both are fixed by `catervas init` and read back from the log's first event afterwards, so that
 /// renaming the team or the directory does not split one project's log in two.
 pub struct ProjectIds {
     /// The team the events belong to.
@@ -79,7 +79,7 @@ impl Project {
         &self,
         body: EventBody,
         at: DateTime<Utc>,
-        task_id: Option<farik_core::contract::TaskId>,
+        task_id: Option<catervas_core::contract::TaskId>,
     ) -> Result<NewEvent, String> {
         new_event(
             body,
@@ -100,8 +100,8 @@ impl Project {
     /// # Errors
     ///
     /// The sentence the store's refusal reads as.
-    pub fn projections(&self) -> Result<farik_store::Projections, String> {
-        farik_store::open_projections(Arc::clone(&self.log)).map_err(|error| error.to_string())
+    pub fn projections(&self) -> Result<catervas_store::Projections, String> {
+        catervas_store::open_projections(Arc::clone(&self.log)).map_err(|error| error.to_string())
     }
 
     /// Appends one event and answers with the sequence number the log gave it.
@@ -122,14 +122,14 @@ impl Project {
 ///
 /// # Errors
 ///
-/// A sentence saying that this is not a git repository, that it is not a Farik project yet, or what
+/// A sentence saying that this is not a git repository, that it is not a Catervas project yet, or what
 /// the team file or the log got wrong.
 pub fn open_project(cwd: &Path, now: DateTime<Utc>) -> Result<Project, String> {
     let root = repository_root(cwd)?;
     let files = ProjectFiles::open(root.clone());
     let team = files.read_team().map_err(|error| match error {
-        farik_store::files::FilesError::NotFound { .. } => format!(
-            "there is no Farik project at {}: run farik init to make one",
+        catervas_store::files::FilesError::NotFound { .. } => format!(
+            "there is no Catervas project at {}: run catervas init to make one",
             root.display()
         ),
         other => other.to_string(),
@@ -158,8 +158,8 @@ pub fn repository_root(cwd: &Path) -> Result<PathBuf, String> {
     let git = Git::open(cwd.to_path_buf());
     match git.top_level() {
         Ok(root) => Ok(PathBuf::from(root)),
-        Err(farik_store::GitError::NotARepository) => Err(format!(
-            "{} is not a git repository, and a Farik project is one: run git init first",
+        Err(catervas_store::GitError::NotARepository) => Err(format!(
+            "{} is not a git repository, and a Catervas project is one: run git init first",
             cwd.display()
         )),
         Err(error) => Err(error.to_string()),
@@ -173,14 +173,14 @@ pub(crate) fn directory_name(root: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// A kebab-case slug of a name a person chose, which is how an id is spelled everywhere in Farik
-/// (`docs/standards/code.md`): `farik-core`'s `template_slug`, so the rule lives once, at most 64
+/// A kebab-case slug of a name a person chose, which is how an id is spelled everywhere in Catervas
+/// (`docs/standards/code.md`): `catervas-core`'s `template_slug`, so the rule lives once, at most 64
 /// characters as the team schema caps an id.
 ///
-/// A name with nothing a slug can keep — punctuation, another script — answers `farik`, because a
+/// A name with nothing a slug can keep — punctuation, another script — answers `catervas`, because a
 /// blank id names nobody and `new_event` refuses one.
 pub(crate) fn slug(name: &str) -> String {
-    template_slug(name).unwrap_or_else(|| "farik".into())
+    template_slug(name).unwrap_or_else(|| "catervas".into())
 }
 
 /// The project's tools, over this process's own board of the project's log.
@@ -219,16 +219,16 @@ mod tests {
 
     #[test]
     fn spells_a_name_a_person_chose_the_way_an_id_is_spelled() {
-        assert_eq!(slug("Farik"), "farik");
+        assert_eq!(slug("Catervas"), "catervas");
         assert_eq!(slug("Maya Chen"), "maya-chen");
         assert_eq!(slug("  a  b  "), "a-b");
         assert_eq!(slug("my_project.v2"), "my-project-v2");
         assert_eq!(
             slug("プロジェクト"),
-            "farik",
+            "catervas",
             "a name with nothing a slug can keep still names something: a blank id names nobody, \
              and new_event refuses one"
         );
-        assert_eq!(slug("---"), "farik");
+        assert_eq!(slug("---"), "catervas");
     }
 }

@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -37,7 +37,7 @@ describe("send back dialog", () => {
 		]);
 		expect(
 			within(dialog).getByText(
-				"This is try 1 of 4. After the last, Farik stops and asks you what to do.",
+				"This is try 1 of 4. After the last, Catervas stops and asks you what to do.",
 			),
 		).toBeTruthy();
 

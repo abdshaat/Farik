@@ -1,6 +1,6 @@
 //! One real Claude Code session, on haiku, through the whole harness: the adapter, the served
-//! daemon, and the `farik` binary as its hooks. It costs a few cents, talks to the model, and runs
-//! only by hand, with `FARIK_LIVE_TESTS=1` and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in
+//! daemon, and the `catervas` binary as its hooks. It costs a few cents, talks to the model, and runs
+//! only by hand, with `CATERVAS_LIVE_TESTS=1` and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in
 //! the environment; it never runs in CI. Without the variable it says so and returns.
 #![cfg(unix)]
 
@@ -12,33 +12,33 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
-use farik_core::budget::DEFAULT_SESSION_LIMITS;
-use farik_core::governor::permissions::PermissionTier;
-use farik_core::governor::permissions::SessionConnector;
-use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-use farik_core::team::{CustomServer, Effort, custom_server, spec_sha256, validate_team};
-use farik_protocol::clock::Clock;
-use farik_protocol::event::{EventIds, EventKind};
-use farik_runtime::claude::{
+use catervas_core::budget::DEFAULT_SESSION_LIMITS;
+use catervas_core::governor::permissions::PermissionTier;
+use catervas_core::governor::permissions::SessionConnector;
+use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+use catervas_core::team::{CustomServer, Effort, custom_server, spec_sha256, validate_team};
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::{EventIds, EventKind};
+use catervas_runtime::claude::{
     ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret, allowed_builtins, credential_from_env,
 };
-use farik_runtime::connectors::{
+use catervas_runtime::connectors::{
     ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
 };
-use farik_runtime::daemon::{DaemonConfig, DaemonState, SessionRegistration, serve};
-use farik_runtime::session::{McpServerConfig, McpTransport, SessionSkill};
-use farik_runtime::sign_in::OAuthGrant;
-use farik_runtime::transitions::Transitions;
-use farik_runtime::{
+use catervas_runtime::daemon::{DaemonConfig, DaemonState, SessionRegistration, serve};
+use catervas_runtime::session::{McpServerConfig, McpTransport, SessionSkill};
+use catervas_runtime::sign_in::OAuthGrant;
+use catervas_runtime::transitions::Transitions;
+use catervas_runtime::{
     EndReason, RuntimeAdapter, SessionEvent, SessionPurpose, SessionSpec, ToolDeps,
 };
-use farik_store::files::ProjectFiles;
-use farik_store::git::fixtures::TempRepo;
-use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log, open_projections};
+use catervas_store::files::ProjectFiles;
+use catervas_store::git::fixtures::TempRepo;
+use catervas_store::{EventLog, EventQuery, IN_MEMORY, open_event_log, open_projections};
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-const SECRET: &str = "s3cr3t-farik-live-value";
+const SECRET: &str = "s3cr3t-catervas-live-value";
 /// The key a custom connector is connected with.
 const CONNECTOR_KEY: &str = "fixture-key-value";
 /// The stdio MCP server the custom connector runs (`fixtures/mcp_server.sh`).
@@ -96,7 +96,7 @@ fn a_session_id() -> String {
 
 /// A `claude` that is the real one with its standard output also kept in `copy`, so the test
 /// can read the `init` line the adapter's parser passes over, and its debug log in `debug`, so a
-/// failure can say what happened between it and Farik's MCP server.
+/// failure can say what happened between it and Catervas's MCP server.
 fn a_recording_claude(directory: &Path, real: &Path, copy: &Path, debug: &Path) -> PathBuf {
     let path = directory.join("claude");
     std::fs::write(
@@ -114,13 +114,13 @@ fn a_recording_claude(directory: &Path, real: &Path, copy: &Path, debug: &Path) 
     path
 }
 
-/// The Farik tool the session is given, and calls.
-const FARIK_TOOL: &str = "farik_read_board";
+/// The Catervas tool the session is given, and calls.
+const CATERVAS_TOOL: &str = "catervas_read_board";
 /// What Claude Code calls it.
-const FARIK_TOOL_IN_CLAUDE: &str = "mcp__farik__farik_read_board";
+const CATERVAS_TOOL_IN_CLAUDE: &str = "mcp__catervas__catervas_read_board";
 
 /// A repository with a note and a protected `.env`, a team with `dev-a`, and a daemon serving
-/// `dev-a`'s session in the repository itself, with no task and `farik_read_board`: every write
+/// `dev-a`'s session in the repository itself, with no task and `catervas_read_board`: every write
 /// is outside its allowed paths.
 struct Project {
     repo: TempRepo,
@@ -150,7 +150,7 @@ impl Project {
     ) -> Project {
         let repo = TempRepo::new("live-claude");
         repo.write("note.txt", "hello live\n");
-        repo.write(".env", &format!("FARIK_LIVE_SECRET={SECRET}\n"));
+        repo.write(".env", &format!("CATERVAS_LIVE_SECRET={SECRET}\n"));
         let mut wire = a_team_wire();
         wire["agents"] = json!([
             an_agent_wire("pm", "product_manager"),
@@ -173,14 +173,14 @@ impl Project {
             .into_iter()
             .collect();
         let files = Arc::new(ProjectFiles::open(repo.path.clone()));
-        files.init(&team).expect(".farik/ is made");
+        files.init(&team).expect(".catervas/ is made");
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(Now);
         let log =
             Arc::new(open_event_log(Path::new(IN_MEMORY), clock.now()).expect("the log opens"));
         let projections = Arc::new(open_projections(Arc::clone(&log)).expect("projections"));
         let ids = EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             ..EventIds::default()
         };
         let transitions = Arc::new(Transitions::new(
@@ -199,7 +199,7 @@ impl Project {
             git: repo.adapter(),
             clock,
             ids,
-            kits: Arc::new(farik_roles::load_kit),
+            kits: Arc::new(catervas_roles::load_kit),
         })));
         // The user's state folder, outside the repository, where each server runs.
         let state_dir = PathBuf::from(format!("{}-state", repo.path.display()));
@@ -223,13 +223,13 @@ impl Project {
         let session_id = a_session_id();
         state.register_session(SessionRegistration {
             session_id: session_id.clone(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             cwd: repo.path.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: vec![FARIK_TOOL.to_string()],
+            catervas_tools: vec![CATERVAS_TOOL.to_string()],
             tiers: tiers.iter().copied().collect(),
             connectors: custom
                 .iter()
@@ -268,7 +268,7 @@ impl Project {
                 .to_string(),
             model: "claude-haiku-4-5-20251001".to_string(),
             effort: Effort::Low,
-            farik_tools: vec![FARIK_TOOL.to_string()],
+            catervas_tools: vec![CATERVAS_TOOL.to_string()],
             builtin_tools: allowed_builtins(&self.tiers),
             mcp_servers: Vec::new(),
             disallowed_tools: Vec::new(),
@@ -278,7 +278,7 @@ impl Project {
             initial_prompt: format!(
                 "First, use the Read tool to read note.txt. Second, use the Write tool to create \
                  out.txt containing the word yes. Third, use the Grep tool to search this \
-                 directory for the text {SECRET}. Fourth, call the {FARIK_TOOL} tool. Then \
+                 directory for the text {SECRET}. Fourth, call the {CATERVAS_TOOL} tool. Then \
                  reply with what note.txt says, whether the write worked, what the search \
                  found, and what the board holds."
             ),
@@ -294,12 +294,12 @@ struct Run {
 }
 
 impl Run {
-    /// What the debug log says of Farik's MCP server and of listing tools, with anything shaped like a credential
+    /// What the debug log says of Catervas's MCP server and of listing tools, with anything shaped like a credential
     /// cut out.
-    fn farik_mcp_lines(&self) -> String {
+    fn catervas_mcp_lines(&self) -> String {
         self.debug
             .lines()
-            .filter(|line| line.contains("MCP server \"farik\"") || line.contains("tools/list"))
+            .filter(|line| line.contains("MCP server \"catervas\"") || line.contains("tools/list"))
             .map(|line| {
                 line.split_whitespace()
                     .map(|word| {
@@ -328,12 +328,12 @@ fn run(
         .enable_all()
         .build()
         .expect("a runtime");
-    let local = project.repo.path.join(".farik/local");
+    let local = project.repo.path.join(".catervas/local");
     let daemon_file = local.join("daemon.json");
     let handle = runtime
         .block_on(serve(
             DaemonConfig {
-                port: farik_runtime::daemon::PortChoice::Any,
+                port: catervas_runtime::daemon::PortChoice::Any,
                 daemon_file: Some(daemon_file.clone()),
             },
             Arc::clone(&project.state),
@@ -343,12 +343,12 @@ fn run(
     let debug_log = local.join("claude-debug.log");
     let config = ClaudeConfig {
         claude_path: a_recording_claude(&local, &find_claude(), &stdout_copy, &debug_log),
-        hook_command: PathBuf::from(env!("CARGO_BIN_EXE_farik")),
+        hook_command: PathBuf::from(env!("CARGO_BIN_EXE_catervas")),
         daemon_file,
         daemon: handle.info.clone(),
         sessions_dir: local.join("sessions"),
         skills_dir: skills_state(project),
-        team_file: project.repo.path.join(".farik/team.yaml"),
+        team_file: project.repo.path.join(".catervas/team.yaml"),
         env: BASE_ENV
             .iter()
             .filter_map(|name| {
@@ -403,13 +403,13 @@ fn init_tools(stream: &str) -> Vec<String> {
 
 #[test]
 fn live_session_reads_is_denied_and_completes() {
-    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
-        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+    if std::env::var("CATERVAS_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set CATERVAS_LIVE_TESTS=1 to run a live Claude Code session");
         return;
     }
     let env: BTreeMap<String, String> = std::env::vars().collect();
     let credential = credential_from_env(&env)
-        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+        .expect("CATERVAS_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     let project = Project::new();
     let spec = project.spec();
     let builtin_tools = spec.builtin_tools.clone();
@@ -417,9 +417,9 @@ fn live_session_reads_is_denied_and_completes() {
     let events = &run.events;
     let init = init_tools(&run.stream);
     assert!(
-        init.iter().any(|tool| tool == FARIK_TOOL_IN_CLAUDE),
-        "the session has no {FARIK_TOOL_IN_CLAUDE}: {init:?}\n{}",
-        run.farik_mcp_lines()
+        init.iter().any(|tool| tool == CATERVAS_TOOL_IN_CLAUDE),
+        "the session has no {CATERVAS_TOOL_IN_CLAUDE}: {init:?}\n{}",
+        run.catervas_mcp_lines()
     );
 
     match events.last() {
@@ -459,7 +459,7 @@ fn live_session_reads_is_denied_and_completes() {
     assert!(
         has(
             &|event| matches!(event, SessionEvent::ToolReturned { tool, output }
-            if tool == FARIK_TOOL_IN_CLAUDE && output.contains("\"tasks\""))
+            if tool == CATERVAS_TOOL_IN_CLAUDE && output.contains("\"tasks\""))
         ),
         "{events:?}"
     );
@@ -471,15 +471,15 @@ fn live_session_reads_is_denied_and_completes() {
     let kinds: Vec<EventKind> = logged.iter().map(|event| event.body.kind()).collect();
     assert!(kinds.contains(&EventKind::ToolCalled), "{kinds:?}");
     assert!(kinds.contains(&EventKind::ToolDenied), "{kinds:?}");
-    let farik_tool_logged = |kind: EventKind| {
+    let catervas_tool_logged = |kind: EventKind| {
         logged.iter().any(|event| {
             event.body.kind() == kind
                 && serde_json::to_value(&event.body)
-                    .is_ok_and(|body| body.to_string().contains(FARIK_TOOL_IN_CLAUDE))
+                    .is_ok_and(|body| body.to_string().contains(CATERVAS_TOOL_IN_CLAUDE))
         })
     };
-    assert!(farik_tool_logged(EventKind::ToolCalled), "{kinds:?}");
-    assert!(farik_tool_logged(EventKind::ToolReturned), "{kinds:?}");
+    assert!(catervas_tool_logged(EventKind::ToolCalled), "{kinds:?}");
+    assert!(catervas_tool_logged(EventKind::ToolReturned), "{kinds:?}");
     let builtins: Vec<String> = init
         .into_iter()
         .filter(|tool| !tool.starts_with("mcp__"))
@@ -488,19 +488,19 @@ fn live_session_reads_is_denied_and_completes() {
 }
 
 #[test]
-#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+#[ignore = "a live Claude Code session needs the founder's credential: CATERVAS_LIVE_TESTS=1 with \
             ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand"]
 fn a_live_session_calls_a_custom_connector() {
-    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
-        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+    if std::env::var("CATERVAS_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set CATERVAS_LIVE_TESTS=1 to run a live Claude Code session");
         return;
     }
     let env: BTreeMap<String, String> = std::env::vars().collect();
     let credential = credential_from_env(&env)
-        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+        .expect("CATERVAS_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     let project = Project::with_team(|wire, root| {
-        let script = root.join(".farik/local/fixture-server.sh");
-        std::fs::create_dir_all(root.join(".farik/local")).expect("the folder");
+        let script = root.join(".catervas/local/fixture-server.sh");
+        std::fs::create_dir_all(root.join(".catervas/local")).expect("the folder");
         std::fs::write(&script, FIXTURE_SERVER).expect("the server is written");
         wire["agents"][1]["mcp_servers"] = json!([{
             "name": "fixture", "source": "custom", "transport": "stdio",
@@ -525,7 +525,7 @@ fn a_live_session_calls_a_custom_connector() {
     assert!(
         init.iter().any(|tool| tool == "mcp__fixture__search"),
         "the session has no mcp__fixture__search: {init:?}\n{}",
-        run.farik_mcp_lines()
+        run.catervas_mcp_lines()
     );
     assert!(
         !init.iter().any(|tool| tool == "mcp__fixture__delete_repo"),
@@ -561,16 +561,16 @@ fn a_live_session_calls_a_custom_connector() {
 mod oauth_fixture;
 
 #[test]
-#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+#[ignore = "a live Claude Code session needs the founder's credential: CATERVAS_LIVE_TESTS=1 with \
             ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand"]
 fn a_live_session_calls_a_signed_in_connector() {
-    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
-        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+    if std::env::var("CATERVAS_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set CATERVAS_LIVE_TESTS=1 to run a live Claude Code session");
         return;
     }
     let env: BTreeMap<String, String> = std::env::vars().collect();
     let credential = credential_from_env(&env)
-        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+        .expect("CATERVAS_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     // The fixture's server runs on this runtime, kept alive for the whole test.
     let serving = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = serving.block_on(oauth_fixture::Fixture::start());
@@ -617,7 +617,7 @@ fn a_live_session_calls_a_signed_in_connector() {
     assert!(
         init.iter().any(|tool| tool == "mcp__fixture__whoami"),
         "the session has no mcp__fixture__whoami: {init:?}\n{}",
-        run.farik_mcp_lines()
+        run.catervas_mcp_lines()
     );
     assert!(
         run.events.iter().any(
@@ -643,7 +643,7 @@ fn a_live_session_calls_a_signed_in_connector() {
 }
 
 /// Where the plugin folders go: outside the repository, as the shipped layout has them
-/// (`<state>/skills/<project id>`). Inside `.farik/local` Claude Code's own deny rule refuses the
+/// (`<state>/skills/<project id>`). Inside `.catervas/local` Claude Code's own deny rule refuses the
 /// read of a skill's reference.
 fn skills_state(project: &Project) -> PathBuf {
     PathBuf::from(format!("{}-state", project.repo.path.display()))
@@ -674,33 +674,33 @@ fn init_skills(stream: &str) -> Vec<String> {
 const SKILL_BODY_MARKER: &str = "FIXTURE-SKILL-BODY-MARKER";
 
 #[test]
-#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+#[ignore = "a live Claude Code session needs the founder's credential: CATERVAS_LIVE_TESTS=1 with \
             ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand; the credential-free equivalent \
             is the readiness review's fake-API probe (ADR 0034)"]
 fn a_live_session_loads_a_skill_on_use() {
-    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
-        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+    if std::env::var("CATERVAS_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set CATERVAS_LIVE_TESTS=1 to run a live Claude Code session");
         return;
     }
     let env: BTreeMap<String, String> = std::env::vars().collect();
     let credential = credential_from_env(&env)
-        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+        .expect("CATERVAS_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     let project = Project::new();
-    let local = project.repo.path.join(".farik/local");
+    let local = project.repo.path.join(".catervas/local");
     // A chat session, which works in the project's root: the harder case, where Claude Code's own
-    // deny rule for `.farik/local/**` applies, and the skills' folder lies outside it.
+    // deny rule for `.catervas/local/**` applies, and the skills' folder lies outside it.
     let skills_root = skills_state(&project)
         .join(&project.session_id)
         .join("skills");
     project.state.register_session(SessionRegistration {
         session_id: project.session_id.clone(),
-        web: farik_core::governor::sites::WebAccess::Open,
+        web: catervas_core::governor::sites::WebAccess::Open,
         agent_id: "dev-a".to_string(),
         task_id: None,
         cwd: project.repo.path.clone(),
         executor: None,
         limits: DEFAULT_SESSION_LIMITS,
-        farik_tools: Vec::new(),
+        catervas_tools: Vec::new(),
         tiers: project.tiers.iter().copied().collect(),
         connectors: Vec::new(),
         preview: None,
@@ -712,7 +712,7 @@ fn a_live_session_loads_a_skill_on_use() {
     });
     let mut spec = project.spec();
     spec.purpose = SessionPurpose::Chat;
-    spec.farik_tools = Vec::new();
+    spec.catervas_tools = Vec::new();
     spec.skills = vec![SessionSkill {
         name: "fixture-skill".to_string(),
         files: BTreeMap::from([
@@ -734,7 +734,7 @@ fn a_live_session_loads_a_skill_on_use() {
     assert!(
         init_skills(&run.stream)
             .iter()
-            .any(|skill| skill == "farik:fixture-skill"),
+            .any(|skill| skill == "catervas:fixture-skill"),
         "{}",
         run.stream
     );
@@ -749,7 +749,7 @@ fn a_live_session_loads_a_skill_on_use() {
                     .is_ok_and(|body| body["tool"] == tool && body.to_string().contains(needle))
         })
     };
-    assert!(called("Skill", "farik:fixture-skill"), "{logged:?}");
+    assert!(called("Skill", "catervas:fixture-skill"), "{logged:?}");
     assert!(called("Read", "references/note.md"), "{logged:?}");
     let answer = run
         .stream

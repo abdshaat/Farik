@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -116,8 +116,10 @@ describe("acceptance gate", () => {
 		).toBeTruthy();
 		expect(within(reviewed).getByText(REVIEW)).toBeTruthy();
 
-		// Then Farik's checks, after both summaries.
-		const checked = screen.getByRole("region", { name: "What Farik checked" });
+		// Then Catervas's checks, after both summaries.
+		const checked = screen.getByRole("region", {
+			name: "What Catervas checked",
+		});
 		expect(
 			reviewed.compareDocumentPosition(checked) &
 				Node.DOCUMENT_POSITION_FOLLOWING,
@@ -271,7 +273,7 @@ describe("acceptance gate", () => {
 				kind: "integration",
 				agent_id: null,
 				title: "Gift cards",
-				line: "Farik could not add it to your project",
+				line: "Catervas could not add it to your project",
 			},
 		]);
 		const add = await screen.findByRole("button", { name: "Add to project" });
@@ -390,7 +392,7 @@ describe("acceptance gate", () => {
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
 		).toEqual([
-			"Farik ran its checks",
+			"Catervas ran its checks",
 			"Iris sent the screens back",
 			"Kai checked the screens",
 			"Ada reviewed the code",
@@ -433,7 +435,7 @@ describe("acceptance gate", () => {
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
 		).toEqual([
-			"Farik ran its checks",
+			"Catervas ran its checks",
 			"Iris sent the screens back",
 			"Ada sent the code back",
 			"Kai checked the screens",

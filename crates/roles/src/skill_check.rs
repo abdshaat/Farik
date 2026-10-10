@@ -1,11 +1,11 @@
-//! Checking a skill a user or a kit adds, against the Agent Skills format and Farik's limits
+//! Checking a skill a user or a kit adds, against the Agent Skills format and Catervas's limits
 //! (`docs/SPEC.md` 6.7, ADR 0034). Pure: the caller reads the folder.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::LazyLock;
 
-use farik_core::contract::Role;
+use catervas_core::contract::Role;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -92,7 +92,7 @@ impl fmt::Display for SkillRefusal {
             ),
             Self::RunsCommands => write!(
                 formatter,
-                "{code}: SKILL.md runs a command when it loads (!` or a ```! block). Farik does not \
+                "{code}: SKILL.md runs a command when it loads (!` or a ```! block). Catervas does not \
                  load skills that do."
             ),
             Self::AttachesFiles => write!(
@@ -320,7 +320,7 @@ pub fn declared_name_and_description(
     Some((name.clone(), description))
 }
 
-/// Every agent role Farik ships.
+/// Every agent role Catervas ships.
 pub const SHIPPED_ROLES: [Role; 8] = [
     Role::ProductManager,
     Role::ScrumMaster,
@@ -359,7 +359,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::Path;
 
-    use farik_core::contract::Role;
+    use catervas_core::contract::Role;
     use serde_json::Value;
 
     use super::{SkillRefusal, check_skill, core_skill_names, declared_name_and_description};

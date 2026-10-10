@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 
 use crate::contract::{Role, TaskContract, TaskStatus, wire_method};
-use crate::generated::task_contract::FarikTaskContractKind as Kind;
+use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::governor::done::{CriterionResult, RunBy};
 use crate::governor::task_status::is_terminal;
 use crate::governor::transition_table::TransitionActor;
@@ -364,7 +364,7 @@ fn without_a_browser(input: &AssignmentInput) -> Option<String> {
     match input.designer_browser {
         DesignerBrowser::Ready => None,
         DesignerBrowser::NoPreview => Some(
-            "preview_not_set: the UI/UX Designer opens your app to work, and Farik has not been told how; set it in Settings, under How to open your app"
+            "preview_not_set: the UI/UX Designer opens your app to work, and Catervas has not been told how; set it in Settings, under How to open your app"
                 .to_string(),
         ),
         DesignerBrowser::NoSandbox => Some(
@@ -372,7 +372,7 @@ fn without_a_browser(input: &AssignmentInput) -> Option<String> {
                 .to_string(),
         ),
         DesignerBrowser::NoConnector => Some(
-            "designer_needs_browser: Playwright is off for the UI/UX Designer, and without it the Designer cannot look at your app, so Farik gives it no work. Turn Playwright on for it on the Team page"
+            "designer_needs_browser: Playwright is off for the UI/UX Designer, and without it the Designer cannot look at your app, so Catervas gives it no work. Turn Playwright on for it on the Team page"
                 .to_string(),
         ),
     }
@@ -1171,8 +1171,8 @@ mod tests {
         in_the_open_sprint, waits_for_a_sprint,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
+    use crate::generated::task_contract::CatervasTaskContractKind as Kind;
     use crate::generated::task_contract::ExitCriterionVerificationVariant0Expect;
-    use crate::generated::task_contract::FarikTaskContractKind as Kind;
     use crate::governor::done::{CriterionResult, RunBy};
     use crate::governor::readiness::fixtures::a_contract;
     use crate::governor::task_status::TASK_STATUSES;
@@ -1248,7 +1248,7 @@ mod tests {
         assert_eq!(
             reasons(check_assignment(&designers, &input)),
             [
-                "preview_not_set: the UI/UX Designer opens your app to work, and Farik has not been told how; set it in Settings, under How to open your app"
+                "preview_not_set: the UI/UX Designer opens your app to work, and Catervas has not been told how; set it in Settings, under How to open your app"
             ]
         );
         input.designer_browser = DesignerBrowser::NoSandbox;
@@ -1262,7 +1262,7 @@ mod tests {
         assert_eq!(
             reasons(check_assignment(&designers, &input)),
             [
-                "designer_needs_browser: Playwright is off for the UI/UX Designer, and without it the Designer cannot look at your app, so Farik gives it no work. Turn Playwright on for it on the Team page"
+                "designer_needs_browser: Playwright is off for the UI/UX Designer, and without it the Designer cannot look at your app, so Catervas gives it no work. Turn Playwright on for it on the Team page"
             ]
         );
         // The browser is the Designer's alone: a Developer is assigned whatever it says.
@@ -1989,7 +1989,7 @@ mod tests {
         assert_eq!(
             reasons(check_assignment(&task, &input)),
             [
-                "private_folder_busy: another task holds .farik/local/finance, and one piece of work \
+                "private_folder_busy: another task holds .catervas/local/finance, and one piece of work \
               touches it at a time; this one waits until that task is accepted or cancelled"
             ]
         );
@@ -2014,7 +2014,7 @@ mod tests {
     fn a_finance_task() -> TaskContract {
         let mut contract = a_contract();
         contract.assignee_role = Role::FinanceSpecialist;
-        contract.allowed_paths = vec![".farik/local/finance/**".to_string()];
+        contract.allowed_paths = vec![".catervas/local/finance/**".to_string()];
         contract.exit_criteria[0].verification = VerificationWire::Variant2 {
             method: json!("artifact"),
             must_contain: Vec::new(),

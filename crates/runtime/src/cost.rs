@@ -5,22 +5,22 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
-use farik_core::budget::{
+use catervas_core::budget::{
     BudgetConsequence, BudgetScope, BudgetState, Exhausted, SessionLedger, check_budgets,
     default_session_limits,
 };
-use farik_core::contract::{Role, TaskContract};
-use farik_core::pricing::{PriceTable, PricingError, Usage, compute_cost_usd};
-use farik_core::team::Team;
-use farik_protocol::clock::Clock;
-use farik_protocol::event::{
-    BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope,
+use catervas_core::contract::{Role, TaskContract};
+use catervas_core::pricing::{PriceTable, PricingError, Usage, compute_cost_usd};
+use catervas_core::team::Team;
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::{
+    BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CatervasEvent,
     CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose, EventBody, EventIds,
-    EventKind, FarikEvent, SessionEndedBodyReason, TokenUsage, new_event,
+    EventKind, SessionEndedBodyReason, TokenUsage, new_event,
 };
-use farik_roles::{RoleError, load_role};
-use farik_store::{CostProjection, CostScope, EventLog, EventQuery, Projections, StoreError};
+use catervas_roles::{RoleError, load_role};
+use catervas_store::{CostProjection, CostScope, EventLog, EventQuery, Projections, StoreError};
+use chrono::{DateTime, Utc};
 
 use crate::channel::{ChannelError, post_system};
 use crate::session::{SessionPurpose, TRIAGE_MODEL, session_model};
@@ -148,7 +148,7 @@ pub fn record_session_cost(
 /// An agent's model is its own `model.id` when it has one and otherwise its role's default
 /// (`session_model`); every active agent also uses `TRIAGE_MODEL`, which its conversations, a
 /// Product Manager's triage, and the ceremony runner's ceremonies run on (5.9, 5.16). An agent
-/// with no model of its own whose role Farik does not ship is passed over, since nothing could
+/// with no model of its own whose role Catervas does not ship is passed over, since nothing could
 /// load its role to start a session of it.
 ///
 /// # Errors
@@ -304,7 +304,7 @@ pub fn budget_state(
 }
 
 /// The more tries the human granted over `history`'s `escalation.resolved` events (ADR 0024).
-pub(crate) fn extra_tries(history: &[FarikEvent]) -> u32 {
+pub(crate) fn extra_tries(history: &[CatervasEvent]) -> u32 {
     history
         .iter()
         .filter_map(|event| match &event.body {
@@ -364,7 +364,7 @@ fn stamp(
     body: EventBody,
     clock: &dyn Clock,
     ids: &EventIds,
-) -> Result<farik_protocol::event::NewEvent, CostError> {
+) -> Result<catervas_protocol::event::NewEvent, CostError> {
     new_event(body, clock.now(), ids.clone()).map_err(|error| CostError::Event {
         detail: format!("{error:?}"),
     })
@@ -432,26 +432,27 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use chrono::{DateTime, Utc};
-    use farik_core::budget::{
+    use catervas_core::budget::{
         BudgetConsequence, BudgetScope, BudgetState, DEFAULT_SESSION_LIMITS, Exhausted,
         SessionLedger, check_budgets, default_session_limits,
     };
-    use farik_core::contract::fixtures::a_contract_wire;
-    use farik_core::contract::{Role, TaskContract, validate_contract};
-    use farik_core::pricing::prices::PRICE_TABLE;
-    use farik_core::pricing::{PriceTable, Usage, validate_price_table};
-    use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-    use farik_core::team::{Team, validate_team};
-    use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::fixtures::{a_new_event, an_event_wire};
-    use farik_protocol::event::{
-        BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CostRecordedBodyPurpose,
-        EventBody, EventIds, EventKind, FarikEvent, MessageKind, NewEvent, event_from_value,
+    use catervas_core::contract::fixtures::a_contract_wire;
+    use catervas_core::contract::{Role, TaskContract, validate_contract};
+    use catervas_core::pricing::prices::PRICE_TABLE;
+    use catervas_core::pricing::{PriceTable, Usage, validate_price_table};
+    use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+    use catervas_core::team::{Team, validate_team};
+    use catervas_protocol::clock::FixedClock;
+    use catervas_protocol::event::fixtures::{a_new_event, an_event_wire};
+    use catervas_protocol::event::{
+        BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CatervasEvent,
+        CostRecordedBodyPurpose, EventBody, EventIds, EventKind, MessageKind, NewEvent,
+        event_from_value,
     };
-    use farik_store::{
+    use catervas_store::{
         CostScope, EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections,
     };
+    use chrono::{DateTime, Utc};
     use serde_json::json;
 
     use super::{
@@ -498,8 +499,8 @@ mod tests {
 
     fn ids(task: Option<&str>, session: &str) -> EventIds {
         EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             task_id: task.map(|id| id.parse().expect("a task id")),
             agent_id: Some("linus".to_string()),
             session_id: Some(session.to_string()),
@@ -529,7 +530,7 @@ mod tests {
         projections.apply(&appended).expect("projects");
     }
 
-    fn everything(log: &EventLog) -> Vec<FarikEvent> {
+    fn everything(log: &EventLog) -> Vec<CatervasEvent> {
         log.read(&EventQuery::default()).expect("the log reads")
     }
 
@@ -955,7 +956,7 @@ mod tests {
         let read = state(&projections, &team, Role::SoftwareDeveloper, None);
         assert_eq!(
             read.session_limits,
-            farik_core::budget::SessionLimits {
+            catervas_core::budget::SessionLimits {
                 max_input_tokens: 100_000,
                 ..DEFAULT_SESSION_LIMITS
             }
@@ -1039,7 +1040,7 @@ mod tests {
             }]
         );
         let events = everything(&log);
-        // The exhaustion, and Farik's line in the channel about it.
+        // The exhaustion, and Catervas's line in the channel about it.
         assert_eq!(events.len(), 2);
         let EventBody::BudgetExhausted(body) = &events[0].body else {
             panic!("a budget.exhausted, not {:?}", events[0].body.kind());
@@ -1096,7 +1097,7 @@ mod tests {
         )
         .expect("recorded");
 
-        let lines: Vec<FarikEvent> = everything(&log)
+        let lines: Vec<CatervasEvent> = everything(&log)
             .into_iter()
             .filter(|event| event.body.kind() == EventKind::MessagePosted)
             .collect();
@@ -1104,7 +1105,7 @@ mod tests {
             .iter()
             .map(|event| match &event.body {
                 EventBody::MessagePosted(body) => {
-                    assert_eq!(body.author, "farik");
+                    assert_eq!(body.author, "catervas");
                     assert_eq!(body.kind, MessageKind::System);
                     assert_eq!(event.envelope.ids.agent_id, None);
                     body.text.clone()

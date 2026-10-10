@@ -1,4 +1,4 @@
-import "@farik/ui/test/dialog-shim";
+import "@catervas/ui/test/dialog-shim";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { media } from "./media.ts";

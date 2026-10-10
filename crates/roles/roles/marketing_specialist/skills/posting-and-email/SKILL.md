@@ -35,7 +35,7 @@ contract says so. Make one change per request, whole, so the user can read what 
 
 ## 5. Keep each request small
 
-Each request's input must stay under 64 KiB, or Farik refuses it (`tool_input_too_large`). Kit's
+Each request's input must stay under 64 KiB, or Catervas refuses it (`tool_input_too_large`). Kit's
 updates replace the whole body, so keep each email or page under 64 KiB: a longer one becomes two
 shorter emails in a series, or a shorter page.
 

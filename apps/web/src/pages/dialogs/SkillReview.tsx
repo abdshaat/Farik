@@ -1,4 +1,4 @@
-import { Button, Dialog } from "@farik/ui";
+import { Button, Dialog } from "@catervas/ui";
 import { useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { said } from "../../app/refusals.ts";
@@ -110,7 +110,7 @@ export function SkillReview({
 						{replaces && (
 							<p>
 								<strong>
-									{t(ours ? "skillReplaces" : "skillReplacesFarik", {
+									{t(ours ? "skillReplaces" : "skillReplacesCatervas", {
 										role,
 										skill: skill.name,
 										whom: skill.level === "agent" ? who : t("skillWholeTeam"),

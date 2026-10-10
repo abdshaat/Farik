@@ -9,9 +9,9 @@ import type {
 } from "@playwright/test/reporter";
 
 /** What `startServe`'s `stop()` attaches: the temporary folders its serve made. */
-export const FOLDERS = "farik-e2e-folders";
+export const FOLDERS = "catervas-e2e-folders";
 
-const mine = join(tmpdir(), "farik-e2e-");
+const mine = join(tmpdir(), "catervas-e2e-");
 
 const folders = (result: TestResult): string[] =>
 	result.attachments

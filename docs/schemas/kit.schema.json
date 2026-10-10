@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/kit.schema.json",
-  "title": "FarikKit",
-  "description": "What a role's kit is: the skills it carries and the services it may be connected to, stored as roles/<role_id>/kit.yaml beside role.yaml. farik-roles loads it and refuses what this schema cannot say, each at its field with a code: kit_role_mismatch, kit_skill_missing, kit_skill_in_role, kit_connector_twice, key_page_missing, label_not_a_tool, package_not_pinned, container_not_builtin, image_not_pinned, allowance_not_external, copy_word_refused, and every refusal the team file gives the same entry. See docs/SPEC.md 6.7 and ADR 0036.",
+  "$id": "https://catervas.dev/schemas/kit.schema.json",
+  "title": "CatervasKit",
+  "description": "What a role's kit is: the skills it carries and the services it may be connected to, stored as roles/<role_id>/kit.yaml beside role.yaml. catervas-roles loads it and refuses what this schema cannot say, each at its field with a code: kit_role_mismatch, kit_skill_missing, kit_skill_in_role, kit_connector_twice, key_page_missing, label_not_a_tool, package_not_pinned, container_not_builtin, image_not_pinned, allowance_not_external, copy_word_refused, and every refusal the team file gives the same entry. See docs/SPEC.md 6.7 and ADR 0036.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -62,7 +62,7 @@
         "transport",
         "tools"
       ],
-      "description": "One service the role may be connected to. stdio and http take the team file's fields and the setup copy (title, about, why, setup, all required); container is a server Farik runs in Docker itself (image, module_root and args, all required) and has no copy. The loader refuses a missing or foreign field per transport (kit_field_missing, kit_field_not_allowed), which typify cannot read from a conditional schema.",
+      "description": "One service the role may be connected to. stdio and http take the team file's fields and the setup copy (title, about, why, setup, all required); container is a server Catervas runs in Docker itself (image, module_root and args, all required) and has no copy. The loader refuses a missing or foreign field per transport (kit_field_missing, kit_field_not_allowed), which typify cannot read from a conditional schema.",
       "properties": {
         "name": {
           "type": "string",
@@ -213,7 +213,7 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{1,64}$"
           },
-          "description": "Tools the owner's approved marketing plan approves: each tagged external_effect (plan_mark_not_external), none with an allowance (plan_mark_with_allowance), and only on Farik's own connector, farik connector <name> (plan_mark_not_farik), since only Farik's own server can be trusted to check the plan (ADR 0038, ADR 0042). Not part of the team entry or its hash."
+          "description": "Tools the owner's approved marketing plan approves: each tagged external_effect (plan_mark_not_external), none with an allowance (plan_mark_with_allowance), and only on Catervas's own connector, catervas connector <name> (plan_mark_not_catervas), since only Catervas's own server can be trusted to check the plan (ADR 0038, ADR 0042). Not part of the team entry or its hash."
         },
         "image": {
           "type": "string",

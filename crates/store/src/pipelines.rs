@@ -1,18 +1,18 @@
 //! The data pipelines the Procurement Specialist asks for (`docs/SPEC.md` 6.10, ADR 0039), folded
 //! from the four `data_pipeline.` kinds of the project's log and the `session.started` events
 //! that name a pipeline. A request is made by the agent; passed to the owner by the Product
-//! Manager's decision session, or by Farik when that session did not decide; approved or declined
+//! Manager's decision session, or by Catervas when that session did not decide; approved or declined
 //! by the Product Manager from that session, or by the owner. Only a decision whose envelope fits
 //! its `by` counts, so that no agent and no other session can approve, decline or escalate a
 //! request.
 
-use chrono::{DateTime, Utc};
-use farik_core::contract::TaskId;
-use farik_core::pipeline::{PipelineCost, pipeline_needs_owner};
-use farik_protocol::event::{
-    DataPipelineCost, DataPipelineDecidedBy, DataPipelineRequestedBody, EventBody, EventKind,
-    FarikEvent,
+use catervas_core::contract::TaskId;
+use catervas_core::pipeline::{PipelineCost, pipeline_needs_owner};
+use catervas_protocol::event::{
+    CatervasEvent, DataPipelineCost, DataPipelineDecidedBy, DataPipelineRequestedBody, EventBody,
+    EventKind,
 };
+use chrono::{DateTime, Utc};
 
 use crate::{EventLog, EventQuery, StoreError};
 
@@ -86,11 +86,11 @@ pub struct PipelineRecord {
     pub requested_at: DateTime<Utc>,
     /// Where it stands.
     pub state: PipelineState,
-    /// The reason it was passed to the owner, when it was: the Product Manager's words, or Farik's
-    /// sentence when `by_farik`.
+    /// The reason it was passed to the owner, when it was: the Product Manager's words, or Catervas's
+    /// sentence when `by_catervas`.
     pub escalated_reason: Option<String>,
-    /// Whether Farik passed it on after the Product Manager's tries, and not the Product Manager.
-    pub by_farik: bool,
+    /// Whether Catervas passed it on after the Product Manager's tries, and not the Product Manager.
+    pub by_catervas: bool,
     /// Who decided it, once it is approved or declined.
     pub by: Option<DecidedBy>,
     /// The Product Manager's reason or the owner's note, when the decision had one.
@@ -111,14 +111,14 @@ pub fn cost_of(cost: DataPipelineCost) -> PipelineCost {
     }
 }
 
-/// Whether `event` was recorded by the owner or by Farik: its envelope names no agent and no
+/// Whether `event` was recorded by the owner or by Catervas: its envelope names no agent and no
 /// session.
-fn is_unattended(event: &FarikEvent) -> bool {
+fn is_unattended(event: &CatervasEvent) -> bool {
     event.envelope.ids.agent_id.is_none() && event.envelope.ids.session_id.is_none()
 }
 
 /// Whether `event` was recorded in one of the sessions asked to decide `record`.
-fn is_its_deciding_session(record: &PipelineRecord, event: &FarikEvent) -> bool {
+fn is_its_deciding_session(record: &PipelineRecord, event: &CatervasEvent) -> bool {
     event
         .envelope
         .ids
@@ -128,7 +128,7 @@ fn is_its_deciding_session(record: &PipelineRecord, event: &FarikEvent) -> bool 
 }
 
 /// Every request the log holds, oldest first. A request is open until a decision it takes: an
-/// escalation counts from Farik (an envelope with no agent and no session) or from a session
+/// escalation counts from Catervas (an envelope with no agent and no session) or from a session
 /// asked to decide this request. A decision counts from the state it may happen in: the owner's
 /// (`by: human`, an envelope with no agent and no session) only on an escalated request, and the
 /// Product Manager's (`by: product_manager`, a session asked to decide this request) only on an
@@ -162,7 +162,7 @@ pub fn data_pipelines(log: &EventLog) -> Result<Vec<PipelineRecord>, StoreError>
                         requested_at: event.envelope.recorded_at,
                         state: PipelineState::Open,
                         escalated_reason: None,
-                        by_farik: false,
+                        by_catervas: false,
                         by: None,
                         reason: None,
                         request: None,
@@ -191,13 +191,13 @@ pub fn data_pipelines(log: &EventLog) -> Result<Vec<PipelineRecord>, StoreError>
                 else {
                     continue;
                 };
-                let by_farik = is_unattended(event);
+                let by_catervas = is_unattended(event);
                 if record.state == PipelineState::Open
-                    && (by_farik || is_its_deciding_session(record, event))
+                    && (by_catervas || is_its_deciding_session(record, event))
                 {
                     record.state = PipelineState::Escalated;
                     record.escalated_reason = Some(body.reason.to_string());
-                    record.by_farik = by_farik;
+                    record.by_catervas = by_catervas;
                 }
             }
             EventBody::DataPipelineApproved(body) => decide(
@@ -223,7 +223,7 @@ pub fn data_pipelines(log: &EventLog) -> Result<Vec<PipelineRecord>, StoreError>
 /// Takes a decision about `pipeline` when it is the first and its envelope fits `by`.
 fn decide(
     records: &mut [PipelineRecord],
-    event: &FarikEvent,
+    event: &CatervasEvent,
     (pipeline, by): (u64, DecidedBy),
     (state, reason): (PipelineState, &str),
     request: Option<TaskId>,
@@ -376,7 +376,7 @@ mod tests {
             escalated.escalated_reason.as_deref(),
             Some("It costs money, so it is yours to decide.")
         );
-        assert!(!escalated.by_farik);
+        assert!(!escalated.by_catervas);
 
         decided(
             &board,
@@ -417,7 +417,7 @@ mod tests {
             pipeline,
             "product_manager",
         );
-        // Nor does a late escalation, from Farik or from the deciding session, take it back.
+        // Nor does a late escalation, from Catervas or from the deciding session, take it back.
         board.put(
             at(10, 8),
             None,
@@ -437,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn the_product_manager_decides_from_its_session_and_farik_escalates_on_none() {
+    fn the_product_manager_decides_from_its_session_and_catervas_escalates_on_none() {
         let board = Board::new("pipelines-pm");
         let first = requested_as(&board, 1, free());
         let second = requested(&board, 2);
@@ -453,7 +453,7 @@ mod tests {
             first,
             "product_manager",
         );
-        // Farik escalates the second after its tries, naming no agent and no session.
+        // Catervas escalates the second after its tries, naming no agent and no session.
         board.put(
             at(10, 6),
             None,
@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(all[0].state, PipelineState::Approved);
         assert_eq!(all[0].by, Some(DecidedBy::ProductManager));
         assert_eq!(all[1].state, PipelineState::Escalated);
-        assert!(all[1].by_farik);
+        assert!(all[1].by_catervas);
         assert_eq!(
             all[1].escalated_reason.as_deref(),
             Some("The Product Manager did not decide")
@@ -518,7 +518,7 @@ mod tests {
                 decided(&board, 7, who, kind, pipeline, "product_manager");
             }
         }
-        // An escalation counts from Farik and from the deciding session, and from no one else.
+        // An escalation counts from Catervas and from the deciding session, and from no one else.
         for who in [
             (Some("proc"), Some("session-proc")),
             (Some("ada"), Some("session-verify")),

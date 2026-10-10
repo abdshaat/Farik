@@ -1,5 +1,5 @@
-import { AVATAR_URLS } from "@farik/ui";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { AVATAR_URLS } from "@catervas/ui";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -154,7 +154,7 @@ const WITH_IRIS = {
 		},
 	],
 };
-/** What `farik init` writes, as settings.defaults answers it. */
+/** What `catervas init` writes, as settings.defaults answers it. */
 const DEFAULTS = {
 	budgets: {},
 	rules: {},
@@ -280,7 +280,7 @@ describe("team page", () => {
 		).toBeTruthy();
 		expect(within(card).queryByText(en.agentActive)).toBeNull();
 		expect(face.style.getPropertyValue("--ring")).toBe(
-			"var(--farik-color-role-ui-ux-designer)",
+			"var(--catervas-color-role-ui-ux-designer)",
 		);
 		// The cost section says what the Designer, and its plans, add.
 		expect(
@@ -680,7 +680,7 @@ describe("team page", () => {
 		await waitFor(() => expect(scrolled.mock.contexts).toContain(preview));
 		expect(
 			within(preview).getByText(
-				"Iris, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Farik the commands you use to open it. Farik runs them inside Docker’s sandbox, never straight on your computer.",
+				"Iris, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Catervas the commands you use to open it. Catervas runs them inside Docker’s sandbox, never straight on your computer.",
 			),
 		).toBeTruthy();
 		expect(within(preview).getByText(en.previewNotSure)).toBeTruthy();
@@ -804,7 +804,7 @@ describe("team page", () => {
 			en.refuseOther,
 		);
 
-		// Put back the default: the answers `farik init` writes.
+		// Put back the default: the answers `catervas init` writes.
 		fireEvent.click(within(may).getByRole("button", { name: en.putBack }));
 		expect(
 			picked(
@@ -1261,7 +1261,7 @@ describe("team page", () => {
 		expect(within(row).getByText(/your Claude subscription/)).toBeTruthy();
 	});
 
-	it("says_a_refused_key_from_the_environment_is_changed_where_farik_runs", async () => {
+	it("says_a_refused_key_from_the_environment_is_changed_where_catervas_runs", async () => {
 		const { socket } = await renderApp("/settings");
 		const s = socket as FakeSocket;
 		await answerStatus(s, true);
@@ -1336,7 +1336,7 @@ const PAIR = {
 		budgets: {},
 	},
 };
-const FOLDER = "/home/me/.config/farik/templates";
+const FOLDER = "/home/me/.config/catervas/templates";
 
 /** The `template.preview` answer: Mira stays, Noor joins, Theo is retired, the rest removed. */
 const PREVIEW = {
@@ -1638,7 +1638,7 @@ describe("team templates", () => {
 		expect(
 			within(section).getByText(t("savedFolder", { folder: FOLDER })),
 		).toBeTruthy();
-		// A file Farik cannot read offers Delete alone, with the fixed line.
+		// A file Catervas cannot read offers Delete alone, with the fixed line.
 		const broken = within(section)
 			.getByText("old-team", { selector: "code" })
 			.closest("li") as HTMLElement;
@@ -1783,7 +1783,7 @@ describe("info buttons on the agent page", () => {
 		for (const key of [
 			"ordersLead",
 			"sitesLead",
-			"sitesFarikNote",
+			"sitesCatervasNote",
 			"mailboxNoneNote",
 		] as const)
 			onlyInTips(t(key, { name: "Ivo" }));

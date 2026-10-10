@@ -1,4 +1,4 @@
-import { Button, Dialog, TextArea } from "@farik/ui";
+import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useRef, useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { commandSaid, daemonSaid, saidAll } from "../../app/refusals.ts";

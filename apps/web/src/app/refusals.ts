@@ -1,4 +1,4 @@
-import { RpcError } from "@farik/protocol-client";
+import { RpcError } from "@catervas/protocol-client";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 
@@ -164,7 +164,7 @@ const SENTENCES: [string, keyof typeof en][] = [
 	["your home folder cannot be read", "setupUnreadable"],
 	["that folder is not a git project", "setupNotGit"],
 	["that folder is inside a git project", "setupInsideGit"],
-	["another farik is already running this project", "setupBusy"],
+	["another catervas is already running this project", "setupBusy"],
 	["connect your AI account first", "setupNoAccount"],
 	["a project's name is", "setupName"],
 	["say a little more about the project", "setupDescribeMore"],

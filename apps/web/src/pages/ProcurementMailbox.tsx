@@ -1,5 +1,5 @@
-import { RpcError } from "@farik/protocol-client";
-import { Button, Choice, TextArea, TextField } from "@farik/ui";
+import { RpcError } from "@catervas/protocol-client";
+import { Button, Choice, TextArea, TextField } from "@catervas/ui";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -14,7 +14,7 @@ type Provider = "gmail" | "icloud" | "fastmail" | "other" | "microsoft";
 type Security = "tls" | "starttls";
 type Server = { host: string; port: string; security: Security };
 
-/** The servers of a provider Farik knows: reading, then sending. */
+/** The servers of a provider Catervas knows: reading, then sending. */
 const KNOWN: Record<
 	Exclude<Provider, "other" | "microsoft">,
 	[Server, Server]
@@ -42,7 +42,7 @@ const HELP: Record<string, string> = {
 	fastmail: "https://www.fastmail.help/hc/articles/360058752854",
 };
 
-/** The steps of a provider's app password, in Farik's words. */
+/** The steps of a provider's app password, in Catervas's words. */
 const STEPS: Record<string, Parameters<typeof t>[0][]> = {
 	gmail: ["mailboxHowGmail1", "mailboxHowGmail2", "mailboxHowGmail3"],
 	icloud: ["mailboxHowIcloud1", "mailboxHowIcloud2", "mailboxHowIcloud3"],
@@ -63,7 +63,7 @@ const PROVIDER_NAME: Record<string, string> = {
 	fastmail: "Fastmail",
 };
 
-/** The provider an address names by its domain, for the domains Farik knows. */
+/** The provider an address names by its domain, for the domains Catervas knows. */
 const DOMAINS: Record<string, Provider> = {
 	"gmail.com": "gmail",
 	"googlemail.com": "gmail",
@@ -143,7 +143,7 @@ function ServerFields({
 
 /**
  * "Connect a procurement mailbox" (spec 6.10): the address the Procurement Specialist writes
- * from and Farik reads replies at, an app password, and the servers. Connecting signs in to both
+ * from and Catervas reads replies at, an app password, and the servers. Connecting signs in to both
  * servers and sends nothing; the password is sent once and dropped from this page.
  */
 export function ProcurementMailbox() {
@@ -189,7 +189,7 @@ export function ProcurementMailbox() {
 			setSmtp(KNOWN[next][1]);
 		}
 	};
-	// The domain of an address Farik knows chooses the provider; any other leaves the choice be.
+	// The domain of an address Catervas knows chooses the provider; any other leaves the choice be.
 	const typeAddress = (next: string) => {
 		setAddress(next);
 		const found = next.includes("@")

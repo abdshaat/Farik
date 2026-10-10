@@ -35,7 +35,7 @@ test("a plan is read, edited with a live check, saved back to refining, then app
 		await expect(page).toHaveURL(/\/tasks\/FRK-1\/plan$/);
 		await expect(
 			page.getByText(
-				"A done.txt file at the root of your project, so that anyone can see the run finished. Farik checks that the file is there.",
+				"A done.txt file at the root of your project, so that anyone can see the run finished. Catervas checks that the file is there.",
 				{ exact: true },
 			),
 		).toBeVisible();
@@ -43,7 +43,7 @@ test("a plan is read, edited with a live check, saved back to refining, then app
 			page.getByText("Mira, your Product Manager, wrote this for you"),
 		).toBeVisible();
 		await expect(
-			page.getByRole("heading", { name: "What Farik checked" }),
+			page.getByRole("heading", { name: "What Catervas checked" }),
 		).toBeVisible();
 		await screenshots(page, "plan");
 
@@ -55,7 +55,7 @@ test("a plan is read, edited with a live check, saved back to refining, then app
 		const intent = page.getByLabel(/^Why you want it/);
 		await expect(verdict).toHaveText(/^(\d+) of \1 checks pass\.$/);
 		const passing = await verdict.textContent();
-		// An empty intent fails a check once Farik has read it; a new one passes again.
+		// An empty intent fails a check once Catervas has read it; a new one passes again.
 		await intent.fill("");
 		await expect(verdict).toHaveText(
 			/^0 of 1 checks pass\. The one left: .*shorter than 20 characters$/,

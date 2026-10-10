@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -45,9 +45,9 @@ describe("help page", () => {
 			s.calls("query").find((q) => q.params.name === "escalation.choices")
 				?.params.params,
 		).toEqual({ task_id: "FRK-1" });
-		// Farik stopped the task for its tries, so the words are Farik's.
+		// Catervas stopped the task for its tries, so the words are Catervas's.
 		const said = screen.getByRole("region", {
-			name: "Farik explains what happened",
+			name: "Catervas explains what happened",
 		});
 		expect(
 			within(said).getByText(
@@ -188,9 +188,9 @@ describe("help page", () => {
 		expect(
 			await screen.findByText("There is nothing to choose here yet."),
 		).toBeTruthy();
-		// Raised by no agent: Farik's words.
+		// Raised by no agent: Catervas's words.
 		expect(
-			screen.getByRole("region", { name: "Farik explains what happened" }),
+			screen.getByRole("region", { name: "Catervas explains what happened" }),
 		).toBeTruthy();
 		expect(screen.queryByLabelText(/A note for Theo/)).toBeNull();
 	});

@@ -55,15 +55,15 @@ pub fn front_end_commands(has_package_json: bool) -> Vec<Vec<&'static str>> {
 }
 
 /// What `pnpm` is given under `--integration` before the first cargo command: the brand's tokens
-/// generated, then the web app built. A farik compiled while `apps/web/dist` is missing serves "not
-/// built" until the crate is compiled again, so every farik the check compiles comes after the app.
+/// generated, then the web app built. A catervas compiled while `apps/web/dist` is missing serves "not
+/// built" until the crate is compiled again, so every catervas the check compiles comes after the app.
 #[must_use]
 pub fn web_app_first(tests: Tests) -> Vec<Vec<&'static str>> {
     match tests {
         Tests::WithoutTheOnesThatNeedAProgram => vec![],
         Tests::All => vec![
             vec!["-r", "--if-present", "generate"],
-            vec!["--filter", "@farik/web", "build"],
+            vec!["--filter", "@catervas/web", "build"],
         ],
     }
 }
@@ -73,8 +73,8 @@ pub fn web_app_first(tests: Tests) -> Vec<Vec<&'static str>> {
 /// [`web_app_first`] built.
 /// Nothing without the flag.
 ///
-/// The journey also runs `target/debug/farik` (`farik init`, `farik log`). It is not built here: the
-/// check's `cargo test --workspace`, and the step's own `cargo test -p farik`, build the package's
+/// The journey also runs `target/debug/catervas` (`catervas init`, `catervas log`). It is not built here: the
+/// check's `cargo test --workspace`, and the step's own `cargo test -p catervas`, build the package's
 /// binaries for its integration tests, so it exists by the time the journey runs.
 #[must_use]
 pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)> {
@@ -83,11 +83,11 @@ pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>
         Tests::All => vec![
             (
                 "cargo",
-                // `farik`'s lint below does not reach `farik-runtime`'s `#[cfg(feature = "e2e")]` code.
+                // `catervas`'s lint below does not reach `catervas-runtime`'s `#[cfg(feature = "e2e")]` code.
                 vec![
                     "clippy",
                     "-p",
-                    "farik-runtime",
+                    "catervas-runtime",
                     "--features",
                     "e2e",
                     "--",
@@ -100,11 +100,11 @@ pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>
                 vec![
                     "clippy",
                     "-p",
-                    "farik",
+                    "catervas",
                     "--features",
                     "e2e",
                     "--bin",
-                    "farik-e2e-serve",
+                    "catervas-e2e-serve",
                     "--",
                     "-D",
                     "warnings",
@@ -116,7 +116,7 @@ pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>
                 vec![
                     "test",
                     "-p",
-                    "farik",
+                    "catervas",
                     "--features",
                     "e2e",
                     "--test",
@@ -130,14 +130,14 @@ pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>
                 vec![
                     "build",
                     "-p",
-                    "farik",
+                    "catervas",
                     "--features",
                     "e2e",
                     "--bin",
-                    "farik-e2e-serve",
+                    "catervas-e2e-serve",
                 ],
             ),
-            ("pnpm", vec!["--filter", "@farik/web", "e2e"]),
+            ("pnpm", vec!["--filter", "@catervas/web", "e2e"]),
         ],
     }
 }
@@ -150,14 +150,14 @@ mod tests {
     };
 
     #[test]
-    fn builds_the_web_app_before_any_farik_is_compiled_under_integration() {
-        // A farik compiled while `apps/web/dist` is missing serves "not built" even after the app
+    fn builds_the_web_app_before_any_catervas_is_compiled_under_integration() {
+        // A catervas compiled while `apps/web/dist` is missing serves "not built" even after the app
         // is built, so the app comes first. The tokens come before it: a fresh checkout has none.
         assert_eq!(
             web_app_first(Tests::All),
             [
                 vec!["-r", "--if-present", "generate"],
-                vec!["--filter", "@farik/web", "build"],
+                vec!["--filter", "@catervas/web", "build"],
             ]
         );
         assert!(web_app_first(Tests::WithoutTheOnesThatNeedAProgram).is_empty());
@@ -231,7 +231,7 @@ mod tests {
                     vec![
                         "clippy",
                         "-p",
-                        "farik-runtime",
+                        "catervas-runtime",
                         "--features",
                         "e2e",
                         "--",
@@ -244,11 +244,11 @@ mod tests {
                     vec![
                         "clippy",
                         "-p",
-                        "farik",
+                        "catervas",
                         "--features",
                         "e2e",
                         "--bin",
-                        "farik-e2e-serve",
+                        "catervas-e2e-serve",
                         "--",
                         "-D",
                         "warnings",
@@ -259,7 +259,7 @@ mod tests {
                     vec![
                         "test",
                         "-p",
-                        "farik",
+                        "catervas",
                         "--features",
                         "e2e",
                         "--test",
@@ -273,14 +273,14 @@ mod tests {
                     vec![
                         "build",
                         "-p",
-                        "farik",
+                        "catervas",
                         "--features",
                         "e2e",
                         "--bin",
-                        "farik-e2e-serve",
+                        "catervas-e2e-serve",
                     ]
                 ),
-                ("pnpm", vec!["--filter", "@farik/web", "e2e"]),
+                ("pnpm", vec!["--filter", "@catervas/web", "e2e"]),
             ]
         );
         assert!(integration_steps(Tests::WithoutTheOnesThatNeedAProgram).is_empty());
@@ -288,14 +288,14 @@ mod tests {
 
     #[test]
     fn integration_steps_lint_the_runtime_with_e2e() {
-        // `cargo clippy -p farik --features e2e` does not lint `farik-runtime`'s
+        // `cargo clippy -p catervas --features e2e` does not lint `catervas-runtime`'s
         // `#[cfg(feature = "e2e")]` code, the local preview's admission among it.
         assert!(integration_steps(Tests::All).contains(&(
             "cargo",
             vec![
                 "clippy",
                 "-p",
-                "farik-runtime",
+                "catervas-runtime",
                 "--features",
                 "e2e",
                 "--",

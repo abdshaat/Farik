@@ -3,15 +3,15 @@
 
 use std::str::FromStr;
 
-use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus, wire_method};
-use farik_core::governor::gates::{Blocker, Rejection, check_product_doc_write};
-use farik_core::governor::transition::TransitionRequest;
-use farik_core::governor::transition_table::{TransitionActor, find_transitions};
-use farik_protocol::event::{
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus, wire_method};
+use catervas_core::governor::gates::{Blocker, Rejection, check_product_doc_write};
+use catervas_core::governor::transition::TransitionRequest;
+use catervas_core::governor::transition_table::{TransitionActor, find_transitions};
+use catervas_protocol::event::{
     CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, NoteWrittenBody,
     NoteWrittenBodyKind, ProductDocWrittenBody, QuestionAskedBody,
 };
-use farik_store::EventQuery;
+use catervas_store::EventQuery;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -42,7 +42,7 @@ pub(crate) struct RejectionInput {
     reasons: String,
 }
 
-/// `farik_request_transition`'s input.
+/// `catervas_request_transition`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RequestTransitionInput {
@@ -62,7 +62,7 @@ pub(crate) struct RequestTransitionInput {
 /// The most workbooks a move into `verifying` names.
 const MOST_WORKBOOKS: usize = 20;
 
-/// `farik_assign_task`'s input.
+/// `catervas_assign_task`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[expect(
@@ -78,7 +78,7 @@ pub(crate) struct AssignTaskInput {
     reviewer_id: Option<String>,
 }
 
-/// `farik_declare_blocked`'s input.
+/// `catervas_declare_blocked`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DeclareBlockedInput {
@@ -88,7 +88,7 @@ pub(crate) struct DeclareBlockedInput {
     needed: String,
 }
 
-/// `farik_record_criterion_result`'s input.
+/// `catervas_record_criterion_result`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordCriterionInput {
@@ -112,7 +112,7 @@ pub(crate) enum NoteKind {
     Progress,
 }
 
-/// `farik_write_note`'s input.
+/// `catervas_write_note`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteNoteInput {
@@ -122,7 +122,7 @@ pub(crate) struct WriteNoteInput {
     text: String,
 }
 
-/// `farik_ask_human`'s input.
+/// `catervas_ask_human`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AskHumanInput {
@@ -135,7 +135,7 @@ pub(crate) struct AskHumanInput {
     choices: Vec<ChoiceInput>,
 }
 
-/// One answer `farik_ask_human` offers.
+/// One answer `catervas_ask_human` offers.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ChoiceInput {
@@ -146,11 +146,11 @@ pub(crate) struct ChoiceInput {
     hint: Option<String>,
 }
 
-/// `farik_write_product_doc`'s input.
+/// `catervas_write_product_doc`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteProductDocInput {
-    /// Where under `.farik/product/`.
+    /// Where under `.catervas/product/`.
     path: String,
     /// The document.
     content: String,
@@ -256,7 +256,7 @@ pub(super) fn declare_blocked(
 
 /// Records a criterion's result as the assignee's or the reviewer's run, by the caller's relation
 /// to the contract. Nobody records a `human` criterion, which only the human answers; and the
-/// reviewer records only `review` criteria, since Farik runs the others for it and the latest
+/// reviewer records only `review` criteria, since Catervas runs the others for it and the latest
 /// result per runner is what the Definition of Done reads.
 pub(super) fn record_criterion(
     call: &Call<'_>,
@@ -290,7 +290,7 @@ pub(super) fn record_criterion(
         Some(method @ ("command" | "test" | "artifact"))
             if run_by == CriterionRecordedBodyRunBy::Reviewer =>
         {
-            return Err(Refusal::CriterionRunByFarik {
+            return Err(Refusal::CriterionRunByCatervas {
                 criterion_id,
                 method: method.to_string(),
             }
@@ -357,7 +357,7 @@ pub(super) fn opens_with_a_summary(text: &str) -> bool {
 }
 
 /// Asks the human, and answers with the question's id: the sequence number of its event, which
-/// is unique and is what `farik answer` takes.
+/// is unique and is what `catervas answer` takes.
 pub(super) fn ask_human(call: &Call<'_>, input: AskHumanInput) -> Result<Value, ToolError> {
     let bounded = input.choices.len() <= 4
         && input.choices.iter().all(|choice| {
@@ -501,11 +501,11 @@ fn ask_governor(
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::TaskStatus;
-    use farik_core::governor::done::RunBy;
-    use farik_core::governor::transition::{TransitionContext, TransitionRequest};
-    use farik_core::governor::transition_table::TransitionActor;
-    use farik_protocol::event::{EventBody, EventKind, TransitionActorWire};
+    use catervas_core::contract::TaskStatus;
+    use catervas_core::governor::done::RunBy;
+    use catervas_core::governor::transition::{TransitionContext, TransitionRequest};
+    use catervas_core::governor::transition_table::TransitionActor;
+    use catervas_protocol::event::{EventBody, EventKind, TransitionActorWire};
     use serde_json::{Value, json};
 
     use crate::tools::ToolError;
@@ -582,7 +582,7 @@ mod tests {
         project.call(
             agent,
             Some("FRK-1"),
-            "farik_record_criterion_result",
+            "catervas_record_criterion_result",
             json!({ "criterion_id": criterion, "passed": passed, "evidence": "pnpm test login: 4 passed" }),
         )
     }
@@ -596,7 +596,7 @@ mod tests {
         project.call(
             agent,
             Some("FRK-1"),
-            "farik_write_note",
+            "catervas_write_note",
             json!({ "kind": kind, "text": text }),
         )
     }
@@ -610,7 +610,7 @@ mod tests {
             .call(
                 "pm",
                 None,
-                "farik_assign_task",
+                "catervas_assign_task",
                 json!({ "task_id": "FRK-1", "assignee_id": "dev-a", "reviewer_id": "dev-b" }),
             )
             .expect("the Product Manager assigns a ready task");
@@ -635,7 +635,7 @@ mod tests {
             project.call(
                 "dev-a",
                 Some("FRK-1"),
-                "farik_request_transition",
+                "catervas_request_transition",
                 json!({ "to": "verifying" }),
             ),
             "gate_failed",
@@ -665,7 +665,7 @@ mod tests {
         project.filed_with("FRK-1", "assigned", "task", None, |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("product_manager");
-            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+            wire["allowed_paths"] = json!([".catervas/local/finance/**"]);
             wire["exit_criteria"] = json!([{
                 "id": "C1",
                 "text": "The books exist.",
@@ -680,7 +680,7 @@ mod tests {
         );
         record(&project, "fin", "C1", true).expect("the assignee records its run");
         let verifying =
-            |input: Value| project.call("fin", Some("FRK-1"), "farik_request_transition", input);
+            |input: Value| project.call("fin", Some("FRK-1"), "catervas_request_transition", input);
         // None named, one not in the folder, then one that is.
         let reason = refused_with(verifying(json!({ "to": "verifying" })), "gate_failed");
         assert!(reason.contains("name the workbooks you wrote"), "{reason}");
@@ -692,16 +692,16 @@ mod tests {
             reason.contains("books.xlsx is not in your folder"),
             "{reason}"
         );
-        let folder = project.repo.path.join(".farik/local/finance");
+        let folder = project.repo.path.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
         // A path that climbs out, or is no workbook, is not in the folder either.
         let reason = refused_with(
-            verifying(json!({ "to": "verifying", "workbooks": ["../farik.db"] })),
+            verifying(json!({ "to": "verifying", "workbooks": ["../catervas.db"] })),
             "gate_failed",
         );
         assert!(
-            reason.contains("../farik.db is not in your folder"),
+            reason.contains("../catervas.db is not in your folder"),
             "{reason}"
         );
         // The list is one to twenty paths.
@@ -758,7 +758,7 @@ mod tests {
         let unknown = project.call(
             "dev-a",
             Some("FRK-1"),
-            "farik_record_criterion_result",
+            "catervas_record_criterion_result",
             json!({ "criterion_id": "C9", "passed": true, "evidence": "it ran" }),
         );
         refused_with(unknown, "unknown_criterion");
@@ -766,8 +766,8 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_the_reviewer_a_criterion_farik_runs() {
-        let project = a_project("tools-criterion-farik-runs");
+    fn refuses_the_reviewer_a_criterion_catervas_runs() {
+        let project = a_project("tools-criterion-catervas-runs");
         in_progress_with(
             &project,
             json!({
@@ -779,17 +779,17 @@ mod tests {
         let before = project.event_count();
         let reason = refused_with(
             record(&project, "dev-b", "C1", true),
-            "criterion_run_by_farik",
+            "criterion_run_by_catervas",
         );
         assert!(reason.contains("C1 is a test criterion"), "{reason}");
         let reason = refused_with(
             record(&project, "dev-b", "C2", true),
-            "criterion_run_by_farik",
+            "criterion_run_by_catervas",
         );
         assert!(reason.contains("C2 is a command criterion"), "{reason}");
         assert_eq!(project.event_count(), before, "nothing is appended");
 
-        let project = a_project("tools-criterion-farik-runs-artifact");
+        let project = a_project("tools-criterion-catervas-runs-artifact");
         in_progress_with(
             &project,
             json!({
@@ -801,7 +801,7 @@ mod tests {
         let before = project.event_count();
         let reason = refused_with(
             record(&project, "dev-b", "C2", true),
-            "criterion_run_by_farik",
+            "criterion_run_by_catervas",
         );
         assert!(reason.contains("C2 is a artifact criterion"), "{reason}");
         assert_eq!(project.event_count(), before, "nothing is appended");
@@ -974,7 +974,7 @@ mod tests {
             .call(
                 "pm",
                 None,
-                "farik_ask_human",
+                "catervas_ask_human",
                 json!({ "question": "Should a login page remember the user?" }),
             )
             .expect("anyone asks");
@@ -995,14 +995,14 @@ mod tests {
             project.call(
                 "pm",
                 Some("FRK-1"),
-                "farik_write_product_doc",
+                "catervas_write_product_doc",
                 json!({ "path": "prd.md", "content": "# Sign-in" }),
             ),
             "gate_failed",
         );
         assert!(reason.contains("has not approved"), "{reason}");
         assert!(
-            !project.repo.path.join(".farik/product/prd.md").exists(),
+            !project.repo.path.join(".catervas/product/prd.md").exists(),
             "nothing is written"
         );
     }
@@ -1023,13 +1023,13 @@ mod tests {
             project.call(
                 "pm",
                 Some("FRK-1"),
-                "farik_write_product_doc",
+                "catervas_write_product_doc",
                 json!({ "path": "prd.md", "content": "# Sign-in" }),
             )
         };
         write().expect("the human approved the epic's contract");
         assert_eq!(
-            std::fs::read_to_string(project.repo.path.join(".farik/product/prd.md"))
+            std::fs::read_to_string(project.repo.path.join(".catervas/product/prd.md"))
                 .expect("the document is written"),
             "# Sign-in"
         );
@@ -1049,7 +1049,7 @@ mod tests {
             .call(
                 "dev-a",
                 Some("FRK-1"),
-                "farik_declare_blocked",
+                "catervas_declare_blocked",
                 json!({ "description": "The sign-in API is down.", "needed": "A working API key." }),
             )
             .expect("the assignee blocks its task");
@@ -1086,7 +1086,7 @@ mod tests {
             project.call(
                 "kai",
                 Some("FRK-1"),
-                "farik_request_transition",
+                "catervas_request_transition",
                 json!({ "to": "verifying" }),
             )
         };
@@ -1136,7 +1136,7 @@ mod tests {
             .call(
                 "proc",
                 Some("FRK-1"),
-                "farik_request_sites",
+                "catervas_request_sites",
                 json!({ "sites": [{ "url": "https://shop.example/boxes", "why": "A maker." }] }),
             )
             .expect("the site is asked for");
@@ -1146,7 +1146,7 @@ mod tests {
             project.call(
                 "proc",
                 Some("FRK-1"),
-                "farik_request_transition",
+                "catervas_request_transition",
                 json!({ "to": "verifying" }),
             )
         };

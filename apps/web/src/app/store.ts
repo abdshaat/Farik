@@ -1,4 +1,4 @@
-import type { Event, QueryName, RpcError } from "@farik/protocol-client";
+import type { Event, QueryName, RpcError } from "@catervas/protocol-client";
 import { useEffect, useRef, useState } from "react";
 import { useConnection } from "./connection.tsx";
 
@@ -6,7 +6,7 @@ const REFETCH_MS = 250;
 
 /** The `serve.status` query's answer, in camelCase. */
 export type ServeStatus = {
-	/** Null while Farik is being set up, before a project is chosen. */
+	/** Null while Catervas is being set up, before a project is chosen. */
 	projectRoot: string | null;
 	paused: boolean;
 	credential: string | null;

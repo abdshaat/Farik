@@ -34,7 +34,7 @@ describe("the stylesheets", () => {
 			)
 			.filter(
 				(f) =>
-					!/var\(--farik-type-[a-z]+-family\)/.test(
+					!/var\(--catervas-type-[a-z]+-family\)/.test(
 						read(f).split("}")[0] ?? "",
 					),
 			);

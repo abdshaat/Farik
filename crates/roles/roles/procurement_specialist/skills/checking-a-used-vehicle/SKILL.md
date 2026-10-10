@@ -27,8 +27,8 @@ Without it, or for a car sold elsewhere:
 - **Look up its open recalls** on the regulator's recall lookup, such as `nhtsa.gov` in the United
   States, which takes the VIN.
 
-Neither site is on Farik's list of sites you may read. Ask for what you need before you end your
-turn, with `farik_request_sites`, one line of reason for each: "the official VIN decoder, to check
+Neither site is on Catervas's list of sites you may read. Ask for what you need before you end your
+turn, with `catervas_request_sites`, one line of reason for each: "the official VIN decoder, to check
 the listing" and "the official recall lookup by VIN". Your task then waits for the owner. If a site
 is declined, say in your note which checks were not made.
 

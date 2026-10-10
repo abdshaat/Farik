@@ -100,7 +100,7 @@ impl GreenMail {
     fn start_with(test: &str, accounts: &[&Account], beside: Option<&GreenMail>) -> GreenMail {
         static STARTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let name = format!(
-            "farik-greenmail-{}-{}-{test}",
+            "catervas-greenmail-{}-{}-{test}",
             std::process::id(),
             STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
@@ -134,7 +134,7 @@ impl GreenMail {
                     "-days",
                     "30",
                     "-subj",
-                    "/CN=Farik test CA",
+                    "/CN=Catervas test CA",
                     "-addext",
                     "basicConstraints=critical,CA:TRUE",
                 ],
@@ -230,7 +230,7 @@ impl GreenMail {
             "--name".into(),
             name.clone(),
             "--label".into(),
-            format!("farik.project={name}"),
+            format!("catervas.project={name}"),
             "-v".into(),
             mount,
             "-e".into(),
@@ -489,7 +489,7 @@ impl Mime<'_> {
                 (None, None) => headers,
             };
         }
-        let boundary = "farik-test-boundary";
+        let boundary = "catervas-test-boundary";
         let mut raw =
             format!("{headers}Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n");
         raw.push_str(&format!(

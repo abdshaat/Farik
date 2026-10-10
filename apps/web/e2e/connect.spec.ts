@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { farik, startServe } from "./fixtures/serve.ts";
+import { catervas, startServe } from "./fixtures/serve.ts";
 
 const shots = new URL("./screenshots/", import.meta.url).pathname;
 
@@ -38,7 +38,7 @@ test("the start link opens the app and pause works end to end", async ({
 		// The rail's Resume keeps to one line.
 		const resume = page.getByRole("button", { name: "Resume the team" });
 		expect(await resume.evaluate(lines)).toBe(1);
-		const kinds = farik(serve.project, ["--json", "log"])
+		const kinds = catervas(serve.project, ["--json", "log"])
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line).kind);
@@ -83,5 +83,5 @@ test("a used link and a lost connection are said plainly", async ({
 	} finally {
 		await serve.stop();
 	}
-	await expect(page.getByText("Farik stopped answering")).toBeVisible();
+	await expect(page.getByText("Catervas stopped answering")).toBeVisible();
 });

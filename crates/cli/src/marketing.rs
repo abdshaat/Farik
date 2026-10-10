@@ -1,15 +1,15 @@
-//! `farik marketing plan show`: the Marketing Specialist's plans and where each stands
-//! (`docs/SPEC.md` 6.5, ADR 0042). The decisions on them are commands, sent as `farik tool approve`
+//! `catervas marketing plan show`: the Marketing Specialist's plans and where each stands
+//! (`docs/SPEC.md` 6.5, ADR 0042). The decisions on them are commands, sent as `catervas tool approve`
 //! sends its own.
 
-use chrono::{DateTime, Utc};
-use farik_core::marketing::network_name;
-use farik_runtime::marketing::{
+use catervas_core::marketing::network_name;
+use catervas_runtime::marketing::{
     kinds_made, list_row, post_row, posts_going_out, states_today, whole,
 };
-use farik_store::marketing::{
+use catervas_store::marketing::{
     MarketingPlan, PlanState, created_campaigns, marketing_plans, social_posts,
 };
+use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::Report;

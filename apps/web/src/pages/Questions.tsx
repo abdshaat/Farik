@@ -1,4 +1,4 @@
-import { Button, Choice, TextArea } from "@farik/ui";
+import { Button, Choice, TextArea } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";

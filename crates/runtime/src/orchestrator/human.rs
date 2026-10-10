@@ -5,26 +5,26 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
-use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
-use farik_core::governor::gates::{Blocker, Rejection};
-use farik_core::governor::sites::site_of;
-use farik_core::governor::transition::TransitionRequest;
-use farik_core::governor::transition_table::TransitionActor;
-use farik_core::marketing::parse_amount;
-use farik_core::sprint::{Sprint, SprintStatus};
-use farik_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
-use farik_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
-use farik_protocol::event::{
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
+use catervas_core::governor::gates::{Blocker, Rejection};
+use catervas_core::governor::sites::site_of;
+use catervas_core::governor::transition::TransitionRequest;
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::marketing::parse_amount;
+use catervas_core::sprint::{Sprint, SprintStatus};
+use catervas_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
+use catervas_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
+use catervas_protocol::event::{
     AgentUpdatedBody, ConnectorDisconnectedBody, DataPipelineApprovedBody, DataPipelineDecidedBy,
     DataPipelineDeclinedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody,
     EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind,
     QuestionAnsweredBody, SiteDecisionBody, new_event,
 };
-use farik_store::pipelines::{PipelineState, data_pipelines};
-use farik_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
-use farik_store::requests::{RequestError, hold_contract, triage_by_human};
-use farik_store::sites::{SiteRequest, site_requests};
-use farik_store::{EventQuery, TaskProjection};
+use catervas_store::pipelines::{PipelineState, data_pipelines};
+use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
+use catervas_store::requests::{RequestError, hold_contract, triage_by_human};
+use catervas_store::sites::{SiteRequest, site_requests};
+use catervas_store::{EventQuery, TaskProjection};
 
 use super::requests::HUMAN;
 use super::verify::{governor_results, is_mechanical, since_verifying};
@@ -123,7 +123,7 @@ pub(super) async fn handle(
         } => transition(tools, &task_id, to, &reason),
         Command::TaskIntegrate { task_id } => integrate(orchestrator, &task_id).await,
         Command::AgentUpdate { agent_id, status } => {
-            // Retiring deletes the agent's keys (ADR 0030), so Farik could no longer stop its
+            // Retiring deletes the agent's keys (ADR 0030), so Catervas could no longer stop its
             // campaigns at their budget: it pauses them first, as removing Google Ads does, and
             // no Google Ads write runs until the team is written.
             let _ads = if status == AgentStatus::Retired {
@@ -297,7 +297,7 @@ fn pause(tools: &ToolDeps, pausing: bool) -> Result<CommandReport, CommandError>
     })
 }
 
-/// The human's message in the team's channel (5.9), its mentions found by Farik.
+/// The human's message in the team's channel (5.9), its mentions found by Catervas.
 fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, CommandError> {
     let team = tools.files.read_team().map_err(failed)?;
     let mentions = mentions_in(&text, &team, HUMAN);
@@ -591,12 +591,12 @@ fn decide_tool_call(
             ..EventQuery::default()
         })
         .map_err(failed)?;
-    if farik_store::waiting::decision_on(&decisions, approval).is_some() {
+    if catervas_store::waiting::decision_on(&decisions, approval).is_some() {
         return Err(CommandError::Refused {
             reason: format!("approval_decided: approval {approval} was already decided"),
         });
     }
-    let body = farik_protocol::event::ToolApprovalDecidedBody {
+    let body = catervas_protocol::event::ToolApprovalDecidedBody {
         approval: NonZeroU64::new(approval).ok_or_else(unknown)?,
         note,
     };
@@ -775,7 +775,7 @@ fn site_decide(
     })
 }
 
-/// Allows a site no agent asked for, or turns one of Farik's back on: `site.approved { host }` with
+/// Allows a site no agent asked for, or turns one of Catervas's back on: `site.approved { host }` with
 /// no task, and every request waiting for the site allowed too. Refused `site_invalid` for words
 /// that name no site and `site_already_allowed` for a site that is approved.
 fn site_add(tools: &ToolDeps, site: &str) -> Result<CommandReport, CommandError> {
@@ -800,7 +800,7 @@ fn site_add(tools: &ToolDeps, site: &str) -> Result<CommandReport, CommandError>
     })
 }
 
-/// Takes a site away, one the owner allowed or one of Farik's: `site.removed { host }` with no
+/// Takes a site away, one the owner allowed or one of Catervas's: `site.removed { host }` with no
 /// task. Refused `site_invalid` for words that name no site and `site_not_allowed` for a site that
 /// is not approved now.
 fn site_remove(tools: &ToolDeps, host: &str) -> Result<CommandReport, CommandError> {
@@ -892,7 +892,7 @@ fn order_payment(
 }
 
 /// Order `number` among `records`, when it is one the owner may still take a step on: refused
-/// `unknown_purchase_order` for a number nobody drafted, `purchase_order_expired` for one Farik
+/// `unknown_purchase_order` for a number nobody drafted, `purchase_order_expired` for one Catervas
 /// closed by itself, and `purchase_order_ended` for one received or closed.
 fn open_order(
     records: &[PurchaseOrderRecord],
@@ -1111,7 +1111,7 @@ async fn send_order(
     )?;
     Ok(CommandReport {
         said: format!(
-            "Approved {} and sent it to {}. You pay for it yourself; Farik never pays.",
+            "Approved {} and sent it to {}. You pay for it yourself; Catervas never pays.",
             seller_of(&record),
             prepared.seller()
         ),
@@ -1385,11 +1385,11 @@ fn order_update(
 /// `renewal_dismissed` for one dismissed before.
 fn renewal_dismiss(tools: &ToolDeps, renewal: u64) -> Result<CommandReport, CommandError> {
     let _dismissing = crate::locked(&crate::procurement::RENEWALS);
-    let all = farik_store::renewals::renewals(&tools.log).map_err(failed)?;
+    let all = catervas_store::renewals::renewals(&tools.log).map_err(failed)?;
     let Some(one) = all.iter().find(|one| one.renewal == renewal) else {
         return Err(order_refusal(
             "unknown_renewal",
-            format!("event {renewal} is no renewal Farik flagged"),
+            format!("event {renewal} is no renewal Catervas flagged"),
         ));
     };
     if one.dismissed {
@@ -1401,7 +1401,7 @@ fn renewal_dismiss(tools: &ToolDeps, renewal: u64) -> Result<CommandReport, Comm
             ),
         ));
     }
-    let body = farik_protocol::event::RenewalDismissedBody {
+    let body = catervas_protocol::event::RenewalDismissedBody {
         renewal: NonZeroU64::new(renewal).ok_or_else(|| failed("a renewal's number is not 0"))?,
     };
     let seq = append(tools, None, EventBody::RenewalDismissed(body))?;
@@ -1452,7 +1452,7 @@ fn approve(
 
 /// Accepts the result of a `verifying` task that waits for the human (5.4): one of risk `high`
 /// or with a `human` criterion, which moves nothing, or any epic, whoever reviews it (ADR 0013),
-/// once Farik has run and passed each of its mechanical criteria and with the human's words.
+/// once Catervas has run and passed each of its mechanical criteria and with the human's words.
 fn accept_result(
     tools: &ToolDeps,
     task_id: &TaskId,
@@ -1504,7 +1504,7 @@ fn accept_result(
 fn history_of(
     tools: &ToolDeps,
     task_id: &TaskId,
-) -> Result<Vec<farik_protocol::event::FarikEvent>, CommandError> {
+) -> Result<Vec<catervas_protocol::event::CatervasEvent>, CommandError> {
     tools
         .log
         .read(&EventQuery {
@@ -1592,11 +1592,11 @@ fn send_result_back(
     })
 }
 
-/// Every `command`, `test`, or `artifact` criterion of the epic has Farik's passing result since
+/// Every `command`, `test`, or `artifact` criterion of the epic has Catervas's passing result since
 /// it last moved into `verifying` (ADR 0013).
 fn mechanical_criteria_passed(
     contract: &TaskContract,
-    history: &[farik_protocol::event::FarikEvent],
+    history: &[catervas_protocol::event::CatervasEvent],
 ) -> Result<(), CommandError> {
     let results = governor_results(history, since_verifying(history));
     let mechanical: Vec<String> = contract
@@ -1613,7 +1613,7 @@ fn mechanical_criteria_passed(
     if !not_run.is_empty() {
         return Err(CommandError::Refused {
             reason: format!(
-                "criteria_not_run: Farik has not yet run {} on the integration branch",
+                "criteria_not_run: Catervas has not yet run {} on the integration branch",
                 not_run.join(", ")
             ),
         });
@@ -2079,7 +2079,7 @@ fn leaves_a_gap(team: &Team, name: &str, role: Role, status: AgentStatus) -> Opt
         ))
     } else if team.judge() == role {
         Some(format!(
-            "last_judge: {name} checks your plans; let Farik choose who checks, or add another \
+            "last_judge: {name} checks your plans; let Catervas choose who checks, or add another \
              {plain}, before {name} {verb}."
         ))
     } else {
@@ -2313,7 +2313,7 @@ fn connect_server(
             .agents
             .iter()
             .find(|held| held.id.as_str() == agent)
-            .map(|held| farik_core::contract::Role::from(held.role))
+            .map(|held| catervas_core::contract::Role::from(held.role))
             .ok_or_else(|| CommandError::NotFound {
                 what: format!("the agent {agent}"),
             })?;
@@ -2327,7 +2327,7 @@ fn connect_server(
             });
         }
     }
-    if farik_core::team::spec_sha256(&custom) != spec_sha256 {
+    if catervas_core::team::spec_sha256(&custom) != spec_sha256 {
         return Err(CommandError::Refused {
             reason: format!(
                 "connector_not_confirmed: {name} was not kept on this machine as it is described \
@@ -2516,24 +2516,24 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use farik_core::contract::TaskStatus;
-    use farik_core::pricing::Usage;
-    use farik_core::team::AgentStatus;
-    use farik_protocol::command::{AcceptSubject, Command, RequestSize};
-    use farik_protocol::event::{
-        EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent, HumanAcceptedBodySubject,
+    use catervas_core::contract::TaskStatus;
+    use catervas_core::pricing::Usage;
+    use catervas_core::team::AgentStatus;
+    use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
+    use catervas_protocol::event::{
+        CatervasEvent, EscalationRaisedBodyReason, EventBody, EventKind, HumanAcceptedBodySubject,
         MessageKind, SessionEndedBodyReason,
     };
     use serde_json::{Value, json};
 
-    use farik_core::sprint::fixtures::an_open_sprint_wire;
-    use farik_core::sprint::{SprintStatus, validate_sprint};
-    use farik_protocol::event::SprintEndedBodyEndedBy;
+    use catervas_core::sprint::fixtures::an_open_sprint_wire;
+    use catervas_core::sprint::{SprintStatus, validate_sprint};
+    use catervas_protocol::event::SprintEndedBodyEndedBy;
 
     use crate::orchestrator::fixtures::{Harness, UsageThenWaitAdapter};
     use crate::orchestrator::{CommandError, CommandReport, Orchestrator};
 
-    fn task(id: &str) -> farik_core::contract::TaskId {
+    fn task(id: &str) -> catervas_core::contract::TaskId {
         id.parse().expect("a task id")
     }
 
@@ -2555,7 +2555,7 @@ mod tests {
         }
     }
 
-    fn last(harness: &Harness, kind: EventKind) -> Option<FarikEvent> {
+    fn last(harness: &Harness, kind: EventKind) -> Option<CatervasEvent> {
         harness.events(&[kind]).pop()
     }
 
@@ -2580,7 +2580,7 @@ mod tests {
         }])
     }
 
-    /// A passing or failing result for C1 of `id`, as Farik's run for the reviewer.
+    /// A passing or failing result for C1 of `id`, as Catervas's run for the reviewer.
     fn governor_result(harness: &Harness, id: &str, passed: bool) {
         harness.project.record(
             id,
@@ -2609,11 +2609,11 @@ mod tests {
 
     /// dev-a's session `s-1` on FRK-1 asked to call `create_issue`: the approval's seq.
     fn an_approval_asked(harness: &Harness) -> u64 {
-        use farik_protocol::event::{NewEvent, event_from_value};
+        use catervas_protocol::event::{NewEvent, event_from_value};
 
         let event = event_from_value(&json!({
-            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "farik",
-            "project_id": "farik", "task_id": "FRK-1", "agent_id": "dev-a", "session_id": "s-1",
+            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "catervas",
+            "project_id": "catervas", "task_id": "FRK-1", "agent_id": "dev-a", "session_id": "s-1",
             "kind": "tool_approval.requested",
             "body": {
                 "server": "github", "tool": "create_issue", "input": "{}",
@@ -2930,7 +2930,7 @@ mod tests {
         };
         assert_eq!(body.subject, HumanAcceptedBodySubject::Contract);
         assert_eq!(report.events.first(), Some(&accepted.envelope.seq));
-        // Farik's line in the channel says what the human did, after the move.
+        // Catervas's line in the channel says what the human did, after the move.
         let line = last(&harness, EventKind::MessagePosted).expect("a system line");
         assert_eq!(line.envelope.seq, moved.envelope.seq + 1);
         assert_eq!(report.events.last(), Some(&line.envelope.seq));
@@ -3005,7 +3005,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn accepts_an_epic_only_after_farik_ran_its_criteria() {
+    async fn accepts_an_epic_only_after_catervas_ran_its_criteria() {
         let harness = Harness::new("human-accept-epic", |_| {});
         an_epic(&harness, "FRK-1", "in_progress", a_command_criterion());
         let mut with_an_artifact = a_command_criterion();
@@ -3040,7 +3040,7 @@ mod tests {
 
         let not_run = refused(&orchestrator, accept(Some("Looks right."))).await;
         assert!(not_run.starts_with("criteria_not_run"), "{not_run}");
-        // An artifact criterion is Farik's to run too.
+        // An artifact criterion is Catervas's to run too.
         let artifact = refused(
             &orchestrator,
             Command::HumanAccept {
@@ -3299,8 +3299,8 @@ mod tests {
         };
         assert_eq!(body.integrated_by.to_string(), "human");
 
-        let contract = farik_core::contract::validate_contract(
-            &farik_core::contract::fixtures::a_contract_wire(),
+        let contract = catervas_core::contract::validate_contract(
+            &catervas_core::contract::fixtures::a_contract_wire(),
         )
         .expect("a contract");
         assert!(matches!(
@@ -3443,7 +3443,7 @@ mod tests {
         reason = "one scenario, read from top to bottom"
     )]
     async fn saves_confirms_and_removes_a_skill_for_the_human() {
-        use farik_protocol::command::SkillScope;
+        use catervas_protocol::command::SkillScope;
 
         let harness = Harness::new("human-skills", |_| {});
         let orchestrator = an_orchestrator(&harness);
@@ -3480,13 +3480,13 @@ mod tests {
             .iter()
             .map(|(p, t)| (p.clone(), t.clone().into_bytes()))
             .collect();
-        let sha = farik_core::skill::skill_sha256(&bytes);
+        let sha = catervas_core::skill::skill_sha256(&bytes);
         let folder = harness
             .project
             .repo
             .path
-            .join(".farik/agents/dev-a/skills/api-style");
-        std::fs::write(folder.join("references/a.md"), "edited").expect("an edit outside Farik");
+            .join(".catervas/agents/dev-a/skills/api-style");
+        std::fs::write(folder.join("references/a.md"), "edited").expect("an edit outside Catervas");
         let reason = refused(
             &orchestrator,
             Command::SkillConfirm {
@@ -3498,7 +3498,7 @@ mod tests {
         )
         .await;
         assert!(reason.starts_with("skill_hash_mismatch: "), "{reason}");
-        let edited = farik_core::skill::skill_sha256(
+        let edited = catervas_core::skill::skill_sha256(
             &crate::skills::read_skill_folder(&folder).expect("readable"),
         );
         let confirmed = handled(
@@ -3581,7 +3581,7 @@ mod tests {
                 .daemon
                 .register_session(crate::daemon::SessionRegistration {
                     session_id: session.to_string(),
-                    web: farik_core::governor::sites::WebAccess::Open,
+                    web: catervas_core::governor::sites::WebAccess::Open,
                     agent_id: agent.to_string(),
                     task_id: None,
                     purpose,
@@ -3591,8 +3591,8 @@ mod tests {
                     skills_root: None,
                     cwd: harness.project.repo.path.clone(),
                     executor: None,
-                    limits: farik_core::budget::DEFAULT_SESSION_LIMITS,
-                    farik_tools: Vec::new(),
+                    limits: catervas_core::budget::DEFAULT_SESSION_LIMITS,
+                    catervas_tools: Vec::new(),
                     tiers: Vec::new(),
                     connectors: Vec::new(),
                     preview: None,
@@ -3706,7 +3706,7 @@ mod tests {
         let report = handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
         let after: Vec<Value> = harness.events(&[])[before..]
             .iter()
-            .map(farik_protocol::event::event_to_value)
+            .map(catervas_protocol::event::event_to_value)
             .collect();
         assert_eq!(
             report.events,
@@ -3771,7 +3771,7 @@ mod tests {
         );
         assert_eq!(
             refused(&orchestrator, a_pause("ada", AgentStatus::Paused)).await,
-            "last_judge: Ada checks your plans; let Farik choose who checks, or add another \
+            "last_judge: Ada checks your plans; let Catervas choose who checks, or add another \
              Architect, before Ada stops."
         );
         assert_eq!(
@@ -4390,7 +4390,7 @@ mod tests {
             &deps.files.read_team().expect("the team reads"),
             contract.assignee_role,
             Some(&contract),
-            &farik_core::budget::SessionLedger::default(),
+            &catervas_core::budget::SessionLedger::default(),
             deps.clock.now(),
         )
         .expect("the budgets read")
@@ -4532,7 +4532,7 @@ mod tests {
         assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
         // The schema holds the number to 1 to 5.
         assert!(
-            farik_protocol::command::command_from_value(&json!({
+            catervas_protocol::command::command_from_value(&json!({
                 "command": "escalation_resolve",
                 "body": { "task_id": "FRK-1", "to": "in_progress", "message": "Go.", "extra_tries": 6 }
             }))
@@ -4546,9 +4546,9 @@ mod tests {
             .project
             .deps
             .log
-            .read(&farik_store::EventQuery {
+            .read(&catervas_store::EventQuery {
                 task_id: Some(task(task_id)),
-                ..farik_store::EventQuery::default()
+                ..catervas_store::EventQuery::default()
             })
             .expect("the log reads");
         crate::orchestrator::messages::human_message(&history, "kai")
@@ -4747,7 +4747,7 @@ mod tests {
         assert_eq!(body.plan.as_str(), "MP-1");
         assert_eq!(
             body.why,
-            farik_protocol::event::MarketingPlanEndedBodyWhy::Replaced
+            catervas_protocol::event::MarketingPlanEndedBodyWhy::Replaced
         );
         assert_eq!(
             body.replaced_by.as_ref().map(|plan| plan.as_str()),
@@ -4803,7 +4803,7 @@ mod tests {
         assert_eq!(body.plan.as_str(), "MP-1");
         assert_eq!(
             body.why,
-            farik_protocol::event::MarketingPlanEndedBodyWhy::ByOwner
+            catervas_protocol::event::MarketingPlanEndedBodyWhy::ByOwner
         );
         assert_eq!(body.note.as_deref(), Some("Changed course."));
         assert_eq!(body.replaced_by, None);
@@ -4817,7 +4817,7 @@ mod tests {
             &held,
             deps,
             "MP-1",
-            farik_core::marketing::EndReason::Expired,
+            catervas_core::marketing::EndReason::Expired,
             None,
             None,
         )
@@ -4944,17 +4944,17 @@ mod tests {
             .project
             .deps
             .log
-            .read(&farik_store::EventQuery {
+            .read(&catervas_store::EventQuery {
                 task_id: Some(task(task_id)),
-                ..farik_store::EventQuery::default()
+                ..catervas_store::EventQuery::default()
             })
             .expect("the log reads");
         crate::orchestrator::messages::human_message(&history, "proc")
     }
 
-    /// The sites the team may read now, with none of Farik's own.
+    /// The sites the team may read now, with none of Catervas's own.
     fn approved_now(harness: &Harness) -> std::collections::BTreeSet<String> {
-        farik_store::sites::approved_sites(
+        catervas_store::sites::approved_sites(
             &harness.project.deps.log,
             &std::collections::BTreeSet::new(),
         )
@@ -5185,9 +5185,9 @@ mod tests {
         assert!(again.starts_with("site_already_allowed: "), "{again}");
         handled(&orchestrator, add(" two.example ")).await;
         assert!(approved_now(&harness).contains("two.example"));
-        // One of Farik's is open already; one that is no site is refused.
-        let farik = farik_roles::sites::farik_sites()[0].host.clone();
-        let reason = refused(&orchestrator, add(&farik)).await;
+        // One of Catervas's is open already; one that is no site is refused.
+        let catervas = catervas_roles::sites::catervas_sites()[0].host.clone();
+        let reason = refused(&orchestrator, add(&catervas)).await;
         assert!(reason.starts_with("site_already_allowed: "), "{reason}");
         for bad in [
             "http://a.com",
@@ -5232,24 +5232,24 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn the_owner_turns_off_a_farik_site() {
+    async fn the_owner_turns_off_a_catervas_site() {
         let harness = Harness::with_procurement("human-site-turn-off");
         let orchestrator = an_orchestrator(&harness);
-        let farik = farik_roles::sites::farik_sites()[0].host.clone();
-        let hosts: std::collections::BTreeSet<String> = farik_roles::sites::farik_sites()
+        let catervas = catervas_roles::sites::catervas_sites()[0].host.clone();
+        let hosts: std::collections::BTreeSet<String> = catervas_roles::sites::catervas_sites()
             .iter()
             .map(|site| site.host.clone())
             .collect();
         let now = |harness: &Harness| {
-            farik_store::sites::approved_sites(&harness.project.deps.log, &hosts)
+            catervas_store::sites::approved_sites(&harness.project.deps.log, &hosts)
                 .expect("the log reads")
         };
-        assert!(now(&harness).contains(&farik));
+        assert!(now(&harness).contains(&catervas));
 
         handled(
             &orchestrator,
             Command::SiteRemove {
-                host: farik.clone(),
+                host: catervas.clone(),
             },
         )
         .await;
@@ -5258,12 +5258,12 @@ mod tests {
         let EventBody::SiteRemoved(body) = &removed.body else {
             panic!("a removal");
         };
-        assert_eq!(body.host.as_str(), farik);
-        assert!(!now(&harness).contains(&farik));
+        assert_eq!(body.host.as_str(), catervas);
+        assert!(!now(&harness).contains(&catervas));
         let again = refused(
             &orchestrator,
             Command::SiteRemove {
-                host: farik.clone(),
+                host: catervas.clone(),
             },
         )
         .await;
@@ -5273,11 +5273,11 @@ mod tests {
         handled(
             &orchestrator,
             Command::SiteAdd {
-                site: farik.clone(),
+                site: catervas.clone(),
             },
         )
         .await;
-        assert!(now(&harness).contains(&farik));
+        assert!(now(&harness).contains(&catervas));
         assert_eq!(harness.events(&[EventKind::SiteApproved]).len(), 1);
     }
 
@@ -5344,9 +5344,9 @@ mod tests {
             .project
             .deps
             .log
-            .read(&farik_store::EventQuery {
+            .read(&catervas_store::EventQuery {
                 task_id: Some(task("FRK-1")),
-                ..farik_store::EventQuery::default()
+                ..catervas_store::EventQuery::default()
             })
             .expect("the log reads");
         assert_eq!(
@@ -5396,14 +5396,14 @@ mod tests {
         );
     }
 
-    fn orders_now(harness: &Harness) -> Vec<farik_store::purchase_orders::PurchaseOrderRecord> {
-        farik_store::purchase_orders::purchase_orders(&harness.project.deps.log)
+    fn orders_now(harness: &Harness) -> Vec<catervas_store::purchase_orders::PurchaseOrderRecord> {
+        catervas_store::purchase_orders::purchase_orders(&harness.project.deps.log)
             .expect("the log reads")
     }
 
     fn orders_waiting(harness: &Harness) -> usize {
         let team = harness.project.deps.files.read_team().expect("the team");
-        farik_store::waiting::waiting(
+        catervas_store::waiting::waiting(
             &harness.project.deps.projections,
             &harness.project.deps.log,
             &harness.project.deps.files,
@@ -5411,7 +5411,7 @@ mod tests {
         )
         .expect("the store reads")
         .iter()
-        .filter(|item| item.kind == farik_store::waiting::WaitingKind::PurchaseOrder)
+        .filter(|item| item.kind == catervas_store::waiting::WaitingKind::PurchaseOrder)
         .count()
     }
 
@@ -5483,10 +5483,10 @@ mod tests {
         let record = &orders_now(&harness)[0];
         assert_eq!(
             record.state,
-            farik_store::purchase_orders::OrderState::Approved
+            catervas_store::purchase_orders::OrderState::Approved
         );
         assert_eq!(
-            farik_store::purchase_orders::expires_at(record),
+            catervas_store::purchase_orders::expires_at(record),
             Some(approved.envelope.recorded_at + chrono::Duration::days(30))
         );
         assert!(
@@ -5518,7 +5518,7 @@ mod tests {
         reason = "one step of the order's life after another"
     )]
     async fn the_owner_places_receives_and_closes() {
-        use farik_store::purchase_orders::OrderState;
+        use catervas_store::purchase_orders::OrderState;
         let harness = Harness::with_procurement("human-order-steps");
         harness.procurement_task("FRK-1", Some("in_progress"));
         let orchestrator = an_orchestrator(&harness);
@@ -5715,7 +5715,7 @@ mod tests {
                 "{reason}"
             );
         }
-        // A number nobody drafted, and an order Farik closed by itself.
+        // A number nobody drafted, and an order Catervas closed by itself.
         let reason = refused(&orchestrator, place_order(99)).await;
         assert!(reason.starts_with("unknown_purchase_order: "), "{reason}");
         harness
@@ -5847,7 +5847,7 @@ mod tests {
         assert!(status.by_owner, "the owner's correction says so");
         assert_eq!(
             status.status,
-            farik_store::purchase_orders::FollowUp::Delayed
+            catervas_store::purchase_orders::FollowUp::Delayed
         );
         assert_eq!(status.note, "Short of flour.");
         assert_eq!(status.expected_on, Some(day("2026-10-20")));
@@ -5892,7 +5892,7 @@ mod tests {
                 .clone()
                 .expect("a status")
                 .status,
-            farik_store::purchase_orders::FollowUp::Shipped,
+            catervas_store::purchase_orders::FollowUp::Shipped,
             "the latest is the status"
         );
     }
@@ -6050,7 +6050,7 @@ mod tests {
             .seq
     }
 
-    /// Farik passes request `pipeline` to the owner after the manager's three tries.
+    /// Catervas passes request `pipeline` to the owner after the manager's three tries.
     fn pipeline_passed_on(harness: &Harness, pipeline: u64) {
         harness.project.record(
             "",
@@ -6059,13 +6059,13 @@ mod tests {
         );
     }
 
-    fn pipelines_now(harness: &Harness) -> Vec<farik_store::pipelines::PipelineRecord> {
-        farik_store::pipelines::data_pipelines(&harness.project.deps.log).expect("the log reads")
+    fn pipelines_now(harness: &Harness) -> Vec<catervas_store::pipelines::PipelineRecord> {
+        catervas_store::pipelines::data_pipelines(&harness.project.deps.log).expect("the log reads")
     }
 
     fn pipelines_waiting(harness: &Harness) -> usize {
         let team = harness.project.deps.files.read_team().expect("the team");
-        farik_store::waiting::waiting(
+        catervas_store::waiting::waiting(
             &harness.project.deps.projections,
             &harness.project.deps.log,
             &harness.project.deps.files,
@@ -6073,7 +6073,7 @@ mod tests {
         )
         .expect("the store reads")
         .iter()
-        .filter(|item| item.kind == farik_store::waiting::WaitingKind::DataPipeline)
+        .filter(|item| item.kind == catervas_store::waiting::WaitingKind::DataPipeline)
         .count()
     }
 
@@ -6142,7 +6142,7 @@ mod tests {
         let record = &pipelines_now(&harness)[0];
         assert_eq!(
             record.state,
-            farik_store::pipelines::PipelineState::Approved
+            catervas_store::pipelines::PipelineState::Approved
         );
         assert_eq!(
             record.request.as_ref().map(|id| id.as_str().to_string()),
@@ -6303,7 +6303,7 @@ mod tests {
         );
     }
 
-    /// A renewal Farik flagged: the vendor Vercel renewing on 2026-11-30, decide by 2026-10-31.
+    /// A renewal Catervas flagged: the vendor Vercel renewing on 2026-11-30, decide by 2026-10-31.
     fn renewal_flagged(harness: &Harness, vendor: &str) -> u64 {
         harness
             .project
@@ -6317,7 +6317,7 @@ mod tests {
     }
 
     fn renewals_open(harness: &Harness) -> Vec<u64> {
-        farik_store::renewals::renewals(&harness.project.deps.log)
+        catervas_store::renewals::renewals(&harness.project.deps.log)
             .expect("the log reads")
             .iter()
             .filter(|one| !one.dismissed)

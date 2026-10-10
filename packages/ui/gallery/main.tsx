@@ -1,5 +1,5 @@
-import "@farik/brand/tokens.css";
-import "@farik/brand/fonts.css";
+import "@catervas/brand/tokens.css";
+import "@catervas/brand/fonts.css";
 import { createRoot } from "react-dom/client";
 import { Gallery } from "./Gallery.tsx";
 

@@ -1,8 +1,8 @@
 //! The spreadsheet tools of the roles that keep a private folder (`docs/SPEC.md` 6.6, 6.10), the
-//! Finance Specialist and the Procurement Specialist: `farik_write_sheet` writes a whole `.xlsx`
-//! workbook in the role's own folder, `.farik/local/finance/` or `.farik/local/procurement/`,
+//! Finance Specialist and the Procurement Specialist: `catervas_write_sheet` writes a whole `.xlsx`
+//! workbook in the role's own folder, `.catervas/local/finance/` or `.catervas/local/procurement/`,
 //! keeping every previous version and refusing any formula that could reach outside the workbook;
-//! `farik_read_sheet` reads one, for the role and for the reviewer of its task, and lets the
+//! `catervas_read_sheet` reads one, for the role and for the reviewer of its task, and lets the
 //! Finance Specialist read the procurement register.
 
 use std::collections::BTreeSet;
@@ -12,11 +12,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use calamine::{Data, Reader as _, Xlsx, XlsxError as ReadError, open_workbook_from_rs};
-use chrono::{DateTime, NaiveDate, Utc};
-use farik_core::contract::Role;
-use farik_core::team::{
+use catervas_core::contract::Role;
+use catervas_core::team::{
     private_file_fault, private_folder, task_private_folder, workbook_path_fault,
 };
+use chrono::{DateTime, NaiveDate, Utc};
 use rust_xlsxwriter::utility::{check_sheet_name, row_col_to_cell};
 use rust_xlsxwriter::{ExcelDateTime, Format, Formula, Workbook, XlsxError};
 use schemars::JsonSchema;
@@ -41,7 +41,7 @@ const MOST_TEXT: usize = 32_767;
 /// The most bytes a workbook file is, written or read.
 const MOST_BYTES: usize = 10 * 1024 * 1024;
 
-/// `farik_write_sheet`'s input.
+/// `catervas_write_sheet`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteSheetInput {
@@ -106,7 +106,7 @@ pub(crate) struct FormulaCell {
 }
 
 impl SheetInput {
-    /// A sheet Farik builds itself, as it builds an order's workbook: no headings row, the rows
+    /// A sheet Catervas builds itself, as it builds an order's workbook: no headings row, the rows
     /// given.
     pub(crate) fn new(name: &str, rows: Vec<Vec<CellInput>>) -> Self {
         Self {
@@ -452,7 +452,7 @@ fn xlsx(error: XlsxError) -> ToolError {
 }
 
 /// The workbook as `.xlsx` bytes. Every sheet's formulas are written with an empty stored value,
-/// since Farik never computes one: a spreadsheet program does, when it opens the file.
+/// since Catervas never computes one: a spreadsheet program does, when it opens the file.
 fn build(sheets: &[SheetInput]) -> Result<Vec<u8>, ToolError> {
     let heading = Format::new().set_bold();
     let date = Format::new().set_num_format("yyyy-mm-dd");
@@ -619,7 +619,7 @@ pub(crate) fn write_workbook(
 }
 
 /// Writes the workbook of `sheets` to `path`, a path in `folder` that [`private_path`] passed, as
-/// a new file: one that is there already is never replaced, so Farik's own files cannot be
+/// a new file: one that is there already is never replaced, so Catervas's own files cannot be
 /// overwritten by a second writer. The folders above `path` are made private when they are not
 /// there.
 ///
@@ -651,7 +651,7 @@ pub(crate) fn write_new_workbook(
             return Err(refused(
                 "purchase_order_file_exists",
                 format!(
-                    "{} is there already, and Farik never replaces an order",
+                    "{} is there already, and Catervas never replaces an order",
                     path.display()
                 ),
             ));
@@ -716,7 +716,7 @@ pub(super) fn store_file(
     Ok(replaced)
 }
 
-/// The folder a `farik_write_sheet` call writes in: that of the caller's own role, in its
+/// The folder a `catervas_write_sheet` call writes in: that of the caller's own role, in its
 /// implement session of a task it is the assignee of, so that a chat or a conversation never
 /// writes a role's files and a task's baseline holds (spec 6.6, 6.10).
 fn folder_to_write(call: &Call<'_>) -> Result<&'static str, ToolError> {
@@ -754,14 +754,14 @@ pub(super) fn in_its_own_implement_session(
     Ok(())
 }
 
-/// `farik_write_sheet`: writes the whole workbook the input describes at its path in the caller's
+/// `catervas_write_sheet`: writes the whole workbook the input describes at its path in the caller's
 /// folder, and answers its path, each sheet's name and rows, and whether it replaced a workbook.
-/// It reports no path to the permission check, as `farik_write_memory` reports none, and holds the
+/// It reports no path to the permission check, as `catervas_write_memory` reports none, and holds the
 /// folder line itself.
 pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Value, ToolError> {
     let folder = folder_to_write(call)?;
     workbook_only(&input.path)?;
-    // The procurement folder's `orders/` is Farik's: it writes each order's workbook there, and
+    // The procurement folder's `orders/` is Catervas's: it writes each order's workbook there, and
     // the agent reads them (spec 6.10). The check is of the path as written, so `Orders/` on a
     // case-insensitive disk is `orders/`.
     if call.role() == Role::ProcurementSpecialist
@@ -772,16 +772,16 @@ pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Va
             .is_some_and(|first| first.eq_ignore_ascii_case("orders"))
     {
         return Err(refused(
-            "orders_are_farik_s",
+            "orders_are_catervas_s",
             format!(
-                "{:?} is in orders/, where Farik writes each purchase order's workbook; draft an \
-                 order with farik_draft_purchase_order, and read the orders with \
-                 farik_read_sheet",
+                "{:?} is in orders/, where Catervas writes each purchase order's workbook; draft an \
+                 order with catervas_draft_purchase_order, and read the orders with \
+                 catervas_read_sheet",
                 input.path
             ),
         ));
     }
-    // So is `mail/`: Farik keeps there the messages it sends to sellers and the replies it reads
+    // So is `mail/`: Catervas keeps there the messages it sends to sellers and the replies it reads
     // (spec 6.10), and the agent reads them with the seller tools.
     if call.role() == Role::ProcurementSpecialist
         && input
@@ -791,11 +791,11 @@ pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Va
             .is_some_and(|first| first.eq_ignore_ascii_case("mail"))
     {
         return Err(refused(
-            "mail_is_farik_s",
+            "mail_is_catervas_s",
             format!(
-                "{:?} is in mail/, where Farik keeps the messages to sellers and their replies; \
-                 draft a message with farik_draft_seller_message, and read them with \
-                 farik_read_seller_messages and farik_read_seller_replies",
+                "{:?} is in mail/, where Catervas keeps the messages to sellers and their replies; \
+                 draft a message with catervas_draft_seller_message, and read them with \
+                 catervas_read_seller_messages and catervas_read_seller_replies",
                 input.path
             ),
         ));
@@ -816,11 +816,11 @@ pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Va
     Ok(json!({ "path": input.path, "sheets": sheets, "replaced": written.replaced }))
 }
 
-/// `farik_read_sheet`'s input.
+/// `catervas_read_sheet`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadSheetInput {
-    /// The workbook's path inside your folder, as for `farik_write_sheet`.
+    /// The workbook's path inside your folder, as for `catervas_write_sheet`.
     path: String,
     /// Only the Finance Specialist, and only with `path` `vendors.xlsx`: read the procurement
     /// register, `procurement`, in place of a workbook of your own folder. Leave it out to read
@@ -836,13 +836,13 @@ pub(crate) struct ReadSheetInput {
     /// How many rows to read from each sheet, 1 to 500; default 200.
     #[serde(default)]
     rows: Option<u32>,
-    /// Read the workbook as it was when this session's task was assigned, from the copy Farik took
+    /// Read the workbook as it was when this session's task was assigned, from the copy Catervas took
     /// of the folder then, instead of as it is now. Only in a session about a task in your folder.
     #[serde(default)]
     baseline: bool,
 }
 
-/// A folder other than the caller's own that `farik_read_sheet` may read (6.10).
+/// A folder other than the caller's own that `catervas_read_sheet` may read (6.10).
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum OtherFolder {
@@ -863,7 +863,7 @@ const SHEETS_CAP: usize = 256 * 1024;
 /// about it, which can quote the file) a refusal quotes.
 const NAMES_CAP: usize = 2 * 1024;
 
-/// The folder a `farik_read_sheet` call reads in (spec 6.6, 6.10): the procurement folder, for the
+/// The folder a `catervas_read_sheet` call reads in (spec 6.6, 6.10): the procurement folder, for the
 /// Finance Specialist alone, when `other` asks for it; in a verify session about a task whose
 /// assignee's role has a private folder, that folder, for the task's reviewer and for the Product
 /// Manager, who accepts the task, whatever folder the caller's own role has; and otherwise that of
@@ -900,7 +900,7 @@ fn folder_to_read(call: &Call<'_>, other: Option<OtherFolder>) -> Result<&'stati
     ))
 }
 
-/// The folder `farik_read_sheet` reads a task's copy from: `.history/<task>` in `folder`, for a
+/// The folder `catervas_read_sheet` reads a task's copy from: `.history/<task>` in `folder`, for a
 /// session about a task in that folder (6.6). A session about no task, or about one that works
 /// elsewhere, has no copy to read.
 fn baseline_folder(call: &Call<'_>, folder: &str) -> Result<String, ToolError> {
@@ -1036,7 +1036,7 @@ fn page_of(
     Ok(json!({ "name": name, "rows": page, "total_rows": total_rows, "more": more }))
 }
 
-/// `farik_read_sheet`: reads a workbook in the caller's folder, a page of every sheet or of the
+/// `catervas_read_sheet`: reads a workbook in the caller's folder, a page of every sheet or of the
 /// one named, and answers them as one untrusted block (8.6): what a workbook holds is the user's
 /// and the services', never an instruction.
 pub(super) fn read_sheet(call: &Call<'_>, input: &ReadSheetInput) -> Result<Value, ToolError> {
@@ -1189,22 +1189,22 @@ mod tests {
 
     /// The Finance Specialist's folder.
     fn folder(project: &TestProject) -> PathBuf {
-        project.repo.path.join(".farik/local/finance")
+        project.repo.path.join(".catervas/local/finance")
     }
 
     /// The Procurement Specialist's folder.
     fn procurement_folder(project: &TestProject) -> PathBuf {
-        project.repo.path.join(".farik/local/procurement")
+        project.repo.path.join(".catervas/local/procurement")
     }
 
-    /// `farik_write_sheet` as `proc` in its implement session of FRK-3.
+    /// `catervas_write_sheet` as `proc` in its implement session of FRK-3.
     fn write_register(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
-        project.call("proc", Some("FRK-3"), "farik_write_sheet", input.clone())
+        project.call("proc", Some("FRK-3"), "catervas_write_sheet", input.clone())
     }
 
-    /// `farik_write_sheet` as `fin` in its implement session of FRK-1.
+    /// `catervas_write_sheet` as `fin` in its implement session of FRK-1.
     fn write(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
-        project.call("fin", Some("FRK-1"), "farik_write_sheet", input.clone())
+        project.call("fin", Some("FRK-1"), "catervas_write_sheet", input.clone())
     }
 
     /// One sheet's JSON.
@@ -1652,7 +1652,13 @@ mod tests {
             b"not a workbook",
             "and what is outside is as it was"
         );
-        assert!(!project.repo.path.join(".farik/local/books.xlsx").exists());
+        assert!(
+            !project
+                .repo
+                .path
+                .join(".catervas/local/books.xlsx")
+                .exists()
+        );
         assert!(!folder(&project).join(".history").exists());
 
         // A link inside the folder to a folder inside it is a link all the same.
@@ -1696,15 +1702,15 @@ mod tests {
         // A part above the folder a link, on a root of its own: the folder is not made yet.
         let root = project.repo.path.join("another-root");
         fs::create_dir_all(&root).expect("a root");
-        let finance = ".farik/local/finance";
+        let finance = ".catervas/local/finance";
         assert!(private_path(&root, finance, "books.xlsx").is_ok());
-        for linked in [".farik", ".farik/local"] {
+        for linked in [".catervas", ".catervas/local"] {
             let root = project.repo.path.join(format!("root-{}", linked.len()));
             let link = root.join(linked);
             fs::create_dir_all(link.parent().expect("a parent")).expect("the parent");
             fs::create_dir_all(outside.join("finance")).expect("a folder outside");
             symlink(
-                if linked == ".farik" {
+                if linked == ".catervas" {
                     outside.clone()
                 } else {
                     outside.join("finance")
@@ -1731,8 +1737,8 @@ mod tests {
         // workbooks alone (6.6, 6.10); either way the path is in the folder and reaches no link.
         let project = a_finance_project("sheets-private-path-note");
         let root = &project.repo.path;
-        let procurement = ".farik/local/procurement";
-        let finance = ".farik/local/finance";
+        let procurement = ".catervas/local/procurement";
+        let finance = ".catervas/local/finance";
         assert_eq!(
             private_path(root, procurement, "evaluations/email-sending.md")
                 .expect("a note in the procurement folder"),
@@ -1754,7 +1760,7 @@ mod tests {
         let outside = root.join("outside");
         fs::create_dir_all(outside.join("evaluations")).expect("a folder outside");
         let elsewhere = root.join("another-root");
-        fs::create_dir_all(elsewhere.join(".farik/local")).expect("a root");
+        fs::create_dir_all(elsewhere.join(".catervas/local")).expect("a root");
         symlink(&outside, elsewhere.join(procurement)).expect("a link out");
         let reason = refusal_of(
             private_path(&elsewhere, procurement, "evaluations/x.md").map(|at| json!(at.to_str())),
@@ -1834,7 +1840,7 @@ mod tests {
             ),
             ("the Product Manager", project.context("pm", Some("FRK-1"))),
         ] {
-            let reason = refusal_of(run(&context, "farik_write_sheet", input.clone()));
+            let reason = refusal_of(run(&context, "catervas_write_sheet", input.clone()));
             assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
         }
         assert_eq!(files_under(&folder(&project)), Vec::<String>::new());
@@ -1985,9 +1991,9 @@ mod tests {
         serde_json::from_str(inner).expect("the block holds JSON")
     }
 
-    /// `farik_read_sheet` as `who` in its session `context` of `task`.
+    /// `catervas_read_sheet` as `who` in its session `context` of `task`.
     fn read(project: &TestProject, who: &str, input: &Value) -> Result<Value, ToolError> {
-        project.call(who, Some("FRK-1"), "farik_read_sheet", input.clone())
+        project.call(who, Some("FRK-1"), "catervas_read_sheet", input.clone())
     }
 
     /// 1,000 rows of `[n, "row n"]` at `path`.
@@ -2078,16 +2084,16 @@ mod tests {
         )
         .expect("the workbook is written");
 
-        let farik_written = pages(
+        let catervas_written = pages(
             &read(&project, "fin", &json!({ "path": "books.xlsx" })).expect("the workbook reads"),
         );
 
         assert_eq!(
-            farik_written[0]["rows"][2],
+            catervas_written[0]["rows"][2],
             json!(["Total", { "formula": "=SUM(B1:B2)", "value": null }]),
-            "a workbook only Farik wrote has no stored value"
+            "a workbook only Catervas wrote has no stored value"
         );
-        assert_eq!(farik_written[0]["rows"][0], json!(["rent", 2]));
+        assert_eq!(catervas_written[0]["rows"][0], json!(["rent", 2]));
 
         // A spreadsheet program saves the value it computed beside the formula.
         let mut book = rust_xlsxwriter::Workbook::new();
@@ -2460,7 +2466,7 @@ mod tests {
                 chat
             }),
         ] {
-            let answer = run(&context, "farik_read_sheet", input.clone())
+            let answer = run(&context, "catervas_read_sheet", input.clone())
                 .unwrap_or_else(|error| panic!("{who} reads: {error}"));
             assert_eq!(pages(&answer)[0]["rows"][1], json!(["rent", 2]), "{who}");
         }
@@ -2491,7 +2497,7 @@ mod tests {
             ),
             ("a session about no task", project.context("pm", None)),
         ] {
-            let reason = refusal_of(run(&context, "farik_read_sheet", input.clone()));
+            let reason = refusal_of(run(&context, "catervas_read_sheet", input.clone()));
             assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
         }
     }
@@ -2502,12 +2508,12 @@ mod tests {
         let project = a_finance_project("sheets-read-baseline");
         write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("a workbook");
         // The copy taken when the task was assigned, then the task's own change.
-        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&folder(&project), &task).expect("the copy");
+        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        catervas_store::baseline::copy_baseline(&folder(&project), &task).expect("the copy");
         write(&project, &one_sheet("books.xlsx", &json!([["rent", 3]]))).expect("changed");
         // A copy is there under the Developer's task too, so that only the rule keeps it out.
-        let other: farik_core::contract::TaskId = "FRK-2".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&folder(&project), &other).expect("the copy");
+        let other: catervas_core::contract::TaskId = "FRK-2".parse().expect("a task id");
+        catervas_store::baseline::copy_baseline(&folder(&project), &other).expect("the copy");
         let context = |who: &str, task: Option<&str>, purpose: SessionPurpose| {
             let mut context = project.context(who, task);
             context.purpose = purpose;
@@ -2528,10 +2534,10 @@ mod tests {
                 context("fin", Some("FRK-1"), SessionPurpose::Implement),
             ),
         ] {
-            let was = run(&context, "farik_read_sheet", before.clone())
+            let was = run(&context, "catervas_read_sheet", before.clone())
                 .unwrap_or_else(|error| panic!("{who} reads the copy: {error}"));
             assert_eq!(rent(&was), json!(["rent", 2]), "{who}");
-            let is = run(&context, "farik_read_sheet", now.clone()).expect("reads it now");
+            let is = run(&context, "catervas_read_sheet", now.clone()).expect("reads it now");
             assert_eq!(rent(&is), json!(["rent", 3]), "{who}");
         }
         // No copy is read in a session about no task of a role with a folder, or of a path the
@@ -2546,7 +2552,7 @@ mod tests {
                 context("fin", Some("FRK-2"), SessionPurpose::Implement),
             ),
         ] {
-            let reason = refusal_of(run(&context, "farik_read_sheet", before.clone()));
+            let reason = refusal_of(run(&context, "catervas_read_sheet", before.clone()));
             assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
             assert!(
                 reason.contains("`baseline` reads the copy taken for a task"),
@@ -2554,21 +2560,21 @@ mod tests {
             );
             // Without `baseline` the same session reads its own folder, as it did.
             assert!(
-                run(&context, "farik_read_sheet", now.clone()).is_ok(),
+                run(&context, "catervas_read_sheet", now.clone()).is_ok(),
                 "{who}"
             );
         }
         let context = context("pm", Some("FRK-1"), SessionPurpose::Verify);
         let reason = refusal_of(run(
             &context,
-            "farik_read_sheet",
+            "catervas_read_sheet",
             json!({ "path": "forecast.xlsx", "baseline": true }),
         ));
         assert!(reason.starts_with("sheet_refused: "), "{reason}");
         // The history is no path of its own, copy or no copy.
         let reason = refusal_of(run(
             &context,
-            "farik_read_sheet",
+            "catervas_read_sheet",
             json!({ "path": ".history/FRK-1/books.xlsx", "baseline": true }),
         ));
         assert!(reason.starts_with("private_path_refused: "), "{reason}");
@@ -2596,7 +2602,7 @@ mod tests {
             .call(
                 "proc",
                 Some("FRK-3"),
-                "farik_read_sheet",
+                "catervas_read_sheet",
                 json!({ "path": "vendors.xlsx" }),
             )
             .expect("it reads back");
@@ -2615,7 +2621,7 @@ mod tests {
         // Its chat does not write, as the Finance Specialist's does not.
         let mut chat = project.context("proc", None);
         chat.purpose = SessionPurpose::Chat;
-        let reason = refusal_of(run(&chat, "farik_write_sheet", the_register()));
+        let reason = refusal_of(run(&chat, "catervas_write_sheet", the_register()));
         assert!(reason.starts_with("sheet_refused: "), "{reason}");
     }
 
@@ -2624,7 +2630,7 @@ mod tests {
     fn finance_reads_the_register_and_nothing_else_there() {
         let project = a_procurement_project("sheets-finance-register");
         write_register(&project, &the_register()).expect("the register is written");
-        // Farik writes an order's workbook, as the agent cannot.
+        // Catervas writes an order's workbook, as the agent cannot.
         let held = procurement_folder(&project);
         write_new_workbook(
             &held,
@@ -2636,7 +2642,8 @@ mod tests {
         fs::create_dir_all(&evaluations).expect("the folder");
         fs::write(evaluations.join("x.md"), "a comparison").expect("a note");
         write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("the books");
-        let finance = |input: Value| project.call("fin", Some("FRK-1"), "farik_read_sheet", input);
+        let finance =
+            |input: Value| project.call("fin", Some("FRK-1"), "catervas_read_sheet", input);
 
         let answer = finance(json!({ "folder": "procurement", "path": "vendors.xlsx" }))
             .expect("the register is read");
@@ -2663,11 +2670,11 @@ mod tests {
         assert!(reason.starts_with("sheet_refused: "), "{reason}");
         let books = finance(json!({ "path": "books.xlsx" })).expect("its own books");
         assert_eq!(pages(&books)[0]["rows"][1], json!(["rent", 2]));
-        // Nothing is written there: `farik_write_sheet` takes no folder, and what it writes lands
+        // Nothing is written there: `catervas_write_sheet` takes no folder, and what it writes lands
         // in the finance folder.
         let mut input = the_register();
         input["folder"] = json!("procurement");
-        let refused = project.call("fin", Some("FRK-1"), "farik_write_sheet", input);
+        let refused = project.call("fin", Some("FRK-1"), "catervas_write_sheet", input);
         assert!(
             matches!(&refused, Err(ToolError::InvalidInput { .. })),
             "{refused:?}"
@@ -2715,14 +2722,14 @@ mod tests {
                 context("dev-b", Some("FRK-2"), SessionPurpose::Verify),
             ),
         ] {
-            let reason = refusal_of(run(&context, "farik_read_sheet", asking.clone()));
+            let reason = refusal_of(run(&context, "catervas_read_sheet", asking.clone()));
             assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
         }
         // A reviewer's read resolves against the reviewed task's own folder, with no `folder`.
         let verifying = context("pm", Some("FRK-3"), SessionPurpose::Verify);
         let answer = run(
             &verifying,
-            "farik_read_sheet",
+            "catervas_read_sheet",
             json!({ "path": "vendors.xlsx" }),
         )
         .expect("the reviewer reads the register of the task it reviews");
@@ -2731,7 +2738,7 @@ mod tests {
         let finance = project.call(
             "fin",
             Some("FRK-1"),
-            "farik_read_sheet",
+            "catervas_read_sheet",
             json!({ "folder": "finance", "path": "vendors.xlsx" }),
         );
         assert!(
@@ -2768,8 +2775,8 @@ mod tests {
             "verifying",
             &json!({ "assignee": "fin", "reviewer": "proc" }),
         );
-        let task: farik_core::contract::TaskId = "FRK-4".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&folder(&project), &task).expect("the copy");
+        let task: catervas_core::contract::TaskId = "FRK-4".parse().expect("a task id");
+        catervas_store::baseline::copy_baseline(&folder(&project), &task).expect("the copy");
         write(
             &project,
             &one_sheet("vendors.xlsx", &json!([["finance", 2]])),
@@ -2778,7 +2785,7 @@ mod tests {
         let mut verifying = project.context("proc", Some("FRK-4"));
         verifying.purpose = SessionPurpose::Verify;
         let first_row = |input: Value| {
-            let answer = run(&verifying, "farik_read_sheet", input)
+            let answer = run(&verifying, "catervas_read_sheet", input)
                 .unwrap_or_else(|error| panic!("the reviewer reads: {error}"));
             pages(&answer)[0]["rows"][1].clone()
         };
@@ -2798,7 +2805,7 @@ mod tests {
             .call(
                 "proc",
                 Some("FRK-3"),
-                "farik_read_sheet",
+                "catervas_read_sheet",
                 json!({ "path": "vendors.xlsx" }),
             )
             .expect("its own register");
@@ -2806,7 +2813,7 @@ mod tests {
         // `folder` is still the Finance Specialist's alone.
         let reason = refusal_of(run(
             &verifying,
-            "farik_read_sheet",
+            "catervas_read_sheet",
             json!({ "folder": "procurement", "path": "vendors.xlsx" }),
         ));
         assert!(reason.starts_with("sheet_refused: "), "{reason}");
@@ -2820,17 +2827,17 @@ mod tests {
     fn the_register_is_never_read_as_a_copy() {
         let project = a_procurement_project("sheets-register-no-baseline");
         write_register(&project, &the_register()).expect("the register is written");
-        let task: farik_core::contract::TaskId = "FRK-3".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&procurement_folder(&project), &task)
+        let task: catervas_core::contract::TaskId = "FRK-3".parse().expect("a task id");
+        catervas_store::baseline::copy_baseline(&procurement_folder(&project), &task)
             .expect("the copy");
         let input = json!({ "folder": "procurement", "path": "vendors.xlsx" });
         // Without `baseline` the Finance Specialist reads the register, in a session about the
         // procurement task as in any other.
-        let now = project.call("fin", Some("FRK-3"), "farik_read_sheet", input.clone());
+        let now = project.call("fin", Some("FRK-3"), "catervas_read_sheet", input.clone());
         assert!(now.is_ok(), "{now:?}");
         let mut asking = input;
         asking["baseline"] = json!(true);
-        let reason = refusal_of(project.call("fin", Some("FRK-3"), "farik_read_sheet", asking));
+        let reason = refusal_of(project.call("fin", Some("FRK-3"), "catervas_read_sheet", asking));
         assert!(reason.starts_with("sheet_refused: "), "{reason}");
         assert!(
             reason.contains("in your own folder, and not the procurement folder's"),
@@ -2864,7 +2871,7 @@ mod tests {
         let reason = refusal_of(project.call(
             "proc",
             Some("FRK-3"),
-            "farik_read_sheet",
+            "catervas_read_sheet",
             json!({ "path": "evaluations/x.md" }),
         ));
         assert!(reason.starts_with("private_path_refused: "), "{reason}");
@@ -2901,7 +2908,7 @@ mod tests {
         for path in ["orders/PO-1.xlsx", "Orders/PO-1.xlsx", "ORDERS/PO-1.xlsx"] {
             let reason = refusal_of(write_register(&project, &one_sheet(path, &rows)));
             assert!(
-                reason.starts_with("orders_are_farik_s: "),
+                reason.starts_with("orders_are_catervas_s: "),
                 "{path}: {reason}"
             );
             assert!(reason.contains(path), "{reason}");
@@ -2912,7 +2919,7 @@ mod tests {
             files_under(&procurement_folder(&project))
         );
 
-        // Only the first part of a path is Farik's; the register and a folder of another name are
+        // Only the first part of a path is Catervas's; the register and a folder of another name are
         // the agent's, and so is a Finance Specialist's own `orders/`.
         write_register(&project, &one_sheet("vendors.xlsx", &rows)).expect("the register");
         write_register(&project, &one_sheet("quotes/orders.xlsx", &rows)).expect("another folder");
@@ -2928,7 +2935,10 @@ mod tests {
 
         for path in ["mail/x.xlsx", "Mail/x.xlsx", "MAIL/in/x.xlsx"] {
             let reason = refusal_of(write_register(&project, &one_sheet(path, &rows)));
-            assert!(reason.starts_with("mail_is_farik_s: "), "{path}: {reason}");
+            assert!(
+                reason.starts_with("mail_is_catervas_s: "),
+                "{path}: {reason}"
+            );
             assert!(reason.contains(path), "{reason}");
         }
         assert!(
@@ -2936,7 +2946,7 @@ mod tests {
             "nothing was written: {:?}",
             files_under(&procurement_folder(&project))
         );
-        // Only the first part of a path is Farik's, and a Finance Specialist's folder has no mail.
+        // Only the first part of a path is Catervas's, and a Finance Specialist's folder has no mail.
         write_register(&project, &one_sheet("quotes/mail.xlsx", &rows)).expect("another folder");
         write(&project, &one_sheet("mail/books.xlsx", &rows))
             .expect("the books' own folder is the Finance Specialist's");

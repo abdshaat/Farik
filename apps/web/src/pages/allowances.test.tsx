@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	fireEvent,
@@ -434,7 +434,7 @@ describe("allowances on the screens", () => {
 		});
 		expect(
 			within(again).getByText(
-				"Farik updated this service since you connected it. Connect it again to keep using it; you choose the numbers again there.",
+				"Catervas updated this service since you connected it. Connect it again to keep using it; you choose the numbers again there.",
 			),
 		).toBeTruthy();
 		fireEvent.click(
@@ -599,7 +599,7 @@ describe("allowances on the screens", () => {
 			["Higgsfield", "6 of 5 videos", "This sprint"],
 		]);
 		const bill =
-			"Farik counts what agents made, not what the service charges. Check your bill there.";
+			"Catervas counts what agents made, not what the service charges. Check your bill there.";
 		expect(within(section).getByText(bill)).toBeTruthy();
 		await expectNoAxeViolations(container);
 		// On a phone each row stacks, as the board draws it.

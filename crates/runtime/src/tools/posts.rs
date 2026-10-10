@@ -1,8 +1,8 @@
-//! `farik_schedule_post`: the Marketing Specialist's tool for a post (`docs/SPEC.md` 6.5, ADR 0042).
+//! `catervas_schedule_post`: the Marketing Specialist's tool for a post (`docs/SPEC.md` 6.5, ADR 0042).
 //! A post that fills an unused slot of the owner's approved plan, on its day and at least three
-//! hours ahead, goes out without asking: Farik records it, shows it on Today with a Stop, and hands
+//! hours ahead, goes out without asking: Catervas records it, shows it on Today with a Stop, and hands
 //! it to Buffer an hour before its time. A post outside the plan waits for the owner, and holds no
-//! task. Either way Farik asks Buffer, with the agent's own connection, which channel the id names,
+//! task. Either way Catervas asks Buffer, with the agent's own connection, which channel the id names,
 //! so a post is never sent to the wrong network.
 
 #![allow(
@@ -11,14 +11,14 @@
               YouTube and TikTok are brands there, not code"
 )]
 
-use chrono::{DateTime, Duration, FixedOffset, SecondsFormat, Utc};
-use farik_core::contract::Role;
-use farik_core::marketing::{
+use catervas_core::contract::Role;
+use catervas_core::marketing::{
     PlanProposal, PostChannel, PostDetails, SlotCheck, SlotRefusal, YOUTUBE_CATEGORIES,
     active_plan, check_slot, network_name, text_fits, text_limit,
 };
-use farik_protocol::event::EventBody;
-use farik_store::marketing::{PostState, marketing_plans, social_posts};
+use catervas_protocol::event::EventBody;
+use catervas_store::marketing::{PostState, marketing_plans, social_posts};
+use chrono::{DateTime, Duration, FixedOffset, SecondsFormat, Utc};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -31,7 +31,7 @@ use crate::marketing::hold_plans;
 use crate::prompt::untrusted_block;
 use crate::session::SessionPurpose;
 
-/// `farik_schedule_post`'s input.
+/// `catervas_schedule_post`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SchedulePostInput {
@@ -46,7 +46,7 @@ pub struct SchedulePostInput {
     text: String,
     /// Up to four pictures or clips, in order. Instagram and Pinterest need one or more, TikTok
     /// and YouTube a video. Each is an https address that stays public until the post goes out,
-    /// that Farik checks answers with an image (PNG, JPEG, GIF or WebP) or a video: yours that the
+    /// that Catervas checks answers with an image (PNG, JPEG, GIF or WebP) or a video: yours that the
     /// owner gave, or one you made with your creative services; never another's.
     #[serde(default)]
     media: Vec<PostMediaInput>,
@@ -252,7 +252,7 @@ fn read_details(
     }
 }
 
-/// The active plan's id, after the slot checks of `farik_core`, for a post that claims `slot`.
+/// The active plan's id, after the slot checks of `catervas_core`, for a post that claims `slot`.
 fn fits_the_plan(
     call: &Call<'_>,
     slot: &str,
@@ -317,13 +317,13 @@ fn fits_the_plan(
     Ok(active.id.clone())
 }
 
-/// What Buffer says of the channel `buffer_channel`, asked as Farik with the agent's connection.
+/// What Buffer says of the channel `buffer_channel`, asked as Catervas with the agent's connection.
 async fn channel_of(call: &Call<'_>, buffer_channel: &str) -> Result<Value, ToolError> {
     let agent = call.agent_id();
     let Some(daemon) = call.context.daemon.upgrade() else {
         return Err(refused(
             "buffer_unreachable",
-            "Farik could not reach Buffer: it is not running its connections",
+            "Catervas could not reach Buffer: it is not running its connections",
         ));
     };
     let mut arguments = serde_json::Map::new();
@@ -338,7 +338,7 @@ async fn channel_of(call: &Call<'_>, buffer_channel: &str) -> Result<Value, Tool
                 ),
             ),
             OwnCallError::Failed(_) | OwnCallError::Timeout => {
-                refused("buffer_unreachable", "Farik could not reach Buffer; try again later")
+                refused("buffer_unreachable", "Catervas could not reach Buffer; try again later")
             }
             OwnCallError::Tool(words) => refused(
                 "post_wrong_channel",
@@ -347,7 +347,7 @@ async fn channel_of(call: &Call<'_>, buffer_channel: &str) -> Result<Value, Tool
                     untrusted_block("buffer", &words, 1_024)
                 ),
             ),
-            OwnCallError::NotListed => failed("get_channel is not one of Farik's own calls"),
+            OwnCallError::NotListed => failed("get_channel is not one of Catervas's own calls"),
         })
 }
 
@@ -360,7 +360,7 @@ fn squashed(name: &str) -> String {
 }
 
 /// The network a service word of Buffer's names, as Buffer writes it (`twitter` is X). Anything
-/// that is not one of the eleven is none: Farik never repeats Buffer's words to the agent.
+/// that is not one of the eleven is none: Catervas never repeats Buffer's words to the agent.
 fn network_of(service: &str) -> Option<PostChannel> {
     PostChannel::ALL.into_iter().find(|channel| {
         let own = squashed(channel.as_str());
@@ -378,7 +378,7 @@ fn is_the_channel(answer: &Value, post: &Post) -> Result<(), ToolError> {
         .map(squashed);
     let named = service.as_deref().and_then(network_of);
     if named != Some(post.channel) {
-        // The answer is Buffer's, so only a network of Farik's own naming is ever shown.
+        // The answer is Buffer's, so only a network of Catervas's own naming is ever shown.
         let network = network_name(post.channel);
         let says = named.map_or("another network", network_name);
         return Err(refused(
@@ -443,7 +443,7 @@ fn body_of(input: &SchedulePostInput, post: &Post) -> serde_json::Map<String, Va
     body
 }
 
-/// `farik_schedule_post`: checks the post, asks Buffer which channel it is, and records it:
+/// `catervas_schedule_post`: checks the post, asks Buffer which channel it is, and records it:
 /// `social_post.scheduled` for a post in the plan, `social_post.requested` for one outside it.
 ///
 /// # Errors
@@ -481,7 +481,7 @@ pub(crate) async fn schedule_post(
 /// hold, so that two posts never take one slot.
 fn record(
     call: &Call<'_>,
-    task: &farik_core::contract::TaskId,
+    task: &catervas_core::contract::TaskId,
     input: &SchedulePostInput,
     post: &Post,
 ) -> Result<Value, ToolError> {
@@ -504,12 +504,12 @@ fn record(
             "post": number,
             "hands_over_at": (post.at - Duration::hours(1))
                 .to_rfc3339_opts(SecondsFormat::AutoSi, true),
-            "next": "it is shown to the owner with a Stop button; Farik hands it to Buffer an hour before its time",
+            "next": "it is shown to the owner with a Stop button; Catervas hands it to Buffer an hour before its time",
         })
     } else {
         json!({
             "post": number,
-            "next": "the owner decides whether it goes out; you need not wait, and Farik posts it once the owner allows it",
+            "next": "the owner decides whether it goes out; you need not wait, and Catervas posts it once the owner allows it",
         })
     })
 }
@@ -519,8 +519,8 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use farik_core::team::fixtures::an_agent_wire;
-    use farik_protocol::event::{EventBody, EventKind};
+    use catervas_core::team::fixtures::an_agent_wire;
+    use catervas_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
     use crate::daemon::DaemonState;
@@ -591,7 +591,7 @@ mod tests {
                 &json!({ "assignee": "kai", "reviewer": "pm" }),
             );
             let mut plan =
-                farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+                catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
             plan["starts_on"] = json!("2026-09-22");
             plan["ends_on"] = json!("2026-10-31");
             plan["campaigns"] = json!([]);
@@ -645,10 +645,10 @@ mod tests {
             context: &ToolContext,
             input: Value,
         ) -> Result<Value, ToolError> {
-            call_tool(context, "farik_schedule_post", input).await
+            call_tool(context, "catervas_schedule_post", input).await
         }
 
-        /// Kai's `farik_schedule_post`.
+        /// Kai's `catervas_schedule_post`.
         async fn schedule(&self, input: Value) -> Result<Value, ToolError> {
             self.schedule_as(&self.context("kai"), input).await
         }
@@ -670,7 +670,7 @@ mod tests {
             self.fixture.calls("get_channel").len()
         }
 
-        fn events(&self, kind: EventKind) -> Vec<farik_protocol::event::FarikEvent> {
+        fn events(&self, kind: EventKind) -> Vec<catervas_protocol::event::CatervasEvent> {
             self.project.events(&[kind])
         }
 
@@ -735,7 +735,7 @@ mod tests {
                 .as_object()
                 .cloned()
                 .expect("an object")],
-            "Farik asked Buffer which channel it is, once"
+            "Catervas asked Buffer which channel it is, once"
         );
     }
 
@@ -840,7 +840,7 @@ mod tests {
             .expect("a row");
         assert!(
             !row.waiting_on_human,
-            "the task does not wait: Farik posts it once allowed"
+            "the task does not wait: Catervas posts it once allowed"
         );
         // The post's time still has to be ahead, and not more than 92 days.
         let mut late = posting.a_post();
@@ -874,7 +874,7 @@ mod tests {
         assert!(reason.starts_with("post_wrong_channel"), "{reason}");
         assert!(
             reason.contains("Buffer says it is LinkedIn"),
-            "the network is named by Farik's own words: {reason}"
+            "the network is named by Catervas's own words: {reason}"
         );
         assert!(
             reason.contains("not one of Instagram's"),
@@ -918,7 +918,7 @@ mod tests {
             .schedule(google)
             .await
             .expect("Google Business is the same name");
-        // A channel that says nothing of its network is not one Farik can post to.
+        // A channel that says nothing of its network is not one Catervas can post to.
         posting.answers(json!({ "id": "chan-1" }));
         let mut other = posting.a_post();
         other["slot"] = json!("post-2");

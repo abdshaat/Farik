@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -237,7 +237,7 @@ describe("skills on the agent page", () => {
 			within(dialog).queryByRole("button", { name: "Add skill" }),
 		).toBeNull();
 		expect(dialog.textContent).toContain(
-			"Also in this skill: references/checklist.md, 2 KB; templates/note.md, 1 KB. Farik keeps them as they are.",
+			"Also in this skill: references/checklist.md, 2 KB; templates/note.md, 1 KB. Catervas keeps them as they are.",
 		);
 		expect(
 			(within(dialog).getByLabelText("Instructions") as HTMLTextAreaElement)
@@ -245,7 +245,7 @@ describe("skills on the agent page", () => {
 		).toBe("# Release notes\nWrite for the people who use the product.\n");
 		fireEvent.click(within(dialog).getByRole("button", { name: "Next" }));
 		const reading = await within(dialog).findByText(
-			"Farik will follow these instructions and use these files. Read them before adding.",
+			"Catervas will follow these instructions and use these files. Read them before adding.",
 		);
 		expect(reading).toBeTruthy();
 		expect(dialog.querySelector('[data-trust="untrusted"]')).toBeTruthy();
@@ -304,7 +304,7 @@ describe("skills on the agent page", () => {
 		});
 		expect(
 			await within(dialog).findByText(
-				"This replaces the skill Farik comes with of that name, design-review, for Theo.",
+				"This replaces the skill Catervas comes with of that name, design-review, for Theo.",
 			),
 		).toBeTruthy();
 		fireEvent.click(
@@ -414,7 +414,7 @@ describe("skills on the agent page", () => {
 			name: "Read implementing-a-contract",
 		});
 		expect(dialog.textContent).toContain("# Shipped");
-		expect(dialog.textContent).toContain("Farik comes with this skill");
+		expect(dialog.textContent).toContain("Catervas comes with this skill");
 		expect(dialog.querySelector('[data-trust="untrusted"]')).toBeNull();
 		expect(
 			within(dialog).queryByRole("button", { name: "Use this skill" }),
@@ -438,7 +438,7 @@ describe("skills on the agent page", () => {
 		expect(within(dialog).queryByLabelText("Name")).toBeNull();
 		fireEvent.click(within(dialog).getByRole("button", { name: "Next" }));
 		expect(
-			await within(dialog).findByText("Farik ignores: hooks"),
+			await within(dialog).findByText("Catervas ignores: hooks"),
 		).toBeTruthy();
 		fireEvent.click(within(dialog).getByRole("button", { name: "Add skill" }));
 		const sent = await sentCommand(s);
@@ -527,13 +527,13 @@ describe("skills on the agent page", () => {
 	it.each([
 		[
 			"skill_runs_commands",
-			"This skill runs commands when it loads, which Farik doesn’t allow.",
+			"This skill runs commands when it loads, which Catervas doesn’t allow.",
 			"Instructions",
 			"When should Theo use it?",
 		],
 		[
 			"skill_attaches_files",
-			"This skill pulls in files when it loads, which Farik doesn’t allow. Name a file without the @.",
+			"This skill pulls in files when it loads, which Catervas doesn’t allow. Name a file without the @.",
 			"Instructions",
 			"When should Theo use it?",
 		],
@@ -545,7 +545,7 @@ describe("skills on the agent page", () => {
 		],
 		[
 			"skill_file_not_text",
-			"A file in this skill is not plain text, which Farik cannot use.",
+			"A file in this skill is not plain text, which Catervas cannot use.",
 			"Instructions",
 			"When should Theo use it?",
 		],
@@ -709,10 +709,10 @@ describe("skills on the agent page", () => {
 		});
 		expect(
 			await within(dialog).findByText(
-				"This replaces the skill Farik comes with of that name, design-review, for your whole team.",
+				"This replaces the skill Catervas comes with of that name, design-review, for your whole team.",
 			),
 		).toBeTruthy();
-		expect(dialog.textContent).not.toContain("Farik cannot add");
+		expect(dialog.textContent).not.toContain("Catervas cannot add");
 		fireEvent.click(
 			within(dialog).getByRole("button", { name: "Use this skill" }),
 		);

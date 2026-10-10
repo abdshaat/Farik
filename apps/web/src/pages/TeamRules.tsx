@@ -1,4 +1,4 @@
-import { Button, TextField } from "@farik/ui";
+import { Button, TextField } from "@catervas/ui";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";

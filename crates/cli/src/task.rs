@@ -1,17 +1,17 @@
-//! `farik task create`: file a YAML contract as a draft request (F3, `docs/SPEC.md` section 5.16).
+//! `catervas task create`: file a YAML contract as a draft request (F3, `docs/SPEC.md` section 5.16).
 
 use std::path::Path;
 
+use catervas_core::contract::{TaskId, TaskKind};
+use catervas_core::governor::gates::{ContractWriteActor, ParentEpic, check_child_creation};
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_protocol::event::EventIds;
+use catervas_store::EventQuery;
+use catervas_store::requests::{RequestError, fields_not_the_authors, file_request};
 use chrono::{DateTime, Utc};
-use farik_core::contract::{TaskId, TaskKind};
-use farik_core::governor::gates::{ContractWriteActor, ParentEpic, check_child_creation};
-use farik_core::governor::transition_table::TransitionActor;
-use farik_protocol::event::EventIds;
-use farik_store::EventQuery;
-use farik_store::requests::{RequestError, fields_not_the_authors, file_request};
 use serde_json::json;
 
-use farik_runtime::sprints::join_epics_sprint;
+use catervas_runtime::sprints::join_epics_sprint;
 
 use crate::project::{Project, tool_deps};
 use crate::{CliIo, HUMAN, Report};
@@ -50,14 +50,14 @@ pub fn create(
     };
     let text = std::fs::read_to_string(&file)
         .map_err(|error| format!("{} could not be read: {error}", file.display()))?;
-    let wire = farik_store::files::yaml_value(&text, &file.display().to_string())
+    let wire = catervas_store::files::yaml_value(&text, &file.display().to_string())
         .map_err(|error| error.to_string())?;
     // The store's words are said to whoever files, an agent included; a person at a terminal is
     // also told which commands do what the request tried to.
     let reminder = if fields_not_the_authors(&wire).is_empty() {
         ""
     } else {
-        "; from the command line, farik contract lock takes the lock and farik triage gives the size"
+        "; from the command line, catervas contract lock takes the lock and catervas triage gives the size"
     };
     let contract = file_request(
         &project.files,
@@ -113,7 +113,7 @@ pub fn create(
                 contract.title.as_str()
             ),
             format!(
-                "farik run judges it against the Definition of Ready, and {}'s assignee assigns \
+                "catervas run judges it against the Definition of Ready, and {}'s assignee assigns \
                  it",
                 parent.as_str()
             ),
@@ -124,7 +124,7 @@ pub fn create(
                 contract.id.as_str(),
                 contract.title.as_str()
             ),
-            "farik triage says whether it is large or small; nothing starts before that \
+            "catervas triage says whether it is large or small; nothing starts before that \
              (5.16)"
                 .to_string(),
         ],
@@ -133,7 +133,7 @@ pub fn create(
         "task_id": contract.id.to_string(),
         "title": contract.title,
         "status": "draft",
-        "path": format!(".farik/contracts/{}.yaml", contract.id.as_str()),
+        "path": format!(".catervas/contracts/{}.yaml", contract.id.as_str()),
         "events": seqs,
     });
     if let Some(warning) = warning {

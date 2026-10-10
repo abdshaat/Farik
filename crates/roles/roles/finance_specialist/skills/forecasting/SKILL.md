@@ -10,7 +10,7 @@ A forecast is a reasoned guess, shown with its reasoning. It is worth what a rea
 ## 1. Start from what happened
 
 Read the last three months, or the last three sprints when the team plans in sprints, from the
-books and from `farik_read_costs`. Forecast the next three of the same kind. When there are fewer
+books and from `catervas_read_costs`. Forecast the next three of the same kind. When there are fewer
 than three, say so and forecast fewer.
 
 ## 2. Name the method

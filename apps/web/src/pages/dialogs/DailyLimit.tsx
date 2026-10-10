@@ -1,4 +1,4 @@
-import { Button, Dialog } from "@farik/ui";
+import { Button, Dialog } from "@catervas/ui";
 import { t } from "../../strings/t.ts";
 import { useDailyLimit } from "../setup/SetupSpending.tsx";
 import type { Team } from "../setup/TeamSetup.tsx";

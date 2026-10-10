@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import icon from "@farik/brand/assets/icons/icon-48.png";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import icon from "@catervas/brand/assets/icons/icon-48.png";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	fireEvent,
@@ -162,7 +162,7 @@ describe("shell", () => {
 		);
 	});
 
-	it("shows Farik's mark beside its name in the rail", async () => {
+	it("shows Catervas's mark beside its name in the rail", async () => {
 		media.set(WIDE, true);
 		const { socket } = await renderApp("/");
 		if (!socket) throw new Error("no socket");

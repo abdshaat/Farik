@@ -39,7 +39,7 @@ function waitingNoteContrast(bubble: Locator): Promise<number[]> {
 			(r): r is CSSStyleRule =>
 				r instanceof CSSStyleRule &&
 				/^\.[\w-]*waiting[\w-]*$/.test(r.selectorText) &&
-				r.style.color === "var(--farik-color-ink-muted)",
+				r.style.color === "var(--catervas-color-ink-muted)",
 		);
 		if (!rule) throw new Error("no rule for the waiting note");
 		const note = document.createElement("span");

@@ -9,12 +9,12 @@ use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use farik_core::contract::TaskId;
-use farik_core::governor::gates::DesignerBrowser;
-use farik_core::governor::permissions::ConnectorTag;
-use farik_core::team::{Agent, Preview, Team};
-use farik_protocol::event::Violation;
-use farik_roles::ConnectorDefinition;
+use catervas_core::contract::TaskId;
+use catervas_core::governor::gates::DesignerBrowser;
+use catervas_core::governor::permissions::ConnectorTag;
+use catervas_core::team::{Agent, Preview, Team};
+use catervas_protocol::event::Violation;
+use catervas_roles::ConnectorDefinition;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -92,7 +92,7 @@ pub trait RunningPreview: Send + Sync {
     fn origin(&self) -> String;
     /// The container whose network namespace the browser joins.
     fn container(&self) -> String;
-    /// The labels the preview's containers carry, `farik.project=<id>` and `farik.task=<id>`.
+    /// The labels the preview's containers carry, `catervas.project=<id>` and `catervas.task=<id>`.
     fn labels(&self) -> Vec<String>;
     /// The user the preview's containers run as, `<uid>:<gid>`.
     fn user(&self) -> String;
@@ -152,7 +152,7 @@ impl PreviewFactory for NoPreviews {
         _tree: &str,
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         Err(PreviewError::DockerUnavailable {
-            detail: "Farik runs without Docker's sandbox".to_string(),
+            detail: "Catervas runs without Docker's sandbox".to_string(),
         })
     }
 }
@@ -192,7 +192,7 @@ impl PolledPreviews {
             holds,
             Arc::new(|ask| {
                 std::thread::Builder::new()
-                    .name("farik-previews".to_string())
+                    .name("catervas-previews".to_string())
                     .spawn(ask)
                     .map(drop)
             }),
@@ -299,14 +299,14 @@ pub fn has_playwright(agent: &Agent) -> bool {
         .any(|server| server.name.as_str() == PLAYWRIGHT)
 }
 
-/// The one connector Farik ships.
+/// The one connector Catervas ships.
 pub const PLAYWRIGHT: &str = "playwright";
 
 /// The name of the browser container beside the preview container `preview`.
 #[must_use]
 pub fn browser_container(preview: &str) -> String {
-    match preview.strip_prefix("farik-preview-") {
-        Some(rest) => format!("farik-browser-{rest}"),
+    match preview.strip_prefix("catervas-preview-") {
+        Some(rest) => format!("catervas-browser-{rest}"),
         None => format!("{preview}-browser"),
     }
 }
@@ -385,10 +385,10 @@ pub fn connector_server(
     }
 }
 
-/// Farik's page check, run by `node` in the connector's image: `AXE_SOURCE` is put before it.
+/// Catervas's page check, run by `node` in the connector's image: `AXE_SOURCE` is put before it.
 const CHECK_SCRIPT: &str = include_str!("../assets/check-page.mjs");
 
-/// The width `farik_check_page` opens a page at.
+/// The width `catervas_check_page` opens a page at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckWidth {
@@ -416,7 +416,7 @@ impl CheckWidth {
     }
 }
 
-/// The colour scheme `farik_check_page` asks the page for.
+/// The colour scheme `catervas_check_page` asks the page for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckTheme {
@@ -458,7 +458,7 @@ pub struct PageCheck {
 ///
 /// # Errors
 ///
-/// When the check cannot run, the page does not load, or the check answers nothing Farik reads.
+/// When the check cannot run, the page does not load, or the check answers nothing Catervas reads.
 pub fn check_page(
     definition: &ConnectorDefinition,
     preview: &dyn RunningPreview,
@@ -475,11 +475,11 @@ pub fn check_page(
     let mut args: Vec<String> = ["run", "--rm", "-i", "--init", "--pull", "never"]
         .map(String::from)
         .to_vec();
-    // Its own name, so a check Farik gives up on can be removed (`run_docker`).
+    // Its own name, so a check Catervas gives up on can be removed (`run_docker`).
     let suffix = crate::daemon::random_token().map_err(|failed| error(format!("{failed:?}")))?;
     args.extend([
         "--name".to_string(),
-        format!("farik-check-{}-{}", preview.container(), &suffix[..12]),
+        format!("catervas-check-{}-{}", preview.container(), &suffix[..12]),
     ]);
     for label in preview.labels() {
         args.extend(["--label".to_string(), label]);
@@ -624,8 +624,8 @@ pub(crate) mod fixtures {
     use std::sync::{Arc, Condvar, Mutex, PoisonError};
     use std::time::Duration;
 
-    use farik_core::contract::TaskId;
-    use farik_core::team::Preview;
+    use catervas_core::contract::TaskId;
+    use catervas_core::team::Preview;
 
     use super::{CheckError, PreviewError, PreviewFactory, RunningPreview, Spawn};
 
@@ -876,13 +876,13 @@ pub(crate) mod fixtures {
         }
 
         fn container(&self) -> String {
-            "farik-preview-p-frk-1".to_string()
+            "catervas-preview-p-frk-1".to_string()
         }
 
         fn labels(&self) -> Vec<String> {
             vec![
-                "farik.project=p".to_string(),
-                "farik.task=FRK-1".to_string(),
+                "catervas.project=p".to_string(),
+                "catervas.task=FRK-1".to_string(),
             ]
         }
 
@@ -932,13 +932,13 @@ pub(crate) mod fixtures {
         }
 
         fn container(&self) -> String {
-            "farik-preview-p-frk-1".to_string()
+            "catervas-preview-p-frk-1".to_string()
         }
 
         fn labels(&self) -> Vec<String> {
             vec![
-                "farik.project=p".to_string(),
-                "farik.task=FRK-1".to_string(),
+                "catervas.project=p".to_string(),
+                "catervas.task=FRK-1".to_string(),
             ]
         }
 
@@ -964,7 +964,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use farik_roles::builtin_connector;
+    use catervas_roles::builtin_connector;
 
     use super::fixtures::{
         HeldPreviews, NamedPreview, QueuedAsks, UnaskedPreviews, at_once, settled,
@@ -1085,7 +1085,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn ends_a_check_that_runs_past_its_deadline() {
-        // A wedged docker client ends the tool call by Farik's own clock, not the script's.
+        // A wedged docker client ends the tool call by Catervas's own clock, not the script's.
         let started = std::time::Instant::now();
         let mut sleeping = std::process::Command::new("sleep");
         sleeping.arg("30");
@@ -1124,12 +1124,16 @@ mod tests {
 
     #[test]
     fn removes_a_check_container_by_its_name() {
-        let args: Vec<String> = ["run", "--rm", "--name", "farik-check-x-1", "image"]
+        let args: Vec<String> = ["run", "--rm", "--name", "catervas-check-x-1", "image"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             super::removal(&args),
-            Some(["rm", "-f", "farik-check-x-1"].map(String::from).to_vec())
+            Some(
+                ["rm", "-f", "catervas-check-x-1"]
+                    .map(String::from)
+                    .to_vec()
+            )
         );
         assert_eq!(super::removal(&args[..2]), None);
     }
@@ -1140,7 +1144,7 @@ mod tests {
         let server = connector_server(
             &definition,
             &NamedPreview { port: 4400 },
-            Path::new("/p/.farik/local/browser/FRK-1/s-1"),
+            Path::new("/p/.catervas/local/browser/FRK-1/s-1"),
         );
         assert_eq!(server.name, "playwright");
         let McpTransport::Stdio { command, args } = server.transport else {
@@ -1148,22 +1152,22 @@ mod tests {
         };
         assert_eq!(command, "docker");
         assert_eq!(args[..2], ["run", "--rm"]);
-        assert_eq!(after(&args, "--name"), ["farik-browser-p-frk-1"]);
+        assert_eq!(after(&args, "--name"), ["catervas-browser-p-frk-1"]);
         assert_eq!(
             after(&args, "--label"),
-            ["farik.project=p", "farik.task=FRK-1"]
+            ["catervas.project=p", "catervas.task=FRK-1"]
         );
         assert_eq!(after(&args, "--user"), ["1000:1000"]);
         assert_eq!(
             after(&args, "--network"),
-            ["container:farik-preview-p-frk-1"]
+            ["container:catervas-preview-p-frk-1"]
         );
         assert_eq!(after(&args, "--pull"), ["never"]);
         assert_eq!(
             after(&args, "--mount"),
-            ["type=bind,src=/p/.farik/local/browser/FRK-1/s-1,dst=/output"]
+            ["type=bind,src=/p/.catervas/local/browser/FRK-1/s-1,dst=/output"]
         );
-        // The image, then its own arguments, then Farik's confinement.
+        // The image, then its own arguments, then Catervas's confinement.
         let image = args
             .iter()
             .position(|arg| *arg == definition.image)

@@ -14,7 +14,7 @@ pub const NOT_A_SUBSCRIPTION_TOKEN: &str =
 pub const NOT_AN_API_KEY: &str =
     "that is not an Anthropic API key: an API key starts with sk-ant-api";
 /// The keychain entry's service.
-const SERVICE: &str = "farik";
+const SERVICE: &str = "catervas";
 /// The keychain entry's account, and the provider every credential records.
 const PROVIDER: &str = "anthropic";
 
@@ -63,7 +63,7 @@ pub trait CredentialStore: Send + Sync {
     fn source(&self) -> Source;
 }
 
-/// The OS keychain: service `farik`, account `anthropic`.
+/// The OS keychain: service `catervas`, account `anthropic`.
 pub struct KeychainStore;
 
 impl CredentialStore for KeychainStore {
@@ -224,7 +224,7 @@ pub fn credential_of_kind(kind: CredentialKind, secret: &str) -> Result<ClaudeCr
     }
 }
 
-/// What a keychain error means for Farik.
+/// What a keychain error means for Catervas.
 /// No store registered, or no secret service on the bus, is no keychain at all.
 pub(crate) fn map_keyring_error(error: &keyring::Error) -> CredentialError {
     match error {
@@ -273,7 +273,7 @@ fn from_json(text: &str) -> Result<ClaudeCredential, CredentialError> {
             Ok(ClaudeCredential::OauthToken(secret(text)))
         }
         _ => Err(CredentialError::Failed(
-            "the stored credential is not one farik can read".to_string(),
+            "the stored credential is not one catervas can read".to_string(),
         )),
     }
 }
@@ -306,7 +306,7 @@ mod tests {
 
     fn scratch(test: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("farik-credential-{}-{test}", std::process::id()));
+            std::env::temp_dir().join(format!("catervas-credential-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("the folder is made");
         dir

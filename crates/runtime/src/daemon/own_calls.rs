@@ -1,7 +1,7 @@
-//! Farik's own calls to a service (ADR 0042, the amendment on `OWN_CALLS`): an act that is not an
-//! agent's, such as Farik handing the owner's approved post to Buffer, made with the agent's own
+//! Catervas's own calls to a service (ADR 0042, the amendment on `OWN_CALLS`): an act that is not an
+//! agent's, such as Catervas handing the owner's approved post to Buffer, made with the agent's own
 //! connection to the service. Every one goes through [`call_as`], and only the pairs of
-//! [`OWN_CALLS`] may be made: a later step that has Farik call a service itself adds its pairs
+//! [`OWN_CALLS`] may be made: a later step that has Catervas call a service itself adds its pairs
 //! here and calls through `call_as`, never beside it.
 //!
 //! Such a call is not the agent's: it passes no hook, may name a tool the kit tags `denied`, and
@@ -11,15 +11,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use farik_core::contract::Role;
-use farik_core::team::{CustomServer, custom_server};
+use catervas_core::contract::Role;
+use catervas_core::team::{CustomServer, custom_server};
 use serde_json::Value;
 
 use super::{DaemonState, Fresh, matches_kit, refreshed_entry};
 use crate::claude::Secret;
 use crate::connectors::{ConnectorEntry, ConnectorError, call_tool, confirmed_entry, own_program};
 
-/// The calls Farik makes itself, as `(service, tool)`: Buffer's `get_channel`, `create_post` and
+/// The calls Catervas makes itself, as `(service, tool)`: Buffer's `get_channel`, `create_post` and
 /// `delete_post`. Any other pair is [`OwnCallError::NotListed`] before anything starts.
 pub(crate) const OWN_CALLS: &[(&str, &str)] = &[
     ("buffer", "get_channel"),
@@ -27,7 +27,7 @@ pub(crate) const OWN_CALLS: &[(&str, &str)] = &[
     ("buffer", "delete_post"),
 ];
 
-/// Why a call of Farik's own did not give an answer.
+/// Why a call of Catervas's own did not give an answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OwnCallError {
     /// The pair is not one of [`OWN_CALLS`].
@@ -53,7 +53,7 @@ const VALID_FOR: Duration = Duration::from_secs(60);
 /// holds.
 const REFRESH_WAIT: Duration = Duration::from_secs(10);
 
-/// Calls `tool` of the service `server` with `arguments`, as Farik, with the connection of the
+/// Calls `tool` of the service `server` with `arguments`, as Catervas, with the connection of the
 /// agent `agent`: its entry in the team file, which must be exactly the kit's (`matches_kit`) and
 /// kept as connected, runs it in the agent's connector folder. A signed-in entry is refreshed
 /// first, when it will not last a minute; an entry of keys is used as kept.
@@ -148,14 +148,14 @@ pub(crate) async fn call_as(
     })
 }
 
-/// A Marketing Specialist whose Buffer is the OAuth fixture, as the tests of Farik's own calls and
+/// A Marketing Specialist whose Buffer is the OAuth fixture, as the tests of Catervas's own calls and
 /// of the tools that make them need it.
 #[cfg(test)]
 pub(crate) mod fixtures {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use farik_core::team::CustomServer;
+    use catervas_core::team::CustomServer;
     use serde_json::{Value, json};
 
     use crate::claude::Secret;
@@ -168,9 +168,9 @@ pub(crate) mod fixtures {
     use crate::tools::fixtures::TestProject;
 
     /// The Marketing Specialist's kit with one service, `buffer`, at `url`: signed in to, or, with
-    /// `keyed`, reached with `Authorization: Bearer {API_KEY}`. `get_channel` is `network`; Farik's
+    /// `keyed`, reached with `Authorization: Bearer {API_KEY}`. `get_channel` is `network`; Catervas's
     /// own `create_post` and `delete_post` are `denied` to the agent, as in the shipped kit.
-    pub(crate) fn buffer_kit(url: &str, keyed: bool) -> farik_roles::Kit {
+    pub(crate) fn buffer_kit(url: &str, keyed: bool) -> catervas_roles::Kit {
         let mut connector = json!({
             "name": "buffer", "transport": "http", "url": url,
             "title": "Buffer", "about": "Schedules posts.", "why": "To post.",
@@ -189,8 +189,8 @@ pub(crate) mod fixtures {
         }
         let kit =
             json!({ "role": "marketing_specialist", "skills": [], "connectors": [connector] });
-        farik_roles::parse_fixture_kit(
-            farik_core::contract::Role::MarketingSpecialist,
+        catervas_roles::parse_fixture_kit(
+            catervas_core::contract::Role::MarketingSpecialist,
             &kit.to_string(),
             &[],
             &[],
@@ -204,7 +204,7 @@ pub(crate) mod fixtures {
     pub(crate) fn connect_buffer(
         project: &TestProject,
         daemon: &DaemonState,
-        kit: &farik_roles::Kit,
+        kit: &catervas_roles::Kit,
     ) -> (CustomServer, SecretAt, Arc<MemoryConnectorSecrets>) {
         project.set_kit(kit.clone());
         let files = &project.deps.files;
@@ -250,7 +250,7 @@ pub(crate) mod fixtures {
             .save(
                 at,
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(server),
+                    spec_sha256: catervas_core::team::spec_sha256(server),
                     keys: BTreeMap::new(),
                     oauth: Some(grant.clone()),
                 },
@@ -424,7 +424,7 @@ mod tests {
             .and_then(|agents| agents.iter().position(|agent| agent["id"] == "kai"))
             .expect("kai");
         team["agents"][at_kai]["mcp_servers"][0]["tools"]["create_post"] = json!("network");
-        let widened = farik_core::team::validate_team(&team).expect("a team");
+        let widened = catervas_core::team::validate_team(&team).expect("a team");
         harness
             .project
             .deps
@@ -435,7 +435,7 @@ mod tests {
             .mcp_servers
             .iter()
             .flatten()
-            .find_map(farik_core::team::custom_server)
+            .find_map(catervas_core::team::custom_server)
             .expect("the entry");
         keep_a_sign_in(
             &store,
@@ -488,7 +488,7 @@ mod tests {
             .save(
                 &at,
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    spec_sha256: catervas_core::team::spec_sha256(&server),
                     keys: BTreeMap::new(),
                     oauth: Some(grant),
                 },
@@ -507,7 +507,7 @@ mod tests {
         );
         assert_eq!(fixture.count("/mcp"), 0);
 
-        // The service ends the sign-in when Farik refreshes it: the owner signs in again.
+        // The service ends the sign-in when Catervas refreshes it: the owner signs in again.
         let harness = marketing("own-calls-lapsed");
         fixture.set(|flags| flags.refresh_error = Some((400, "invalid_grant".to_string())));
         let (server, at, store) = connect_buffer(&harness.project, &harness.daemon, &kit);
@@ -549,7 +549,7 @@ mod tests {
             .save(
                 &at,
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    spec_sha256: catervas_core::team::spec_sha256(&server),
                     keys: BTreeMap::from([("API_KEY".to_string(), Secret::new(token.clone()))]),
                     oauth: None,
                 },

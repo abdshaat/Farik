@@ -1,4 +1,4 @@
-import { Button, DiffView, StatusWord } from "@farik/ui";
+import { Button, DiffView, StatusWord } from "@catervas/ui";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
@@ -190,8 +190,8 @@ export function TaskDetail() {
 	const nameOf = (who?: string) =>
 		who === "human"
 			? t("you")
-			: who === "governor" || who === "farik" || !who
-				? "Farik"
+			: who === "governor" || who === "catervas" || !who
+				? "Catervas"
 				: (agentOf(who)?.displayName ?? who);
 
 	// A Designer's task in progress counts its plans in place of its tries (the approved mockup).
@@ -238,7 +238,7 @@ export function TaskDetail() {
 	)?.sessionId;
 	const cancellable =
 		contract.status !== "accepted" && contract.status !== "cancelled";
-	// The branch as `farik_core::branch::task_branch` names it.
+	// The branch as `catervas_core::branch::task_branch` names it.
 	const branch =
 		contract.assigneeRole === "software_developer" ||
 		contract.assigneeRole === "ui_ux_designer"

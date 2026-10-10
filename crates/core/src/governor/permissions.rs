@@ -1,6 +1,6 @@
 //! Permission tiers (`docs/SPEC.md` section 5.6): what a tool call may do given the agent's
 //! grants, the task's allowed paths, and the team's protected paths; and what a command may be
-//! (`farik_exec`, ADR 0004 and spec 5.12).
+//! (`catervas_exec`, ADR 0004 and spec 5.12).
 
 use std::collections::BTreeSet;
 
@@ -16,7 +16,7 @@ use crate::team::canonical_json;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionTier {
-    /// Read files in the project and `.farik/`, and search.
+    /// Read files in the project and `.catervas/`, and search.
     Read,
     /// Write files under the task contract's `allowed_paths`.
     WriteWorkspace,
@@ -175,7 +175,7 @@ pub struct SessionConnector {
     /// without asking (ADR 0037), by the bare tool name.
     pub allowances: std::collections::BTreeMap<String, u32>,
     /// The `external_effect` tools the kit marks as approved by the owner's marketing plan (ADR
-    /// 0042), by the bare tool name: only a kit's entry of Farik's own connector has any.
+    /// 0042), by the bare tool name: only a kit's entry of Catervas's own connector has any.
     pub plan_tools: std::collections::BTreeSet<String>,
 }
 
@@ -429,7 +429,7 @@ fn first_path(refusal: PathRefusal, to_refusal: impl FnOnce(String) -> ToolRefus
     }
 }
 
-/// Why a command is refused by `farik_exec`.
+/// Why a command is refused by `catervas_exec`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandRefusal {
     /// The command matches one of the team's forbidden patterns (spec 5.12).
@@ -437,7 +437,7 @@ pub enum CommandRefusal {
         /// The pattern it matched.
         pattern: String,
     },
-    /// The command runs `git`, which is a Farik tool of its own (ADR 0004).
+    /// The command runs `git`, which is a Catervas tool of its own (ADR 0004).
     GitViaExec,
     /// A forbidden pattern is not a valid regular expression; nothing was checked.
     InvalidPattern {
@@ -453,7 +453,7 @@ const WRAPPERS: [&str; 11] = [
     "env", "sudo", "doas", "command", "exec", "nohup", "time", "timeout", "nice", "setsid", "xargs",
 ];
 
-/// Decides whether `farik_exec` may run a command. The command is split into segments on `&&`,
+/// Decides whether `catervas_exec` may run a command. The command is split into segments on `&&`,
 /// `||`, `;`, `|`, and newlines, without parsing quotes, so `echo "a; git push"` is refused too,
 /// on the safe side. Each word is read bare: quotes and shell punctuation are stripped, a path
 /// keeps only its last segment, and a `.exe` suffix is dropped, so `"git"`, `(git`, `./git`,
@@ -461,7 +461,7 @@ const WRAPPERS: [&str; 11] = [
 /// `git`, or when its first bare word is a `NAME=value` assignment or one of the wrappers
 /// (`env`, `sudo`, `doas`, `command`, `exec`, `nohup`, `time`, `timeout`, `nice`, `setsid`,
 /// `xargs`) and `git` appears anywhere later in that segment, which catches `sudo -u root git
-/// push` at the cost of refusing `sudo apt install git`. Git is a Farik tool with its own tiers
+/// push` at the cost of refusing `sudo apt install git`. Git is a Catervas tool with its own tiers
 /// (ADR 0004); a call hidden in a subshell, a variable, or a script (`$(git push)`, `GIT=git;
 /// $GIT push`, `sh -c "git push"`) is the residual that record accepts. A forbidden pattern is an
 /// ECMAScript regular expression, which has no inline flags such as `(?i)`; every pattern is

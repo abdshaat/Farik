@@ -1,13 +1,13 @@
-//! `farik renewal list`: the renewals coming up that nobody dismissed (`docs/SPEC.md` 6.10, ADR
-//! 0039). Dismissing one is a command, sent as `farik site approve` sends its own.
+//! `catervas renewal list`: the renewals coming up that nobody dismissed (`docs/SPEC.md` 6.10, ADR
+//! 0039). Dismissing one is a command, sent as `catervas site approve` sends its own.
 
-use farik_runtime::procurement::renewals_list;
+use catervas_runtime::procurement::renewals_list;
 use serde_json::Value;
 
 use crate::Report;
 use crate::project::Project;
 
-/// The renewals coming up, oldest first, and how many rows of the register Farik could not read,
+/// The renewals coming up, oldest first, and how many rows of the register Catervas could not read,
 /// and the same as `renewals.list` answers with `--json`.
 ///
 /// # Errors
@@ -44,9 +44,9 @@ fn lines(wire: &Value) -> Vec<String> {
     }
     match wire["unreadable"].as_u64().unwrap_or_default() {
         0 => {}
-        1 => lines.push("1 row in the register has a renewal date Farik can't read".to_string()),
+        1 => lines.push("1 row in the register has a renewal date Catervas can't read".to_string()),
         many => lines.push(format!(
-            "{many} rows in the register have a renewal date Farik can't read"
+            "{many} rows in the register have a renewal date Catervas can't read"
         )),
     }
     lines
@@ -77,12 +77,12 @@ mod tests {
             lines(&json!({ "open": [], "unreadable": 1 })),
             [
                 "no renewal is coming up",
-                "1 row in the register has a renewal date Farik can't read"
+                "1 row in the register has a renewal date Catervas can't read"
             ]
         );
         assert_eq!(
             lines(&json!({ "open": open, "unreadable": 2 }))[1],
-            "2 rows in the register have a renewal date Farik can't read"
+            "2 rows in the register have a renewal date Catervas can't read"
         );
     }
 }

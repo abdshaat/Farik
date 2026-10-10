@@ -1,15 +1,15 @@
-//! `farik contract new` (`docs/SPEC.md` 5.13): a request filed from a brief or an issue, its
+//! `catervas contract new` (`docs/SPEC.md` 5.13): a request filed from a brief or an issue, its
 //! contract written with the Product Manager, and its questions asked at the terminal.
 
 use std::io::{BufRead, BufReader, Read, Write};
 
-use farik_core::contract::{TaskId, TaskStatus};
-use farik_protocol::command::{Command, RequestSize};
-use farik_protocol::event::{EventBody, EventKind};
-use farik_runtime::forge::{Forge, Issue};
-use farik_runtime::orchestrator::{TickRules, TickScope};
-use farik_store::EventQuery;
-use farik_store::requests::{
+use catervas_core::contract::{TaskId, TaskStatus};
+use catervas_protocol::command::{Command, RequestSize};
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_runtime::forge::{Forge, Issue};
+use catervas_runtime::orchestrator::{TickRules, TickScope};
+use catervas_store::EventQuery;
+use catervas_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_brief,
 };
 use serde_json::{Value, json};
@@ -29,7 +29,7 @@ use crate::{CliIo, HUMAN};
 /// The longest title a contract has (the schema's `maxLength`).
 const TITLE_LIMIT: usize = 120;
 /// Why the human's size was given, as the log keeps it.
-const SIZED_BY: &str = "sized by the human with farik contract new";
+const SIZED_BY: &str = "sized by the human with catervas contract new";
 /// The kinds of the task's events printed after each tick.
 const SHOWN: [EventKind; 6] = [
     EventKind::RequestTriaged,
@@ -48,7 +48,7 @@ pub(crate) enum Source<'s> {
     Issue(&'s str),
 }
 
-/// What `farik contract new` was asked.
+/// What `catervas contract new` was asked.
 pub(crate) struct Asked<'s> {
     pub(crate) source: Source<'s>,
     pub(crate) size: Option<RequestSize>,
@@ -76,7 +76,7 @@ fn title_of(brief: &str) -> String {
         .collect()
 }
 
-/// `farik contract new`: builds the request and, when no other process drives the project, starts
+/// `catervas contract new`: builds the request and, when no other process drives the project, starts
 /// driving it first, so that a start that refuses files nothing; then files the request, sizes it
 /// when asked, and drives it with the refining rules until the contract is written or the Product
 /// Manager waits on the person, answering its questions at the terminal. When another process
@@ -148,7 +148,7 @@ fn title_and_brief(
         Source::Brief(brief) => (title_of(brief), (*brief).to_string()),
         Source::Issue(url) => {
             let program = on_path("gh", io).ok_or(
-                "farik contract new --from reads the issue with gh, and there is no gh on PATH",
+                "catervas contract new --from reads the issue with gh, and there is no gh on PATH",
             )?;
             let forge = Forge {
                 program,
@@ -233,7 +233,7 @@ fn hand_over(
     if asked.lock {
         return Err(
             "--lock waits for the Product Manager's contract, which the process driving \
-                    this project writes: run farik contract lock FRK-<n> once it has"
+                    this project writes: run catervas contract lock FRK-<n> once it has"
                 .to_string(),
         );
     }
@@ -261,8 +261,8 @@ fn hand_over(
         .and_then(|address| address.pid)
         .map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
     let handed = format!(
-        "the farik process driving this project (pid {pid}) takes it from here; answer its \
-         questions with farik answer"
+        "the catervas process driving this project (pid {pid}) takes it from here; answer its \
+         questions with catervas answer"
     );
     printer.json_lines = true;
     printer.line(
@@ -295,7 +295,7 @@ async fn with_the_product_manager(
         (_, Some(question)) => {
             printer.line(
                 &format!(
-                    "the question stays open: farik answer {} <your answer>, then farik run",
+                    "the question stays open: catervas answer {} <your answer>, then catervas run",
                     question.seq
                 ),
                 &Value::Null,
@@ -313,7 +313,7 @@ async fn with_the_product_manager(
     if lock && readiness.is_some() && !contract_written(project, task_id) {
         printer.line(
             &format!(
-                "not locked: the Product Manager has written no contract for {id} yet: run farik \
+                "not locked: the Product Manager has written no contract for {id} yet: run catervas \
                  contract lock {id} once it has",
                 id = task_id.as_str()
             ),
@@ -647,7 +647,7 @@ fn readiness(project: &Project, task_id: &TaskId) -> (&'static str, Vec<String>)
 
 #[cfg(test)]
 mod tests {
-    use farik_runtime::forge::Issue;
+    use catervas_runtime::forge::Issue;
 
     use super::brief_from_issue;
 

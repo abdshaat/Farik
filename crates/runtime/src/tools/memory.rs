@@ -1,12 +1,12 @@
-//! `farik_write_memory` (`docs/SPEC.md` 5.8): an agent replaces its own notebook,
-//! `.farik/agents/<id>/memory.md`, within the team's cap, and the log records what it wrote.
-//! `farik_write_decision` and `farik_read_decisions`: the Architect and the Product Manager record
-//! decisions under `.farik/decisions/`, which nobody rewrites, and every agent reads them.
+//! `catervas_write_memory` (`docs/SPEC.md` 5.8): an agent replaces its own notebook,
+//! `.catervas/agents/<id>/memory.md`, within the team's cap, and the log records what it wrote.
+//! `catervas_write_decision` and `catervas_read_decisions`: the Architect and the Product Manager record
+//! decisions under `.catervas/decisions/`, which nobody rewrites, and every agent reads them.
 
-use farik_core::contract::Role;
-use farik_core::text;
-use farik_protocol::event::EventBody;
-use farik_store::files::FilesError;
+use catervas_core::contract::Role;
+use catervas_core::text;
+use catervas_protocol::event::EventBody;
+use catervas_store::files::FilesError;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 
-/// `farik_write_memory`'s input.
+/// `catervas_write_memory`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteMemoryInput {
@@ -46,7 +46,7 @@ pub(super) fn write_memory(call: &Call<'_>, input: &WriteMemoryInput) -> Result<
     Ok(json!({}))
 }
 
-/// `farik_write_decision`'s input.
+/// `catervas_write_decision`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteDecisionInput {
@@ -56,7 +56,7 @@ pub(crate) struct WriteDecisionInput {
     text: String,
 }
 
-/// `farik_read_decisions`'s input.
+/// `catervas_read_decisions`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadDecisionsInput {
@@ -74,7 +74,7 @@ const DECISION_CHARS: usize = 32_000;
 /// How many numbers a write tries when other writers keep taking the one it picked.
 const DECISION_TRIES: usize = 3;
 
-/// Writes a decision under `.farik/decisions/`, numbered one past the highest, and records
+/// Writes a decision under `.catervas/decisions/`, numbered one past the highest, and records
 /// `decision.written`, for the Architect and the Product Manager alone (5.8). Answers its number
 /// and its file.
 pub(super) fn write_decision(
@@ -132,7 +132,7 @@ pub(super) fn write_decision(
     call.append(None, EventBody::DecisionWritten(body))?;
     Ok(json!({
         "number": decision.number,
-        "path": format!(".farik/decisions/{:04}-{}.md", decision.number, decision.slug),
+        "path": format!(".catervas/decisions/{:04}-{}.md", decision.number, decision.slug),
     }))
 }
 
@@ -178,8 +178,8 @@ fn decision_refused(why: &str) -> ToolError {
 mod tests {
     use serde_json::json;
 
-    use farik_core::team::fixtures::an_agent_wire;
-    use farik_protocol::event::{EventBody, EventKind};
+    use catervas_core::team::fixtures::an_agent_wire;
+    use catervas_protocol::event::{EventBody, EventKind};
 
     use crate::tools::ToolError;
     use crate::tools::fixtures::{TestProject, a_team_of_three};
@@ -202,7 +202,7 @@ mod tests {
             .call(
                 "dev-a",
                 None,
-                "farik_write_memory",
+                "catervas_write_memory",
                 json!({ "text": "use pnpm" }),
             )
             .expect("the notebook is written");
@@ -232,7 +232,7 @@ mod tests {
             .call(
                 "dev-a",
                 None,
-                "farik_write_memory",
+                "catervas_write_memory",
                 json!({ "text": "a".repeat(2_000) }),
             )
             .expect("a notebook at its cap is written");
@@ -240,7 +240,7 @@ mod tests {
             .call(
                 "dev-a",
                 None,
-                "farik_write_memory",
+                "catervas_write_memory",
                 json!({ "text": "use pnpm" }),
             )
             .expect("the notebook is written");
@@ -251,7 +251,7 @@ mod tests {
             .call(
                 "dev-a",
                 None,
-                "farik_write_memory",
+                "catervas_write_memory",
                 json!({ "text": "a".repeat(2_001) }),
             )
             .expect_err("the cap refuses it");
@@ -278,13 +278,18 @@ mod tests {
             .call(
                 "dev-a",
                 None,
-                "farik_write_memory",
+                "catervas_write_memory",
                 json!({ "text": "use pnpm" }),
             )
             .expect("the notebook is written");
 
         project
-            .call("dev-a", None, "farik_write_memory", json!({ "text": "" }))
+            .call(
+                "dev-a",
+                None,
+                "catervas_write_memory",
+                json!({ "text": "" }),
+            )
             .expect("an empty notebook is allowed");
 
         assert_eq!(memory(&project, "dev-a"), "");
@@ -297,7 +302,7 @@ mod tests {
     }
 
     /// The team of three with an Architect, `arch`.
-    fn a_team_with_an_architect() -> farik_core::team::Team {
+    fn a_team_with_an_architect() -> catervas_core::team::Team {
         a_team_of_three(|wire| {
             wire["agents"]
                 .as_array_mut()
@@ -315,21 +320,21 @@ mod tests {
             .call(
                 "arch",
                 None,
-                "farik_write_decision",
+                "catervas_write_decision",
                 json!({ "title": "Use SQLite for the log", "text": "One file, no server." }),
             )
             .expect("the decision is written");
 
         assert_eq!(
             answer,
-            json!({ "number": 1, "path": ".farik/decisions/0001-use-sqlite-for-the-log.md" })
+            json!({ "number": 1, "path": ".catervas/decisions/0001-use-sqlite-for-the-log.md" })
         );
         assert!(
             std::fs::read_to_string(
                 project
                     .repo
                     .path
-                    .join(".farik/decisions/0001-use-sqlite-for-the-log.md")
+                    .join(".catervas/decisions/0001-use-sqlite-for-the-log.md")
             )
             .expect("the file")
             .ends_with("By: arch\n\nOne file, no server.\n")
@@ -361,7 +366,7 @@ mod tests {
             .call(
                 "dev-a",
                 None,
-                "farik_write_decision",
+                "catervas_write_decision",
                 json!({ "title": "Use SQLite for the log", "text": "One file, no server." }),
             )
             .expect_err("a Developer does not decide");
@@ -406,7 +411,7 @@ mod tests {
                 .call(
                     "arch",
                     None,
-                    "farik_write_decision",
+                    "catervas_write_decision",
                     json!({ "title": title, "text": text }),
                 )
                 .expect_err("the limits refuse it");
@@ -430,7 +435,7 @@ mod tests {
             .call(
                 "arch",
                 None,
-                "farik_write_decision",
+                "catervas_write_decision",
                 json!({ "title": "a".repeat(120), "text": "a".repeat(32_000) }),
             )
             .expect("a decision at its limits is written");
@@ -448,20 +453,20 @@ mod tests {
                 .call(
                     agent,
                     None,
-                    "farik_write_decision",
+                    "catervas_write_decision",
                     json!({ "title": title, "text": text }),
                 )
                 .expect("the decision is written");
         }
 
         let listed = project
-            .call("dev-a", None, "farik_read_decisions", json!({}))
+            .call("dev-a", None, "catervas_read_decisions", json!({}))
             .expect("the list");
         let second = project
             .call(
                 "dev-a",
                 None,
-                "farik_read_decisions",
+                "catervas_read_decisions",
                 json!({ "number": 2 }),
             )
             .expect("the second");
@@ -469,7 +474,7 @@ mod tests {
             .call(
                 "dev-a",
                 None,
-                "farik_read_decisions",
+                "catervas_read_decisions",
                 json!({ "number": 9 }),
             )
             .expect_err("there is no ninth");

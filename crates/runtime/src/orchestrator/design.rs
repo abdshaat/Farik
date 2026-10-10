@@ -2,10 +2,10 @@
 //! then implement. The task's latest `design_plan.*` event decides which session runs, read afresh
 //! at every tick, so that a session which ends without its one answer is simply started again.
 
-use farik_core::contract::{Role, TaskContract, TaskStatus};
-use farik_core::team::{Agent, Team};
-use farik_protocol::event::EventKind;
-use farik_store::{EventQuery, TaskProjection};
+use catervas_core::contract::{Role, TaskContract, TaskStatus};
+use catervas_core::team::{Agent, Team};
+use catervas_protocol::event::EventKind;
+use catervas_store::{EventQuery, TaskProjection};
 
 use super::messages::{decide_design_plan_message, explore_message};
 use super::rules::{Waiting, acted, asleep, governor_moves, refused_since_entering, spent};
@@ -16,35 +16,35 @@ use crate::session::SessionPurpose;
 use crate::tools::design::{DesignPlan, PlanState, design_plan, plan_history, returns};
 use crate::transitions::TransitionOutcome;
 
-/// The Farik tools an explore session is offered: the five reading tools, the plan, and the page
+/// The Catervas tools an explore session is offered: the five reading tools, the plan, and the page
 /// check when the preview is open for it (step 12).
 pub(super) const EXPLORE_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_read_decisions",
-    "farik_propose_design_plan",
-    "farik_check_page",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_read_decisions",
+    "catervas_propose_design_plan",
+    "catervas_check_page",
 ];
 
-/// The Farik tools the Designer's design review of a Developer's UI change is offered (D9): the
+/// The Catervas tools the Designer's design review of a Developer's UI change is offered (D9): the
 /// five reading tools, the page check, and its one answer.
 pub(super) const DESIGN_REVIEW_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_read_decisions",
-    "farik_check_page",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_read_decisions",
+    "catervas_check_page",
     RECORD_DESIGN_REVIEW_TOOL,
 ];
 
 /// The design review's one answer, offered to that session alone.
-pub(super) const RECORD_DESIGN_REVIEW_TOOL: &str = "farik_record_design_review";
+pub(super) const RECORD_DESIGN_REVIEW_TOOL: &str = "catervas_record_design_review";
 
 /// The one tool the Product Manager's decision session is given.
-pub(super) const DECIDE_TOOL: &str = "farik_decide_design_plan";
+pub(super) const DECIDE_TOOL: &str = "catervas_decide_design_plan";
 
 /// Where a Designer's task stands before its implement session.
 pub(super) enum Stage {
@@ -208,10 +208,10 @@ async fn decide(
 mod tests {
     use std::collections::BTreeSet;
 
-    use farik_core::contract::TaskStatus;
-    use farik_core::governor::permissions::PermissionTier;
-    use farik_protocol::command::Command;
-    use farik_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
+    use catervas_core::contract::TaskStatus;
+    use catervas_core::governor::permissions::PermissionTier;
+    use catervas_protocol::command::Command;
+    use catervas_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
     use serde_json::{Value, json};
 
     use crate::claude::allowed_builtins;
@@ -221,7 +221,7 @@ mod tests {
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
         decide_design_plan_approves_frk_1, decide_design_plan_returns_frk_1, explore_plans_frk_1,
-        implement_by_iris_frk_1, replays_farik_read_board, review_writes_note,
+        implement_by_iris_frk_1, replays_catervas_read_board, review_writes_note,
     };
     use crate::session::{SessionPurpose, SessionSpec};
     use crate::tools::fixtures::{browsing, with_the_designer};
@@ -315,14 +315,14 @@ mod tests {
         );
         let explore = &started[0];
         assert_eq!(
-            explore.farik_tools,
+            explore.catervas_tools,
             [
-                "farik_read_task",
-                "farik_read_board",
-                "farik_read_rules",
-                "farik_read_criteria",
-                "farik_read_decisions",
-                "farik_propose_design_plan",
+                "catervas_read_task",
+                "catervas_read_board",
+                "catervas_read_rules",
+                "catervas_read_criteria",
+                "catervas_read_decisions",
+                "catervas_propose_design_plan",
             ]
         );
         assert_eq!(
@@ -331,7 +331,7 @@ mod tests {
         );
         assert_eq!(explore.cwd, harness.worktree("FRK-1"));
         let decision = &started[1];
-        assert_eq!(decision.farik_tools, ["farik_decide_design_plan"]);
+        assert_eq!(decision.catervas_tools, ["catervas_decide_design_plan"]);
         assert!(
             decision.system_prompt.contains(DESIGN_DECISION_INSTRUCTION),
             "{}",
@@ -362,15 +362,15 @@ mod tests {
         assert_eq!(who(&started), [("iris", SessionPurpose::Explore)]);
         let explore = &started[0];
         assert_eq!(
-            explore.farik_tools,
+            explore.catervas_tools,
             [
-                "farik_read_task",
-                "farik_read_board",
-                "farik_read_rules",
-                "farik_read_criteria",
-                "farik_read_decisions",
-                "farik_propose_design_plan",
-                "farik_check_page",
+                "catervas_read_task",
+                "catervas_read_board",
+                "catervas_read_rules",
+                "catervas_read_criteria",
+                "catervas_read_decisions",
+                "catervas_propose_design_plan",
+                "catervas_check_page",
             ]
         );
         let servers: Vec<&str> = explore
@@ -385,7 +385,7 @@ mod tests {
             explore.initial_prompt
         );
         assert!(
-            explore.initial_prompt.contains("`farik_check_page`"),
+            explore.initial_prompt.contains("`catervas_check_page`"),
             "{}",
             explore.initial_prompt
         );
@@ -604,10 +604,10 @@ mod tests {
             wire["budget"]["max_sessions"] = json!(4);
         });
         let adapter = harness.recorded(vec![
-            replays_farik_read_board(),
-            replays_farik_read_board(),
-            replays_farik_read_board(),
-            replays_farik_read_board(),
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
 

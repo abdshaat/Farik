@@ -1,7 +1,7 @@
 //! Small shared pieces of English, so that one refusal does not disagree with another about how
-//! to name a list of things, and the one way Farik counts a text's tokens.
+//! to name a list of things, and the one way Catervas counts a text's tokens.
 
-/// The tokens of `text` as Farik counts them without a tokenizer: a quarter of its characters,
+/// The tokens of `text` as Catervas counts them without a tokenizer: a quarter of its characters,
 /// rounded up. A notebook's cap and the channel's summary are both measured with it, so that
 /// neither disagrees with the other about how long a text is.
 #[must_use]

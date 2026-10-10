@@ -1,4 +1,4 @@
-import { AVATAR_KEYS } from "@farik/brand";
+import { AVATAR_KEYS } from "@catervas/brand";
 import { describe, expect, it } from "vitest";
 import { AVATAR_URLS } from "./avatars.ts";
 

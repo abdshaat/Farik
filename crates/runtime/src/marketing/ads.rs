@@ -1,19 +1,19 @@
 //! What Today and a marketing plan's page say of the plan's ads and their budget (ADR 0042, step
 //! 08g): the rows that ask the owner what to do when a budget was reached, or that tell them ads
-//! may be running that Farik could not pause or cannot watch, and the plan's spend and pauses.
+//! may be running that Catervas could not pause or cannot watch, and the plan's spend and pauses.
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, SecondsFormat, Utc};
-use farik_core::contract::{TaskId, TaskStatus};
-use farik_core::marketing::{
+use catervas_core::contract::{TaskId, TaskStatus};
+use catervas_core::marketing::{
     CapScope, Lineage, PlanRecord, active_plan, is_carried, to_pause_for_end,
 };
-use farik_store::StoreError;
-use farik_store::marketing::{
+use catervas_store::StoreError;
+use catervas_store::marketing::{
     BudgetReached, CampaignPaused, MarketingPlan, PausedWhy, budgets_reached, campaigns_paused,
     created_campaigns, marketing_plans, paused_for_end, raises,
 };
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Map, Value, json};
 
 use crate::daemon::ads_calls::{GOOGLE_ADS, lineage_of};
@@ -41,7 +41,7 @@ pub(crate) fn open_raise(deps: &ToolDeps, plan: &str) -> Result<Option<TaskId>, 
 }
 
 /// Whether an agent that is not retired has a Google Ads entry in the team file, which
-/// `paused_for_end` needs: its sign-in could enable a campaign Farik paused for a removal. `true`
+/// `paused_for_end` needs: its sign-in could enable a campaign Catervas paused for a removal. `true`
 /// when the team file cannot be read, so that nothing is counted paused on a guess.
 pub(crate) fn google_ads_held(deps: &ToolDeps) -> bool {
     deps.files
@@ -50,7 +50,7 @@ pub(crate) fn google_ads_held(deps: &ToolDeps) -> bool {
         .is_none_or(|team| team.has_connector(GOOGLE_ADS))
 }
 
-/// Whether a campaign Farik made under `plan` is left to pause: not carried by the active plan and
+/// Whether a campaign Catervas made under `plan` is left to pause: not carried by the active plan and
 /// not recorded paused for its end. The command that ends a plan, handled in a process that drives
 /// nothing, says so, since the watch pauses it when a process does.
 ///
@@ -115,10 +115,10 @@ fn base(plan: &MarketingPlan, kind: &str, title: &str, line: &str) -> Value {
     })
 }
 
-/// The row for a plan whose ads Farik could not pause.
+/// The row for a plan whose ads Catervas could not pause.
 fn running_row(plan: &MarketingPlan, why: &str) -> Value {
     let line = format!(
-        "Farik could not pause its ads: {} They keep running at Google until {} or their \
+        "Catervas could not pause its ads: {} They keep running at Google until {} or their \
          budget there. Pause them in Google Ads.",
         sentence(why),
         plan.proposal.ends_on
@@ -128,10 +128,10 @@ fn running_row(plan: &MarketingPlan, why: &str) -> Value {
     row
 }
 
-/// The row for the active plan whose spend Farik cannot read.
+/// The row for the active plan whose spend Catervas cannot read.
 fn unread_row(plan: &MarketingPlan, read: &SpendRead, why: &str) -> Value {
     let line = format!(
-        "Farik can't read its ad spend: {} Any of its ads still running keep running at \
+        "Catervas can't read its ad spend: {} Any of its ads still running keep running at \
          Google until {} or their budget there; pause them in Google Ads.",
         sentence(why),
         plan.proposal.ends_on
@@ -157,7 +157,7 @@ struct Facts<'a> {
     plans: Vec<MarketingPlan>,
     reached: Vec<BudgetReached>,
     paused: Vec<CampaignPaused>,
-    made: Vec<farik_core::marketing::CreatedCampaign>,
+    made: Vec<catervas_core::marketing::CreatedCampaign>,
     reads: BTreeMap<String, SpendRead>,
     state: &'a DaemonState,
 }
@@ -219,9 +219,9 @@ impl Facts<'_> {
         };
         let amounts = format!("{} of {} {}", cap.spent, cap.budget, plan.proposal.currency);
         let line = match trouble {
-            None => format!("{subject}: {amounts}. Farik paused {them}."),
+            None => format!("{subject}: {amounts}. Catervas paused {them}."),
             Some(why) => format!(
-                "{subject}: {amounts}. Farik could not pause {them}: {} Farik tries again every \
+                "{subject}: {amounts}. Catervas could not pause {them}: {} Catervas tries again every \
                  15 minutes; pause {them} in Google Ads.",
                 sentence(why)
             ),
@@ -274,8 +274,8 @@ impl Facts<'_> {
 }
 
 /// The rows of `waiting.list` about the plans' ads, one per plan, by precedence: the active plan
-/// whose ads reached a budget, else a plan whose ads Farik could not pause, else the active plan
-/// whose spend Farik cannot read. A plan whose ads reached a budget and could not be paused for
+/// whose ads reached a budget, else a plan whose ads Catervas could not pause, else the active plan
+/// whose spend Catervas cannot read. A plan whose ads reached a budget and could not be paused for
 /// its end or Google Ads' removal says so in the first. The active plan's come first.
 ///
 /// # Errors
@@ -323,7 +323,7 @@ pub(crate) fn ads_rows(state: &DaemonState, deps: &ToolDeps) -> Result<Vec<Value
 }
 
 /// What `marketing_plan.get` adds for `plan`: `spend`, when the watch has tried, `reached`, the
-/// budgets its ads reached, and `paused`, the campaigns Farik paused on its own.
+/// budgets its ads reached, and `paused`, the campaigns Catervas paused on its own.
 ///
 /// # Errors
 ///

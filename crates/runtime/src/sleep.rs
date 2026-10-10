@@ -5,10 +5,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use catervas_protocol::clock::Clock;
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_store::{EventLog, EventQuery, StoreError};
 use chrono::{DateTime, Utc};
-use farik_protocol::clock::Clock;
-use farik_protocol::event::{EventBody, EventKind};
-use farik_store::{EventLog, EventQuery, StoreError};
 
 /// When the agent wakes, while it is asleep at `now`: the `until` of the last `agent.slept` for
 /// it, when that is later than `now`, and nothing otherwise.
@@ -68,10 +68,10 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
+    use catervas_protocol::clock::{Clock, MovableClock};
+    use catervas_protocol::event::{AgentSleptBody, EventBody, EventIds, NewEvent};
+    use catervas_store::{EventLog, IN_MEMORY, open_event_log};
     use chrono::{DateTime, Duration, Utc};
-    use farik_protocol::clock::{Clock, MovableClock};
-    use farik_protocol::event::{AgentSleptBody, EventBody, EventIds, NewEvent};
-    use farik_store::{EventLog, IN_MEMORY, open_event_log};
 
     use super::{Sleeper, TokioSleeper, asleep_until};
     use crate::tools::fixtures::at;
@@ -81,8 +81,8 @@ mod tests {
         log.append(&NewEvent {
             recorded_at: at(),
             ids: EventIds {
-                team_id: "farik".to_string(),
-                project_id: "farik".to_string(),
+                team_id: "catervas".to_string(),
+                project_id: "catervas".to_string(),
                 agent_id: Some(agent.to_string()),
                 ..EventIds::default()
             },
