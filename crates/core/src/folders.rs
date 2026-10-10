@@ -76,6 +76,106 @@ pub fn pair_changed_alone(changed_paths: &[String]) -> Vec<String> {
     alone
 }
 
+/// The human documents the owner approves through `catervas_write_folder_doc` (section 5.7).
+pub const OWNER_ACCEPTED: [&str; 2] = [
+    "docs/catervas/product/spec.md",
+    "docs/catervas/product/roadmap.md",
+];
+
+/// A path `catervas_write_folder_doc` may write: normalised, and whether the owner approves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderDocPath {
+    /// The path, normalised.
+    pub path: String,
+    /// Whether the path is in [`OWNER_ACCEPTED`].
+    pub owner_accepted: bool,
+}
+
+/// Why a path is not one the caller may write with `catervas_write_folder_doc`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderDocPathRefusal {
+    /// The role owns no folder.
+    NoFolder,
+    /// The path is not below the caller's folder.
+    Outside,
+    /// The path is not a `.md` file.
+    NotMarkdown,
+    /// The path is an `.agent.md` twin, written from the human document's `agent_text`.
+    AgentTwin,
+    /// The path is a marketing plan, proposed with `catervas_propose_marketing_plan`.
+    MarketingPlan,
+}
+
+/// Holds a path to a `.md` file at least one segment below the role's folder (letter case counts),
+/// not an `.agent.md` twin, and not a human document the owner does not approve here.
+///
+/// # Errors
+///
+/// The first [`FolderDocPathRefusal`] that applies.
+pub fn check_folder_doc_path(
+    role: Role,
+    path: &str,
+) -> Result<FolderDocPath, FolderDocPathRefusal> {
+    let folder = role_folder(role).ok_or(FolderDocPathRefusal::NoFolder)?;
+    let path = normalise(path).ok_or(FolderDocPathRefusal::Outside)?;
+    if !path
+        .strip_prefix(folder)
+        .is_some_and(|rest| rest.starts_with('/') && rest.len() > 1)
+    {
+        return Err(FolderDocPathRefusal::Outside);
+    }
+    if path.strip_suffix(".md").is_none() {
+        return Err(FolderDocPathRefusal::NotMarkdown);
+    }
+    if path.strip_suffix(TWIN_SUFFIX).is_some() {
+        return Err(FolderDocPathRefusal::AgentTwin);
+    }
+    let owner_accepted = OWNER_ACCEPTED.contains(&path.as_str());
+    if is_human_document(&path) && !owner_accepted {
+        return Err(FolderDocPathRefusal::MarketingPlan);
+    }
+    Ok(FolderDocPath {
+        path,
+        owner_accepted,
+    })
+}
+
+/// The git author of a folder change: `<display name> (Catervas) <catervas@localhost>`, the name
+/// without `<`, `>` and control characters, or the agent's id when nothing is left.
+#[must_use]
+pub fn folder_doc_author(display_name: &str, agent_id: &str) -> String {
+    let name: String = display_name
+        .chars()
+        .filter(|c| !c.is_control() && *c != '<' && *c != '>')
+        .collect();
+    let name = name.trim();
+    let name = if name.is_empty() { agent_id } else { name };
+    format!("{name} (Catervas) <catervas@localhost>")
+}
+
+/// The commit message of a folder change: `docs(<the folder's last segment>): <each path within
+/// the folder, joined by ", "> by <agent name>`, with `, approved by the owner` after an approval.
+#[must_use]
+pub fn folder_doc_message(
+    folder: &str,
+    paths: &[&str],
+    agent_name: &str,
+    approved: bool,
+) -> String {
+    let scope = folder.rsplit('/').next().unwrap_or(folder);
+    let within = format!("{folder}/");
+    let names: Vec<&str> = paths
+        .iter()
+        .map(|path| path.strip_prefix(&within).unwrap_or(path))
+        .collect();
+    let owner = if approved {
+        ", approved by the owner"
+    } else {
+        ""
+    };
+    format!("docs({scope}): {} by {agent_name}{owner}", names.join(", "))
+}
+
 /// What a role may read of the project (`docs/SPEC.md` section 5.6): everything, or only the
 /// listed read paths, each `<folder>/**`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,8 +255,9 @@ pub fn folders_line(role: Role, active_roles: &[Role]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ROLE_FOLDERS, ReadAccess, agent_twin, folders_line, human_of_twin, is_human_document,
-        pair_changed_alone, read_access, role_folder,
+        FolderDocPathRefusal, OWNER_ACCEPTED, ROLE_FOLDERS, ReadAccess, agent_twin,
+        check_folder_doc_path, folder_doc_author, folder_doc_message, folders_line, human_of_twin,
+        is_human_document, pair_changed_alone, read_access, role_folder,
     };
     use crate::team::Role;
 
@@ -399,6 +500,107 @@ mod tests {
                 ]
             ),
             "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read only docs/catervas/product/ and docs/catervas/marketing/: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.md twin beside it, read the twin, which is written for agents."
+        );
+    }
+
+    #[test]
+    fn holds_a_document_to_its_writers_folder() {
+        for (path, normalised) in [
+            (
+                "docs/catervas/delivery/cadence.md",
+                "docs/catervas/delivery/cadence.md",
+            ),
+            (
+                "./docs/catervas/delivery/notes/s4.md",
+                "docs/catervas/delivery/notes/s4.md",
+            ),
+        ] {
+            let ok = check_folder_doc_path(Role::ScrumMaster, path).expect(path);
+            assert_eq!((ok.path.as_str(), ok.owner_accepted), (normalised, false));
+        }
+        for path in [
+            "docs/catervas/product/x.md",
+            "docs/catervas/delivery",
+            "docs/catervas/delivery/../product/x.md",
+            "/docs/catervas/delivery/x.md",
+            "Docs/catervas/delivery/x.md",
+        ] {
+            assert_eq!(
+                check_folder_doc_path(Role::ScrumMaster, path),
+                Err(FolderDocPathRefusal::Outside),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            check_folder_doc_path(Role::ScrumMaster, "docs/catervas/delivery/x.txt"),
+            Err(FolderDocPathRefusal::NotMarkdown)
+        );
+        assert_eq!(
+            check_folder_doc_path(Role::ScrumMaster, "docs/catervas/delivery/x.agent.md"),
+            Err(FolderDocPathRefusal::AgentTwin)
+        );
+        for name in ["spec.md", "roadmap.md"] {
+            let ok = check_folder_doc_path(Role::ProductManager, &product(name)).expect(name);
+            assert!(ok.owner_accepted, "{name}");
+        }
+        assert!(
+            !check_folder_doc_path(Role::ProductManager, &product("notes.md"))
+                .expect("notes")
+                .owner_accepted
+        );
+        assert_eq!(
+            check_folder_doc_path(
+                Role::MarketingSpecialist,
+                "docs/catervas/marketing/plans/MP-3.md"
+            ),
+            Err(FolderDocPathRefusal::MarketingPlan)
+        );
+        assert!(
+            check_folder_doc_path(
+                Role::MarketingSpecialist,
+                "docs/catervas/marketing/plans/notes.md"
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            check_folder_doc_path(Role::FinanceSpecialist, "docs/catervas/finance/x.md"),
+            Err(FolderDocPathRefusal::NoFolder)
+        );
+        assert_eq!(OWNER_ACCEPTED, [product("spec.md"), product("roadmap.md")]);
+        assert!(OWNER_ACCEPTED.iter().all(|path| is_human_document(path)));
+    }
+
+    #[test]
+    fn writes_the_author_and_the_message() {
+        assert_eq!(
+            folder_doc_author("Sol", "sm"),
+            "Sol (Catervas) <catervas@localhost>"
+        );
+        assert_eq!(
+            folder_doc_author("<Mal>\nory", "sm"),
+            "Malory (Catervas) <catervas@localhost>"
+        );
+        assert_eq!(
+            folder_doc_author("<>", "sm"),
+            "sm (Catervas) <catervas@localhost>"
+        );
+        assert_eq!(
+            folder_doc_message(
+                "docs/catervas/delivery",
+                &["docs/catervas/delivery/cadence.md"],
+                "Sol",
+                false
+            ),
+            "docs(delivery): cadence.md by Sol"
+        );
+        assert_eq!(
+            folder_doc_message(
+                "docs/catervas/product",
+                &[&product("roadmap.md"), &product("spec.md")],
+                "Mira",
+                true
+            ),
+            "docs(product): roadmap.md, spec.md by Mira, approved by the owner"
         );
     }
 }

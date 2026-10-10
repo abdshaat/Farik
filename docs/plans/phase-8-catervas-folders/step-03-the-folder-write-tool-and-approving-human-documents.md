@@ -115,7 +115,7 @@ Files: modified `crates/core/src/folders.rs` (items and tests in its `mod tests`
 - `holds_a_document_to_its_writers_folder` — for the Scrum Master: `docs/catervas/delivery/cadence.md` and `./docs/catervas/delivery/notes/s4.md` pass, normalised, `owner_accepted` false; `docs/catervas/product/x.md`, `docs/catervas/delivery`, `docs/catervas/delivery/../product/x.md`, `/docs/catervas/delivery/x.md` and `Docs/catervas/delivery/x.md` are `Outside`; `docs/catervas/delivery/x.txt` is `NotMarkdown`; `docs/catervas/delivery/x.agent.md` is `AgentTwin`. For the Product Manager, `docs/catervas/product/spec.md` and `roadmap.md` pass with `owner_accepted` true and `notes.md` with false. For the Marketing Specialist, `docs/catervas/marketing/plans/MP-3.md` is `MarketingPlan` and `docs/catervas/marketing/plans/notes.md` passes. The Finance Specialist's every path is `NoFolder`. `OWNER_ACCEPTED` is the two product paths, each `is_human_document`. RED: no function.
 - `writes_the_author_and_the_message` — `folder_doc_author("Sol", "sm")` is `Sol (Catervas) <catervas@localhost>`; `"<Mal>\nory"` gives `Malory (Catervas) …`; `"<>"` gives `sm (Catervas) …`. `folder_doc_message("docs/catervas/delivery", &["docs/catervas/delivery/cadence.md"], "Sol", false)` is `docs(delivery): cadence.md by Sol`; the product's roadmap then spec, approved, is `docs(product): roadmap.md, spec.md by Mira, approved by the owner`. RED: no functions.
 
-- [ ] `feat(core): hold a folder document to its writer's folder`
+- [x] `feat(core): hold a folder document to its writer's folder`
 
 ### Task 2: The seven events and their fold
 
