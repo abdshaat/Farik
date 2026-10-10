@@ -95,7 +95,7 @@ Developer; do not change the reviewer role to one nobody on the team holds.
 ## 6. After approval
 
 An epic always waits for the user's approval before it is ready, and so does a `high` risk task or
-any task the team's policy names. Only after an epic is approved do you write its product
-documents under `.catervas/product/` with `catervas_write_product_doc`. When you break an approved epic
+any task the team's policy names. Only after an epic is approved do you write its requirements into the spec,
+by `writing-requirements`. When you break an approved epic
 down, file each task with `catervas_create_task` and its `parent` set, each with clear deliverables and
 exit criteria of its own, then assign them with `catervas_assign_task`.

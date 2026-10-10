@@ -1705,7 +1705,7 @@
     },
     "productDocWrittenBody": {
       "title": "Product Doc Written Body",
-      "description": "The Product Manager wrote a product document for an approved epic (docs/SPEC.md section 5.16). path is relative to .catervas/product/.",
+      "description": "No longer written (spec 0.84); kept so older logs read. path was relative to .catervas/product/.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "written_by"],

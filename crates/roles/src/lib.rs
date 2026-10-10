@@ -1296,6 +1296,56 @@ mod tests {
         );
     }
 
+    /// The Product Manager's documents are `docs/catervas/product/` (spec 5.17): its prompt and
+    /// skills say so, and none names the tool or the folder that went.
+    #[test]
+    fn the_product_manager_keeps_its_folder() {
+        let definition = loaded(Role::ProductManager);
+        for needle in [
+            "docs/catervas/product/",
+            "spec.md",
+            "roadmap.md",
+            ".agent.md",
+        ] {
+            assert!(
+                definition.system_prompt.contains(needle),
+                "the prompt does not name {needle}"
+            );
+        }
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let requirements = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "writing-requirements")
+            .expect("the requirements skill");
+        let requirements = &requirements.session_files["SKILL.md"];
+        for needle in ["spec.md", "spec.agent.md"] {
+            assert!(requirements.contains(needle), "{requirements}");
+        }
+        let mut texts = vec![definition.system_prompt.clone()];
+        texts.extend(definition.skills.iter().map(|skill| skill.text.clone()));
+        for skill in &kit.skills {
+            texts.extend(skill.session_files.values().cloned());
+        }
+        for text in texts {
+            // Built apart, so that this file does not name what it forbids.
+            for gone in [
+                concat!(".catervas/", "product"),
+                concat!("catervas_write_", "product_doc"),
+            ] {
+                assert!(!text.contains(gone), "{gone}: {text}");
+            }
+        }
+        assert!(
+            definition
+                .produces
+                .iter()
+                .any(|line| line.contains("docs/catervas/product/")),
+            "{:?}",
+            definition.produces
+        );
+    }
+
     #[test]
     fn forbids_application_code_to_every_role_but_the_developer() {
         for role in [

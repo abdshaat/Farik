@@ -1,17 +1,15 @@
-//! The work tools: transitions, assignment, blocks, criterion results, notes, questions, and
-//! product documents.
+//! The work tools: transitions, assignment, blocks, criterion results, notes and questions.
 
 use std::str::FromStr;
 
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus, wire_method};
-use catervas_core::governor::gates::{Blocker, Rejection, check_product_doc_write};
+use catervas_core::governor::gates::{Blocker, Rejection};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::{TransitionActor, find_transitions};
 use catervas_protocol::event::{
     CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, NoteWrittenBody,
-    NoteWrittenBodyKind, ProductDocWrittenBody, QuestionAskedBody,
+    NoteWrittenBodyKind, QuestionAskedBody,
 };
-use catervas_store::EventQuery;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -19,7 +17,7 @@ use serde_json::{Value, json};
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, actor_wire, contract_accepted, refusal_details, refusal_wire,
+    TransitionAsk, TransitionOutcome, actor_wire, refusal_details, refusal_wire,
 };
 
 /// What is in the way, for a block.
@@ -144,16 +142,6 @@ pub(crate) struct ChoiceInput {
     /// What picking it means, in up to 160 characters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hint: Option<String>,
-}
-
-/// `catervas_write_product_doc`'s input.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct WriteProductDocInput {
-    /// Where under `.catervas/product/`.
-    path: String,
-    /// The document.
-    content: String,
 }
 
 /// Asks the governor to move the session's task, as the first actor of the matching rows the
@@ -387,43 +375,6 @@ pub(super) fn ask_human(call: &Call<'_>, input: AskHumanInput) -> Result<Value, 
         "question_id": event.envelope.seq,
         "next": "end your turn: the human's answer starts the next session",
     }))
-}
-
-/// Writes a product document for the session's epic when `check_product_doc_write` allows it: the
-/// user's approval is a `human.accepted { contract }` of the contract the epic has now.
-pub(super) fn write_product_doc(
-    call: &Call<'_>,
-    input: WriteProductDocInput,
-) -> Result<Value, ToolError> {
-    let task = call.task()?;
-    let (contract, row) = call.contract(task)?;
-    let history = call
-        .deps()
-        .log
-        .read(&EventQuery {
-            task_id: Some(task.clone()),
-            ..EventQuery::default()
-        })
-        .map_err(failed)?;
-    check_product_doc_write(
-        contract.kind,
-        row.status,
-        contract_accepted(&history),
-        call.role(),
-    )
-    .map_err(|details| Refusal::GateFailed { details })?;
-    call.deps()
-        .files
-        .write_product_doc(&input.path, &input.content)
-        .map_err(failed)?;
-    let event = call.append(
-        Some(task),
-        EventBody::ProductDocWritten(ProductDocWrittenBody {
-            path: input.path,
-            written_by: call.agent_id().to_string(),
-        }),
-    )?;
-    Ok(json!({ "seq": event.envelope.seq }))
 }
 
 /// The first actor, among the rows from the contract's status to `to`, that the caller is.
@@ -984,60 +935,6 @@ mod tests {
             panic!("a question");
         };
         assert_eq!(body.asked_by, "pm");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_product_document_before_the_user_approves_the_epic() {
-        let project = a_project("tools-product-doc");
-        project.filed("CTV-1", "in_progress", "epic", None);
-        let reason = refused_with(
-            project.call(
-                "pm",
-                Some("CTV-1"),
-                "catervas_write_product_doc",
-                json!({ "path": "prd.md", "content": "# Sign-in" }),
-            ),
-            "gate_failed",
-        );
-        assert!(reason.contains("has not approved"), "{reason}");
-        assert!(
-            !project.repo.path.join(".catervas/product/prd.md").exists(),
-            "nothing is written"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn writes_a_product_document_once_the_epic_is_approved() {
-        let project = a_project("tools-product-doc-approved");
-        project.filed("CTV-1", "escalated", "epic", None);
-        project.moved("CTV-1", "refining", "escalated", &json!({}));
-        project.record(
-            "CTV-1",
-            "human.accepted",
-            &json!({ "subject": "contract", "accepted_by": "human" }),
-        );
-        project.moved("CTV-1", "escalated", "ready", &json!({}));
-        let write = || {
-            project.call(
-                "pm",
-                Some("CTV-1"),
-                "catervas_write_product_doc",
-                json!({ "path": "prd.md", "content": "# Sign-in" }),
-            )
-        };
-        write().expect("the human approved the epic's contract");
-        assert_eq!(
-            std::fs::read_to_string(project.repo.path.join(".catervas/product/prd.md"))
-                .expect("the document is written"),
-            "# Sign-in"
-        );
-        assert_eq!(project.events(&[EventKind::ProductDocWritten]).len(), 1);
-
-        project.moved("CTV-1", "ready", "cancelled", &json!({}));
-        let reason = refused_with(write(), "gate_failed");
-        assert!(reason.contains("cancelled"), "{reason}");
     }
 
     #[test]

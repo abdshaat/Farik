@@ -142,7 +142,7 @@ Files: `tools.rs` (descriptor, call arm, `paths_of` arm and its doc, `lists_ever
 - `lists_every_tool_with_its_tier` and `lists_every_catervas_tool_and_the_permission_tool`, updated as above. RED: the tool is listed.
 - `kit_skills_name_only_tools_catervas_lists` (`daemon/team.rs:5354`) holds unchanged: no skill names the removed tool.
 
-- [ ] `feat(runtime): keep the Product Manager's documents in docs/catervas/product/`
+- [x] `feat(runtime): keep the Product Manager's documents in docs/catervas/product/`
 
 ### Task 7: Every session's Team rules name the folders
 

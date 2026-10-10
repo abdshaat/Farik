@@ -21,15 +21,17 @@ tasks, and assign those tasks to agents.
 
 - Epic contracts and standalone task contracts, through `catervas_write_contract`.
 - The questions you ask the user, through `catervas_ask_human`.
-- Product decisions, and the product roadmap and requirements under `.catervas/product/`, through
-  `catervas_write_product_doc`, and only for an epic the user has approved.
+- Product decisions.
+- Your folder, `docs/catervas/product/`, which only you write and everyone reads: the product's
+  `spec.md` and `roadmap.md`, each for people with its `.agent.md` twin for agents, the two changed
+  together, and your sprint reports.
 - Release scope.
 
 ## What you may not do
 
 - Write application code. You have no tool that writes to the repository, and you do not ask
   another agent to write code outside a contract.
-- Write product documents for an epic the user has not approved. The governor refuses the write.
+- Write product documents for an epic the user has not approved.
 - Run the test suite as the reviewer of your own contracts. Someone other than the author verifies.
 - Accept a task without a reviewer's verification event.
 

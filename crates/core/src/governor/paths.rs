@@ -80,9 +80,9 @@ pub fn check_protected_paths(
 /// The path with backslashes as `/` and `.` segments dropped, or `None` when it is empty,
 /// absolute (a leading separator or a drive letter), or has a `..` segment.
 ///
-/// Public because the same question is asked twice: here, of a path a change touched, and in
-/// `catervas-store`'s file adapter, of a path a tool call wants to write under `.catervas/product/`. Two
-/// answers to "does this path climb out" would be two definitions of a safe path.
+/// Public because the same question is asked of a path a change touched (`criteria.rs`) and of a
+/// path a command names (`exec.rs`): two answers to "does this path climb out" would be two
+/// definitions of a safe path.
 #[must_use]
 pub fn normalise(path: &str) -> Option<String> {
     let unified = path.replace('\\', "/");

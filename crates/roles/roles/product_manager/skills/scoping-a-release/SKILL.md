@@ -28,5 +28,4 @@ written down comes back as an argument.
 ## 4. The notes
 
 Write the release notes from accepted tasks only, in the user's words: what changed for them. Do
-not list work that is still open or was sent back. Save them with `catervas_write_product_doc` while working on the release's approved epic; Catervas
-refuses it anywhere else, so otherwise give the notes to the user in your answer.
+not list work that is still open or was sent back. The notes belong in your folder, `docs/catervas/product/`. You have no tool that writes your folder yet: do not file a task for yourself; give the text to the user in your answer.

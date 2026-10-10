@@ -258,11 +258,6 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "Ask the human a question; end your turn after asking.",
         ),
-        tool::<work::WriteProductDocInput>(
-            "catervas_write_product_doc",
-            Read,
-            "Write a product document under .catervas/product/ for the approved epic of this session.",
-        ),
         tool::<channel::PostMessageInput>(
             "catervas_post_message",
             Read,
@@ -502,7 +497,6 @@ pub async fn call_tool(
         "catervas_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
-        "catervas_write_product_doc" => work::write_product_doc(&call, parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
         "catervas_append_retro" => retro::append_retro(&call, &parse(input)?),
         "catervas_write_memory" => memory::write_memory(&call, &parse(input)?),
@@ -551,18 +545,12 @@ pub async fn call_tool(
     }
 }
 
-/// The paths a call touches, for the permission check: `.catervas/product/<path>` for a product
-/// document, the named paths of a commit, and the plans folder for a marketing plan (its number
-/// is not taken yet, so the check is of the folder; the tool asks again with the file's own path);
-/// nothing for every other tool. Read leniently, since the input is parsed strictly afterwards.
+/// The paths a call touches, for the permission check: the named paths of a commit, and the plans
+/// folder for a marketing plan (its number is not taken yet, so the check is of the folder; the
+/// tool asks again with the file's own path); nothing for every other tool. Read leniently, since the input is parsed strictly afterwards.
 pub(crate) fn paths_of(name: &str, input: &Value) -> Vec<String> {
     match name {
         "catervas_propose_marketing_plan" => vec![marketing::plan_file(0)],
-        "catervas_write_product_doc" => input
-            .get("path")
-            .and_then(Value::as_str)
-            .map(|path| vec![format!(".catervas/product/{path}")])
-            .unwrap_or_default(),
         "catervas_git_commit" => input
             .get("paths")
             .and_then(Value::as_array)
@@ -756,7 +744,6 @@ mod tests {
             "catervas_record_criterion_result",
             "catervas_write_note",
             "catervas_ask_human",
-            "catervas_write_product_doc",
             "catervas_post_message",
             "catervas_append_retro",
             "catervas_write_memory",
@@ -806,7 +793,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..41] {
+        for tool in &tools[..40] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

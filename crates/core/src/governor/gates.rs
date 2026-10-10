@@ -597,58 +597,6 @@ pub fn check_children_done(children: &[ChildState]) -> GateResult {
     verdict(reasons)
 }
 
-/// Whether the Product Manager may write a product document for this contract (`docs/SPEC.md`
-/// section 5.16 items 1, 2 and 5): the writer is the Product Manager, the contract is an epic,
-/// the user has approved the contract the epic has now, and the epic is not cancelled.
-///
-/// The approval is passed in rather than read from the status, because the status cannot answer
-/// it: an epic waiting for approval sits in `escalated` (5.16 item 2), and so does one that
-/// failed the Definition of Ready three times and one whose risk needs the human, neither of
-/// which was ever approved. `user_approved` means the user approved **this** contract and the epic
-/// has not been returned to `refining` since: a human edit of a frozen contract sends the epic
-/// back to `refining` (5.11) and the approval it had does not carry over, because 5.16 item 2 asks
-/// for it before the epic leaves `refining` each time. The return is what ends the approval, not
-/// the session it starts, or a document could be written in the window between the two. The
-/// approval therefore answers 5.16 item 1's "not yet `ready`" on its own, and the status is asked
-/// only about `cancelled`: an epic escalated after its approval, for a budget or a permission,
-/// keeps the documents it was approved for.
-///
-/// # Errors
-///
-/// Every rule the write fails.
-pub fn check_product_doc_write(
-    epic_kind: Kind,
-    epic_status: TaskStatus,
-    user_approved: bool,
-    actor_role: Role,
-) -> GateResult {
-    let mut reasons = Vec::new();
-    if actor_role != Role::ProductManager {
-        reasons.push(format!(
-            "role {actor_role} may not write a product document; the Product Manager owns them"
-        ));
-    }
-    if epic_kind != Kind::Epic {
-        reasons.push(
-            "a product document is written for an epic the user approved, and this contract is a task"
-                .to_string(),
-        );
-    }
-    if !user_approved {
-        reasons.push(
-            "the user has not approved the contract this epic has now, and a product document waits for that"
-                .to_string(),
-        );
-    }
-    if epic_status == TaskStatus::Cancelled {
-        reasons.push(
-            "the epic is cancelled, and a product document would describe a decision the team abandoned"
-                .to_string(),
-        );
-    }
-    verdict(reasons)
-}
-
 /// Who is asking to write a contract, and which agent they are.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractWriteActor {
@@ -1167,8 +1115,8 @@ mod tests {
         FIELDS_THE_STORE_OWNS, FolderWork, ParentEpic, Rejection, SprintHold, WorkState,
         check_assignment, check_blocker_resolved, check_blocker_written, check_child_creation,
         check_children_done, check_contract_write, check_criteria_recorded, check_human_triage,
-        check_product_doc_write, check_rejection_reasons, fits_the_open_sprint, in_the_backlog,
-        in_the_open_sprint, waits_for_a_sprint,
+        check_rejection_reasons, fits_the_open_sprint, in_the_backlog, in_the_open_sprint,
+        waits_for_a_sprint,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
@@ -2348,122 +2296,6 @@ mod tests {
             [
                 "every task under this epic is accepted or cancelled first, and a task the runtime did not name is draft",
                 "no task under this epic was accepted, so there is nothing to verify"
-            ]
-        );
-    }
-
-    #[test]
-    fn writes_a_product_document_only_for_the_product_manager_and_an_approved_epic() {
-        assert_eq!(
-            check_product_doc_write(Kind::Epic, TaskStatus::Ready, true, Role::ProductManager),
-            Ok(())
-        );
-        assert_eq!(
-            check_product_doc_write(
-                Kind::Epic,
-                TaskStatus::InProgress,
-                true,
-                Role::ProductManager
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            reasons(check_product_doc_write(
-                Kind::Epic,
-                TaskStatus::Ready,
-                true,
-                Role::SoftwareDeveloper
-            )),
-            [
-                "role software_developer may not write a product document; the Product Manager owns them"
-            ]
-        );
-        for status in [
-            TaskStatus::Assigned,
-            TaskStatus::Verifying,
-            TaskStatus::Accepted,
-        ] {
-            assert_eq!(
-                check_product_doc_write(Kind::Epic, status, true, Role::ProductManager),
-                Ok(()),
-                "{status}"
-            );
-        }
-        // All four rules failing at once report all four, in the order they are written.
-        assert_eq!(
-            reasons(check_product_doc_write(
-                Kind::Task,
-                TaskStatus::Cancelled,
-                false,
-                Role::SoftwareDeveloper
-            )),
-            [
-                "role software_developer may not write a product document; the Product Manager owns them",
-                "a product document is written for an epic the user approved, and this contract is a task",
-                "the user has not approved the contract this epic has now, and a product document waits for that",
-                "the epic is cancelled, and a product document would describe a decision the team abandoned"
-            ]
-        );
-    }
-
-    #[test]
-    fn waits_for_the_approval_itself_and_for_a_status_that_cannot_be_stale() {
-        // An epic waiting for approval sits in `escalated`, and so does one that failed the
-        // Definition of Ready three times and one whose risk needs the human: none of the three
-        // was approved, and the status cannot tell them apart. The approval is its own fact, and
-        // the status is checked as well, because either one alone can be out of date.
-        for status in TASK_STATUSES {
-            assert!(
-                reasons(check_product_doc_write(
-                    Kind::Epic,
-                    status,
-                    false,
-                    Role::ProductManager
-                ))
-                .contains(
-                    &"the user has not approved the contract this epic has now, and a product document waits for that"
-                        .to_string()
-                ),
-                "{status}"
-            );
-        }
-        // An epic escalated after its approval, for a budget or a permission, keeps the documents
-        // it was approved for; only a cancelled one is refused on its status.
-        assert_eq!(
-            check_product_doc_write(
-                Kind::Epic,
-                TaskStatus::Escalated,
-                true,
-                Role::ProductManager
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            reasons(check_product_doc_write(
-                Kind::Epic,
-                TaskStatus::Cancelled,
-                true,
-                Role::ProductManager
-            )),
-            [
-                "the epic is cancelled, and a product document would describe a decision the team abandoned"
-            ]
-        );
-    }
-
-    #[test]
-    fn writes_a_product_document_for_an_epic_and_never_for_a_standalone_task() {
-        // Under the team policy `human_accepts_contracts: all` every contract is accepted by the
-        // human, so the approval alone does not say this one is an epic.
-        assert_eq!(
-            reasons(check_product_doc_write(
-                Kind::Task,
-                TaskStatus::Ready,
-                true,
-                Role::ProductManager
-            )),
-            [
-                "a product document is written for an epic the user approved, and this contract is a task"
             ]
         );
     }

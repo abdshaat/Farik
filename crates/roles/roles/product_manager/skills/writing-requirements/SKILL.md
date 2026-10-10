@@ -1,6 +1,6 @@
 ---
 name: writing-requirements
-description: Use when an approved epic needs its requirements written under .catervas/product/.
+description: Use when an approved epic needs its requirements written into the product's spec.
 ---
 
 # Writing requirements
@@ -9,9 +9,9 @@ Requirements are a product document. You write one only for an epic the user has
 
 ## 1. Check the approval first
 
-If the epic is not approved, stop: the governor refuses the write, and a document for work the user
-has not agreed to is a guess in writing. Write it with `catervas_write_product_doc`, under
-`.catervas/product/`.
+If the epic is not approved, stop: a document for work the user has not agreed to is a guess in
+writing. The requirements belong in `docs/catervas/product/spec.md`, for people, and in
+`docs/catervas/product/spec.agent.md`, for agents, changed together. You have no tool that writes your folder yet: do not file a task for yourself; give the text to the user in your answer.
 
 ## 2. The shape
 
