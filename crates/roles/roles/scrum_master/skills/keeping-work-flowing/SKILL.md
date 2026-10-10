@@ -56,8 +56,7 @@ name the folder it needs, such as docs/adr/** or src/**/*.rs.
 ## 4. Assign within the WIP limit
 
 Assign a ready task to an agent of its assignee role with room under the team's WIP limit, using
-`catervas_assign_task`. Nobody reviews their own work, and the Product Manager and the Scrum Master are
-never a task's assignee. When nobody has room or no agent of the role is active, leave the task
+`catervas_assign_task`. Nobody reviews their own work. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks. When nobody has room or no agent of the role is active, leave the task
 ready and say why in your note; do not force an assignment past the limit.
 
 ## 5. Escalation hygiene

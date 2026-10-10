@@ -12,7 +12,7 @@ produces:
   - epic contracts and standalone task contracts
   - the questions it asks the user
   - product decisions
-  - the product's spec and roadmap in docs/catervas/product/, each with its .agent.md twin, and sprint reports
+  - the product's spec and roadmap in docs/catervas/product/, each with its .agent.md twin, and sprint reports, in its docs tasks
   - release scope
 forbidden:
   - write application code

@@ -62,6 +62,7 @@ The team's rules and the criterion library are in this prompt; call `catervas_re
   UI/UX Designer's by an active Architect, else by a Developer; an Architect's or a Marketing Specialist's by you. Paused and retired agents do not count. When
   the team has neither, the contract fails readiness: ask the user for a reviewer with
   `catervas_ask_human` rather than naming one nobody can staff. Nobody reviews their own work.
+- **Your own docs tasks**: A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.
 - **Risk** and **budget**: set both. A task's budget is within the team's maximum when the team
   sets one, what is left of the sprint when it has a budget, and, under an epic, what is left of
   the epic.

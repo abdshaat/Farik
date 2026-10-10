@@ -1322,21 +1322,6 @@ mod tests {
         for needle in ["spec.md", "spec.agent.md"] {
             assert!(requirements.contains(needle), "{requirements}");
         }
-        for name in ["writing-requirements", "scoping-a-release"] {
-            let skill = kit
-                .skills
-                .iter()
-                .find(|skill| skill.name == name)
-                .expect("the skill");
-            let flat = flattened(&skill.session_files["SKILL.md"]);
-            assert!(
-                flat.contains(
-                    "You have no tool that writes your folder yet: do not file a task for \
-                     yourself; give the text to the user in your answer."
-                ),
-                "{name}: {flat}"
-            );
-        }
         assert!(
             flattened(&definition.system_prompt).contains(
                 "Your folder, `docs/catervas/product/`, which only you write and everyone reads"
@@ -1366,6 +1351,73 @@ mod tests {
             "{:?}",
             definition.produces
         );
+    }
+
+    /// The Product Manager keeps its folder in docs tasks of its own (step 01b): its prompt and
+    /// skills say so, and the Scrum Master's skill lets it be the assignee of those alone.
+    #[test]
+    fn the_product_manager_works_its_folder_in_docs_tasks() {
+        let definition = loaded(Role::ProductManager);
+        let prompt = flattened(&definition.system_prompt);
+        for needle in [
+            "kept in your docs tasks",
+            "`catervas_git_commit`",
+            "request `verifying`",
+        ] {
+            assert!(prompt.contains(needle), "{needle}: {prompt}");
+        }
+        // Built apart, so that this file does not name what it forbids.
+        let gone = concat!("You have no tool that writes ", "to the repository");
+        assert!(!prompt.contains(gone), "{prompt}");
+        assert!(
+            definition
+                .produces
+                .iter()
+                .any(|line| line.contains("docs/catervas/product/")
+                    && line.contains("in its docs tasks")),
+            "{:?}",
+            definition.produces
+        );
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let skill_text = |name: &str| {
+            flattened(
+                &kit.skills
+                    .iter()
+                    .find(|skill| skill.name == name)
+                    .expect("the skill")
+                    .session_files["SKILL.md"],
+            )
+        };
+        let requirements = skill_text("writing-requirements");
+        for needle in ["docs task", "spec.agent.md"] {
+            assert!(requirements.contains(needle), "{needle}: {requirements}");
+        }
+        for name in ["writing-requirements", "scoping-a-release"] {
+            assert!(
+                !skill_text(name).contains("You have no tool that writes your folder yet"),
+                "{name}"
+            );
+        }
+        for (role, skill_name, sentence) in [
+            (
+                Role::ProductManager,
+                "writing-task-contracts",
+                "A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.",
+            ),
+            (
+                Role::ScrumMaster,
+                "keeping-work-flowing",
+                "Nobody reviews their own work. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks.",
+            ),
+        ] {
+            let definition = loaded(role);
+            let skill = definition
+                .skills
+                .iter()
+                .find(|skill| skill.name == skill_name)
+                .expect("the skill");
+            assert!(flattened(&skill.body).contains(sentence), "{skill_name}");
+        }
     }
 
     /// `text` with every run of whitespace made one space.

@@ -108,7 +108,7 @@ Text, exactly where it is quoted:
 - `the_product_manager_works_its_folder_in_docs_tasks` (`lib.rs`) — the prompt holds "kept in your docs tasks", "`catervas_git_commit`" and "request `verifying`", and not "You have no tool that writes to the repository"; `writing-requirements` holds "docs task" and `spec.agent.md`, and neither it nor `scoping-a-release` holds "You have no tool that writes your folder yet"; `writing-task-contracts` and `keeping-work-flowing` hold their sentences above word for word. RED: step 01's text.
 - `kit_skills_name_only_tools_catervas_lists` (`crates/runtime/src/daemon/team.rs:5354`) holds unchanged.
 
-- [ ] `feat(roles): tell the Product Manager to keep its folder in docs tasks`
+- [x] `feat(roles): tell the Product Manager to keep its folder in docs tasks`
 
 ### Task 4: Spec
 
