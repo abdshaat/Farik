@@ -36,4 +36,25 @@ describe("Button", () => {
 		expect(onClick).not.toHaveBeenCalled();
 		await expectNoAxeViolations(container);
 	});
+
+	it("says whether what it opens is open", async () => {
+		const { container, rerender } = render(
+			<Button expanded={false} controls="more">
+				More
+			</Button>,
+		);
+		const button = screen.getByRole("button", { name: "More" });
+		expect(button.getAttribute("aria-expanded")).toBe("false");
+		expect(button.getAttribute("aria-controls")).toBe("more");
+		rerender(
+			<Button expanded controls="more">
+				More
+			</Button>,
+		);
+		expect(button.getAttribute("aria-expanded")).toBe("true");
+		rerender(<Button>More</Button>);
+		expect(button.hasAttribute("aria-expanded")).toBe(false);
+		expect(button.hasAttribute("aria-controls")).toBe(false);
+		await expectNoAxeViolations(container);
+	});
 });

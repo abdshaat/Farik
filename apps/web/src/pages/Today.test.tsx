@@ -479,7 +479,7 @@ describe("today", () => {
 			within(missing as HTMLElement)
 				.getByRole("link", { name: en.waitingOpenSettings })
 				.getAttribute("href"),
-		).toBe("/settings#preview");
+		).toBe("/settings/your-app");
 		expect(
 			within(sandbox as HTMLElement).getByText("Iris needs Docker’s sandbox"),
 		).toBeTruthy();
@@ -552,7 +552,7 @@ describe("today", () => {
 		const link = within(row as HTMLElement).getByRole("link", {
 			name: en.waitingKeyConnect,
 		});
-		expect(link.getAttribute("href")).toBe("/settings");
+		expect(link.getAttribute("href")).toBe("/settings/account");
 		await expectNoAxeViolations(container);
 	});
 

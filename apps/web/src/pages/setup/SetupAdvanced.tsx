@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
+import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
 import type { Judges } from "../Team.tsx";
 import { slug } from "./SetupProject.tsx";
@@ -66,7 +67,7 @@ export function SprintsSwitch({
 		<Switch
 			id="plan-in-sprints"
 			label={t("planInSprints")}
-			description={t("planInSprintsNote")}
+			info={<Bullets text={t("planInSprintsNote")} />}
 			checked={on}
 			onChange={onChange}
 		/>
@@ -85,6 +86,7 @@ export function PlanCheck({
 	errors,
 	putBack,
 	children,
+	heading: Heading = "h2",
 }: {
 	judgment: Judgment | undefined;
 	onChange: (judgment: Judgment) => void;
@@ -94,6 +96,8 @@ export function PlanCheck({
 	errors: Refusal[];
 	putBack: (() => void) | undefined;
 	children?: ReactNode;
+	/** Settings puts the check under a page heading of its own. */
+	heading?: "h2" | "h3";
 }) {
 	const judgment: Required<Judgment> = {
 		required: "always",
@@ -122,9 +126,9 @@ export function PlanCheck({
 		t("planJudgeNone").replace("{role}", roleName(role));
 	return (
 		<section className={styles.card} aria-labelledby="plans">
-			<h2 id="plans" className={styles.heading}>
+			<Heading id="plans" className={styles.heading}>
 				{t("planTitle")}
-			</h2>
+			</Heading>
 			<p>{t("planLead")}</p>
 			<Switch
 				id="plan-required"

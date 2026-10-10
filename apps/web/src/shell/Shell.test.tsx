@@ -43,7 +43,7 @@ describe("shell", () => {
 
 	it("shows_the_rail_on_a_wide_screen_and_a_bar_on_a_phone", async () => {
 		media.set(WIDE, true);
-		const { container, socket } = await renderApp("/settings");
+		const { container, socket } = await renderApp("/settings/computer");
 		await answerStatus(socket as never, false);
 		const rail = await screen.findByRole("navigation", { name: en.navRail });
 		const places = within(rail).getAllByRole("link");

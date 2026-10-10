@@ -1,0 +1,5 @@
+.bullets {
+	margin: 0;
+	padding-inline-start: 1.25em;
+	max-width: 65ch;
+}

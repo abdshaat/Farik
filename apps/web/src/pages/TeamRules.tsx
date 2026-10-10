@@ -1,9 +1,9 @@
-import { Button, TextField } from "@catervas/ui";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router";
+import { Button, InfoTip, TextField } from "@catervas/ui";
+import { type ReactNode, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
+import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import {
@@ -35,10 +35,11 @@ type Part = {
 };
 
 /**
- * Settings' "Your team's rules": setup's four questions after setup, each saved on its own
- * through `team.save`, its effect shown first (SPEC 4.4, 10).
+ * The team's rules after setup: setup's four questions, each part saved on its own through
+ * `team.save`, its effect shown first (SPEC 4.4, 10). The hook is what the Settings pages share;
+ * each page draws its own parts with `key(name)`, so saving one starts only that one again.
  */
-export function TeamRules({ advanced = false }: { advanced?: boolean }) {
+export function useRuleParts() {
 	const { data, again } = useQuery<{ team: Team }>("team.get", {});
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
@@ -49,9 +50,8 @@ export function TeamRules({ advanced = false }: { advanced?: boolean }) {
 	// Each part's round: saving or cancelling one starts that one again, and no other, so the
 	// others keep their drafts over the team as the daemon reads it again.
 	const [rounds, setRounds] = useState<Record<string, number>>({});
-	if (!data) return null;
-	const part = (name: string) => ({
-		saved: data.team,
+	const part = (name: string): Part => ({
+		saved: data?.team as Team,
 		defaults,
 		base,
 		done: () => {
@@ -59,26 +59,23 @@ export function TeamRules({ advanced = false }: { advanced?: boolean }) {
 			again();
 		},
 	});
+	// The spending fields keep their own state, so a newly saved limit starts them again.
+	const key = (name: string) =>
+		name === "spend"
+			? `spend-${rounds.spend ?? 0}-${data?.team.budgets.dailyUsd}`
+			: `${name}-${rounds[name] ?? 0}`;
+	return { ready: Boolean(data), part, key };
+}
+
+/** A rules page's heading, with the note that a change starts with each agent's next work. */
+export function RulesTitle({ name }: { name: string }) {
 	return (
-		<section className={styles.section} aria-labelledby="rules-area">
-			<h2 id="rules-area">{t("rulesArea")}</h2>
-			<p className={styles.muted}>{t("rulesNextSession")}</p>
-			<May key={`may-${rounds.may ?? 0}`} {...part("may")} />
-			{/* Its fields keep their own state, so a newly saved limit starts it again. */}
-			<Spend
-				key={`spend-${rounds.spend ?? 0}-${data.team.budgets.dailyUsd}`}
-				{...part("spend")}
-			/>
-			<Finish key={`finish-${rounds.finish ?? 0}`} {...part("finish")} />
-			<Planning
-				key={`planning-${rounds.planning ?? 0}`}
-				{...part("planning")}
-			/>
-			<Plans key={`plans-${rounds.plans ?? 0}`} {...part("plans")} />
-			{advanced && (
-				<UiPaths key={`paths-${rounds.paths ?? 0}`} {...part("paths")} />
-			)}
-		</section>
+		<div className={styles.titled}>
+			<h2 className={styles.pageHeading}>{name}</h2>
+			<InfoTip id="rulesNextSession-info">
+				<Bullets text={t("rulesNextSession")} />
+			</InfoTip>
+		</div>
 	);
 }
 
@@ -156,7 +153,7 @@ export function useChange(
 	return { checked, errors, foot, preview, save, busy, blocked };
 }
 
-/** One part of the area, under its heading. */
+/** One part of a page, under its heading. */
 function Part({
 	id,
 	title,
@@ -168,13 +165,13 @@ function Part({
 }) {
 	return (
 		<section className={styles.section} aria-labelledby={id}>
-			<h2 id={id}>{title}</h2>
+			<h3 id={id}>{title}</h3>
 			{children}
 		</section>
 	);
 }
 
-function May(part: Part) {
+export function May(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<Team["policy"]["permissions"]>();
 	// A team file without the answers runs on the defaults (SPEC 5.6).
@@ -207,7 +204,7 @@ function May(part: Part) {
 }
 
 /** The daily limit: the Costs page's own control, here beside the other rules. */
-function Spend(part: Part) {
+export function Spend(part: Part) {
 	const { saved } = part;
 	const { wrong, budgets, fields } = useDailyLimit(saved.budgets.dailyUsd);
 	const usd = budgets(saved.budgets).dailyUsd;
@@ -224,7 +221,7 @@ function Spend(part: Part) {
 	);
 }
 
-function Finish(part: Part) {
+export function Finish(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<string>();
 	const next = mine
@@ -243,7 +240,7 @@ function Finish(part: Part) {
 	);
 }
 
-function Planning(part: Part) {
+export function Planning(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<boolean>();
 	// An old team file without the key does not plan in sprints.
@@ -267,7 +264,7 @@ function Planning(part: Part) {
 	);
 }
 
-function Plans(part: Part) {
+export function Plans(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<Team["policy"]["judgment"]>();
 	const next = mine
@@ -283,6 +280,7 @@ function Plans(part: Part) {
 			judges={checked?.judges}
 			errors={errors}
 			putBack={defaults && (() => setMine(defaults.policy.judgment ?? {}))}
+			heading="h3"
 		>
 			{foot}
 		</PlanCheck>
@@ -293,13 +291,14 @@ function Plans(part: Part) {
  * "How to open your app" (step 12, D2): the preview's two commands, its port and first page,
  * asked only of a team with a UI/UX Designer, and saved on their own.
  */
-export function HowToOpen() {
+export function HowToOpen({ none }: { none?: ReactNode }) {
 	const { data, again } = useQuery<{ team: Team }>("team.get", {});
 	const [round, setRound] = useState(0);
 	const designer = data?.team.agents.find(
 		(a) => a.role === "ui_ux_designer" && a.status !== "retired",
 	);
-	if (!data || !designer) return null;
+	if (!data) return null;
+	if (!designer) return none ?? null;
 	return (
 		<Preview
 			key={round}
@@ -328,21 +327,19 @@ function Preview({
 	const { errors, foot } = useChange({ saved, base: undefined, done }, next, {
 		shownAbove: "/preview",
 	});
-	// Today's "Open Settings" links here: the page goes to the section once it is drawn.
-	const { hash } = useLocation();
-	const here = useRef<HTMLElement>(null);
-	useEffect(() => {
-		if (hash === "#preview") here.current?.scrollIntoView();
-	}, [hash]);
 	return (
 		<section
-			ref={here}
 			id="preview"
 			className={styles.section}
 			aria-labelledby="preview-heading"
 		>
-			<h2 id="preview-heading">{t("previewTitle")}</h2>
-			<p>{t("previewLead", { designer })}</p>
+			<div className={styles.titled}>
+				<h2 id="preview-heading">{t("previewTitle")}</h2>
+				<InfoTip id="previewMore-info">
+					<Bullets text={t("previewMore")} />
+				</InfoTip>
+			</div>
+			<Bullets text={t("previewLead", { designer })} />
 			<PreviewFields
 				id="preview"
 				form={form}
@@ -351,7 +348,6 @@ function Preview({
 				onChange={setMine}
 			/>
 			{foot}
-			<p className={styles.muted}>{t("previewNotSure")}</p>
 		</section>
 	);
 }
@@ -363,7 +359,7 @@ function withPreview(team: Team, preview: Team["preview"]): Team {
 }
 
 /** Advanced: the globs that make a Developer's change one the Designer checks (spec 5.12). */
-function UiPaths(part: Part) {
+export function UiPaths(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<string[]>();
 	const [adding, setAdding] = useState("");
