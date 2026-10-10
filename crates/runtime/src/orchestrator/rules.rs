@@ -25,9 +25,9 @@ use chrono::{DateTime, Utc};
 use super::design::{self, Stage};
 use super::integrate::{awaiting, awaiting_folder_changes, cleanup};
 use super::messages::{
-    Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message, plan_message,
-    planning_message, posts_heard, retro_message, sprint_review_message, standup_message,
-    with_the_approved_plan,
+    Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message,
+    owners_folder_words, plan_message, planning_message, posts_heard, retro_message,
+    sprint_review_message, standup_message, with_the_approved_plan,
 };
 use super::pipeline::decide_pipelines;
 use super::requests;
@@ -427,12 +427,13 @@ async fn review_and_retro(
             .into_iter()
             .find(|cost| cost.key == sprint.sprint_id)
             .map_or(0.0, |cost| cost.usd);
-        (
-            Thread::Review,
-            sprint_review_message(&sprint.sprint_id, &tasks, file.budget_usd, spent),
-            CEREMONY_TOOLS,
-            "review ceremony",
-        )
+        let mut facts = sprint_review_message(&sprint.sprint_id, &tasks, file.budget_usd, spent);
+        // What the owner decided of the runner's documents since its last review.
+        let heard = owners_folder_words(&tools.log, runner.id.as_str())?;
+        if !heard.is_empty() {
+            facts = format!("{facts}\n{heard}");
+        }
+        (Thread::Review, facts, CEREMONY_TOOLS, "review ceremony")
     };
     let end = run_session(
         deps,
@@ -7619,6 +7620,87 @@ mod tests {
             "{:?}",
             ceremonies(&harness)
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn tells_the_review_the_owners_decisions() {
+        const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+        const SPEC: &str = "docs/catervas/product/spec.md";
+        // No Scrum Master: the Product Manager runs the ceremonies and proposes its documents.
+        let harness = Harness::new("orch-review-owner-words", |_| {});
+        let adapter = harness.recorded(vec![review(), review(), review()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let propose = |path: &str| {
+            harness
+                .project
+                .record_in(
+                    Some("pm"),
+                    Some("session-1"),
+                    "",
+                    "folder_doc.proposed",
+                    &json!({
+                        "path": path, "text": "For people.", "agent_text": "For agents.",
+                        "summary": "Pie pre-orders are done.", "sprint_id": "S1",
+                        "proposed_by": "pm"
+                    }),
+                )
+                .envelope
+                .seq
+        };
+        // A sprint of a task, ended by the tick, and its review.
+        let review_of = |sprint: &str, task: &str| {
+            harness.accepted(task);
+            harness.open_sprint(sprint, &[task]);
+            async {
+                orchestrator.tick().await.expect("the sprint ends");
+                orchestrator.tick().await.expect("the review runs");
+            }
+        };
+        review_of("S1", "CTV-1").await;
+        assert!(
+            !adapter.started()[0].initial_prompt.contains("The owner"),
+            "the first review has nothing to hear"
+        );
+        let (roadmap, spec) = (propose(ROADMAP), propose(SPEC));
+        harness.project.record(
+            "",
+            "folder_doc.returned",
+            &json!({ "proposals": [roadmap], "reason": "Keep gift cards in Now" }),
+        );
+
+        review_of("S2", "CTV-2").await;
+
+        let prompt = outside_the_untrusted_blocks(&adapter.started()[1].initial_prompt);
+        assert!(
+            prompt.contains(&format!(
+                "The owner sent back your changes to {ROADMAP}: Keep gift cards in Now"
+            )),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains(&format!(
+                "Your change to {SPEC} (proposal {spec}) still waits for the owner; proposing it again replaces it."
+            )),
+            "{prompt}"
+        );
+        harness.project.record(
+            "",
+            "folder_doc.approved",
+            &json!({ "proposals": [spec], "note": "Thanks" }),
+        );
+
+        review_of("S3", "CTV-3").await;
+
+        let prompt = outside_the_untrusted_blocks(&adapter.started()[2].initial_prompt);
+        assert!(
+            prompt.contains(&format!(
+                "The owner approved your changes to {SPEC}. The owner adds: Thanks"
+            )),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("sent back your changes"), "{prompt}");
+        assert!(!prompt.contains("still waits for the owner"), "{prompt}");
     }
 
     /// Records `text` in `agent`'s chat as `author`, and answers its seq.

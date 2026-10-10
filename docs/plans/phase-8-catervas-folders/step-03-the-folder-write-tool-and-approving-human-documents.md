@@ -184,7 +184,7 @@ Consumes: Tasks 2 to 5.
 - `decides_under_the_integration_lock` (integration) — with the lock file held by the test (`waits_for_the_lock_file`), an approval of `[a]` on another thread has recorded nothing and made no branch after 300 ms, and approves once it is let go; a second approval of `[a]` then is `folder_doc_decided`. RED: no lock.
 - `tells_the_review_the_owners_decisions` (`rules.rs`, integration) — on a team with no Scrum Master, after `pm`'s proposal of the roadmap and the owner's return "Keep gift cards in Now", the next review session's first message holds "The owner sent back your changes to docs/catervas/product/roadmap.md: Keep gift cards in Now" outside every untrusted block; the review of the sprint after holds no such line; an approval with note "Thanks" gives "The owner approved your changes to docs/catervas/product/roadmap.md. The owner adds: Thanks". A proposal of the spec still pending gives "Your change to docs/catervas/product/spec.md (proposal <n>) still waits for the owner; proposing it again replaces it." RED: no line.
 
-- [ ] `feat(runtime): let the owner approve or send back a folder document`
+- [x] `feat(runtime): let the owner approve or send back a folder document`
 
 ### Task 7: Spec
 

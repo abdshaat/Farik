@@ -16,16 +16,17 @@ pub use crate::generated::command::CommandName;
 use crate::generated::command::{
     AgentUpdateBody, CatervasCommand as CommandWire, ChatMessagePostBody, ConnectorConnectBody,
     ConnectorDisconnectBody, DataPipelineDecideBody, DataPipelineDecideBodyDecision, EmptyBody,
-    EscalationResolveBody, FolderChangeIntegrateBody, HumanAcceptBody, HumanAcceptBodySubject,
-    HumanSendBackBody, HumanSendBackBodySubject, MarketingPlanDecideBody,
-    MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody,
-    PurchaseOrderDecideBody, PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody,
-    PurchaseOrderStepBody, PurchaseOrderUpdateBody, QuestionAnswerBody, RenewalDismissBody,
-    RequestTriageBody, RequestTriageBodySize, SellerMessageDiscardBody, SellerMessageSendBody,
-    SellerReplyDismissBody, SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody,
-    SkillConfirmBody, SkillLevel, SkillRemoveBody, SkillSaveBody, SocialPostDecideBody,
-    SocialPostDecideBodyDecision, SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody,
-    TaskTransitionBody, ToolDecisionBody,
+    EscalationResolveBody, FolderChangeIntegrateBody, FolderDocDecideBody,
+    FolderDocDecideBodyDecision, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
+    HumanSendBackBodySubject, MarketingPlanDecideBody, MarketingPlanDecideBodyDecision,
+    MarketingPlanEndBody, MessagePostBody, PurchaseOrderDecideBody,
+    PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody, PurchaseOrderStepBody,
+    PurchaseOrderUpdateBody, QuestionAnswerBody, RenewalDismissBody, RequestTriageBody,
+    RequestTriageBodySize, SellerMessageDiscardBody, SellerMessageSendBody, SellerReplyDismissBody,
+    SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel,
+    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
+    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
+    ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -348,6 +349,16 @@ pub enum Command {
         /// The change's number, the n of `docs/folder-<n>`.
         change: u64,
     },
+    /// Approve the proposals of one card on Today, or send them back with the owner's words
+    /// (`docs/SPEC.md` 5.7).
+    FolderDocDecide {
+        /// The proposals' numbers, 1 to 20, each once.
+        proposals: Vec<u64>,
+        /// Whether the owner approves them (false: sends them back).
+        approve: bool,
+        /// The owner's words; the reason, required, when sending back.
+        note: Option<String>,
+    },
     /// Approve an order and email it, with its workbook, to its seller in one press, which records
     /// it placed: the owner pays the seller outside Catervas (ADR 0039).
     PurchaseOrderSend {
@@ -644,6 +655,14 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             let body: FolderChangeIntegrateBody = read_body(body, name)?;
             Ok(Command::FolderChangeIntegrate {
                 change: body.change.get(),
+            })
+        }
+        CommandName::FolderDocDecide => {
+            let body: FolderDocDecideBody = read_body(body, name)?;
+            Ok(Command::FolderDocDecide {
+                proposals: body.proposals.iter().map(|number| number.get()).collect(),
+                approve: body.decision == FolderDocDecideBodyDecision::Approve,
+                note: body.note.map(|note| note.as_str().to_string()),
             })
         }
         CommandName::PurchaseOrderSend => {
@@ -1017,6 +1036,21 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::FolderChangeIntegrate { change } => (
             CommandName::FolderChangeIntegrate,
             json!({ "change": change }),
+        ),
+        Command::FolderDocDecide {
+            proposals,
+            approve,
+            note,
+        } => (
+            CommandName::FolderDocDecide,
+            with_optional(
+                json!({
+                    "proposals": proposals,
+                    "decision": if *approve { "approve" } else { "return" },
+                }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
         ),
         Command::SellerReplyDismiss { reply } => {
             (CommandName::SellerReplyDismiss, json!({ "reply": reply }))
@@ -2362,6 +2396,61 @@ mod tests {
             json!({ "change": 3, "task_id": "CTV-1" }),
         ] {
             let errors = refusal(&json!({ "command": "folder_change_integrate", "body": body }));
+            assert!(!errors.is_empty(), "{body}");
+        }
+    }
+
+    #[test]
+    fn reads_folder_doc_decide() {
+        for (body, command) in [
+            (
+                json!({ "proposals": [3, 4], "decision": "approve", "note": "Thanks" }),
+                Command::FolderDocDecide {
+                    proposals: vec![3, 4],
+                    approve: true,
+                    note: Some("Thanks".to_string()),
+                },
+            ),
+            (
+                json!({ "proposals": [3], "decision": "return", "note": "Keep gift cards in Now" }),
+                Command::FolderDocDecide {
+                    proposals: vec![3],
+                    approve: false,
+                    note: Some("Keep gift cards in Now".to_string()),
+                },
+            ),
+            (
+                json!({ "proposals": [5], "decision": "approve" }),
+                Command::FolderDocDecide {
+                    proposals: vec![5],
+                    approve: true,
+                    note: None,
+                },
+            ),
+        ] {
+            assert_eq!(read("folder_doc_decide", &body), command);
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": "folder_doc_decide", "body": body })
+            );
+        }
+        let twenty: Vec<u64> = (1..=20).collect();
+        read(
+            "folder_doc_decide",
+            &json!({ "proposals": twenty, "decision": "approve", "note": "x".repeat(600) }),
+        );
+        let twenty_one: Vec<u64> = (1..=21).collect();
+        for body in [
+            json!({ "decision": "approve" }),
+            json!({ "proposals": [], "decision": "approve" }),
+            json!({ "proposals": twenty_one, "decision": "approve" }),
+            json!({ "proposals": [3, 3], "decision": "approve" }),
+            json!({ "proposals": [0], "decision": "approve" }),
+            json!({ "proposals": [3], "decision": "maybe" }),
+            json!({ "proposals": [3], "decision": "approve", "note": "x".repeat(601) }),
+            json!({ "proposals": [3], "decision": "approve", "reason": "x" }),
+        ] {
+            let errors = refusal(&json!({ "command": "folder_doc_decide", "body": body }));
             assert!(!errors.is_empty(), "{body}");
         }
     }

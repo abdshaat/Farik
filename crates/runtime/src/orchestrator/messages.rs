@@ -7,13 +7,14 @@ use catervas_core::governor::done::CriterionResult;
 use catervas_core::marketing::network_name;
 use catervas_core::team::{Agent, task_private_folder};
 use catervas_protocol::event::{
-    BlockerWire, BudgetExhaustedBodyScope, CatervasEvent, EventBody, HumanAcceptedBodySubject,
-    NoteWrittenBodyKind,
+    BlockerWire, BudgetExhaustedBodyScope, CatervasEvent, EventBody, EventKind,
+    HumanAcceptedBodySubject, NoteWrittenBodyKind, Thread,
 };
-use catervas_store::TaskProjection;
+use catervas_store::folder_docs::{ProposalState, folder_docs};
 use catervas_store::git::HeadSummary;
 use catervas_store::marketing::{PostState, SocialPost};
 use catervas_store::pipelines::PipelineRecord;
+use catervas_store::{EventLog, EventQuery, StoreError, TaskProjection};
 use chrono::{DateTime, Utc};
 
 use crate::ceremonies::OpenEscalation;
@@ -689,6 +690,81 @@ pub(super) fn ceremony_message(facts: &str, summary: &str) -> String {
         "{facts}\nThe channel lately, oldest first: {}",
         untrusted_block("channel", summary, NOTE_CAP_BYTES)
     )
+}
+
+/// What the owner decided of `agent_id`'s folder document proposals since its last sprint review
+/// began, oldest first, then each proposal of its that still waits (docs/SPEC.md 5.7): a line
+/// each, the owner's words not wrapped, as they are the human's own (ADR 0011). Empty when there is
+/// nothing to say.
+///
+/// # Errors
+///
+/// When the log cannot be read.
+pub(super) fn owners_folder_words(log: &EventLog, agent_id: &str) -> Result<String, StoreError> {
+    let docs = folder_docs(log)?;
+    let since = log
+        .read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            kinds: vec![EventKind::SessionStarted],
+            ..EventQuery::default()
+        })?
+        .iter()
+        .filter(|event| {
+            matches!(&event.body, EventBody::SessionStarted(body)
+                if body.thread == Some(Thread::Review))
+        })
+        .map(|event| event.envelope.seq)
+        .max()
+        .unwrap_or(0);
+    let mut lines = Vec::new();
+    for decision in docs
+        .decisions
+        .iter()
+        .filter(|decision| decision.seq > since)
+    {
+        let mut paths: Vec<&str> = Vec::new();
+        for number in &decision.proposals {
+            if let Some(proposal) = docs
+                .proposals
+                .iter()
+                .find(|proposal| proposal.proposal == *number && proposal.agent_id == agent_id)
+                && !paths.contains(&proposal.path.as_str())
+            {
+                paths.push(&proposal.path);
+            }
+        }
+        if paths.is_empty() {
+            continue;
+        }
+        let paths = paths.join(", ");
+        lines.push(if decision.approved {
+            let said = format!("The owner approved your changes to {paths}.");
+            if decision.words.is_empty() {
+                said
+            } else {
+                format!("{said} The owner adds: {}", decision.words)
+            }
+        } else {
+            format!(
+                "The owner sent back your changes to {paths}: {}",
+                decision.words
+            )
+        });
+    }
+    lines.extend(
+        docs.proposals
+            .iter()
+            .filter(|proposal| {
+                proposal.agent_id == agent_id && proposal.state == ProposalState::Pending
+            })
+            .map(|proposal| {
+                format!(
+                    "Your change to {} (proposal {}) still waits for the owner; proposing it again replaces it.",
+                    proposal.path, proposal.proposal
+                )
+            }),
+    );
+    Ok(lines.join("\n"))
 }
 
 /// A conversation session's message: each message that mentions the agent with its author, seq,
