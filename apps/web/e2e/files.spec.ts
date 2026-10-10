@@ -42,9 +42,7 @@ test("the owner reads and edits the team's documents, through the real server an
 		await expect(tree.getByText("Product", { exact: true })).toBeVisible();
 		await expect(tree.getByText("Architecture", { exact: true })).toBeVisible();
 		await expect(tree.getByText("Nothing here yet")).toBeVisible();
-		await expect(
-			page.getByRole("heading", { name: "Roadmap" }),
-		).toBeVisible();
+		await expect(page.getByRole("heading", { name: "Roadmap" })).toBeVisible();
 
 		// 2. Ada's overview, its diagram drawn as an image under the served policy.
 		await tree.getByText("Architecture", { exact: true }).click();
