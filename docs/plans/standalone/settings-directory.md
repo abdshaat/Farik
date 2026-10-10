@@ -134,7 +134,7 @@ Files: modified `docs/SPEC.md` (0.85 header sentence; section 8's web UI paragra
 
 Tests: none (docs).
 
-- [ ] `docs(spec): describe Settings as a directory`
+- [x] `docs(spec): describe Settings as a directory`
 
 ## Verification
 

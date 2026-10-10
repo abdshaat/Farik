@@ -1,6 +1,6 @@
 # Settings as a directory
 
-Status: design approved in chat by the founder, 2026-10-10 (layout, sections, links and testing); the written design and its mockup await the founder's review.
+Status: built on this branch (`docs/plans/standalone/settings-directory.md`); design and mockup approved by the founder, 2026-10-10.
 Branch: `fix/settings-fewer-words` (pull request #35), after the fewer-words change it builds on.
 Spec: `docs/SPEC.md` section 8's web UI paragraph (line 934), section 4's Change project ("This computer", line 131), section 10's configuring requirement (line 959), and F15 (team rules in Settings); `docs/design/web-ui.md`'s Settings row.
 
