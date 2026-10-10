@@ -202,11 +202,16 @@ impl SetupHost for CliHost {
         }
         self.has_account()?;
         // Only while a project is being left: a folder with a team is the user's to replace.
-        if self.leaving.is_some() && root.join(".farik/team.yaml").exists() {
-            if !replace {
-                return Err(refused(HAS_TEAM));
+        if self.leaving.is_some() {
+            if root.join(".farik/team.yaml").exists() {
+                if !replace {
+                    return Err(refused(HAS_TEAM));
+                }
+                self.clear(&root)?;
+            } else if std::fs::symlink_metadata(root.join(".farik")).is_ok() {
+                // A leftover with no team: none of it may carry context into the new team.
+                self.clear(&root)?;
             }
-            self.clear(&root)?;
         }
         self.taken_on(&root, no_sandbox)?;
         Ok(self.choose(root))
@@ -601,6 +606,78 @@ mod tests {
             events(&chosen, EventKind::CriteriaUpdated).len(),
             1,
             "only init's"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaving_leaves_links_in_carried_folders_behind() {
+        let world = World::new("links");
+        let old = a_project("links-old", |wire| {
+            wire["skills"] = json!([pin("team-skill")]);
+        });
+        let outside = TempRepo::new("links-outside");
+        write(&outside.path, "secret.txt", b"outside secret");
+        let secret = outside.path.join("secret.txt");
+        write(&old.path, ".farik/team/avatars/real.png", b"real");
+        write(&old.path, ".farik/skills/team-skill/SKILL.md", b"skill");
+        let links = [
+            ".farik/team/avatars/link.png",
+            ".farik/skills/team-skill/link.md",
+        ];
+        for link in links {
+            std::os::unix::fs::symlink(&secret, old.path.join(link)).expect("a link");
+        }
+        let fresh = TempRepo::new("links-new");
+
+        let host = world.host(Some(&root_of(&old.path)));
+        let chosen = host.open(&named(&fresh), false, false).expect("taken on");
+
+        assert_eq!(read(&chosen, ".farik/team/avatars/real.png"), b"real");
+        assert_eq!(read(&chosen, ".farik/skills/team-skill/SKILL.md"), b"skill");
+        for link in links {
+            assert!(
+                std::fs::symlink_metadata(chosen.join(link)).is_err(),
+                "{link} was carried"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaving_clears_a_leftover_farik_folder_with_no_team() {
+        let world = World::new("leftover");
+        let old = a_project("leftover-old", |_| {});
+        let target = TempRepo::new("leftover-new");
+        let theo = AgentId::try_from("theo").expect("an id");
+        write(
+            &target.path,
+            ".farik/agents/theo/memory.md",
+            b"stale context\n",
+        );
+        assert!(!target.path.join(".farik/team.yaml").exists());
+
+        let host = world.host(Some(&root_of(&old.path)));
+        let chosen = host.open(&named(&target), false, false).expect("taken on");
+
+        let new = open_project(&chosen, Utc::now()).expect("a project");
+        assert_eq!(new.files.read_memory(&theo).expect("memory"), "");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn not_leaving_keeps_a_leftover_farik_folder_with_no_team() {
+        let world = World::new("leftover-kept");
+        let target = TempRepo::new("leftover-kept-new");
+        write(&target.path, ".farik/agents/theo/memory.md", b"kept\n");
+
+        let host = world.host(None);
+        host.open(&named(&target), false, false).expect("taken on");
+
+        assert_eq!(
+            read(&target.path, ".farik/agents/theo/memory.md"),
+            b"kept\n"
         );
     }
 
