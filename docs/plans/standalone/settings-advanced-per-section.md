@@ -80,7 +80,7 @@ Tests:
 - `starts_closed_on_each_page` (`team.test.tsx`) — open Work's advanced settings at `/settings/work`, then go to an agent's page: its list is closed (no shared state).
 - Every existing test that clicked the `switch` named `advancedSwitch` on the agent page (`team.test.tsx:527` and `:1768`; `connectors.test.tsx:129, 289, 395, 492, 548, 576, 612, 1053, 2724`) presses the button instead; `toggles_tiers_in_advanced` finds the tiers in the list named "Advanced settings", not "What Ada may do"; the info-button test (`team.test.tsx:1760`) drops `agentMayAdvanced`. `setup/team.test.tsx`'s clicks on the setup-finish switch (`:1085, 1341, 1371`) are setup's and stay.
 
-- [ ] `feat(web): open an agent's advanced settings under their own button`
+- [x] `feat(web): open an agent's advanced settings under their own button`
 
 ### Task 3: the plan editor's button, and no global switch left
 

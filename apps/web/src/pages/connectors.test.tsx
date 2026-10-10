@@ -126,7 +126,7 @@ const row = (name: string) => {
 /** ConnectorAdd, opened from Advanced, step 1 filled in for airtable with `key`. */
 async function startedAdding(key = "pat-secret-1", sandboxed = true) {
 	const page = await opened([], sandboxed);
-	fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+	fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 	fireEvent.click(screen.getByRole("button", { name: en.connectorCustomAdd }));
 	const dialog = await screen.findByRole("dialog", {
 		name: "Add a custom connector to Theo",
@@ -286,7 +286,7 @@ describe("connectors on the agent page", () => {
 			name: "github",
 			args: ["-y", "github-connector"],
 		};
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		fireEvent.click(
 			screen.getByRole("button", { name: en.connectorCustomAdd }),
 		);
@@ -392,7 +392,7 @@ describe("connectors on the agent page", () => {
 	it("agent_edit_advanced_says_where_a_command_runs", async () => {
 		const { container } = await opened();
 		expect(screen.queryByText(/More connectors arrive/)).toBeNull();
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		expect(
 			screen.getByText(/Give files by full path, starting with \//),
 		).toBeTruthy();
@@ -489,7 +489,7 @@ describe("connectors on the agent page", () => {
 	it("connector_add_takes_each_part_of_a_command_in_its_own_field", async () => {
 		// Split on spaces, a path holding one could not be entered (re-review N6).
 		const { container, s } = await opened([]);
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		fireEvent.click(
 			screen.getByRole("button", { name: en.connectorCustomAdd }),
 		);
@@ -545,7 +545,7 @@ describe("connectors on the agent page", () => {
 	it("connector_add_says_early_when_a_whole_command_is_pasted_into_command", async () => {
 		// Re-review 2 m5: "npx -y foo" in Command was sent, and failed in general words.
 		await opened([]);
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		fireEvent.click(
 			screen.getByRole("button", { name: en.connectorCustomAdd }),
 		);
@@ -573,7 +573,7 @@ describe("connectors on the agent page", () => {
 		// Re-review 2 m5: an empty part is not sent, so the daemon counts the parts after it
 		// one lower.
 		const { s } = await opened([]);
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		fireEvent.click(
 			screen.getByRole("button", { name: en.connectorCustomAdd }),
 		);
@@ -609,7 +609,7 @@ describe("connectors on the agent page", () => {
 	it("connector_add_says_when_catervas_settings_folder_is_inside_the_project", async () => {
 		// Re-review 2 m1: no stdio server starts among the project's files, and the page says why.
 		const { s } = await opened([]);
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		fireEvent.click(
 			screen.getByRole("button", { name: en.connectorCustomAdd }),
 		);
@@ -1050,7 +1050,7 @@ async function openedSignedIn(rows: object[] = SIGNED_IN_ROWS) {
 /** ConnectorAdd at step 1 for a web address, `url` typed and Next pressed, no key typed. */
 async function askedToSignIn(url = "https://mcp.notion.com/mcp") {
 	const page = await opened([], true);
-	fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+	fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 	fireEvent.click(screen.getByRole("button", { name: en.connectorCustomAdd }));
 	const dialog = await screen.findByRole("dialog", {
 		name: "Add a custom connector to Theo",
@@ -2721,7 +2721,7 @@ describe("logos and info buttons on the Connectors section", () => {
 				KIT_STATES[2] as object,
 			],
 		);
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		const page = document.body;
 		onlyInTips(page, en.connectorsNote);
 		onlyInTips(page, t("kitGoneNote", { name: "Theo" }));

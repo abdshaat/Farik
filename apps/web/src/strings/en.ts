@@ -395,7 +395,6 @@ export const en = {
 	effortHighNote: "Thinks longest, costs most",
 	effortInfo: "Quick: {low}. Balanced: {medium}. Careful: {high}.",
 	agentMay: "What {name} may do",
-	agentMayAdvanced: "Advanced shows each permission.",
 	tierRead: "Read the project",
 	tierReadNote: "Every agent can.",
 	tierWrite: "Change files in its task",

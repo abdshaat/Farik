@@ -519,13 +519,53 @@ describe("team page", () => {
 		expect(one(checked, "kai").model).toEqual({ effort: "low" });
 	});
 
+	it("opens_the_agent's_advanced_settings_under_its_button", async () => {
+		const { container } = await opened("/team/ada");
+		await screen.findByRole("heading", { name: "Ada, your Architect" });
+		const options = () =>
+			within(screen.getByRole("combobox", { name: en.agentModel }))
+				.getAllByRole("option")
+				.map((o) => o.textContent ?? "");
+		expect(screen.queryByRole("switch", { name: en.tierNetwork })).toBeNull();
+		expect(
+			screen.queryByRole("button", { name: en.connectorCustomAdd }),
+		).toBeNull();
+		expect(options().some((o) => o.includes("("))).toBe(false);
+
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		const list = screen.getByRole("list", { name: en.advanced });
+		expect(within(list).getAllByRole("switch")).toHaveLength(7);
+		expect(
+			within(list).getByRole("button", { name: en.connectorCustomAdd }),
+		).toBeTruthy();
+		expect(options().some((o) => o.includes("("))).toBe(true);
+		expect(screen.getByRole("button", { name: en.advancedHide })).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("starts_closed_on_each_page", async () => {
+		await settings(WITH_IRIS, "/settings/work");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.advancedSwitch }),
+		);
+		expect(await screen.findByRole("list", { name: en.advanced })).toBeTruthy();
+		cleanup();
+
+		await opened("/team/ada");
+		await screen.findByRole("heading", { name: "Ada, your Architect" });
+		expect(screen.queryByRole("list", { name: en.advanced })).toBeNull();
+		expect(
+			screen.getByRole("button", { name: en.advancedSwitch }),
+		).toBeTruthy();
+	});
+
 	it("toggles_tiers_in_advanced", async () => {
 		const { container, s } = await opened("/team/ada");
 		await screen.findByRole("heading", { name: "Ada, your Architect" });
 		expect(screen.queryByRole("switch", { name: en.tierNetwork })).toBeNull();
 
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
-		const tiers = screen.getByRole("list", { name: "What Ada may do" });
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		const tiers = screen.getByRole("list", { name: en.advanced });
 		expect(within(tiers).getAllByRole("switch")).toHaveLength(7);
 		const network = within(tiers).getByRole("switch", {
 			name: en.tierNetwork,
@@ -1759,7 +1799,6 @@ describe("info buttons on the agent page", () => {
 		const say = (key: keyof typeof en) =>
 			t(key, { name: "Theo", role: "Developer" });
 		for (const key of [
-			"agentMayAdvanced",
 			"agentNextWork",
 			"agentPauseNote",
 			"agentReplaceNote",
@@ -1767,7 +1806,7 @@ describe("info buttons on the agent page", () => {
 			"skillsLead",
 		] as const)
 			onlyInTips(say(key));
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		for (const key of [
 			"tierReadNote",
 			"tierWriteNote",
