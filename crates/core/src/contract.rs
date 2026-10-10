@@ -430,11 +430,13 @@ mod tests {
 
     #[test]
     fn refuses_a_task_id_that_does_not_match_the_pattern() {
-        let mut input = a_contract_wire();
-        input["id"] = json!("TASK-1");
-        let errors = refusal(&input);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].path, "/id");
+        for id in ["TASK-1", "FRK-1"] {
+            let mut input = a_contract_wire();
+            input["id"] = json!(id);
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{id}");
+            assert_eq!(errors[0].path, "/id");
+        }
     }
 
     #[test]

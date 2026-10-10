@@ -1545,11 +1545,13 @@ mod tests {
 
     #[test]
     fn refuses_a_task_id_that_is_not_one() {
-        let mut input = an_event_wire(EventKind::TaskCreated);
-        input["task_id"] = json!("TASK-1");
-        let errors = refusal(&input);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].path, "/task_id");
+        for id in ["TASK-1", "FRK-1"] {
+            let mut input = an_event_wire(EventKind::TaskCreated);
+            input["task_id"] = json!(id);
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{id}");
+            assert_eq!(errors[0].path, "/task_id");
+        }
     }
 
     #[test]

@@ -85,6 +85,15 @@ mod tests {
     }
 
     #[test]
+    fn reports_a_marker_that_carries_an_frk_id() {
+        let text = format!("// {}(FRK-1) fix this\n", marker());
+        assert_eq!(
+            find_bare_todos(&files(&[("a.rs", text)])),
+            vec!["a.rs:1".to_string()]
+        );
+    }
+
+    #[test]
     fn accepts_a_marker_that_carries_an_issue_number_or_a_link() {
         let a = format!("// {}(#12) fix this\n", marker());
         let b = format!(
