@@ -145,6 +145,10 @@ export function FileDocument({
 	};
 
 	const name = document.name;
+	// A document's own first-level heading is its title, so the page shows it once, not twice.
+	const first = /^# +(.+?)(?: +#+)? *\r?\n/.exec(version.text);
+	const title = first?.[1] ?? name;
+	const body = first ? version.text.slice(first[0].length) : version.text;
 	return (
 		<div className={styles.doc}>
 			<p className={styles.crumb}>
@@ -152,7 +156,7 @@ export function FileDocument({
 			</p>
 			<div className={styles.head}>
 				<div className={styles.headText}>
-					<h2 className={styles.title}>{name}</h2>
+					<h2 className={styles.title}>{title}</h2>
 					{draft ? (
 						pair && <p className={styles.changed}>{t("filesEditing")}</p>
 					) : (
@@ -293,7 +297,7 @@ export function FileDocument({
 							})}
 						</p>
 					)}
-					<Markdown text={version.text} />
+					<Markdown text={body} />
 				</>
 			)}
 		</div>

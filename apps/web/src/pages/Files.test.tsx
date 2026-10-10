@@ -287,6 +287,38 @@ describe("Files", () => {
 		expect(screen.queryByText(/bringing this up to date/)).toBeNull();
 	});
 
+	it("shows a document's title once", async () => {
+		media.set(WIDE, true);
+		await files("/files/product/roadmap.md", {
+			read: read({
+				document: version(ROADMAP, "# Roadmap\n\nPie pre-orders", null),
+				twin: null,
+			}),
+		});
+		await screen.findByText("Pie pre-orders");
+		expect(screen.getAllByRole("heading", { name: "Roadmap" })).toHaveLength(1);
+		cleanup();
+
+		// A first heading of its own is the title, as the document words it.
+		await files("/files/product/roadmap.md", {
+			read: read({
+				document: version(ROADMAP, "# Where we go ##\n\nPie", null),
+				twin: null,
+			}),
+		});
+		await screen.findByText("Pie");
+		expect(screen.getAllByRole("heading", { name: "Where we go" })).toHaveLength(
+			1,
+		);
+		cleanup();
+
+		// With no heading of its own, the plain name is the title.
+		await files("/files/product/roadmap.md", { read: read({ twin: null }) });
+		expect(
+			(await screen.findAllByRole("heading", { name: "Roadmap" })).length,
+		).toBe(1);
+	});
+
 	it("says a one-file document is written for the team", async () => {
 		media.set(WIDE, true);
 		await files(`/files/${OVERVIEW.slice(ROOT.length)}`, {
