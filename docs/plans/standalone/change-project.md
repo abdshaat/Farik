@@ -107,7 +107,7 @@ Files: modified `crates/core/src/team.rs` (function and `mod tests`). Produces `
 - `carried_team_drops_retired_agents_and_activates_the_rest` — from a team of an active Product Manager, an active Developer, a paused Architect and a retired Marketing Specialist: the agent ids are the first three in their order, each `AgentStatus::Active`.
 - `carried_team_keeps_everything_else` — `serde_json::to_value` of the result equals the input's with the retired agent removed and each `status` `"active"`: names, personas, avatars, models, grants, `mcp_servers`, agent and team `skills`, budgets, policy and `plan_in_sprints` all equal.
 
-- [ ] `feat(core): carry a team to another project without its retired agents`
+- [x] `feat(core): carry a team to another project without its retired agents`
 
 ### Task 2: task numbers past old task branches
 

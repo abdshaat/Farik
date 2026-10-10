@@ -203,6 +203,36 @@ fn path_fault(path: &str, notes: bool) -> Option<String> {
     )
 }
 
+/// The team a project is carried to when the user changes project from the web app: the same team
+/// without its retired agents, every other agent active. Retired agents are kept in a team file
+/// only so that past events name someone, and a new project has no past; a paused agent is
+/// active again, since the user chose the team, not its pause. Names, personas, grants, connectors,
+/// skills, budgets and policy are untouched.
+///
+/// The result is held to `validate_team` through its serialized form, so a team that would not
+/// stand without the agents dropped (no Product Manager left, say) is refused with the same errors
+/// as any other.
+///
+/// # Errors
+///
+/// Every error `validate_team` reports for the carried team.
+pub fn carried_team(team: &Team) -> Result<Team, Vec<ValidationError>> {
+    let mut carried = team.clone();
+    carried
+        .agents
+        .retain(|agent| agent.status != AgentStatus::Retired);
+    for agent in &mut carried.agents {
+        agent.status = AgentStatus::Active;
+    }
+    let value = serde_json::to_value(&carried).map_err(|error| {
+        vec![ValidationError {
+            path: "/".to_string(),
+            message: format!("the carried team could not be written: {error}"),
+        }]
+    })?;
+    validate_team(&value)
+}
+
 /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
 /// team.
 ///
@@ -1332,6 +1362,7 @@ impl From<PermissionTierWire> for PermissionTier {
 mod tests {
     use serde_json::{Value, json};
 
+    use super::carried_team;
     use super::fixtures::{a_full_team_wire, a_team_wire, an_agent_wire};
     use super::{
         AgentStatus, HumanAcceptsContracts, Integration, JudgeChoice, JudgmentPolicy,
@@ -1768,6 +1799,56 @@ mod tests {
                 .count(),
             1,
             "and a path the team repeated is still one path"
+        );
+    }
+
+    #[test]
+    fn carried_team_drops_retired_agents_and_activates_the_rest() {
+        let mut wire = a_team_wire();
+        wire["agents"] = json!([
+            an_agent_wire("ada", "product_manager"),
+            an_agent_wire("linus", "software_developer"),
+            an_agent_wire("grace", "architect"),
+            an_agent_wire("mary", "marketing_specialist"),
+        ]);
+        wire["agents"][2]["status"] = json!("paused");
+        wire["agents"][3]["status"] = json!("retired");
+        let carried = carried_team(&team(&wire)).expect("the carried team is a team");
+        assert_eq!(
+            carried
+                .agents
+                .iter()
+                .map(|agent| agent.id.to_string())
+                .collect::<Vec<_>>(),
+            ["ada", "linus", "grace"]
+        );
+        assert!(
+            carried
+                .agents
+                .iter()
+                .all(|agent| agent.status == AgentStatus::Active)
+        );
+    }
+
+    #[test]
+    fn carried_team_keeps_everything_else() {
+        let mut wire = a_full_team_wire();
+        let agents = wire["agents"].as_array_mut().expect("agents");
+        agents.push(an_agent_wire("grace", "architect"));
+        agents.push(an_agent_wire("mary", "marketing_specialist"));
+        agents[2]["status"] = json!("paused");
+        agents[3]["status"] = json!("retired");
+        let input = team(&wire);
+        let carried = carried_team(&input).expect("the carried team is a team");
+
+        let mut expected = serde_json::to_value(&input).expect("a team serializes");
+        expected["agents"].as_array_mut().expect("agents").pop();
+        for agent in expected["agents"].as_array_mut().expect("agents") {
+            agent["status"] = json!("active");
+        }
+        assert_eq!(
+            serde_json::to_value(&carried).expect("a team serializes"),
+            expected
         );
     }
 
