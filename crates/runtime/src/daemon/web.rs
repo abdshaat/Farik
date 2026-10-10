@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::setup::list_folders;
 use super::{DaemonError, DaemonState, SetupError, SetupHost, hex, random_token, same_token};
-use super::{board, gates, team, templates};
+use super::{board, documents, gates, team, templates};
 use crate::claude::CredentialKind;
 use crate::computer::{build_sandbox_image, check_computer, pull_browser_image};
 use crate::credential::CredentialStore;
@@ -867,6 +867,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         }
         "allowances.list" => board::allowances(state, deps),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
+        name if documents::QUERIES.contains(&name) => documents::query(deps, name, params),
         name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
         _ => gates::query(state, deps, name, params),
     }

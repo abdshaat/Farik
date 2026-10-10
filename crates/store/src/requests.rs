@@ -219,6 +219,30 @@ pub fn file_request(
     )
 }
 
+/// Every task filed to bring an `.agent.md` twin up to date (`task.created` with `rederives`,
+/// `docs/SPEC.md` 5.17), oldest first, each with its twin. Whether one is still open is the
+/// board's to say.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn rederive_tasks(log: &EventLog) -> Result<Vec<(TaskId, String)>, StoreError> {
+    let created = log.read(&EventQuery {
+        kinds: vec![EventKind::TaskCreated],
+        ..EventQuery::default()
+    })?;
+    Ok(created
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::TaskCreated(body) => Some((
+                event.envelope.ids.task_id.clone()?,
+                body.rederives.as_ref()?.to_string(),
+            )),
+            _ => None,
+        })
+        .collect())
+}
+
 /// Files the request that raises the budget of marketing plan `plan` (ADR 0042, step 08g), as
 /// `file_request` files one for `created_by`: `task.created` names the plan in `raises`, so that
 /// the sprint policy never holds it, and `request.triaged { small }` follows at once, by `catervas`,

@@ -161,7 +161,7 @@ Files: `rpc.schema.json` (both names in `queryName`, `filesTreeQuery`, `filesRea
 - `reads_the_owners_waiting_change_from_its_branch` — policy `manual`, the owner's save of `roadmap.md`: `files.read` answers `waiting: { change: 1, branch: "docs/folder-1" }`, the saved text and that branch's blob, `last_change.by_you` true, `stale: false`; after `FolderChangeIntegrate { change: 1 }`, `waiting: null`, the saved text from main, `last_change` `{ by_you: true }` (the merge `Merge docs/folder-1: …`), `stale: true` and `rederiving: true`; an owner's change escalated (`folder_change.escalated`) gives `waiting: null` and main's text. RED.
 - `reads_nothing_the_tree_would_not_list` — `…/roadmap.agent.md`, `…/l.md`, `…/missing.md`, `src/a.rs` and `docs/catervas/../README.md` are each `NOT_FOUND`. RED.
 
-- [ ] `feat(runtime): answer the team's folders and their documents`
+- [x] `feat(runtime): answer the team's folders and their documents`
 
 ### Task 7: The owner's save
 

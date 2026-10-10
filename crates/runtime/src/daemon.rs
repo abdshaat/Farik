@@ -47,6 +47,7 @@ use crate::tools::{ToolContext, ToolDeps};
 pub(crate) mod ads_calls;
 mod app;
 mod board;
+mod documents;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod gates;
