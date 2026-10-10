@@ -49,8 +49,9 @@ and open every completion note with such a summary, then a blank line, then the 
 Only the Developer and the UI/UX Designer change code: a task for any other role keeps its
 `allowed_paths` inside the team's `document_paths`, and a Developer's or a Designer's task says
 `change: fix` when it repairs a defect.
-While the team has a Marketing Specialist, another role's task names no path that could reach
-docs/marketing/ (not docs/** or docs); name the folder it needs, such as docs/adr/**.
+While a role that owns a folder under docs/catervas/ has an active agent, another role's task
+names no path that could reach that folder (not docs/**, docs/catervas/**, docs, ** or **/*.md);
+name the folder it needs, such as docs/adr/** or src/**/*.rs.
 
 ## 4. Assign within the WIP limit
 

@@ -110,7 +110,7 @@ Consumes: `ROLE_FOLDERS` (Task 1), `reaches_the_folder` (Task 2).
 - `the_folder_sentence_names_no_role` (`plain.rs`) — the plain words of `FolderOwned` contain "folder" and none of "marketing", "product manager", "architect". RED: they name the Marketing Specialist.
 - `the_planners_keep_other_tasks_off_the_owners_folders` (replaces `lib.rs:1227`) — both skills hold, word for word, "While a role that owns a folder under docs/catervas/ has an active agent, another role's task names no path that could reach that folder (not docs/**, docs/catervas/**, docs, ** or **/*.md); name the folder it needs, such as docs/adr/** or src/**/*.rs." RED: they hold the marketing sentence.
 
-- [ ] `feat(core): keep each role's folder to its owner at readiness`
+- [x] `feat(core): keep each role's folder to its owner at readiness`
 
 ### Task 4: The marketing folder moves, and a plan gets its twin
 

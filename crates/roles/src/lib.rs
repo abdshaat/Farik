@@ -1221,11 +1221,12 @@ mod tests {
         );
     }
 
-    /// While the team has a Marketing Specialist, no other role's task may name a path that
-    /// could reach `docs/marketing/`; the two roles that write contracts are told so, word for word.
+    /// While a role that owns a folder under `docs/catervas/` has an active agent, no other role's
+    /// task may name a path that could reach it; the two roles that write contracts are told so,
+    /// word for word.
     #[test]
-    fn the_planners_keep_other_tasks_off_the_marketing_folder() {
-        let sentence = "While the team has a Marketing Specialist, another role's task names no path that could reach docs/marketing/ (not docs/** or docs); name the folder it needs, such as docs/adr/**.";
+    fn the_planners_keep_other_tasks_off_the_owners_folders() {
+        let sentence = "While a role that owns a folder under docs/catervas/ has an active agent, another role's task names no path that could reach that folder (not docs/**, docs/catervas/**, docs, ** or **/*.md); name the folder it needs, such as docs/adr/** or src/**/*.rs.";
         for (role, skill_name) in [
             (Role::ProductManager, "writing-task-contracts"),
             (Role::ScrumMaster, "keeping-work-flowing"),

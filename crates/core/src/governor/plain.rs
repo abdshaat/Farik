@@ -37,8 +37,8 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::DocumentPathsOnly => {
             "Only the developer changes code, and this plan lets someone else change it."
         }
-        ReadinessRule::MarketingPathsOwned => {
-            "Only the Marketing Specialist changes the brand kit and the marketing plans, and this plan lets someone else."
+        ReadinessRule::FolderOwned => {
+            "Only a folder's owner changes the documents in it, and this plan lets someone else."
         }
         ReadinessRule::NoCatervasPaths => "The plan reaches into Catervas's own files.",
         ReadinessRule::PrivateFolderTask => {
@@ -84,7 +84,7 @@ mod tests {
         NewTestsRequiredByRule,
         AllowedPathsWithinCeiling,
         DocumentPathsOnly,
-        MarketingPathsOwned,
+        FolderOwned,
         NoCatervasPaths,
         PrivateFolderTask,
         PrivateFolderReviewer,
@@ -113,7 +113,7 @@ mod tests {
             | NewTestsRequiredByRule
             | AllowedPathsWithinCeiling
             | DocumentPathsOnly
-            | MarketingPathsOwned
+            | FolderOwned
             | NoCatervasPaths
             | PrivateFolderTask
             | PrivateFolderReviewer
@@ -136,6 +136,16 @@ mod tests {
             assert!(!plain.contains(role), "{plain}");
         }
         assert!(plain.contains("private folder"), "{plain}");
+    }
+
+    /// The rule holds every role's folder, so its plain words name no role.
+    #[test]
+    fn the_folder_sentence_names_no_role() {
+        let plain = plain_readiness(FolderOwned).to_lowercase();
+        for role in ["marketing", "product manager", "architect"] {
+            assert!(!plain.contains(role), "{plain}");
+        }
+        assert!(plain.contains("folder"), "{plain}");
     }
 
     #[test]
