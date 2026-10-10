@@ -1049,6 +1049,14 @@ mod tests {
             CloseOut
         );
         assert_eq!(epic_step(&[built(TaskStatus::Accepted)]), CloseOut);
+        // A cancelled task that is no plan task does not stop the plan's tasks from being written.
+        assert_eq!(
+            epic_step(&[
+                plan_task(TaskStatus::Accepted, false),
+                built(TaskStatus::Cancelled)
+            ]),
+            WriteThePlansTasks
+        );
         assert_eq!(
             epic_step(&[
                 plan_task(TaskStatus::Accepted, false),
@@ -3011,6 +3019,55 @@ mod tests {
                 spec.initial_prompt
             );
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn closes_an_epic_whose_plans_tasks_are_done() {
+        let harness = Harness::new(
+            "epic-plans-tasks-done",
+            with_a_scrum_master_and_an_architect,
+        );
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task(&harness);
+        // CTV-3 builds in the plan's lane: it names the plan, but its path is a lane's, not the plan.
+        harness.file_under("CTV-3", "ready", Some("CTV-1"), |wire| {
+            wire["plan"] = json!("docs/catervas/architecture/plans/CTV-1.md");
+            wire["lane"] = json!(1);
+            wire["allowed_paths"] = json!(["src/**"]);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
+            harness.project.moved("CTV-3", pair[0], pair[1], &people);
+        }
+        integrated(&harness, false);
+        harness.project.record(
+            "CTV-3",
+            "task.integrated",
+            &json!({ "sha": "abd", "into": "main", "integrated_by": "governor" }),
+        );
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        let about_the_epic: Vec<_> = started
+            .iter()
+            .filter(|spec| spec.task_id == Some(task("CTV-1")))
+            .map(|spec| (spec.agent_id.as_str(), spec.purpose))
+            .collect();
+        assert_eq!(about_the_epic, [("sam", SessionPurpose::Plan)]);
+        let spec = started
+            .iter()
+            .find(|spec| spec.task_id == Some(task("CTV-1")))
+            .expect("a session about the epic");
+        assert!(
+            spec.initial_prompt
+                .starts_with("Every task under the epic CTV-1 is done"),
+            "{}",
+            spec.initial_prompt
+        );
     }
 
     #[tokio::test]
