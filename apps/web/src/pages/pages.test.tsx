@@ -8,8 +8,15 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useConnection } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
+import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerStatus, renderApp } from "../test/render-app.tsx";
+import { refusedBy } from "../test/schema.ts";
+
+function Status() {
+	return <p data-testid="status">{useConnection().status}</p>;
+}
 
 describe("pages", () => {
 	afterEach(() => {
@@ -48,6 +55,43 @@ describe("pages", () => {
 			"/disconnect",
 			expect.objectContaining({ method: "POST", credentials: "same-origin" }),
 		);
+	});
+
+	it("settings_changes_the_project_after_asking", async () => {
+		const { socket } = await renderApp(
+			"/settings",
+			{ "GET /session": 204 },
+			<Status />,
+		);
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerStatus(s, false, 2);
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.changeProject }),
+		);
+		expect(
+			screen.getByText(
+				en.changeProjectConfirm.replace("{name}", "corner-bakery"),
+			),
+		).toBeTruthy();
+		// Cancel sends nothing.
+		fireEvent.click(screen.getByRole("button", { name: en.agentCancel }));
+		expect(screen.queryByText(/The team stops working/)).toBeNull();
+		expect(s.calls("project.leave")).toHaveLength(0);
+
+		fireEvent.click(screen.getByRole("button", { name: en.changeProject }));
+		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		const call = await waitFor(() => {
+			const f = s.calls("project.leave").at(-1);
+			if (!f) throw new Error("no project.leave was sent");
+			return f;
+		});
+		expect(s.calls("project.leave")).toHaveLength(1);
+		expect(refusedBy("projectLeaveRequest", call.params)).toEqual([]);
+		expect(call.params).toEqual({});
+		await s.reply(call, {});
+		expect(await screen.findByTestId("status")).toBeTruthy();
+		expect(screen.getByTestId("status").textContent).toBe("reopening");
 	});
 
 	it("shows_the_connect_page_states", async () => {

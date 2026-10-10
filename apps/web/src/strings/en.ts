@@ -173,6 +173,16 @@ export const en = {
 	browserNote:
 		"A folder that is not a git project can’t be used yet. For a new project, go back and choose “No, start a new one”: Farik makes the folder and sets up git for you.",
 	opening: "Opening your project…",
+	changeProject: "Change project…",
+	changeProjectConfirm:
+		"The team stops working on {name}. Its work there is kept, and it is all there if you come back.",
+	changeProjectYes: "Change project",
+	movingFrom: "Moving your team from {name}",
+	stayOn: "Stay on {name}",
+	replaceTeam:
+		"{target} already has a Farik team. It will be replaced by yours, starting fresh; your code is not touched.",
+	replaceYes: "Replace it",
+	replaceNo: "Choose another",
 	takeOnError: "Farik could not open that project.",
 	scanTitle: "Here is what Farik found in your project",
 	scanLead:

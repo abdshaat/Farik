@@ -212,7 +212,7 @@ Files: modified `apps/web/src/pages/Settings.tsx`, `pages/pages.test.tsx`, `page
 - `setup.test.tsx` `moving_the_team_offers_to_stay` — `serve.status { projectRoot: null, leaving: "/h/old-repo" }`: the page says "Moving your team from old-repo", has no Back button, and Stay on old-repo sends `project.open { path: "/h/old-repo", no_sandbox: false }`.
 - `setup.test.tsx` `asks_before_replacing_a_team` — `project.open` answered with the message `has_team: …`: a confirmation names the chosen folder; Replace it sends `project.open` with the same `path` and `replace: true`; Choose another shows the folder browser again and sends nothing.
 
-- [ ] `feat(web): change the project from Settings`
+- [x] `feat(web): change the project from Settings`
 
 ### Task 10: docs
 

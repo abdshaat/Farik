@@ -41,7 +41,7 @@ export function Settings({
 	theme: ThemeChoice;
 	onTheme: (c: ThemeChoice) => void;
 }) {
-	const { disconnect } = useConnection();
+	const { disconnect, client, reopen } = useConnection();
 	const { data } = useQuery<ServeStatus>("serve.status", {});
 	const [advanced, toggle] = useAdvanced();
 	const [leaving, setLeaving] = useState(false);
@@ -53,6 +53,20 @@ export function Settings({
 			// The request failed: this browser is still connected, and the button can be tried again.
 		} finally {
 			setLeaving(false);
+		}
+	};
+	const [changing, setChanging] = useState(false);
+	const [moving, setMoving] = useState(false);
+	const [said, setSaid] = useState<string>();
+	const change = async () => {
+		if (!client) return;
+		setMoving(true);
+		try {
+			await client.call("project.leave", {});
+			reopen();
+		} catch (e) {
+			setSaid(saidAll(e));
+			setMoving(false);
 		}
 	};
 	return (
@@ -108,6 +122,32 @@ export function Settings({
 						<dd>{`127.0.0.1:${data.port}`}</dd>
 					</dl>
 				)}
+				{data?.projectRoot && !changing && (
+					<div>
+						<Button onClick={() => setChanging(true)}>
+							{t("changeProject")}
+						</Button>
+					</div>
+				)}
+				{data?.projectRoot && changing && (
+					<>
+						<p>
+							{t("changeProjectConfirm").replace(
+								"{name}",
+								data.projectRoot.split("/").filter(Boolean).at(-1) ?? "",
+							)}
+						</p>
+						<div className={styles.actions}>
+							<Button busy={moving} onClick={change}>
+								{t("changeProjectYes")}
+							</Button>
+							<Button kind="quiet" onClick={() => setChanging(false)}>
+								{t("agentCancel")}
+							</Button>
+						</div>
+					</>
+				)}
+				{said && <p role="alert">{said}</p>}
 				<div>
 					<Button busy={leaving} onClick={leave}>
 						{t("disconnect")}
