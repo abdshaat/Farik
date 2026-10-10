@@ -307,9 +307,9 @@ describe("Files", () => {
 			}),
 		});
 		await screen.findByText("Pie");
-		expect(screen.getAllByRole("heading", { name: "Where we go" })).toHaveLength(
-			1,
-		);
+		expect(
+			screen.getAllByRole("heading", { name: "Where we go" }),
+		).toHaveLength(1);
 		cleanup();
 
 		// With no heading of its own, the plain name is the title.
