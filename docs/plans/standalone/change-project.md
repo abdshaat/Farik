@@ -1,10 +1,10 @@
 # Standalone: changing the project from the web app
 
-Status: draft
+Status: ready
 Branch: `feat/change-project` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 4.1 (first run, the project page), 4.4 (changing the team), 8.1 (the web UI paragraph), 8.4 (task ids)
 Depends on: phase 7 (merged in #22)
-Readiness confirmed by: (pending; the readiness review of 2026-10-09, a fresh Opus 5.5 session, found one decision open for the founder: the mailbox, under Decisions)
+Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-09 (one round, against docs/standards/workflow.md stage 2)
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
 
@@ -28,7 +28,8 @@ The founder approved `docs/design/change-project.md` on 2026-10-09; it is the so
 - Pictures: the whole `.farik/team/avatars/` folder is copied (a retired agent's picture comes along, unused). Criteria are not carried: the new repository keeps the library its own `init` seeded from its scan (the founder, 2026-10-09). Rejected: carrying the old `criteria.yaml` (one repository's checks, `cargo test` say, would run in another). Settings: the old `local/settings.json` is written; the wizard's `no_sandbox: true` still wins after it, as today.
 - Events: the carried team is recorded as `team.updated` (`updated_by: human`, `template: None`, `plan_in_sprints: Some(team.plans_in_sprints())` as runtime's `team_updated` sets it) after `init`'s own; no new event kind. No `team.paused`, no `setup-pending`.
 - Connector keys: `farik_runtime::connectors::copy_keys` copies, for each agent of the carried team and each of its `mcp_servers` names, the entry under the old project's id to the new one's, the whole `ConnectorEntry` (OAuth included); and the mailbox entry `mailbox:<id>:procurement` when the carried team has a Procurement Specialist. An entry the store cannot read or write is skipped and not counted; the agent page then shows it as not connected. No state folder: nothing is copied.
-- **Open, for the founder (readiness review, 2026-10-09):** the mailbox is more than its password. Its address and servers are `.farik/local/procurement/mail/mailbox.json`, its read position `mail/ledger.json` (both written by `connect_mailbox`, `crates/runtime/src/procurement.rs`), and `seller_mail` reads its address from an unattended `mailbox.connected` event in the log (`crates/store/src/seller_mail.rs`). The new project has none of them, so copying the password alone leaves a mailbox the new project shows as not connected, while the notice counts it as copied. Either (a) the take-on also copies `mailbox.json` and `ledger.json` and records `mailbox.connected` (Farik's own, unattended) in the new log, or (b) the mailbox is not copied and is connected again in the new project. Tasks 4 and 7 wait on this for the mailbox only.
+- The mailbox moves whole (decided 2026-10-09, from the founder's "copy the keys by default, notify the user, offer different keys"; the readiness review found that the password alone leaves a mailbox the new project shows as not connected). When `copy_keys` copied the mailbox's password (the carried team has a Procurement Specialist and the old project has the entry), `carry` also copies `.farik/local/procurement/mail/mailbox.json` and `mail/ledger.json` from the old project with `farik_runtime::procurement::carry_mailbox` (the folder made owner-only and refused if any part of it is a link, as `mail_dir` does; each file written with `write_private`), and records `mailbox.connected` in the new log with the body `farik_runtime::procurement::mailbox_connected` builds, which `connect_mailbox` is changed to build its own with (no new event kind). The event is appended through `Project::event(body, now, None)`, whose envelope names no agent and no session, so `seller_mail` reads it as Farik's own, as it reads `connect_mailbox`'s. The copied ledger keeps the old position, so mail already read in the old project is not read again. The mailbox counts in `keys-copied.json` as before (`agent_id` `""`, `server` `"procurement"`); choosing different keys for it is the existing connect-mailbox flow. Old project without `mailbox.json`: the password is still copied and counted, and no file or event is written. Rejected: (b) leaving the mailbox to be connected again (the founder asked that keys be copied by default).
+- On replace, a key the target folder already had under its own project id for an agent and server the carry does not overwrite stays there (`.farik/` is deleted, the keychain is not). Accepted: deleting keys is outside the design, and a key the carried team does not name is never loaded.
 - `.farik/local/keys-copied.json` is `{ "from": "<old root>", "keys": [{ "agent_id", "server" }] }`, mirroring `SecretAt` (the mailbox's `agent_id` is `""`, `server` `"procurement"`), written only when at least one key was copied; runtime owns its writer and reader. `serve.status` `keys_copied` is `{ from, count }` or `null`, read only when the daemon has a project (as `setup_pending` is: in setup mode `web.project_root` is empty and would resolve against the working folder); `keys_copied.dismiss` removes the file, answers `{}` also when it is absent, and records no event (local UI state, like saving a template).
 - Settings, once `project.leave` answers, calls `useConnection().reopen()`, as `SetupProject` does after a take-on, so the socket's close is a reopening and not "lost"; the reconnected `serve.status` (`project_root: null`, `leaving` set) sends `Shell` to `/setup/project` through `landing`. A leave while a session runs waits, like `farik stop`, for that tick to end; the page shows the reopening state meanwhile, and past `REOPEN_FOR_MS` the connection's ordinary retry reconnects it.
 - The copied-keys notice lives in `Shell`, under the paused banner's place, so it shows on every page until chosen (design: "stays until one is chosen"). **Choose different keys** dismisses and goes to `/team`.
@@ -45,6 +46,7 @@ crates/store/src/git.rs, requests.rs            modifies: task_branch_numbers, t
 docs/schemas/rpc.schema.json                    modifies: project.leave, keys_copied.dismiss, replace, serve.status (Task 3)
 crates/protocol/src/rpc.rs                      tests:    the new frames (Task 3)
 crates/runtime/src/connectors.rs                modifies: copy_keys, KEYS_COPIED, write_keys_copied, keys_copied (Task 4)
+crates/runtime/src/procurement.rs               modifies: carry_mailbox, mailbox_connected (Task 4)
 crates/runtime/src/daemon/web.rs                modifies: WebState.leaving, serve.status (Task 5); open's replace (Task 7)
 crates/runtime/src/daemon.rs                    modifies: DaemonState::left (Task 5)
 crates/runtime/src/daemon/team.rs               modifies: project.leave, keys_copied.dismiss (Task 5)
@@ -78,6 +80,9 @@ pub fn copy_keys(secrets: &dyn ConnectorSecrets, state: &Path, from: &Path, to: 
     -> std::io::Result<Vec<SecretAt>>;           // each copied, under the new project's id
 pub fn write_keys_copied(root: &Path, from: &Path, copied: &[SecretAt]) -> std::io::Result<()>;
 pub fn keys_copied(root: &Path) -> Option<(String, usize)>;   // (from, count); None absent or unreadable
+// farik-runtime::procurement
+pub fn carry_mailbox(from: &Path, to: &Path) -> std::io::Result<Option<String>>; // the address, when mailbox.json was there
+pub fn mailbox_connected(address: &str) -> Result<EventBody, String>;          // purpose Procurement
 // farik-runtime::daemon
 pub struct WebState { /* … */ pub leaving: Mutex<Option<PathBuf>> }
 impl DaemonState { pub fn left(&self) -> Option<PathBuf>; }
@@ -135,12 +140,15 @@ Files: modified `docs/schemas/rpc.schema.json`; tested in `crates/protocol/src/r
 
 ### Task 4: copying connector keys
 
-Files: modified `crates/runtime/src/connectors.rs` (functions and `mod tests`, `MemoryConnectorSecrets`, temp folders; no git). Produces `copy_keys`, `KEYS_COPIED`, `write_keys_copied`, `keys_copied`.
+Files: modified `crates/runtime/src/connectors.rs` (functions and `mod tests`, `MemoryConnectorSecrets`, temp folders; no git), `crates/runtime/src/procurement.rs` (`carry_mailbox`, `mailbox_connected`, `connect_mailbox` builds its body with it; `mod tests`). Produces `copy_keys`, `KEYS_COPIED`, `write_keys_copied`, `keys_copied`, `carry_mailbox`, `mailbox_connected`.
 
 - `copy_keys_copies_each_kept_agents_entries` — entries for (old, theo, github, with `oauth` set) and (old, theo, notion), theo holding both servers: `load` under the new id of each equals the old entry, `oauth` included; `load` under the old id is still `Some`; the answer is those two `SecretAt` with the new project's id.
 - `copy_keys_leaves_agents_off_the_team_and_servers_with_no_entry` — an entry for (old, iris, x) with no iris on the team is not under the new id; a server of theo's with no entry is not in the answer.
 - `copy_keys_copies_the_mailbox_with_a_procurement_specialist` — the old `mailbox:<old>:procurement` entry is under `mailbox:<new>:procurement` when the team has a Procurement Specialist, and not when it has none.
 - `copy_keys_skips_an_entry_the_store_cannot_read` — a store whose `load` fails for (old, theo, github) alone: notion is copied and answered, github is neither.
+- `carry_mailbox_copies_the_settings_and_the_ledger` — old `mail/mailbox.json` with address `buy@shop.test` and `mail/ledger.json` with `last_uid` 42: the answer is `Some("buy@shop.test")`, both files under the new root have the old bytes and mode `0o600`, and the `mail` folder mode `0o700`; with no old `mailbox.json`, the answer is `None` and the new root has no `mail` folder.
+- `carry_mailbox_refuses_a_linked_mail_folder` — the new root's `.farik/local/procurement` is a symbolic link: the answer is an error and nothing is written through the link.
+- `mailbox_connected_is_what_connect_mailbox_records` — `mailbox_connected("buy@shop.test")` is `EventBody::MailboxConnected` with `purpose` procurement and that address; the existing `connect_mailbox` tests still pass on the body it now builds with it.
 - `keys_copied_file_only_when_something_was_copied` — `write_keys_copied(root, from, &[])` leaves no file; with two, `keys_copied(root)` is `Some((from as a string, 2))` and the file's `keys[*]` hold `agent_id` and `server`.
 - `keys_copied_is_none_without_a_readable_file` — no file, and a file that is not JSON, both answer `None`.
 
@@ -173,7 +181,8 @@ Files: created `crates/cli/src/carry.rs`; modified `crates/cli/src/lib.rs` (`mod
 Order in `open` while leaving: the existing checks (home, git root, not home, lock, account), then `has_team` unless `replace`, then (replace) remove `.farik/` and `git worktree prune`, then `init`, then `carry`, then `no_sandbox`.
 
 - `leaving_carries_the_team_to_a_fresh_folder` — old: active theo, paused ada, retired iris, a team skill pinned with its folder, an avatar file, a criterion of the user's, sandbox `none`, a memory note for theo. The target's team is `carried_team(old)`; the avatar's bytes, the skill folder's files and the sandbox setting equal the old's; the target's criteria library is the one its `init` seeded and holds no criterion of the old one's name; `read_memory(theo)` is empty; there is no `setup-pending`; the log holds no `team.paused` and its last `team.updated` names theo and ada, with no `criteria.updated` after it.
-- `leaving_copies_the_kept_agents_keys_and_says_so` — old keys for (theo, github), (iris, notion) and the mailbox, with a kept Procurement Specialist: under the new id are theo's github and the mailbox, not iris's; the old still holds theo's; `keys-copied.json` has `from` the old root and two keys.
+- `leaving_copies_the_kept_agents_keys_and_says_so` — old keys for (theo, github), (iris, notion) and the mailbox, with a kept Procurement Specialist: under the new id are theo's github and the mailbox, not iris's; the old still holds theo's; `keys-copied.json` has `from` the old root and two keys. The old project's `mail/mailbox.json` (address `buy@shop.test`) and `mail/ledger.json` (`last_uid` 42) are under the new root with the same bytes, `farik_store::seller_mail::seller_mail(&new.log)` has `address` `Some("buy@shop.test")`, and the new log's `mailbox.connected` names no agent and no session.
+- `leaving_without_a_procurement_specialist_moves_no_mailbox` — the old project has a mailbox and its Procurement Specialist is retired: no mailbox entry under the new id, no `mail` folder under the new root, no `mailbox.connected` in the new log.
 - `leaving_writes_no_keys_file_when_no_key_was_copied` — no keys kept: no `keys-copied.json`.
 - `leaving_refuses_a_folder_with_a_team_unless_replaced` — target with its own team and a memory note: `open(.., replace: false)` is `Refused(HAS_TEAM)` and its `team.yaml` bytes are unchanged; `open(.., replace: true)` answers the target, its team is the carried one, its memory note is gone, and `git status --porcelain` lists nothing outside `.farik/`.
 - `leaving_reopens_the_old_folder_as_it_is` — `open(<absolute old root>)` answers it; its `team.yaml` bytes and the log's event count are unchanged; no `keys-copied.json`.
