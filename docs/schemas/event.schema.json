@@ -166,7 +166,8 @@
         "folder_change.opened",
         "folder_change.integrated",
         "folder_change.escalated",
-        "project.started"
+        "project.started",
+        "catervafication.started"
       ]
     },
     "eventBodyWire": {
@@ -272,7 +273,8 @@
         { "$ref": "#/$defs/folderChangeOpenedBody" },
         { "$ref": "#/$defs/folderChangeIntegratedBody" },
         { "$ref": "#/$defs/folderChangeEscalatedBody" },
-        { "$ref": "#/$defs/projectStartedBody" }
+        { "$ref": "#/$defs/projectStartedBody" },
+        { "$ref": "#/$defs/catervaficationStartedBody" }
       ]
     },
     "contractSummary": {
@@ -1840,6 +1842,16 @@
       "properties": {
         "name": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
         "description": { "type": "string", "minLength": 20, "maxLength": 2000 }
+      }
+    },
+    "catervaficationStartedBody": {
+      "title": "Catervafication Started Body",
+      "description": "The team began documenting the project (docs/SPEC.md 5.16 and 5.17): the epic the envelope names is the Catervafication, of an existing repository or of a new project. It names no one; task.created names who filed the epic.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project"],
+      "properties": {
+        "project": { "type": "string", "enum": ["existing", "new"] }
       }
     },
     "connectorTag": {

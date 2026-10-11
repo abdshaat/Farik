@@ -781,7 +781,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::FolderChangeOpened(_)
         | EventBody::FolderChangeIntegrated(_)
         | EventBody::FolderChangeEscalated(_)
-        | EventBody::ProjectStarted(_) => Ok(()),
+        | EventBody::ProjectStarted(_)
+        // The epic's board row is made by its `task.created`; this event only says what it is for.
+        | EventBody::CatervaficationStarted(_) => Ok(()),
     }
 }
 

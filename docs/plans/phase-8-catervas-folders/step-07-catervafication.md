@@ -104,7 +104,7 @@ Files: `event.schema.json` (`catervafication.started` in `eventKind` after the l
 - `names_every_event_kind_as_an_entity_and_a_past_tense_verb` and `reads_an_event_of_every_kind_and_gives_the_body_its_own_kind_back` hold with it. RED: unknown kind.
 - `reads_a_catervafication_started_event` (`event.rs`) — `{ project: "existing" }` and `"new"` read and write back; `"old"`, a missing `project` and an extra field are refused; without a task id on the envelope it is refused as about one contract. RED.
 
-- [ ] `feat(protocol): record that a Catervafication started`
+- [x] `feat(protocol): record that a Catervafication started`
 
 ### Task 2: Filing the epic
 
