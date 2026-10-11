@@ -838,6 +838,7 @@ mod tests {
         const FEATURES: &str = "docs/catervas/architecture/features.md";
         const STRUCTURE: &str = "docs/catervas/architecture/structure.md";
         const CADENCE: &str = "docs/catervas/delivery/cadence.md";
+        const REPORT: &str = "docs/catervas/product/reports/S4.md";
         let board = Board::new("moved-architecture-notes");
         let team_with = |integration: &str| {
             let mut wire = catervas_core::team::fixtures::a_team_wire();
@@ -908,14 +909,7 @@ mod tests {
         }
         wrote(11, "sm", "session-3", "retro", CADENCE, 4);
         // The Product Manager's review writes its report after sprint 4: not the architecture's.
-        wrote(
-            12,
-            "pm",
-            "session-4",
-            "review",
-            "docs/catervas/product/reports/S4.md",
-            5,
-        );
+        wrote(12, "pm", "session-4", "review", REPORT, 5);
         let said = |integration: &str| -> Vec<(chrono::DateTime<chrono::Utc>, String)> {
             moved_since(
                 &board.log,
