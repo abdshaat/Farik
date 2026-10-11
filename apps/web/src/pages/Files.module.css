@@ -191,7 +191,7 @@ details[open] > summary.fold::before {
 /* The open document. */
 .doc {
 	display: grid;
-	grid-template-columns: minmax(0, 760px);
+	grid-template-columns: minmax(0, 1fr);
 	gap: var(--catervas-space-4);
 	align-content: start;
 }
