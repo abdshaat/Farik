@@ -167,22 +167,24 @@ fn row(project: Project, role: Role) -> Row {
 /// its tasks, times the tasks it is filed with (five for an existing repository, else three).
 #[must_use]
 pub(crate) fn epic_contract(project: Project, max_cost_usd: f64) -> Value {
-    let (title, intent, tasks) = match project {
+    let (title, intent, summary, tasks) = match project {
         Project::Existing => (
             "Catervafy the repository",
             "The team reads the project and writes down what it knows, each role in its own folder under docs/catervas/, before building anything.",
+            "Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
             5.0,
         ),
         Project::New => (
             "Catervafy the new project",
             "The team reads the approved product plan and writes down what it knows, each role in its own folder under docs/catervas/, before building anything.",
+            "Your team reads your approved product plan and writes down how it will build the project, before building anything. You can read all of it in Files.",
             3.0,
         ),
     };
     json!({
         "title": title,
         "intent": intent,
-        "summary": intent,
+        "summary": summary,
         "scope": {
             "in_scope": ["The documents each role keeps in its own folder under docs/catervas/."],
             "out_of_scope": ["The project's code, and everything outside docs/catervas/."]
@@ -193,12 +195,12 @@ pub(crate) fn epic_contract(project: Project, max_cost_usd: f64) -> Value {
         }],
         "exit_criteria": [{
             "id": "C1",
-            "text": "Every Catervafication task is accepted or cancelled, and each accepted one's work is on the integration branch.",
+            "text": "Every Catervafication task is accepted or cancelled, and each accepted one's work is in your project.",
             "satisfies": ["R1"],
             "verification": {
                 "method": "review",
                 "rubric": [
-                    "Is every task under the epic accepted or cancelled, and is each accepted one's work on the integration branch?"
+                    "Is every task under the epic accepted or cancelled, and is each accepted one's work in your project?"
                 ]
             }
         }],
@@ -724,6 +726,27 @@ mod tests {
             Architect, MarketingSpecialist, ProductManager, SoftwareDeveloper, UiUxDesigner,
         };
         let epic = TaskId::try_from("CTV-1".to_string()).expect("an id");
+        // The epic is worded for its owner, as the Offer card is.
+        for (project, summary) in [
+            (
+                Project::Existing,
+                "Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
+            ),
+            (
+                Project::New,
+                "Your team reads your approved product plan and writes down how it will build the project, before building anything. You can read all of it in Files.",
+            ),
+        ] {
+            let wire = epic_contract(project, 20.0);
+            assert_eq!(wire["summary"], summary, "{project:?}");
+            assert_eq!(
+                wire["exit_criteria"][0]["verification"]["rubric"],
+                json!([
+                    "Is every task under the epic accepted or cancelled, and is each accepted one's work in your project?"
+                ]),
+                "{project:?}"
+            );
+        }
         let rubric_two = [
             "Does each document say only what the project, its history or its owner's words show, and name where it read it?",
             "Does any document contradict another, or the code?",
