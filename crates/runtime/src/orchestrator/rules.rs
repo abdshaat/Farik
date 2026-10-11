@@ -8519,6 +8519,82 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_product_managers_refresh_hears_the_owner() {
+        let harness = Harness::new("orch-refresh-owner", with_a_scrum_master_and_an_architect);
+        a_sprint_of_one_task(&harness, true);
+        on_main(&harness, SPEC);
+        on_main(&harness, STRUCTURE);
+        let proposal = harness
+            .project
+            .record_in(
+                Some("pm"),
+                Some("session-1"),
+                "",
+                "folder_doc.proposed",
+                &json!({
+                    "path": SPEC, "text": "For people.", "agent_text": "For agents.",
+                    "summary": "Pie pre-orders are done.", "sprint_id": "S1",
+                    "proposed_by": "pm"
+                }),
+            )
+            .envelope
+            .seq;
+        harness.project.record(
+            "",
+            "folder_doc.returned",
+            &json!({ "proposals": [proposal], "reason": "Keep gift cards in Now" }),
+        );
+        let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let started = adapter.started();
+        let prompt = outside_the_untrusted_blocks(&started[1].initial_prompt);
+        assert!(
+            prompt.contains(&format!(
+                "The owner sent back your changes to {SPEC}: Keep gift cards in Now"
+            )),
+            "{prompt}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refreshes_past_an_escalated_integration() {
+        let harness = Harness::new("orch-refresh-escalated", |wire| {
+            with_a_scrum_master_and_an_architect(wire);
+            wire["policy"]["integration"] = json!("auto_merge");
+        });
+        harness.accepted("CTV-1");
+        harness.open_sprint("S1", &["CTV-1"]);
+        on_main(&harness, SPEC);
+        on_main(&harness, STRUCTURE);
+        harness.project.record(
+            "CTV-1",
+            "escalation.raised",
+            &json!({ "reason": "integration", "detail": "merging the branch into main failed" }),
+        );
+        let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the sprint ends");
+        orchestrator.tick().await.expect("the review runs");
+
+        orchestrator
+            .tick()
+            .await
+            .expect("the Product Manager's refresh runs");
+
+        assert_eq!(
+            who_held(&harness)[1..],
+            [("pm".to_string(), Thread::Review)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn skips_the_architecture_when_nothing_was_integrated() {
         // (name, integrated, spec on main, structure on main, who holds the review thread)
         for (name, integrated, spec, structure, held) in [
