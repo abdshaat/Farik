@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Today: what moved</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif}
+.px{image-rendering:pixelated}
+button:focus-visible{outline:2px solid #5F7A9B;outline-offset:2px}
+button:disabled{opacity:.45;cursor:default}
+</style>
+</helmet>
+<section aria-labelledby="moved-heading" style="box-sizing: border-box; width: 100%; min-height: 100%; padding: {{pad}}; display: flex; flex-direction: column; gap: 12px; background: {{t.page}}; color: {{t.ink}}; font-family: 'Space Grotesk', system-ui, sans-serif;">
+<h2 id="moved-heading" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">What moved since yesterday</h2>
+<ul aria-label="What moved since yesterday" style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px;">
+<sc-for list="{{shown}}" as="one" hint-placeholder-count="3">
+<li style="display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px; background: {{t.surface}}; border: 1px solid {{t.rule}}; border-radius: 8px;">
+<sc-if value="{{one.isYou}}" hint-placeholder-val="{{false}}">
+<span aria-hidden="true" style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; background: {{t.ink}}; color: {{t.page}};"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="11" cy="8" r="3.5"></circle><path d="M4 19c1-3.6 3.8-5.5 7-5.5s6 1.9 7 5.5"></path></svg></span>
+</sc-if>
+<sc-if value="{{one.hasImg}}" hint-placeholder-val="{{true}}">
+<img class="px" src="{{one.img}}" alt="" width="40" height="40" style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 4px;">
+</sc-if>
+<div style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px;">
+<strong style="font-size: 16px; line-height: 24px; font-weight: 600;">{{one.who}}</strong>
+<sc-if value="{{one.hasRole}}" hint-placeholder-val="{{true}}">
+<span style="font-size: 12px; line-height: 18px; padding: 0 6px; border-radius: 4px; color: #161616; background: {{one.roleColor}};">{{one.role}}</span>
+</sc-if>
+<time datetime="{{one.iso}}" style="font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 20px; color: {{t.muted}};">{{one.when}}</time>
+</div>
+<p style="margin: 0; font-size: 16px; line-height: 24px; overflow-wrap: anywhere;">{{one.line}}</p>
+</div>
+</li>
+</sc-for>
+</ul>
+<sc-if value="{{hasMore}}" hint-placeholder-val="{{true}}">
+<button type="button" onClick="{{more}}" style="min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 16px; font: 400 16px/24px 'Space Grotesk', system-ui, sans-serif; color: {{t.ink}}; background: {{t.surface}}; border: 1px solid #8A7F6E; border-radius: 4px; cursor: pointer; width: {{btnWidth}};">Show more<span style="color: {{t.muted}};">({{leftWords}})</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m3 6 5 5 5-5"></path></svg></button>
+</sc-if>
+<sc-if value="{{allShown}}" hint-placeholder-val="{{false}}">
+<button type="button" onClick="{{fewer}}" style="min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 16px; font: 400 16px/24px 'Space Grotesk', system-ui, sans-serif; color: {{t.ink}}; background: {{t.surface}}; border: 1px solid #8A7F6E; border-radius: 4px; cursor: pointer; width: {{btnWidth}};">Show fewer<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m3 10 5-5 5 5"></path></svg></button>
+</sc-if>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"phone":{"editor":"boolean","default":false},"count":{"editor":"int","default":3,"min":3,"max":10},"$preview":{"width":720,"height":460}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { count: props.count ?? 3 };
+  }
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var phone = this.props.phone ?? false;
+    var t = dark
+      ? { page: '#161616', surface: '#1F1F1F', ink: '#F3E7D3', muted: '#B9AE9C', rule: '#333333' }
+      : { page: '#F3E7D3', surface: '#FBF6EC', ink: '#161616', muted: '#5B5347', rule: '#D9CBB3' };
+    var A = {
+      developer: '/_blob/37a0bbbf42dc69b1603c1b32b843d3da',
+      architect: '/_blob/aba4db721a0765c2a6755aec20ae8993',
+      scrum: '/_blob/052a3da29681f2451884e9dbd2c259a5',
+      pm: '/_blob/2df65252a56ce49cfbd38f6e81cc0435',
+      marketing: '/_blob/521338e4ee67ef6d94915909d1770ff6',
+      catervas: '/_blob/6e6aecd0658e1f010fbbda6d345c959f'
+    };
+    var R = {
+      developer: ['Developer', '#B7C7DA'],
+      architect: ['Architect', '#D6B77A'],
+      scrum: ['Scrum Master', '#A3B8A0'],
+      pm: ['Product Manager', '#C9A0A6'],
+      marketing: ['Marketing', '#B3A9CF']
+    };
+    // Newest first; Show more adds the next three below. A person's move shows the person's own tile; Catervas's, its mark.
+    var all = [
+      { who: 'Theo', kind: 'developer', when: '08:05', iso: '2026-10-11T08:05Z', line: 'Theo moved “Checkout page” to Review' },
+      { who: 'Ada', kind: 'architect', when: '07:40', iso: '2026-10-11T07:40Z', line: 'Ada reached its usage limit and will pick up again at 12:40' },
+      { who: 'You', kind: 'you', when: '07:12', iso: '2026-10-11T07:12Z', line: 'You accepted “Menu photos”' },
+      { who: 'Catervas', kind: 'catervas', when: '07:11', iso: '2026-10-11T07:11Z', line: '“Menu photos” was added to the project' },
+      { who: 'Kai', kind: 'marketing', when: '06:30', iso: '2026-10-11T06:30Z', line: 'Kai wrote the Instagram post for 13:00.' },
+      { who: 'Sol', kind: 'scrum', when: '06:00', iso: '2026-10-11T06:00Z', line: 'Sol posted the standup' },
+      { who: 'Mia', kind: 'pm', when: 'Yesterday 18:20', iso: '2026-10-10T18:20Z', line: 'Mia moved “Gift cards” to To do' },
+      { who: 'Theo', kind: 'developer', when: 'Yesterday 16:02', iso: '2026-10-10T16:02Z', line: 'Theo moved “Menu photos” to Review' },
+      { who: 'Catervas', kind: 'catervas', when: 'Yesterday 14:00', iso: '2026-10-10T14:00Z', line: 'Catervas handed the Instagram post for 14:00 to Buffer.' },
+      { who: 'Ada', kind: 'architect', when: 'Yesterday 11:45', iso: '2026-10-10T11:45Z', line: 'Ada moved “Menu photos” to Being reworked' }
+    ];
+    var per = 3;
+    var count = Math.min(this.state.count, all.length);
+    var shown = all.slice(0, count).map(function (one) {
+      var role = R[one.kind];
+      return {
+        who: one.who, when: one.when, iso: one.iso, line: one.line,
+        img: A[one.kind] || '',
+        isYou: one.kind === 'you',
+        hasImg: one.kind !== 'you',
+        hasRole: !!role,
+        role: role ? role[0] : '',
+        roleColor: role ? role[1] : ''
+      };
+    });
+    var self = this;
+    return {
+      t: t,
+      pad: phone ? '16px' : '24px',
+      shown: shown,
+      btnWidth: phone ? '100%' : 'auto',
+      hasMore: count < all.length,
+      allShown: count >= all.length && all.length > per,
+      leftWords: (all.length - count) + ' more',
+      more: function () { self.setState({ count: Math.min(all.length, count + per) }); },
+      fewer: function () { self.setState({ count: per }); }
+    };
+  }
+}
+</script>
+</body>
+</html>
