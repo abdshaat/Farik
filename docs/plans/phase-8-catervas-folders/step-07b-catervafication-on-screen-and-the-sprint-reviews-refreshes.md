@@ -116,7 +116,7 @@ Files: created `CatervaficationCard.tsx`, `CatervaficationCard.module.css`; `Tod
 
 `docs/SPEC.md`: 4.1 (setup ends, on an existing repository, with the offer; Start or Later); 4.2 (Today's quiet card until started, and the Files page's; F3 is the request box and does not change); 5.9 (the review's refreshes: who, when, once per sprint, the Architect's only after an integration, the Product Manager's inside its own review with no Scrum Master; the moved line); 5.17 (the sprint report's path); the next spec revision. `docs/design/catervas-folders.md`: "Each sprint" names the report's path and the Architect's skip. `docs/plans/project-plan.md`: row 07b as step 07 wrote it, marked planned.
 
-- [ ] `docs(spec): record the Catervafication on screen and the sprint review's refreshes`
+- [x] `docs(spec): record the Catervafication on screen and the sprint review's refreshes`
 
 ## Verification
 

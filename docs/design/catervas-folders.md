@@ -90,7 +90,7 @@ The Architect's, the Developer's and the Designer's tasks run in parallel. A rol
 
 ## Each sprint
 
-At sprint review the Product Manager proposes the spec's and the roadmap's changes and writes its sprint report, and the Architect brings `features.md`, `jobs.md` and `structure.md` up to date with the sprint's integrated changes: one session per sprint, not per integration, for cost. At the retro each role may update its own agent-only notes.
+At sprint review the Product Manager proposes the spec's and the roadmap's changes and writes its sprint report to `product/reports/<sprint id>.md`, and the Architect brings `features.md`, `jobs.md` and `structure.md` up to date with the sprint's integrated changes: one session per sprint, not per integration, for cost. The Architect's session is skipped when no task of the sprint was integrated; the Product Manager's is its own review when the team has no Scrum Master. At the retro each role may update its own agent-only notes.
 
 ## Events
 
