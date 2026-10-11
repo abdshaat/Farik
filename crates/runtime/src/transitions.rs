@@ -4094,6 +4094,67 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn asks_the_owner_about_the_product_plans_contract_under_all() {
+        // The product plan's contract is the owner's to approve like any other under `all`: it
+        // needs the owner's summary and waits for the owner's word. Only the wait for the plan to
+        // be on main is lifted for it.
+        let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
+        let project = Project::new("plan-asks-all", all, at(12));
+        started(&project);
+        for (task, summary) in [
+            (
+                "CTV-1",
+                Some("A bakery site, so that people can order cakes."),
+            ),
+            ("CTV-2", None),
+        ] {
+            project.file(task, |wire| {
+                if let Some(summary) = summary {
+                    wire["summary"] = json!(summary);
+                }
+            });
+            project.record(
+                task,
+                "task.created",
+                &json!({
+                    "summary": { "kind": "task", "title": "Draft the product plan", "status": "refining", "risk": "low" },
+                    "created_by": "human",
+                    "product_plan": true
+                }),
+                at(9),
+            );
+            written(&project, task);
+        }
+        // With its summary the contract passes the checks and waits for the owner alone.
+        let outcome = readying(&project, "CTV-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "CTV-1");
+        assert!(
+            holds(
+                &failures,
+                "needs the human's acceptance before it leaves refining"
+            ),
+            "{failures:?}"
+        );
+        assert!(
+            !holds(&failures, "product plan is not approved yet"),
+            "{failures:?}"
+        );
+        // Without one the owner has nothing to read: the summary is asked of it as of any plan.
+        let outcome = readying(&project, "CTV-2");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "CTV-2");
+        assert!(holds(&failures, "no summary for the user"), "{failures:?}");
+    }
+
     /// A `contract.written` of `task` by the Product Manager.
     fn written(project: &Project, task: &str) {
         project.record(
