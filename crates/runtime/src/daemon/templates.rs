@@ -110,8 +110,9 @@ fn slug_of(params: &Value) -> &str {
 }
 
 /// The team as it is, what the template `slug` names makes of it (a ready-made team first, then a
-/// saved one), the template's name, and its digest. An agent has worked when the log has an event of its. When `digest` is given, a
-/// file with another digest is refused: it changed since the preview that answered that one.
+/// saved one), the template's name, and its digest. An agent has worked when the log has an event
+/// of its. When `digest` is given, a file with another digest is refused: it changed since the
+/// preview that answered that one.
 fn applying(
     deps: &ToolDeps,
     templates: Option<&Templates>,
@@ -1366,7 +1367,14 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn previews_and_applies_a_builtin() {
-        let (harness, _) = templated("templates-builtin-apply", |_| {});
+        let (harness, folder) = templated("templates-builtin-apply", |_| {});
+        // A different team saved under the built-in's file name never shadows the built-in.
+        saved(&folder, &pair());
+        std::fs::copy(
+            folder.join("pair.yaml"),
+            folder.join("financial-analysis.yaml"),
+        )
+        .expect("copied");
         let (_, expected) = crate::templates::builtin("financial-analysis").expect("a built-in");
         let shown = preview(&harness, "financial-analysis");
         assert_eq!(shown["digest"], json!(expected));

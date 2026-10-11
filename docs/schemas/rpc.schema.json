@@ -6116,7 +6116,7 @@
           "properties": {}
         }
       },
-      "description": "The ready-made teams, the saved teams on this computer, each whole, and the files in the templates folder that are not one. Without a state folder it answers the ready-made teams alone, with folder null. template.preview of a saved team is refused with -32005 and the code no_state_folder at / when Catervas has no state folder; a ready-made team needs none."
+      "description": "The ready-made teams, the saved teams on this computer, each whole, and the files in the templates folder that are not one. Without a state folder it answers the ready-made teams alone, with folder null. template.save, template.rename and template.delete, and template.preview and template.apply of a saved team, are refused with -32005 and the code no_state_folder at / when Catervas has no state folder; this list and a ready-made team's preview and apply are not. A saved file under a ready-made team's slug is listed as unreadable, and saving or renaming to a ready-made team's name is refused with template_builtin at /name."
     },
     "skillsListQuery": {
       "title": "Skills List Query",
