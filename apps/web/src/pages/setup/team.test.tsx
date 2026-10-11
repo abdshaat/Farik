@@ -1448,6 +1448,11 @@ describe("team setup", () => {
 				.getByRole("button", { name: en.advancedHide })
 				.getAttribute("aria-expanded"),
 		).toBe("true");
+		expect(
+			screen
+				.getByRole("button", { name: en.advancedHide })
+				.getAttribute("aria-controls"),
+		).toBe("finish-advanced");
 		expect(screen.getByRole("heading", { name: en.finishTitle })).toBeTruthy();
 		expect(await screen.findByText(en.rulesTitle)).toBeTruthy();
 		fireEvent.click(screen.getByRole("button", { name: en.advancedHide }));
@@ -1500,6 +1505,8 @@ describe("team setup", () => {
 
 	it("edits_the_checks_and_the_plan_check", async () => {
 		const { container, socket } = await renderApp("/setup/finish");
+		const advanced = () =>
+			within(document.getElementById("finish-advanced") as HTMLElement);
 		const s = socket as FakeSocket;
 		await answerQuery(
 			s,
@@ -1525,16 +1532,18 @@ describe("team setup", () => {
 			judges: { auto: mira, architect: null, scrum_master: null },
 		});
 		expect(
-			await screen.findByRole("radio", {
+			await advanced().findByRole("radio", {
 				name: "Catervas chooses: Mira, the Product Manager",
 			}),
 		).toBeTruthy();
 		expect(
-			screen.getByRole("radio", {
+			advanced().getByRole("radio", {
 				name: "The Scrum Master, once the team has one",
 			}),
 		).toBeTruthy();
-		const checks = await screen.findByRole("list", { name: en.checksTitle });
+		const checks = await advanced().findByRole("list", {
+			name: en.checksTitle,
+		});
 		expect(within(checks).getByText(TESTS_PASS.text)).toBeTruthy();
 		expect(
 			within(checks).getByText("Found in your project. Runs: pnpm test"),
@@ -1543,10 +1552,10 @@ describe("team setup", () => {
 		await expectNoAxeViolations(container);
 
 		const text = "The page loads in under two seconds.";
-		fireEvent.change(screen.getByLabelText(en.checkNew), {
+		fireEvent.change(advanced().getByLabelText(en.checkNew), {
 			target: { value: text },
 		});
-		fireEvent.click(screen.getByRole("button", { name: en.checkAdd }));
+		fireEvent.click(advanced().getByRole("button", { name: en.checkAdd }));
 		const save = await sent(s, "criteria.save");
 		const added = {
 			name: "the-page-loads-in-under-two-seconds",
@@ -1560,14 +1569,14 @@ describe("team setup", () => {
 		await s.reply(save, {});
 		expect(await within(checks).findByText(text)).toBeTruthy();
 
-		const small = screen.getByRole("checkbox", {
+		const small = advanced().getByRole("checkbox", {
 			name: new RegExp(`^${en.planSmall}`),
 		});
 		expect((small as HTMLInputElement).checked).toBe(false);
 		fireEvent.click(small);
 		expect((small as HTMLInputElement).checked).toBe(true);
 
-		fireEvent.click(screen.getByRole("radio", { name: /the Architect/i }));
+		fireEvent.click(advanced().getByRole("radio", { name: /the Architect/i }));
 		await waitFor(async () => {
 			const frame = await asked(s, "team.validate");
 			const team = (
@@ -1589,7 +1598,7 @@ describe("team setup", () => {
 			effects: [],
 		});
 		// Said at the choice it concerns, in the page's own words.
-		const who = screen.getByRole("group", { name: en.planJudge });
+		const who = advanced().getByRole("group", { name: en.planJudge });
 		expect(
 			await within(who).findByText(
 				en.refuseJudge.replaceAll("{role}", en.roleArchitect),
@@ -1603,7 +1612,9 @@ describe("team setup", () => {
 				.disabled,
 		).toBe(false);
 
-		fireEvent.click(screen.getByRole("radio", { name: /^Catervas chooses/ }));
+		fireEvent.click(
+			advanced().getByRole("radio", { name: /^Catervas chooses/ }),
+		);
 		await answerQuery(s, "team.validate", { errors: [], effects: [] });
 		await waitFor(() =>
 			expect(
@@ -1634,10 +1645,13 @@ describe("team setup", () => {
 		fireEvent.click(
 			await screen.findByRole("button", { name: en.advancedSwitch }),
 		);
-		fireEvent.change(await screen.findByLabelText(en.checkNew), {
+		const advanced = within(
+			document.getElementById("finish-advanced") as HTMLElement,
+		);
+		fireEvent.change(await advanced.findByLabelText(en.checkNew), {
 			target: { value: "The page loads in under two seconds." },
 		});
-		fireEvent.click(screen.getByRole("button", { name: en.checkAdd }));
+		fireEvent.click(advanced.getByRole("button", { name: en.checkAdd }));
 		await s.fail(await sent(s, "criteria.save"), -32602, RAW);
 		expect(await screen.findByText(en.refuseOther)).toBeTruthy();
 		expect(screen.queryByText(/does not match/)).toBeNull();
@@ -1783,13 +1797,13 @@ describe("team setup", () => {
 
 		// Behind advanced settings, the same switch as in Settings, on.
 		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
-		const toggle = await screen.findByRole("switch", {
+		const adv = () =>
+			within(document.getElementById("finish-advanced") as HTMLElement);
+		const toggle = await adv().findByRole("switch", {
 			name: en.planInSprints,
 		});
 		expect(toggle.getAttribute("aria-checked")).toBe("true");
-		expect(
-			screen.getByRole("heading", { name: en.rulesPlanning }),
-		).toBeTruthy();
+		expect(adv().getByRole("heading", { name: en.rulesPlanning })).toBeTruthy();
 		await expectNoAxeViolations(first.container);
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		const on = (await sent(s, "team.start")).params as {
@@ -1806,10 +1820,10 @@ describe("team setup", () => {
 			await screen.findByRole("button", { name: en.advancedSwitch }),
 		);
 		fireEvent.click(
-			await screen.findByRole("switch", { name: en.planInSprints }),
+			await adv().findByRole("switch", { name: en.planInSprints }),
 		);
 		expect(
-			screen
+			adv()
 				.getByRole("switch", { name: en.planInSprints })
 				.getAttribute("aria-checked"),
 		).toBe("false");
