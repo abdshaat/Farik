@@ -111,7 +111,7 @@ Files: `event.schema.json` (`project.started` in the kinds, `projectStartedBody`
 - `a_product_plan_task_skips_the_sprints` (`projections.rs`) — its row's `skips_sprints` is true; a plain request's stays false. RED.
 - `creates_a_project_paused_with_its_first_request` (`serving.rs:1232`, updated) — the log holds exactly one `project.started { name: "bakery", description }`, and CTV-1 is still filed with the description as its intent. RED: no event. `takes_on_the_chosen_project_on_the_same_port` (`:1292`) asserts its log holds no `project.started`.
 
-- [ ] `feat(protocol): record a project started from a paragraph`
+- [x] `feat(protocol): record a project started from a paragraph`
 
 ### Task 3: Readiness asks git, and rule 9 holds the rest
 

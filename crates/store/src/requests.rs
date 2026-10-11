@@ -479,6 +479,7 @@ fn creation_bodies(
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
         summary: summary_of(contract),
+        product_plan: None,
         from_chat_message: from_chat_message.and_then(NonZeroU64::new),
         raises: raises
             .map(|plan| {

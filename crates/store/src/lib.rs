@@ -25,6 +25,8 @@ pub mod metrics;
 pub mod migrations;
 /// The data pipelines the log holds.
 pub mod pipelines;
+/// Whether the project was started from a paragraph, and which task drafts its product plan.
+pub mod product_plan;
 /// The board, derived from the log.
 pub mod projections;
 /// The purchase orders the log holds.

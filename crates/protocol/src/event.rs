@@ -30,12 +30,12 @@ pub use crate::generated::event::{
     MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
     MarketingPlanProposedBody, MarketingPlanReturnedBody, MemoryWrittenBody, MessagePostedBody,
     NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
-    ProductDocWrittenBody, ProjectScannedBody, ProposedRequest, PullRequestOpenedBody,
-    QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody, RequestTriagedBody,
-    RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody, SessionEndedBody,
-    SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
-    SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody, SprintEndedBody,
-    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    ProductDocWrittenBody, ProjectScannedBody, ProjectStartedBody, ProposedRequest,
+    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody,
+    RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
+    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
+    SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody,
+    SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
     TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
     TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
     TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
@@ -253,6 +253,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::FolderChangeOpened => "folderChangeOpenedBody",
         EventKind::FolderChangeIntegrated => "folderChangeIntegratedBody",
         EventKind::FolderChangeEscalated => "folderChangeEscalatedBody",
+        EventKind::ProjectStarted => "projectStartedBody",
     }
 }
 
@@ -338,6 +339,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// the Product Manager or the owner decided it. `folder_doc.written` and `folder_doc.proposed` name
 /// the agent in `written_by` and `proposed_by`; the other kinds of the folder documents name no one in
 /// the body: the owner decided or edited, or Catervas integrated or escalated a change.
+/// `project.started` names no one: the first run recorded it for the owner's paragraph.
 #[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
@@ -449,13 +451,14 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::FolderDocEdited(_)
         | EventBody::FolderChangeOpened(_)
         | EventBody::FolderChangeIntegrated(_)
-        | EventBody::FolderChangeEscalated(_) => None,
+        | EventBody::FolderChangeEscalated(_)
+        | EventBody::ProjectStarted(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 109] = [
+pub const EVERY_KIND: [EventKind; 110] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -565,6 +568,7 @@ pub const EVERY_KIND: [EventKind; 109] = [
     EventKind::FolderChangeOpened,
     EventKind::FolderChangeIntegrated,
     EventKind::FolderChangeEscalated,
+    EventKind::ProjectStarted,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -933,6 +937,9 @@ pub enum EventBody {
     /// Catervas could not integrate a folder change and left it to the human.
     #[serde(rename = "folder_change.escalated")]
     FolderChangeEscalated(FolderChangeEscalatedBody),
+    /// The first run made this project from the owner's paragraph.
+    #[serde(rename = "project.started")]
+    ProjectStarted(ProjectStartedBody),
 }
 
 impl EventBody {
@@ -1050,6 +1057,7 @@ impl EventBody {
             Self::FolderChangeOpened(_) => EventKind::FolderChangeOpened,
             Self::FolderChangeIntegrated(_) => EventKind::FolderChangeIntegrated,
             Self::FolderChangeEscalated(_) => EventKind::FolderChangeEscalated,
+            Self::ProjectStarted(_) => EventKind::ProjectStarted,
         }
     }
 }
@@ -2070,7 +2078,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 109);
+        assert_eq!(EVERY_KIND.len(), 110);
     }
 
     #[test]
@@ -2099,7 +2107,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 109);
+        assert_eq!(EVERY_KIND.len(), 110);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2253,6 +2261,33 @@ mod tests {
     }
 
     #[test]
+    fn project_started_holds_its_bounds() {
+        let kind = EventKind::ProjectStarted;
+        assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+        let wire = a_full_event_wire(kind);
+        let event = event_from_value(&wire).expect("a valid project.started");
+        assert_eq!(event.body.kind(), kind);
+        assert_eq!(event_to_value(&event), wire);
+        assert!(!is_about_one_contract(kind));
+        for (field, value) in [
+            ("name", json!("Bakery")),
+            ("name", json!("x".repeat(65))),
+            ("name", json!("")),
+            ("description", json!("x".repeat(19))),
+            ("description", json!("x".repeat(2001))),
+        ] {
+            let mut wire = an_event_wire(kind);
+            wire["body"][field] = value.clone();
+            assert!(!refusal(&wire).is_empty(), "{field} {value}");
+        }
+        let mut created = an_event_wire(EventKind::TaskCreated);
+        created["body"]["product_plan"] = json!(false);
+        assert!(!refusal(&created).is_empty());
+        created["body"]["product_plan"] = json!(true);
+        event_from_value(&created).expect("a product plan task");
+    }
+
+    #[test]
     fn reads_a_folder_doc_edited_event() {
         let mut wire = an_event_wire(EventKind::FolderDocEdited);
         wire["body"] =
@@ -2304,7 +2339,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 109);
+        assert_eq!(EVERY_KIND.len(), 110);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2445,7 +2480,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 109);
+        assert_eq!(EVERY_KIND.len(), 110);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -2760,7 +2795,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 109);
+        assert_eq!(EVERY_KIND.len(), 110);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

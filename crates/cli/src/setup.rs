@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas_protocol::clock::Clock;
-use catervas_protocol::event::EventBody;
+use catervas_protocol::event::{EventBody, ProjectStartedBody};
 use catervas_runtime::claude::CredentialKind;
 use catervas_runtime::computer::on_path;
 use catervas_runtime::connectors::ConnectorSecrets;
@@ -266,6 +266,23 @@ impl SetupHost for CliHost {
         self.git(&root, &["commit", "-m", "Start the project"])?;
 
         let (project, _) = self.taken_on(&root, no_sandbox)?;
+        // The project is new: its Product Manager interviews the owner before anything else is
+        // planned (4.1). Recorded before the first request is filed.
+        let started = project
+            .event(
+                EventBody::ProjectStarted(ProjectStartedBody {
+                    name: name.parse().map_err(|_| {
+                        failed("the project's name is not one the log holds".into())
+                    })?,
+                    description: description.trim().parse().map_err(|_| {
+                        failed("the project's description is not one the log holds".into())
+                    })?,
+                }),
+                self.clock.now(),
+                None,
+            )
+            .map_err(failed)?;
+        project.append(&started).map_err(failed)?;
         let request = request_from_brief(
             name,
             description,

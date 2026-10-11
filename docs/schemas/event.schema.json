@@ -165,7 +165,8 @@
         "folder_doc.edited",
         "folder_change.opened",
         "folder_change.integrated",
-        "folder_change.escalated"
+        "folder_change.escalated",
+        "project.started"
       ]
     },
     "eventBodyWire": {
@@ -270,7 +271,8 @@
         { "$ref": "#/$defs/folderDocEditedBody" },
         { "$ref": "#/$defs/folderChangeOpenedBody" },
         { "$ref": "#/$defs/folderChangeIntegratedBody" },
-        { "$ref": "#/$defs/folderChangeEscalatedBody" }
+        { "$ref": "#/$defs/folderChangeEscalatedBody" },
+        { "$ref": "#/$defs/projectStartedBody" }
       ]
     },
     "contractSummary": {
@@ -301,6 +303,11 @@
         "created_by": { "type": "string", "description": "The agent id that filed the request, or human." },
         "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "raises": { "$ref": "#/$defs/marketingPlanId" },
+        "product_plan": {
+          "type": "boolean",
+          "const": true,
+          "description": "This request is a new project's product plan task, filed by the owner's word (docs/SPEC.md 4.3); such a request skips the sprint queue as a raise does, and is judged as filed. Only Catervas writes it."
+        },
         "rederives": {
           "type": "string",
           "maxLength": 512,
@@ -1807,6 +1814,17 @@
       "properties": {
         "change": { "$ref": "#/$defs/folderChangeNumber" },
         "detail": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "projectStartedBody": {
+      "title": "Project Started Body",
+      "description": "The first run made this project from the owner's paragraph (docs/SPEC.md 4.1): it is new, and its Product Manager interviews the owner before anything else is planned. name is the folder's name; description is the paragraph, trimmed. The envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+        "description": { "type": "string", "minLength": 20, "maxLength": 2000 }
       }
     },
     "connectorTag": {

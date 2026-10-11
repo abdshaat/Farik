@@ -314,6 +314,10 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "change": 2,
             "sha": "a1b2c3d4"
         }),
+        EventKind::ProjectStarted => json!({
+            "name": "little-oak-cakes",
+            "description": "A bakery that sells cakes online and bakes to order."
+        }),
         EventKind::FolderChangeEscalated => json!({
             "change": 1,
             "detail": "The merge conflicted in docs/catervas/delivery/cadence.md."
