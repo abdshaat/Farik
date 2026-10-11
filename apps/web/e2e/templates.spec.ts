@@ -144,21 +144,24 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 		});
 		expect(last[1]?.body).toMatchObject({ template: "Pair" });
 
-		// 4. A refused result: Noor paused and a new Developer who never worked, so Pair would
-		// leave no active Developer, and nothing changes.
+		// 4. A refused result: a second Product Manager who never worked, and Mira paused, so Three
+		// of us (Mira, Ada and Theo) would leave no active Product Manager, and nothing changes.
 		await expect(
-			page.getByRole("button", { name: "Pause Noor" }),
+			page.getByRole("button", { name: "Pause Mira" }),
 		).toBeVisible();
+		await page
+			.getByLabel("Their role")
+			.selectOption({ label: "Product Manager" });
 		await page.getByRole("button", { name: "Add someone" }).click();
 		await expect.poll(() => statuses(a.project)).toHaveLength(4);
-		await page.getByRole("button", { name: "Pause Noor" }).click();
-		await expect.poll(() => statuses(a.project)).toContain("noor paused");
+		await page.getByRole("button", { name: "Pause Mira" }).click();
+		await expect.poll(() => statuses(a.project)).toContain("mira paused");
 		const unchanged = teamOf(a.project);
 		await page.getByRole("button", { name: "Use a saved team" }).click();
-		await dialog.getByLabel(/^Pair/).check();
+		await dialog.getByLabel(/^Three of us/).check();
 		await dialog.getByRole("button", { name: "Show what changes" }).click();
 		await expect(dialog.getByRole("alert")).toContainText(
-			"Your team would have no active Developer. Noor stays but is paused. Resume Noor on the Team page first, or choose another saved team.",
+			"Your team would have no active Product Manager. Mira stays but is paused. Resume Mira on the Team page first, or choose another team.",
 		);
 		await expect(
 			dialog.getByRole("button", { name: "Use this team" }),

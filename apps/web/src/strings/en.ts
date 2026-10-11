@@ -363,7 +363,7 @@ export const en = {
 	planJudgeNone: "The {role}, once the team has one",
 	team: "Team",
 	teamPageLead:
-		"{count} agents work on {name}. A team needs a Product Manager and a Developer; everyone else is up to you. You can have up to seven.",
+		"{count} agents work on {name}. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
 	agentEditLink: "Edit {name}",
 	agentPause: "Pause {name}",
 	agentResume: "Resume {name}",
@@ -1598,7 +1598,8 @@ export const en = {
 	templateChanged:
 		"This saved team was saved again since you looked at it. Go back and look at what changes once more.",
 	useLead:
-		"Pick a team you saved. Catervas shows you who stays, who joins and who leaves before anything changes.",
+		"Pick a ready-made team or one you saved. Catervas shows you who stays, who joins and who leaves before anything changes.",
+	useBuiltinList: "Ready-made",
 	useList: "Saved teams",
 	useSettingsBefore: "Rename or delete saved teams in ",
 	useShow: "Show what changes",
@@ -1626,8 +1627,8 @@ export const en = {
 	templatePausedRetired:
 		"{paused} stays but is paused, and {retired} would be retired.",
 	templateResume:
-		"Resume {paused} on the Team page first, or choose another saved team.",
-	templateChooseAnother: "Choose another saved team.",
+		"Resume {paused} on the Team page first, or choose another team.",
+	templateChooseAnother: "Choose another team.",
 	savedTeams: "Saved teams",
 	savedTeamsLead:
 		"Teams you saved from a Team page.\nAny project on this computer can start from one.\nRenaming or deleting one changes no project’s team.",

@@ -168,7 +168,7 @@ Files: modified `apps/web/src/pages/dialogs/UseTemplate.tsx`, `apps/web/src/stri
 - `says_the_team_needs_a_product_manager_alone` — the Team page's lead no longer says "and a Developer".
 - `refusedLine_knows_no_developer_rule` — a preview refusal `needs_product_manager` names the Product Manager; any other code falls back to `said(code)` and "Choose another team."
 
-- [ ] `feat(web): list the ready-made teams on the Team page`
+- [x] `feat(web): list the ready-made teams on the Team page`
 
 ### Task 6: docs
 

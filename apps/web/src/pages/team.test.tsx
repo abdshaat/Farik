@@ -1434,6 +1434,42 @@ const PREVIEW = {
 	digest: "a".repeat(64),
 };
 
+const builtinTeam = (slug: string, name: string, agents: string[][]) => ({
+	slug,
+	template: {
+		...PAIR.template,
+		name,
+		agents: agents.map(([id, display_name, role, avatar]) => ({
+			id,
+			display_name,
+			role,
+			avatar,
+		})),
+	},
+});
+/** `templates.list` with the three ready-made teams and Pair saved. */
+const LISTED = {
+	folder: FOLDER,
+	builtin: [
+		builtinTeam("software-product", "Software product", [
+			["mira", "Mira", "product_manager", "product-manager"],
+			["ada", "Ada", "architect", "architect"],
+			["theo", "Theo", "software_developer", "developer"],
+			["kai", "Kai", "marketing_specialist", "marketing-specialist"],
+		]),
+		builtinTeam("online-store", "Online store", [
+			["mira", "Mira", "product_manager", "product-manager"],
+			["noor", "Noor", "procurement_specialist", "extra-5"],
+		]),
+		builtinTeam("financial-analysis", "Financial analysis", [
+			["mira", "Mira", "product_manager", "product-manager"],
+			["noor", "Noor", "finance_specialist", "finance-specialist"],
+		]),
+	],
+	templates: [PAIR],
+	unreadable: [],
+};
+
 /** The latest `name` query the page asked. */
 async function query(s: FakeSocket, name: string) {
 	return waitFor(() => {
@@ -1633,14 +1669,15 @@ describe("team templates", () => {
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
+	/** Two Product Managers, Mira paused and Pat active; Pair holds Mira and would retire Pat. */
 	it("disables_use_when_the_result_is_refused", async () => {
 		const paused = {
 			...TEAM,
 			agents: [
 				...TEAM.agents.map((a) =>
-					a.id === "theo" ? { ...a, status: "paused" } : a,
+					a.id === "mira" ? { ...a, status: "paused" } : a,
 				),
-				agent("rowan", "Rowan", "software_developer", "extra-2"),
+				agent("pat", "Pat", "product_manager", "extra-2"),
 			],
 		};
 		const { container, s } = await opened("/team", paused);
@@ -1649,6 +1686,7 @@ describe("team templates", () => {
 		);
 		await answerQuery(s, "templates.list", {
 			folder: FOLDER,
+			builtin: [],
 			templates: [PAIR],
 			unreadable: [],
 		});
@@ -1665,7 +1703,7 @@ describe("team templates", () => {
 				),
 			},
 			kept: ["mira", "theo"],
-			retired: ["sol", "ada", "kai", "rowan"],
+			retired: ["sol", "ada", "kai", "pat"],
 			removed: [],
 			added: [],
 			effects: [],
@@ -1673,8 +1711,8 @@ describe("team templates", () => {
 				{
 					path: "/agents",
 					message:
-						"A team needs an active Software Developer to do the work, and this one has none.",
-					code: "needs_developer",
+						"A team needs an active Product Manager to plan its work, and this one has none.",
+					code: "needs_product_manager",
 				},
 			],
 		});
@@ -1683,10 +1721,10 @@ describe("team templates", () => {
 		});
 		const alert = within(preview).getByRole("alert");
 		expect(alert.textContent).toBe(
-			`${en.useCannot}${t("templateNoActive", { role: "Developer" })} ${t(
+			`${en.useCannot}${t("templateNoActive", { role: "Product Manager" })} ${t(
 				"templatePausedRetired",
-				{ paused: "Theo", retired: "Rowan" },
-			)} ${t("templateResume", { paused: "Theo" })}${en.useNothingChanged}`,
+				{ paused: "Mira", retired: "Pat" },
+			)} ${t("templateResume", { paused: "Mira" })}${en.useNothingChanged}`,
 		);
 		expect(within(preview).queryByText(/Software Developer/)).toBeNull();
 		expect(
@@ -1846,6 +1884,170 @@ describe("team templates", () => {
 		const section = await screen.findByRole("region", { name: en.savedTeams });
 		expect(await within(section).findByText(en.templateNoFolder)).toBeTruthy();
 		expect(within(section).queryByText("Online store")).toBeNull();
+	});
+
+	it("lists_the_ready_made_above_the_saved", async () => {
+		const { container, s } = await opened("/team");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.templateUseOpen }),
+		);
+		await answerQuery(s, "templates.list", LISTED);
+		const dialog = await screen.findByRole("dialog", {
+			name: en.templateUseOpen,
+		});
+		const ready = await within(dialog).findByRole("group", {
+			name: en.useBuiltinList,
+		});
+		const mine = within(dialog).getByRole("group", { name: en.useList });
+		expect(
+			within(ready)
+				.getAllByRole("radio")
+				.map((r) => (r as HTMLInputElement).value),
+		).toEqual(["software-product", "online-store", "financial-analysis"]);
+		expect(
+			within(mine)
+				.getAllByRole("radio")
+				.map((r) => (r as HTMLInputElement).value),
+		).toEqual(["pair"]);
+		// Ready-made comes first on the page, and the first of them is picked.
+		expect(
+			ready.compareDocumentPosition(mine) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		const software = within(ready).getByRole("radio", {
+			name: /^Software product/,
+		}) as HTMLInputElement;
+		expect(software.checked).toBe(true);
+		expect(
+			within(ready).getByText(
+				t("builtinMeta", { names: "Mira, Ada, Theo and Kai" }),
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+		// One selection across both groups.
+		const pair = within(mine).getByRole("radio", {
+			name: /^Pair/,
+		}) as HTMLInputElement;
+		fireEvent.click(pair);
+		expect(pair.checked).toBe(true);
+		expect(software.checked).toBe(false);
+	});
+
+	it("previews_and_uses_a_ready_made_team", async () => {
+		const { s } = await opened("/team");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.templateUseOpen }),
+		);
+		await answerQuery(s, "templates.list", LISTED);
+		const dialog = await screen.findByRole("dialog", {
+			name: en.templateUseOpen,
+		});
+		fireEvent.click(
+			await within(dialog).findByRole("radio", { name: /^Financial analysis/ }),
+		);
+		fireEvent.click(within(dialog).getByRole("button", { name: en.useShow }));
+		const asked = await query(s, "template.preview");
+		expect(asked.params.params).toEqual({ slug: "financial-analysis" });
+		await s.reply(asked, PREVIEW);
+		const preview = await screen.findByRole("dialog", {
+			name: t("usePreviewTitle", { name: "Financial analysis" }),
+		});
+		fireEvent.click(within(preview).getByRole("button", { name: en.useApply }));
+		const applied = await sent(s, "template.apply");
+		expect(applied.params).toEqual({
+			slug: "financial-analysis",
+			digest: PREVIEW.digest,
+		});
+	});
+
+	it("opens_with_no_saved_team_and_no_folder", async () => {
+		const { s } = await opened("/team");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.templateUseOpen }),
+		);
+		await answerQuery(s, "templates.list", {
+			...LISTED,
+			folder: null,
+			templates: [],
+		});
+		const dialog = await screen.findByRole("dialog", {
+			name: en.templateUseOpen,
+		});
+		const ready = await within(dialog).findByRole("group", {
+			name: en.useBuiltinList,
+		});
+		expect(within(ready).getAllByRole("radio")).toHaveLength(3);
+		expect(
+			within(dialog).getByRole("heading", { name: en.useList }),
+		).toBeTruthy();
+		expect(within(dialog).getByText(en.templateNoFolder)).toBeTruthy();
+	});
+
+	it("opens_with_no_saved_team_in_a_folder", async () => {
+		const { s } = await opened("/team");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.templateUseOpen }),
+		);
+		await answerQuery(s, "templates.list", { ...LISTED, templates: [] });
+		const dialog = await screen.findByRole("dialog", {
+			name: en.templateUseOpen,
+		});
+		await within(dialog).findByRole("group", { name: en.useBuiltinList });
+		expect(
+			within(dialog).getByRole("heading", { name: en.useList }),
+		).toBeTruthy();
+		expect(within(dialog).getByText(en.startSavedNone)).toBeTruthy();
+	});
+
+	it("says_the_team_needs_a_product_manager_alone", async () => {
+		await opened("/team");
+		const lead = await screen.findByText(/agents work on/);
+		expect(lead.textContent).toBe(
+			"5 agents work on Corner Bakery. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
+		);
+	});
+
+	it("refusedLine_knows_no_developer_rule", async () => {
+		const team = {
+			...TEAM,
+			agents: TEAM.agents.map((a) =>
+				a.id === "mira" ? { ...a, status: "paused" } : a,
+			),
+		};
+		const refuse = async (code: string) => {
+			const { s } = await opened("/team", team);
+			fireEvent.click(
+				await screen.findByRole("button", { name: en.templateUseOpen }),
+			);
+			await answerQuery(s, "templates.list", LISTED);
+			const dialog = await screen.findByRole("dialog", {
+				name: en.templateUseOpen,
+			});
+			fireEvent.click(
+				await within(dialog).findByRole("button", { name: en.useShow }),
+			);
+			await s.reply(await query(s, "template.preview"), {
+				...PREVIEW,
+				team,
+				kept: ["mira"],
+				retired: [],
+				errors: [{ path: "/agents", message: "refused", code }],
+			});
+			const preview = await screen.findByRole("dialog", {
+				name: t("usePreviewTitle", { name: "Software product" }),
+			});
+			return within(preview).getByRole("alert").textContent;
+		};
+		expect(await refuse("needs_product_manager")).toBe(
+			`${en.useCannot}${t("templateNoActive", { role: "Product Manager" })} ${t(
+				"templatePaused",
+				{ paused: "Mira" },
+			)} ${t("templateResume", { paused: "Mira" })}${en.useNothingChanged}`,
+		);
+		cleanup();
+		// The Developer rule is gone: its code is any other refusal.
+		expect(await refuse("needs_developer")).toBe(
+			`${en.useCannot}${said("needs_developer")} ${en.templateChooseAnother}${en.useNothingChanged}`,
+		);
 	});
 });
 

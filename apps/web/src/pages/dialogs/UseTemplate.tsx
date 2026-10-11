@@ -13,7 +13,13 @@ import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
-import { andList, Faces, templateMeta, useTemplates } from "../SavedTeams.tsx";
+import {
+	andList,
+	builtinMeta,
+	Faces,
+	templateMeta,
+	useTemplates,
+} from "../SavedTeams.tsx";
 import {
 	type Agent,
 	ringOf,
@@ -36,7 +42,6 @@ type Preview = {
 
 /** The role a missing-role refusal names. */
 const MISSING: Record<string, Agent["role"]> = {
-	needs_developer: "software_developer",
 	needs_product_manager: "product_manager",
 };
 
@@ -81,9 +86,10 @@ export function UseTemplate({
 }) {
 	const { client } = useConnection();
 	const { listing, noFolder } = useTemplates();
+	const builtin = listing?.builtin ?? [];
 	const saved = listing?.templates ?? [];
 	const [picked, setPicked] = useState<string>();
-	const slug = picked ?? saved[0]?.slug;
+	const slug = picked ?? builtin[0]?.slug ?? saved[0]?.slug;
 	const [shown, setShown] = useState<string>();
 	const { data: preview } = useQuery<Preview>(
 		"template.preview",
@@ -92,7 +98,9 @@ export function UseTemplate({
 	);
 	const [busy, setBusy] = useState(false);
 	const [refused, setRefused] = useState<string>();
-	const template = saved.find((s) => s.slug === shown)?.template;
+	const template = [...builtin, ...saved].find(
+		(s) => s.slug === shown,
+	)?.template;
 	const name = template?.name ?? "";
 
 	const apply = async () => {
@@ -213,6 +221,20 @@ export function UseTemplate({
 			}
 		>
 			<p>{t("useLead")}</p>
+			{builtin.length > 0 && (
+				<Choice<string>
+					name="use-saved"
+					legend={t("useBuiltinList")}
+					value={slug ?? ""}
+					onChange={setPicked}
+					options={builtin.map(({ slug, template }) => ({
+						value: slug,
+						label: template.name,
+						description: builtinMeta(template),
+						extra: <Faces agents={template.agents} />,
+					}))}
+				/>
+			)}
 			{saved.length > 0 ? (
 				<Choice<string>
 					name="use-saved"
@@ -227,8 +249,11 @@ export function UseTemplate({
 					}))}
 				/>
 			) : (
-				(listing || noFolder) && (
-					<p>{t(noFolder ? "templateNoFolder" : "startSavedNone")}</p>
+				listing && (
+					<>
+						<h3 className={styles.groupTitle}>{t("useList")}</h3>
+						<p>{t(noFolder ? "templateNoFolder" : "startSavedNone")}</p>
+					</>
 				)
 			)}
 			<p className={styles.muted}>
