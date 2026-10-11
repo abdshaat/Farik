@@ -453,10 +453,12 @@ describe("today", () => {
 			sprint,
 			backlog: { plan_in_sprints: true, count: 2 },
 		});
-		const line = await screen.findByText(
-			"Little Oak Cakes: your team waits for your product plan",
-		);
-		expect(line.closest("p")).toBe(line);
+		const line = await screen.findByRole("link", {
+			name: "Little Oak Cakes: your team waits for your product plan",
+		});
+		// The mockup draws it as a link: to the Product Manager's chat.
+		expect(line.getAttribute("href")).toBe("/channel/mira");
+		expect(line.closest("p")?.textContent).toBe(line.textContent);
 		expect(screen.queryByText(/Sprint 2 is running/)).toBeNull();
 		expect(screen.queryByText(/wait in the Backlog/)).toBeNull();
 		cleanup();

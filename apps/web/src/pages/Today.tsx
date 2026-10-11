@@ -232,15 +232,20 @@ export function Today() {
 	const pm = agents.find(
 		(a) => a.role === "product_manager" && a.status !== "retired",
 	);
+	const waitsForPlan = t("todayWaitsForPlan", {
+		project: projectName(plan?.newProject?.name ?? ""),
+	});
 	return (
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("today")}</h1>
 			<div className={styles.band}>
 				{interviewing && plan.newProject ? (
 					<p>
-						{t("todayWaitsForPlan", {
-							project: projectName(plan.newProject.name),
-						})}
+						{pm ? (
+							<Link to={`/channel/${pm.id}`}>{waitsForPlan}</Link>
+						) : (
+							waitsForPlan
+						)}
 					</p>
 				) : sprint ? (
 					<p>
