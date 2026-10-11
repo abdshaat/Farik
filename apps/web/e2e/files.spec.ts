@@ -153,3 +153,37 @@ test("the owner reads and edits the team's documents, through the real server an
 		await serve.stop();
 	}
 });
+
+test("the folder list stays in view beside a long document, reading and editing", async ({
+	page,
+}) => {
+	const serve = await startServe({
+		team: "pm-architect-developer",
+		transcripts: [],
+	});
+	const longText = `# Roadmap\n\n${Array.from({ length: 60 }, (_, i) => `- Item ${i + 1}`).join("\n")}\n`;
+	commitFiles(
+		serve.project,
+		{ [ROADMAP]: longText, [TWIN]: longText },
+		"docs: a long roadmap",
+	);
+	try {
+		await page.goto(serve.url);
+		await page.setViewportSize({ width: 1440, height: 800 });
+		await page
+			.getByRole("navigation", { name: "Main" })
+			.getByRole("link", { name: "Files" })
+			.click();
+		await expect(page.getByRole("heading", { name: "Roadmap" })).toBeVisible();
+		const link = page
+			.getByRole("navigation", { name: "Files" })
+			.getByRole("link", { name: "Roadmap" });
+		await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+		await expect(link).toBeInViewport();
+		await page.getByRole("button", { name: "Edit" }).click();
+		await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+		await expect(link).toBeInViewport();
+	} finally {
+		await serve.stop();
+	}
+});
