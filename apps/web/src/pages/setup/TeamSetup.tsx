@@ -286,7 +286,10 @@ export function keptDraft(root: string): Draft | undefined {
 			root: string;
 			draft: Draft;
 		} | null;
-		return kept?.root === root ? kept.draft : undefined;
+		const d = kept?.root === root ? kept.draft : undefined;
+		return d && Array.isArray(d.members) && typeof d.preview?.start === "string"
+			? d
+			: undefined;
 	} catch {
 		return undefined;
 	}

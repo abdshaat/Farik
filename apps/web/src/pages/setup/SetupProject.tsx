@@ -44,6 +44,7 @@ export function SetupProject() {
 		serve?.projectRoot && serve.setupPending && !leaving
 			? serve.projectRoot
 			: undefined;
+	const links = !leaving && !opening;
 	const base = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
 
 	// Catervas restarts on the chosen project; once the page is connected to it again, it goes home.
@@ -83,13 +84,23 @@ export function SetupProject() {
 
 	if (opening)
 		return (
-			<Wizard step={2} title={t("projectTitle")} lead={t("projectLead")}>
+			<Wizard
+				step={2}
+				title={t("projectTitle")}
+				lead={t("projectLead")}
+				links={links}
+			>
 				<p role="status">{t("opening")}</p>
 			</Wizard>
 		);
 	if (replacing !== undefined)
 		return (
-			<Wizard step={2} title={t("projectTitle")} lead={t("projectLead")}>
+			<Wizard
+				step={2}
+				title={t("projectTitle")}
+				lead={t("projectLead")}
+				links={links}
+			>
 				<p>{t("replaceTeam").replace("{target}", base(replacing))}</p>
 				<div className={styles.foot}>
 					<Button
@@ -118,6 +129,7 @@ export function SetupProject() {
 				step={2}
 				title={t(view === "project" ? "browserTitle" : "browserParentTitle")}
 				lead={t("browserLead")}
+				links={links}
 			>
 				<FolderBrowser
 					mode={view}
@@ -138,7 +150,12 @@ export function SetupProject() {
 			</Wizard>
 		);
 	return (
-		<Wizard step={2} title={t("projectTitle")} lead={t("projectLead")}>
+		<Wizard
+			step={2}
+			title={t("projectTitle")}
+			lead={t("projectLead")}
+			links={links}
+		>
 			{leaving && (
 				<p role="status">{t("movingFrom").replace("{name}", base(leaving))}</p>
 			)}
@@ -215,11 +232,6 @@ export function SetupProject() {
 					</Button>
 				)}
 				<span className={styles.buttons}>
-					{keep && (
-						<Button kind="primary" onClick={() => navigate("/setup/scan")}>
-							{t("projectKeep").replace("{name}", base(keep))}
-						</Button>
-					)}
 					<Button
 						kind={keep ? "secondary" : "primary"}
 						busy={busy}
@@ -232,6 +244,11 @@ export function SetupProject() {
 					>
 						{t("continue")}
 					</Button>
+					{keep && (
+						<Button kind="primary" onClick={() => navigate("/setup/scan")}>
+							{t("projectKeep").replace("{name}", base(keep))}
+						</Button>
+					)}
 				</span>
 			</div>
 		</Wizard>

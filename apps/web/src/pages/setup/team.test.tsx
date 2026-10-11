@@ -883,7 +883,6 @@ describe("team setup", () => {
 			within(card).getByRole("textbox", { name: en.previewStart }),
 			{ target: { value: "npm start" } },
 		);
-		await answerStatus(s, false, 1, { setup_pending: true });
 		fireEvent.click(
 			screen.getByRole("button", { name: "Continue with these six" }),
 		);
@@ -935,7 +934,6 @@ describe("team setup", () => {
 		fireEvent.click(
 			screen.getByRole("button", { name: "Continue with these six" }),
 		);
-		await answerStatus(s, false, 1, { setup_pending: true });
 		const validate = await asked(s, "team.validate");
 		const team = (validate.params.params as { team: { preview: unknown } })
 			.team;
@@ -1257,6 +1255,7 @@ describe("team setup", () => {
 		await screen.findByRole("heading", { name: en.scanTitle });
 		fireEvent.click(screen.getByRole("button", { name: en.scanRight }));
 		await answerQuery(s, "team.propose", proposed());
+		expect(screen.queryByRole("heading", { name: en.teamTitle })).toBeNull();
 		await answerStatus(s, false, 1, { setup_pending: true });
 		await screen.findByRole("heading", { name: en.teamTitle });
 		await waitFor(() => expect(name().value).toBe("Theodora"));
@@ -1297,6 +1296,87 @@ describe("team setup", () => {
 		expect(
 			(screen.getByLabelText(en.spendAmount) as HTMLInputElement).value,
 		).toBe("25");
+
+		// A limit left unfinished is not kept: going back and on leaves the draft as it was.
+		const around = async () => {
+			fireEvent.click(screen.getByRole("button", { name: en.back }));
+			await screen.findByRole("heading", { name: en.mayTitle });
+			await answerQuery(s, "settings.defaults", RECOMMENDED);
+			await waitFor(() =>
+				expect(
+					(
+						screen.getByRole("button", {
+							name: en.continue,
+						}) as HTMLButtonElement
+					).disabled,
+				).toBe(false),
+			);
+			fireEvent.click(screen.getByRole("button", { name: en.continue }));
+			await screen.findByRole("heading", { name: en.spendTitle });
+		};
+		fireEvent.click(screen.getByRole("radio", { name: /^No limit/ }));
+		await around();
+		fireEvent.click(screen.getByRole("radio", { name: /^Stop the team/ }));
+		fireEvent.change(screen.getByLabelText(en.spendAmount), {
+			target: { value: "-5" },
+		});
+		await around();
+		expect(
+			(screen.getByRole("radio", { name: /^No limit/ }) as HTMLInputElement)
+				.checked,
+		).toBe(true);
+	});
+
+	it("spending_step_link_keeps_the_typed_limit", async () => {
+		const { socket } = await renderApp("/setup/spending");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		await screen.findByRole("heading", { name: en.spendTitle });
+		fireEvent.click(screen.getByRole("radio", { name: /^Stop the team/ }));
+		fireEvent.change(screen.getByLabelText(en.spendAmount), {
+			target: { value: "25" },
+		});
+		fireEvent.click(
+			within(screen.getByRole("navigation", { name: en.setupSteps })).getByRole(
+				"button",
+				{ name: en.wizardMay },
+			),
+		);
+		await screen.findByRole("heading", { name: en.mayTitle });
+		await answerQuery(s, "settings.defaults", RECOMMENDED);
+		await waitFor(() =>
+			expect(
+				(screen.getByRole("button", { name: en.continue }) as HTMLButtonElement)
+					.disabled,
+			).toBe(false),
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.continue }));
+		await screen.findByRole("heading", { name: en.spendTitle });
+		expect(
+			(screen.getByLabelText(en.spendAmount) as HTMLInputElement).value,
+		).toBe("25");
+	});
+
+	it("ignores_a_kept_draft_of_another_shape", async () => {
+		sessionStorage.setItem(
+			"catervas.setupDraft",
+			JSON.stringify({
+				root: "/home/me/corner-bakery",
+				draft: { team: {} },
+			}),
+		);
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		expect(
+			(
+				(await screen.findByRole("textbox", {
+					name: t("teamName", { role: "Developer" }),
+				})) as HTMLInputElement
+			).value,
+		).toBe("Theo");
 	});
 
 	it("forgets_the_draft_once_the_team_starts", async () => {
@@ -1980,6 +2060,34 @@ describe("team setup's three starts", () => {
 		).toHaveLength(0);
 	});
 
+	it("a_saved_team_links_spending_from_finish", async () => {
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		await answerQuery(s, "templates.list", { ...LISTED, templates: [THREE] });
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A saved team/ }),
+		);
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.teamContinue }),
+		);
+		await s.reply(await asked(s, "team.validate"), { errors: [], effects: [] });
+		await screen.findByRole("heading", { name: en.spendTitle });
+		fireEvent.click(screen.getByRole("button", { name: en.continue }));
+		await screen.findByRole("heading", { name: en.finishTitle });
+		fireEvent.click(
+			within(screen.getByRole("navigation", { name: en.setupSteps })).getByRole(
+				"button",
+				{ name: en.wizardSpending },
+			),
+		);
+		expect(
+			await screen.findByRole("heading", { name: en.spendTitle }),
+		).toBeTruthy();
+		expect(screen.queryByRole("heading", { name: en.mayTitle })).toBeNull();
+	});
+
 	it("takes_a_saved_designer_off_without_a_sandbox", async () => {
 		const { container, socket } = await renderApp("/setup/team");
 		const s = socket as FakeSocket;
@@ -2007,7 +2115,6 @@ describe("team setup's three starts", () => {
 		fireEvent.click(
 			await screen.findByRole("radio", { name: /^A saved team/ }),
 		);
-		await answerStatus(s, false, 1, { setup_pending: true });
 		const include = (await screen.findByRole("checkbox", {
 			name: "Include the UI/UX Designer",
 		})) as HTMLInputElement;

@@ -333,6 +333,11 @@ describe("setup", () => {
 			await screen.findByText("Moving your team from old-repo"),
 		).toBeTruthy();
 		expect(screen.queryByRole("button", { name: en.back })).toBeNull();
+		expect(
+			within(
+				screen.getByRole("navigation", { name: en.setupSteps }),
+			).queryAllByRole("button"),
+		).toHaveLength(0);
 		fireEvent.click(screen.getByRole("button", { name: "Stay on old-repo" }));
 		const open = await sent(s, "project.open");
 		expect(open.params).toEqual({ path: "/h/old-repo", no_sandbox: false });
@@ -488,6 +493,27 @@ describe("setup", () => {
 			credential: null,
 		});
 		await screen.findByRole("heading", { name: en.projectTitle });
+		expect(screen.queryByRole("button", { name: /^Keep / })).toBeNull();
+		cleanup();
+
+		// A project whose setup is finished is not offered either.
+		const third = await renderApp("/setup/project");
+		await answerStatus(third.socket as FakeSocket, false, 1, {
+			project_root: "/home/u/shop",
+			setup_pending: false,
+		});
+		await screen.findByRole("heading", { name: en.projectTitle });
+		expect(screen.queryByRole("button", { name: /^Keep / })).toBeNull();
+		cleanup();
+
+		// Nor is it while the team is moving away from another project.
+		const fourth = await renderApp("/setup/project");
+		await answerStatus(fourth.socket as FakeSocket, false, 1, {
+			project_root: "/home/u/shop",
+			setup_pending: true,
+			leaving: "/h/old-repo",
+		});
+		await screen.findByText("Moving your team from old-repo");
 		expect(screen.queryByRole("button", { name: /^Keep / })).toBeNull();
 	});
 

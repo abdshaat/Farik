@@ -98,11 +98,16 @@ export function SetupSpending() {
 	const { draft, change } = useSetup();
 	const { wrong, budgets, fields } = useDailyLimit(draft.team.budgets.dailyUsd);
 
+	// What was typed comes back with the screen, unless it is unfinished.
+	const keep = () => {
+		if (!wrong)
+			change({
+				...draft,
+				team: { ...draft.team, budgets: budgets(draft.team.budgets) },
+			});
+	};
 	const onward = () => {
-		change({
-			...draft,
-			team: { ...draft.team, budgets: budgets(draft.team.budgets) },
-		});
+		keep();
 		navigate("/setup/finish");
 	};
 
@@ -112,6 +117,7 @@ export function SetupSpending() {
 			title={t("spendTitle")}
 			lead={t("spendLead")}
 			carried={!!draft.from}
+			onLeave={keep}
 		>
 			{fields}
 			<p className={styles.note}>{t("spendFixed")}</p>
@@ -119,12 +125,7 @@ export function SetupSpending() {
 			<div className={styles.foot}>
 				<Button
 					onClick={() => {
-						// What was typed comes back with the screen.
-						if (!wrong)
-							change({
-								...draft,
-								team: { ...draft.team, budgets: budgets(draft.team.budgets) },
-							});
+						keep();
 						navigate(draft.from ? "/setup/team" : "/setup/permissions");
 					}}
 				>

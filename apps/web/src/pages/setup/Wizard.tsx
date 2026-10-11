@@ -39,6 +39,10 @@ export function Wizard(props: {
 	children: ReactNode;
 	/** A saved team's permission answers carried over: "What they may do" is not a step. */
 	carried?: boolean;
+	/** Called before a step-list link leaves the screen, to keep what was typed. */
+	onLeave?: () => void;
+	/** Whether earlier steps are links (default); off while moving a team or opening a project. */
+	links?: boolean;
 }) {
 	const navigate = useNavigate();
 	const steps = props.carried ? STEPS.filter((s) => s !== MAY) : STEPS;
@@ -68,7 +72,12 @@ export function Wizard(props: {
 					<Stepper
 						steps={steps}
 						current={current}
-						onPick={(i) => navigate(paths[i] ?? "/")}
+						{...(props.links !== false && {
+							onPick: (i: number) => {
+								props.onLeave?.();
+								navigate(paths[i] ?? "/");
+							},
+						})}
 					/>
 				</nav>
 				<h1 className={styles.title}>{props.title}</h1>
