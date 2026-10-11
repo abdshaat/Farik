@@ -149,7 +149,7 @@ Files: `catervafication.rs` (`file_due`, `FileDue`, tests); `requests.rs` (`in_p
 - `files_no_task_twice` (integration) — CTV-3 cancelled by the human: no Architect's task is filed again; a UI/UX Designer added to the team after the filing gets its task on the next tick. RED.
 - `tells_the_retro_to_write_the_cadence` (`messages.rs`) — with `catervafied` true the retro's facts end with the line of Decisions; false, they do not; and `review_and_retro`'s retro of S1 holding CTV-1 under a Scrum Master passes true, under a PM runner false (`rules.rs`, integration). RED.
 
-- [ ] `feat(runtime): file the Catervafication's docs tasks`
+- [x] `feat(runtime): file the Catervafication's docs tasks`
 
 ### Task 6: A new project's Catervafication
 

@@ -34,7 +34,7 @@ use super::verify::{
     since_verifying, unanswered,
 };
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
-use crate::catervafication::catervafication_of;
+use crate::catervafication::{FileDue, catervafication_of, file_due};
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
@@ -551,6 +551,26 @@ pub(super) async fn in_progress_epic(
         .filter(|other| other.parent.as_ref() == Some(&row.task_id))
         .collect();
     let contract = deps.tools.files.read_contract(&row.task_id)?;
+    // The Catervafication's epic is broken down by Catervas: it files each role's task from its
+    // template, with no session, and is never broken down by the Product Manager.
+    let catervafication = catervafication_of(&history(deps, &row.task_id)?);
+    if let Some(project) = catervafication {
+        match file_due(&deps.tools, team, board, row, project).map_err(|error| {
+            OrchestratorError::Refused {
+                reason: format!("catervafication_failed: {error}"),
+            }
+        })? {
+            FileDue::Filed(filed) => {
+                let ids: Vec<&str> = filed.iter().map(|id| id.as_str()).collect();
+                return Ok(Some(TickReport::Acted {
+                    task_id: row.task_id.clone(),
+                    what: format!("filed the Catervafication's tasks: {}", ids.join(", ")),
+                }));
+            }
+            FileDue::MarketingWaits => return Ok(None),
+            FileDue::Nothing => {}
+        }
+    }
     let children = children_of_epic(deps, &tasks)?;
     let listed: Vec<(String, String, String)> = tasks
         .iter()
@@ -564,6 +584,8 @@ pub(super) async fn in_progress_epic(
         .collect();
     let (agent, initial_prompt) = match epic_step(&children) {
         EpicStep::Nothing => return Ok(None),
+        // Catervas files this epic's tasks itself, so it has no breakdown for a session to make.
+        EpicStep::BreakDown if catervafication.is_some() => return Ok(None),
         EpicStep::CloseOut => {
             let rejection = last_rejection(deps, &row.task_id, &tasks)?;
             (
@@ -2095,6 +2117,234 @@ mod tests {
         let raised = last(&harness, EventKind::EscalationRaised).expect("the owner is asked");
         assert!(matches!(&raised.body, EventBody::EscalationRaised(body)
             if body.reason == EscalationRaisedBodyReason::Approval));
+    }
+
+    /// The suggested six's Catervafication started, and run until its epic CTV-1 is `in_progress`.
+    async fn a_catervafication_in_progress(
+        harness: &Harness,
+    ) -> (Orchestrator, Arc<crate::recorded::RecordedAdapter>) {
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator
+            .handle(Command::CatervaficationStart)
+            .await
+            .expect("the owner starts it");
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+        (orchestrator, adapter)
+    }
+
+    /// The role each task under CTV-1 is for, in the order they were filed.
+    fn roles_under_the_epic(harness: &Harness) -> Vec<String> {
+        harness
+            .project
+            .deps
+            .files
+            .list_contracts()
+            .expect("the contracts list")
+            .iter()
+            .map(|id| {
+                harness
+                    .project
+                    .deps
+                    .files
+                    .read_contract(id)
+                    .expect("a contract")
+            })
+            .filter(|contract| {
+                contract.parent.as_ref().map(|parent| parent.as_str()) == Some("CTV-1")
+            })
+            .map(|contract| contract.assignee_role.to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn files_one_task_per_role_with_a_folder() {
+        let harness = Harness::with_the_suggested_six("req-catervafication-files");
+        let (orchestrator, adapter) = a_catervafication_in_progress(&harness).await;
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Acted {
+                task_id: task("CTV-1"),
+                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5".to_string()
+            }
+        );
+        assert_eq!(
+            roles_under_the_epic(&harness),
+            [
+                "product_manager",
+                "architect",
+                "software_developer",
+                "ui_ux_designer"
+            ]
+        );
+        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5"] {
+            let row = harness.row(id);
+            assert_eq!(row.parent, Some(task("CTV-1")), "{id}");
+            assert_eq!(row.sprint.as_deref(), Some("S1"), "{id}");
+            let created = harness
+                .events(&[EventKind::TaskCreated])
+                .into_iter()
+                .find(|event| event.envelope.ids.task_id == Some(task(id)))
+                .expect("a task.created");
+            assert!(
+                matches!(&created.body, EventBody::TaskCreated(body) if body.created_by == "catervas"),
+                "{id}"
+            );
+        }
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn files_the_marketing_task_once_the_product_plan_is_in() {
+        let harness = Harness::with_the_suggested_six("req-catervafication-marketing");
+        let (orchestrator, adapter) = a_catervafication_in_progress(&harness).await;
+        orchestrator.tick().await.expect("the tick files the tasks");
+        // CTV-3 to CTV-5 are accepted and integrated; the plan, CTV-2, awaits its integration.
+        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5"] {
+            harness.project.moved(id, "draft", "accepted", &json!({}));
+        }
+        let integrate = |id: &str| {
+            harness.project.record(
+                id,
+                "task.integrated",
+                &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
+            );
+        };
+        for id in ["CTV-3", "CTV-4", "CTV-5"] {
+            integrate(id);
+        }
+        assert!(harness.row("CTV-2").awaiting_integration);
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(is_idle(&report), "{report:?}");
+        assert_eq!(roles_under_the_epic(&harness).len(), 4);
+        assert!(adapter.started().is_empty(), "the epic is not closed out");
+
+        integrate("CTV-2");
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            report,
+            TickReport::Acted {
+                task_id: task("CTV-1"),
+                what: "filed the Catervafication's tasks: CTV-6".to_string()
+            }
+        );
+        assert_eq!(
+            roles_under_the_epic(&harness).last().map(String::as_str),
+            Some("marketing_specialist")
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn files_no_marketing_task_for_a_cancelled_product_plan() {
+        let harness = Harness::with_the_suggested_six("req-catervafication-no-plan");
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator
+            .handle(Command::CatervaficationStart)
+            .await
+            .expect("the owner starts it");
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        harness
+            .project
+            .moved("CTV-2", "draft", "cancelled", &json!({}));
+        for id in ["CTV-3", "CTV-4", "CTV-5"] {
+            harness.project.moved(id, "draft", "accepted", &json!({}));
+            harness.project.record(
+                id,
+                "task.integrated",
+                &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
+            );
+        }
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(roles_under_the_epic(&harness).len(), 4, "no Marketing task");
+        let started = adapter.started();
+        let spec = started.first().expect("the epic's close-out starts");
+        assert_eq!(spec.purpose, SessionPurpose::Plan);
+        assert_eq!(spec.task_id, Some(task("CTV-1")));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn files_no_task_twice() {
+        let harness = Harness::with_the_suggested_six("req-catervafication-twice");
+        // The Designer is paused at first: it has no task.
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        let mut wire = serde_json::to_value(&team).expect("the team is JSON");
+        wire["agents"][4]["status"] = json!("paused");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
+            .expect("the team is written");
+        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
+        let epic_only = crate::orchestrator::TickScope {
+            task_id: Some(task("CTV-1")),
+            rules: crate::orchestrator::TickRules::All,
+        };
+        orchestrator
+            .tick_within(&epic_only)
+            .await
+            .expect("the tick files the tasks");
+        assert_eq!(
+            roles_under_the_epic(&harness),
+            ["product_manager", "architect", "software_developer"]
+        );
+
+        // The owner cancels the Architect's task: it is not filed again.
+        harness.project.moved(
+            "CTV-3",
+            "draft",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        let report = orchestrator
+            .tick_within(&epic_only)
+            .await
+            .expect("the tick runs");
+        assert!(is_idle(&report), "{report:?}");
+        assert_eq!(roles_under_the_epic(&harness).len(), 3);
+
+        // A Designer who joins later gets its task on the next tick.
+        wire["agents"][4]["status"] = json!("active");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
+            .expect("the team is written");
+        let report = orchestrator
+            .tick_within(&epic_only)
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&report, TickReport::Acted { what, .. } if what.ends_with("CTV-5")),
+            "{report:?}"
+        );
+        assert_eq!(
+            roles_under_the_epic(&harness).last().map(String::as_str),
+            Some("ui_ux_designer")
+        );
     }
 
     #[tokio::test]

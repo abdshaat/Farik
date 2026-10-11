@@ -12,6 +12,7 @@ use std::fmt;
 
 use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::role_folder;
+use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::Team;
@@ -20,11 +21,13 @@ use catervas_protocol::event::{
     new_event,
 };
 use catervas_store::files::FilesError;
-use catervas_store::requests::{RequestError, file_catervafication_epic, placeholder_budget_usd};
-use catervas_store::{EventLog, EventQuery, StoreError};
+use catervas_store::requests::{
+    RequestError, file_catervafication_epic, file_request, placeholder_budget_usd,
+};
+use catervas_store::{EventLog, EventQuery, StoreError, TaskProjection};
 use serde_json::{Value, json};
 
-use crate::sprints::{PlannedBy, SprintError, plan_sprint, start_sprint};
+use crate::sprints::{PlannedBy, SprintError, join_epics_sprint, plan_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{TransitionAsk, TransitionError, TransitionOutcome};
 
@@ -459,6 +462,89 @@ pub(crate) fn start(
     Ok(Started {
         epic: epic.id,
         sprint,
+    })
+}
+
+/// What `file_due` found to do for an epic.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FileDue {
+    /// These tasks were filed.
+    Filed(Vec<TaskId>),
+    /// Nothing was filed, and the Marketing Specialist's task waits for the product plan, which is
+    /// written and not yet on the integration branch.
+    MarketingWaits,
+    /// Nothing is due.
+    Nothing,
+}
+
+/// Files, as Catervas, the task of each role `catervafication_roles` lists that has none under
+/// `epic` in any status (a task the owner cancelled is not filed again), each into the epic's
+/// sprint. On an existing repository the Marketing Specialist's task waits until the Product
+/// Manager's task under the epic is accepted and integrated, so that it reads the approved plan; it
+/// is never filed while there is no such task, or when that task is cancelled.
+///
+/// # Errors
+///
+/// Whichever part failed; the tasks filed before it stay filed, and are not filed again.
+pub(crate) fn file_due(
+    deps: &ToolDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    epic: &TaskProjection,
+    project: Project,
+) -> Result<FileDue, CatervaficationError> {
+    let designer_ready = deps.transitions.designer_browser(team) == DesignerBrowser::Ready;
+    let mut held: Vec<(Role, &TaskProjection)> = Vec::new();
+    for task in board
+        .iter()
+        .filter(|row| row.parent.as_ref() == Some(&epic.task_id))
+    {
+        held.push((deps.files.read_contract(&task.task_id)?.assignee_role, task));
+    }
+    let max_cost_usd = placeholder_budget_usd(&team.rules());
+    let mut filed: Vec<TaskId> = Vec::new();
+    let mut waits = false;
+    for (role, reviewer) in catervafication_roles(team, project, designer_ready) {
+        if held.iter().any(|(held, _)| *held == role) {
+            continue;
+        }
+        if role == Role::MarketingSpecialist && project == Project::Existing {
+            match held
+                .iter()
+                .find(|(held, _)| *held == Role::ProductManager)
+                .map(|(_, row)| *row)
+            {
+                // The plan is not filed yet, or the owner cancelled it: nothing to read.
+                None => continue,
+                Some(plan) if plan.status == TaskStatus::Cancelled => continue,
+                Some(plan) if plan.status == TaskStatus::Accepted && !plan.awaiting_integration => {
+                }
+                Some(_) => {
+                    waits = true;
+                    continue;
+                }
+            }
+        }
+        let contract = file_request(
+            &deps.files,
+            &deps.log,
+            task_contract(project, role, reviewer, &epic.task_id, max_cost_usd),
+            "catervas",
+            Some(&epic.task_id),
+            deps.clock.now(),
+            &deps.ids,
+            None,
+        )?;
+        deps.projections.catch_up()?;
+        join_epics_sprint(deps, &contract.id)?;
+        filed.push(contract.id);
+    }
+    Ok(if !filed.is_empty() {
+        FileDue::Filed(filed)
+    } else if waits {
+        FileDue::MarketingWaits
+    } else {
+        FileDue::Nothing
     })
 }
 

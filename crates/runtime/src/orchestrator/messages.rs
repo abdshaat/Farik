@@ -701,7 +701,13 @@ pub(super) fn sprint_review_message(
 /// The retro's facts (5.9): each rejection of a task of the sprint with its failed criteria, each
 /// escalation with its reason, each block with its blocker, each task's iterations; and the last
 /// retros, their latest 16 KiB. What an agent wrote is untrusted text, each block cut at 16 KiB.
-pub(super) fn retro_message(sprint_id: &str, tasks: &[SprintTask], retro: Option<&str>) -> String {
+/// For the sprint of a Catervafication (`catervafied`), the Scrum Master is told to write the cadence.
+pub(super) fn retro_message(
+    sprint_id: &str,
+    tasks: &[SprintTask],
+    retro: Option<&str>,
+    catervafied: bool,
+) -> String {
     let mut facts = Vec::new();
     for task in tasks {
         let id = task.task_id.as_str();
@@ -729,7 +735,7 @@ pub(super) fn retro_message(sprint_id: &str, tasks: &[SprintTask], retro: Option
         }
         facts.push(format!("{id}: {} iteration(s)", task.iteration));
     }
-    format!(
+    let message = format!(
         "The retro of {sprint_id}, which has ended: its rejections, escalations, blocks, and each \
          task's iterations: {}{retro}",
         untrusted_block("retro_facts", &facts.join("\n"), NOTE_CAP_BYTES),
@@ -737,8 +743,17 @@ pub(super) fn retro_message(sprint_id: &str, tasks: &[SprintTask], retro: Option
             "\nWhat the last retros learned, their latest part: {}",
             untrusted_block("retro", last_bytes(text, NOTE_CAP_BYTES), NOTE_CAP_BYTES)
         )),
-    )
+    );
+    if catervafied {
+        format!("{message}\n{CADENCE_LINE}")
+    } else {
+        message
+    }
 }
+
+/// What the retro of a sprint that documented the project ends with: the Scrum Master writes the
+/// team's cadence (ADR 0051).
+const CADENCE_LINE: &str = "This sprint documented the project. Write the team's sprint cadence to docs/catervas/delivery/cadence.md with catervas_write_folder_doc, as your skill catervafying-the-repository says.";
 
 /// The last `cap` bytes of `text` at most, starting on a character.
 fn last_bytes(text: &str, cap: usize) -> &str {
@@ -1232,7 +1247,7 @@ mod tests {
     use super::{
         Changes, Digest, Resume, ReviewBrief, breakdown_message, close_out_message, human_message,
         implement_message, plan_message, plan_task_message, plan_tasks_message, planning_message,
-        refine_message, review_message,
+        refine_message, retro_message, review_message,
     };
     use crate::tools::fixtures::at;
 
@@ -1846,5 +1861,18 @@ mod tests {
         assert!(!message.contains("# Retro"), "{message}");
         let without = planning_message("S2", &[(contract(), 0)], false, None, &digest, None);
         assert!(!without.contains("source=\"retro\""), "{without}");
+    }
+
+    #[test]
+    fn tells_the_retro_to_write_the_cadence() {
+        let line = "This sprint documented the project. Write the team's sprint cadence to docs/catervas/delivery/cadence.md with catervas_write_folder_doc, as your skill catervafying-the-repository says.";
+        let with = retro_message("S1", &[], Some("# Retro\nkeep it small"), true);
+        assert!(with.ends_with(line), "{with}");
+        let without = retro_message("S1", &[], Some("# Retro\nkeep it small"), false);
+        assert!(
+            !without.contains("catervafying-the-repository"),
+            "{without}"
+        );
+        assert!(!without.contains("cadence.md"), "{without}");
     }
 }

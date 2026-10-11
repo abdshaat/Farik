@@ -417,9 +417,14 @@ async fn review_and_retro(
     }
     let (thread, facts, offered, name) = if sprint.reviewed {
         let retro = tools.files.read_retro()?;
+        // The Scrum Master writes the cadence at the retro of the sprint that documented the
+        // project (ADR 0051).
+        let catervafied = Role::from(runner.role) == Role::ScrumMaster
+            && crate::catervafication::started(&tools.log)?
+                .is_some_and(|epic| file.task_ids.iter().any(|id| id.as_str() == epic.as_str()));
         (
             Thread::Retro,
-            retro_message(&sprint.sprint_id, &tasks, retro.as_deref()),
+            retro_message(&sprint.sprint_id, &tasks, retro.as_deref(), catervafied),
             RETRO_TOOLS,
             "retro ceremony",
         )
@@ -7459,6 +7464,52 @@ mod tests {
         );
         harness.spent(Some("CTV-1"), "s-1", 1.25);
         harness
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn tells_the_scrum_master_to_write_the_cadence_at_the_retro_of_a_catervafication() {
+        let cadence = "docs/catervas/delivery/cadence.md";
+        let retro_prompt = |name: &str, scrum_master: bool| {
+            let harness = Harness::new(name, |wire| {
+                if scrum_master {
+                    with_a_scrum_master(wire);
+                }
+            });
+            harness.accepted("CTV-1");
+            harness.open_sprint("S1", &["CTV-1"]);
+            harness.project.record(
+                "CTV-1",
+                "catervafication.started",
+                &json!({ "project": "existing" }),
+            );
+            harness.project.record(
+                "CTV-1",
+                "note.written",
+                &json!({ "kind": "completion", "text": "The project is documented.", "written_by": "dev-a" }),
+            );
+            harness.spent(Some("CTV-1"), "s-1", 1.25);
+            let adapter = harness.recorded(vec![review(), retro()]);
+            (harness, adapter)
+        };
+        for (name, scrum_master, tells) in [
+            ("orch-retro-cadence-sm", true, true),
+            ("orch-retro-cadence-pm", false, false),
+        ] {
+            let (harness, adapter) = retro_prompt(name, scrum_master);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            for _ in 0..3 {
+                orchestrator.tick().await.expect("the tick runs");
+            }
+            let started = adapter.started();
+            assert_eq!(started.len(), 2, "{name}: {started:?}");
+            assert_eq!(
+                started[1].initial_prompt.contains(cadence),
+                tells,
+                "{name}: {}",
+                started[1].initial_prompt
+            );
+        }
     }
 
     /// The thread of each ceremony session started, oldest first.
