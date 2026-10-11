@@ -113,7 +113,7 @@ Files: `crates/store/src/requests.rs` (`Filing.catervafies`, `file`, `creation_b
 - `files_a_catervafication_epic_triaged_by_catervas` — a minimal epic wire filed with `created_by: "human"` and `Existing`: the contract file has `kind: epic`, `status: draft`; the log holds, in order, `task.created { created_by: "human" }`, `request.triaged { size: large, reason: "the Catervafication of an existing repository", triaged_by: "catervas" }` and `catervafication.started { project: existing }`, each with the epic's id; the board's row is an epic, triaged. With `New` and `"catervas"`, the reason ends "of a new project". RED: no function.
 - `refuses_an_epic_wire_that_sets_its_kind` — a wire with `kind` is refused as `file_request` refuses it, and nothing is recorded. RED: `kind` passes.
 
-- [ ] `feat(store): file the Catervafication's epic`
+- [x] `feat(store): file the Catervafication's epic`
 
 ### Task 3: The templates and the roles
 

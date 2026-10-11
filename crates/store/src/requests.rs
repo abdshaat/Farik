@@ -18,8 +18,9 @@ use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_protocol::command::{Command, RequestSize, command_from_value};
 use catervas_protocol::event::{
-    CatervasEvent, ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds,
-    EventKind, RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
+    CatervaficationStartedBody, CatervaficationStartedBodyProject, CatervasEvent,
+    ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds, EventKind,
+    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -216,6 +217,7 @@ pub fn file_request(
             raises: None,
             rederives: None,
             product_plan: false,
+            catervafies: None,
         },
         (now, ids),
     )
@@ -314,6 +316,7 @@ pub fn file_rederive_request(
             raises: None,
             rederives: Some(twin),
             product_plan: false,
+            catervafies: None,
         },
         (now, ids),
     )
@@ -345,6 +348,7 @@ pub fn file_raise_request(
             raises: Some(plan),
             rederives: None,
             product_plan: false,
+            catervafies: None,
         },
         (now, ids),
     )
@@ -442,6 +446,39 @@ pub fn file_product_plan_request(
             raises: None,
             rederives: None,
             product_plan: true,
+            catervafies: None,
+        },
+        (now, ids),
+    )
+}
+
+/// Files the epic of a Catervafication (`docs/SPEC.md` 5.16): `file_request` for an epic, which no
+/// request sets the kind of, and `request.triaged { large }` and `catervafication.started` follow at
+/// once, by `catervas`, under the one filing lock, so that no triage session runs.
+///
+/// # Errors
+///
+/// As `file_request`.
+pub fn file_catervafication_epic(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    created_by: &str,
+    project: CatervaficationStartedBodyProject,
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            rederives: None,
+            product_plan: false,
+            catervafies: Some(project),
         },
         (now, ids),
     )
@@ -456,6 +493,7 @@ struct Filing<'a> {
     raises: Option<&'a str>,
     rederives: Option<&'a str>,
     product_plan: bool,
+    catervafies: Option<CatervaficationStartedBodyProject>,
 }
 
 fn file(
@@ -506,6 +544,9 @@ fn file(
     if let Some(parent) = parent {
         object.insert("kind".to_string(), json!("task"));
         object.insert("parent".to_string(), json!(parent.to_string()));
+    }
+    if filing.catervafies.is_some() {
+        object.insert("kind".to_string(), json!("epic"));
     }
 
     let command = command_from_value(&json!({
@@ -577,6 +618,7 @@ fn creation_bodies(
         raises,
         rederives,
         product_plan,
+        catervafies,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
@@ -629,6 +671,22 @@ fn creation_bodies(
             reason: "a new project's product plan".to_string(),
             triaged_by: "catervas".to_string(),
         }));
+    }
+    if let Some(project) = catervafies {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Large,
+            reason: match project {
+                CatervaficationStartedBodyProject::Existing => {
+                    "the Catervafication of an existing repository"
+                }
+                CatervaficationStartedBodyProject::New => "the Catervafication of a new project",
+            }
+            .to_string(),
+            triaged_by: "catervas".to_string(),
+        }));
+        bodies.push(EventBody::CatervaficationStarted(
+            CatervaficationStartedBody { project },
+        ));
     }
     Ok(bodies)
 }
@@ -1042,8 +1100,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        PLACEHOLDER, RequestError, file_product_plan_request, file_request, hold_contract,
-        placeholder_budget_usd, product_plan_request, request_from_brief, triage_by_human,
+        PLACEHOLDER, RequestError, file_catervafication_epic, file_product_plan_request,
+        file_request, hold_contract, placeholder_budget_usd, product_plan_request,
+        request_from_brief, triage_by_human,
     };
     use crate::files::fixtures::{TempProject, a_team};
     use crate::git::fixtures::git_in;
@@ -1177,6 +1236,118 @@ mod tests {
         };
         assert_eq!(triaged.size, RequestTriagedBodySize::Small);
         assert_eq!(triaged.triaged_by, "catervas");
+    }
+
+    #[test]
+    fn files_a_catervafication_epic_triaged_by_catervas() {
+        use catervas_protocol::event::CatervaficationStartedBodyProject as Project;
+
+        let (project, log) = a_project("catervafication-epic");
+        let files = project.files();
+        let epic = file_catervafication_epic(
+            &files,
+            &log,
+            a_request(),
+            "human",
+            Project::Existing,
+            (at(), &ids()),
+        )
+        .expect("the epic is filed");
+        assert_eq!(epic.kind, TaskKind::Epic);
+        assert_eq!(epic.status, TaskStatus::Draft);
+        assert_eq!(
+            files.read_contract(&epic.id).expect("held").kind,
+            TaskKind::Epic
+        );
+
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.body.kind())
+                .collect::<Vec<_>>(),
+            [
+                EventKind::TaskCreated,
+                EventKind::RequestTriaged,
+                EventKind::CatervaficationStarted
+            ]
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| event.envelope.ids.task_id.as_ref() == Some(&epic.id))
+        );
+        let EventBody::TaskCreated(created) = &events[0].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "human");
+        let EventBody::RequestTriaged(triaged) = &events[1].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.size, RequestTriagedBodySize::Large);
+        assert_eq!(
+            triaged.reason,
+            "the Catervafication of an existing repository"
+        );
+        assert_eq!(triaged.triaged_by, "catervas");
+        let EventBody::CatervaficationStarted(started) = &events[2].body else {
+            panic!("a catervafication.started");
+        };
+        assert_eq!(started.project, Project::Existing);
+        let projections = open_projections(Arc::clone(&log)).expect("the projections open");
+        let row = projections
+            .task(&epic.id)
+            .expect("the board reads")
+            .expect("the epic is on it");
+        assert_eq!(row.kind, TaskKind::Epic);
+        assert!(row.triaged);
+
+        let (project, log) = a_project("catervafication-epic-new");
+        file_catervafication_epic(
+            &project.files(),
+            &log,
+            a_request(),
+            "catervas",
+            Project::New,
+            (at(), &ids()),
+        )
+        .expect("the epic is filed");
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        let EventBody::RequestTriaged(triaged) = &events[1].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.reason, "the Catervafication of a new project");
+        let EventBody::CatervaficationStarted(started) = &events[2].body else {
+            panic!("a catervafication.started");
+        };
+        assert_eq!(started.project, Project::New);
+    }
+
+    #[test]
+    fn refuses_an_epic_wire_that_sets_its_kind() {
+        use catervas_protocol::event::CatervaficationStartedBodyProject as Project;
+
+        let (project, log) = a_project("catervafication-epic-kind");
+        let mut wire = a_request();
+        wire["kind"] = json!("epic");
+        let refused = file_catervafication_epic(
+            &project.files(),
+            &log,
+            wire,
+            "human",
+            Project::Existing,
+            (at(), &ids()),
+        )
+        .expect_err("the kind is Catervas's to give");
+        let RequestError::Refused { reason } = refused else {
+            panic!("a refusal, not a failure: {refused:?}");
+        };
+        assert!(reason.starts_with("sets kind,"), "{reason}");
+        assert!(kinds(&log).is_empty(), "nothing is recorded");
+        assert!(
+            project.files().list_contracts().expect("a list").is_empty(),
+            "nothing is filed"
+        );
     }
 
     #[test]
