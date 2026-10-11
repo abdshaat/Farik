@@ -1,6 +1,6 @@
 # Phase 8, step 04: The Files page's server
 
-Status: done (executed and landing-reviewed 2026-10-10; lands after fixes 2ee4bf0c, 02f462dd, 3c03971d, eee095f4, c78ad635; spec 0.90; the server answers a refused save in the page's words)
+Status: done (executed and landing-reviewed 2026-10-10; lands after fixes 2ee4bf0c, 02f462dd, 3c03971d, eee095f4, c78ad635; spec 0.93; the server answers a refused save in the page's words)
 Branch: `phase/8-catervas-folders` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 5.4, 5.14, 5.17, 8.5; F5
 Depends on: steps 01 and 01b of this phase (planned, not yet executed: `catervas_core::folders` with `ROLE_FOLDERS`, `role_folder`, `is_human_document`, `agent_twin`, `human_of_twin`, `pair_changed_alone`, `folders_line`; `DoneRule::PairChangedAlone`; `PromptInput.active_roles` and `rules_section`'s folders line; the Product Manager's `write_workspace` and `git_local` and `REVIEWER_ROLE_FOR`'s Product Manager row); step 03 of this phase (planned, not yet executed: `Git::commit_files` and `CommitOutcome`, `transitions::integration_lock`, `tools::folders::{land, Landed, LandRefusal}`, the fold `folder_docs`, `Subject::FolderChange` through `integrate_locked` and `record_integrated`, the events `folder_doc.written`, `folder_doc.approved` and `folder_change.integrated`); phase 7 and the Catervas rename (merged on main, 2c28b555); task ids `CTV-<n>` (merged on main, #33). Nothing of steps 02, 03b, 05, 06 or 07.

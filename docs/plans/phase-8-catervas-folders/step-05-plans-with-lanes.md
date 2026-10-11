@@ -1,6 +1,6 @@
 # Phase 8, step 05: Plans with lanes
 
-Status: done (executed and landing-reviewed 2026-10-10; lands after fixes d47fbbb3 … d6685eef; spec 0.92)
+Status: done (executed and landing-reviewed 2026-10-10; lands after fixes d47fbbb3 … d6685eef; spec 0.95)
 Branch: `phase/8-catervas-folders` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 5.2, 5.3, 5.13, 5.16, 6.1, 6.2, 6.3; F4, F5, F6, F14
 Depends on: steps 01 and 01b of this phase (planned, not yet executed: `catervas_core::folders`, `FolderOwned`, the planners' folder sentence, every owner's folder line; `no_task_no_write`, the Product Manager's docs tasks); phase 7 and the Catervas rename (merged on main, 2c28b555); the task id rename to `CTV-<n>` (the founder's decision, a separate pull request that lands on main first, as for step 01b); ADR 0051 and `docs/design/catervas-folders.md` ("Planning a feature"). Step 02 (ready) also edits the Product Manager's `system.md` and `writing-task-contracts`, `folders.rs` and `rules.rs`; this plan keeps its lines. Steps 03 and 04 touch nothing here.
