@@ -3017,14 +3017,38 @@ mod tests {
         // Two drafts at once file one, and a draft is open until it is cancelled.
         let harness = a_new_project("human-plan-open", |_| {});
         let orchestrator = an_orchestrator(&harness);
-        let (first, second) = tokio::join!(
-            orchestrator.handle(Command::ProductPlanDraft),
-            orchestrator.handle(Command::ProductPlanDraft)
-        );
-        let results = [first, second];
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        // Raced on two threads past a barrier, so that a check made outside the lock is caught.
+        let start = std::sync::Barrier::new(2);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let racers: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        super::draft_for(&harness.project.deps, &team)
+                    })
+                })
+                .collect();
+            racers
+                .into_iter()
+                .map(|racer| racer.join().expect("the racer ends"))
+                .collect()
+        });
         assert_eq!(
             results.iter().filter(|result| result.is_ok()).count(),
             1,
+            "{results:?}"
+        );
+        assert!(
+            results.iter().any(|result| matches!(
+                result,
+                Err(CommandError::Refused { reason }) if reason.starts_with("product_plan_open:")
+            )),
             "{results:?}"
         );
         assert_eq!(product_plan_tasks(&harness), ["CTV-1"]);
