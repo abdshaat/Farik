@@ -665,7 +665,9 @@ describe("chats", () => {
 		const buttons = screen.getAllByRole("button", { name: DRAFT });
 		expect(buttons).toHaveLength(1);
 		expect(region.contains(buttons[0] as HTMLElement)).toBe(true);
-		const last = screen.getByText("One more thing").closest("li") as HTMLElement;
+		const last = screen
+			.getByText("One more thing")
+			.closest("li") as HTMLElement;
 		expect(within(last).queryByRole("button")).toBeNull();
 	});
 
