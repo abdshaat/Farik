@@ -175,7 +175,7 @@ Files: the seven `SKILL.md`, front matter `name` the folder, `description` start
 
 `docs/SPEC.md`: 3 (Catervafication: the epic, its sprint, its roles and templates, the Scrum Master's cadence); 4.1 (an existing repository's team is offered it after setup; a new project's starts once its product plan is approved); 5.2 (the WIP limit leaves out an epic for its own tasks); 5.9 (the retro's line); 5.16 (the Catervafication epic: filed whole and judged, approved by the owner's Start or, for a new project, by the owner's acceptance of its product plan, its tasks filed by Catervas at the breakdown point, Marketing's after the product plan is integrated); 5.17 (`catervafication_start`, its refusals, `catervafication.get`); 6.1 to 6.5 and 6.8 (each kit's new skills); 8.5 (`catervafication.started`); the next spec revision. `docs/design/catervas-folders.md`: "Starting" says the Scrum Master writes the cadence at the retro, that roles with no reviewer get no task, and that a new project's epic is approved by the owner's acceptance of its product plan; its steps table splits row 07 into 07 and 07b. `docs/plans/project-plan.md`: row 07 becomes this step, Spec `3, 4.1, 5.2, 5.9, 5.16, 5.17, 6, 8.5`; row 07b, "The Catervafication on screen and the sprint review's refreshes", Spec `4.1, 4.2, 5.9, 5.17`.
 
-- [ ] `docs(spec): record Catervafication`
+- [x] `docs(spec): record Catervafication`
 
 ## Verification
 
