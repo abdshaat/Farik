@@ -6116,7 +6116,7 @@
           "properties": {}
         }
       },
-      "description": "The saved teams on this computer, each whole, and the files in the templates folder that are not one. Every template query and method is refused with -32005 and the code no_state_folder at / when Catervas has no state folder."
+      "description": "The ready-made teams, the saved teams on this computer, each whole, and the files in the templates folder that are not one. Without a state folder it answers the ready-made teams alone, with folder null. template.preview of a saved team is refused with -32005 and the code no_state_folder at / when Catervas has no state folder; a ready-made team needs none."
     },
     "skillsListQuery": {
       "title": "Skills List Query",
@@ -6251,7 +6251,7 @@
           "properties": {
             "name": {
               "type": "string",
-              "description": "The saved team's name, as the person typed it; the daemon trims it."
+              "description": "The saved team's name, as the person typed it; the daemon trims it. The name of a ready-made team is refused with -32005 and template_builtin at /name, whatever replace says."
             },
             "replace": {
               "type": "boolean",
@@ -6305,7 +6305,7 @@
     },
     "templateRenameRequest": {
       "title": "Template Rename Request",
-      "description": "Gives a saved team another name, keeping when it was saved, and records no event. A new slug another template holds is refused with template_exists at /name. Answers templateSlugResult.",
+      "description": "Gives a saved team another name, keeping when it was saved, and records no event. A new slug another template holds is refused with template_exists at /name; a ready-made team's name with template_builtin at /name. Answers templateSlugResult.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -6385,13 +6385,38 @@
       "additionalProperties": false,
       "required": [
         "folder",
+        "builtin",
         "templates",
         "unreadable"
       ],
       "properties": {
         "folder": {
-          "type": "string",
-          "description": "The folder the daemon keeps saved teams in, as it uses it: under XDG_CONFIG_HOME when that is set."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The folder the daemon keeps saved teams in, as it uses it: under XDG_CONFIG_HOME when that is set. Null when Catervas has no state folder, in which case templates and unreadable are empty and the ready-made teams are still listed."
+        },
+        "builtin": {
+          "type": "array",
+          "description": "The ready-made teams Catervas comes with, in the order to list them. A saved file under one of their slugs is listed under unreadable, so it can be deleted; template.preview and template.apply by that slug reach the ready-made team.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug",
+              "template"
+            ],
+            "properties": {
+              "slug": {
+                "type": "string"
+              },
+              "template": {
+                "type": "object",
+                "description": "The template whole, as team-template.schema.json shapes it."
+              }
+            }
+          }
         },
         "templates": {
           "type": "array",

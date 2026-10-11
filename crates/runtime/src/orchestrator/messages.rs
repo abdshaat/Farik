@@ -5,7 +5,7 @@ use catervas_core::branch::task_branch;
 use catervas_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use catervas_core::governor::done::CriterionResult;
 use catervas_core::marketing::network_name;
-use catervas_core::team::{Agent, task_private_folder};
+use catervas_core::team::{Agent, Team, task_private_folder};
 use catervas_protocol::event::{
     BlockerWire, BudgetExhaustedBodyScope, CatervasEvent, EventBody, HumanAcceptedBodySubject,
     NoteWrittenBodyKind,
@@ -415,9 +415,24 @@ fn decision_block(
 /// review it.
 pub(super) fn plan_message(
     contract: &TaskContract,
+    team: &Team,
     assignees: &[String],
     reviewers: &[String],
 ) -> String {
+    // A team may hold several agents of one role, such as three Finance Specialists, so each is
+    // named with its persona, which says its desk.
+    let named = |ids: &[String]| -> Vec<String> {
+        ids.iter()
+            .map(|id| {
+                let persona = team
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id.as_str() == id)
+                    .and_then(|agent| agent.persona.as_deref().map(String::as_str));
+                persona.map_or_else(|| id.clone(), |persona| format!("{id} ({persona})"))
+            })
+            .collect()
+    };
     format!(
         "Assign {task} with `catervas_assign_task`, naming its assignee and its reviewer. The agents \
          of its assignee role, {assignee_role}, with room for it: {assignees}. The agents of its \
@@ -425,8 +440,8 @@ pub(super) fn plan_message(
         task = contract.id.as_str(),
         assignee_role = contract.assignee_role,
         reviewer_role = contract.reviewer_role,
-        assignees = listed(assignees),
-        reviewers = listed(reviewers),
+        assignees = listed(&named(assignees)),
+        reviewers = listed(&named(reviewers)),
     )
 }
 
@@ -1090,12 +1105,68 @@ mod tests {
 
     use super::{
         Changes, Digest, Resume, ReviewBrief, close_out_message, human_message, implement_message,
-        planning_message, refine_message, review_message,
+        plan_message, planning_message, refine_message, review_message,
     };
     use crate::tools::fixtures::at;
 
     fn contract() -> TaskContract {
         validate_contract(&a_contract_wire()).expect("the fixture is a contract")
+    }
+
+    #[test]
+    fn names_each_desk_beside_its_id() {
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
+        let agent = |id: &str, role: &str, persona: Option<&str>| {
+            let mut agent = catervas_core::team::fixtures::an_agent_wire(id, role);
+            if let Some(persona) = persona {
+                agent["persona"] = json!(persona);
+            }
+            agent
+        };
+        wire["agents"] = json!([
+            agent(
+                "mira",
+                "product_manager",
+                Some("Asks the questions that decide what to build")
+            ),
+            agent(
+                "noor",
+                "finance_specialist",
+                Some("Portfolio desk: what you hold")
+            ),
+            agent(
+                "ivo",
+                "finance_specialist",
+                Some("Risk desk: what could go wrong")
+            ),
+            agent(
+                "lena",
+                "finance_specialist",
+                Some("Opportunity desk: what could be gained")
+            ),
+            agent("sam", "finance_specialist", None)
+        ]);
+        let team = catervas_core::team::validate_team(&wire).expect("a team");
+        let ids = |ids: &[&str]| ids.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let message = plan_message(
+            &contract(),
+            &team,
+            &ids(&["noor", "ivo", "lena", "sam"]),
+            &ids(&["mira"]),
+        );
+        for desk in [
+            "noor (Portfolio desk: what you hold)",
+            "ivo (Risk desk: what could go wrong)",
+            "lena (Opportunity desk: what could be gained)",
+            "mira (Asks the questions that decide what to build)",
+        ] {
+            assert!(message.contains(desk), "{desk} in {message}");
+        }
+        assert!(message.contains("sam"), "{message}");
+        assert!(
+            !message.contains("sam ("),
+            "no persona, no brackets: {message}"
+        );
     }
 
     fn an_epic() -> TaskContract {

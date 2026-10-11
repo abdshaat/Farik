@@ -141,7 +141,7 @@ Files: modified `crates/runtime/src/templates.rs`, `crates/runtime/src/daemon/te
 - `a_saved_slug_without_a_folder_is_still_refused` (daemon) — served with `None`, `template.preview { slug: "mine" }` and `template.save` are refused `no_state_folder`; `refuses_in_plain_words`'s no-folder loop drops `templates.list`.
 - `names_each_desk_beside_its_id` (messages.rs) — a team of Mira and the three desks, a finance contract: the message lists `noor (Portfolio desk: …)`, `ivo (Risk desk: …)`, `lena (Opportunity desk: …)` and the reviewer `mira (Asks the questions that decide what to build)`; an agent without a persona is its id alone.
 
-- [ ] `feat(runtime): list, preview and apply the ready-made teams, reserve their names, and name each desk to the planner`
+- [x] `feat(runtime): list, preview and apply the ready-made teams, reserve their names, and name each desk to the planner`
 
 ### Task 4: the fourth start, and from scratch
 

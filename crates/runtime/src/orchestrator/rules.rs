@@ -1493,7 +1493,7 @@ async fn ready(
             tools: None,
             in_reply_to: None,
             thread: None,
-            initial_prompt: plan_message(&contract, &assignees, &reviewers),
+            initial_prompt: plan_message(&contract, team, &assignees, &reviewers),
             pipeline: None,
         },
     )
