@@ -2073,7 +2073,7 @@ fn leaves_a_gap(team: &Team, name: &str, role: Role, status: AgentStatus) -> Opt
             "leaves"
         },
     );
-    if matches!(role, Role::ProductManager | Role::SoftwareDeveloper) {
+    if role == Role::ProductManager {
         Some(format!(
             "last_of_role: {name} is your only {plain}; add another before {name} {verb}."
         ))
@@ -3781,6 +3781,31 @@ mod tests {
         assert!(last(&harness, EventKind::AgentUpdated).is_none());
         // One of two Developers may go.
         handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
+    }
+
+    #[test]
+    fn retires_the_last_developer() {
+        use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+        use catervas_core::team::{Role, validate_team};
+
+        let mut wire = a_team_wire();
+        wire["agents"] = json!([
+            an_agent_wire("pm", "product_manager"),
+            an_agent_wire("dev", "software_developer"),
+        ]);
+        let mut team = validate_team(&wire).expect("a team");
+        // The only Developer goes: a team needs a Product Manager alone (ADR 0055).
+        team.agents[1].status = AgentStatus::Retired;
+        assert_eq!(
+            super::leaves_a_gap(&team, "Dev", Role::SoftwareDeveloper, AgentStatus::Retired),
+            None
+        );
+        // The only Product Manager may not pause.
+        team.agents[0].status = AgentStatus::Paused;
+        assert_eq!(
+            super::leaves_a_gap(&team, "Pm", Role::ProductManager, AgentStatus::Paused).as_deref(),
+            Some("last_of_role: Pm is your only Product Manager; add another before Pm stops.")
+        );
     }
 
     #[tokio::test]

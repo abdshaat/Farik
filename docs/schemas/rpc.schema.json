@@ -6084,7 +6084,6 @@
           "enum": [
             "too_many",
             "needs_product_manager",
-            "needs_developer",
             "repeated_id",
             "worked",
             "name",

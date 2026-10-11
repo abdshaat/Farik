@@ -40,6 +40,9 @@ pub enum ReadinessRule {
     /// Someone other than the assignee can review: the human, for an epic only; otherwise one
     /// active agent of the reviewer role, or two when it is the assignee's role.
     ReviewerAvailable,
+    /// At least one active agent holds the assignee's role (a human assignee is exempt: the
+    /// reviewer rule refuses one).
+    AssigneeAvailable,
     /// Scope names at least one `out_of_scope` item that is not blank.
     OutOfScopePresent,
     /// Every listed dependency exists and is at least `ready`.
@@ -148,7 +151,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 22] = [
+const CHECKS: [Check; 23] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -156,6 +159,7 @@ const CHECKS: [Check; 22] = [
     command_criteria_complete,
     budget_within_sprint,
     reviewer_available,
+    assignee_available,
     out_of_scope_present,
     dependencies_ready,
     required_criteria_present,
@@ -388,6 +392,29 @@ fn reviewer_available(
         ));
     }
     None
+}
+
+fn assignee_available(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    if contract.assignee_role == Role::Human {
+        return None;
+    }
+    let active = context
+        .active_agents_by_role
+        .get(&contract.assignee_role)
+        .copied()
+        .unwrap_or(0);
+    (active == 0).then(|| {
+        failure(
+            ReadinessRule::AssigneeAvailable,
+            format!(
+                "nobody can take this task: the team has no active {}; add one on the Team page",
+                plain_role(contract.assignee_role)
+            ),
+        )
+    })
 }
 
 fn out_of_scope_present(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
@@ -1128,12 +1155,49 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_contract_whose_assignee_role_nobody_holds() {
+        let mut context = a_ready_context();
+        context
+            .active_agents_by_role
+            .remove(&Role::SoftwareDeveloper);
+        context.active_agents_by_role.insert(Role::Architect, 2);
+        assert_eq!(
+            failed_rules(&a_contract(), &context),
+            [R::AssigneeAvailable]
+        );
+        assert_eq!(
+            message_of(&a_contract(), &context, R::AssigneeAvailable),
+            "nobody can take this task: the team has no active Software Developer; add one on the Team page"
+        );
+        context
+            .active_agents_by_role
+            .insert(Role::SoftwareDeveloper, 1);
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+        // A human assignee is not an agent the team holds; the reviewer rule is what refuses it.
+        let mut contract = a_contract();
+        contract.assignee_role = Role::Human;
+        assert!(!failed_rules(&contract, &context).contains(&R::AssigneeAvailable));
+    }
+
+    #[test]
+    fn the_assignee_rule_comes_after_the_reviewers() {
+        let mut context = a_ready_context();
+        context
+            .active_agents_by_role
+            .remove(&Role::SoftwareDeveloper);
+        context.active_agents_by_role.remove(&Role::Architect);
+        assert_eq!(
+            failed_rules(&a_contract(), &context),
+            [R::ReviewerAvailable, R::AssigneeAvailable]
+        );
+    }
+
+    #[test]
     fn lets_the_human_review_an_epic_but_not_a_task() {
         let mut epic = a_contract();
         epic.kind = Kind::Epic;
         epic.reviewer_role = Role::Human;
-        let mut context = a_ready_context();
-        context.active_agents_by_role.clear();
+        let context = a_ready_context();
         assert_eq!(evaluate_readiness(&epic, &context), Ok(()));
         let mut task = a_contract();
         task.reviewer_role = Role::Human;

@@ -362,6 +362,38 @@ mod tests {
         (harness, folder)
     }
 
+    /// The project team of the refused-result tests: two Product Managers, `mira` paused and `pat`
+    /// active, and the Marketing Specialist `kai`. A template that keeps `mira` and drops `pat`
+    /// leaves no active Product Manager.
+    fn mira_paused_and_pat(wire: &mut Value) {
+        let mut mira = an_agent_wire("mira", "product_manager");
+        mira["status"] = json!("paused");
+        wire["agents"] = json!([
+            mira,
+            an_agent_wire("pat", "product_manager"),
+            an_agent_wire("kai", "marketing_specialist")
+        ]);
+    }
+
+    /// "Duo": Mira, the Product Manager `mira`, and Theo, a new Developer.
+    fn duo() -> Value {
+        json!({
+            "version": 1,
+            "name": "Duo",
+            "saved_at": "2026-09-30T12:00:00Z",
+            "agents": [
+                { "id": "mira", "display_name": "Mira", "role": "product_manager" },
+                { "id": "theo", "display_name": "Theo", "role": "software_developer" }
+            ],
+            "policy": {
+                "permissions": { "run_commands": true, "push": false },
+                "judgment": { "required": "never" },
+                "integration": "manual"
+            },
+            "budgets": {}
+        })
+    }
+
     /// A digest no template file has.
     const NO_DIGEST: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -984,9 +1016,7 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_in_plain_words() {
-        let (harness, folder) = templated("templates-refused", |wire| {
-            wire["agents"][2]["status"] = json!("paused");
-        });
+        let (harness, folder) = templated("templates-refused", mira_paused_and_pat);
         saved(&folder, &pair());
         std::fs::write(folder.join("broken.yaml"), "{").expect("written");
         assert_eq!(
@@ -1034,27 +1064,24 @@ mod tests {
             None
         );
 
-        // The paused match: dev-b, paused, is kept as the only Developer while dev-a, who
-        // worked, is retired.
-        worked(&harness, "dev-a");
-        let mut paused = pair();
-        paused["name"] = json!("Paused");
-        paused["agents"] = json!([
-            { "id": "pm", "display_name": "Mira", "role": "product_manager" },
-            { "id": "dev-b", "display_name": "Bo", "role": "software_developer" }
-        ]);
-        saved(&folder, &paused);
+        // The paused match: mira, paused, is kept while pat, who worked, is retired, so no
+        // Product Manager is active.
+        worked(&harness, "pat");
+        saved(&folder, &duo());
         let (team, events) = (team_file(&harness), seq_count(&harness));
-        let shown = preview(&harness, "paused");
-        assert_eq!(shown["errors"][0]["code"], "needs_developer", "{shown}");
+        let shown = preview(&harness, "duo");
+        assert_eq!(
+            shown["errors"][0]["code"], "needs_product_manager",
+            "{shown}"
+        );
         assert_eq!(shown["errors"][0]["path"], "/agents");
         assert_eq!(
             refusal(
                 &harness,
                 "template.apply",
-                &json!({ "slug": "paused", "digest": digest(&harness, "paused") })
+                &json!({ "slug": "duo", "digest": digest(&harness, "duo") })
             ),
-            (-32005, json!("needs_developer"), json!("/agents"))
+            (-32005, json!("needs_product_manager"), json!("/agents"))
         );
         assert_eq!(team_file(&harness), team, "nothing is written");
         assert_eq!(seq_count(&harness), events, "nothing is recorded");
@@ -1086,17 +1113,19 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn checks_again_when_applying_a_preview_gone_stale() {
-        let (harness, folder) = templated("templates-stale", |_| {});
-        let mut duo = pair();
-        duo["agents"].as_array_mut().expect("agents").pop();
-        saved(&folder, &duo);
-        worked(&harness, "dev-b");
-        let shown = preview(&harness, "pair");
+        let (harness, folder) = templated("templates-stale", |wire| {
+            wire["agents"][0]["status"] = json!("active");
+            mira_paused_and_pat(wire);
+            wire["agents"][0]["status"] = json!("active");
+        });
+        saved(&folder, &duo());
+        worked(&harness, "pat");
+        let shown = preview(&harness, "duo");
         assert_eq!(shown["errors"], json!([]));
-        // Since the preview, Ada (dev-a), whom Pair now keeps as its only Developer, was paused:
-        // applying now would retire dev-b and leave no active Developer.
+        // Since the preview, Mira, whom Duo keeps as its only Product Manager, was paused:
+        // applying now would retire pat and leave no active Product Manager.
         let mut wire = team_file(&harness);
-        wire["agents"][1]["status"] = json!("paused");
+        wire["agents"][0]["status"] = json!("paused");
         harness
             .project
             .deps
@@ -1108,9 +1137,9 @@ mod tests {
             refusal(
                 &harness,
                 "template.apply",
-                &json!({ "slug": "pair", "digest": shown["digest"] })
+                &json!({ "slug": "duo", "digest": shown["digest"] })
             ),
-            (-32005, json!("needs_developer"), json!("/agents"))
+            (-32005, json!("needs_product_manager"), json!("/agents"))
         );
         assert_eq!(team_file(&harness), wire, "nothing is written");
         assert_eq!(seq_count(&harness), events);
@@ -1168,26 +1197,27 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn works_the_result_out_again_under_the_lock() {
-        let (harness, folder) = templated("templates-under-lock", |_| {});
-        let mut duo = pair();
-        duo["agents"].as_array_mut().expect("agents").pop();
-        saved(&folder, &duo);
-        worked(&harness, "dev-b");
-        let digest = digest(&harness, "pair");
+        let (harness, folder) = templated("templates-under-lock", |wire| {
+            mira_paused_and_pat(wire);
+            wire["agents"][0]["status"] = json!("active");
+        });
+        saved(&folder, &duo());
+        worked(&harness, "pat");
+        let digest = digest(&harness, "duo");
         let writing = harness.daemon.team_writes();
         let daemon = Arc::clone(&harness.daemon);
         let asking = std::thread::spawn(move || {
             rpc(
                 &daemon,
                 "template.apply",
-                &json!({ "slug": "pair", "digest": digest }),
+                &json!({ "slug": "duo", "digest": digest }),
             )
         });
         std::thread::sleep(std::time::Duration::from_millis(300));
-        // While another write holds the team, it pauses Ada (dev-a), whom Pair keeps as its only
-        // Developer: worked out against this team, applying retires dev-b and leaves none active.
+        // While another write holds the team, it pauses Mira, whom Duo keeps as its only Product
+        // Manager: worked out against this team, applying retires pat and leaves none active.
         let mut wire = team_file(&harness);
-        wire["agents"][1]["status"] = json!("paused");
+        wire["agents"][0]["status"] = json!("paused");
         harness
             .project
             .deps
@@ -1200,7 +1230,7 @@ mod tests {
         assert_eq!(reply["error"]["code"], -32005, "{reply}");
         assert_eq!(
             reply["error"]["data"]["errors"][0]["code"],
-            "needs_developer"
+            "needs_product_manager"
         );
         assert_eq!(team_file(&harness), wire, "nothing is written");
         assert_eq!(seq_count(&harness), events);

@@ -116,7 +116,7 @@ Files: modified `crates/core/src/team.rs`, `crates/core/src/team/template.rs` (t
 - `retires_the_last_developer` (human.rs) — retiring the only Developer of a team with an active Product Manager is not refused; pausing the only Product Manager still is, with `last_of_role`.
 - The daemon's tests that expected `needs_developer` (`daemon/team.rs` `3891`-`3898`, `daemon/templates.rs` `refuses_in_plain_words`, `checks_again_when_applying_a_preview_gone_stale`, `works_the_result_out_again_under_the_lock`) use the paused-Product-Manager scenario and expect `needs_product_manager`; `daemon/gates.rs`'s counts become 24 and 26.
 
-- [ ] `feat(core): a team needs an active Product Manager alone, and readiness needs the assignee's role`
+- [x] `feat(core): a team needs an active Product Manager alone, and readiness needs the assignee's role`
 
 ### Task 2: the three teams and the Finance Specialist's mandate
 
