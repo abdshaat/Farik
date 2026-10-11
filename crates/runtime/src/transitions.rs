@@ -2157,6 +2157,12 @@ mod tests {
             0
         );
         assert_eq!(open_tasks(&project.team, None, &board, "maya", None), 1);
+        // Another epic's task does not lift the exception: `maya`'s own epic still counts.
+        let other = "CTV-4".parse().expect("a task id");
+        assert_eq!(
+            open_tasks(&project.team, None, &board, "maya", Some(&other)),
+            1
+        );
 
         let asking = |task: &str| {
             project.ask(
