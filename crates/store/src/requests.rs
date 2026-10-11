@@ -360,7 +360,7 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64) -> Value {
         "intent": "Write this new project's product plan from the owner's interview in your one-to-one chat, which From the human holds: docs/catervas/product/spec.md, the product description, and docs/catervas/product/roadmap.md, the roadmap, each for the owner to read, with its .agent.md version for the team. Nothing else is planned until the owner approves it.",
         "summary": "The Product Manager writes the product description and the roadmap from your interview, for you to read and approve. Nothing else is planned until you approve them.",
         "scope": {
-            "in_scope": ["docs/catervas/product/spec.md and roadmap.md, each with its .agent.md version"],
+            "in_scope": ["The product description (spec.md) and the roadmap (roadmap.md), each with the team's copy."],
             "out_of_scope": ["Code, and every other document"]
         },
         "requirements": [
@@ -374,13 +374,13 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64) -> Value {
             },
             {
                 "id": "R3",
-                "text": "spec.agent.md and roadmap.agent.md say what spec.md and roadmap.md say, written for agents."
+                "text": "The team's copies of both (spec.agent.md, roadmap.agent.md) say the same, written for the agents."
             }
         ],
         "exit_criteria": [
             {
                 "id": "C1",
-                "text": "spec.md and roadmap.md have what R1 and R2 name.",
+                "text": "The product description and the roadmap have every part listed above.",
                 "satisfies": ["R1", "R2"],
                 "verification": {
                     "method": "review",
@@ -393,7 +393,7 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64) -> Value {
             },
             {
                 "id": "C2",
-                "text": "The .agent.md versions say what the documents for the owner say.",
+                "text": "The team's copies say the same as the documents you read.",
                 "satisfies": ["R3"],
                 "verification": {
                     "method": "review",
@@ -1135,6 +1135,29 @@ mod tests {
         assert_eq!(contract.assignee_role, Role::ProductManager);
         assert_eq!(contract.allowed_paths, paths);
         assert_eq!(evaluate_readiness(&contract, &a_ready_context()), Ok(()));
+        // The owner reads and accepts the result.
+        assert!(catervas_core::governor::done::result_needs_the_human(
+            &contract
+        ));
+        // The words the owner reads are plain, and these are the ones they get.
+        assert_eq!(
+            contract.scope.in_scope,
+            [
+                "The product description (spec.md) and the roadmap (roadmap.md), each with the team's copy."
+            ]
+        );
+        assert_eq!(
+            contract.requirements[2].text.to_string(),
+            "The team's copies of both (spec.agent.md, roadmap.agent.md) say the same, written for the agents."
+        );
+        assert_eq!(
+            contract.exit_criteria[0].text.to_string(),
+            "The product description and the roadmap have every part listed above."
+        );
+        assert_eq!(
+            contract.exit_criteria[1].text.to_string(),
+            "The team's copies say the same as the documents you read."
+        );
 
         let events = log.read(&EventQuery::default()).expect("the log reads");
         assert_eq!(
