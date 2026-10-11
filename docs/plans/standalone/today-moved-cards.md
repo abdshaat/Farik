@@ -20,7 +20,7 @@ The founder, 2026-10-11: "Under what moved since yesterday in the main endpoint,
 - Show more: `useState(3)`; the list shows the first `shown` of the reversed rows. One `Button` (`kind` default), rendered while there are more than three rows, inside `<div className={styles.movedMore}>` (`.movedMore > button { width: 100%; }`, `Button` taking no `className`): while rows are hidden its words are "Show more ({n} more)" (`movedMore`) and it adds three; once all show its words are "Show fewer" (`movedFewer`) and it sets three again. Being one element whose words switch, it keeps focus when pressed (the new cards land above it). Rejected: pages with Newer and Older (the founder's first boards, replaced), a "load more" from the daemon (a day's moves are already in hand).
 - Where the board and this plan differ, the plan wins: pictures at 48 (not 40), the card's radius `--catervas-radius-raised`, and the button's words plain, "Show more ({n} more)", with no chevron and no muted part.
 - Style: `.moved` stays the bulletless grid; `.moved li` becomes the card (surface, `rule` border, `--catervas-radius-raised`, `space-3` `space-4` padding, flex with `space-3` gap); the head line wraps; `time` keeps the code face and `ink-muted`. The `Button` at the list's end takes the row's width.
-- Spec revision 0.87 (2026-10-11), a header sentence at `docs/SPEC.md:3`, and one sentence at the end of 5.7's last paragraph (line 340): Today's "What moved since yesterday" shows the moves newest first as cards with who made each, three at first, "Show more" adding three; `moved.since` gives `by`. `docs/design/web-ui.md`'s Today row (line 121) says "What moved" is cards, newest first, with Show more.
+- Spec revision 0.88 (2026-10-11; 0.87 until the merge of `main`, whose `reconnect-ai-account` took 0.87 first), a header sentence at `docs/SPEC.md:3`, and one sentence at the end of 5.7's last paragraph (line 340): Today's "What moved since yesterday" shows the moves newest first as cards with who made each, three at first, "Show more" adding three; `moved.since` gives `by`. `docs/design/web-ui.md`'s Today row (line 121) says "What moved" is cards, newest first, with Show more.
 
 ## File map
 
@@ -84,7 +84,7 @@ Tests (`Today.test.tsx`; `today()`'s fixture team holds the agents named):
 
 ### Task 3: the spec and the design say so
 
-Files: `docs/SPEC.md` (0.87 header sentence; the sentence at the end of 5.7's last paragraph, line 340), `docs/design/web-ui.md` (Today's row)
+Files: `docs/SPEC.md` (0.88 header sentence; the sentence at the end of 5.7's last paragraph, line 340), `docs/design/web-ui.md` (Today's row)
 
 Tests: none (docs).
 

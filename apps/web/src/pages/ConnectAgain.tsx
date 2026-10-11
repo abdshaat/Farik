@@ -7,8 +7,18 @@ import styles from "./pages.module.css";
 
 type Kind = "subscription_token" | "api_key";
 
-/** Settings' account row while the provider refuses the key: a new key, kept, resumes the team. */
-export function ConnectAgain({ onConnected }: { onConnected: () => void }) {
+/**
+ * Settings' account row taking a key: while the provider refuses the key (`refused`), a new key,
+ * kept, resumes the team; with no account connected, it connects one without starting Catervas
+ * again.
+ */
+export function ConnectAgain({
+	onConnected,
+	refused: keyRefused = true,
+}: {
+	onConnected: () => void;
+	refused?: boolean;
+}) {
 	const { client } = useConnection();
 	const [kind, setKind] = useState<Kind>("subscription_token");
 	const [secret, setSecret] = useState("");
@@ -30,7 +40,7 @@ export function ConnectAgain({ onConnected }: { onConnected: () => void }) {
 	};
 	return (
 		<>
-			<p role="alert">{t("accountKeyRefused")}</p>
+			{keyRefused && <p role="alert">{t("accountKeyRefused")}</p>}
 			<Choice<Kind>
 				name="kind"
 				legend={t("accountKind")}
@@ -57,7 +67,7 @@ export function ConnectAgain({ onConnected }: { onConnected: () => void }) {
 					disabled={secret.trim() === ""}
 					onClick={connect}
 				>
-					{t("accountConnectAgain")}
+					{t(keyRefused ? "accountConnectAgain" : "accountConnect")}
 				</Button>
 			</div>
 		</>
