@@ -82,6 +82,9 @@ pub enum ReadinessRule {
     LaneBeyondBuilders,
     /// A task's allowed paths could not meet those of a task in another lane of its epic.
     LanesOverlap,
+    /// A new project plans nothing but its product plan until the plan is on the integration
+    /// branch.
+    ProductPlanFirst,
     /// The judge's review is recorded when the team's policy checks plans.
     JudgmentRecorded,
     /// The judge answered yes to every question it was asked.
@@ -136,6 +139,10 @@ pub struct ParentState {
 
 /// Everything the readiness check needs from the world, passed in by the runtime.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one fact the runtime read from the world about this contract"
+)]
 pub struct ReadinessContext {
     /// What is left of the sprint's budget, in dollars.
     pub remaining_sprint_budget_usd: f64,
@@ -154,6 +161,10 @@ pub struct ReadinessContext {
     /// Whether the human approves this plan before work starts, and so reads its summary first:
     /// the team's policy is `all`, or the contract is an epic or a `high` risk task.
     pub human_approves: bool,
+    /// Whether this is a new project whose product plan is not on the integration branch yet.
+    pub awaits_the_product_plan: bool,
+    /// Whether this contract is that product plan's own task.
+    pub is_the_product_plan: bool,
 }
 
 /// One rule the contract fails, with a message that says what to change.
@@ -167,7 +178,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 24] = [
+const CHECKS: [Check; 25] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -192,6 +203,7 @@ const CHECKS: [Check; 24] = [
     budget_within_parent,
     lane_beyond_builders,
     lanes_overlap,
+    product_plan_first,
 ];
 
 /// The judge's review, asked of a contract only once every other rule passes, so that a
@@ -1017,6 +1029,15 @@ fn lanes_overlap(contract: &TaskContract, context: &ReadinessContext) -> Option<
     ))
 }
 
+fn product_plan_first(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    (context.awaits_the_product_plan && !context.is_the_product_plan).then(|| {
+        failure(
+            ReadinessRule::ProductPlanFirst,
+            "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec.md and docs/catervas/product/roadmap.md are on the integration branch".to_string(),
+        )
+    })
+}
+
 fn judgment_recorded(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
     if context.requires_judgment_review && context.judgment_review.is_none() {
         return Some(failure(
@@ -1228,6 +1249,28 @@ mod tests {
             message_of(&a_contract(), &context, R::ReviewerAvailable)
                 .ends_with("add an agent with role architect")
         );
+    }
+
+    #[test]
+    fn refuses_everything_but_the_product_plan_until_it_is_approved() {
+        let mut context = a_ready_context();
+        context.awaits_the_product_plan = true;
+        let message = "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec.md and docs/catervas/product/roadmap.md are on the integration branch";
+        assert_eq!(failed_rules(&a_contract(), &context), [R::ProductPlanFirst]);
+        assert_eq!(
+            message_of(&a_contract(), &context, R::ProductPlanFirst),
+            message
+        );
+        let mut epic = a_contract();
+        epic.kind = Kind::Epic;
+        epic.reviewer_role = Role::Human;
+        assert_eq!(failed_rules(&epic, &context), [R::ProductPlanFirst]);
+        context.is_the_product_plan = true;
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+        context.awaits_the_product_plan = false;
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+        context.is_the_product_plan = false;
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
     }
 
     #[test]

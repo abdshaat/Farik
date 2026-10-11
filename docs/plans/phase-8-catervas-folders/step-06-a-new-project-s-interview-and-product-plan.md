@@ -99,7 +99,7 @@ Files: `folders.rs` (`PRODUCT_PLAN`, `product_plan_approved`, tests); `readiness
 - `refuses_everything_but_the_product_plan_until_it_is_approved` (`readiness.rs`) — `a_ready_context()` with `awaits_the_product_plan: true`: `a_contract()` fails `[ProductPlanFirst]` alone with exactly the Decisions' message, and an epic of it too; with `is_the_product_plan: true` it passes; with `awaits_the_product_plan: false` it passes either way. RED: no rule.
 - `the_product_plan_sentence_is_plain` (`plain.rs`) — exactly "A new project plans nothing until the owner approves its product plan.". RED.
 
-- [ ] `feat(core): plan nothing in a new project before its product plan`
+- [x] `feat(core): plan nothing in a new project before its product plan`
 
 ### Task 2: A new project is recorded, and its plan's task marked
 

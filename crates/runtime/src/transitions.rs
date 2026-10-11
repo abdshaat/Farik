@@ -737,6 +737,8 @@ impl Transitions {
             requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
             judgment_review: judgment_since_written(history),
             human_approves: asks_every_contract(team) || requires_human_acceptance(contract),
+            awaits_the_product_plan: false,
+            is_the_product_plan: false,
         };
 
         Ok((budget, open_sprint, sprint_left, readiness))
