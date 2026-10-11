@@ -49,7 +49,7 @@ Catervas runs a small team of AI agents on one project for one person. The team 
 
 - **The harness test.** On Catervas's own project, the Product Manager writes contracts for three real issues, one Developer builds them, a second checks them, the Product Manager accepts them, and the founder reviews the changes and the record and agrees each was done as agreed.
 - **The thirty-minute test.** A new user with no help goes from nothing to an accepted task on their own project in under thirty minutes, measured with five people, at least three of them non-technical, in the browser.
-- **The kit check.** Every role does one real task with its own tools in the web app, recorded and signed off by the founder.
+- **The kit check.** Each role but the DevOps Engineer does one real task with its own tools in the web app, on Claude, recorded and signed off.
 - **The benchmark.** Before launch, a published, blind comparison of a Catervas team against one fully equipped AI agent: Catervas must be at least as good on quality and clearly better on failures and cost control, or it does not launch and the product changes.
 - **The numbers to watch:** tasks accepted on their first review; escalations per accepted task, which should fall over time; cost per accepted task and how much of it goes to planning and review; the share of checks run by a command or test rather than by opinion; and projects still active four weeks later.
 - **Before the desktop app:** the founder and at least three non-technical testers run the released web app on their own projects, and the founder signs off the record.

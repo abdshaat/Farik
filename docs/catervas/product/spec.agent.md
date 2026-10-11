@@ -49,7 +49,7 @@ Catervas runs its own small team of AI agents (Product Manager, Scrum Master, Ar
 
 - Milestone 0 exit: on Catervas's own repo, PM contracts three real issues, one Developer implements, the other verifies, PM accepts, human reviews diffs and event log and agrees each was done as contracted (docs/SPEC.md §11).
 - Milestone 1 exit: new user with no help goes from nothing to an accepted task on their own repo within 30 minutes; 5 test users, ≥3 non-technical; run in the browser (docs/SPEC.md §11; docs/plans/project-plan.md phase 9).
-- Kit check: one real task per role (but DevOps) in the web app on Claude, recorded in docs/milestones/role-kits.md and signed off (docs/plans/project-plan.md phase 9 step 02).
+- Kit check: each role's kit but the DevOps Engineer's does one real task in the web app, on Claude, recorded in docs/milestones/role-kits.md and signed off (docs/plans/project-plan.md phase 9 step 02).
 - Benchmark gate: pre-registered, blind benchmark vs one fully equipped agent; at least as good on quality, clearly better on failure rates and cost control; speed does not block; failure changes the product (ADR 0025; docs/plans/project-plan.md phase 12).
 - Metrics: first-pass acceptance rate; escalations per accepted task (should fall); cost per accepted task and the share on PM and review sessions; share of exit criteria verified by command or test; weekly returning projects at four weeks (docs/PRODUCT_ANALYSIS.md "What to measure").
 - Desktop gate: founder and ≥3 non-technical testers run the released web app on their own repos; founder signs off docs/milestones/web-release.md (docs/SPEC.md §11 Milestone 3; docs/plans/project-plan.md phase 15 step 01).

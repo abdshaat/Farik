@@ -13,7 +13,7 @@ Taken from the project's plan, its decisions and its recent history. Catervas ha
 
 - **Catervas Cloud.** A free service run by Catervas that signs people in to GitHub in one click and to Google Ads, with the website, the privacy policy and a Catervas account; its hosting is planned privately, apart from this project.
 - **Ask or auto.** The owner chooses to approve every outward action or let the team act on its own within its limits, with purchases, spending limits and the owner's decisions always kept.
-- **The kit check.** Each role but the DevOps Engineer does one real task with its own tools in the web app, recorded and signed off.
+- **The kit check.** Each role but the DevOps Engineer does one real task with its own tools in the web app, on Claude, recorded and signed off.
 - **The first real-user tests.** A recorded team sprint in the browser, then the thirty-minute test with five new users, at least three of them non-technical.
 
 ## Later

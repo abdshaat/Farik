@@ -13,7 +13,7 @@ From docs/plans/project-plan.md (rev 41), docs/decisions/, CLAUDE.md "Current st
 
 - **Catervas Cloud.** Phase 8: free sign-in service (GitHub single click, Google Ads), website, privacy policy, Catervas account; hosting planned separately in the private ops repository (ADR 0044, ADR 0047, ADR 0048; project-plan phase 8).
 - **Ask or auto.** Phase 9 step 01: owner chooses `ask` or `auto` for outward acts within limits; purchase orders, spending limits and human gates unchanged (ADR 0041; docs/plans/phase-9-milestones/step-01-ask-or-auto.md).
-- **The kit check.** Phase 9 step 02: one real task per role but DevOps in the web app on Claude, recorded in docs/milestones/role-kits.md and signed off; not yet planned (project-plan phase 9).
+- **The kit check.** Phase 9 step 02: each role's kit but the DevOps Engineer's does one real task in the web app, on Claude, recorded in docs/milestones/role-kits.md and signed off; not yet planned (project-plan phase 9).
 - **The first real-user tests.** Phase 9 step 03: recorded team sprint in the browser, then Milestone 1's 30-minute test with 5 users, ≥3 non-technical (docs/SPEC.md §11; project-plan phase 9).
 
 ## Later
