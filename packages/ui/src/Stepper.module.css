@@ -41,3 +41,8 @@
 	text-decoration: underline;
 	cursor: pointer;
 }
+
+.link:focus-visible {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: 2px;
+}

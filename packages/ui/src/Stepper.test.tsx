@@ -22,9 +22,9 @@ describe("Stepper", () => {
 		await expectNoAxeViolations(container);
 	});
 
-	it("links_the_earlier_steps", () => {
+	it("links_the_earlier_steps", async () => {
 		const onPick = vi.fn();
-		render(
+		const { container } = render(
 			<Stepper
 				steps={["Your project", "What we found", "Your team", "Spending"]}
 				current={2}
@@ -40,6 +40,7 @@ describe("Stepper", () => {
 		expect(onPick).toHaveBeenCalledWith(1);
 		expect(screen.queryByRole("button", { name: "Your team" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Spending" })).toBeNull();
+		await expectNoAxeViolations(container);
 	});
 
 	it("links_nothing_without_on_pick", () => {
