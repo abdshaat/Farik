@@ -54,16 +54,20 @@ pub(crate) fn with_the_designer(wire: &mut Value) {
 }
 
 /// The suggested six (`pm`, `sm`, `ada`, `dev`, `iris`, `kai`): a Product Manager, a Scrum Master,
-/// an Architect, one Software Developer, a UI/UX Designer and a Marketing Specialist.
+/// an Architect, one Software Developer, a UI/UX Designer with its Playwright connector and a
+/// Marketing Specialist, and a preview for the Designer to open.
 pub(crate) fn with_the_suggested_six(wire: &mut Value) {
+    let mut iris = an_agent_wire("iris", "ui_ux_designer");
+    iris["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
     wire["agents"] = json!([
         an_agent_wire("pm", "product_manager"),
         an_agent_wire("sm", "scrum_master"),
         an_agent_wire("ada", "architect"),
         an_agent_wire("dev", "software_developer"),
-        an_agent_wire("iris", "ui_ux_designer"),
+        iris,
         an_agent_wire("kai", "marketing_specialist"),
     ]);
+    wire["preview"] = json!({ "start": "make serve", "port": 4401 });
 }
 
 /// Adds the Marketing Specialist `kai` to a team's wire.

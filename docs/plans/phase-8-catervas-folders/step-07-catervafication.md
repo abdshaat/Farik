@@ -138,7 +138,7 @@ Files: `catervafication.rs` (`start`, `started`, `Started`, `CatervaficationErro
 - `assigns_the_product_managers_task_under_its_own_epic` (`rules.rs`, integration, no Scrum Master, WIP 1) — `pm` holds the in-progress Catervafication epic CTV-1 and its PM task CTV-2 is `ready`: rule 8's plan session offers `pm` among those with room. RED: rule 8 passes `None` for the parent.
 - `offers_the_catervafication_until_it_starts` (`gates.rs`, integration) — `catervafication.get` answers `{ offered: true, roles: ["product_manager", "architect", "software_developer", "ui_ux_designer", "marketing_specialist"] }` on the suggested six, `offered: false` after the command and on a log holding `project.started`. RED: unknown query.
 
-- [ ] `feat(runtime): start a Catervafication on the owner's word`
+- [x] `feat(runtime): start a Catervafication on the owner's word`
 
 ### Task 5: The tasks, and the retro's line
 

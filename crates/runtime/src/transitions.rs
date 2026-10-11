@@ -1262,7 +1262,13 @@ fn assignment(
         assignee_role,
         reviewer_id,
         reviewer_role,
-        assignee_open_tasks: open_tasks(team, open_sprint.as_deref(), board, assignee_id),
+        assignee_open_tasks: open_tasks(
+            team,
+            open_sprint.as_deref(),
+            board,
+            assignee_id,
+            row.parent.as_ref(),
+        ),
         wip_limit: u32::try_from(team.policy.wip_limit_per_agent).unwrap_or(u32::MAX),
         remaining_sprint_budget_usd: sprint_left_usd,
         open_sprint,
@@ -1405,17 +1411,20 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
 }
 
 /// The tasks an agent holds that are neither accepted nor cancelled (5.2), leaving out one that
-/// waits for a sprint while `open_sprint` is open: it is not being worked (ADR 0028).
+/// waits for a sprint while `open_sprint` is open: it is not being worked (ADR 0028), and the epic
+/// `under`, when one is named: an epic does not hold its own tasks back from its assignee.
 pub(crate) fn open_tasks(
     team: &Team,
     open_sprint: Option<&str>,
     board: &[TaskProjection],
     agent_id: &str,
+    under: Option<&TaskId>,
 ) -> u32 {
     let held = board
         .iter()
         .filter(|row| {
             row.assignee_id.as_deref() == Some(agent_id)
+                && under != Some(&row.task_id)
                 && !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
                 && !waits_for_a_sprint(&crate::sprints::sprint_hold(team, open_sprint, row))
         })
@@ -2106,6 +2115,75 @@ mod tests {
         if held != "assigned" {
             project.moved(task, "assigned", held, &people, at(10));
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_epics_own_task_is_not_held_by_the_epic() {
+        use super::open_tasks;
+
+        let project = Project::new(
+            "epic-own-task",
+            a_team(|wire| wire["policy"]["wip_limit_per_agent"] = json!(1)),
+            at(12),
+        );
+        // `maya` holds the epic CTV-1, in progress; CTV-4 is another epic, held by `dev-a`.
+        for (epic, holder) in [("CTV-1", "maya"), ("CTV-4", "dev-a")] {
+            project.file(epic, |wire| {
+                wire["kind"] = json!("epic");
+                wire["assignee_role"] = json!("product_manager");
+                wire["reviewer_role"] = json!("human");
+            });
+            project.created_under(epic, "ready", "epic", None);
+            let people = json!({ "assignee": holder });
+            project.moved(epic, "ready", "assigned", &people, at(10));
+            project.moved(epic, "assigned", "in_progress", &people, at(10));
+        }
+        // CTV-2 is a Product Manager's task under CTV-1, CTV-3 one under CTV-4.
+        for (task, epic) in [("CTV-2", "CTV-1"), ("CTV-3", "CTV-4")] {
+            project.file(task, |wire| {
+                wire["kind"] = json!("task");
+                wire["parent"] = json!(epic);
+                wire["assignee_role"] = json!("product_manager");
+                wire["reviewer_role"] = json!("software_developer");
+            });
+            project.created_under(task, "ready", "task", Some(epic));
+        }
+
+        let board = project.projections.board().expect("the board reads");
+        let epic = "CTV-1".parse().expect("a task id");
+        assert_eq!(
+            open_tasks(&project.team, None, &board, "maya", Some(&epic)),
+            0
+        );
+        assert_eq!(open_tasks(&project.team, None, &board, "maya", None), 1);
+
+        let asking = |task: &str| {
+            project.ask(
+                &a_request(
+                    task,
+                    TaskStatus::Assigned,
+                    TransitionActor::ProductManager,
+                    Some("maya"),
+                ),
+                &assigning("maya", "dev-b"),
+            )
+        };
+        let outcome = asking("CTV-2");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        // Under another epic, the epic `maya` holds still counts against her limit of one.
+        let TransitionOutcome::Refused(refusal) = asking("CTV-3") else {
+            panic!("CTV-3 was assigned to a Product Manager at her limit");
+        };
+        assert!(
+            refusal_details(&refusal)
+                .iter()
+                .any(|reason| reason.contains("limit")),
+            "{refusal:?}"
+        );
     }
 
     #[test]

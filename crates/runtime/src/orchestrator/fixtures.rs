@@ -287,6 +287,14 @@ impl Harness {
         })
     }
 
+    /// A harness on the suggested six (`with_the_suggested_six`) whose previews can run, so that the
+    /// Designer's browser is ready.
+    pub(crate) fn with_the_suggested_six(name: &str) -> Self {
+        let mut harness = Self::new(name, crate::tools::fixtures::with_the_suggested_six);
+        harness.previews = Arc::new(crate::preview::fixtures::FakePreviews::ready());
+        harness
+    }
+
     /// A harness whose team also has two Finance Specialists, `fin` and `fin-2`, each of whom may
     /// hold two tasks.
     pub(crate) fn with_finance(name: &str) -> Self {

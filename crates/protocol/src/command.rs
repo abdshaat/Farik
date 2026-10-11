@@ -202,6 +202,9 @@ pub enum Command {
     TeamResume,
     /// The owner's word that the Product Manager is to draft a new project's product plan.
     ProductPlanDraft,
+    /// The owner's order that the team documents an existing repository (5.16): the epic is filed
+    /// and approved by this order.
+    CatervaficationStart,
     /// Say something in the team's channel.
     MessagePost {
         /// What the human says.
@@ -572,7 +575,8 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
         | CommandName::SprintEnd
         | CommandName::TeamPause
         | CommandName::TeamResume
-        | CommandName::ProductPlanDraft => empty_command(name, body),
+        | CommandName::ProductPlanDraft
+        | CommandName::CatervaficationStart => empty_command(name, body),
         CommandName::SprintStart => {
             let body: SprintStartBody = read_body(body, name)?;
             Ok(Command::SprintStart {
@@ -813,8 +817,8 @@ fn skill_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
     }
 }
 
-/// `run_stop`, `sprint_end`, `team_pause`, `team_resume` or `product_plan_draft`, whose body is
-/// empty.
+/// `run_stop`, `sprint_end`, `team_pause`, `team_resume`, `product_plan_draft` or
+/// `catervafication_start`, whose body is empty.
 fn empty_command(name: CommandName, body: &Value) -> Result<Command, Vec<ValidationError>> {
     let _: EmptyBody = read_body(body, name)?;
     Ok(match name {
@@ -822,6 +826,7 @@ fn empty_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
         CommandName::SprintEnd => Command::SprintEnd,
         CommandName::TeamPause => Command::TeamPause,
         CommandName::ProductPlanDraft => Command::ProductPlanDraft,
+        CommandName::CatervaficationStart => Command::CatervaficationStart,
         _ => Command::TeamResume,
     })
 }
@@ -962,6 +967,7 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::TeamPause => (CommandName::TeamPause, json!({})),
         Command::TeamResume => (CommandName::TeamResume, json!({})),
         Command::ProductPlanDraft => (CommandName::ProductPlanDraft, json!({})),
+        Command::CatervaficationStart => (CommandName::CatervaficationStart, json!({})),
         Command::MessagePost { text } => (CommandName::MessagePost, json!({ "text": text })),
         Command::ChatMessagePost { agent_id, text } => (
             CommandName::ChatMessagePost,
@@ -1761,6 +1767,16 @@ mod tests {
             json!({ "command": "product_plan_draft", "body": {} })
         );
         let errors = refusal(&json!({ "command": "product_plan_draft", "body": { "why": "now" } }));
+        assert!(!errors.is_empty(), "it takes no field");
+    }
+
+    #[test]
+    fn reads_catervafication_start() {
+        let wire = json!({ "command": "catervafication_start", "body": {} });
+        let command = command_from_value(&wire).expect("a valid catervafication_start");
+        assert_eq!(command_to_value(&command), wire);
+        let errors =
+            refusal(&json!({ "command": "catervafication_start", "body": { "project": "new" } }));
         assert!(!errors.is_empty(), "it takes no field");
     }
 

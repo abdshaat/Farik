@@ -34,6 +34,7 @@ use super::verify::{
     since_verifying, unanswered,
 };
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
+use crate::catervafication::catervafication_of;
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
@@ -278,8 +279,8 @@ fn judge(
 
 /// Whether the contract is judged now: written since refining began with no refusal by the
 /// governor since that write, or, with no such write, filed whole (a breakdown's task, a contract
-/// the human holds, a twin's re-derive, a new project's product plan) and not refused since refining
-/// began. A raw request is not judged: its brief would fail and spend one of the three attempts.
+/// the human holds, a twin's re-derive, a new project's product plan, a Catervafication's epic) and not refused
+/// since refining began. A raw request is not judged: its brief would fail and spend one of the three attempts.
 fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u64) -> bool {
     let refused_after = |after: u64| {
         history.iter().any(|event| {
@@ -296,11 +297,13 @@ fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u6
     let is_a_rederive = history.iter().any(
         |event| matches!(&event.body, EventBody::TaskCreated(body) if body.rederives.is_some()),
     );
-    // The product plan's task is Catervas's contract, filed whole: no refine session rewrites it.
+    // The product plan's task and the Catervafication's epic are Catervas's contracts, filed
+    // whole: no refine session rewrites them.
     let filed_whole = contract.parent.is_some()
         || contract.locked
         || is_a_rederive
-        || is_the_product_plan(history);
+        || is_the_product_plan(history)
+        || catervafication_of(history).is_some();
     match written {
         Some(written) => !refused_after(written),
         None => filed_whole && !refused_after(began),
@@ -354,7 +357,7 @@ pub(super) fn ready_epic(
     };
     let open = deps.tools.projections.open_sprint()?;
     let open = open.as_ref().map(|sprint| sprint.sprint_id.as_str());
-    if !has_room(team, open, board, assignee)
+    if !has_room(team, open, board, assignee, None)
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
@@ -2054,6 +2057,44 @@ mod tests {
             adapter.started().is_empty(),
             "no refine session rewrites it"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_the_catervafication_epic_as_filed_whole() {
+        use crate::catervafication::{Project, epic_contract};
+        use catervas_store::requests::file_catervafication_epic;
+
+        let harness = Harness::new("req-catervafication-whole", |_| {});
+        let deps = &harness.project.deps;
+        file_catervafication_epic(
+            &deps.files,
+            &deps.log,
+            epic_contract(Project::New, 2.0),
+            "catervas",
+            Project::New,
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("the epic is filed");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // Rule 10 moves it to refining on the Product Manager's behalf; the next tick judges it as
+        // filed, and the governor asks the owner, with no refine session to rewrite the template.
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            moves_of(&harness, "CTV-1"),
+            ["draft -> refining", "refining -> escalated"]
+        );
+        assert!(
+            adapter.started().is_empty(),
+            "no refine session rewrites it"
+        );
+        let raised = last(&harness, EventKind::EscalationRaised).expect("the owner is asked");
+        assert!(matches!(&raised.body, EventBody::EscalationRaised(body)
+            if body.reason == EscalationRaisedBodyReason::Approval));
     }
 
     #[tokio::test]

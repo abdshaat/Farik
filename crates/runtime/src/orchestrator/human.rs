@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::{agent_twin, folder_doc_author, folder_doc_message};
-use catervas_core::governor::gates::{Blocker, Rejection};
+use catervas_core::governor::gates::{Blocker, DesignerBrowser, Rejection};
 use catervas_core::governor::sites::site_of;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
@@ -37,6 +37,7 @@ use super::requests::{HUMAN, product_manager};
 use super::verify::{governor_results, is_mechanical, since_verifying};
 
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
+use crate::catervafication::{self, Project};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
@@ -164,6 +165,7 @@ pub(super) async fn handle(
         Command::TeamPause => pause(tools, true),
         Command::TeamResume => pause(tools, false),
         Command::ProductPlanDraft => draft_product_plan(tools),
+        Command::CatervaficationStart => catervafication_start(tools),
         Command::MessagePost { text } => post_message(tools, text),
         Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
         Command::ConnectorConnect {
@@ -373,6 +375,85 @@ fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandErro
             "{} drafts the product plan as {}. It comes to you on Today to approve.",
             writer.display_name.as_str(),
             contract.id.as_str()
+        ),
+        events,
+    })
+}
+
+/// Held while a Catervafication starts, so that two presses of Start file one epic.
+// ponytail: one lock for the process, as the product plan's draft has; the command line does not start one.
+static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The owner's Start of the Catervafication of an existing repository (4.1, 5.16): the epic is filed,
+/// given a sprint of its own and approved by this order. Each refusal is `<code>: <words>`, in this
+/// order, and records nothing.
+fn catervafication_start(tools: &ToolDeps) -> Result<CommandReport, CommandError> {
+    let team = tools.files.read_team().map_err(failed)?;
+    catervafication_start_for(tools, &team)
+}
+
+/// `catervafication_start` for `team`, which a team file's validation keeps from lacking an active
+/// Product Manager and which a test may therefore hand in whole.
+fn catervafication_start_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandError> {
+    let _starting = crate::locked(&STARTING);
+    tools.projections.catch_up().map_err(failed)?;
+    let refused = |reason: &str| {
+        Err(CommandError::Refused {
+            reason: reason.to_string(),
+        })
+    };
+    if let Some(epic) = catervafication::started(&tools.log).map_err(failed)? {
+        return refused(&format!(
+            "catervafication_started: your team is already documenting this project, as {}",
+            epic.as_str()
+        ));
+    }
+    if new_project(&tools.log).map_err(failed)?.is_some() {
+        return refused(
+            "catervafication_new_project: a new project's Catervafication starts by itself once you approve its product plan",
+        );
+    }
+    if product_manager(team).is_none() {
+        return refused(
+            "catervafication_no_product_manager: the team has no active Product Manager to move the epic into its plan; resume one first",
+        );
+    }
+    let ready = tools.transitions.designer_browser(team) == DesignerBrowser::Ready;
+    let roles = catervafication::catervafication_roles(team, Project::Existing, ready);
+    if roles.first().map(|(role, _)| *role) != Some(Role::ProductManager) {
+        return refused(
+            "catervafication_no_writers: no one on your team can both write and have their notes checked; add an Architect or a Scrum Master",
+        );
+    }
+    let before = tools
+        .log
+        .read(&EventQuery {
+            limit: Some(1),
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .first()
+        .map_or(0, |event| event.envelope.seq);
+    let started =
+        catervafication::start(tools, team, Project::Existing, HUMAN, None).map_err(failed)?;
+    let events = tools
+        .log
+        .read(&EventQuery {
+            after_seq: Some(before),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .iter()
+        .map(|event| event.envelope.seq)
+        .collect();
+    let in_sprint = started
+        .sprint
+        .map_or_else(String::new, |sprint| format!(" in {sprint}"));
+    Ok(CommandReport {
+        said: format!(
+            "Your team starts documenting the project{in_sprint}: {}.",
+            started.epic.as_str()
         ),
         events,
     })
@@ -3062,6 +3143,183 @@ mod tests {
             .moved("CTV-1", "draft", "cancelled", &json!({}));
         handled(&orchestrator, Command::ProductPlanDraft).await;
         assert_eq!(product_plan_tasks(&harness), ["CTV-1", "CTV-2"]);
+    }
+
+    /// The kinds of these events about `epic`, oldest first.
+    fn about(harness: &Harness, epic: &str, kinds: &[EventKind]) -> Vec<CatervasEvent> {
+        harness
+            .events(kinds)
+            .into_iter()
+            .filter(|event| event.envelope.ids.task_id == Some(task(epic)))
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_catervafication_approved_by_the_owner() {
+        let harness = Harness::with_the_suggested_six("human-catervafication");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = handled(&orchestrator, Command::CatervaficationStart).await;
+
+        assert_eq!(
+            report.said,
+            "Your team starts documenting the project in S1: CTV-1."
+        );
+        // The epic is filed whole, then its sprint is opened and planned, it moves into refining as
+        // the Product Manager asks, and the owner's approval comes after the move.
+        let kinds = [
+            EventKind::TaskCreated,
+            EventKind::RequestTriaged,
+            EventKind::CatervaficationStarted,
+            EventKind::SprintStarted,
+            EventKind::SprintPlanned,
+            EventKind::TaskTransitioned,
+            EventKind::HumanAccepted,
+        ];
+        let seen: Vec<EventKind> = harness
+            .events(&kinds)
+            .iter()
+            .map(|event| event.body.kind())
+            .collect();
+        assert_eq!(seen, kinds);
+        let created = last(&harness, EventKind::TaskCreated).expect("the epic is filed");
+        assert!(
+            matches!(&created.body, EventBody::TaskCreated(body) if body.created_by == "human")
+        );
+        assert_eq!(created.envelope.ids.task_id, Some(task("CTV-1")));
+        let started = last(&harness, EventKind::SprintStarted).expect("a sprint is opened");
+        assert!(matches!(&started.body, EventBody::SprintStarted(body)
+            if body.sprint_id.as_str() == "S1" && body.started_by == "human"));
+        let planned = last(&harness, EventKind::SprintPlanned).expect("the epic is planned");
+        assert!(matches!(&planned.body, EventBody::SprintPlanned(body)
+            if body.planned_by == "governor"
+                && json!(body.task_ids) == json!(["CTV-1"])));
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("the epic moves");
+        assert!(matches!(&moved.body, EventBody::TaskTransitioned(body)
+            if body.to.to_string() == "refining" && body.requested_by == "pm"));
+        let accepted = last(&harness, EventKind::HumanAccepted).expect("the owner approves");
+        assert!(matches!(&accepted.body, EventBody::HumanAccepted(body)
+            if body.subject == HumanAcceptedBodySubject::Contract
+                && body.accepted_by == "human" && body.message.is_none()));
+        assert_eq!(report.events.last(), Some(&accepted.envelope.seq));
+
+        // The next tick readies it with no session and no escalation, and the one after assigns it
+        // to the Scrum Master.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("sm"));
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // With a sprint already open, none is opened or planned, and the epic waits for one.
+        let open = Harness::with_the_suggested_six("human-catervafication-open");
+        open.open_sprint("S1", &[]);
+        let orchestrator = an_orchestrator(&open);
+        let report = handled(&orchestrator, Command::CatervaficationStart).await;
+        assert_eq!(
+            report.said,
+            "Your team starts documenting the project: CTV-1."
+        );
+        assert_eq!(open.events(&[EventKind::SprintStarted]).len(), 1);
+        assert!(about(&open, "CTV-1", &[EventKind::SprintPlanned]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_second_start_and_a_new_projects() {
+        let nothing_recorded = |harness: &Harness| {
+            assert!(
+                harness
+                    .events(&[EventKind::TaskCreated, EventKind::CatervaficationStarted])
+                    .is_empty(),
+                "nothing is recorded"
+            );
+        };
+        let harness = Harness::with_the_suggested_six("human-catervafication-twice");
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, Command::CatervaficationStart).await;
+        assert_eq!(
+            refused(&orchestrator, Command::CatervaficationStart).await,
+            "catervafication_started: your team is already documenting this project, as CTV-1"
+        );
+        assert_eq!(
+            harness.events(&[EventKind::CatervaficationStarted]).len(),
+            1
+        );
+
+        let new = Harness::with_the_suggested_six("human-catervafication-new");
+        new.started();
+        assert_eq!(
+            refused(&an_orchestrator(&new), Command::CatervaficationStart).await,
+            "catervafication_new_project: a new project's Catervafication starts by itself once you approve its product plan"
+        );
+        nothing_recorded(&new);
+
+        // No active Product Manager: a team file cannot say so, so the team is handed in whole.
+        let paused = Harness::with_the_suggested_six("human-catervafication-paused");
+        let mut wire = serde_json::to_value(
+            paused
+                .project
+                .deps
+                .files
+                .read_team()
+                .expect("the team reads"),
+        )
+        .expect("the team is JSON");
+        wire["agents"][0]["status"] = json!("paused");
+        let without_one: catervas_core::team::Team =
+            serde_json::from_value(wire).expect("the team reads back");
+        assert!(matches!(
+            super::catervafication_start_for(&paused.project.deps, &without_one),
+            Err(CommandError::Refused { reason })
+                if reason == "catervafication_no_product_manager: the team has no active Product Manager to move the epic into its plan; resume one first"
+        ));
+        nothing_recorded(&paused);
+
+        // A Product Manager and two Developers: no one can write and have their notes checked.
+        let writers = Harness::new("human-catervafication-writers", |_| {});
+        assert_eq!(
+            refused(&an_orchestrator(&writers), Command::CatervaficationStart).await,
+            "catervafication_no_writers: no one on your team can both write and have their notes checked; add an Architect or a Scrum Master"
+        );
+        nothing_recorded(&writers);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn two_starts_at_once_record_one_epic() {
+        let harness = Harness::with_the_suggested_six("human-catervafication-race");
+        let tools = &harness.project.deps;
+        // Raced on two threads past a barrier, so that a check made outside the lock is caught.
+        let start = std::sync::Barrier::new(2);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let racers: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        super::catervafication_start(tools)
+                    })
+                })
+                .collect();
+            racers
+                .into_iter()
+                .map(|racer| racer.join().expect("the racer ends"))
+                .collect()
+        });
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(
+            harness.events(&[EventKind::CatervaficationStarted]).len(),
+            1
+        );
+        assert_eq!(harness.events(&[EventKind::TaskCreated]).len(), 1);
     }
 
     /// An epic the Product Manager wrote for the human to review, with `criteria`, filed in

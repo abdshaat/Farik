@@ -60,7 +60,8 @@
         "purchase_order_send",
         "folder_change_integrate",
         "folder_doc_decide",
-        "product_plan_draft"
+        "product_plan_draft",
+        "catervafication_start"
       ]
     },
     "commandBodyWire": {
@@ -552,7 +553,7 @@
     },
     "emptyBody": {
       "title": "Empty Body",
-      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, team_resume, and product_plan_draft.",
+      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, team_resume, product_plan_draft, and catervafication_start.",
       "type": "object",
       "additionalProperties": false,
       "properties": {}

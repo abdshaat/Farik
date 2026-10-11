@@ -13,7 +13,7 @@ use catervas_core::contract::{
 };
 use catervas_core::folders::PRODUCT_PLAN;
 use catervas_core::governor::gates::{
-    ContractWriteActor, ContractWriteOutcome, check_contract_write,
+    ContractWriteActor, ContractWriteOutcome, DesignerBrowser, check_contract_write,
 };
 use catervas_core::governor::plain::plain_readiness;
 use catervas_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
@@ -333,6 +333,7 @@ pub(super) fn query(
         "sprint.current" => sprint_current(deps),
         "backlog.summary" => backlog_summary(deps, &team()?),
         "product_plan.state" => product_plan_state(deps, &team()?),
+        "catervafication.get" => catervafication_get(deps, &team()?),
         "questions.list" => questions(deps, params["task_id"].as_str()),
         _ => {
             let task_id = task_of(deps, params)?;
@@ -646,6 +647,30 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             "created_at": created_at,
         })),
         "documents": documents,
+    }))
+}
+
+/// `catervafication.get`: whether the team offers to document an existing repository, which it does
+/// while the log holds neither a Catervafication nor a new project and a Start would not be refused
+/// for want of a Product Manager and someone to check its notes, and the roles that would get a task.
+fn catervafication_get(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
+    let ready = deps.transitions.designer_browser(team) == DesignerBrowser::Ready;
+    let roles = crate::catervafication::catervafication_roles(
+        team,
+        crate::catervafication::Project::Existing,
+        ready,
+    );
+    let begun = crate::catervafication::started(&deps.log)
+        .map_err(|e| internal(&e))?
+        .is_some()
+        || new_project(&deps.log).map_err(|e| internal(&e))?.is_some();
+    let offered = !begun
+        && roles
+            .first()
+            .is_some_and(|(role, _)| *role == catervas_core::contract::Role::ProductManager);
+    Ok(json!({
+        "offered": offered,
+        "roles": roles.iter().map(|(role, _)| role.to_string()).collect::<Vec<_>>(),
     }))
 }
 
@@ -4515,6 +4540,60 @@ pub(super) mod tests {
         assert_eq!(
             summary(&a_backlog("gates-backlog-off", false)),
             json!({ "plan_in_sprints": false, "count": 0 })
+        );
+    }
+
+    /// `harness` with its daemon taking commands through its orchestrator.
+    fn driven_by(harness: Harness) -> Harness {
+        let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
+        assert!(
+            harness
+                .daemon
+                .set_command_handler(command_handler(orchestrator))
+        );
+        harness
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_catervafication_until_it_starts() {
+        let offer = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "catervafication.get",
+                &json!({}),
+                "catervaficationGetResult",
+            )
+        };
+        let harness = driven_by(Harness::with_the_suggested_six("gates-catervafication"));
+        assert_eq!(
+            offer(&harness),
+            json!({
+                "offered": true,
+                "roles": [
+                    "product_manager", "architect", "software_developer", "ui_ux_designer",
+                    "marketing_specialist"
+                ]
+            })
+        );
+        let started = rpc(
+            &harness.daemon,
+            "command",
+            &json!({ "command": { "command": "catervafication_start", "body": {} } }),
+        );
+        assert!(started["error"].is_null(), "{started}");
+        assert_eq!(offer(&harness)["offered"], false);
+
+        // A new project documents itself once its plan is approved; nothing is offered.
+        let new = driven_by(Harness::with_the_suggested_six("gates-catervafication-new"));
+        new.started();
+        assert_eq!(offer(&new)["offered"], false);
+
+        // A team that cannot both write and have its notes checked is offered nothing.
+        let no_writers = driven_by(Harness::new("gates-catervafication-none", |_| {}));
+        assert_eq!(
+            offer(&no_writers),
+            json!({ "offered": false, "roles": ["software_developer"] })
         );
     }
 

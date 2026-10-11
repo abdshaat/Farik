@@ -1558,7 +1558,7 @@ async fn ready(
                 .as_deref()
                 .is_none_or(|builder| agent.id.as_str() == builder)
         })
-        .filter(|agent| has_room(team, open, board, agent))
+        .filter(|agent| has_room(team, open, board, agent, row.parent.as_ref()))
         .map(|agent| agent.id.to_string())
         .collect();
     let Some(first) = assignees.first() else {
@@ -1609,18 +1609,20 @@ fn assigner(team: &Team) -> Option<&Agent> {
 }
 
 /// Whether `agent` holds fewer open tasks, neither accepted nor cancelled nor waiting for a sprint
-/// while `open` is open, than the WIP limit.
+/// while `open` is open, than the WIP limit, the epic `under` not counted (`open_tasks`).
 pub(super) fn has_room(
     team: &Team,
     open: Option<&str>,
     board: &[TaskProjection],
     agent: &Agent,
+    under: Option<&TaskId>,
 ) -> bool {
     u64::from(transitions::open_tasks(
         team,
         open,
         board,
         agent.id.as_str(),
+        under,
     )) < u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
 }
 
@@ -2055,6 +2057,48 @@ mod tests {
             }
         );
         assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_the_product_managers_task_under_its_own_epic() {
+        // No Scrum Master, a limit of one: `pm` holds the in-progress Catervafication epic CTV-1,
+        // and its own docs task CTV-2 under it is ready.
+        let harness = Harness::new("orch-plan-own-epic", |_| {});
+        harness
+            .project
+            .filed_with("CTV-1", "ready", "epic", None, |wire| {
+                wire["assignee_role"] = json!("product_manager");
+                wire["reviewer_role"] = json!("human");
+                wire["allowed_paths"] = json!(["docs/catervas/**"]);
+            });
+        let people = json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-1", "assigned", "in_progress", &people);
+        harness.file_under("CTV-2", "ready", Some("CTV-1"), |wire| {
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("software_developer");
+            wire["allowed_paths"] = json!(["docs/catervas/product/**"]);
+        });
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        let spec = started
+            .iter()
+            .find(|spec| spec.task_id == Some("CTV-2".parse().expect("a task id")))
+            .expect("a plan session for CTV-2");
+        assert_eq!(spec.purpose, SessionPurpose::Plan);
+        assert!(
+            spec.initial_prompt
+                .contains("with room for it: pm. The agents of its reviewer role"),
+            "{}",
+            spec.initial_prompt
+        );
     }
 
     #[tokio::test]

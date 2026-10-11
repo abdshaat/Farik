@@ -60,6 +60,7 @@
         "template.preview",
         "backlog.summary",
         "product_plan.state",
+        "catervafication.get",
         "skills.list",
         "skill.get",
         "allowances.list",
@@ -284,6 +285,9 @@
             },
             {
               "$ref": "#/$defs/productPlanStateQuery"
+            },
+            {
+              "$ref": "#/$defs/catervaficationGetQuery"
             },
             {
               "$ref": "#/$defs/sprintGetQuery"
@@ -2243,6 +2247,20 @@
         }
       }
     },
+    "catervaficationGetQuery": {
+      "title": "Catervafication Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "catervafication.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "backlogSummaryQuery": {
       "title": "Backlog Summary Query",
       "type": "object",
@@ -3606,6 +3624,22 @@
         "plan_in_sprints",
         "count"
       ]
+    },
+    "catervaficationGetResult": {
+      "description": "Whether the team offers to document an existing repository now, and with which roles (docs/SPEC.md 4.1, 5.16, ADR 0051). offered is true while the log holds neither catervafication.started nor project.started and a Start would not be refused for want of a Product Manager and someone to check its notes. roles are the roles that would get a task, in the order they are filed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offered", "roles"],
+      "properties": {
+        "offered": { "type": "boolean" },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["product_manager", "architect", "software_developer", "ui_ux_designer", "marketing_specialist"]
+          }
+        }
+      }
     },
     "productPlanStateResult": {
       "description": "Where a new project's product plan stands (docs/SPEC.md 4.3). new_project is the project's name when it was started from a paragraph, null for any other. approved is true when both documents are on the integration branch, and false with no new project. task is the newest task that drafts the plan and is still open (not cancelled, and not accepted with its integration done), null when there is none. documents holds spec.md then roadmap.md as the task's branch has them, each left out when git has none there, while the task is verifying, and is empty otherwise.",

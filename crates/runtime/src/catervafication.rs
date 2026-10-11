@@ -8,11 +8,25 @@
     )
 )]
 
-use catervas_core::contract::{Role, TaskId, TaskKind};
+use std::fmt;
+
+use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::role_folder;
+use catervas_core::governor::transition::TransitionRequest;
+use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::Team;
-use catervas_protocol::event::{CatervasEvent, EventBody};
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject,
+    new_event,
+};
+use catervas_store::files::FilesError;
+use catervas_store::requests::{RequestError, file_catervafication_epic, placeholder_budget_usd};
+use catervas_store::{EventLog, EventQuery, StoreError};
 use serde_json::{Value, json};
+
+use crate::sprints::{PlannedBy, SprintError, plan_sprint, start_sprint};
+use crate::tools::ToolDeps;
+use crate::transitions::{TransitionAsk, TransitionError, TransitionOutcome};
 
 /// What the Catervafication documents: a repository that exists, or a project made from a
 /// paragraph.
@@ -283,6 +297,168 @@ pub(crate) fn catervafication_of(history: &[CatervasEvent]) -> Option<Project> {
     history.iter().find_map(|event| match &event.body {
         EventBody::CatervaficationStarted(body) => Some(body.project),
         _ => None,
+    })
+}
+
+/// Why a Catervafication could not be started.
+#[derive(Debug)]
+pub(crate) enum CatervaficationError {
+    /// The team has no active Product Manager to move the epic into its plan.
+    NoProductManager,
+    /// The epic could not be filed.
+    Requests(RequestError),
+    /// Its sprint could not be opened or planned.
+    Sprint(SprintError),
+    /// The move into refining failed.
+    Transition(TransitionError),
+    /// The log or the board failed.
+    Store(StoreError),
+    /// A contract file failed.
+    Files(FilesError),
+}
+
+impl fmt::Display for CatervaficationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoProductManager => write!(formatter, "the team has no active Product Manager"),
+            Self::Requests(error) => write!(formatter, "the epic could not be filed: {error}"),
+            Self::Sprint(error) => write!(formatter, "its sprint failed: {error}"),
+            Self::Transition(error) => write!(formatter, "the epic could not move: {error}"),
+            Self::Store(error) => write!(formatter, "the store failed: {error}"),
+            Self::Files(error) => write!(formatter, "the files failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for CatervaficationError {}
+
+impl From<RequestError> for CatervaficationError {
+    fn from(error: RequestError) -> Self {
+        Self::Requests(error)
+    }
+}
+
+impl From<SprintError> for CatervaficationError {
+    fn from(error: SprintError) -> Self {
+        Self::Sprint(error)
+    }
+}
+
+impl From<TransitionError> for CatervaficationError {
+    fn from(error: TransitionError) -> Self {
+        Self::Transition(error)
+    }
+}
+
+impl From<StoreError> for CatervaficationError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl From<FilesError> for CatervaficationError {
+    fn from(error: FilesError) -> Self {
+        Self::Files(error)
+    }
+}
+
+/// What `start` did: the epic, and the sprint it opened for it, when it opened one.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Started {
+    /// The epic of the Catervafication.
+    pub epic: TaskId,
+    /// The sprint `start` opened and planned the epic into, absent when one was open already.
+    pub sprint: Option<String>,
+}
+
+/// The epic of the Catervafication the log holds, when it holds one.
+///
+/// # Errors
+///
+/// What the log refused.
+pub(crate) fn started(log: &EventLog) -> Result<Option<TaskId>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            kinds: vec![EventKind::CatervaficationStarted],
+            limit: Some(1),
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find_map(|event| event.envelope.ids.task_id))
+}
+
+/// Starts the Catervafication of `project` as `by` (`human` for the owner's Start, `catervas` for a
+/// new project's): files its epic, opens a sprint for it when none is open and plans the epic into
+/// it, asks `draft -> refining` as the first active Product Manager, and, only when that moved,
+/// records the owner's approval of the epic (`human.accepted`, with `note` as its message): after
+/// the move, because an approval counts only from the last move into `refining`.
+///
+/// # Errors
+///
+/// `NoProductManager` before anything is recorded; otherwise whichever part failed.
+pub(crate) fn start(
+    deps: &ToolDeps,
+    team: &Team,
+    project: Project,
+    by: &str,
+    note: Option<String>,
+) -> Result<Started, CatervaficationError> {
+    let Some(manager) = team
+        .active_agents()
+        .find(|agent| Role::from(agent.role) == Role::ProductManager)
+    else {
+        return Err(CatervaficationError::NoProductManager);
+    };
+    let epic = file_catervafication_epic(
+        &deps.files,
+        &deps.log,
+        epic_contract(project, placeholder_budget_usd(&team.rules())),
+        by,
+        project,
+        (deps.clock.now(), &deps.ids),
+    )?;
+    deps.projections.catch_up()?;
+    // The sprint holds the epic alone, so nothing else is planned while it is open (spec 3).
+    let sprint = if deps.projections.open_sprint()?.is_none() {
+        let sprint = start_sprint(deps, None, by)?;
+        plan_sprint(deps, std::slice::from_ref(&epic.id), &PlannedBy::Governor)?;
+        Some(sprint.id.as_str().to_string())
+    } else {
+        None
+    };
+    let outcome = deps.transitions.request(
+        &TransitionRequest {
+            task_id: epic.id.clone(),
+            to: TaskStatus::Refining,
+            actor: TransitionActor::ProductManager,
+            agent_id: Some(manager.id.to_string()),
+        },
+        &TransitionAsk::default(),
+        team,
+    )?;
+    if matches!(outcome, TransitionOutcome::Moved(_)) {
+        let ids = EventIds {
+            task_id: Some(epic.id.clone()),
+            ..deps.ids.clone()
+        };
+        let accepted = new_event(
+            EventBody::HumanAccepted(HumanAcceptedBody {
+                subject: HumanAcceptedBodySubject::Contract,
+                accepted_by: "human".to_string(),
+                message: note,
+            }),
+            deps.clock.now(),
+            ids,
+        )
+        .map_err(|error| StoreError::InvalidEvent {
+            detail: format!("the approval cannot be stamped: {error:?}"),
+        })?;
+        let appended = deps.log.append(&accepted)?;
+        deps.projections.apply(&appended)?;
+    }
+    Ok(Started {
+        epic: epic.id,
+        sprint,
     })
 }
 
