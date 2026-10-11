@@ -151,13 +151,14 @@ export function SetupPermissions() {
 	};
 
 	// The questions start at the recommended answers, which the user may change.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: answer is rebuilt every render; the effect runs when the defaults or an answer change
 	useEffect(() => {
 		if (defaults && (commands === undefined || push === undefined))
 			answer({
 				commands: commands ?? defaults.runCommands,
 				push: push ?? defaults.push,
 			});
-	});
+	}, [defaults, commands, push]);
 
 	return (
 		<Wizard step={5} title={t("mayTitle")} lead={t("mayLead")}>

@@ -1085,6 +1085,22 @@ describe("team setup", () => {
 		expect(screen.queryByRole("heading", { name: en.mayAlready })).toBeNull();
 	});
 
+	it("keeps_an_answer_given_before_the_defaults", async () => {
+		const { socket } = await renderApp("/setup/permissions");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		await screen.findByRole("heading", { name: en.mayTitle });
+		const radio = (name: RegExp) =>
+			screen.getByRole("radio", { name }) as HTMLInputElement;
+		fireEvent.click(radio(/^No, nobody may/));
+		await answerQuery(s, "settings.defaults", RECOMMENDED);
+		await waitFor(() =>
+			expect(radio(/^No, keep everything on this computer/).checked).toBe(true),
+		);
+		expect(radio(/^No, nobody may/).checked).toBe(true);
+	});
+
 	it("asks_both_permission_questions", async () => {
 		const { container, socket } = await renderApp("/setup/permissions");
 		const s = socket as FakeSocket;
