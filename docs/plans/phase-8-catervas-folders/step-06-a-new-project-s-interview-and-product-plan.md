@@ -164,7 +164,7 @@ Consumes: Tasks 1 to 5.
 
 `docs/SPEC.md`: 3 (the sprint exceptions gain the product plan task); 4.1 (a new project records `project.started`; its first request waits; once setup ends the Product Manager opens its interview, in place of the first reading in the channel); 4.3 (the interview: its instruction, `heard`, one session per message, still read-only; `product_plan_draft`); 5.3 (`product_plan_first`, its message and plain words, approval read from the integration branch, rule 9's hold); 5.16 (the product plan task, which Catervas triages: its contract, judged as filed, the interview as the human's words); 6.1 (the interview and the product plan task); 8.5 (`project.started`, `task.created`'s `product_plan`, `chat_message.posted`'s `heard`, and `session.started`'s description: a chat session with no `in_reply_to` opens the interview); F5 (`product_plan_first` in the governor) and F8 (`heard` in `chat.messages`, the interview, `product_plan.state`); the next spec revision after the branch's last. `docs/design/catervas-folders.md`: "A new project" says approved on the integration branch, the paragraph still filed and held, and the opening; the steps table splits row 06 into 06 and 06b. `docs/plans/project-plan.md`: row 06 becomes this step's Delivers, Spec `3, 4.1, 4.3, 5.3, 5.16, 6.1, 8.5`, and row 06b, "The interview and the plan in the web app", Spec `4.1, 4.2, 4.3`.
 
-- [ ] `docs(spec): record a new project's interview and product plan`
+- [x] `docs(spec): record a new project's interview and product plan`
 
 ## Verification
 
