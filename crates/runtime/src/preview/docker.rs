@@ -34,6 +34,10 @@ const TAIL_LINES: usize = 40;
 const PREPARE_SCRIPT: &str = "timeout -k 2 900 sh -c \"$1\" > /tmp/catervas-prepare.log 2>&1; \
      code=$?; tail -n 40 /tmp/catervas-prepare.log; exit $code";
 
+/// Prints each file in `$@` that exists and always succeeds: a kernel without IPv6 has no
+/// `/proc/net/tcp6`, and `/proc/net/tcp` must still be read (ADR 0054).
+const LISTENING_SCRIPT: &str = "cat \"$@\" 2>/dev/null; exit 0";
+
 /// Whether `program info` succeeds within `limit`. A client that has not answered by then is
 /// killed and counts as no answer: a daemon that hangs would otherwise hold the caller for as long
 /// as it likes.
@@ -254,13 +258,23 @@ impl DockerPreview {
         while Instant::now() < deadline {
             let candidates = match port {
                 Some(port) => vec![port],
-                None => match self.exec(&["cat", "/proc/net/tcp", "/proc/net/tcp6"]) {
+                None => match self.exec(&[
+                    "sh",
+                    "-c",
+                    LISTENING_SCRIPT,
+                    "sh",
+                    "/proc/net/tcp",
+                    "/proc/net/tcp6",
+                ]) {
                     Ok(finished) => listening_ports(&finished.stdout),
                     Err(true) => return None,
                     Err(false) => Vec::new(),
                 },
             };
             for candidate in candidates {
+                if Instant::now() >= deadline {
+                    break;
+                }
                 let url = format!("http://localhost:{candidate}{path}");
                 let probe = format!("curl -fsS -o /dev/null {url} || wget -q -O /dev/null {url}");
                 match self.exec(&["sh", "-c", &probe]) {
@@ -367,7 +381,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use super::{DockerPreviewFactory, daemon_answers, listening_ports};
+    use super::{DockerPreviewFactory, LISTENING_SCRIPT, daemon_answers, listening_ports};
     use crate::preview::PreviewFactory;
 
     /// A folder holding an executable `docker` that runs `body` under `sh`, answering its path.
@@ -473,12 +487,36 @@ mod tests {
         let tcp = format!(
             "{HEADER}   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 1 1 0\n\
                 \x20  1: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 2 1 0\n\
-                \x20  2: 0100007F:1F91 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 3 1 0\n"
+                \x20  2: 0100007F:1F91 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 3 1 0\n\
+                \x20  3: 0100007F:0400 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 5 1 0\n\
+                \x20  4: 0100007F:03FF 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 6 1 0\n"
         );
         let tcp6 = format!(
             "{HEADER}   0: 00000000000000000000000001000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 4 1 0\n"
         );
-        assert_eq!(listening_ports(&format!("{tcp}{tcp6}")), [8080]);
+        assert_eq!(listening_ports(&format!("{tcp}{tcp6}")), [1024, 8080]);
+    }
+
+    #[test]
+    fn reads_the_tcp_table_when_tcp6_is_missing() {
+        let file = std::env::temp_dir().join(format!("catervas-tcp-{}", std::process::id()));
+        std::fs::write(
+            &file,
+            format!("{HEADER}   0: 0100007F:1F90 00000000:0000 0A 0\n"),
+        )
+        .expect("written");
+        let out = std::process::Command::new("sh")
+            .args(["-c", LISTENING_SCRIPT, "sh"])
+            .arg(&file)
+            .arg("/nonexistent/catervas-tcp6")
+            .output()
+            .expect("sh ran");
+        let _ = std::fs::remove_file(&file);
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(
+            listening_ports(&String::from_utf8_lossy(&out.stdout)),
+            [8080]
+        );
     }
 
     #[test]

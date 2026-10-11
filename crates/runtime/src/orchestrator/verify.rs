@@ -987,6 +987,13 @@ mod tests {
             "the Designer is shown the change: {}",
             review.initial_prompt
         );
+        assert!(
+            review
+                .initial_prompt
+                .ends_with("The app's preview is at http://localhost:4401/."),
+            "the design review is told where the preview is: {}",
+            review.initial_prompt
+        );
         // The Architect's review is not the Designer's: no browser, no page check.
         assert!(started[2].mcp_servers.is_empty());
         assert!(
