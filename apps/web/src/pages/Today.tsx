@@ -1,3 +1,4 @@
+import mark from "@catervas/brand/assets/logo-mark-1254.png";
 import {
 	Avatar,
 	type AvatarKey,
@@ -5,7 +6,7 @@ import {
 	RoleTag,
 	uiStrings,
 } from "@catervas/ui";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
@@ -93,7 +94,7 @@ type Waiting = {
 	Partial<SiteAsk> &
 	Partial<OrderAsk> &
 	Partial<PipelineAsk>;
-type Moved = { at: string; line: string };
+type Moved = { at: string; by: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
 
@@ -350,27 +351,119 @@ export function Today() {
 					{moved.moved.length === 0 ? (
 						<p className={styles.muted}>{t("movedNone")}</p>
 					) : (
-						<ul className={styles.moved} aria-label={t("movedTitle")}>
-							{moved.moved.map((one) => (
-								<li key={`${one.at}-${one.line}`}>
-									{/* Times are HH:MM UTC, as the team's own lines say them; the
-									list holds a day, so an earlier date is yesterday's. */}
-									<time dateTime={one.at}>
-										{one.at.slice(0, 10) === today ? (
-											one.at.slice(11, 16)
-										) : (
-											<abbr title={t("yesterday")}>{t("yesterdayShort")}</abbr>
-										)}
-									</time>
-									<span>{one.line}</span>
-								</li>
-							))}
-						</ul>
+						<MovedList moved={moved.moved} agents={agents} today={today} />
 					)}
 				</section>
 			)}
 			<ChannelPreview agents={agents} />
 		</div>
+	);
+}
+
+/** How many moves show at first, and how many each "Show more" adds. */
+const MOVED_STEP = 3;
+
+/** What moved, newest first: three cards, then "Show more" adds three; "Show fewer" goes back. */
+function MovedList({
+	moved,
+	agents,
+	today,
+}: {
+	moved: Moved[];
+	agents: Agent[];
+	today: string;
+}) {
+	const [shown, setShown] = useState(MOVED_STEP);
+	// The daemon answers oldest first, as a log reads; the page turns it round.
+	const newest = [...moved].reverse();
+	const hidden = newest.length - shown;
+	return (
+		<>
+			<ul className={styles.moved} aria-label={t("movedTitle")}>
+				{newest.slice(0, shown).map((one) => (
+					<MovedCard
+						key={`${one.at}-${one.by}-${one.line}`}
+						one={one}
+						agent={agents.find((a) => a.id === one.by)}
+						today={today}
+					/>
+				))}
+			</ul>
+			{newest.length > MOVED_STEP && (
+				<div className={styles.movedMore}>
+					<Button
+						onClick={() =>
+							setShown(hidden > 0 ? shown + MOVED_STEP : MOVED_STEP)
+						}
+					>
+						{hidden > 0 ? t("movedMore", { n: hidden }) : t("movedFewer")}
+					</Button>
+				</div>
+			)}
+		</>
+	);
+}
+
+/** One move: who made it (picture, name, role tag), when, and the sentence. */
+function MovedCard({
+	one,
+	agent,
+	today,
+}: {
+	one: Moved;
+	agent: Agent | undefined;
+	today: string;
+}) {
+	// Times are HH:MM UTC, as the team's own lines say them; the list holds a day, so an
+	// earlier date is yesterday's.
+	const hhmm = one.at.slice(11, 16);
+	const time =
+		one.at.slice(0, 10) === today ? hhmm : t("movedYesterday", { time: hhmm });
+	let picture: ReactNode = null;
+	let name: string;
+	if (one.by === "human") {
+		name = t("movedYou");
+		picture = (
+			<span className={styles.you} aria-hidden="true">
+				{/* biome-ignore lint/a11y/noSvgWithoutTitle: decorative, inside an aria-hidden tile */}
+				<svg
+					width="24"
+					height="24"
+					viewBox="0 0 22 22"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="1.75"
+				>
+					<circle cx="11" cy="8" r="3.5" />
+					<path d="M4 19c1-3.6 3.8-5.5 7-5.5s6 1.9 7 5.5" />
+				</svg>
+			</span>
+		);
+	} else if (one.by === "catervas") {
+		name = t("brand");
+		picture = <img src={mark} alt="" width={48} height={48} />;
+	} else {
+		name = agent?.displayName ?? one.by;
+		if (agent?.avatar) {
+			picture = (
+				<Avatar avatarKey={agent.avatar as AvatarKey} name="" size={48} />
+			);
+		}
+	}
+	return (
+		<li>
+			{picture}
+			<div className={styles.movedText}>
+				<span className={styles.movedHead}>
+					<strong>{name}</strong>
+					{agent && one.by !== "human" && one.by !== "catervas" && (
+						<RoleTag role={agent.role} />
+					)}
+					<time dateTime={one.at}>{time}</time>
+				</span>
+				<span>{one.line}</span>
+			</div>
+		</li>
 	);
 }
 

@@ -80,7 +80,7 @@ Tests (`Today.test.tsx`; `today()`'s fixture team holds the agents named):
 - `draws_the_person_and_catervas` — the `human` card holds the `aria-hidden` tile and no `img`; the `catervas` card's `img` is the mark with `alt=""`; an agent on the team without `avatar` has no `img` and has its role tag.
 - The empty case (`movedNone`) is unchanged.
 
-- [ ] `feat(web): show what moved as cards, newest first, three at a time`
+- [x] `feat(web): show what moved as cards, newest first, three at a time`
 
 ### Task 3: the spec and the design say so
 
