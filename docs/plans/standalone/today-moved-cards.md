@@ -1,6 +1,6 @@
 # Standalone: what moved, as cards, newest first
 
-Status: ready
+Status: done
 Branch: `feat/today-moved-cards`
 Spec: `docs/SPEC.md` the end of 5.7's last paragraph (line 340, Today's lists; nothing in the spec names "What moved" or `moved.since` yet), section 8's web UI (Today); `docs/design/web-ui.md` (Today's row, line 121)
 Depends on: none (`main` at `15d67ec`)
@@ -103,3 +103,13 @@ pnpm --filter @catervas/web e2e
 ```
 
 Then the founder opens Today with more than three moves since yesterday, sees the newest on top, and presses Show more.
+
+## Landing review
+
+A fresh Opus 5.5 session, 2026-10-11: lands. Every decision carried out; 34 mutants, one at a time, 33 RED: `by` for each kind of move (governor, an empty agent id, a task's move, integration, acceptance, ceremony, each post kind, the ads lines), the daemon not sending `by`, and on the page the order, three at first, a step of three, the count, Show fewer, the button for three or fewer, two buttons in place of one (focus), a remounting button (focus), both time formats, the person tile, "You", the mark and its empty `alt`, an unknown id, an agent without a picture, the picture's `alt` naming the agent, the role tag, `dateTime`. The survivor: the schema not requiring `by`, which no test can see while the daemon always sends it. Findings, both nits: the decorative SVG's lint exception (fixed in `b8c4a15`, `aria-hidden` on the `svg`), and this plan's status (done here).
+
+Verification, as run in this container (no fullcheck script; Docker started by hand):
+- `cargo xtask check` on `96e10d8`, under a child reaper: `xtask check: ok`. Without the reaper, three `claude_process` tests fail ("the program's child outlived …"), the container's missing reaper; all 26 pass under it. `b8c4a15` changes one attribute in `Today.tsx`.
+- `pnpm check` on `b8c4a15`: exit 0; apps/web 532 passed, packages/ui 63, packages/brand 35.
+- e2e on `96e10d8` (Playwright pointed at `/opt/pw-browsers/chromium`): 13 passed, 2 failed, `design.spec.ts` and `designer.spec.ts`, both at `docker run … alpine:3.22`, which Docker Hub refused with `429 Too Many Requests`; neither touches Today.
+
