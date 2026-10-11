@@ -395,9 +395,19 @@ describe("today", () => {
 			title: "the launch post",
 			line: "question line",
 		};
-		await today({ waiting: [PRODUCT_PLAN_ROW, question], plan: IN_REVIEW });
+		const other = {
+			task_id: "CTV-5",
+			kind: "acceptance",
+			agent_id: "mira",
+			title: "the weekly report",
+			line: "Accept the result",
+		};
+		await today({
+			waiting: [PRODUCT_PLAN_ROW, question, other],
+			plan: IN_REVIEW,
+		});
 		expect(
-			await screen.findByRole("heading", { name: "Waiting on you (2)" }),
+			await screen.findByRole("heading", { name: "Waiting on you (3)" }),
 		).toBeTruthy();
 		const list = screen.getByRole("list", { name: en.waitingList });
 		expect(
@@ -407,6 +417,13 @@ describe("today", () => {
 		).toBeTruthy();
 		// The plan's task has no row of its own besides the card; the question keeps its row.
 		expect(within(list).getByText("Mira has a question")).toBeTruthy();
+		// Another acceptance stays the generic row beside the one plan card.
+		expect(within(list).getByText("Accept the weekly report")).toBeTruthy();
+		expect(
+			within(list).getAllByRole("region", {
+				name: "Your product plan to approve",
+			}),
+		).toHaveLength(1);
 		expect(
 			within(list).queryByText("Accept Draft the product plan"),
 		).toBeNull();
