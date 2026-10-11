@@ -312,7 +312,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<chat::ChatReplyInput>(
             "catervas_chat_reply",
             Read,
-            "Answer the user in your one-to-one chat, once, then end your turn. When work is needed, add a request, a title and what it asks for, for the user to send.",
+            "Answer the user in your one-to-one chat, once, then end your turn. When work is needed, add a request, a title and what it asks for, for the user to send. During a new project's interview, put your summary in heard.",
         ),
         tool::<costs::ReadCostsInput>(
             "catervas_read_costs",

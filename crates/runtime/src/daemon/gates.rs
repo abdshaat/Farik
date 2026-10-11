@@ -3431,6 +3431,7 @@ pub(super) mod tests {
             deps.clock.as_ref(),
             &deps.ids,
             crate::chat::NewChatMessage {
+                heard: None,
                 chat: "dev-a".to_string(),
                 author: author.to_string(),
                 text: "Could customers also pay with Apple Pay?".to_string(),
@@ -4441,6 +4442,7 @@ pub(super) mod tests {
             deps.clock.as_ref(),
             &deps.ids,
             crate::chat::NewChatMessage {
+                heard: None,
                 chat: "pm".to_string(),
                 author: "human".to_string(),
                 text: "Could customers also pay with Apple Pay?".to_string(),

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
-use crate::chat::{ChatError, NewChatMessage, ProposedRequest, post_chat};
+use crate::chat::{ChatError, Heard, NewChatMessage, ProposedRequest, post_chat};
 use crate::session::SessionPurpose;
 
 /// `catervas_chat_reply`'s input.
@@ -20,6 +20,8 @@ pub struct ChatReplyInput {
     pub text: String,
     /// The request you propose, when work is needed; the user sends it, or not.
     pub request: Option<ProposedRequest>,
+    /// During a new project's interview, your summary of what the owner told you.
+    pub heard: Option<Heard>,
 }
 
 fn refused(detail: impl Into<String>) -> ToolError {
@@ -74,6 +76,7 @@ pub(super) fn chat_reply(call: &Call<'_>, input: ChatReplyInput) -> Result<Value
             text: input.text,
             in_reply_to: context.in_reply_to,
             request: input.request,
+            heard: input.heard,
             session_id: Some(context.session_id.clone()),
         },
     )
@@ -108,6 +111,7 @@ mod tests {
             project.deps.clock.as_ref(),
             &project.deps.ids,
             crate::chat::NewChatMessage {
+                heard: None,
                 chat: "pm".to_string(),
                 author: "human".to_string(),
                 text: "Could customers also pay with Apple Pay?".to_string(),
@@ -176,6 +180,80 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_a_reply_with_what_it_heard() {
+        let project = TestProject::new("chat-reply-heard", &a_team_of_three(|_| {}));
+        let asked = crate::chat::post_chat(
+            &project.deps.log,
+            project.deps.clock.as_ref(),
+            &project.deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "pm".to_string(),
+                author: "human".to_string(),
+                text: "That is everything.".to_string(),
+                in_reply_to: None,
+                request: None,
+                heard: None,
+                session_id: None,
+            },
+        )
+        .expect("the owner's message is recorded");
+        let mut context = project.context("pm", None);
+        context.purpose = SessionPurpose::Chat;
+        context.in_reply_to = Some(asked);
+        let heard = |change: &dyn Fn(&mut serde_json::Value)| {
+            let mut heard = json!({
+                "customers": "People who order cakes for birthdays.",
+                "problem": "They cannot see what is free on a given day.",
+                "must": "Show the days a cake can be ordered.",
+                "not_now": "Delivery.",
+                "works_when": "Ten orders arrive in the first month."
+            });
+            change(&mut heard);
+            json!({ "text": "Here is what I heard.", "heard": heard })
+        };
+        let before = project.event_count();
+        let blank = run(
+            &context,
+            "catervas_chat_reply",
+            heard(&|heard| heard["problem"] = json!("  \n")),
+        )
+        .expect_err("a blank part is refused");
+        assert!(
+            matches!(&blank, ToolError::Refused { reason } if reason.starts_with("chat_reply_refused: blank_heard")),
+            "{blank:?}"
+        );
+        let long = run(
+            &context,
+            "catervas_chat_reply",
+            heard(&|heard| heard["must"] = json!("x".repeat(1001))),
+        )
+        .expect_err("a long part is refused");
+        assert!(
+            matches!(&long, ToolError::Refused { reason } if reason.starts_with("chat_reply_refused: heard_out_of_bounds")),
+            "{long:?}"
+        );
+        assert_eq!(project.event_count(), before, "neither is recorded");
+
+        run(&context, "catervas_chat_reply", heard(&|_| {})).expect("the reply is recorded");
+        let replies = project.events(&[EventKind::ChatMessagePosted]);
+        let EventBody::ChatMessagePosted(body) = &replies[1].body else {
+            panic!("a chat message");
+        };
+        let recorded = serde_json::to_value(&body.heard).expect("serialises");
+        assert_eq!(
+            recorded,
+            json!({
+                "customers": "People who order cakes for birthdays.",
+                "problem": "They cannot see what is free on a given day.",
+                "must": "Show the days a cake can be ordered.",
+                "not_now": "Delivery.",
+                "works_when": "Ten orders arrive in the first month."
+            })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_one_reply_when_two_race() {
         let project = TestProject::new("chat-reply-race", &a_team_of_three(|_| {}));
         // Raced a few times, so that a check outside the lock is caught every run, not by luck.
@@ -185,6 +263,7 @@ mod tests {
                 project.deps.clock.as_ref(),
                 &project.deps.ids,
                 crate::chat::NewChatMessage {
+                    heard: None,
                     chat: "pm".to_string(),
                     author: "human".to_string(),
                     text: "Status?".to_string(),

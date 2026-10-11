@@ -922,7 +922,7 @@
     },
     "chatMessagePostedBody": {
       "title": "Chat Message Posted Body",
-      "description": "A message in the user's one-to-one chat with one agent (docs/SPEC.md 4.3, 5.9; ADR 0026), which is never the team's channel: nothing that reads message.posted reads it. chat is the agent's id, and the envelope names that agent on the user's message too, so one chat is read by the envelope's agent alone; author is human or that agent. text is 1 to 4,000 code points, not blank, its line breaks kept; the limits are checked when the message is posted, so that reading the log never fails on an old one. An agent's reply names the user's message it answers in in_reply_to, and may carry a proposed request, title 1 to 120 code points on one line and text 20 to 4,000, which only the user files.",
+      "description": "A message in the user's one-to-one chat with one agent (docs/SPEC.md 4.3, 5.9; ADR 0026), which is never the team's channel: nothing that reads message.posted reads it. chat is the agent's id, and the envelope names that agent on the user's message too, so one chat is read by the envelope's agent alone; author is human or that agent. text is 1 to 4,000 code points, not blank, its line breaks kept; the limits are checked when the message is posted, so that reading the log never fails on an old one. An agent's reply names the user's message it answers in in_reply_to, and may carry a proposed request, title 1 to 120 code points on one line and text 20 to 4,000, which only the user files, and heard, the summary of a new project's interview.",
       "type": "object",
       "additionalProperties": false,
       "required": ["chat", "author", "text"],
@@ -931,7 +931,22 @@
         "author": { "type": "string" },
         "text": { "type": "string" },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
-        "request": { "$ref": "#/$defs/proposedRequest" }
+        "request": { "$ref": "#/$defs/proposedRequest" },
+        "heard": { "$ref": "#/$defs/heard" }
+      }
+    },
+    "heard": {
+      "title": "Heard",
+      "description": "What the Product Manager heard from the owner in a new project's interview (docs/SPEC.md 4.3), as the chat shows it: each part is 1 to 1,000 code points, not blank, its line breaks kept; the limits are checked when the reply is posted, as a message's are.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["customers", "problem", "must", "not_now", "works_when"],
+      "properties": {
+        "customers": { "type": "string" },
+        "problem": { "type": "string" },
+        "must": { "type": "string" },
+        "not_now": { "type": "string" },
+        "works_when": { "type": "string" }
       }
     },
     "proposedRequest": {

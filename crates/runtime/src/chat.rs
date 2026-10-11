@@ -36,6 +36,26 @@ pub struct ProposedRequest {
     pub text: String,
 }
 
+/// The most one part of what the Product Manager heard holds, in code points.
+const HEARD_MAX: usize = 1_000;
+
+/// What the Product Manager heard from the owner in a new project's interview, to be shown as the
+/// chat's "What I heard".
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Heard {
+    /// Who the customers are: 1 to 1,000 characters.
+    pub customers: String,
+    /// The problem they have: 1 to 1,000 characters.
+    pub problem: String,
+    /// What the product must do, and any constraint that fits here: 1 to 1,000 characters.
+    pub must: String,
+    /// What is out for now, and any constraint that fits here: 1 to 1,000 characters.
+    pub not_now: String,
+    /// How the owner will know it works: 1 to 1,000 characters.
+    pub works_when: String,
+}
+
 /// A chat message to record, as whoever says it knows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewChatMessage {
@@ -49,6 +69,8 @@ pub struct NewChatMessage {
     pub in_reply_to: Option<u64>,
     /// The request a reply proposes.
     pub request: Option<ProposedRequest>,
+    /// What a reply heard, in a new project's interview.
+    pub heard: Option<Heard>,
     /// The session a reply was written in.
     pub session_id: Option<String>,
 }
@@ -108,7 +130,7 @@ fn within(text: &str, what: &str, min: usize, max: usize) -> Result<(), ChatErro
 ///
 /// # Errors
 ///
-/// `Refused` when the text or a proposed request is out of its limits; `Store` when the log fails.
+/// `Refused` when the text, a proposed request or what was heard is out of its limits; `Store` when the log fails.
 pub fn post_chat(
     log: &EventLog,
     clock: &dyn Clock,
@@ -124,6 +146,17 @@ pub fn post_chat(
             ));
         }
         within(&request.text, "request", REQUEST_TEXT_MIN, CHAT_TEXT_MAX)?;
+    }
+    if let Some(heard) = &message.heard {
+        for part in [
+            &heard.customers,
+            &heard.problem,
+            &heard.must,
+            &heard.not_now,
+            &heard.works_when,
+        ] {
+            within(part, "heard", 1, HEARD_MAX)?;
+        }
     }
     let ids = EventIds {
         agent_id: Some(message.chat.clone()),
@@ -142,6 +175,13 @@ pub fn post_chat(
                 title: request.title,
                 text: request.text,
             }),
+        heard: message.heard.map(|heard| catervas_protocol::event::Heard {
+            customers: heard.customers,
+            problem: heard.problem,
+            must: heard.must,
+            not_now: heard.not_now,
+            works_when: heard.works_when,
+        }),
     });
     let event = new_event(body, clock.now(), ids)
         .map_err(|error| refused(format!("the chat message cannot be recorded: {error:?}")))?;
@@ -372,13 +412,21 @@ pub fn chat_history(log: &EventLog, agent_id: &str) -> Result<Option<String>, St
         let line = if body.author == HUMAN {
             format!("The user:\n{}", body.text)
         } else {
-            let said = match &body.request {
+            let mut said = match &body.request {
                 Some(request) => format!(
                     "{}\n\nProposed request: {}\n{}",
                     body.text, request.title, request.text
                 ),
                 None => body.text,
             };
+            if let Some(heard) = &body.heard {
+                use std::fmt::Write;
+                let _ = write!(
+                    said,
+                    "\n\nWhat I heard:\nYour customers: {}\nThe problem: {}\nIt must: {}\nNot now: {}\nIt works when: {}",
+                    heard.customers, heard.problem, heard.must, heard.not_now, heard.works_when
+                );
+            }
             format!(
                 "You:\n{}",
                 crate::prompt::untrusted_block("chat", &said, HISTORY_BYTES)
@@ -407,7 +455,7 @@ mod tests {
 
     use catervas_store::event_log::fixtures::append_unreadable;
 
-    use super::{NewChatMessage, ProposedRequest, pending_chat, post_chat};
+    use super::{Heard, NewChatMessage, ProposedRequest, chat_history, pending_chat, post_chat};
     use crate::tools::fixtures::at;
 
     fn catervas_ids() -> EventIds {
@@ -447,6 +495,7 @@ mod tests {
             &FixedClock::new(at()),
             &catervas_ids(),
             NewChatMessage {
+                heard: None,
                 chat: agent.to_string(),
                 author: author.to_string(),
                 text: "Status?".to_string(),
@@ -509,6 +558,50 @@ mod tests {
     }
 
     #[test]
+    fn shows_what_the_agent_heard_as_its_words() {
+        let log = open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens");
+        let asked = said(&log, "mira", "human");
+        post_chat(
+            &log,
+            &FixedClock::new(at()),
+            &catervas_ids(),
+            NewChatMessage {
+                chat: "mira".to_string(),
+                author: "mira".to_string(),
+                text: "Here is what I heard.".to_string(),
+                in_reply_to: Some(asked),
+                request: None,
+                heard: Some(Heard {
+                    customers: "Birthday bakers.".to_string(),
+                    problem: "No free days shown.".to_string(),
+                    must: "Show free days.".to_string(),
+                    not_now: "Delivery.".to_string(),
+                    works_when: "Ten orders a month.".to_string(),
+                }),
+                session_id: Some("session-1".to_string()),
+            },
+        )
+        .expect("the reply is recorded");
+        let history = chat_history(&log, "mira")
+            .expect("reads")
+            .expect("a chat has a history");
+        let (_, agent) = history.split_once("You:\n").expect("the agent's line");
+        let block = agent
+            .strip_prefix("<untrusted")
+            .unwrap_or_else(|| panic!("an untrusted block: {agent}"));
+        assert!(block.contains("What I heard:"), "{agent}");
+        for line in [
+            "Your customers: Birthday bakers.",
+            "The problem: No free days shown.",
+            "It must: Show free days.",
+            "Not now: Delivery.",
+            "It works when: Ten orders a month.",
+        ] {
+            assert!(block.contains(line), "{line} in {agent}");
+        }
+    }
+
+    #[test]
     fn records_a_chat_message() {
         let log = open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens");
         let clock = FixedClock::new(at());
@@ -517,6 +610,7 @@ mod tests {
             &clock,
             &catervas_ids(),
             NewChatMessage {
+                heard: None,
                 chat: "mira".to_string(),
                 author: "human".to_string(),
                 text: "Could customers\npay with Apple Pay?".to_string(),
@@ -531,6 +625,7 @@ mod tests {
             &clock,
             &catervas_ids(),
             NewChatMessage {
+                heard: None,
                 chat: "mira".to_string(),
                 author: "mira".to_string(),
                 text: "Not yet.\n\nI can propose it.".to_string(),

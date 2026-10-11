@@ -369,6 +369,7 @@ fn post_chat_message(
         tools.clock.as_ref(),
         &tools.ids,
         NewChatMessage {
+            heard: None,
             chat: agent_id.to_string(),
             author: HUMAN.to_string(),
             text,
@@ -4409,6 +4410,7 @@ mod tests {
                 deps.clock.as_ref(),
                 &deps.ids,
                 crate::chat::NewChatMessage {
+                    heard: None,
                     chat: "dev-a".to_string(),
                     author: "dev-a".to_string(),
                     text: "Here is a request.".to_string(),

@@ -133,7 +133,7 @@ Files: `event.schema.json` (`heard`, its `$defs` and the body's description), th
 - `lists_what_a_reply_heard` (`board.rs`, integration) — `chat.messages` answers that reply's `heard` and `null` for the owner's message, held to `chatMessagesResult`. RED.
 - `shows_what_the_agent_heard_as_its_words` (`chat.rs`) — `chat_history` of that reply holds "What I heard:" and "Your customers: <text>" inside the agent's `untrusted` block. RED.
 
-- [ ] `feat(runtime): let a chat reply say what it heard`
+- [x] `feat(runtime): let a chat reply say what it heard`
 
 ### Task 5: The interview
 

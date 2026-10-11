@@ -3068,6 +3068,7 @@ mod tests {
                 deps.clock.as_ref(),
                 &deps.ids,
                 crate::chat::NewChatMessage {
+                    heard: None,
                     chat: agent.to_string(),
                     author: author.to_string(),
                     text,

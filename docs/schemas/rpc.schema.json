@@ -6116,7 +6116,7 @@
       }
     },
     "chatMessagesResult": {
-      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to and request, null when it has none; sent_as is the request the user sent a reply's proposal as (request.file's from_chat_message), null when not sent. waiting says why the user's newest message has no answer yet, null when the agent answered or nobody wrote; when several reasons apply the first wins: retired, key_refused (the team is paused because the provider refused the key), day_spent (the team's daily budget; the message is kept), asleep with until, answering (a session answers or is about to), no_answer (a session ended without a reply: the user asks again). No event is written for a chat that did not run (ADR 0026).",
+      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to, request and heard (what the Product Manager heard in a new project's interview: customers, problem, must, not_now, works_when), null when it has none; sent_as is the request the user sent a reply's proposal as (request.file's from_chat_message), null when not sent. waiting says why the user's newest message has no answer yet, null when the agent answered or nobody wrote; when several reasons apply the first wins: retired, key_refused (the team is paused because the provider refused the key), day_spent (the team's daily budget; the message is kept), asleep with until, answering (a session answers or is about to), no_answer (a session ended without a reply: the user asks again). No event is written for a chat that did not run (ADR 0026).",
       "type": "object",
       "additionalProperties": false,
       "required": ["messages", "waiting"],
@@ -6143,7 +6143,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["seq", "at", "author", "text", "in_reply_to", "request", "sent_as"],
+            "required": ["seq", "at", "author", "text", "in_reply_to", "request", "heard", "sent_as"],
             "properties": {
               "seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
               "at": { "type": "string", "format": "date-time" },
@@ -6165,6 +6165,23 @@
                     "properties": {
                       "title": { "type": "string" },
                       "text": { "type": "string" }
+                    }
+                  }
+                ]
+              },
+              "heard": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["customers", "problem", "must", "not_now", "works_when"],
+                    "properties": {
+                      "customers": { "type": "string" },
+                      "problem": { "type": "string" },
+                      "must": { "type": "string" },
+                      "not_now": { "type": "string" },
+                      "works_when": { "type": "string" }
                     }
                   }
                 ]
