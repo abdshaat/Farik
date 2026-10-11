@@ -1,0 +1,38 @@
+# Ready-made teams
+
+Status: approved by the founder on 2026-10-10 (brainstorm in a Claude Code session: "Now implement the plan").
+
+## Why
+
+A new user builds a team from the suggested six, from a team they saved in another project, or from scratch. The suggested six are a software team. A user who runs a shop, or wants financial analysis done, has nothing to start from but a builder that insists on a Software Developer. The founder asked for ready-made teams for three purposes, picked at setup like a saved team: a software product team, an online store team, and a financial analysis team of one Product Manager and three Finance Specialists. Two of the three have no Software Developer, which every team needed until now (F1, D18); ADR 0040 planned to drop that requirement with the business workspaces, after the web launch, and the founder pulled it forward on 2026-10-10 ("A, pull the rule change forward now"). The founder also asked that the user can still build a custom team, and add roles to it later.
+
+## What the user sees
+
+1. **A fourth start.** Setup's "Your team" offers, in this order: the suggested team, a ready-made team, a saved team, from scratch. "A ready-made team" lists the three by name with their faces and one line each on what the team does. Picking one fills the rows as a saved team does, so the user can rename anyone, untick anyone, or add someone before Continue; its permission answers carry over, so that screen is skipped, and the last screen lists them under "What they may do, from <name>". The three are there even when Catervas has no state folder.
+2. **The three teams.**
+   - *Software product*: Product Manager, Architect, Software Developer, Marketing Specialist. The DevOps Engineer joins it when its role lands (phase 11 of the project plan; ADR 0027).
+   - *Online store*: Product Manager, Procurement Specialist, Finance Specialist, Marketing Specialist.
+   - *Financial analysis*: Product Manager and three Finance Specialists, one desk each by persona: portfolio, risk, opportunities. The three share the books folder and work one task at a time (`docs/design/finance-specialist.md`: "a second finance task is not assigned while another task holds the folder, even with two Finance Specialists"); the Product Manager gives each task to the analyst whose desk it is, and reviews it, as it reviews every finance task. The founder chose this over a folder per analyst on 2026-10-10 ("A, one desk, three specialists"): three points of view, not three workers.
+   - Each agent carries its name, persona and picture; its model is its role's shipped one. No daily limit is set, so the spending screen asks as usual. No starting brief (the founder, 2026-10-10: "Without brief"; "Just predefined teams for these 3 purposes").
+3. **On the Team page.** "Use a saved team" lists the three under "Ready-made" above the user's saved teams, with the same preview of who stays, joins, is retired or removed. Settings' "Saved teams" does not list them: there is nothing to rename or delete.
+4. **A team needs a Product Manager, and nothing else.** The team editor, setup's check and a template's check refuse a team without an active Product Manager, as before, and no longer one without a Software Developer. A task whose role nobody on the team holds is refused readiness in words that say which role to add, so the Product Manager learns it when it writes the contract, not when nobody can take it.
+5. **Custom teams.** "From scratch" starts with the Product Manager's row, which cannot be unticked, and the Developer's row, which can; "Add someone" and "More roles" add the rest. Continue waits until everyone ticked is named and at least two are ticked. After setup the Team page's "Add someone" offers every role, as today.
+6. **The Finance Specialist's mandate** is widened from the product's costs and earnings to a business's money: what it owns, spends, earns and has at stake, so a portfolio, a risk or an opportunity is work it takes. Its guards stay: management accounting, not financial advice, said wherever it gives numbers; every number names its source; it never pays, refunds or moves money.
+
+## How it works
+
+- **Built-in templates.** The three are team-template files (`docs/schemas/team-template.schema.json`, the format a saved team uses) shipped inside the binary from `crates/roles/teams/<slug>.yaml`, slugs `software-product`, `online-store` and `financial-analysis`, each held to `validate_template` by a test over every shipped file. `templates.list` answers them under `builtin`, each whole with its slug, beside the saved ones, and `template.preview` and `template.apply` take a built-in slug like a saved one, the digest being the sha256 of the embedded text. A built-in is looked up before the folder. Without a state folder `templates.list` answers `folder: null`, no saved teams and the built-ins, instead of refusing; `template.save`, `template.rename` and `template.delete` still refuse `no_state_folder`, and a saved slug given to preview or apply without a folder is refused as before.
+- **Reserved slugs.** `template.save` and `template.rename` refuse a name whose slug is a built-in's with `template_builtin` at `/name`; the page says "Catervas comes with a team called <name>. Choose another name." Renaming or deleting a built-in slug finds no file, as today.
+- **The rule.** `REQUIRED_ROLES` in `catervas-core` names the Product Manager alone; `needs_developer` goes from the daemon's codes and the pages' words. The Definition of Ready gains a rule, `AssigneeAvailable`: the team has at least one active agent of the contract's assignee role; its message names the role. The reviewer rule already refuses a Developer's task when neither an Architect nor a second Developer is active, and a Designer's when neither an Architect nor a Developer is.
+- **Setup.** `Start` gains `builtin`, which fills the draft as `saved` does (`from` set, the answers carried). "Add someone" bases its newcomer on the suggested team's Developer, not the draft's, so it works on a team without one.
+- **The Finance Specialist** keeps its tools, folder, kit and reviewer; only the mandate's first sentences change, in `role.yaml`, `system.md` and spec 6.6.
+
+## Out of scope
+
+A starting brief or request per team; a folder per Finance Specialist; business workspaces without a repository (every project is still a git repository, so a store or a finance team runs in one, its agents in their private folders); business-neutral prompts for the other roles; a description field in the template format (the three lines live with the page's words, by slug); editing or deleting the built-ins; the DevOps Engineer.
+
+## Testing
+
+Rust: every shipped team file passes `validate_template`; `templates.list` answers the three, with and without a state folder; a built-in previews and applies by slug and digest; a save or rename to a built-in's name is refused `template_builtin`; a team or template without a Developer is accepted and one without a Product Manager is refused; readiness refuses a contract whose assignee role has no active agent and names the role. Web: the fourth start lists the three, fills the rows from one and carries its answers; "Use a saved team" lists the ready-made above the saved; from scratch the Developer's row can be unticked and Continue waits for two named; "Add someone" works on a team without a Developer; the "needs a Developer" words are gone.
+
+Docs: `docs/SPEC.md` 1, 3, 4.1, 4.4, 5.3, 6.6, 6.8, 8.4 and F1 (revision 0.87); ADR 0055; the project plan's D18 and phase 14 (revision 42).
