@@ -235,10 +235,10 @@ pub fn carried_team(team: &Team) -> Result<Team, Vec<ValidationError>> {
 /// team.
 ///
 /// Four rules are this function's rather than the schema's. Three of them are there because
-/// `typify` cannot generate a
-/// usable type from an array that carries a `contains` — it writes an empty enum for the array and
-/// the whole team becomes unbuildable. So the schema says two to seven agents and this says the
-/// rest: ids are unique, and an active Product Manager is there.
+/// `typify` cannot generate a usable type from an array that carries a `contains` — it writes an
+/// empty enum for the array and the whole team becomes unbuildable. So the schema says two agents
+/// at least and this says the rest: seven at most that are not retired, ids are unique, and an
+/// active Product Manager is there.
 /// The fourth is there because the schema has no way to say it either: an agent may not have `read`
 /// taken away, since everyone reads (5.6) and an agent that cannot read is one every tool call is
 /// refused for.

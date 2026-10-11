@@ -25,7 +25,7 @@
       "items": {
         "$ref": "#/$defs/agent"
       },
-      "description": "Two agents at least, and at most seven that are not retired: a retired agent stays so that its past events still name someone, and does not count. The seven, and three more rules, are validate_team's rather than this schema's, because a schema cannot count only some items and typify cannot generate a usable type from an array that carries a `contains`: ids are unique, and the team has an active Product Manager."
+      "description": "Two agents at least, and at most seven that are not retired: a retired agent stays so that its past events still name someone, and does not count. The seven, and two more rules, are validate_team's rather than this schema's, because a schema cannot count only some items and typify cannot generate a usable type from an array that carries a `contains`: ids are unique, and the team has an active Product Manager."
     },
     "budgets": {
       "$ref": "#/$defs/budgets"

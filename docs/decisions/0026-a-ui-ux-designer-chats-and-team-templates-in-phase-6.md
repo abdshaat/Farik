@@ -2,6 +2,7 @@
 
 Date: 2026-09-30
 Status: accepted. The founder approved it on 2026-09-30, with one change: the Designer checks a Developer's UI change in the browser before it goes to the Architect for approval (A4). Amended 2026-09-30 (project plan revision 23), on step 11's readiness review: step 11 is split in two, 11 the Designer and its plan gate, 12 the preview, the connector and the design review; chats become step 13, templates step 14, and the milestone runbook step 15. Amended 2026-10-01 (project plan revision 25, ADR 0028): a new step 15, sprints gather ready work, comes before the milestone runbook, which becomes step 16. The founder also decided that the preview runs as a `prepare` and a `start` command, both in the sandbox, and that the Designer works only with Docker's sandbox on, its browser reaching only the preview. The step numbers below are the ones before the split.
+Amended 2026-10-11 by ADR 0055: part C's templates can also be built into Catervas: three ready-made teams ship as built-in templates, listed with the saved ones, never renamed or deleted, and a saved team cannot take their names.
 
 ## Context
 

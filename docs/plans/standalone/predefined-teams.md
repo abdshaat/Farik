@@ -1,6 +1,6 @@
 # Standalone: ready-made teams
 
-Status: ready
+Status: done
 Branch: `feat/predefined-teams` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 1 (goal 1), 3 (team template), 4.1 (the starts), 4.4 (using a saved team), 5.3 (Definition of Ready), 6.6 (the Finance Specialist's mandate), 6.8, 8.4, F1
 Depends on: main at 15d67ec2 (pull requests #32 and #35 merged)
@@ -174,7 +174,7 @@ Files: modified `apps/web/src/pages/dialogs/UseTemplate.tsx`, `apps/web/src/stri
 
 Files: `docs/SPEC.md` (1 goal 1 and the non-goal line; 3, the template paragraph gains the built-ins and the `init` sentence loses "the two a team cannot work without"; 4.1, four starts; 4.4, the two groups and the paused-Product-Manager example; 5.3, the assignee bullet after the reviewer's; 6.6, the mandate; 6.8, the "every team has a Developer" clause; 8.4, built-ins in the binary; F1, enforce a Product Manager, the template rule; the revision line 0.87), `docs/plans/project-plan.md` (D18's line, phase 14 steps 03 and 05's notes, revision 42), `docs/decisions/0040-*.md`, `0026-*.md`, `0019-*.md` (one "Amended 2026-10-10 by ADR 0055" line each), this plan's status to done.
 
-- [ ] `docs(spec): ready-made teams, and a team needs a Product Manager alone (0.87)`
+- [x] `docs(spec): ready-made teams, and a team needs a Product Manager alone (0.87)`
 
 ## Verification
 
