@@ -2207,6 +2207,18 @@ mod tests {
             );
         }
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // A Designer whose browser is not ready (no preview can run) gets no task.
+        let unready = Harness::new(
+            "req-catervafication-files-unready",
+            crate::tools::fixtures::with_the_suggested_six,
+        );
+        let (orchestrator, _) = a_catervafication_in_progress(&unready).await;
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            roles_under_the_epic(&unready),
+            ["product_manager", "architect", "software_developer"]
+        );
     }
 
     #[tokio::test]

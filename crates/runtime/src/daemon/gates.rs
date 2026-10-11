@@ -4584,6 +4584,21 @@ pub(super) mod tests {
         assert!(started["error"].is_null(), "{started}");
         assert_eq!(offer(&harness)["offered"], false);
 
+        // A Designer whose browser is not ready (no preview can run) is left out of the offer.
+        let unready = driven_by(Harness::new(
+            "gates-catervafication-unready",
+            crate::tools::fixtures::with_the_suggested_six,
+        ));
+        assert_eq!(
+            offer(&unready)["roles"],
+            json!([
+                "product_manager",
+                "architect",
+                "software_developer",
+                "marketing_specialist"
+            ])
+        );
+
         // A new project documents itself once its plan is approved; nothing is offered.
         let new = driven_by(Harness::with_the_suggested_six("gates-catervafication-new"));
         new.started();
