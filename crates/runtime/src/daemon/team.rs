@@ -4752,6 +4752,13 @@ pub(super) mod tests {
         let none = driven("team-propose-no-preview");
         a_pnpm_project(&none, &json!({ "test": "vitest" }));
         assert_eq!(propose(&none), Value::Null);
+
+        // A scan that fails (a tracked package.json gone from disk) proposes no preview, and the
+        // proposal still answers.
+        let broken = driven("team-propose-scan-fails");
+        a_pnpm_project(&broken, &json!({ "dev": "vite" }));
+        std::fs::remove_file(broken.project.repo.path.join("package.json")).expect("removed");
+        assert_eq!(propose(&broken), Value::Null);
     }
 
     #[test]
