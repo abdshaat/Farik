@@ -100,7 +100,7 @@ Files: `Stepper.tsx`, `Stepper.test.tsx`, `strings.ts`; created `SetupReady.tsx`
 - `start_the_team_goes_to_the_offer` (`setup.test.tsx`, beside the start's test) — after `team.start` answers, the location is `/setup/ready`. RED: `/`.
 - `joins_names_as_the_lead_does` — `[]` "", `["A"]` "A", `["A","B"]` "A and B", `["A","B","C"]` "A, B and C". RED.
 
-- [ ] `feat(web): offer the Catervafication at the end of setup`
+- [x] `feat(web): offer the Catervafication at the end of setup`
 
 ### Task 4: The quiet card on Today and Files
 

@@ -2574,4 +2574,33 @@ export const en = {
 		"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
 	refuseTooLarge:
 		"This is too long to save here: a document can be at most about 256 KB.",
+	// The end of setup for a project that already exists (4.1, 5.17).
+	readyTitle: "Your team is ready",
+	readyLead:
+		"{names} have joined {team}. They know what Catervas found in your project; next, they can learn it properly.",
+	readyRecommended: "Recommended",
+	readyOfferTitle: "Start with a Catervafication sprint",
+	readyOfferLead:
+		"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
+	readyPm:
+		"writes what your product is and what comes next, as your product plan to approve.",
+	readyArchitect: "writes how your project is put together, with diagrams.",
+	readyDeveloper:
+		"writes how your project is built and worked on: its habits and rules.",
+	readyDesigner: "writes down every screen your project has.",
+	readyMarketing:
+		"writes your marketing plan, after you approve the product plan.",
+	readyNote:
+		"Your team only adds its notes; nothing else in your project changes.",
+	readyStart: "Start",
+	readyLater: "Later",
+	readyLaterNote: "Later keeps this on Today.",
+	refuseCatervaficationStarted:
+		"Your team is already documenting this project.",
+	refuseCatervaficationNewProject:
+		"A new project's documenting sprint starts by itself once you approve its product plan.",
+	refuseCatervaficationNoPm:
+		"Your Product Manager is paused. Resume them on the Team page, then start.",
+	refuseCatervaficationNoWriters:
+		"No one on your team can both write and have their notes checked. Add an Architect or a Scrum Master on the Team page, then start.",
 };

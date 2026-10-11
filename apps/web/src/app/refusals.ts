@@ -143,6 +143,11 @@ const WORDS: Record<string, keyof typeof en> = {
 	skill_description_invalid: "skillDescriptionInvalid",
 	skill_name_taken: "skillNameTaken",
 	skill_limit_reached: "skillLimitReached",
+	// The owner's Start of the documenting sprint (SPEC 4.1).
+	catervafication_started: "refuseCatervaficationStarted",
+	catervafication_new_project: "refuseCatervaficationNewProject",
+	catervafication_no_product_manager: "refuseCatervaficationNoPm",
+	catervafication_no_writers: "refuseCatervaficationNoWriters",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */
