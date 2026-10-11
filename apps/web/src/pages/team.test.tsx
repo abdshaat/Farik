@@ -1231,7 +1231,7 @@ describe("team page", () => {
 		).toBe(true);
 	});
 
-	it("shows_and_disconnects_the_account", async () => {
+	it("shows_disconnects_and_connects_the_account_again", async () => {
 		const { container, socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
@@ -1270,6 +1270,44 @@ describe("team page", () => {
 		await s.reply(again, { provider: null, kind: null, source: null });
 		expect(await within(row).findByText(en.accountNone)).toBeTruthy();
 		expect(within(row).queryByText(en.accountKeychain)).toBeNull();
+		await expectNoAxeViolations(container);
+
+		// Another account is connected right here, without starting Catervas again.
+		const button = within(row).getByRole("button", {
+			name: en.accountConnect,
+		}) as HTMLButtonElement;
+		expect(within(row).queryByText(en.accountKeyRefused)).toBeNull();
+		expect(button.disabled).toBe(true);
+		fireEvent.click(within(row).getByLabelText(en.apiKey));
+		fireEvent.change(within(row).getByLabelText(en.apiKeyField), {
+			target: { value: "sk-ant-api03-new" },
+		});
+		fireEvent.click(button);
+		const connect = await sent(s, "account.connect");
+		expect(connect.params).toEqual({
+			kind: "api_key",
+			secret: "sk-ant-api03-new",
+		});
+		await s.reply(connect, { stored_in: "keychain", taking_on: false });
+		const third = await waitFor(() => {
+			const asked = s
+				.calls("query")
+				.filter((q) => q.params.name === "account.status");
+			if (asked.length < 3) throw new Error("the account was not asked again");
+			return asked.at(-1) as never;
+		});
+		await s.reply(third, {
+			provider: "anthropic",
+			kind: "api_key",
+			source: "keychain",
+		});
+		expect(await within(row).findByText(en.accountBack)).toBeTruthy();
+		expect(within(row).getByText(/an API key/)).toBeTruthy();
+		expect(within(row).queryByText(en.accountGone)).toBeNull();
+		// It can be disconnected again.
+		expect(
+			within(row).getByRole("button", { name: en.accountDisconnect }),
+		).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});
 
@@ -1335,6 +1373,68 @@ describe("team page", () => {
 			expect(within(row).queryByText(en.accountKeyRefused)).toBeNull(),
 		);
 		expect(within(row).getByText(/your Claude subscription/)).toBeTruthy();
+	});
+
+	it("connects_a_refused_key_again_after_disconnecting_it", async () => {
+		const { socket } = await renderApp("/settings/account");
+		const s = socket as FakeSocket;
+		await answerStatus(s, true);
+		await answerQuery(s, "account.status", {
+			provider: "anthropic",
+			kind: "api_key",
+			source: "keychain",
+			key_refused: true,
+		});
+		const row = await screen.findByRole("region", { name: en.accountRow });
+		fireEvent.click(
+			await within(row).findByRole("button", { name: en.accountDisconnect }),
+		);
+		fireEvent.click(
+			within(row).getByRole("button", { name: en.accountDisconnectYes }),
+		);
+		await s.reply(await sent(s, "account.disconnect"), {
+			removed_from: ["keychain"],
+			paused: false,
+		});
+		const asked = () =>
+			s.calls("query").filter((q) => q.params.name === "account.status");
+		const nth = (n: number) =>
+			waitFor(() => {
+				if (asked().length < n) throw new Error("the account was not asked");
+				return asked().at(-1) as never;
+			});
+		await s.reply(await nth(2), {
+			provider: null,
+			kind: null,
+			source: null,
+			key_refused: true,
+		});
+		// One key field, the refused key's, not a second one beside it.
+		await within(row).findByText(en.accountNone);
+		expect(within(row).getAllByLabelText(en.subscriptionKey)).toHaveLength(1);
+		expect(
+			within(row).queryByRole("button", { name: en.accountConnect }),
+		).toBeNull();
+		fireEvent.change(within(row).getByLabelText(en.subscriptionKey), {
+			target: { value: "sk-ant-oat01-new" },
+		});
+		fireEvent.click(
+			within(row).getByRole("button", { name: en.accountConnectAgain }),
+		);
+		await s.reply(await sent(s, "account.connect"), {
+			stored_in: "keychain",
+			taking_on: false,
+		});
+		await s.reply(await nth(3), {
+			provider: "anthropic",
+			kind: "subscription_token",
+			source: "keychain",
+		});
+		// The connect resumed the team: Disconnect is back, and nothing says it is paused.
+		expect(
+			await within(row).findByRole("button", { name: en.accountDisconnect }),
+		).toBeTruthy();
+		expect(within(row).queryByText(en.accountGone)).toBeNull();
 	});
 
 	it("says_a_refused_key_from_the_environment_is_changed_where_catervas_runs", async () => {
