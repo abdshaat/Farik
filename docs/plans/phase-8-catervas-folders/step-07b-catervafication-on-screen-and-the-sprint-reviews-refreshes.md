@@ -110,7 +110,7 @@ Files: created `CatervaficationCard.tsx`, `CatervaficationCard.module.css`; `Tod
 - `shows_the_same_start_on_the_files_page` (`Files.test.tsx`) — `offered: true`: the card heads the page; `false`: it does not. RED.
 - `names_a_catervafication_in_a_tasks_history` (`TaskDetail.test.tsx`) — an epic's history with `catervafication.started` reads "Catervas filed it to document the project.". RED: "toldOther".
 
-- [ ] `feat(web): keep the Catervafication's Start on Today and Files`
+- [x] `feat(web): keep the Catervafication's Start on Today and Files`
 
 ### Task 5: Spec
 

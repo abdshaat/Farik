@@ -16,6 +16,10 @@ import { t } from "../strings/t.ts";
 import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
 import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
+import {
+	type Catervafication,
+	CatervaficationCard,
+} from "./CatervaficationCard.tsx";
 import { ChannelPreview } from "./Channel.tsx";
 import {
 	DocumentChanges,
@@ -217,6 +221,9 @@ export function Today() {
 	);
 	const interviewing = !!plan?.newProject && !plan.approved;
 	const planTask = plan?.documents.length === 2 ? plan.task?.taskId : undefined;
+	// "Later" leaves a quiet card here until the owner starts the documenting sprint.
+	const { data: documenting, again: askDocumentingAgain } =
+		useQuery<Catervafication>("catervafication.get", {});
 	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
 	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
 	// The daemon counts nothing while the team does not plan in sprints.
@@ -282,6 +289,9 @@ export function Today() {
 			<RequestBox
 				pmName={pm?.displayName ?? uiStrings.roleName.product_manager}
 			/>
+			{documenting?.offered && (
+				<CatervaficationCard again={askDocumentingAgain} />
+			)}
 			{waiting && (
 				<section className={styles.section} aria-labelledby="waiting-heading">
 					<h2 id="waiting-heading">

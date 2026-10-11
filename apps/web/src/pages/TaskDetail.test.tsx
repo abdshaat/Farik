@@ -339,6 +339,27 @@ describe("task detail", () => {
 		expect(new Set(told).size).toBe(KINDS.length);
 	});
 
+	it("names_a_catervafication_in_a_tasks_history", async () => {
+		await opened(CONTRACT, [], {
+			"task.history": {
+				events: [
+					event(
+						20,
+						"catervafication.started",
+						{ project: "existing" },
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		const told = within(screen.getByRole("tabpanel"))
+			.getAllByRole("listitem")
+			.map((line) => line.querySelector("span")?.textContent);
+		expect(told).toEqual(["Catervas filed it to document the project."]);
+	});
+
 	it("shows_the_plan_waiting_for_the_product_manager", async () => {
 		// The plan was written the day the page is read, so the page says "today".
 		vi.useFakeTimers({ toFake: ["Date"] });

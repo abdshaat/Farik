@@ -3,6 +3,10 @@ import { Link, useNavigate, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
 import { useWide } from "../shell/Shell.tsx";
 import { t } from "../strings/t.ts";
+import {
+	type Catervafication,
+	CatervaficationCard,
+} from "./CatervaficationCard.tsx";
 import { FileDocument } from "./FileDocument.tsx";
 import styles from "./Files.module.css";
 import { type FilesTree, filePath, fileRoute } from "./files.ts";
@@ -14,6 +18,8 @@ export function Files() {
 	const wide = useWide();
 	const { data: team } = useQuery<{ team: Team }>("team.get", {});
 	const { data: tree, again } = useQuery<FilesTree>("files.tree", {});
+	const { data: documenting, again: askDocumentingAgain } =
+		useQuery<Catervafication>("catervafication.get", {});
 	const agents = team?.team.agents;
 	// Nothing shows until the team and the tree are both here: the owner's face is part of every row.
 	if (!tree || !agents) return null;
@@ -37,6 +43,11 @@ export function Files() {
 	// The document sits in the same place in both layouts, so that a draft survives a resize.
 	return (
 		<div className={wide ? styles.wide : styles.narrow}>
+			{documenting?.offered && (
+				<div className={styles.offer}>
+					<CatervaficationCard again={askDocumentingAgain} />
+				</div>
+			)}
 			{wide ? (
 				<FolderTree tree={tree} agents={agents} open={path} />
 			) : (

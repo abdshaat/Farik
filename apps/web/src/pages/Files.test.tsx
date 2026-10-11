@@ -134,7 +134,7 @@ const read = (more: Record<string, unknown> = {}) => ({
 /** The Files page at `path`, with the team, the tree and the document answered. */
 async function files(
 	path: string,
-	fields: { read?: unknown; tree?: unknown } = {},
+	fields: { read?: unknown; tree?: unknown; catervafication?: unknown } = {},
 ) {
 	vi.useFakeTimers({ toFake: ["Date"] });
 	vi.setSystemTime(NOW);
@@ -143,6 +143,8 @@ async function files(
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team: TEAM });
 	await answerQuery(s, "files.tree", fields.tree ?? tree());
+	if (fields.catervafication)
+		await answerQuery(s, "catervafication.get", fields.catervafication);
 	if (fields.read !== null)
 		await answerQuery(s, "files.read", fields.read ?? read());
 	return { container, s };
@@ -181,6 +183,30 @@ describe("Files", () => {
 		expect(nav.querySelectorAll("details")).toHaveLength(2);
 		expect(within(nav).getByText(en.filesNothingHere)).toBeTruthy();
 		expect(within(nav).getByText("Iris")).toBeTruthy();
+	});
+
+	it("shows_the_same_start_on_the_files_page", async () => {
+		media.set(WIDE, true);
+		await files("/files/product/roadmap.md", {
+			catervafication: { offered: true, roles: ["product_manager"] },
+		});
+		const title = await screen.findByText(
+			"Your team hasn\u2019t documented this project yet",
+		);
+		const start = screen.getByRole("button", { name: "Start" });
+		expect(start.getAttribute("aria-describedby")).toBe(title.id);
+		// It heads the page: before the folders and the document.
+		const nav = screen.getByRole("navigation", { name: en.files });
+		expect(
+			title.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		cleanup();
+
+		await files("/files/product/roadmap.md", {
+			catervafication: { offered: false, roles: [] },
+		});
+		await screen.findByRole("heading", { name: "Roadmap" });
+		expect(screen.queryByText(/documented this project/)).toBeNull();
 	});
 
 	it("opens a pair on the version for you", async () => {

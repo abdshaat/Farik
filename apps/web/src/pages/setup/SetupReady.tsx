@@ -3,13 +3,11 @@ import { Navigate, useNavigate } from "react-router";
 import { useQuery } from "../../app/store.ts";
 import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
+import type { Catervafication } from "../CatervaficationCard.tsx";
 import { useCommand } from "../dialogs/StartSprint.tsx";
 import styles from "./setup.module.css";
 import type { Team } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
-
-/** What `catervafication.get` answers: whether the offer stands, and the roles that would write. */
-export type Catervafication = { offered: boolean; roles: string[] };
 
 /** What each role that writes in a Catervafication says of itself, in the order the daemon lists them. */
 const LINES: Record<string, keyof typeof en> = {

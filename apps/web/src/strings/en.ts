@@ -2603,4 +2603,8 @@ export const en = {
 		"Your Product Manager is paused. Resume them on the Team page, then start.",
 	refuseCatervaficationNoWriters:
 		"No one on your team can both write and have their notes checked. Add an Architect or a Scrum Master on the Team page, then start.",
+	cardTitle: "Your team hasn’t documented this project yet",
+	cardLead:
+		"A first sprint where your team reads your project and writes down what it learns, before building anything.",
+	toldCatervafication: "Catervas filed it to document the project.",
 };

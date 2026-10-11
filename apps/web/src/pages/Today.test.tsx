@@ -112,6 +112,7 @@ async function today(fields: {
 	backlog?: unknown;
 	docs?: unknown;
 	plan?: unknown;
+	catervafication?: unknown;
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -125,6 +126,8 @@ async function today(fields: {
 	if (fields.docs)
 		await answerQuery(s, "folder_doc_proposals.list", fields.docs);
 	if (fields.plan) await answerQuery(s, "product_plan.state", fields.plan);
+	if (fields.catervafication)
+		await answerQuery(s, "catervafication.get", fields.catervafication);
 	return { container, s };
 }
 
@@ -325,6 +328,58 @@ describe("today", () => {
 				.getByRole("link", { name: "Add" })
 				.getAttribute("href"),
 		).toBe("/tasks/CTV-5/accept");
+	});
+
+	it("keeps_a_quiet_card_until_it_starts", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		const { s, container } = await today({
+			waiting: [question],
+			catervafication: { offered: true, roles: ["product_manager"] },
+		});
+		const title = await screen.findByText(
+			"Your team hasn\u2019t documented this project yet",
+		);
+		const start = screen.getByRole("button", { name: "Start" });
+		expect(start.getAttribute("aria-describedby")).toBe(title.id);
+		expect(
+			screen.getByText(
+				"A first sprint where your team reads your project and writes down what it learns, before building anything.",
+			),
+		).toBeTruthy();
+		// It follows the request box, and is no "Waiting on you" item.
+		const request = screen.getByLabelText(en.requestLabel);
+		expect(
+			request.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		const waitingList = screen.getByRole("list", { name: en.waitingList });
+		expect(waitingList.contains(title)).toBe(false);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(start);
+		const command = await sent(s);
+		expect(command.params).toEqual({
+			command: { command: "catervafication_start", body: {} },
+		});
+		expect(refusedBy("emptyBody", bodyOf(command))).toEqual([]);
+		const asked = () =>
+			s.calls("query").filter((f) => f.params.name === "catervafication.get");
+		expect(asked()).toHaveLength(1);
+		await s.reply(command, { said: "started", events: [9] });
+		await waitFor(() => expect(asked()).toHaveLength(2));
+		await answerQuery(s, "catervafication.get", { offered: false, roles: [] });
+		await waitFor(() =>
+			expect(screen.queryByText(title.textContent ?? "")).toBeNull(),
+		);
+		expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
 	});
 
 	it("counts_and_lists_the_document_changes", async () => {
