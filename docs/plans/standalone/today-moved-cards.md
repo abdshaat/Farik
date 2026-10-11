@@ -64,7 +64,7 @@ Tests:
 - `says_what_moved_with_the_ads` asserts `by` is `catervas` on every line.
 - The daemon's shape test (`gates.rs:4069-4076`, the `movedSinceResult` query) holds the answer to the schema, which now requires `by` (`movedSinceResult` has `additionalProperties: false`, so the daemon's `by` fails it until the schema gains it, and the schema's `required` fails the daemon until it sends it).
 
-- [ ] `feat(store): say who made each move`
+- [x] `feat(store): say who made each move`
 
 ### Task 2: the cards, newest first, three at a time
 
