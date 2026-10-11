@@ -56,6 +56,14 @@
 	border-right: 1px solid var(--catervas-color-rule);
 }
 
+/* On the wide layout the folders stay in view while a long document scrolls; a long list scrolls inside itself. */
+.wide > .tree {
+	position: sticky;
+	top: var(--catervas-space-5);
+	max-height: calc(100dvh - var(--catervas-space-5) * 2);
+	overflow-y: auto;
+}
+
 .lead {
 	margin: 0;
 	color: var(--catervas-color-ink-muted);
