@@ -48,6 +48,17 @@ export function useDailyLimit(kept: number | undefined) {
 					]}
 				/>
 			</div>
+			{limit === "daily" && (
+				<div className={styles.form}>
+					<TextField
+						id="daily"
+						label={t("spendAmount")}
+						value={amount}
+						onChange={setAmount}
+						{...(wrong && { error: t("spendAmountWrong") })}
+					/>
+				</div>
+			)}
 			{limit === "daily" && !wrong && (
 				<figure className={styles.example}>
 					<figcaption>{t("spendExample")}</figcaption>
@@ -65,17 +76,6 @@ export function useDailyLimit(kept: number | undefined) {
 					/>
 					<p>{t("spendExampleStop", { limit: money(dollars) })}</p>
 				</figure>
-			)}
-			{limit === "daily" && (
-				<div className={styles.form}>
-					<TextField
-						id="daily"
-						label={t("spendAmount")}
-						value={amount}
-						onChange={setAmount}
-						{...(wrong && { error: t("spendAmountWrong") })}
-					/>
-				</div>
 			)}
 			<PutBack
 				onClick={

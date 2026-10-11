@@ -1413,7 +1413,16 @@ describe("team setup", () => {
 		expect(
 			screen.getByText("At $20.00, everyone pauses and you get a message."),
 		).toBeTruthy();
-		const meter = document.querySelector("meter") as HTMLMeterElement;
+		const figure = screen
+			.getByText(en.spendExample)
+			.closest("figure") as HTMLElement;
+		expect(
+			screen.getByLabelText(en.spendAmount).compareDocumentPosition(figure) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		const meter = screen.getByRole("meter", {
+			name: "Today the team has spent $12.80, of $20.00 a day.",
+		}) as HTMLMeterElement;
 		expect(meter.value).toBeCloseTo(12.8);
 		expect(meter.max).toBe(20);
 		fireEvent.change(screen.getByLabelText(en.spendAmount), {
