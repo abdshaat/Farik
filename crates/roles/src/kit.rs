@@ -2331,6 +2331,8 @@ mod tests {
                     names(&[
                         "docs/catervas/product/",
                         "`catervas_propose_marketing_plan`",
+                        "`MP-<n>.agent.md`",
+                        "Do not ask for `verifying` while the plan waits",
                     ]);
                 }
                 Role::ProductManager => names(&["spec.agent.md", "roadmap.agent.md"]),

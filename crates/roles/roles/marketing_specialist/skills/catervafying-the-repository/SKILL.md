@@ -32,6 +32,8 @@ from the product plan, and the plan says so.
 ## 4. Finish
 
 Propose the plan with `catervas_propose_marketing_plan`: its `text` for the owner and its
-`agent_text` for the team go in the same call, with the `summary` the owner reads first. Commit
-anything else you wrote with `catervas_git_commit`, and request `verifying`. The reviewer checks
-that the plan came from `docs/catervas/product/` alone.
+`agent_text` for the team go in the same call, with the `summary` the owner reads first. Catervas
+writes `MP-<n>.md` and `MP-<n>.agent.md` into your worktree; commit both together with
+`catervas_git_commit`, then end your turn. Do not ask for `verifying` while the plan waits for the
+owner; once the owner decides, your next session requests `verifying`, and the reviewer checks that
+the plan came from `docs/catervas/product/` alone.
