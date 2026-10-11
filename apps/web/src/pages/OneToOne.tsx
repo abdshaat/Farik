@@ -20,6 +20,7 @@ import channel from "./Channel.module.css";
 import styles from "./Chats.module.css";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { Heard, type HeardSummary } from "./Heard.tsx";
+import type { ProductPlanState } from "./ProductPlanCard.tsx";
 import type { Agent } from "./setup/TeamSetup.tsx";
 
 type Proposal = { title: string; text: string };
@@ -33,12 +34,6 @@ type ChatMessage = {
 	request: Proposal | null;
 	heard: HeardSummary | null;
 	sentAs: string | null;
-};
-/** The part of `product_plan.state` a chat reads: whether the owner is still being interviewed. */
-type Interview = {
-	newProject: { name: string } | null;
-	approved: boolean;
-	task: { taskId: string } | null;
 };
 type Because =
 	| "retired"
@@ -87,7 +82,7 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 	const id = agent.id;
 	const name = agent.displayName;
 	// Only the Product Manager interviews a new project's owner.
-	const plan = useQuery<Interview>(
+	const plan = useQuery<ProductPlanState>(
 		"product_plan.state",
 		{},
 		agent.role !== "product_manager",
