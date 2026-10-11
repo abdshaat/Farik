@@ -907,6 +907,15 @@ mod tests {
             );
         }
         wrote(11, "sm", "session-3", "retro", CADENCE, 4);
+        // The Product Manager's review writes its report after sprint 4: not the architecture's.
+        wrote(
+            12,
+            "pm",
+            "session-4",
+            "review",
+            "docs/catervas/product/reports/S4.md",
+            5,
+        );
         let said = |integration: &str| -> Vec<(chrono::DateTime<chrono::Utc>, String)> {
             moved_since(
                 &board.log,
