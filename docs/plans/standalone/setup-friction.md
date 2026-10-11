@@ -175,7 +175,7 @@ Files: modified `docs/SPEC.md`, `docs/design/web-ui.md` (any line naming setup's
 
 SPEC: header revision 0.87 (2026-10-10, standalone plan `setup-friction`, ADR 0054); 4.1 line 101: the preview card shows how the app starts when the scan found a script, the port optional, and "Behind an Advanced switch on the last screen" becomes "Under the last screen's Show advanced settings button, opened in place"; a sentence that each earlier step in the step list is a link back, Scan has Back, the project step offers "Keep <name>", and the team's answers are kept for the tab while the project is the same; the daily limit shows an example; line 103: the two permissions start at the recommended answers, which the user may change, and "Nothing runs until the two permissions are set." is deleted; 8.3 line 867: `port` optional, found as ADR 0054 says, and the browsing session told the address.
 
-- [ ] `docs(spec): record setup asking less and going back`
+- [x] `docs(spec): record setup asking less and going back`
 
 ## Verification
 
