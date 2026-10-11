@@ -159,7 +159,7 @@ Files: `rules.rs` (`catervafy_a_new_project`, after rule 2 in `tick`, tests); `c
 - `leaves_an_existing_repository_to_its_owner` — without `project.started`, the same commits file nothing. RED.
 - `files_nothing_for_an_empty_new_project` (integration) — a Scrum Master and one Developer, `project.started`, the product plan approved: the tick records no epic and no `catervafication.started`. RED.
 
-- [ ] `feat(runtime): catervafy a new project once its product plan is approved`
+- [x] `feat(runtime): catervafy a new project once its product plan is approved`
 
 ### Task 7: The skills
 

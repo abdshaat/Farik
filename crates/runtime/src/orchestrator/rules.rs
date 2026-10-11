@@ -7,18 +7,21 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus};
-use catervas_core::governor::gates::{fits_the_open_sprint, in_the_backlog, waits_for_a_sprint};
+use catervas_core::governor::gates::{
+    DesignerBrowser, fits_the_open_sprint, in_the_backlog, waits_for_a_sprint,
+};
 use catervas_core::governor::task_status::is_terminal;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::marketing::plans_to_end;
 use catervas_core::team::{Agent, AgentStatus, Team, task_private_folder};
 use catervas_protocol::event::{
-    CatervasEvent, EscalationAgedBody, EventBody, EventIds, EventKind, SessionStartedBodyPurpose,
-    Thread, new_event,
+    CatervasEvent, EscalationAgedBody, EventBody, EventIds, EventKind, HumanAcceptedBodySubject,
+    SessionStartedBodyPurpose, Thread, new_event,
 };
 use catervas_store::baseline::{copy_baseline, folder_in};
 use catervas_store::marketing::{marketing_plans, social_posts};
+use catervas_store::product_plan::{new_project, product_plan_tasks};
 use catervas_store::{CostScope, EventQuery, Git, TaskProjection};
 use chrono::{DateTime, Utc};
 
@@ -202,6 +205,9 @@ pub(super) async fn tick(
             return Ok(report);
         }
     }
+    if let Some(report) = catervafy_a_new_project(deps, scope, &team)? {
+        return Ok(report);
+    }
     if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
@@ -283,6 +289,94 @@ pub(super) async fn tick(
             .filter(in_scope)
             .any(|row| in_the_backlog(&sprint_hold(&team, open_id, row)));
     Ok(idle(&waiting, backlog))
+}
+
+/// A new project's Catervafication (4.1, 5.16), between the integration rules and the budget rule:
+/// once its product plan is on the integration branch, however it got there (a merge under the
+/// team's policy, the forge's, or `catervas integrate`), Catervas files the epic that has the team
+/// document the project, already approved by the owner's acceptance of that plan. It does nothing
+/// for a project the owner did not start from a paragraph, for one that has started already, while
+/// the plan waits, with no active Product Manager to move the epic, and when no role would get a
+/// task. It is about no one task, so it runs only in a tick scoped to none, under `All` or
+/// `Planning`.
+// ponytail: two kind reads per tick until it starts, and git's only on a new project; record
+// `project.started`'s approval if a tick is too slow.
+fn catervafy_a_new_project(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if !sprint_rules_run(scope) {
+        return Ok(None);
+    }
+    let tools = &deps.tools;
+    if new_project(&tools.log)?.is_none()
+        || crate::catervafication::started(&tools.log)?.is_some()
+        || tools.transitions.awaits_the_product_plan(team)?
+        || requests::product_manager(team).is_none()
+    {
+        return Ok(None);
+    }
+    let designer_ready = tools.transitions.designer_browser(team) == DesignerBrowser::Ready;
+    if crate::catervafication::catervafication_roles(
+        team,
+        crate::catervafication::Project::New,
+        designer_ready,
+    )
+    .is_empty()
+    {
+        return Ok(None);
+    }
+    let note = plan_acceptance_note(tools)?;
+    let started = crate::catervafication::start(
+        tools,
+        team,
+        crate::catervafication::Project::New,
+        "catervas",
+        note,
+    )
+    .map_err(|error| OrchestratorError::Refused {
+        reason: format!("catervafication_failed: {error}"),
+    })?;
+    Ok(Some(TickReport::Acted {
+        task_id: started.epic,
+        what: "started the Catervafication of the new project".to_string(),
+    }))
+}
+
+/// What the owner's approval of a new project's Catervafication says: that they approved it with
+/// the product plan, which task they accepted and on which UTC day. `None` when the log holds no
+/// product plan task.
+fn plan_acceptance_note(
+    tools: &crate::tools::ToolDeps,
+) -> Result<Option<String>, OrchestratorError> {
+    let Some((plan, _)) = product_plan_tasks(&tools.log)?.pop() else {
+        return Ok(None);
+    };
+    let day = tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(plan.clone()),
+            kinds: vec![EventKind::HumanAccepted],
+            ..EventQuery::default()
+        })?
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(&event.body, EventBody::HumanAccepted(body)
+                if body.subject == HumanAcceptedBodySubject::Result)
+        })
+        .map(|event| event.envelope.recorded_at.format("%Y-%m-%d").to_string());
+    Ok(Some(match day {
+        Some(day) => format!(
+            "Approved with the product plan: you accepted {} on {day}.",
+            plan.as_str()
+        ),
+        None => format!(
+            "Approved with the product plan: you accepted {}.",
+            plan.as_str()
+        ),
+    }))
 }
 
 /// What an idle tick says, from what kept its rules from starting a session: a spent day before a
@@ -7510,6 +7604,209 @@ mod tests {
                 started[1].initial_prompt
             );
         }
+    }
+
+    /// A new project (`project.started`) whose team has a Product Manager, an Architect, a Developer
+    /// and a Marketing Specialist, and whose first request CTV-1 and product plan CTV-2 are accepted
+    /// and integrated, the plan accepted by the owner three days ago; its documents are not yet on
+    /// main (`approve_the_product_plan`).
+    fn a_new_project_with_its_plan_done(name: &str) -> Harness {
+        use catervas_core::team::fixtures::an_agent_wire;
+        let harness = Harness::new(name, |wire| {
+            wire["agents"] = json!([
+                an_agent_wire("pm", "product_manager"),
+                an_agent_wire("ada", "architect"),
+                an_agent_wire("dev", "software_developer"),
+                an_agent_wire("kai", "marketing_specialist"),
+            ]);
+        });
+        harness.started();
+        harness.a_request("Bake cakes online");
+        let deps = &harness.project.deps;
+        // The owner has been greeted, so that no interview waits to open.
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "pm".to_string(),
+                author: "pm".to_string(),
+                text: "Hello! Who are your customers?".to_string(),
+                in_reply_to: None,
+                request: None,
+                heard: None,
+                session_id: None,
+            },
+        )
+        .expect("the greeting is recorded");
+        catervas_store::requests::file_product_plan_request(
+            &deps.files,
+            &deps.log,
+            catervas_store::requests::product_plan_request(Role::Architect, 5.0),
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("the product plan is filed");
+        harness.project.record_at(
+            at() - chrono::Duration::days(3),
+            "CTV-2",
+            "human.accepted",
+            &json!({ "subject": "result", "accepted_by": "human" }),
+        );
+        for id in ["CTV-1", "CTV-2"] {
+            harness.project.moved(id, "draft", "accepted", &json!({}));
+            harness.project.record(
+                id,
+                "task.integrated",
+                &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
+            );
+        }
+        harness
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn catervafies_a_new_project_once_its_plan_is_approved() {
+        let harness = a_new_project_with_its_plan_done("orch-catervafy-new");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // While the plan is not on main, the rule does nothing.
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        assert!(
+            harness
+                .events(&[EventKind::CatervaficationStarted])
+                .is_empty()
+        );
+
+        harness.approve_the_product_plan();
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-3"),
+            "{report:?}"
+        );
+        let created = harness
+            .events(&[EventKind::TaskCreated])
+            .into_iter()
+            .find(|event| {
+                event.envelope.ids.task_id.as_ref().map(|id| id.as_str()) == Some("CTV-3")
+            })
+            .expect("the epic is filed");
+        assert!(
+            matches!(&created.body, EventBody::TaskCreated(body) if body.created_by == "catervas")
+        );
+        let started = harness.events(&[EventKind::CatervaficationStarted]);
+        assert_eq!(started.len(), 1);
+        assert!(
+            matches!(&started[0].body, EventBody::CatervaficationStarted(body)
+            if body.project == catervas_protocol::event::CatervaficationStartedBodyProject::New)
+        );
+        let sprint = harness.events(&[EventKind::SprintStarted]);
+        assert!(matches!(&sprint[0].body, EventBody::SprintStarted(body)
+            if body.sprint_id.as_str() == "S1" && body.started_by == "catervas"));
+        let moved = harness.events(&[EventKind::TaskTransitioned]);
+        let into_refining = moved
+            .iter()
+            .find(|event| {
+                matches!(&event.body, EventBody::TaskTransitioned(body)
+                if body.to.to_string() == "refining" && body.requested_by == "pm")
+            })
+            .expect("the epic moves into refining as the Product Manager");
+        assert_eq!(
+            into_refining
+                .envelope
+                .ids
+                .task_id
+                .as_ref()
+                .map(|id| id.as_str()),
+            Some("CTV-3")
+        );
+        let accepted = harness.events(&[EventKind::HumanAccepted]);
+        let approval = accepted.last().expect("the owner's approval is recorded");
+        assert!(matches!(&approval.body, EventBody::HumanAccepted(body)
+            if body.accepted_by == "human"
+                && body.message.as_deref()
+                    == Some("Approved with the product plan: you accepted CTV-2 on 2026-09-19.")));
+        assert!(approval.envelope.seq > into_refining.envelope.seq);
+
+        // The next tick readies it with no session and no escalation.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::Ready);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        // Assigned to the Product Manager (no Scrum Master), under way, its tasks are filed.
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        let files = &harness.project.deps.files;
+        let roles: Vec<String> = ["CTV-4", "CTV-5", "CTV-6"]
+            .iter()
+            .map(|id| {
+                files
+                    .read_contract(&id.parse().expect("an id"))
+                    .expect("the task is filed")
+                    .assignee_role
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            roles,
+            ["architect", "software_developer", "marketing_specialist"]
+        );
+        // A second epic is not filed.
+        assert_eq!(
+            harness.events(&[EventKind::CatervaficationStarted]).len(),
+            1
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_an_existing_repository_to_its_owner() {
+        let harness = a_new_project_with_its_plan_done("orch-catervafy-existing");
+        // The same commits, in a project that was not started from a paragraph.
+        let existing = Harness::new("orch-catervafy-existing-log", |_| {});
+        existing.approve_the_product_plan();
+        let orchestrator = existing.orchestrator(existing.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        assert!(
+            existing
+                .events(&[EventKind::CatervaficationStarted])
+                .is_empty()
+        );
+        assert!(existing.events(&[EventKind::TaskCreated]).is_empty());
+        drop(harness);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn files_nothing_for_an_empty_new_project() {
+        // A Scrum Master and one Developer: no Architect to check the Developer's notes, and
+        // no Marketing Specialist.
+        let harness = Harness::new("orch-catervafy-empty", |wire| {
+            wire["agents"] = json!([
+                catervas_core::team::fixtures::an_agent_wire("pm", "product_manager"),
+                catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+                catervas_core::team::fixtures::an_agent_wire("dev", "software_developer"),
+            ]);
+        });
+        harness.started();
+        harness.approve_the_product_plan();
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        assert!(harness.events(&[EventKind::TaskCreated]).is_empty());
+        assert!(
+            harness
+                .events(&[EventKind::CatervaficationStarted])
+                .is_empty()
+        );
     }
 
     /// The thread of each ceremony session started, oldest first.

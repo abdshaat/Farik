@@ -1431,6 +1431,14 @@ mod tests {
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
 
         harness.approve_the_product_plan();
+        // The new project's Catervafication starts first (4.1), with no session; the next tick
+        // refines the request against the plan.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            harness.events(&[EventKind::CatervaficationStarted]).len(),
+            1
+        );
+        assert_eq!(adapter.started().len(), 1);
         orchestrator.tick().await.expect("the tick runs");
         assert_eq!(adapter.started().len(), 2);
     }

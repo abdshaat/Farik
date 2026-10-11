@@ -1,12 +1,5 @@
 //! The Catervafication (`docs/SPEC.md` 5.16, ADR 0051): the epic that has the team document the
 //! project, the fixed tasks it is filed with, and when it starts.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the command, the rules and the tick use these in the tasks that follow"
-    )
-)]
 
 use std::fmt;
 
