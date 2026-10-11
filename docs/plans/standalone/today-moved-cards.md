@@ -88,7 +88,7 @@ Files: `docs/SPEC.md` (0.87 header sentence; the sentence at the end of 5.7's la
 
 Tests: none (docs).
 
-- [ ] `docs(spec): say what moved shows as cards, newest first`
+- [x] `docs(spec): say what moved shows as cards, newest first`
 
 ## Verification
 
