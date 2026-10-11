@@ -720,12 +720,7 @@ mod tests {
         &wire["exit_criteria"][index]["verification"]
     }
 
-    #[test]
-    fn writes_each_template_as_the_table_says() {
-        use Role::{
-            Architect, MarketingSpecialist, ProductManager, SoftwareDeveloper, UiUxDesigner,
-        };
-        let epic = TaskId::try_from("CTV-1".to_string()).expect("an id");
+    fn the_epic_is_worded_for_its_owner() {
         // The epic is worded for its owner, as the Offer card is.
         for (project, summary) in [
             (
@@ -747,6 +742,15 @@ mod tests {
                 "{project:?}"
             );
         }
+    }
+
+    #[test]
+    fn writes_each_template_as_the_table_says() {
+        use Role::{
+            Architect, MarketingSpecialist, ProductManager, SoftwareDeveloper, UiUxDesigner,
+        };
+        let epic = TaskId::try_from("CTV-1".to_string()).expect("an id");
+        the_epic_is_worded_for_its_owner();
         let rubric_two = [
             "Does each document say only what the project, its history or its owner's words show, and name where it read it?",
             "Does any document contradict another, or the code?",
