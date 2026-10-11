@@ -222,7 +222,7 @@ pub fn folder_doc_message(
 
 /// The documents with a fixed name, in the order the Files page lists them. A step that adds a
 /// document adds its name here.
-pub const DOCUMENT_NAMES: [(&str, &str); 11] = [
+pub const DOCUMENT_NAMES: [(&str, &str); 12] = [
     ("docs/catervas/product/spec.md", "Product description"),
     ("docs/catervas/product/roadmap.md", "Roadmap"),
     ("docs/catervas/architecture/overview.md", "Overview"),
@@ -231,6 +231,7 @@ pub const DOCUMENT_NAMES: [(&str, &str); 11] = [
     ("docs/catervas/architecture/structure.md", "Structure"),
     ("docs/catervas/engineering/conventions.md", "Conventions"),
     ("docs/catervas/engineering/workflow.md", "Workflow"),
+    ("docs/catervas/design/ui-inventory.md", "UI inventory"),
     ("docs/catervas/delivery/cadence.md", "Sprint rhythm"),
     ("docs/catervas/marketing/brand/brand-kit.md", "Brand kit"),
     ("docs/catervas/marketing/brand/persona.md", "Brand persona"),
@@ -795,6 +796,7 @@ mod tests {
         assert_eq!(name("architecture/jobs.md"), "Scheduled jobs");
         assert_eq!(name("marketing/brand/persona.md"), "Brand persona");
         assert_eq!(name("delivery/cadence.md"), "Sprint rhythm");
+        assert_eq!(name("design/ui-inventory.md"), "UI inventory");
         assert_eq!(name("delivery/ceremony-notes.md"), "Ceremony notes");
         assert_eq!(name("engineering/how_we_test.md"), "How we test");
         assert_eq!(plain_name("product"), "Product");

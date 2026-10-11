@@ -124,7 +124,7 @@ Files: created `crates/runtime/src/catervafication.rs` (`Project`, `catervaficat
 - `writes_each_template_as_the_table_says` — for each row: the title; one `artifact` criterion per document with `must_contain ["# "]`, the Architect's overview also "```mermaid"; the `review` criterion with its rubric (the Marketing Specialist's with its extra question); the intent ending "Follow your skill catervafying-the-repository."; the Developer's rubric question, word for word; the new Architect's two documents and no `plans/`. RED.
 - `knows_a_catervafication_from_its_history` — a history with `catervafication.started { new }` gives `New`; one without, `None`. RED.
 
-- [ ] `feat(runtime): write the Catervafication's fixed contracts`
+- [x] `feat(runtime): write the Catervafication's fixed contracts`
 
 ### Task 4: Start
 

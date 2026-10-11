@@ -53,6 +53,19 @@ pub(crate) fn with_the_designer(wire: &mut Value) {
     agents.push(an_agent_wire("ada", "architect"));
 }
 
+/// The suggested six (`pm`, `sm`, `ada`, `dev`, `iris`, `kai`): a Product Manager, a Scrum Master,
+/// an Architect, one Software Developer, a UI/UX Designer and a Marketing Specialist.
+pub(crate) fn with_the_suggested_six(wire: &mut Value) {
+    wire["agents"] = json!([
+        an_agent_wire("pm", "product_manager"),
+        an_agent_wire("sm", "scrum_master"),
+        an_agent_wire("ada", "architect"),
+        an_agent_wire("dev", "software_developer"),
+        an_agent_wire("iris", "ui_ux_designer"),
+        an_agent_wire("kai", "marketing_specialist"),
+    ]);
+}
+
 /// Adds the Marketing Specialist `kai` to a team's wire.
 pub(crate) fn with_the_marketing_specialist(wire: &mut Value) {
     wire["agents"]

@@ -3,6 +3,9 @@
 
 /// A kit connector's allowances: the period, the count and what a connect may set.
 pub mod allowances;
+/// The Catervafication: the epic that has the team document the project, its fixed tasks, and when
+/// it starts.
+pub(crate) mod catervafication;
 /// The team's ceremonies: the facts each is given.
 pub mod ceremonies;
 /// The team's channel: messages, and whom they mention.
