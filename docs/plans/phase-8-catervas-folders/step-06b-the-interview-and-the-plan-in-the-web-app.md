@@ -100,7 +100,7 @@ Files: created `ProductPlanCard.tsx`, `.module.css`, `.test.tsx`; modified `Toda
 
 `docs/SPEC.md`: 4.1 (the new project's Today: the band's line and the agents' lines while the plan waits); 4.2 (the product plan on Today: the card, both documents rendered, Approve and Send back as the human's acceptance of the task); 4.3 (the interview's intro, "What I heard", the button, where it sits, and its refusals); F3 and F8 where they list Today's rows and the chat; the next spec revision after step 06's.
 
-- [ ] `docs(spec): record the interview and the product plan in the web app`
+- [x] `docs(spec): record the interview and the product plan in the web app`
 
 ## Verification
 
