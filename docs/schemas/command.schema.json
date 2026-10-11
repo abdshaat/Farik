@@ -59,7 +59,8 @@
         "seller_reply_dismiss",
         "purchase_order_send",
         "folder_change_integrate",
-        "folder_doc_decide"
+        "folder_doc_decide",
+        "product_plan_draft"
       ]
     },
     "commandBodyWire": {
@@ -551,7 +552,7 @@
     },
     "emptyBody": {
       "title": "Empty Body",
-      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, and team_resume.",
+      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, team_resume, and product_plan_draft.",
       "type": "object",
       "additionalProperties": false,
       "properties": {}

@@ -278,7 +278,8 @@ fn judge(
 
 /// Whether the contract is judged now: written since refining began with no refusal by the
 /// governor since that write, or, with no such write, filed whole (a breakdown's task, a contract
-/// the human holds, a twin's re-derive) and not refused since refining began. A raw request is not judged: its brief would fail and spend one of the three attempts.
+/// the human holds, a twin's re-derive, a new project's product plan) and not refused since refining
+/// began. A raw request is not judged: its brief would fail and spend one of the three attempts.
 fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u64) -> bool {
     let refused_after = |after: u64| {
         history.iter().any(|event| {
@@ -295,11 +296,14 @@ fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u6
     let is_a_rederive = history.iter().any(
         |event| matches!(&event.body, EventBody::TaskCreated(body) if body.rederives.is_some()),
     );
+    // The product plan's task is Catervas's contract, filed whole: no refine session rewrites it.
+    let filed_whole = contract.parent.is_some()
+        || contract.locked
+        || is_a_rederive
+        || is_the_product_plan(history);
     match written {
         Some(written) => !refused_after(written),
-        None => {
-            (contract.parent.is_some() || contract.locked || is_a_rederive) && !refused_after(began)
-        }
+        None => filed_whole && !refused_after(began),
     }
 }
 
@@ -1404,6 +1408,60 @@ mod tests {
         harness.approve_the_product_plan();
         orchestrator.tick().await.expect("the tick runs");
         assert_eq!(adapter.started().len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_the_product_plan_task_as_filed_and_sends_a_refused_one_to_the_product_manager()
+    {
+        // No Architect on the team, so the governor refuses the filed contract's reviewer.
+        let harness = Harness::new("req-product-plan-filed", |_| {});
+        harness.started();
+        let deps = &harness.project.deps;
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "pm".to_string(),
+                author: "pm".to_string(),
+                text: "Hello! Who are your customers?".to_string(),
+                in_reply_to: None,
+                request: None,
+                heard: None,
+                session_id: None,
+            },
+        )
+        .expect("the greeting is recorded");
+        catervas_store::requests::file_product_plan_request(
+            &deps.files,
+            &deps.log,
+            catervas_store::requests::product_plan_request(
+                catervas_core::contract::Role::Architect,
+                5.0,
+            ),
+            (at(), &deps.ids),
+        )
+        .expect("the owner's word files it");
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+        // Judged as filed: the governor was asked, refused, and no session ran.
+        assert!(adapter.started().is_empty());
+        // The governor was asked for `escalated` first, then for `ready`, and refused both.
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 2);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
+
+        // Refused, it goes to the Product Manager as any contract does.
+        orchestrator.tick().await.expect("the tick runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(
+            (started[0].agent_id.as_str(), started[0].purpose),
+            ("pm", SessionPurpose::Refine)
+        );
     }
 
     #[tokio::test]

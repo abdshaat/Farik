@@ -1,8 +1,10 @@
 //! A new project and its product plan task, read from the log (`docs/SPEC.md` 4.1 and 4.3).
 
+use catervas_core::contract::{TaskId, TaskStatus};
 use catervas_protocol::event::{CatervasEvent, EventBody, EventKind};
+use chrono::{DateTime, Utc};
 
-use crate::{EventLog, EventQuery, StoreError};
+use crate::{EventLog, EventQuery, StoreError, TaskProjection};
 
 /// A project the first run made from the owner's paragraph.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +35,36 @@ pub fn new_project(log: &EventLog) -> Result<Option<NewProject>, StoreError> {
     }))
 }
 
+/// Every task filed to draft the product plan, oldest first, each with when it was filed.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn product_plan_tasks(log: &EventLog) -> Result<Vec<(TaskId, DateTime<Utc>)>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            kinds: vec![EventKind::TaskCreated],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter(|event| {
+            matches!(&event.body, EventBody::TaskCreated(body) if body.product_plan == Some(true))
+        })
+        .filter_map(|event| Some((event.envelope.ids.task_id?, event.envelope.recorded_at)))
+        .collect())
+}
+
+/// Whether a product plan task still drafts the plan: it is not cancelled, and not accepted with
+/// its integration done.
+#[must_use]
+pub fn drafts_the_plan(row: &TaskProjection) -> bool {
+    match row.status {
+        TaskStatus::Cancelled => false,
+        TaskStatus::Accepted => row.awaiting_integration,
+        _ => true,
+    }
+}
+
 /// Whether a task's events say it is the product plan's: its `task.created` has `product_plan`.
 #[must_use]
 pub fn is_the_product_plan(history: &[CatervasEvent]) -> bool {
@@ -61,6 +93,43 @@ mod tests {
             }
         }
         board.put(at(10, 0), Some(task), None, "task.created", body);
+    }
+
+    #[test]
+    fn a_task_drafts_the_plan_until_it_is_cancelled_or_accepted_and_integrated() {
+        let board = Board::new("product-plan-open");
+        created(&board, "CTV-1", &json!({ "product_plan": true }));
+        let drafting = |board: &Board| {
+            let rows = board.projections.board().expect("the board reads");
+            super::drafts_the_plan(&rows[0])
+        };
+        assert!(drafting(&board));
+        board.moved(
+            at(11, 0),
+            "CTV-1",
+            ("draft", "accepted"),
+            "human",
+            (None, None),
+        );
+        assert!(drafting(&board), "accepted, awaiting its integration");
+        board.put(
+            at(11, 5),
+            Some("CTV-1"),
+            None,
+            "task.integrated",
+            json!({ "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "into": "main", "integrated_by": "governor" }),
+        );
+        assert!(!drafting(&board), "accepted and integrated");
+        let cancelled = Board::new("product-plan-cancelled");
+        created(&cancelled, "CTV-1", &json!({ "product_plan": true }));
+        cancelled.moved(
+            at(11, 0),
+            "CTV-1",
+            ("draft", "cancelled"),
+            "human",
+            (None, None),
+        );
+        assert!(!drafting(&cancelled));
     }
 
     #[test]

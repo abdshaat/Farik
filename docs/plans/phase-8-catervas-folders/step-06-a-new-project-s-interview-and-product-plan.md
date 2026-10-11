@@ -158,7 +158,7 @@ Consumes: Tasks 1 to 5.
 - `gives_the_plans_task_the_interview` (`session.rs`, integration) — with a 20 KiB interview, the product plan task's `implement` session's `From the human` starts with the interview, cut, and ends with the owner's whole send-back message; another task's holds no interview. RED.
 - `answers_where_the_product_plan_stands` (`gates.rs`, integration) — an existing project: `{ new_project: null, approved: false, task: null, documents: [] }`; a new one: its `name`, `approved: false`, `task: null`; after the draft, its task; `verifying` with both files on its branch: their texts, spec first; both on `main`: `approved: true`; each answer held to `productPlanStateResult`. RED: unknown query.
 
-- [ ] `feat(runtime): draft the product plan on the owner's word`
+- [x] `feat(runtime): draft the product plan on the owner's word`
 
 ### Task 7: Spec
 

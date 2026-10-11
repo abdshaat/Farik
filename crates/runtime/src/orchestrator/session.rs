@@ -27,6 +27,7 @@ use catervas_protocol::event::{
 use catervas_roles::{ConnectorDefinition, builtin_connector, load_role};
 use catervas_store::EventQuery;
 use catervas_store::git::{integration_branch, stale_twins};
+use catervas_store::product_plan::is_the_product_plan;
 use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
@@ -1005,13 +1006,18 @@ fn human_of(
     interviewing: bool,
 ) -> Result<Option<String>, OrchestratorError> {
     Ok(match ask.contract {
-        Some(contract) => human_message(
-            &deps.tools.log.read(&EventQuery {
+        Some(contract) => {
+            let history = deps.tools.log.read(&EventQuery {
                 task_id: Some(contract.id.clone()),
                 ..EventQuery::default()
-            })?,
-            ask.agent.id.as_str(),
-        ),
+            })?;
+            let message = human_message(&history, ask.agent.id.as_str());
+            if ask.purpose == SessionPurpose::Implement && is_the_product_plan(&history) {
+                with_the_interview(deps, ask, message)?
+            } else {
+                message
+            }
+        }
         None if interviewing => crate::chat::interview(
             &deps.tools.log,
             ask.agent.id.as_str(),
@@ -1021,6 +1027,28 @@ fn human_of(
             crate::chat::chat_history(&deps.tools.log, ask.agent.id.as_str())?
         }
         None => None,
+    })
+}
+
+/// What the product plan task's `implement` session is shown in `From the human`: the owner's
+/// interview in its assignee's chat, as the interview's own session is shown it, cut to leave room
+/// for `message`, the owner's words about the task, which are never cut. `ponytail:` the assignee's
+/// own chat; a team of two Product Managers where the other interviewed gives the paragraph alone;
+/// name the chat in the task if that ever happens.
+fn with_the_interview(
+    deps: &OrchestratorDeps,
+    ask: &SessionAsk<'_>,
+    message: Option<String>,
+) -> Result<Option<String>, OrchestratorError> {
+    let taken = message.as_ref().map_or(0, |message| message.len() + 2);
+    let interview = crate::chat::interview(
+        &deps.tools.log,
+        ask.agent.id.as_str(),
+        (16 * 1024_usize).saturating_sub(taken),
+    )?;
+    Ok(match (interview, message) {
+        (Some(interview), Some(message)) => Some(format!("{interview}\n\n{message}")),
+        (interview, message) => interview.or(message),
     })
 }
 
@@ -3276,6 +3304,113 @@ mod tests {
         assert!(
             approved.contains("The user:\nBirthday bakers, mostly."),
             "{approved}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn gives_the_plans_task_the_interview() {
+        let harness = Harness::new("session-plan-interview", |wire| {
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("ada", "architect"),
+            );
+        });
+        harness.started();
+        let deps = &harness.project.deps;
+        let chat = |author: &str, text: String| {
+            crate::chat::post_chat(
+                &deps.log,
+                deps.clock.as_ref(),
+                &deps.ids,
+                crate::chat::NewChatMessage {
+                    heard: None,
+                    chat: "pm".to_string(),
+                    author: author.to_string(),
+                    text,
+                    in_reply_to: None,
+                    request: None,
+                    session_id: None,
+                },
+            )
+            .expect("recorded");
+        };
+        chat("human", format!("OLDEST {}", "x".repeat(3_900)));
+        for number in 0..5 {
+            chat(
+                if number % 2 == 0 { "pm" } else { "human" },
+                format!("MIDDLE-{number} {}", "y".repeat(3_900)),
+            );
+        }
+        chat("human", "NEWEST: that is everything.".to_string());
+        let plan = catervas_store::requests::file_product_plan_request(
+            &deps.files,
+            &deps.log,
+            catervas_store::requests::product_plan_request(
+                catervas_core::contract::Role::Architect,
+                5.0,
+            ),
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("filed");
+        harness.project.filed("CTV-2", "in_progress", "task", None);
+        let sent_back = format!("Please say more about delivery. {}", "z".repeat(1_500));
+        harness.project.record(
+            plan.id.as_str(),
+            "human.accepted",
+            &json!({ "subject": "result", "accepted_by": "human", "message": sent_back }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = agent(&team, "pm");
+        let other = deps
+            .tools
+            .files
+            .read_contract(&"CTV-2".parse().expect("an id"))
+            .expect("the contract");
+
+        let prompt = session_spec(
+            deps,
+            &team,
+            &asked(deps, pm, SessionPurpose::Implement, Some(&plan)),
+        )
+        .expect("the spec")
+        .system_prompt;
+        let (_, rest) = prompt
+            .split_once("## From the human\n\n")
+            .expect("a section");
+        let human = rest
+            .split_once("\n## ")
+            .map_or(rest, |(section, _)| section)
+            .trim_end();
+        assert!(
+            human.starts_with("When they started the project, the owner wrote:\n"),
+            "{human}"
+        );
+        assert!(human.contains("NEWEST: that is everything."), "{human}");
+        assert!(!human.contains("OLDEST"), "{human}");
+        assert!(!human.contains("[cut at"), "{human}");
+        assert!(
+            human.ends_with(&format!("The human, accepting the result: {sent_back}")),
+            "{human}"
+        );
+        assert!(human.len() <= 16 * 1024, "{}", human.len());
+
+        let elsewhere = session_spec(
+            deps,
+            &team,
+            &asked(
+                deps,
+                agent(&team, "dev-a"),
+                SessionPurpose::Implement,
+                Some(&other),
+            ),
+        )
+        .expect("the spec")
+        .system_prompt;
+        assert!(
+            !elsewhere.contains("When they started the project"),
+            "{elsewhere}"
         );
     }
 

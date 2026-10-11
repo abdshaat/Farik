@@ -59,6 +59,7 @@
         "templates.list",
         "template.preview",
         "backlog.summary",
+        "product_plan.state",
         "skills.list",
         "skill.get",
         "allowances.list",
@@ -280,6 +281,9 @@
             },
             {
               "$ref": "#/$defs/backlogSummaryQuery"
+            },
+            {
+              "$ref": "#/$defs/productPlanStateQuery"
             },
             {
               "$ref": "#/$defs/sprintGetQuery"
@@ -2258,6 +2262,25 @@
         }
       }
     },
+    "productPlanStateQuery": {
+      "title": "Product Plan State Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "product_plan.state"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "sprintsListQuery": {
       "title": "Sprints List Query",
       "type": "object",
@@ -3582,6 +3605,73 @@
       "required": [
         "plan_in_sprints",
         "count"
+      ]
+    },
+    "productPlanStateResult": {
+      "description": "Where a new project's product plan stands (docs/SPEC.md 4.3). new_project is the project's name when it was started from a paragraph, null for any other. approved is true when both documents are on the integration branch, and false with no new project. task is the newest task that drafts the plan and is still open (not cancelled, and not accepted with its integration done), null when there is none. documents holds spec.md then roadmap.md as the task's branch has them, each left out when git has none there, while the task is verifying, and is empty otherwise.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "new_project": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": { "name": { "type": "string" } }
+            }
+          ]
+        },
+        "approved": { "type": "boolean" },
+        "task": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["task_id", "status", "created_at"],
+              "properties": {
+                "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "refining",
+                    "ready",
+                    "assigned",
+                    "in_progress",
+                    "blocked",
+                    "verifying",
+                    "rejected",
+                    "accepted",
+                    "escalated",
+                    "cancelled"
+                  ]
+                },
+                "created_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "text"],
+            "properties": {
+              "path": { "type": "string" },
+              "text": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": [
+        "new_project",
+        "approved",
+        "task",
+        "documents"
       ]
     },
     "sprintsListResult": {

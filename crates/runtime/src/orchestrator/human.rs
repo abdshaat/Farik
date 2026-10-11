@@ -23,13 +23,17 @@ use catervas_protocol::event::{
 };
 use catervas_store::folder_docs::{ProposalState, folder_docs};
 use catervas_store::pipelines::{PipelineState, data_pipelines};
+use catervas_store::product_plan::{drafts_the_plan, new_project, product_plan_tasks};
 use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
-use catervas_store::requests::{RequestError, hold_contract, triage_by_human};
+use catervas_store::requests::{
+    RequestError, file_product_plan_request, hold_contract, placeholder_budget_usd,
+    product_plan_request, triage_by_human,
+};
 use catervas_store::sites::{SiteRequest, site_requests};
 use catervas_store::{EventQuery, TaskProjection};
 use serde_json::json;
 
-use super::requests::HUMAN;
+use super::requests::{HUMAN, product_manager};
 use super::verify::{governor_results, is_mechanical, since_verifying};
 
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
@@ -159,6 +163,7 @@ pub(super) async fn handle(
         ),
         Command::TeamPause => pause(tools, true),
         Command::TeamResume => pause(tools, false),
+        Command::ProductPlanDraft => draft_product_plan(tools),
         Command::MessagePost { text } => post_message(tools, text),
         Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
         Command::ConnectorConnect {
@@ -282,6 +287,95 @@ pub(super) async fn handle(
             })
         }
     }
+}
+
+/// Held while a product plan is drafted, so that two presses of the button file one task.
+// ponytail: one lock for the process, as a chat's reply has; the command line makes no new project.
+static DRAFTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The owner's word that the Product Manager drafts a new project's product plan (4.3): the task
+/// is filed as the owner's request, with `product_plan` marking it, and Catervas triages it. Each
+/// refusal is `<code>: <words>`, in this order.
+fn draft_product_plan(tools: &ToolDeps) -> Result<CommandReport, CommandError> {
+    let team = tools.files.read_team().map_err(failed)?;
+    draft_for(tools, &team)
+}
+
+/// `draft_product_plan` for `team`, which a team file's validation keeps from lacking a Product
+/// Manager and which a test may therefore hand in whole.
+fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandError> {
+    let _drafting = DRAFTING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let refused = |reason: String| Err(CommandError::Refused { reason });
+    if new_project(&tools.log).map_err(failed)?.is_none() {
+        return refused(
+            "not_a_new_project: this project was not started in Catervas, so it has no product plan to draft"
+                .to_string(),
+        );
+    }
+    if !tools
+        .transitions
+        .awaits_the_product_plan(team)
+        .map_err(failed)?
+    {
+        return refused("product_plan_approved: the product plan is approved already".to_string());
+    }
+    let drafting: Vec<TaskId> = product_plan_tasks(&tools.log)
+        .map_err(failed)?
+        .into_iter()
+        .map(|(task, _)| task)
+        .collect();
+    let board = tools.projections.board().map_err(failed)?;
+    if let Some(open) = board
+        .iter()
+        .find(|row| drafting.contains(&row.task_id) && drafts_the_plan(row))
+    {
+        return refused(format!(
+            "product_plan_open: {} drafts the product plan already",
+            open.task_id.as_str()
+        ));
+    }
+    let Some(writer) = product_manager(team) else {
+        return refused(
+            "product_plan_no_writer: the team has no active Product Manager to write it"
+                .to_string(),
+        );
+    };
+    let Some(reviewer) =
+        catervas_roles::default_reviewer_role(team, TaskKind::Task, Role::ProductManager)
+    else {
+        return refused(
+            "product_plan_no_reviewer: an Architect or a Scrum Master checks the product plan before you read it, and the team has no active one; add one on the Team page"
+                .to_string(),
+        );
+    };
+    let contract = file_product_plan_request(
+        &tools.files,
+        &tools.log,
+        product_plan_request(reviewer, placeholder_budget_usd(&team.rules())),
+        (tools.clock.now(), &tools.ids),
+    )
+    .map_err(failed)?;
+    tools.projections.catch_up().map_err(failed)?;
+    let events = tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(contract.id.clone()),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .iter()
+        .map(|event| event.envelope.seq)
+        .collect();
+    Ok(CommandReport {
+        said: format!(
+            "{} drafts the product plan as {}. It comes to you on Today to approve.",
+            writer.display_name.as_str(),
+            contract.id.as_str()
+        ),
+        events,
+    })
 }
 
 /// The human's pause of the whole team, or its resume: recorded once, and refused when the team
@@ -2760,6 +2854,190 @@ mod tests {
 
     fn last(harness: &Harness, kind: EventKind) -> Option<CatervasEvent> {
         harness.events(&[kind]).pop()
+    }
+
+    /// A new project's team: Mira the Product Manager, Ada the Architect, and the Developer
+    /// `dev-a`, with `change` applied to its wire; the owner has been greeted, so that no
+    /// interview waits to open.
+    fn a_new_project(name: &str, change: impl FnOnce(&mut Value)) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            let agents = wire["agents"].as_array_mut().expect("agents");
+            agents.push(catervas_core::team::fixtures::an_agent_wire(
+                "ada",
+                "architect",
+            ));
+            agents[3]["display_name"] = json!("Ada");
+            change(wire);
+        });
+        harness.started();
+        let deps = &harness.project.deps;
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "pm".to_string(),
+                author: "pm".to_string(),
+                text: "Hello! Who are your customers?".to_string(),
+                in_reply_to: None,
+                request: None,
+                heard: None,
+                session_id: None,
+            },
+        )
+        .expect("the greeting is recorded");
+        harness
+    }
+
+    fn product_plan_tasks(harness: &Harness) -> Vec<String> {
+        harness
+            .events(&[EventKind::TaskCreated])
+            .into_iter()
+            .filter(|event| {
+                matches!(&event.body, EventBody::TaskCreated(body) if body.product_plan == Some(true))
+            })
+            .filter_map(|event| event.envelope.ids.task_id)
+            .map(|id| id.to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn drafts_the_product_plan_on_the_owners_word() {
+        let harness = a_new_project("human-product-plan", |wire| {
+            wire["policy"]["plan_in_sprints"] = json!(true);
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sam", "scrum_master"),
+            );
+        });
+        let plan = crate::recorded::fixtures::plan_assigns_ctv_1();
+        let assigns_mira_and_ada = crate::recorded::Transcript::from_jsonl(
+            &plan
+                .lines()
+                .collect::<Vec<_>>()
+                .join("\n")
+                .replace("dev-a", "pm")
+                .replace("dev-b", "ada"),
+        );
+        let adapter = harness.recorded(vec![assigns_mira_and_ada]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = handled(&orchestrator, Command::ProductPlanDraft).await;
+
+        assert_eq!(
+            report.said,
+            "Mira drafts the product plan as CTV-1. It comes to you on Today to approve."
+        );
+        assert_eq!(report.events.len(), 2, "{report:?}");
+        assert_eq!(product_plan_tasks(&harness), ["CTV-1"]);
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-1"))
+            .expect("the contract");
+        assert_eq!(contract.title.as_str(), "Draft the product plan");
+        assert_eq!(
+            contract.reviewer_role,
+            catervas_core::contract::Role::Architect
+        );
+
+        // Rule 10 and rule 9 move it to ready with no refine session; sprints are on and none is
+        // open, and it is not held: the Scrum Master's plan session takes it to assigned.
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(
+            (started[0].agent_id.as_str(), started[0].purpose),
+            ("sam", crate::session::SessionPurpose::Plan)
+        );
+        assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("pm"));
+        assert_eq!(harness.row("CTV-1").reviewer_id.as_deref(), Some("ada"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_draft_out_of_place() {
+        // No project.started: not a new project.
+        let old = Harness::new("human-plan-old", |_| {});
+        let refusal = refused(&an_orchestrator(&old), Command::ProductPlanDraft).await;
+        assert_eq!(
+            refusal,
+            "not_a_new_project: this project was not started in Catervas, so it has no product plan to draft"
+        );
+        assert!(product_plan_tasks(&old).is_empty());
+
+        // Both documents on main: approved already.
+        let approved = a_new_project("human-plan-approved", |_| {});
+        approved.approve_the_product_plan();
+        let refusal = refused(&an_orchestrator(&approved), Command::ProductPlanDraft).await;
+        assert_eq!(
+            refusal,
+            "product_plan_approved: the product plan is approved already"
+        );
+        assert!(product_plan_tasks(&approved).is_empty());
+
+        // No active Product Manager: a team file cannot say so, so the team is handed in whole.
+        let unwritten = a_new_project("human-plan-no-writer", |_| {});
+        let mut wire = serde_json::to_value(
+            unwritten
+                .project
+                .deps
+                .files
+                .read_team()
+                .expect("the team reads"),
+        )
+        .expect("the team is JSON");
+        wire["agents"][0]["status"] = json!("paused");
+        let without_one: catervas_core::team::Team =
+            serde_json::from_value(wire).expect("the team reads back");
+        assert!(matches!(
+            super::draft_for(&unwritten.project.deps, &without_one),
+            Err(CommandError::Refused { reason })
+                if reason == "product_plan_no_writer: the team has no active Product Manager to write it"
+        ));
+        assert!(product_plan_tasks(&unwritten).is_empty());
+
+        // No active Architect or Scrum Master.
+        let unreviewed = Harness::new("human-plan-no-reviewer", |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+        });
+        unreviewed.started();
+        let refusal = refused(&an_orchestrator(&unreviewed), Command::ProductPlanDraft).await;
+        assert_eq!(
+            refusal,
+            "product_plan_no_reviewer: an Architect or a Scrum Master checks the product plan before you read it, and the team has no active one; add one on the Team page"
+        );
+        assert!(product_plan_tasks(&unreviewed).is_empty());
+
+        // Two drafts at once file one, and a draft is open until it is cancelled.
+        let harness = a_new_project("human-plan-open", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+        let (first, second) = tokio::join!(
+            orchestrator.handle(Command::ProductPlanDraft),
+            orchestrator.handle(Command::ProductPlanDraft)
+        );
+        let results = [first, second];
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(product_plan_tasks(&harness), ["CTV-1"]);
+        let refusal = refused(&orchestrator, Command::ProductPlanDraft).await;
+        assert_eq!(
+            refusal,
+            "product_plan_open: CTV-1 drafts the product plan already"
+        );
+        harness
+            .project
+            .moved("CTV-1", "draft", "cancelled", &json!({}));
+        handled(&orchestrator, Command::ProductPlanDraft).await;
+        assert_eq!(product_plan_tasks(&harness), ["CTV-1", "CTV-2"]);
     }
 
     /// An epic the Product Manager wrote for the human to review, with `criteria`, filed in
