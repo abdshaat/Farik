@@ -251,6 +251,9 @@ pub struct EndedSprint {
     pub ended_seq: u64,
     /// Whether its review has run, under the ceremonies' bound (`has_run`).
     pub reviewed: bool,
+    /// Each agent with a review session that has run since its end, under the same bound, by the
+    /// session's agent on its envelope, in the order their first sessions started.
+    pub reviewed_by: Vec<String>,
     /// Whether its retro has run, under the same bound, or has appended, however its session
     /// ended: a sprint gets one retro.
     pub retro_held: bool,
@@ -308,9 +311,34 @@ pub fn ended_sprint(log: &EventLog) -> Result<Option<EndedSprint>, StoreError> {
         started_seq,
         ended_seq: events[last].envelope.seq,
         reviewed: has_run(after, |event| in_thread(event, Thread::Review)),
+        reviewed_by: reviewed_by(after),
         retro_held: retro_appended || has_run(after, |event| in_thread(event, Thread::Retro)),
         retro_appended,
     }))
+}
+
+/// Each agent with a review session among `events` that `has_run`, in the order their first
+/// review sessions started.
+fn reviewed_by(events: &[CatervasEvent]) -> Vec<String> {
+    let mut agents: Vec<&str> = Vec::new();
+    for event in events {
+        if let Some(agent) = event.envelope.ids.agent_id.as_deref()
+            && in_thread(event, Thread::Review)
+            && !agents.contains(&agent)
+        {
+            agents.push(agent);
+        }
+    }
+    agents
+        .into_iter()
+        .filter(|agent| {
+            has_run(events, |event| {
+                in_thread(event, Thread::Review)
+                    && event.envelope.ids.agent_id.as_deref() == Some(*agent)
+            })
+        })
+        .map(str::to_string)
+        .collect()
 }
 
 /// Each event about `task_id` recorded while `sprint` was open, oldest first.
@@ -354,7 +382,7 @@ mod tests {
     use chrono::Duration;
     use serde_json::json;
 
-    use super::open_escalations;
+    use super::{ended_sprint, open_escalations};
     use crate::tools::fixtures::{TestProject, a_team_of_three, at};
 
     #[test]
@@ -426,5 +454,53 @@ mod tests {
             ]
         );
         assert_eq!(open[0].title, "Add a login page");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn knows_who_has_reviewed_an_ended_sprint() {
+        let project = TestProject::new("ceremonies-reviewed-by", &a_team_of_three(|_| {}));
+        project.open_sprint("S1", None, &[]);
+        project.record(
+            "",
+            "sprint.ended",
+            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
+        );
+        let start = |agent: &str, session: &str| {
+            project.record_in(
+                Some(agent),
+                Some(session),
+                "",
+                "session.started",
+                &json!({
+                    "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                    "thread": "review"
+                }),
+            );
+        };
+        let end = |agent: &str, session: &str| {
+            project.record_in(
+                Some(agent),
+                Some(session),
+                "",
+                "session.ended",
+                &json!({ "reason": "completed", "detail": "" }),
+            );
+        };
+        start("sm", "s-1");
+        end("sm", "s-1");
+        start("pm", "s-2");
+
+        let sprint = ended_sprint(&project.deps.log)
+            .expect("the log reads")
+            .expect("S1 ended");
+        assert_eq!(sprint.reviewed_by, ["sm"]);
+
+        end("pm", "s-2");
+
+        let sprint = ended_sprint(&project.deps.log)
+            .expect("the log reads")
+            .expect("S1 ended");
+        assert_eq!(sprint.reviewed_by, ["sm", "pm"]);
     }
 }

@@ -14,7 +14,7 @@ use catervas_core::governor::task_status::is_terminal;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::marketing::plans_to_end;
-use catervas_core::team::{Agent, AgentStatus, Team, task_private_folder};
+use catervas_core::team::{Agent, AgentStatus, Integration, Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationAgedBody, EventBody, EventIds, EventKind, HumanAcceptedBodySubject,
     SessionStartedBodyPurpose, Thread, new_event,
@@ -22,15 +22,16 @@ use catervas_protocol::event::{
 use catervas_store::baseline::{copy_baseline, folder_in};
 use catervas_store::marketing::{marketing_plans, social_posts};
 use catervas_store::product_plan::{new_project, product_plan_tasks};
-use catervas_store::{CostScope, EventQuery, Git, TaskProjection};
+use catervas_store::{CostScope, EventQuery, Git, GitError, TaskProjection};
 use chrono::{DateTime, Utc};
 
 use super::design::{self, Stage};
 use super::integrate::{awaiting, awaiting_folder_changes, cleanup};
 use super::messages::{
-    Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message,
-    owners_folder_words, plan_message, planning_message, posts_heard, retro_message,
-    sprint_review_message, standup_message, with_the_approved_plan,
+    Digest, Resume, SprintTask, architecture_refresh_message, ceremony_message, implement_message,
+    mention_message, owners_folder_lines, owners_folder_words, plan_message, planning_message,
+    posts_heard, product_refresh_message, retro_message, sprint_review_message, standup_message,
+    with_the_approved_plan,
 };
 use super::pipeline::decide_pipelines;
 use super::requests;
@@ -41,7 +42,8 @@ use super::{
     session_dir, worktree,
 };
 use crate::ceremonies::{
-    budgets_spent_since_planning, ended_sprint, open_escalations, sprint_events, standup_moves,
+    EndedSprint, budgets_spent_since_planning, ended_sprint, open_escalations, sprint_events,
+    standup_moves,
 };
 use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
@@ -466,7 +468,9 @@ fn finished_sprint(
 /// those tasks while the sprint was open. The review is told each task's status, cost, and
 /// completion note, and the sprint's budget and spent; the retro the sprint's rejections,
 /// escalations, blocks, and iterations, and the last retros, and is offered `catervas_append_retro`.
-/// Passed over for a sprint whose file lists no task, with no runner, or on a spent day.
+/// Between them (`due_refresh`), the Product Manager and the Architect each get one `review`
+/// session that refreshes the product plan and the architecture notes. Passed over for a sprint
+/// whose file lists no task, with no runner, or on a spent day.
 async fn review_and_retro(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -496,52 +500,67 @@ async fn review_and_retro(
     {
         return Ok(None);
     }
-    let mut tasks = Vec::new();
-    for row in board.iter().filter(|row| {
-        file.task_ids
-            .iter()
-            .any(|id| id.as_str() == row.task_id.as_str())
-    }) {
-        tasks.push(SprintTask {
-            task_id: row.task_id.clone(),
-            status: row.status,
-            iteration: row.iteration,
-            events: sprint_events(&tools.log, &sprint, &row.task_id)?,
-        });
-    }
-    let (thread, facts, offered, name) = if sprint.reviewed {
-        let retro = tools.files.read_retro()?;
-        // The Scrum Master writes the cadence at the retro of the sprint that documented the
-        // project (ADR 0051).
-        let catervafied = Role::from(runner.role) == Role::ScrumMaster
-            && crate::catervafication::started(&tools.log)?
-                .is_some_and(|epic| file.task_ids.iter().any(|id| id.as_str() == epic.as_str()));
-        (
-            Thread::Retro,
-            retro_message(&sprint.sprint_id, &tasks, retro.as_deref(), catervafied),
-            RETRO_TOOLS,
-            "retro ceremony",
-        )
+    let tasks = sprint_tasks(tools, board, &sprint, &file)?;
+    let refresh = if sprint.reviewed {
+        due_refresh(deps, team, board, &sprint, &tasks, waiting)?
     } else {
-        let spent = tools
-            .projections
-            .costs(CostScope::Sprint)?
-            .into_iter()
-            .find(|cost| cost.key == sprint.sprint_id)
-            .map_or(0.0, |cost| cost.usd);
-        let mut facts = sprint_review_message(&sprint.sprint_id, &tasks, file.budget_usd, spent);
-        // What the owner decided of the runner's documents since its last review.
-        let heard = owners_folder_words(&tools.log, runner.id.as_str())?;
-        if !heard.is_empty() {
-            facts = format!("{facts}\n{heard}");
+        Refresh::None
+    };
+    let (agent, thread, facts, offered, name) = match refresh {
+        Refresh::Wait => return Ok(None),
+        Refresh::Ask(agent, facts, name) => (agent, Thread::Review, facts, CEREMONY_TOOLS, name),
+        Refresh::None if sprint.reviewed => {
+            let retro = tools.files.read_retro()?;
+            // The Scrum Master writes the cadence at the retro of the sprint that documented the
+            // project (ADR 0051).
+            let catervafied = Role::from(runner.role) == Role::ScrumMaster
+                && crate::catervafication::started(&tools.log)?.is_some_and(|epic| {
+                    file.task_ids.iter().any(|id| id.as_str() == epic.as_str())
+                });
+            (
+                runner,
+                Thread::Retro,
+                retro_message(&sprint.sprint_id, &tasks, retro.as_deref(), catervafied),
+                RETRO_TOOLS,
+                "retro ceremony",
+            )
         }
-        (Thread::Review, facts, CEREMONY_TOOLS, "review ceremony")
+        Refresh::None => {
+            // A Product Manager that runs the review makes its refresh in it.
+            let refresh_in_review = Role::from(runner.role) == Role::ProductManager
+                && on_the_integration_branch(deps, team, PRODUCT_SPEC)?;
+            let spent = tools
+                .projections
+                .costs(CostScope::Sprint)?
+                .into_iter()
+                .find(|cost| cost.key == sprint.sprint_id)
+                .map_or(0.0, |cost| cost.usd);
+            let mut facts = sprint_review_message(
+                &sprint.sprint_id,
+                &tasks,
+                file.budget_usd,
+                spent,
+                refresh_in_review,
+            );
+            // What the owner decided of the runner's documents since its last review.
+            let heard = owners_folder_words(&tools.log, runner.id.as_str())?;
+            if !heard.is_empty() {
+                facts = format!("{facts}\n{heard}");
+            }
+            (
+                runner,
+                Thread::Review,
+                facts,
+                CEREMONY_TOOLS,
+                "review ceremony",
+            )
+        }
     };
     let end = run_session(
         deps,
         team,
         SessionAsk {
-            agent: runner,
+            agent,
             contract: None,
             purpose: SessionPurpose::Ceremony,
             cwd: tools.files.root().to_path_buf(),
@@ -558,8 +577,153 @@ async fn review_and_retro(
     .await?;
     Ok(Some(TickReport::Sprint {
         sprint_id: sprint.sprint_id,
-        what: ran(runner, name, &end),
+        what: ran(agent, name, &end),
     }))
+}
+
+/// The tasks of `sprint`, as its review and retro are told them: each of `file`'s on the board,
+/// with the events about it while the sprint was open.
+fn sprint_tasks(
+    tools: &crate::tools::ToolDeps,
+    board: &[TaskProjection],
+    sprint: &EndedSprint,
+    file: &catervas_core::sprint::Sprint,
+) -> Result<Vec<SprintTask>, OrchestratorError> {
+    let mut tasks = Vec::new();
+    for row in board.iter().filter(|row| {
+        file.task_ids
+            .iter()
+            .any(|id| id.as_str() == row.task_id.as_str())
+    }) {
+        tasks.push(SprintTask {
+            task_id: row.task_id.clone(),
+            title: row.title.clone(),
+            status: row.status,
+            iteration: row.iteration,
+            events: sprint_events(&tools.log, sprint, &row.task_id)?,
+        });
+    }
+    Ok(tasks)
+}
+
+/// The product plan's spec, which the Product Manager's refresh keeps true.
+const PRODUCT_SPEC: &str = "docs/catervas/product/spec.md";
+/// The architecture's structure notes, which the Architect's refresh keeps true.
+const ARCHITECTURE_STRUCTURE: &str = "docs/catervas/architecture/structure.md";
+
+/// What the sprint review's refreshes ask of the tick (`due_refresh`).
+enum Refresh<'a> {
+    /// No refresh is owed: the retro, or the review, is next.
+    None,
+    /// One is owed but its agent cannot be asked yet, or a task awaits its integration: pass over.
+    Wait,
+    /// The agent to ask, its first message's facts, and the session's name.
+    Ask(&'a Agent, String, &'static str),
+}
+
+/// Whether `path` is on the team's integration branch; false when the branch does not exist.
+fn on_the_integration_branch(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    path: &str,
+) -> Result<bool, OrchestratorError> {
+    let git = &deps.tools.git;
+    match git.has_file(&integration_branch(team, git)?, path) {
+        Err(GitError::CommandFailed { .. }) => Ok(false),
+        other => Ok(other?),
+    }
+}
+
+/// The refresh the reviewed `sprint` owes next, once per sprint under the ceremonies' bound
+/// (`reviewed_by`): the Product Manager's, when its `spec.md` is on the integration branch and it
+/// has not reviewed (a Product Manager that ran the review has: its review was its refresh); then
+/// the Architect's, when its `structure.md` is and a task of the sprint was integrated after the
+/// sprint started, read from the log. Under `auto_merge` they wait while a task of the sprint is
+/// accepted and awaiting its integration, which rule 2 does first, unless its integration was
+/// escalated to the human. Passed over on a spent day or while the agent sleeps, as the review is.
+fn due_refresh<'a>(
+    deps: &OrchestratorDeps,
+    team: &'a Team,
+    board: &[TaskProjection],
+    sprint: &EndedSprint,
+    tasks: &[SprintTask],
+    waiting: &mut Waiting,
+) -> Result<Refresh<'a>, OrchestratorError> {
+    let tools = &deps.tools;
+    let owed = |role: Role, path: &str| -> Result<Option<&'a Agent>, OrchestratorError> {
+        let Some(agent) = team
+            .active_agents()
+            .find(|agent| Role::from(agent.role) == role)
+        else {
+            return Ok(None);
+        };
+        if sprint.reviewed_by.iter().any(|id| id == agent.id.as_str()) {
+            return Ok(None);
+        }
+        Ok(on_the_integration_branch(deps, team, path)?.then_some(agent))
+    };
+    let product = owed(Role::ProductManager, PRODUCT_SPEC)?;
+    let architecture = owed(Role::Architect, ARCHITECTURE_STRUCTURE)?;
+    if product.is_none() && architecture.is_none() {
+        return Ok(Refresh::None);
+    }
+    if team.policy.integration == Integration::AutoMerge {
+        let escalated = open_escalations(&tools.log, &tools.projections)?;
+        if board.iter().any(|row| {
+            tasks.iter().any(|task| task.task_id == row.task_id)
+                && row.status == TaskStatus::Accepted
+                && row.awaiting_integration
+                && !escalated.iter().any(|open| open.task_id == row.task_id)
+        }) {
+            return Ok(Refresh::Wait);
+        }
+    }
+    let cannot_be_asked = |agent: &Agent, waiting: &mut Waiting| {
+        Ok::<_, OrchestratorError>(
+            day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
+                | asleep(deps, agent, &mut waiting.slept)?,
+        )
+    };
+    if let Some(agent) = product {
+        if cannot_be_asked(agent, waiting)? {
+            return Ok(Refresh::Wait);
+        }
+        let (decisions, pending) = owners_folder_lines(&tools.log, agent.id.as_str())?;
+        return Ok(Refresh::Ask(
+            agent,
+            product_refresh_message(&sprint.sprint_id, tasks, &decisions, &pending),
+            "product refresh session",
+        ));
+    }
+    let Some(agent) = architecture else {
+        return Ok(Refresh::None);
+    };
+    let integrated_ids: Vec<TaskId> = tools
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::TaskIntegrated],
+            after_seq: Some(sprint.started_seq),
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter_map(|event| event.envelope.ids.task_id)
+        .collect();
+    let integrated: Vec<SprintTask> = tasks
+        .iter()
+        .filter(|task| integrated_ids.contains(&task.task_id))
+        .cloned()
+        .collect();
+    if integrated.is_empty() {
+        return Ok(Refresh::None);
+    }
+    if cannot_be_asked(agent, waiting)? {
+        return Ok(Refresh::Wait);
+    }
+    Ok(Refresh::Ask(
+        agent,
+        architecture_refresh_message(&sprint.sprint_id, &integrated),
+        "architecture refresh session",
+    ))
 }
 
 /// The Catervas tools the retro is offered: the standup's and the review's, and the retro's append.
@@ -8238,6 +8402,253 @@ mod tests {
         );
         assert!(!prompt.contains("sent back your changes"), "{prompt}");
         assert!(!prompt.contains("still waits for the owner"), "{prompt}");
+    }
+
+    const SPEC: &str = "docs/catervas/product/spec.md";
+    const STRUCTURE: &str = "docs/catervas/architecture/structure.md";
+
+    /// The harness's team with an active Scrum Master `sm` and Architect `ada` besides.
+    fn with_a_scrum_master_and_an_architect(wire: &mut serde_json::Value) {
+        with_a_scrum_master(wire);
+        wire["agents"]
+            .as_array_mut()
+            .expect("a list of agents")
+            .push(catervas_core::team::fixtures::an_agent_wire(
+                "ada",
+                "architect",
+            ));
+    }
+
+    /// `path` committed on the branch checked out at the root, as an integration leaves it.
+    fn on_main(harness: &Harness, path: &str) {
+        let file = harness.project.repo.path.join(path);
+        std::fs::create_dir_all(file.parent().expect("a folder")).expect("the folder");
+        harness.commit_at_root(path, "# A document\n", "Add a document");
+    }
+
+    /// S1 holding CTV-1, which `delivered` says how it ended: accepted, with its note, and
+    /// integrated after the sprint started, or cancelled.
+    fn a_sprint_of_one_task(harness: &Harness, integrated: bool) {
+        if integrated {
+            harness.accepted("CTV-1");
+        } else {
+            harness.project.filed("CTV-1", "cancelled", "task", None);
+        }
+        harness.open_sprint("S1", &["CTV-1"]);
+        if integrated {
+            harness.project.record(
+                "CTV-1",
+                "note.written",
+                &json!({
+                    "kind": "completion",
+                    "text": "The login page is done.",
+                    "written_by": "dev-a"
+                }),
+            );
+            harness.project.record(
+                "CTV-1",
+                "task.integrated",
+                &json!({ "sha": "abc123", "into": "main", "integrated_by": "governor" }),
+            );
+        }
+    }
+
+    /// The agent and thread of each ceremony session started, oldest first.
+    fn who_held(harness: &Harness) -> Vec<(String, Thread)> {
+        harness
+            .events(&[EventKind::SessionStarted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::SessionStarted(body) => Some((
+                    event.envelope.ids.agent_id.unwrap_or_default(),
+                    body.thread?,
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refreshes_the_product_and_the_architecture_after_the_review() {
+        let harness = Harness::new("orch-refresh", with_a_scrum_master_and_an_architect);
+        a_sprint_of_one_task(&harness, true);
+        on_main(&harness, SPEC);
+        on_main(&harness, STRUCTURE);
+        let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..6 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert_eq!(
+            who_held(&harness),
+            vec![
+                ("sm".to_string(), Thread::Review),
+                ("pm".to_string(), Thread::Review),
+                ("ada".to_string(), Thread::Review),
+                ("sm".to_string(), Thread::Retro),
+            ]
+        );
+        let started = adapter.started();
+        let (pm, ada) = (&started[1], &started[2]);
+        assert!(
+            pm.initial_prompt.starts_with(
+                "The sprint 1 review is done. Keep the product plan true to what the sprint did."
+            ),
+            "{}",
+            pm.initial_prompt
+        );
+        assert!(tools_of(pm).contains("catervas_write_folder_doc"));
+        assert!(
+            ada.initial_prompt.starts_with(
+                "Bring docs/catervas/architecture/features.md, jobs.md and structure.md up to date with what sprint 1 added to the project."
+            ),
+            "{}",
+            ada.initial_prompt
+        );
+        assert!(tools_of(ada).contains("catervas_write_folder_doc"));
+        assert!(
+            ada.initial_prompt.contains("CTV-1")
+                && !outside_the_untrusted_blocks(&ada.initial_prompt).contains("CTV-1"),
+            "{}",
+            ada.initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn skips_the_architecture_when_nothing_was_integrated() {
+        // (name, integrated, spec on main, structure on main, who holds the review thread)
+        for (name, integrated, spec, structure, held) in [
+            (
+                "orch-refresh-cancelled",
+                false,
+                true,
+                true,
+                vec!["sm", "pm"],
+            ),
+            (
+                "orch-refresh-no-structure",
+                true,
+                true,
+                false,
+                vec!["sm", "pm"],
+            ),
+            ("orch-refresh-no-spec", true, false, true, vec!["sm", "ada"]),
+        ] {
+            let harness = Harness::new(name, with_a_scrum_master_and_an_architect);
+            a_sprint_of_one_task(&harness, integrated);
+            if spec {
+                on_main(&harness, SPEC);
+            }
+            if structure {
+                on_main(&harness, STRUCTURE);
+            }
+            let mut transcripts = vec![review(); held.len()];
+            transcripts.push(retro());
+            let orchestrator = harness.orchestrator(harness.recorded(transcripts));
+
+            for _ in 0..held.len() + 3 {
+                orchestrator.tick().await.expect("the tick runs");
+            }
+
+            let mut expected: Vec<(String, Thread)> = held
+                .iter()
+                .map(|agent| ((*agent).to_string(), Thread::Review))
+                .collect();
+            expected.push(("sm".to_string(), Thread::Retro));
+            assert_eq!(who_held(&harness), expected, "{name}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn integrates_before_it_refreshes() {
+        let harness = Harness::new("orch-refresh-integrates", |wire| {
+            with_a_scrum_master_and_an_architect(wire);
+            wire["policy"]["integration"] = json!("auto_merge");
+        });
+        harness.accepted("CTV-1");
+        harness.open_sprint("S1", &["CTV-1"]);
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "The login page is done.", "written_by": "dev-a" }),
+        );
+        on_main(&harness, SPEC);
+        on_main(&harness, STRUCTURE);
+        let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the sprint ends");
+        orchestrator.tick().await.expect("the review runs");
+        assert_eq!(who_held(&harness).len(), 1);
+
+        let integrating = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&integrating, TickReport::Acted { task_id, what }
+                if task_id.as_str() == "CTV-1" && what.contains("integrated")),
+            "{integrating:?}"
+        );
+        assert_eq!(who_held(&harness).len(), 1, "no refresh ran first");
+        orchestrator
+            .tick()
+            .await
+            .expect("the Product Manager's refresh runs");
+        orchestrator
+            .tick()
+            .await
+            .expect("the Architect's refresh runs");
+        assert_eq!(
+            who_held(&harness)[1..],
+            [
+                ("pm".to_string(), Thread::Review),
+                ("ada".to_string(), Thread::Review)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_product_managers_review_is_its_refresh() {
+        // No Scrum Master: the Product Manager runs the review and the retro.
+        let harness = Harness::new("orch-refresh-pm-runs", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(catervas_core::team::fixtures::an_agent_wire(
+                    "ada",
+                    "architect",
+                ));
+        });
+        a_sprint_of_one_task(&harness, true);
+        on_main(&harness, SPEC);
+        on_main(&harness, STRUCTURE);
+        let adapter = harness.recorded(vec![review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..6 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert_eq!(
+            who_held(&harness),
+            vec![
+                ("pm".to_string(), Thread::Review),
+                ("ada".to_string(), Thread::Review),
+                ("pm".to_string(), Thread::Retro),
+            ]
+        );
+        let review_of_pm = &adapter.started()[0].initial_prompt;
+        let facts = review_of_pm
+            .find("The review of S1")
+            .expect("the review's facts");
+        let asks = review_of_pm
+            .find("docs/catervas/product/reports/S1.md")
+            .expect("the refresh's asks");
+        assert!(facts < asks, "{review_of_pm}");
     }
 
     /// Records `text` in `agent`'s chat as `author`, and answers its seq.

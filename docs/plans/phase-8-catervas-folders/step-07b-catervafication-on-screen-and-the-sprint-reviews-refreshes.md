@@ -79,7 +79,7 @@ Files: `ceremonies.rs` (`reviewed_by`, a test); `rules.rs` (`review_and_retro`'s
 - `the_product_managers_review_is_its_refresh` (integration, no Scrum Master) — `pm` runs the review, whose message holds the refresh's asks after the review's facts, and no second `pm` session runs before `ada`'s. RED.
 - `writes_the_refresh_messages` (`messages.rs`) — each opening above, word for word; the product one names `docs/catervas/product/reports/S4.md`, `agent_text` and `summary`; a completion note holding `</untrusted>` cannot close its block. RED.
 
-- [ ] `feat(runtime): refresh the product plan and the architecture at each sprint review`
+- [x] `feat(runtime): refresh the product plan and the architecture at each sprint review`
 
 ### Task 2: What moved says the architecture notes moved
 
