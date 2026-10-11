@@ -236,7 +236,7 @@ function waitingWords(
 			return (
 				<>
 					{t("chatsKeyRefused", { name })}{" "}
-					<Link to="/settings">{t("chatsKeyLink")}</Link>
+					<Link to="/settings/account">{t("chatsKeyLink")}</Link>
 				</>
 			);
 		case "no_answer":

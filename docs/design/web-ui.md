@@ -127,7 +127,7 @@ The screens map to phase 6's steps as follows:
 | Channel | 10 | Chat with avatars. Ceremonies (standup, review, retro) are collapsible threads titled in plain words. |
 | Team | 06 | Each agent's card-sized profile: avatar, name, role, persona, model, and pause or retire. Its advanced view holds permissions and rules. |
 | Costs | 09 | Today's and this sprint's spend per agent, in dollars, with the harness metrics. |
-| Settings | 04, 06, 09 | Theme (light, dark, or match the system), the Advanced switch, and "Your team's rules": setup's permission, spending, finishing and plan-check answers, each changed on its own with its effect shown first. |
+| Settings | 04, 06, 09 | A directory of eight sections at their own addresses under `/settings/`, a side list on a desktop and a list on a phone: General (theme, language), Allowed actions, Spending, How work runs (finishing, planning in sprints, the plan check; setup's answers, each changed on its own with its effect shown first), Your app (with a UI/UX Designer), Saved teams, This computer, and AI account. |
 
 Lifecycle states map to plain words. Nothing shows the raw state names unless the user opens a task's advanced view:
 

@@ -49,4 +49,29 @@ describe("TextField", () => {
 		expect(texts).toContain("Shown to your team");
 		await expectNoAxeViolations(container);
 	});
+
+	it("puts its info behind a button beside the label", async () => {
+		const { container } = render(
+			<TextField
+				id="port"
+				label="Port"
+				value=""
+				onChange={() => {}}
+				info="Detail."
+			/>,
+		);
+		const button = screen.getByRole("button", { name: "More about this" });
+		expect(screen.getByText("Port").contains(button)).toBe(false);
+		const tip = container.querySelector("#port-info");
+		expect(tip?.getAttribute("role")).toBe("tooltip");
+		expect(tip?.textContent).toBe("Detail.");
+		const input = screen.getByRole("textbox", { name: "Port" });
+		expect(input.getAttribute("aria-describedby")).toContain("port-info");
+		await expectNoAxeViolations(container);
+	});
+
+	it("has no info button without info", () => {
+		render(<TextField id="port" label="Port" value="" onChange={() => {}} />);
+		expect(screen.queryByRole("button")).toBeNull();
+	});
 });

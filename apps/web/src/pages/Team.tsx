@@ -187,7 +187,7 @@ export function Team() {
 					{t("savedAsBefore")}
 					<strong>{savedAs}</strong>
 					{t("savedAsAfter")}
-					<Link to="/settings">{t("settings")}</Link>.
+					<Link to="/settings/saved-teams">{t("settings")}</Link>.
 				</p>
 			)}
 			{open === "save" && (

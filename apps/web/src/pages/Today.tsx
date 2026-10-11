@@ -135,7 +135,7 @@ const KINDS: Record<
 	preview_missing: {
 		title: "waitingPreviewMissing",
 		word: "waitingOpenSettings",
-		page: "/settings#preview",
+		page: "/settings/your-app",
 		line: "waitingPreviewMissingLine",
 	},
 	designer_needs_sandbox: {
@@ -960,7 +960,7 @@ function KeyRefusedRow() {
 			</div>
 			<Link
 				className={styles.action}
-				to="/settings"
+				to="/settings/account"
 				aria-describedby="waiting-key"
 			>
 				{t("waitingKeyConnect")}

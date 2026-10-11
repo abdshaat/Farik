@@ -20,6 +20,7 @@ import {
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { NO_MAILBOX } from "../test/sellerMail.ts";
 import { SITES } from "../test/sites.ts";
+import { onlyInTips } from "../test/tips.ts";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -171,24 +172,27 @@ const DEFAULTS = {
 	ui_paths: UI_PATHS,
 };
 
-/** Settings, with the team and the defaults answered: its team's rules area. */
-async function settings(team: object = TEAM, path = "/settings") {
+const RULES_PAGES = ["allowed-actions", "spending", "work"];
+
+/** A Settings section, with the queries it asks answered: a rules page asks for the defaults. */
+async function settings(team: object = TEAM, path = "/settings/work") {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
-	// The shell asks first, then the page itself.
 	await answerStatus(s, false);
-	await answerStatus(s, false, 2);
-	await answerQuery(s, "team.get", {
-		team,
-		agents: EFFECTIVE,
-		judges: JUDGES,
-		max_agents: 7,
-	});
-	await answerQuery(s, "settings.defaults", DEFAULTS);
-	const rules = await screen.findByRole("region", { name: en.rulesArea });
+	const isRules = RULES_PAGES.some((page) => path.endsWith(`/${page}`));
+	// Only the rules and the preview ask for the team, on a phone.
+	if (isRules || path.endsWith("/your-app"))
+		await answerQuery(s, "team.get", {
+			team,
+			agents: EFFECTIVE,
+			judges: JUDGES,
+			max_agents: 7,
+		});
+	if (isRules) await answerQuery(s, "settings.defaults", DEFAULTS);
+	const main = await screen.findByRole("main");
 	const part = (name: string) =>
-		within(rules).getByRole("region", { name }) as HTMLElement;
-	return { container, s, rules, part };
+		within(main).getByRole("region", { name }) as HTMLElement;
+	return { container, s, main, part };
 }
 
 const picked = (el: HTMLElement) => (el as HTMLInputElement).checked;
@@ -515,13 +519,55 @@ describe("team page", () => {
 		expect(one(checked, "kai").model).toEqual({ effort: "low" });
 	});
 
+	it("opens_the_agent's_advanced_settings_under_its_button", async () => {
+		const { container } = await opened("/team/ada");
+		await screen.findByRole("heading", { name: "Ada, your Architect" });
+		const options = () =>
+			within(screen.getByRole("combobox", { name: en.agentModel }))
+				.getAllByRole("option")
+				.map((o) => o.textContent ?? "");
+		expect(screen.queryByRole("switch", { name: en.tierNetwork })).toBeNull();
+		expect(
+			screen.queryByRole("button", { name: en.connectorCustomAdd }),
+		).toBeNull();
+		expect(options().some((o) => o.includes("("))).toBe(false);
+
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		const list = screen.getByRole("list", { name: en.advanced });
+		expect(within(list).getAllByRole("switch")).toHaveLength(7);
+		expect(
+			within(list).getByRole("button", { name: en.connectorCustomAdd }),
+		).toBeTruthy();
+		expect(options().some((o) => o.includes("("))).toBe(true);
+		expect(screen.getByRole("button", { name: en.advancedHide })).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("starts_closed_on_each_page", async () => {
+		// The old global switch's key, left in a browser, opens nothing.
+		localStorage.setItem("catervas.advanced", "true");
+		await settings(WITH_IRIS, "/settings/work");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.advancedSwitch }),
+		);
+		expect(await screen.findByRole("list", { name: en.advanced })).toBeTruthy();
+		cleanup();
+
+		await opened("/team/ada");
+		await screen.findByRole("heading", { name: "Ada, your Architect" });
+		expect(screen.queryByRole("list", { name: en.advanced })).toBeNull();
+		expect(
+			screen.getByRole("button", { name: en.advancedSwitch }),
+		).toBeTruthy();
+	});
+
 	it("toggles_tiers_in_advanced", async () => {
 		const { container, s } = await opened("/team/ada");
 		await screen.findByRole("heading", { name: "Ada, your Architect" });
 		expect(screen.queryByRole("switch", { name: en.tierNetwork })).toBeNull();
 
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
-		const tiers = screen.getByRole("list", { name: "What Ada may do" });
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		const tiers = screen.getByRole("list", { name: en.advanced });
 		expect(within(tiers).getAllByRole("switch")).toHaveLength(7);
 		const network = within(tiers).getByRole("switch", {
 			name: en.tierNetwork,
@@ -611,7 +657,7 @@ describe("team page", () => {
 	});
 
 	it("says_a_failed_disconnect_in_plain_words", async () => {
-		const { socket } = await renderApp("/settings");
+		const { socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		await answerQuery(s, "account.status", {
@@ -669,21 +715,37 @@ describe("team page", () => {
 	});
 
 	it("saves_the_preview_in_settings", async () => {
-		const scrolled = vi.fn();
-		Element.prototype.scrollIntoView = scrolled;
-		const { container, s } = await settings(WITH_IRIS, "/settings#preview");
+		const { container, s } = await settings(WITH_IRIS, "/settings/your-app");
 		const preview = await screen.findByRole("region", {
 			name: en.previewTitle,
 		});
 		expect(preview.id).toBe("preview");
-		// Today's row links here, and the page goes to the section.
-		await waitFor(() => expect(scrolled.mock.contexts).toContain(preview));
-		expect(
-			within(preview).getByText(
-				"Iris, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Catervas the commands you use to open it. Catervas runs them inside Docker’s sandbox, never straight on your computer.",
-			),
-		).toBeTruthy();
-		expect(within(preview).getByText(en.previewNotSure)).toBeTruthy();
+		const lines = (key: keyof typeof en) =>
+			t(key, { designer: "Iris" }).split("\n");
+		const items = within(preview)
+			.getAllByRole("listitem")
+			.map((i) => i.textContent);
+		for (const line of lines("previewLead")) expect(items).toContain(line);
+		for (const line of lines("previewMore")) onlyInTips(line);
+		for (const key of [
+			"previewPrepareHint",
+			"previewStartHint",
+			"previewPortHint",
+			"previewPathHint",
+		] as const)
+			for (const line of lines(key)) onlyInTips(line);
+		const described = (name: string, key: keyof typeof en) => {
+			const box = within(preview).getByRole("textbox", { name });
+			const text = (box.getAttribute("aria-describedby") ?? "")
+				.split(" ")
+				.map((id) => document.getElementById(id)?.textContent ?? "")
+				.join(" ");
+			expect(text).toContain(lines(key)[0]);
+		};
+		described(en.previewPrepare, "previewPrepareHint");
+		described(en.previewStart, "previewStartHint");
+		described(en.previewPort, "previewPortHint");
+		described(en.previewPath, "previewPathHint");
 		await expectNoAxeViolations(container);
 
 		const field = (name: string) =>
@@ -716,15 +778,21 @@ describe("team page", () => {
 		).toEqual(expected);
 		cleanup();
 
-		// A team without a Designer is never asked.
-		await settings();
+		// A team without a Designer is told to add one, and never asked.
+		await settings(TEAM, "/settings/your-app");
 		expect(screen.queryByRole("region", { name: en.previewTitle })).toBeNull();
+		expect(await screen.findByText(en.yourAppNone)).toBeTruthy();
 	});
 
 	it("edits_the_ui_paths_in_advanced", async () => {
-		const { container, s } = await settings(WITH_IRIS);
+		// With Advanced off the page does not ask for the patterns.
+		await settings(WITH_IRIS, "/settings/work");
 		expect(screen.queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		cleanup();
+		const { container, s } = await settings(WITH_IRIS, "/settings/work");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.advancedSwitch }),
+		);
 		const paths = screen.getByRole("region", { name: en.uiPathsTitle });
 		const list = within(paths).getByRole("list");
 		// The team says none, so the seven defaults stand.
@@ -764,8 +832,11 @@ describe("team page", () => {
 	});
 
 	it("changes_what_agents_may_do_and_the_limit_from_settings", async () => {
-		const { container, s, rules, part } = await settings();
-		expect(within(rules).getByText(en.rulesNextSession)).toBeTruthy();
+		const { container, s, part } = await settings(
+			TEAM,
+			"/settings/allowed-actions",
+		);
+		for (const line of en.rulesNextSession.split("\n")) onlyInTips(line);
 		await expectNoAxeViolations(container);
 
 		// The team's own answers, not setup's blanks.
@@ -826,8 +897,11 @@ describe("team page", () => {
 			).toBeGreaterThan(1),
 		);
 
-		// The same daily limit as the Costs page's.
-		const spend = part(en.rulesSpendTitle);
+		// The same daily limit as the Costs page's, on its own page.
+		cleanup();
+		const next = await settings(TEAM, "/settings/spending");
+		const { s: s2, part: part2 } = next;
+		const spend = part2(en.rulesSpendTitle);
 		expect(
 			picked(within(spend).getByRole("radio", { name: /^No limit/ })),
 		).toBe(true);
@@ -839,18 +913,20 @@ describe("team page", () => {
 		fireEvent.change(within(spend).getByLabelText(en.spendAmount), {
 			target: { value: "15" },
 		});
-		const limited = await validated(s, ["The team may spend up to $15 a day."]);
+		const limited = await validated(s2, [
+			"The team may spend up to $15 a day.",
+		]);
 		expect(limited.budgets).toEqual({ daily_usd: 15 });
 		expect(
 			await within(spend).findByText("The team may spend up to $15 a day."),
 		).toBeTruthy();
 		fireEvent.click(within(spend).getByRole("button", { name: en.agentSave }));
-		await waitFor(() => expect(s.calls("team.save")).toHaveLength(3));
-		expect((await saved(s)).budgets).toEqual({ daily_usd: 15 });
+		await waitFor(() => expect(s2.calls("team.save")).toHaveLength(1));
+		expect((await saved(s2)).budgets).toEqual({ daily_usd: 15 });
 	});
 
 	it("changes_how_work_is_added_and_how_plans_are_checked_from_settings", async () => {
-		const { container, s, part } = await settings();
+		const { container, s, part } = await settings(TEAM, "/settings/work");
 
 		const finish = part(en.rulesFinish);
 		expect(
@@ -977,7 +1053,7 @@ describe("team page", () => {
 	it("reads_an_old_team_as_not_planning_in_sprints", async () => {
 		// TEAM has no plan_in_sprints, as a team file from before step 15; the default is on.
 		expect("plan_in_sprints" in TEAM.policy).toBe(false);
-		const { part } = await settings(TEAM);
+		const { part } = await settings(TEAM, "/settings/work");
 		const toggle = within(part(en.rulesPlanning)).getByRole("switch", {
 			name: en.planInSprints,
 		});
@@ -986,10 +1062,10 @@ describe("team page", () => {
 
 	it("switches_planning_in_sprints", async () => {
 		const on = { ...TEAM, policy: { ...TEAM.policy, plan_in_sprints: true } };
-		const { container, s, rules, part } = await settings(on);
+		const { container, s, main, part } = await settings(on, "/settings/work");
 		// The section sits after "How finished work is added", before the plan check.
-		const headings = within(rules)
-			.getAllByRole("heading", { level: 2 })
+		const headings = within(main)
+			.getAllByRole("heading", { level: 3 })
 			.map((h) => h.textContent);
 		expect(headings.indexOf(en.rulesPlanning)).toBe(
 			headings.indexOf(en.rulesFinish) + 1,
@@ -999,8 +1075,7 @@ describe("team page", () => {
 			name: en.planInSprints,
 		});
 		expect(toggle.getAttribute("aria-checked")).toBe("true");
-		expect(toggle.getAttribute("aria-describedby")).toBeTruthy();
-		expect(within(planning).getByText(en.planInSprintsNote)).toBeTruthy();
+		for (const line of en.planInSprintsNote.split("\n")) onlyInTips(line);
 		await expectNoAxeViolations(container);
 
 		fireEvent.click(toggle);
@@ -1036,7 +1111,7 @@ describe("team page", () => {
 	});
 
 	it("keeps_each_rules_draft_until_it_is_saved_or_cancelled", async () => {
-		const { s, part } = await settings();
+		const { s, part } = await settings(TEAM, "/settings/work");
 		// The saved team is checked once on load, not once for each part.
 		await act(async () => {});
 		expect(
@@ -1044,11 +1119,13 @@ describe("team page", () => {
 		).toHaveLength(1);
 
 		// A draft in one part survives another part's save and the page's re-read.
-		const branches = () =>
-			within(part(en.rulesMay)).getByRole("radio", {
-				name: /^Yes, on its own branches/,
+		const sprints = () =>
+			within(part(en.rulesPlanning)).getByRole("switch", {
+				name: en.planInSprints,
 			});
-		fireEvent.click(branches());
+		expect(sprints().getAttribute("aria-checked")).toBe("false");
+		fireEvent.click(sprints());
+		expect(sprints().getAttribute("aria-checked")).toBe("true");
 		const finish = part(en.rulesFinish);
 		fireEvent.click(
 			within(finish).getByRole("radio", {
@@ -1082,22 +1159,21 @@ describe("team page", () => {
 				),
 			).toBe(true),
 		);
-		expect(picked(branches())).toBe(true);
+		expect(sprints().getAttribute("aria-checked")).toBe("true");
 
 		// Cancel drops the draft: the part shows the team's own answer again.
 		fireEvent.click(
-			within(part(en.rulesMay)).getByRole("button", { name: en.agentCancel }),
+			within(part(en.rulesPlanning)).getByRole("button", {
+				name: en.agentCancel,
+			}),
 		);
-		await waitFor(() => expect(picked(branches())).toBe(false));
-		expect(
-			picked(
-				within(part(en.rulesMay)).getByRole("radio", {
-					name: /^No, nobody may/,
-				}),
-			),
-		).toBe(true);
+		await waitFor(() =>
+			expect(sprints().getAttribute("aria-checked")).toBe("false"),
+		);
+	});
 
-		// A saved limit is what the part shows once the team is read again.
+	it("shows_a_saved_limit_once_the_team_is_read_again", async () => {
+		const { s, part } = await settings(TEAM, "/settings/spending");
 		const spend = () => part(en.rulesSpendTitle);
 		fireEvent.click(
 			within(spend()).getByRole("radio", {
@@ -1114,8 +1190,8 @@ describe("team page", () => {
 		fireEvent.click(
 			within(spend()).getByRole("button", { name: en.agentSave }),
 		);
-		await waitFor(() => expect(s.calls("team.save")).toHaveLength(2));
-		await s.reply(s.calls("team.save")[1] as never, {});
+		await waitFor(() => expect(s.calls("team.save")).toHaveLength(1));
+		await s.reply(s.calls("team.save")[0] as never, {});
 		const again = await waitFor(() => {
 			const all = s.calls("query").filter((q) => q.params.name === "team.get");
 			if (all.length === reads) throw new Error("the team was not read again");
@@ -1156,7 +1232,7 @@ describe("team page", () => {
 	});
 
 	it("shows_and_disconnects_the_account", async () => {
-		const { container, socket } = await renderApp("/settings");
+		const { container, socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		await answerQuery(s, "account.status", {
@@ -1198,7 +1274,7 @@ describe("team page", () => {
 	});
 
 	it("says_the_key_did_not_work_and_connects_again", async () => {
-		const { container, socket } = await renderApp("/settings");
+		const { container, socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, true);
 		await answerQuery(s, "account.status", {
@@ -1262,7 +1338,7 @@ describe("team page", () => {
 	});
 
 	it("says_a_refused_key_from_the_environment_is_changed_where_catervas_runs", async () => {
-		const { socket } = await renderApp("/settings");
+		const { socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, true);
 		await answerQuery(s, "account.status", {
@@ -1287,7 +1363,7 @@ describe("team page", () => {
 	});
 
 	it("names_the_variable_a_key_from_the_environment_comes_from", async () => {
-		const { socket } = await renderApp("/settings");
+		const { socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		await answerQuery(s, "account.status", {
@@ -1413,6 +1489,11 @@ describe("team templates", () => {
 		expect(line.textContent).toBe(
 			`${en.savedAsBefore}My usual team${en.savedAsAfter}${en.settings}.`,
 		);
+		expect(
+			within(line)
+				.getByRole("link", { name: en.settings })
+				.getAttribute("href"),
+		).toBe("/settings/saved-teams");
 		expect(screen.queryByRole("dialog")).toBeNull();
 		await expectNoAxeViolations(container);
 	});
@@ -1434,6 +1515,11 @@ describe("team templates", () => {
 			name: /^Pair/,
 		})) as HTMLInputElement;
 		expect(pair.checked).toBe(true);
+		expect(
+			within(dialog)
+				.getByRole("link", { name: en.settings })
+				.getAttribute("href"),
+		).toBe("/settings/saved-teams");
 		await expectNoAxeViolations(container);
 		fireEvent.click(within(dialog).getByRole("button", { name: en.useShow }));
 		const asked = await query(s, "template.preview");
@@ -1613,7 +1699,7 @@ describe("team templates", () => {
 	});
 
 	it("renames_and_deletes_in_settings", async () => {
-		const { container, socket } = await renderApp("/settings");
+		const { container, socket } = await renderApp("/settings/saved-teams");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		const listed = {
@@ -1703,13 +1789,6 @@ describe("team templates", () => {
 	});
 });
 
-/** Every place `text` shows on the page, each of which must sit inside an info button's tip. */
-function onlyInTips(text: string) {
-	const found = screen.getAllByText(text);
-	expect(found.length).toBeGreaterThan(0);
-	for (const el of found) expect(el.closest('[role="tooltip"]')).not.toBeNull();
-}
-
 describe("info buttons on the agent page", () => {
 	afterEach(() => {
 		vi.useRealTimers();
@@ -1722,7 +1801,6 @@ describe("info buttons on the agent page", () => {
 		const say = (key: keyof typeof en) =>
 			t(key, { name: "Theo", role: "Developer" });
 		for (const key of [
-			"agentMayAdvanced",
 			"agentNextWork",
 			"agentPauseNote",
 			"agentReplaceNote",
@@ -1730,7 +1808,7 @@ describe("info buttons on the agent page", () => {
 			"skillsLead",
 		] as const)
 			onlyInTips(say(key));
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		for (const key of [
 			"tierReadNote",
 			"tierWriteNote",
@@ -1787,5 +1865,45 @@ describe("info buttons on the agent page", () => {
 			"mailboxNoneNote",
 		] as const)
 			onlyInTips(t(key, { name: "Ivo" }));
+	});
+});
+
+describe("info buttons on Settings", () => {
+	afterEach(() => {
+		cleanup();
+		localStorage.clear();
+	});
+
+	it("keeps Settings to short lines, the rest behind info buttons", async () => {
+		const general = await settings(TEAM, "/settings/general");
+		await expectNoAxeViolations(general.container);
+		cleanup();
+
+		await settings(TEAM, "/settings/allowed-actions");
+		for (const line of en.rulesNextSession.split("\n")) onlyInTips(line);
+		cleanup();
+
+		const { s } = await settings(TEAM, "/settings/saved-teams");
+		await answerQuery(s, "templates.list", {
+			folder: FOLDER,
+			templates: [
+				{
+					...PAIR,
+					slug: "my-usual-team",
+					template: { ...PAIR.template, name: "My usual team" },
+				},
+			],
+			unreadable: [],
+		});
+		await screen.findByText("My usual team", { selector: "strong" });
+		for (const line of en.savedTeamsLead.split("\n")) onlyInTips(line);
+		cleanup();
+
+		const computer = await settings(TEAM, "/settings/computer");
+		await answerStatus(computer.s, false, 2);
+		await screen.findByText("/home/me/corner-bakery");
+		for (const line of en.connectedBody.split("\n")) onlyInTips(line);
+		const connected = screen.getByText(en.connectedLead);
+		expect(connected.closest('[role="tooltip"]')).toBeNull();
 	});
 });

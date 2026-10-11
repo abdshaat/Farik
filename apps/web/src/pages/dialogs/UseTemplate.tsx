@@ -233,7 +233,7 @@ export function UseTemplate({
 			)}
 			<p className={styles.muted}>
 				{t("useSettingsBefore")}
-				<Link to="/settings">{t("settings")}</Link>.
+				<Link to="/settings/saved-teams">{t("settings")}</Link>.
 			</p>
 		</Dialog>
 	);

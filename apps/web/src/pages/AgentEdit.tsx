@@ -11,6 +11,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
+import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
 import {
 	type AllowanceRow,
@@ -29,7 +30,6 @@ import { MailboxSection } from "./Mailbox.tsx";
 import { OrdersSection } from "./Orders.tsx";
 import styles from "./pages.module.css";
 import { ServiceLogo } from "./ServiceLogo.tsx";
-import { useAdvanced } from "./Settings.tsx";
 import { SitesSection } from "./Sites.tsx";
 import {
 	type Agent,
@@ -199,7 +199,7 @@ function Editor({
 	const { client } = useConnection();
 	const navigate = useNavigate();
 	const status = useStatus();
-	const [advanced, setAdvanced] = useAdvanced();
+	const [advanced, setAdvanced] = useState(false);
 	const [draft, setDraft] = useState<Edited>();
 	const [busy, setBusy] = useState(false);
 	const [refused, setRefused] = useState<string>();
@@ -443,22 +443,18 @@ function Editor({
 			{/* The Procurement Specialist reads only the sites it is given: they come before what it may do. */}
 			{saved.role === "procurement_specialist" && <SitesSection name={name} />}
 			<section className={styles.section} aria-labelledby="may-heading">
-				<div className={styles.titled}>
-					<h2 id="may-heading">{say("agentMay")}</h2>
-					{!advanced && (
-						<InfoTip id="agentMayAdvanced-info">
-							{t("agentMayAdvanced")}
-						</InfoTip>
-					)}
-				</div>
-				<Switch
-					id="agent-advanced"
-					label={t("advancedSwitch")}
-					checked={advanced}
-					onChange={setAdvanced}
+				<h2 id="may-heading">{say("agentMay")}</h2>
+				<ShowAdvanced
+					open={advanced}
+					onToggle={() => setAdvanced(!advanced)}
+					controls="agent-advanced"
 				/>
-				{advanced ? (
-					<ul className={styles.tiers} aria-label={say("agentMay")}>
+				{advanced && (
+					<ul
+						id="agent-advanced"
+						className={styles.tiers}
+						aria-label={t("advanced")}
+					>
 						{TIERS.map(([tier, label, note]) => (
 							<li key={tier}>
 								<Switch
@@ -470,23 +466,21 @@ function Editor({
 								/>
 							</li>
 						))}
+						<li>
+							<div className={styles.titled}>
+								<h3 className={styles.subheading}>{t("connectorCustom")}</h3>
+								<InfoTip id="connectorCustomNote-info">
+									<span>{t("connectorCustomNote")}</span>
+									<span>{t("connectorCustomKeychain")}</span>
+								</InfoTip>
+							</div>
+							<span>
+								<Button onClick={() => setAdding({})}>
+									{t("connectorCustomAdd")}
+								</Button>
+							</span>
+						</li>
 					</ul>
-				) : null}
-				{advanced && (
-					<>
-						<div className={styles.titled}>
-							<h3 className={styles.subheading}>{t("connectorCustom")}</h3>
-							<InfoTip id="connectorCustomNote-info">
-								<span>{t("connectorCustomNote")}</span>
-								<span>{t("connectorCustomKeychain")}</span>
-							</InfoTip>
-						</div>
-						<span>
-							<Button onClick={() => setAdding({})}>
-								{t("connectorCustomAdd")}
-							</Button>
-						</span>
-					</>
 				)}
 				<span>
 					<Button

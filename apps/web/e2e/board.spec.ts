@@ -224,7 +224,7 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		await screenshots(page, "costs");
 
 		// 7. Settings' team rules, on a running team.
-		await page.goto(at("/settings"));
+		await page.goto(at("/settings/work"));
 		await expect(
 			page.getByRole("region", { name: "How finished work is added" }),
 		).toBeVisible();

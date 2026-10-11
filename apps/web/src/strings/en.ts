@@ -4,6 +4,25 @@ export const en = {
 	events: "Events",
 	eventsForTesting: "Events (for testing)",
 	settings: "Settings",
+	settingsSections: "Settings sections",
+	settingsBack: "Settings",
+	sectionGeneral: "General",
+	sectionAllowedActions: "Allowed actions",
+	sectionSpending: "Spending",
+	sectionWork: "How work runs",
+	sectionYourApp: "Your app",
+	sectionSavedTeams: "Saved teams",
+	sectionComputer: "This computer",
+	sectionAccount: "AI account",
+	sectionGeneralSummary: "Theme and language",
+	sectionAllowedActionsSummary: "What agents may do",
+	sectionSpendingSummary: "The daily limit",
+	sectionWorkSummary: "Sprints and plan checks",
+	sectionYourAppSummary: "How to open your app",
+	sectionSavedTeamsSummary: "Your saved teams",
+	sectionComputerSummary: "Folder and connection",
+	sectionAccountSummary: "Your Claude account",
+	yourAppNone: "Add a UI/UX Designer to your team first.",
 	noPage: "No page here",
 	noPageHome: "Go to the start page",
 	linkUsed:
@@ -55,14 +74,10 @@ export const en = {
 	themeSystemNote: "Follows your computer’s setting.",
 	advanced: "Advanced settings",
 	advancedSwitch: "Show advanced settings",
-	advancedBody:
-		"Catervas’s defaults are safe, and you never need to change them. Turning this on shows the detailed settings in each screen: what each agent may do, the team’s rules, the list of checks Catervas can run, the models, and how Catervas judges a plan ready.",
-	advancedSafe:
-		"Catervas refuses any change that would leave your team unable to work, and says what to change instead.",
 	thisComputer: "Catervas on this computer",
 	connectedLead: "Connected.",
 	connectedBody:
-		"This page talks to Catervas running on your computer, and nothing leaves it except the requests to the AI models.",
+		"This page talks to Catervas on your computer.\nNothing leaves your computer except the requests to the AI models.",
 	projectFolder: "Project folder",
 	address: "Address",
 	disconnect: "Disconnect this browser",
@@ -380,7 +395,6 @@ export const en = {
 	effortHighNote: "Thinks longest, costs most",
 	effortInfo: "Quick: {low}. Balanced: {medium}. Careful: {high}.",
 	agentMay: "What {name} may do",
-	agentMayAdvanced: "Advanced shows each permission.",
 	tierRead: "Read the project",
 	tierReadNote: "Every agent can.",
 	tierWrite: "Change files in its task",
@@ -582,7 +596,6 @@ export const en = {
 	planAskSend: "Send it back",
 	editTitle: "Edit the plan for {title}",
 	editBack: "Back to the plan",
-	editAdvanced: "Advanced view",
 	lockOpen: "{pm} can still change this plan",
 	lockOpenHint: "Lock it so that only you change it.",
 	lockButton: "Lock the plan",
@@ -786,9 +799,8 @@ export const en = {
 	mayGitRemote: "sends its work to its own branches online",
 	mayExternal: "acts outside your computer, with your approval",
 	putBack: "Put back the default",
-	rulesArea: "Your team’s rules",
 	rulesNextSession:
-		"The answers you gave in setup, to change whenever you like. Each change starts with each agent’s next session, never in the middle of one.",
+		"Your answers from setup. Change them whenever you like.\nA change starts with each agent’s next piece of work, never in the middle of one.",
 	rulesMay: "What agents may do",
 	rulesSpend: "Daily spending limit",
 	rulesSpendTitle: "What the team may spend",
@@ -869,7 +881,7 @@ export const en = {
 	rulesPlanning: "Planning work",
 	planInSprints: "Plan work in sprints",
 	planInSprintsNote:
-		"The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks. Nobody starts building until you start a sprint. Work that becomes ready during a sprint waits in the Backlog for the next one.",
+		"The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks.\nNobody starts building until you start a sprint.\nWork that gets ready during a sprint waits in the Backlog for the next one.",
 	finishSprints: "Your team works in sprints",
 	finishSprintsNote:
 		"The team gets your requests ready straight away, and starts building when you start a sprint from the Board. Until then, ready work waits in the Backlog.",
@@ -1113,21 +1125,24 @@ export const en = {
 	sprintReadIt: "Read it",
 	previewTitle: "How to open your app",
 	previewLead:
-		"{designer}, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Catervas the commands you use to open it. Catervas runs them inside Docker’s sandbox, never straight on your computer.",
+		"{designer} opens your app in a browser to check its screens.\nTell Catervas the commands that start it.",
 	previewSetupTitle: "{designer} needs to know how to open your app",
 	previewSetupLead:
-		"{designer} looks at your app in a browser. Tell Catervas the commands you use to open it; Catervas runs them inside Docker’s sandbox. Not sure? Leave them empty. You can add them in Settings later, and {designer} waits until you do.",
+		"{designer} opens your app in a browser to check its screens.\nTell Catervas the commands that start it.\nNot sure? Leave these empty and add them in Settings later. {designer} waits until you do.",
 	previewPrepare: "Get it ready (optional)",
 	previewPrepareHint:
-		"Installs what your app needs and builds it. This may use the internet, for up to 15 minutes.",
+		"A command that installs what your app needs and builds it, such as “npm install”.\nYou can leave it empty.\nIt may use the internet, for up to 15 minutes.",
 	previewStart: "Start it",
-	previewStartHint: "Starts your app. The internet is off while it runs.",
+	previewStartHint:
+		"The command that starts your app, such as “npm start”.\nThe internet is off while your app runs.",
 	previewPort: "Port",
-	previewPortHint: "The number your app answers on.",
+	previewPortHint:
+		"The number your app answers on, like a door number.\nYour app often shows it when it starts: in “localhost:3000” it is 3000.\nIt must be a number from 1024 to 65535.",
 	previewPath: "First page",
-	previewPathHint: "The page {designer} opens first.",
-	previewNotSure:
-		"Not sure what to type? Whoever set up your app knows. Your README file often says too.",
+	previewPathHint:
+		"The page {designer} opens first.\nLeave it as “/” for your app’s home page.",
+	previewMore:
+		"Catervas runs these commands inside Docker’s sandbox, a safe box kept apart from the rest of your computer.\nNot sure what to type? Ask whoever set up your app, or look in its README file.",
 	refusePreviewPort: "Use a number from 1024 to 65535.",
 	refusePreview:
 		"Catervas cannot use these. Starting your app needs a command and a port, each command is at most 500 characters, and the first page starts with /.",
@@ -1540,7 +1555,7 @@ export const en = {
 	finishPushNo: "Everything stays on this computer.",
 	finishCarriedBefore:
 		"You answered these when you saved the team, so Catervas does not ask again. Change them any time in ",
-	finishCarriedAfter: ", under Your team’s rules.",
+	finishCarriedAfter: ".",
 	templateSaveOpen: "Save as a template",
 	templateUseOpen: "Use a saved team",
 	saveTitle: "Save this team as a template",
@@ -1603,7 +1618,7 @@ export const en = {
 	templateChooseAnother: "Choose another saved team.",
 	savedTeams: "Saved teams",
 	savedTeamsLead:
-		"Teams you saved from a Team page. Every project on this computer can start from them. Renaming or deleting one changes no project’s team.",
+		"Teams you saved from a Team page.\nAny project on this computer can start from one.\nRenaming or deleting one changes no project’s team.",
 	savedTeamsNoneBefore: "You have no saved teams yet. Save one from your ",
 	savedTeamsNoneAfter: " page with “Save as a template”.",
 	savedRename: "Rename",

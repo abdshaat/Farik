@@ -1,9 +1,17 @@
-import { AVATAR_URLS, type AvatarKey, Button, Choice } from "@catervas/ui";
+import {
+	AVATAR_URLS,
+	type AvatarKey,
+	Button,
+	Choice,
+	InfoTip,
+} from "@catervas/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, refusalsOf, said } from "../../app/refusals.ts";
+import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
+import pages from "../pages.module.css";
 import { Faces, templateMeta, useTemplates } from "../SavedTeams.tsx";
 import { PreviewFields } from "./PreviewFields.tsx";
 import styles from "./setup.module.css";
@@ -207,10 +215,17 @@ export function SetupTeam() {
 						className={styles.memberCard}
 						aria-labelledby={`preview-${index}`}
 					>
-						<h2 id={`preview-${index}`}>
-							{t("previewSetupTitle", { designer: agent.displayName })}
-						</h2>
-						<p>{t("previewSetupLead", { designer: agent.displayName })}</p>
+						<div className={pages.titled}>
+							<h2 id={`preview-${index}`}>
+								{t("previewSetupTitle", { designer: agent.displayName })}
+							</h2>
+							<InfoTip id={`preview-${index}-more-info`}>
+								<Bullets text={t("previewMore")} />
+							</InfoTip>
+						</div>
+						<Bullets
+							text={t("previewSetupLead", { designer: agent.displayName })}
+						/>
 						<PreviewFields
 							id={`preview-${index}`}
 							form={draft.preview}

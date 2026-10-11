@@ -427,7 +427,7 @@ describe("chats", () => {
 			[
 				{ because: "key_refused" },
 				"Mira cannot answer: your AI provider refused the key. Check the key in Settings",
-				"/settings",
+				"/settings/account",
 			],
 			[{ because: "no_answer" }, "Mira could not answer. Ask again."],
 		];
