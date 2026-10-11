@@ -1,9 +1,20 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { commitFiles, events, startServe } from "./fixtures/serve.ts";
 import { screenshots } from "./fixtures/shots.ts";
 
 /** The Files page's screenshots are taken at 1440, as the chats' are. */
 const shots = (page: Page, name: string) => screenshots(page, name, 1440);
+
+/**
+ * How far short of the page's content an element's right edge stops, in px: the open document
+ * takes the whole right side at a wide window, so this is only the page's own padding (16 px).
+ */
+async function shortOfRight(page: Page, el: Locator): Promise<number> {
+	const content = await page.getByRole("main").boundingBox();
+	const box = await el.boundingBox();
+	if (!content || !box) throw new Error("the page or the element is not drawn");
+	return Math.round(content.x + content.width - (box.x + box.width));
+}
 
 const ROADMAP = "docs/catervas/product/roadmap.md";
 const TWIN = "docs/catervas/product/roadmap.agent.md";
@@ -56,6 +67,10 @@ test("the owner reads and edits the team's documents, through the real server an
 
 		// 3. The roadmap's version for the team.
 		await page.goto(at("/files/product/roadmap.md"));
+		// The Edit button ends the document's head, so its right edge is the document's.
+		expect(
+			await shortOfRight(page, page.getByRole("button", { name: "Edit" })),
+		).toBeLessThanOrEqual(24);
 		await page.getByRole("button", { name: "For the team" }).click();
 		await expect(page.getByText("Now: pie pre-orders.")).toBeVisible();
 		await page.getByRole("button", { name: "For you" }).click();
@@ -68,6 +83,7 @@ test("the owner reads and edits the team's documents, through the real server an
 			),
 		).toBeVisible();
 		const box = page.getByLabel("Roadmap text");
+		expect(await shortOfRight(page, box)).toBeLessThanOrEqual(24);
 		await box.fill(`${await box.inputValue()}\nGift cards next.\n`);
 		await shots(page, "files-edit");
 		await page.getByRole("button", { name: "Save" }).click();
