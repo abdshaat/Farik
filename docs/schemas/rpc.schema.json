@@ -501,6 +501,9 @@
           "$ref": "#/$defs/keysCopiedDismissRequest"
         },
         {
+          "$ref": "#/$defs/connectorSuggestionHideRequest"
+        },
+        {
           "$ref": "#/$defs/browserPullRequest"
         },
         {
@@ -1612,6 +1615,45 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {}
+        }
+      }
+    },
+    "connectorSuggestionHideRequest": {
+      "title": "Connector Suggestion Hide Request",
+      "description": "Notes that the user said Not now to suggesting the kit service server to the agent (.catervas/local/connector-suggestions.json), once, and records no event. Answers emptyResult. Refused with REFUSED (suggestion_not_offered) when the agent is not in the team or its role's kit has no such service.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector_suggestion.hide"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            }
+          }
         }
       }
     },

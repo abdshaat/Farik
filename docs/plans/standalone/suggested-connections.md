@@ -94,7 +94,7 @@ Files: modified `docs/schemas/rpc.schema.json` (the request and its `oneOf` entr
 - `reads_the_suggestion_hide_request` — `request(1, "connector_suggestion.hide", &json!({ "agent": "dev-a", "server": "fixture" }))` is read by `rpc_request_from_value`.
 - `refuses_bad_suggestion_hide_requests` — `{ "agent": "dev-a" }` (no server), `{ "agent": "dev-a", "server": "fixture", "x": 1 }` (an extra field) and `{ "agent": 1, "server": "fixture" }` are each refused.
 
-- [ ] `feat(protocol): a request that hides a suggested connection`
+- [x] `feat(protocol): a request that hides a suggested connection`
 
 ### Task 3: the daemon
 
