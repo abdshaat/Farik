@@ -25,6 +25,7 @@ A new user builds a team from the suggested six, from a team they saved in anoth
 - **Reserved slugs.** `template.save` and `template.rename` refuse a name whose slug is a built-in's with `template_builtin` at `/name`; the page says "Catervas comes with a team called <name>. Choose another name." Renaming or deleting a built-in slug finds no file, as today.
 - **The rule.** `REQUIRED_ROLES` in `catervas-core` names the Product Manager alone; `needs_developer` goes from the daemon's codes and the pages' words. The Definition of Ready gains a rule, `AssigneeAvailable`: the team has at least one active agent of the contract's assignee role; its message names the role. The reviewer rule already refuses a Developer's task when neither an Architect nor a second Developer is active, and a Designer's when neither an Architect nor a Developer is.
 - **Setup.** `Start` gains `builtin`, which fills the draft as `saved` does (`from` set, the answers carried). "Add someone" bases its newcomer on the suggested team's Developer, not the draft's, so it works on a team without one.
+- **The desks.** When a task is ready to assign, the planner's message lists each agent of the assignee role and of the reviewer role as its id with its persona, so the Product Manager tells the portfolio, risk and opportunity desks apart and gives each task to the one whose desk it is.
 - **The Finance Specialist** keeps its tools, folder, kit and reviewer; only the mandate's first sentences change, in `role.yaml`, `system.md` and spec 6.6.
 
 ## Out of scope
