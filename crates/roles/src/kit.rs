@@ -198,11 +198,13 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "scoping-a-release",
             "using-product-sources",
             "deciding-data-pipelines",
+            "catervafying-the-repository",
         ),
         Role::ScrumMaster => embedded!("scrum_master":
             "planning-a-sprint",
             "running-ceremonies",
             "writing-escalation-digests",
+            "catervafying-the-repository",
         ),
         Role::Architect => embedded!("architect":
             "designing-apis-and-data",
@@ -211,6 +213,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "setting-performance-budgets",
             "using-architecture-sources",
             "planning-in-lanes",
+            "catervafying-the-repository",
         ),
         Role::SoftwareDeveloper => embedded!("software_developer":
             "test-driven-development",
@@ -219,6 +222,11 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "testing-per-stack",
             "answering-a-review",
             "using-docs-and-the-browser",
+            "catervafying-the-repository",
+            "catervas-recommended-workflow",
+        ),
+        Role::UiUxDesigner => embedded!("ui_ux_designer":
+            "catervafying-the-repository",
         ),
         Role::MarketingSpecialist => embedded!("marketing_specialist":
             "positioning-and-messaging",
@@ -236,6 +244,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "writing-the-marketing-plan",
             "running-social-channels",
             "running-search-ads",
+            "catervafying-the-repository",
         ),
         Role::FinanceSpecialist => embedded!("finance_specialist":
             "categorising-expenses",
@@ -261,7 +270,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "requesting-a-data-pipeline",
             "contacting-sellers",
         ),
-        _ => Vec::new(),
+        Role::Human => Vec::new(),
     }
 }
 
@@ -2259,8 +2268,9 @@ mod tests {
     #[test]
     fn product_manager_kit_carries_deciding_data_pipelines() {
         let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
-        assert_eq!(kit.skills.len(), 6);
+        assert_eq!(kit.skills.len(), 7);
         assert_eq!(kit.skills[5].name, "deciding-data-pipelines");
+        assert_eq!(kit.skills[6].name, "catervafying-the-repository");
         assert_eq!(kit.skills[4].name, "using-product-sources");
         let (description, text) = kit_skill(Role::ProductManager, "deciding-data-pipelines");
         assert!(description.starts_with("Use when"), "{description}");
@@ -2283,6 +2293,110 @@ mod tests {
         assert!(!text.contains(" @"), "no @ after a space");
     }
 
+    /// ADR 0051: every role that owns a folder carries `catervafying-the-repository`, listed last
+    /// (the Developer's last but one, before the recommended workflow), under 6 KiB, naming its
+    /// folder and the tool that commits its documents.
+    #[test]
+    fn every_owner_carries_catervafying_the_repository() {
+        for (role, folder) in catervas_core::folders::ROLE_FOLDERS {
+            let kit = load_kit(role).expect("a shipped kit");
+            let position = if role == Role::SoftwareDeveloper {
+                2
+            } else {
+                1
+            };
+            let skill = &kit.skills[kit.skills.len() - position];
+            assert_eq!(skill.name, "catervafying-the-repository", "{role}");
+            assert!(skill.description.starts_with("Use when"), "{role}");
+            let text = &skill.session_files["SKILL.md"];
+            assert!(text.len() < 6 * 1024, "{role}: {} bytes", text.len());
+            assert!(!text.contains(" @"), "{role}: no @ after a space");
+            assert!(
+                text.contains(&format!("{folder}/")),
+                "{role} names {folder}/"
+            );
+            if role == Role::ScrumMaster {
+                assert!(text.contains("`catervas_write_folder_doc`"), "{role}");
+                assert!(text.contains("cadence.md"), "{role}");
+            } else {
+                assert!(text.contains("`catervas_git_commit`"), "{role}");
+            }
+            let names = |needles: &[&str]| {
+                for needle in needles {
+                    assert!(text.contains(needle), "{role} lacks {needle}");
+                }
+            };
+            match role {
+                Role::MarketingSpecialist => {
+                    names(&[
+                        "docs/catervas/product/",
+                        "`catervas_propose_marketing_plan`",
+                    ]);
+                }
+                Role::ProductManager => names(&["spec.agent.md", "roadmap.agent.md"]),
+                Role::Architect => names(&["mermaid", "jobs.md"]),
+                _ => {}
+            }
+        }
+        // The kits stay within the schema's twenty skills.
+        for role in [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::SoftwareDeveloper,
+            Role::UiUxDesigner,
+            Role::MarketingSpecialist,
+        ] {
+            let kit = load_kit(role).expect("a shipped kit");
+            assert!(kit.skills.len() <= 20, "{role}");
+        }
+        for (role, count) in [
+            (Role::ProductManager, 7),
+            (Role::ScrumMaster, 4),
+            (Role::Architect, 7),
+            (Role::SoftwareDeveloper, 8),
+            (Role::UiUxDesigner, 1),
+            (Role::MarketingSpecialist, 16),
+        ] {
+            assert_eq!(load_kit(role).expect("a kit").skills.len(), count, "{role}");
+        }
+    }
+
+    #[test]
+    fn the_developer_carries_catervas_recommended_workflow() {
+        let kit = load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+        assert_eq!(
+            kit.skills.last().map(|skill| skill.name.as_str()),
+            Some("catervas-recommended-workflow")
+        );
+        let (description, workflow) =
+            kit_skill(Role::SoftwareDeveloper, "catervas-recommended-workflow");
+        assert!(description.starts_with("Use when"), "{description}");
+        for word in [
+            "brainstorm",
+            "plan",
+            "test first",
+            "verify",
+            "review",
+            "Conventional Commits",
+        ] {
+            assert!(workflow.contains(word), "lacks {word}:\n{workflow}");
+        }
+        assert!(workflow.len() < 6 * 1024, "{} bytes", workflow.len());
+        assert!(!workflow.contains(" @"), "no @ after a space");
+        let (_, catervafying) = kit_skill(Role::SoftwareDeveloper, "catervafying-the-repository");
+        assert!(
+            catervafying.contains(
+                "With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of workflow.md."
+            ),
+            "{catervafying}"
+        );
+        assert!(
+            catervafying.contains("the last fifty commits"),
+            "{catervafying}"
+        );
+    }
+
     #[test]
     fn scrum_master_kit_carries_its_skills() {
         let kit = load_kit(Role::ScrumMaster).expect("the Scrum Master's kit");
@@ -2293,6 +2407,7 @@ mod tests {
                 "planning-a-sprint",
                 "running-ceremonies",
                 "writing-escalation-digests",
+                "catervafying-the-repository",
             ]
         );
         for skill in &kit.skills {
@@ -2317,6 +2432,8 @@ mod tests {
                 "testing-per-stack",
                 "answering-a-review",
                 "using-docs-and-the-browser",
+                "catervafying-the-repository",
+                "catervas-recommended-workflow",
             ]
         );
         for skill in &kit.skills {
@@ -2341,6 +2458,7 @@ mod tests {
                 "setting-performance-budgets",
                 "using-architecture-sources",
                 "planning-in-lanes",
+                "catervafying-the-repository",
             ]
         );
         for skill in &kit.skills {
@@ -2401,6 +2519,7 @@ mod tests {
                 "writing-the-marketing-plan",
                 "running-social-channels",
                 "running-search-ads",
+                "catervafying-the-repository",
             ]
         );
         for skill in &kit.skills {

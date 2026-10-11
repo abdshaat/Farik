@@ -2279,15 +2279,17 @@ pub(super) mod tests {
                 ("role", "testing-per-stack", "in_use"),
                 ("role", "answering-a-review", "in_use"),
                 ("role", "using-docs-and-the-browser", "in_use"),
+                ("role", "catervafying-the-repository", "in_use"),
+                ("role", "catervas-recommended-workflow", "in_use"),
                 ("team", "api-style", "in_use"),
                 ("agent", "notes", "in_use"),
             ]
         );
         assert!(
-            got["skills"][8]["bytes"].as_u64().unwrap_or_default() > 0,
+            got["skills"][10]["bytes"].as_u64().unwrap_or_default() > 0,
             "{got}"
         );
-        assert_eq!(got["skills"][8]["description"], "Use when notes.");
+        assert_eq!(got["skills"][10]["description"], "Use when notes.");
         let ghost = rpc(
             &harness.daemon,
             "query",

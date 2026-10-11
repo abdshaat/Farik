@@ -169,7 +169,7 @@ Files: the seven `SKILL.md`, front matter `name` the folder, `description` start
 - `the_developer_carries_catervas_recommended_workflow` — the Developer's kit ends with it; its text holds "brainstorm", "plan", "test first", "verify", "review" and "Conventional Commits"; `catervafying-the-repository` holds the sentence above word for word and "the last fifty commits". RED.
 - The per-role `*_kit_carries_its_skills` tests list the new names; every kit's skill count is at most 20; `kit_skills_name_only_tools_catervas_lists` (`crates/runtime/src/daemon/team.rs`) holds.
 
-- [ ] `feat(roles): ship each owner's catervafying-the-repository and the recommended workflow`
+- [x] `feat(roles): ship each owner's catervafying-the-repository and the recommended workflow`
 
 ### Task 8: Spec
 
