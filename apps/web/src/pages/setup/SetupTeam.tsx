@@ -216,7 +216,7 @@ export function SetupTeam() {
 						className={styles.memberCard}
 						aria-labelledby={`preview-${index}`}
 					>
-						{editing ? (
+						{editing || errors.some((e) => e.path.startsWith("/preview")) ? (
 							<>
 								<div className={pages.titled}>
 									<h2 id={`preview-${index}`}>
@@ -257,7 +257,14 @@ export function SetupTeam() {
 									kind="quiet"
 									expanded={false}
 									controls={`preview-${index}-fields`}
-									onClick={() => setEditing(true)}
+									onClick={() => {
+										setEditing(true);
+										requestAnimationFrame(() =>
+											document
+												.getElementById(`preview-${index}-start`)
+												?.focus(),
+										);
+									}}
 								>
 									{t("previewChange")}
 								</Button>

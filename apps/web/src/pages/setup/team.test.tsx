@@ -824,15 +824,46 @@ describe("team setup", () => {
 		expect(
 			within(card).queryByRole("textbox", { name: en.previewStart }),
 		).toBeNull();
-		fireEvent.click(
-			within(card).getByRole("button", { name: en.previewChange }),
+		const change = within(card).getByRole("button", {
+			name: en.previewChange,
+		});
+		expect(change.getAttribute("aria-expanded")).toBe("false");
+		const id = (card.getAttribute("aria-labelledby") as string).replace(
+			/^preview-/,
+			"",
 		);
-		await answerStatus(s, false, 1, { setup_pending: true });
+		expect(change.getAttribute("aria-controls")).toBe(`preview-${id}-fields`);
+		fireEvent.click(change);
 		const start = within(card).getByRole("textbox", {
 			name: en.previewStart,
 		}) as HTMLInputElement;
+		await waitFor(() => expect(document.activeElement).toBe(start));
 		expect(start.value).toBe("pnpm run dev");
 		expect(within(card).getAllByRole("textbox")).toHaveLength(4);
+	});
+
+	it("shows_the_fields_when_the_preview_is_refused", async () => {
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", {
+			...proposed((team) => {
+				team.agents = SIX;
+				team.preview = { start: "pnpm run dev", path: "/" };
+			}),
+			unavailable: [],
+		});
+		await answerStatus(s, false, 1, { setup_pending: true });
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Continue with these six" }),
+		);
+		const validate = await asked(s, "team.validate");
+		await s.reply(validate, {
+			errors: [{ path: "/preview/path", message: "no", code: "pattern" }],
+			effects: [],
+		});
+		expect(
+			await screen.findByRole("textbox", { name: en.previewStart }),
+		).toBeTruthy();
 	});
 
 	it("leaves_the_port_out_when_it_is_empty", async () => {
