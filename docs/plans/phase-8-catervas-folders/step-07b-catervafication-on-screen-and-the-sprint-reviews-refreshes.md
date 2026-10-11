@@ -87,7 +87,7 @@ Files: `activity.rs` (`moved_since`, a test).
 
 - `says_the_architecture_notes_were_brought_up_to_date` — `ada` ("Ada", an Architect) wrote `features.md` and `structure.md` in one `review` session after S4 ended, and `sm` wrote `delivery/cadence.md` in a retro: one line "Ada brought the architecture notes up to date with sprint 4" at the later write's time, none for `sm`; a write before `since` gives none; under `pull_request`, "Ada sent the architecture notes for sprint 4 as a pull request". RED.
 
-- [ ] `feat(store): say when the architecture notes were brought up to date`
+- [x] `feat(store): say when the architecture notes were brought up to date`
 
 ### Task 3: The offer after setup
 

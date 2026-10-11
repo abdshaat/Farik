@@ -6,9 +6,9 @@ use std::str::FromStr as _;
 
 use catervas_core::contract::{Role, TaskId, TaskStatus};
 use catervas_core::marketing::{CapScope, network_name};
-use catervas_core::team::{AgentStatus, Team};
+use catervas_core::team::{AgentStatus, Integration, Team};
 use catervas_protocol::event::{
-    CatervasEvent, EventBody, EventKind, MessageKind, SessionStartedBodyPurpose,
+    CatervasEvent, EventBody, EventKind, MessageKind, SessionStartedBodyPurpose, Thread,
 };
 use chrono::{DateTime, Utc};
 
@@ -425,6 +425,7 @@ pub fn moved_since(
             .map(|(seq, at, line)| (seq, Moved { at, line })),
     );
     moved.extend(proposal_moves(log, &who, since)?);
+    moved.extend(architecture_moves(log, team, &who, since)?);
     moved.sort_by_key(|(seq, _)| *seq);
     Ok(moved.into_iter().map(|(_, moved)| moved).collect())
 }
@@ -471,6 +472,90 @@ fn proposal_moves(
                     line,
                 },
             )
+        })
+        .collect())
+}
+
+/// An Architect's `review` session, the sprint it came after, and its latest write: its seq and
+/// time.
+struct ReviewSession {
+    session: String,
+    agent: String,
+    sprint: String,
+    wrote: Option<(u64, DateTime<Utc>)>,
+}
+
+/// Where the Architect brought its notes up to date since `since`: one line for each of its `review`
+/// sessions that wrote a folder document, at its latest write, naming the sprint of the last
+/// `sprint.ended` before the session started. Under the `pull_request` policy the change reaches
+/// the project only when it is merged, and the line says it was sent as a pull request.
+fn architecture_moves(
+    log: &EventLog,
+    team: &Team,
+    who: &impl Fn(&str) -> String,
+    since: DateTime<Utc>,
+) -> Result<Vec<(u64, Moved)>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![
+            EventKind::SprintEnded,
+            EventKind::SessionStarted,
+            EventKind::FolderDocWritten,
+        ],
+        ..EventQuery::default()
+    })?;
+    let is_architect = |agent: &str| {
+        team.agents
+            .iter()
+            .any(|each| each.id.as_str() == agent && Role::from(each.role) == Role::Architect)
+    };
+    let mut last_ended: Option<String> = None;
+    // Each review session of an Architect, with the sprint it came after, and its latest write.
+    let mut sessions: Vec<ReviewSession> = Vec::new();
+    for event in &events {
+        let ids = &event.envelope.ids;
+        match &event.body {
+            EventBody::SprintEnded(body) => last_ended = Some(body.sprint_id.as_str().to_string()),
+            EventBody::SessionStarted(body) if body.thread == Some(Thread::Review) => {
+                if let (Some(agent), Some(session), Some(sprint)) =
+                    (&ids.agent_id, &ids.session_id, &last_ended)
+                    && is_architect(agent)
+                {
+                    sessions.push(ReviewSession {
+                        session: session.clone(),
+                        agent: agent.clone(),
+                        sprint: sprint.clone(),
+                        wrote: None,
+                    });
+                }
+            }
+            EventBody::FolderDocWritten(_) if event.envelope.recorded_at > since => {
+                if let Some(session) = &ids.session_id
+                    && let Some(each) = sessions.iter_mut().find(|each| &each.session == session)
+                {
+                    each.wrote = Some((event.envelope.seq, event.envelope.recorded_at));
+                }
+            }
+            _ => {}
+        }
+    }
+    let by_pull_request = team.policy.integration == Integration::PullRequest;
+    Ok(sessions
+        .into_iter()
+        .filter_map(|each| {
+            let (seq, at) = each.wrote?;
+            let (agent, n) = (&each.agent, each.sprint.trim_start_matches('S'));
+            let line = if by_pull_request {
+                format!(
+                    "{} sent the architecture notes for sprint {n} as a pull request",
+                    who(agent)
+                )
+            } else {
+                format!(
+                    "{} brought the architecture notes up to date with sprint {n}",
+                    who(agent)
+                )
+            };
+            Some((seq, Moved { at, line }))
         })
         .collect())
 }
@@ -744,6 +829,109 @@ mod tests {
             [(
                 at(10, 3),
                 "Ada proposed 2 changes to the product plan from the sprint 4 review.".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn says_the_architecture_notes_were_brought_up_to_date() {
+        const FEATURES: &str = "docs/catervas/architecture/features.md";
+        const STRUCTURE: &str = "docs/catervas/architecture/structure.md";
+        const CADENCE: &str = "docs/catervas/delivery/cadence.md";
+        let board = Board::new("moved-architecture-notes");
+        let team_with = |integration: &str| {
+            let mut wire = catervas_core::team::fixtures::a_team_wire();
+            wire["agents"] = json!([
+                { "id": "ada", "display_name": "Ada", "role": "architect", "status": "active" },
+                { "id": "sm", "display_name": "Sam", "role": "scrum_master", "status": "active" },
+                { "id": "pm", "display_name": "Pat", "role": "product_manager", "status": "active" },
+                { "id": "dev", "display_name": "Dee", "role": "software_developer", "status": "active" },
+            ]);
+            wire["policy"]["integration"] = json!(integration);
+            validate_team(&wire).expect("the fixture is a team")
+        };
+        let wrote = |hour, agent: &str, session: &str, thread: &str, path: &str, change: u64| {
+            board.session(
+                at(hour, 0),
+                None,
+                agent,
+                session,
+                "session.started",
+                json!({
+                    "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                    "thread": thread
+                }),
+            );
+            board.session(
+                at(hour, 1),
+                None,
+                agent,
+                session,
+                "folder_doc.written",
+                json!({ "path": path, "written_by": agent, "change": change, "sha": "abc123" }),
+            );
+        };
+        let ended = |hour, sprint: &str| {
+            board.put(
+                at(hour, 0),
+                None,
+                None,
+                "sprint.ended",
+                json!({ "sprint_id": sprint, "ended_by": "human", "left": [] }),
+            );
+        };
+        // Sprint 3's review, before `since`; then sprint 4 ends and its review writes two notes;
+        // the Scrum Master's retro writes the cadence.
+        ended(7, "S3");
+        wrote(8, "ada", "session-1", "review", FEATURES, 1);
+        ended(9, "S4");
+        board.session(
+            at(10, 0),
+            None,
+            "ada",
+            "session-2",
+            "session.started",
+            json!({
+                "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                "thread": "review"
+            }),
+        );
+        for (minute, path, change) in [(1, FEATURES, 2), (3, STRUCTURE, 3)] {
+            board.session(
+                at(10, minute),
+                None,
+                "ada",
+                "session-2",
+                "folder_doc.written",
+                json!({ "path": path, "written_by": "ada", "change": change, "sha": "abc123" }),
+            );
+        }
+        wrote(11, "sm", "session-3", "retro", CADENCE, 4);
+        let said = |integration: &str| -> Vec<(chrono::DateTime<chrono::Utc>, String)> {
+            moved_since(
+                &board.log,
+                &board.projections,
+                &team_with(integration),
+                at(9, 30),
+            )
+            .expect("the store reads")
+            .into_iter()
+            .map(|one| (one.at, one.line))
+            .collect()
+        };
+
+        assert_eq!(
+            said("manual"),
+            [(
+                at(10, 3),
+                "Ada brought the architecture notes up to date with sprint 4".to_string()
+            )]
+        );
+        assert_eq!(
+            said("pull_request"),
+            [(
+                at(10, 3),
+                "Ada sent the architecture notes for sprint 4 as a pull request".to_string()
             )]
         );
     }
