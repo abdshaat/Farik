@@ -8612,6 +8612,42 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn opens_the_interview_with_one_product_manager() {
+        // The team has a second active Product Manager after `pm`: the one the team names for
+        // the product plan, `pm`, interviews the owner, and `pm2`'s chat stays shut however many
+        // ticks pass.
+        let harness = Harness::new("orch-interview-two-pms", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(catervas_core::team::fixtures::an_agent_wire(
+                    "pm2",
+                    "product_manager",
+                ));
+        });
+        harness.started();
+        let adapter = harness.recorded(vec![
+            chat_answers_with_a_request(),
+            chat_answers_with_a_request(),
+            chat_answers_with_a_request(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(started[0].agent_id, "pm");
+        assert_eq!(
+            chat_starts(&harness),
+            [(Some("pm".to_string()), None, Some("pm".to_string()))]
+        );
+        assert_eq!(replies_of(&harness, "pm"), 1);
+        assert_eq!(replies_of(&harness, "pm2"), 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_while_the_team_is_paused() {
         let harness = Harness::new("orch-chat-paused-team", |_| {});
         // Planning would run first on a team at work: a paused one runs the chat rule alone.
