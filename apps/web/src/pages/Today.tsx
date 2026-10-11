@@ -425,7 +425,6 @@ function MovedCard({
 		name = t("movedYou");
 		picture = (
 			<span className={styles.you} aria-hidden="true">
-				{/* biome-ignore lint/a11y/noSvgWithoutTitle: decorative, inside an aria-hidden tile */}
 				<svg
 					width="24"
 					height="24"
@@ -433,6 +432,7 @@ function MovedCard({
 					fill="none"
 					stroke="currentColor"
 					strokeWidth="1.75"
+					aria-hidden="true"
 				>
 					<circle cx="11" cy="8" r="3.5" />
 					<path d="M4 19c1-3.6 3.8-5.5 7-5.5s6 1.9 7 5.5" />
