@@ -85,7 +85,7 @@ Files: modified `crates/runtime/src/connectors.rs` (the constant, two functions,
 - `hide_suggestion_keeps_earlier_pairs_in_order` — hiding `("dev-a", "fixture")` then `("kai", "buffer")` answers both, in that order.
 - `hidden_suggestions_is_empty_without_a_readable_file` — with no file, and with the file holding `not json`, the answer is empty; `hide_suggestion` after the unreadable file replaces it with the one pair.
 
-- [ ] `feat(runtime): remember the connections the user said Not now to`
+- [x] `feat(runtime): remember the connections the user said Not now to`
 
 ### Task 2: the wire
 
