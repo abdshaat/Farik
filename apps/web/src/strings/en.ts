@@ -704,8 +704,6 @@ export const en = {
 		"A team has seven people at most. Retire someone before adding another.",
 	refuseNeedsProductManager:
 		"Your team needs a Product Manager to write its plans. Include one.",
-	refuseNeedsDeveloper:
-		"Your team needs a Developer to do the work. Include one.",
 	refuseRepeatedId: "Two people on the team have the same name. Rename one.",
 	refuseWorked:
 		"Someone you took off the team has already done work. Retire them from their card instead.",
@@ -1517,10 +1515,23 @@ export const en = {
 	waitingNeedsBrowserLine:
 		"{designer} opens your app with Playwright. Turn Playwright on for {designer} on the Team page; until then {designer} takes no work, and nobody checks the screens {developer} builds.",
 	startsLegend:
-		"Start from the team Catervas suggests, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
+		"Start from the team Catervas suggests, from a ready-made team, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
 	startSuggested: "The suggested team",
 	startSuggestedNote:
 		"Six people, one for each job. A good start for a first project.",
+	startBuiltin: "A ready-made team",
+	startBuiltinNote:
+		"Teams Catervas comes with, one for each purpose. Pick one, then change anyone below.",
+	startWhichBuiltin: "Which ready-made team?",
+	builtinSoftwareProduct:
+		"Plans, designs, builds and markets a software product.",
+	builtinOnlineStore:
+		"Plans the shop, finds and orders stock, keeps the books and markets it.",
+	builtinFinancialAnalysis:
+		"Three analysts, one desk each: your portfolio, its risks and its opportunities, managed by a Product Manager.",
+	builtinMeta: "{names} · comes with Catervas",
+	templateBuiltin:
+		"Catervas comes with a team called {name}. Choose another name.",
 	startSaved: "A saved team",
 	startSavedNote:
 		"A team you tuned before and saved from a Team page. It brings everyone’s name, picture, persona and model, and your answers to the setup questions.",
@@ -1529,14 +1540,15 @@ export const en = {
 	startWhich: "Which saved team?",
 	startScratch: "From scratch",
 	startScratchNote:
-		"Start with the two every team needs, a Product Manager and a Developer, and add whoever else you want.",
+		"Start with a Product Manager and a Developer, keep or untick the Developer, and add whoever else you want.",
 	teamLeadSaved:
 		"Filled from {name}. Change anyone before you continue; the saved team itself stays as it is.",
 	teamLeadScratch:
-		"Every team needs a Product Manager to plan and a Developer to build. Name them, then add whoever else you want.",
+		"Every team needs a Product Manager to plan. Name them, then add whoever else you want.",
 	teamScratchNote:
 		"Every team needs one. Picture, persona and model are the role’s own; change them later on the Team page.",
-	teamNameBoth: "Name both to continue.",
+	teamNameAll:
+		"Name the Product Manager and at least one more person to continue.",
 	teamSavedAnswers:
 		"{name} also holds your answers about what they may do, spending, finishing work and checking plans. You will see them on the next screens, already chosen.",
 	templateMeta: "{names} · saved {date}",

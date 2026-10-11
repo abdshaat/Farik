@@ -9,6 +9,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { said } from "../app/refusals.ts";
 import { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
@@ -1786,6 +1787,65 @@ describe("team templates", () => {
 		);
 		const deleted = await sent(s, "template.delete");
 		expect(deleted.params).toEqual({ slug: "my-usual-team" });
+	});
+
+	it("words_the_builtin_refusal_and_forgets_the_developers", async () => {
+		expect(said("template_builtin", { name: "Online store" })).toBe(
+			"Catervas comes with a team called Online store. Choose another name.",
+		);
+		// The Developer is no longer required, so its refusal has no words of its own.
+		expect(said("needs_developer")).toBe(en.refuseOther);
+
+		const { socket } = await renderApp("/settings/saved-teams");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "templates.list", {
+			folder: FOLDER,
+			builtin: [],
+			templates: [PAIR],
+			unreadable: [],
+		});
+		const section = await screen.findByRole("region", { name: en.savedTeams });
+		fireEvent.click(
+			await within(section).findByRole("button", { name: "Rename Pair" }),
+		);
+		fireEvent.change(
+			within(section).getByRole("textbox", {
+				name: t("savedRenameLabel", { name: "Pair" }),
+			}),
+			{ target: { value: "  Online store " } },
+		);
+		fireEvent.click(
+			within(section).getByRole("button", { name: en.savedRenameSave }),
+		);
+		await s.fail(await sent(s, "template.rename"), -32005, "refused", {
+			errors: [{ path: "/name", message: "builtin", code: "template_builtin" }],
+		});
+		expect(
+			await within(section).findByText(
+				"Catervas comes with a team called Online store. Choose another name.",
+			),
+		).toBeTruthy();
+	});
+
+	it("settings_lists_saved_teams_only", async () => {
+		const { socket } = await renderApp("/settings/saved-teams");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "templates.list", {
+			folder: null,
+			builtin: [
+				{
+					slug: "online-store",
+					template: { ...PAIR.template, name: "Online store" },
+				},
+			],
+			templates: [],
+			unreadable: [],
+		});
+		const section = await screen.findByRole("region", { name: en.savedTeams });
+		expect(await within(section).findByText(en.templateNoFolder)).toBeTruthy();
+		expect(within(section).queryByText("Online store")).toBeNull();
 	});
 });
 

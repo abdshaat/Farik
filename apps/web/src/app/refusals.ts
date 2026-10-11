@@ -9,7 +9,6 @@ export type Refusal = { path: string; message: string; code?: string };
 const WORDS: Record<string, keyof typeof en> = {
 	too_many: "refuseTooMany",
 	needs_product_manager: "refuseNeedsProductManager",
-	needs_developer: "refuseNeedsDeveloper",
 	repeated_id: "refuseRepeatedId",
 	worked: "refuseWorked",
 	name: "refuseName",
@@ -22,6 +21,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	last_judge: "refuseLastJudge",
 	too_short: "requestTooShort",
 	template_exists: "templateExists",
+	template_builtin: "templateBuiltin",
 	template_name: "templateName",
 	template_unreadable: "templateUnreadable",
 	no_state_folder: "templateNoFolder",

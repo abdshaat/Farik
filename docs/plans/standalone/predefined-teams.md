@@ -156,7 +156,7 @@ Files: modified `apps/web/src/pages/SavedTeams.tsx`, `apps/web/src/pages/setup/T
 - `words_the_builtin_refusal_and_forgets_the_developers` — `said("template_builtin", { name })` is "Catervas comes with a team called <name>. Choose another name.", Settings' rename refusal shows it with the name typed, and `said("needs_developer")` is the fallback wording.
 - `settings_lists_saved_teams_only` — Settings' "Saved teams" with `folder` null shows `templateNoFolder` and never a built-in's name.
 
-- [ ] `feat(web): a ready-made team as setup's fourth start, and from scratch with a Product Manager alone`
+- [x] `feat(web): a ready-made team as setup's fourth start, and from scratch with a Product Manager alone`
 
 ### Task 5: the Team page lists the ready-made
 
