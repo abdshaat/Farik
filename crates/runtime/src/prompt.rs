@@ -147,6 +147,10 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
     ),
 ];
 
+/// The `This session` section of a new project's Product Manager's chat session while the owner's
+/// product plan is not approved (`docs/SPEC.md` 4.3), in place of the chat's.
+pub const INTERVIEW_INSTRUCTION: &str = "This session is your interview of the owner about their new project, in your one-to-one chat. `From the human` holds what they wrote when they started it, then the chat so far. Nothing is planned until the owner approves the product plan you write from it. Find out, one question at a time, who the customers are, the problem they have, what the product must do, what is out for now, any constraints, and how the owner will know it works; ask only what the chat has not answered, in your persona's voice, short and in plain words. When you know enough, or the owner asks you to, sum up: put the summary in `heard` (constraints under `must` or `not_now`, as they fit) and say in your text that they can correct it or have you draft the plan. Put no request in your reply: nothing is planned before the plan. Answer once with `catervas_chat_reply`, then end the session.";
+
 /// The `This session` section of each ceremony (5.9), by its thread: what it posts, and the tool
 /// it ends with. The channel is read by all, so each tells the agent to mention no one.
 pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [

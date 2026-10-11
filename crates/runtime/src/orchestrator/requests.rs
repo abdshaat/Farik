@@ -1003,11 +1003,12 @@ mod tests {
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
     use crate::prompt::JUDGMENT_INSTRUCTION;
     use crate::recorded::fixtures::{
-        accept_ctv_1, implement_finishes_ctv_1, judge_ctv_1_by_architect, judge_ctv_1_fails,
-        judge_ctv_1_passes, plan_assigns_ctv_1, plan_assigns_ctv_2, plan_breaks_down_ctv_1,
-        plan_closes_epic_ctv_1, planning_ceremony_ctv_1_ctv_3, refine_asks_ctv_1,
-        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, replays_catervas_read_board,
-        review_epic_ctv_1, review_epic_fails_ctv_1, triage_by_sm_ctv_1, triage_ctv_1_large,
+        accept_ctv_1, chat_answers_with_a_request, implement_finishes_ctv_1,
+        judge_ctv_1_by_architect, judge_ctv_1_fails, judge_ctv_1_passes, plan_assigns_ctv_1,
+        plan_assigns_ctv_2, plan_breaks_down_ctv_1, plan_closes_epic_ctv_1,
+        planning_ceremony_ctv_1_ctv_3, refine_asks_ctv_1, refine_writes_epic_ctv_1,
+        refine_writes_task_ctv_1, replays_catervas_read_board, review_epic_ctv_1,
+        review_epic_fails_ctv_1, triage_by_sm_ctv_1, triage_ctv_1_large,
     };
     use crate::session::SessionPurpose;
     use crate::tools::fixtures::at;
@@ -1379,22 +1380,30 @@ mod tests {
     async fn holds_a_new_projects_contracts_until_the_plan() {
         let harness = Harness::new("req-new-project-holds", |_| {});
         harness.started();
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
+        let adapter = harness.recorded(vec![
+            chat_answers_with_a_request(),
+            refine_writes_task_ctv_1(),
+        ]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
+        a_sized_request(&harness, &orchestrator, RequestSize::Small).await;
+        // The first tick opens the interview (its one session); the next triages and refines.
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
+        assert_eq!(adapter.started().len(), 1);
         let watched = [EventKind::ContractEvaluated, EventKind::TransitionRefused];
         let before = harness.events(&watched).len();
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(is_idle(&report), "{report:?}");
-        assert!(adapter.started().is_empty());
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
         assert_eq!(harness.events(&watched).len(), before);
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
 
         harness.approve_the_product_plan();
         orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(adapter.started().len(), 1);
+        assert_eq!(adapter.started().len(), 2);
     }
 
     #[tokio::test]

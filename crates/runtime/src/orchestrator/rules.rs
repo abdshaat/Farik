@@ -168,6 +168,9 @@ pub(super) async fn tick(
     if let Some(report) = chat(deps, scope, &team, &mut waiting).await? {
         return Ok(report);
     }
+    if let Some(report) = open_the_interview(deps, scope, &team, &mut waiting).await? {
+        return Ok(report);
+    }
     if let Some(report) = sprint_rules(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
@@ -824,6 +827,79 @@ async fn chat(
         }));
     }
     Ok(None)
+}
+
+/// The interview's opening, after the chat rule (4.1, 4.3): while a new project's product plan is
+/// not approved, its Product Manager, when its chat holds no message and it never started a `chat`
+/// session, awake and on a day whose budget is not spent, gets one `chat` session that answers no
+/// message, to greet the owner and ask the first question. It is not part of `chat_alone`, so a
+/// paused team, setup's pause included, waits to open it. A session that ends without a reply is
+/// not retried, as a chat's is not; the owner can write first. It is about no one task, so it runs
+/// only under `All` in a tick scoped to none.
+async fn open_the_interview(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.rules != TickRules::All
+        || scope.task_id.is_some()
+        || !deps.tools.transitions.awaits_the_product_plan(team)?
+    {
+        return Ok(None);
+    }
+    let Some(agent) = requests::product_manager(team) else {
+        return Ok(None);
+    };
+    let log = &deps.tools.log;
+    let id = agent.id.as_str();
+    if !crate::chat::chat_page(log, id, None, 1)?.is_empty() {
+        return Ok(None);
+    }
+    let began = log
+        .read(&EventQuery {
+            agent_id: Some(id.to_string()),
+            kinds: vec![EventKind::SessionStarted],
+            ..EventQuery::default()
+        })?
+        .iter()
+        .any(|event| {
+            matches!(&event.body, EventBody::SessionStarted(body)
+                if body.purpose == SessionStartedBodyPurpose::Chat)
+        });
+    if began
+        || day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
+            | asleep(deps, agent, &mut waiting.slept)?
+    {
+        return Ok(None);
+    }
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            agent,
+            contract: None,
+            purpose: SessionPurpose::Chat,
+            cwd: deps.tools.files.root().to_path_buf(),
+            executor: None,
+            read_only: true,
+            only_tool: None,
+            tools: Some(CHAT_TOOLS),
+            in_reply_to: None,
+            thread: None,
+            initial_prompt: format!(
+                "{}, the owner has just started this project. Open your interview in your \
+                 one-to-one chat: greet them and ask your first question.",
+                agent.display_name.as_str()
+            ),
+            pipeline: None,
+        },
+    )
+    .await?;
+    Ok(Some(TickReport::Chat {
+        agent_id: agent.id.to_string(),
+        what: ran(agent, "chat", &end),
+    }))
 }
 
 /// The channel rule, between the budget rule and rule 3 (5.9): the first active agent in team
@@ -8452,6 +8528,86 @@ mod tests {
                 matches!(&event.body, EventBody::ChatMessagePosted(body) if body.author == agent)
             })
             .count()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn opens_the_interview_once_the_team_runs() {
+        let opening = "pm, the owner has just started this project. Open your interview in your one-to-one chat: greet them and ask your first question.";
+        // Replied: one session, then none.
+        let harness = Harness::new("orch-interview-opens", |_| {});
+        harness.started();
+        let adapter = harness.recorded(vec![chat_answers_with_a_request()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&first, TickReport::Chat { agent_id, .. } if agent_id == "pm"),
+            "{first:?}"
+        );
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(started[0].initial_prompt, opening);
+        assert_eq!(
+            (started[0].agent_id.as_str(), started[0].purpose),
+            ("pm", SessionPurpose::Chat)
+        );
+        assert_eq!(
+            chat_starts(&harness),
+            [(Some("pm".to_string()), None, Some("pm".to_string()))]
+        );
+        assert_eq!(replies_of(&harness, "pm"), 1);
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+
+        // Ended without a reply: not retried either.
+        let silent = Harness::new("orch-interview-silent", |_| {});
+        silent.started();
+        let adapter = silent.recorded(vec![crate::recorded::fixtures::ends_without_a_decision()]);
+        let orchestrator = silent.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1);
+        assert_eq!(replies_of(&silent, "pm"), 0);
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+
+        // None while the team is paused, with no project.started, or with the plan on main.
+        let paused = Harness::new("orch-interview-paused", |_| {});
+        paused.started();
+        let adapter = paused.recorded(vec![chat_answers_with_a_request()]);
+        let orchestrator = paused.orchestrator(adapter.clone());
+        orchestrator
+            .handle(Command::TeamPause)
+            .await
+            .expect("the pause is handled");
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(&report, TickReport::Idle { .. }), "{report:?}");
+        assert!(adapter.started().is_empty());
+        orchestrator
+            .handle(Command::TeamResume)
+            .await
+            .expect("the resume is handled");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "it opens once the team runs");
+
+        let old = Harness::new("orch-interview-old", |_| {});
+        let adapter = old.recorded(vec![chat_answers_with_a_request()]);
+        old.orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(adapter.started().is_empty());
+
+        let approved = Harness::new("orch-interview-approved", |_| {});
+        approved.started();
+        approved.approve_the_product_plan();
+        let adapter = approved.recorded(vec![chat_answers_with_a_request()]);
+        approved
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(adapter.started().is_empty());
     }
 
     #[tokio::test]

@@ -144,7 +144,7 @@ Consumes: Tasks 2 to 4.
 - `interviews_the_owner_in_the_product_managers_chat` (`session.rs`, integration) — with `project.started`: the Product Manager's chat session's prompt ends with `INTERVIEW_INSTRUCTION` and its `From the human` starts with the description, the owner's lines outside every untrusted block; the Developer's chat in the same project keeps the chat's closing and history; with both documents on `main`, the Product Manager's chat is the plain chat again; the session is offered no tool outside `CHAT_TOOLS`. RED.
 - `opens_the_interview_once_the_team_runs` (`rules.rs`, integration) — with `project.started`, the team resumed and the Product Manager's chat empty: one tick runs its `chat` session with no `in_reply_to` and exactly the opening message; the next tick runs none, whether it replied or not; none runs while the team is paused (`tick_within`), without `project.started`, or with the plan on `main`. RED: no rule.
 
-- [ ] `feat(runtime): interview the owner of a new project in the Product Manager's chat`
+- [x] `feat(runtime): interview the owner of a new project in the Product Manager's chat`
 
 ### Task 6: The owner's word drafts the plan
 
