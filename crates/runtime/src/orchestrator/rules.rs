@@ -366,7 +366,7 @@ fn plan_acceptance_note(
             matches!(&event.body, EventBody::HumanAccepted(body)
                 if body.subject == HumanAcceptedBodySubject::Result)
         })
-        .map(|event| event.envelope.recorded_at.format("%Y-%m-%d").to_string());
+        .map(|event| event.envelope.recorded_at.format("%-d %B %Y").to_string());
     Ok(Some(match day {
         Some(day) => format!(
             "Approved with the product plan: you accepted {} on {day}.",
@@ -7727,7 +7727,7 @@ mod tests {
         assert!(matches!(&approval.body, EventBody::HumanAccepted(body)
             if body.accepted_by == "human"
                 && body.message.as_deref()
-                    == Some("Approved with the product plan: you accepted CTV-2 on 2026-09-19.")));
+                    == Some("Approved with the product plan: you accepted CTV-2 on 19 September 2026.")));
         assert!(approval.envelope.seq > into_refining.envelope.seq);
 
         // The next tick readies it with no session and no escalation.

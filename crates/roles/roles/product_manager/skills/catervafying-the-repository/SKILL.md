@@ -37,7 +37,7 @@ use. What you did not find, leave out or say you did not find; never guess.
 
 A human document is a pair. Write `spec.md` with `spec.agent.md`, and `roadmap.md` with
 `roadmap.agent.md`, in the same commit: the team version says the same, short and exact, for the
-agents. Catervas refuses a commit that changes one file of a pair without the other.
+agents. The Definition of Done refuses a task whose diff changes one file of a pair without the other.
 
 ## 5. Finish
 

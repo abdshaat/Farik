@@ -254,7 +254,7 @@ pub(crate) fn task_contract(
             }
             json!({
                 "id": format!("C{}", index + 1),
-                "text": format!("{path} exists and opens with a Markdown heading."),
+                "text": format!("{path} exists and holds a Markdown heading."),
                 "satisfies": ["R1"],
                 "verification": { "method": "artifact", "path": path, "must_contain": must }
             })
