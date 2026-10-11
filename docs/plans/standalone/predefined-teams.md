@@ -126,7 +126,7 @@ Files: created `crates/roles/teams/software-product.yaml`, `online-store.yaml`, 
 - `holds_every_shipped_team_to_the_template_schema` — each yaml, through `serde_saphyr` to a `Value`, passes `validate_template`; the Financial analysis one has three `finance_specialist` agents and no `software_developer`.
 - `the_finance_specialist_keeps_its_guards` — `load_role(FinanceSpecialist)`'s mandate contains "what it owns, spends, earns and has at stake", "not a tax filing, statutory accounts or financial advice" and "Every number names its source", and the system prompt contains "has at stake".
 
-- [ ] `feat(roles): ship three ready-made teams, and widen the Finance Specialist's mandate to a business's money`
+- [x] `feat(roles): ship three ready-made teams, and widen the Finance Specialist's mandate to a business's money`
 
 ### Task 3: built-ins on the wire, and desks in the plan message
 
