@@ -94,7 +94,7 @@ Files: created `ProductPlanCard.tsx`, `.module.css`, `.test.tsx`; modified `Toda
 - `puts_the_plan_in_place_of_its_acceptance_row` (`Today.test.tsx`) — `waiting.list` with the product plan's acceptance row and a question, the state with both documents: "Waiting on you (2)", the card in place of the row; with `documents` empty, the generic acceptance row. RED.
 - `says_the_team_waits_for_the_plan` (`Today.test.tsx`) — interviewing: the band's first line is "Little Oak Cakes: your team waits for your product plan", and no sprint or Backlog line; approved: the sprint line as before. RED.
 
-- [ ] `feat(web): approve a new project's product plan on Today`
+- [x] `feat(web): approve a new project's product plan on Today`
 
 ### Task 4: Spec
 

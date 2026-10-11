@@ -44,6 +44,11 @@ import {
 	PostCard,
 	type PostMedia,
 } from "./PostGoingOut.tsx";
+import {
+	ProductPlanCard,
+	type ProductPlanState,
+	projectName,
+} from "./ProductPlanCard.tsx";
 import { RenewalsSection } from "./Renewals.tsx";
 import { SellerMailSections } from "./SellerMail.tsx";
 import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
@@ -204,6 +209,14 @@ export function Today() {
 		cards: DocumentChangesCard[];
 	}>("folder_doc_proposals.list", {});
 	const cards = planChanges?.cards ?? [];
+	// A new project's product plan: while it is interviewed, the band says so; once both documents
+	// are written, the plan's acceptance row is shown as the plan itself.
+	const { data: plan, again: askPlanAgain } = useQuery<ProductPlanState>(
+		"product_plan.state",
+		{},
+	);
+	const interviewing = !!plan?.newProject && !plan.approved;
+	const planTask = plan?.documents.length === 2 ? plan.task?.taskId : undefined;
 	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
 	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
 	// The daemon counts nothing while the team does not plan in sprints.
@@ -223,7 +236,13 @@ export function Today() {
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("today")}</h1>
 			<div className={styles.band}>
-				{sprint ? (
+				{interviewing && plan.newProject ? (
+					<p>
+						{t("todayWaitsForPlan", {
+							project: projectName(plan.newProject.name),
+						})}
+					</p>
+				) : sprint ? (
 					<p>
 						<Link to={`/sprints/${sprint.sprintId}`}>
 							{t("sprintLine", {
@@ -273,7 +292,28 @@ export function Today() {
 						<ul className={styles.rows} aria-label={t("waitingList")}>
 							{keyRefused && <KeyRefusedRow />}
 							{waiting.waiting.map((item) =>
-								item.kind === "tool_approval" ? (
+								item.kind === "acceptance" &&
+								plan &&
+								planTask &&
+								item.taskId === planTask ? (
+									<li key={`plan-${item.taskId}`}>
+										<ProductPlanCard
+											state={plan}
+											name={
+												agent(item.agentId)?.displayName ??
+												pm?.displayName ??
+												""
+											}
+											avatar={
+												(agent(item.agentId) ?? pm)?.avatar as
+													| AvatarKey
+													| undefined
+											}
+											integration={team?.team.policy.integration as Integration}
+											again={askPlanAgain}
+										/>
+									</li>
+								) : item.kind === "tool_approval" ? (
 									<ToolApprovalRow
 										key={`${item.kind}-${item.approval}`}
 										item={item}

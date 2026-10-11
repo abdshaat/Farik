@@ -50,6 +50,12 @@ import {
 } from "../test/pipelines.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import {
+	APPROVED,
+	IN_REVIEW,
+	INTERVIEWING,
+	PRODUCT_PLAN_ROW,
+} from "../test/productPlan.ts";
+import {
 	answerQuery,
 	answerStatus,
 	eventArrives,
@@ -105,6 +111,7 @@ async function today(fields: {
 	team?: unknown;
 	backlog?: unknown;
 	docs?: unknown;
+	plan?: unknown;
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -117,6 +124,7 @@ async function today(fields: {
 	if (fields.backlog) await answerQuery(s, "backlog.summary", fields.backlog);
 	if (fields.docs)
 		await answerQuery(s, "folder_doc_proposals.list", fields.docs);
+	if (fields.plan) await answerQuery(s, "product_plan.state", fields.plan);
 	return { container, s };
 }
 
@@ -377,6 +385,70 @@ describe("today", () => {
 			await screen.findByRole("region", { name: en.docChangesTitle }),
 		).toBeTruthy();
 		expect(screen.queryByText(en.waitingNone)).toBeNull();
+	});
+
+	it("puts_the_plan_in_place_of_its_acceptance_row", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		await today({ waiting: [PRODUCT_PLAN_ROW, question], plan: IN_REVIEW });
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (2)" }),
+		).toBeTruthy();
+		const list = screen.getByRole("list", { name: en.waitingList });
+		expect(
+			await within(list).findByRole("region", {
+				name: "Your product plan to approve",
+			}),
+		).toBeTruthy();
+		// The plan's task has no row of its own besides the card; the question keeps its row.
+		expect(within(list).getByText("Mira has a question")).toBeTruthy();
+		expect(
+			within(list).queryByText("Accept Draft the product plan"),
+		).toBeNull();
+		cleanup();
+
+		// Until both documents are there, the generic row, which still accepts.
+		await today({
+			waiting: [PRODUCT_PLAN_ROW, question],
+			plan: { ...IN_REVIEW, documents: [] },
+		});
+		const generic = await screen.findByRole("list", { name: en.waitingList });
+		expect(
+			await within(generic).findByText("Accept Draft the product plan"),
+		).toBeTruthy();
+		expect(
+			screen.queryByRole("region", { name: "Your product plan to approve" }),
+		).toBeNull();
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (2)" }),
+		).toBeTruthy();
+	});
+
+	it("says_the_team_waits_for_the_plan", async () => {
+		const sprint = { sprint_id: "S2", done: 4, total: 7 };
+		await today({
+			plan: INTERVIEWING,
+			sprint,
+			backlog: { plan_in_sprints: true, count: 2 },
+		});
+		const line = await screen.findByText(
+			"Little Oak Cakes: your team waits for your product plan",
+		);
+		expect(line.closest("p")).toBe(line);
+		expect(screen.queryByText(/Sprint 2 is running/)).toBeNull();
+		expect(screen.queryByText(/wait in the Backlog/)).toBeNull();
+		cleanup();
+
+		await today({ plan: APPROVED, sprint });
+		expect(await screen.findByText(/Sprint 2 is running/)).toBeTruthy();
+		expect(
+			screen.queryByText(/your team waits for your product plan/),
+		).toBeNull();
 	});
 
 	it("lists_what_waits_on_you", async () => {
