@@ -1460,3 +1460,51 @@ fn finds_the_twins_the_owner_left_behind() {
         Vec::<String>::new()
     );
 }
+
+const SPEC: &str = "docs/catervas/product/spec.md";
+const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn tells_whether_a_file_is_on_a_branch() {
+    let repository = TempRepo::new("has-file");
+    repository.write(SPEC, "# Bakery\n");
+    repository.commit("write the spec");
+    // In the working tree only: not on the branch.
+    repository.write(ROADMAP, "# Roadmap\n");
+    let git = repository.adapter();
+    assert!(git.has_file("main", SPEC).expect("the read works"));
+    assert!(!git.has_file("main", ROADMAP).expect("the read works"));
+    assert!(matches!(
+        git.has_file("nope", SPEC),
+        Err(GitError::CommandFailed { .. })
+    ));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_the_product_plan_from_the_integration_branch() {
+    use catervas_core::team::{fixtures::a_team_wire, validate_team};
+    use catervas_store::git::product_plan_on;
+
+    let team = |branch: Option<&str>| {
+        let mut wire = a_team_wire();
+        if let Some(branch) = branch {
+            wire["policy"]["integration_branch"] = serde_json::json!(branch);
+        }
+        validate_team(&wire).expect("a team")
+    };
+    let repository = TempRepo::new("product-plan-on");
+    let git = repository.adapter();
+    repository.write(SPEC, "# Bakery\n");
+    repository.commit("write the spec");
+    assert!(!product_plan_on(&git, &team(None)).expect("the read works"));
+    repository.write(ROADMAP, "# Roadmap\n");
+    repository.commit("write the roadmap");
+    assert!(product_plan_on(&git, &team(None)).expect("the read works"));
+    // The integration branch, not the default one: develop holds neither document.
+    repository.git(&["branch", "develop", "HEAD~2"]);
+    assert!(!product_plan_on(&git, &team(Some("develop"))).expect("the read works"));
+    // A branch the repository does not have is not an error: the plan is not there yet.
+    assert!(!product_plan_on(&git, &team(Some("release"))).expect("the read works"));
+}

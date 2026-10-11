@@ -514,6 +514,45 @@ impl Harness {
         git_in(root, &["commit", "-m", message]);
     }
 
+    /// `project.started`, about no task: the project is new, and its product plan is not approved
+    /// until both documents are on the integration branch (`approve_the_product_plan`).
+    pub(crate) fn started(&self) {
+        let wire = json!({
+            "seq": 1,
+            "recorded_at": at().to_rfc3339(),
+            "team_id": "catervas",
+            "project_id": "catervas",
+            "kind": "project.started",
+            "body": {
+                "name": "little-oak-cakes",
+                "description": "A bakery that sells cakes online and bakes to order."
+            },
+        });
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        let deps = &self.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+    }
+
+    /// Both documents of the product plan, committed on the branch checked out at the root.
+    pub(crate) fn approve_the_product_plan(&self) {
+        let root = &self.project.repo.path;
+        for path in catervas_core::folders::PRODUCT_PLAN {
+            let file = root.join(path);
+            std::fs::create_dir_all(file.parent().expect("a folder")).expect("the folder");
+            std::fs::write(file, "# A document\n").expect("the file is written");
+            git_in(root, &["add", "--", path]);
+        }
+        git_in(root, &["commit", "-m", "Approve the product plan"]);
+    }
+
     /// `task` accepted, its worktree gone, with `a.txt`'s first line changed on its branch and
     /// changed differently on `main` afterwards, so that merging it conflicts in `a.txt`.
     pub(crate) fn accepted_in_conflict(&self, task: &str) {

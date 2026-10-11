@@ -48,7 +48,9 @@ use catervas_protocol::event::{
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use catervas_store::git::integration_branch;
+use catervas_store::git::product_plan_on;
 use catervas_store::git::stale_twins;
+use catervas_store::product_plan::{is_the_product_plan, new_project};
 
 /// Where the integration lock lives, under the project root.
 pub(crate) const INTEGRATION_LOCK: &str = ".catervas/local/integration.lock";
@@ -669,13 +671,27 @@ impl Transitions {
         )
     }
 
+    /// Whether this is a new project whose product plan is not on the integration branch yet:
+    /// false with no `project.started`, and then git is not asked. Every caller asks this one
+    /// method (`docs/SPEC.md` 5.3).
+    ///
+    /// # Errors
+    ///
+    /// What the log or git refuses.
+    pub fn awaits_the_product_plan(&self, team: &Team) -> Result<bool, TransitionError> {
+        if new_project(&self.log)?.is_none() {
+            return Ok(false);
+        }
+        Ok(!product_plan_on(&self.git, team)?)
+    }
+
     /// The Definition of Ready's context for `contract` as it is given, which need not be the
     /// file's: the browser checks a plan the human has not saved yet. Everything else is read from
     /// the store as `context` reads it.
     ///
     /// # Errors
     ///
-    /// As `context`'s, but for git, which it does not ask.
+    /// As `context`'s, and git for a new project (`awaits_the_product_plan`).
     pub fn readiness_context(
         &self,
         team: &Team,
@@ -737,8 +753,8 @@ impl Transitions {
             requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
             judgment_review: judgment_since_written(history),
             human_approves: asks_every_contract(team) || requires_human_acceptance(contract),
-            awaits_the_product_plan: false,
-            is_the_product_plan: false,
+            awaits_the_product_plan: self.awaits_the_product_plan(team)?,
+            is_the_product_plan: is_the_product_plan(history),
         };
 
         Ok((budget, open_sprint, sprint_left, readiness))
@@ -3993,6 +4009,89 @@ mod tests {
             wire["policy"]["judgment"] = json!({ "required": "always" });
             change(wire);
         })
+    }
+
+    /// The project's `project.started`, about no task.
+    fn started(project: &Project) {
+        project.append_wire(&json!({
+            "seq": 1,
+            "recorded_at": at(9).to_rfc3339(),
+            "team_id": "catervas",
+            "project_id": "catervas",
+            "kind": "project.started",
+            "body": {
+                "name": "little-oak-cakes",
+                "description": "A bakery that sells cakes online and bakes to order."
+            },
+        }));
+    }
+
+    /// Both documents of the product plan, committed on `main`.
+    fn approve_the_product_plan(project: &Project) {
+        for document in catervas_core::folders::PRODUCT_PLAN {
+            project.repo.write(document, "# A document\n");
+        }
+        project.repo.commit("approve the product plan");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_another_task_of_a_new_project_until_the_plan_is_on_main() {
+        // Without project.started nothing is refused for it, whatever git holds.
+        let old = Project::new("plan-first-old", a_team(|_| {}), at(12));
+        old.file("CTV-1", |_| {});
+        old.created("CTV-1", "refining");
+        written(&old, "CTV-1");
+        let outcome = readying(&old, "CTV-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        let project = Project::new("plan-first", a_team(|_| {}), at(12));
+        started(&project);
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
+        // The product plan's own task is marked on its task.created.
+        project.file("CTV-2", |_| {});
+        project.record(
+            "CTV-2",
+            "task.created",
+            &json!({
+                "summary": { "kind": "task", "title": "Draft the product plan", "status": "refining", "risk": "low" },
+                "created_by": "human",
+                "product_plan": true
+            }),
+            at(9),
+        );
+        written(&project, "CTV-2");
+
+        let outcome = readying(&project, "CTV-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "CTV-1");
+        assert!(
+            holds(
+                &failures,
+                "this new project's product plan is not approved yet"
+            ),
+            "{failures:?}"
+        );
+        let outcome = readying(&project, "CTV-2");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        approve_the_product_plan(&project);
+        let outcome = readying(&project, "CTV-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
     }
 
     /// A `contract.written` of `task` by the Product Manager.

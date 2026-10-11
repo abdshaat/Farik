@@ -5,7 +5,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use catervas_core::folders::{agent_twin, is_human_document, twin_is_stale};
+use catervas_core::folders::{
+    PRODUCT_PLAN, agent_twin, is_human_document, product_plan_approved, twin_is_stale,
+};
 use catervas_core::team::Team;
 
 /// Why a git operation did not happen.
@@ -288,6 +290,24 @@ impl Git {
         // Not trimmed, unlike every other answer: a file's trailing newlines are its content.
         let object = format!("{rev}:{path}");
         run_git_untrimmed(&self.root, &["show", "--no-textconv", &object])
+    }
+
+    /// Whether `rev` holds a file at `path`.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn has_file(&self, rev: &str, path: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        let listed = self.at_root(&[
+            "--literal-pathspecs",
+            "ls-tree",
+            "--name-only",
+            rev,
+            "--",
+            path,
+        ])?;
+        Ok(!listed.is_empty())
     }
 
     /// The paths `head` added or modified since it and `base` last agreed; a deleted path is not
@@ -1017,6 +1037,28 @@ pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
         }
         None => git.default_branch(),
     }
+}
+
+/// Whether the new project's product plan is on the team's integration branch: both documents of
+/// `PRODUCT_PLAN` are there (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
+///
+/// # Errors
+///
+/// What `integration_branch` refuses; `CommandFailed` for any git error but a missing branch.
+pub fn product_plan_on(git: &Git, team: &Team) -> Result<bool, GitError> {
+    let branch = integration_branch(team, git)?;
+    match git.tree(&branch) {
+        Ok(_) => {}
+        Err(GitError::CommandFailed { .. }) => return Ok(false),
+        Err(other) => return Err(other),
+    }
+    let mut present = Vec::new();
+    for document in PRODUCT_PLAN {
+        if git.has_file(&branch, document)? {
+            present.push(document.to_string());
+        }
+    }
+    Ok(product_plan_approved(&present))
 }
 
 /// The `.agent.md` twins on `branch` that are behind the document for people beside them: the

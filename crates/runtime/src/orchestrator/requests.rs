@@ -20,6 +20,7 @@ use catervas_protocol::event::{
 use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
 use catervas_store::git::GitError;
+use catervas_store::product_plan::is_the_product_plan;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
@@ -144,6 +145,11 @@ pub(super) async fn refining(
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     let history = history(deps, &row.task_id)?;
+    // A new project plans nothing but its product plan until the plan is approved (5.3): the
+    // contract waits, with no session and no governor ask to spend an attempt or escalate.
+    if !is_the_product_plan(&history) && deps.tools.transitions.awaits_the_product_plan(team)? {
+        return Ok(None);
+    }
     let began = refining_began(&history);
     if is_to_be_judged(&contract, &history, began) {
         let judge_role = team.judge();
@@ -1366,6 +1372,29 @@ mod tests {
         assert_eq!(body.actor, TransitionActorWire::ProductManager);
         assert_eq!(body.requested_by, "pm");
         assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_a_new_projects_contracts_until_the_plan() {
+        let harness = Harness::new("req-new-project-holds", |_| {});
+        harness.started();
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        let watched = [EventKind::ContractEvaluated, EventKind::TransitionRefused];
+        let before = harness.events(&watched).len();
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(is_idle(&report), "{report:?}");
+        assert!(adapter.started().is_empty());
+        assert_eq!(harness.events(&watched).len(), before);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
+
+        harness.approve_the_product_plan();
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1);
     }
 
     #[tokio::test]

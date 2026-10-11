@@ -123,7 +123,7 @@ Consumes: Tasks 1 and 2.
 - `refuses_another_task_of_a_new_project_until_the_plan_is_on_main` (`transitions.rs`, integration) — with `project.started` in the log, a written contract's governor `ready` is refused with `product_plan_first` among its failures; a contract whose `task.created` has `product_plan` is not refused for it; once both documents are committed on `main`, the first moves to `ready`. Without `project.started` nothing is refused for it, whatever git holds. RED: no field filled.
 - `holds_a_new_projects_contracts_until_the_plan` (`requests.rs`, integration) — a refining raw request in a project with `project.started`: the tick starts no session and records no `contract.evaluated` or `transition.refused` for it; with both documents on `main`, the Product Manager's refine session runs. RED: the refine session runs.
 
-- [ ] `feat(runtime): hold a new project's work until its product plan is approved`
+- [x] `feat(runtime): hold a new project's work until its product plan is approved`
 
 ### Task 4: What the Product Manager heard
 
