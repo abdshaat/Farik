@@ -107,7 +107,7 @@ Files: modified `crates/runtime/src/daemon/team.rs`. Consumes Task 2.
 - `scan_answers_how_to_start_the_app` — `project.scan` on a project with `pnpm-lock.yaml` and a `dev` script answers `app_start: {"prepare":"pnpm install","start":"pnpm run dev"}`; without the script, `app_start: null`.
 - `proposes_the_preview_the_scan_found` — `team.propose` there answers `team.preview` `{"prepare":"pnpm install","start":"pnpm run dev","path":"/"}` with no `port`; a team that already has a preview keeps its own; a project with no suggestion proposes none.
 
-- [ ] `feat(runtime): propose the preview the scan found`
+- [x] `feat(runtime): propose the preview the scan found`
 
 ### Task 4: the Designer's card says how the app starts
 
