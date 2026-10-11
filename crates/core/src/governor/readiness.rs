@@ -398,7 +398,8 @@ fn assignee_available(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
-    if contract.assignee_role == Role::Human {
+    // An epic is taken by the Scrum Master or the Product Manager whatever role it names.
+    if contract.assignee_role == Role::Human || contract.kind == Kind::Epic {
         return None;
     }
     let active = context
@@ -1177,6 +1178,13 @@ mod tests {
         let mut contract = a_contract();
         contract.assignee_role = Role::Human;
         assert!(!failed_rules(&contract, &context).contains(&R::AssigneeAvailable));
+        // An epic is taken by the Scrum Master or the Product Manager whatever role it names.
+        let mut epic = a_contract();
+        epic.kind = Kind::Epic;
+        context
+            .active_agents_by_role
+            .remove(&Role::SoftwareDeveloper);
+        assert_eq!(evaluate_readiness(&epic, &context), Ok(()));
     }
 
     #[test]
@@ -1197,7 +1205,8 @@ mod tests {
         let mut epic = a_contract();
         epic.kind = Kind::Epic;
         epic.reviewer_role = Role::Human;
-        let context = a_ready_context();
+        let mut context = a_ready_context();
+        context.active_agents_by_role.clear();
         assert_eq!(evaluate_readiness(&epic, &context), Ok(()));
         let mut task = a_contract();
         task.reviewer_role = Role::Human;

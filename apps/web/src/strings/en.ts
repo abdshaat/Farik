@@ -242,7 +242,7 @@ export const en = {
 	jobDesigner:
 		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees. Checks every screen {developer} builds.",
 	jobFinance:
-		"Keeps the books and forecasts your spending, starting with the team's AI costs.",
+		"Keeps the books: what your business owns, spends, earns and has at stake.",
 	jobProcurement:
 		"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
 	setupMoreRoles: "More roles",
@@ -1528,7 +1528,7 @@ export const en = {
 	builtinOnlineStore:
 		"Plans the shop, finds and orders stock, keeps the books and markets it.",
 	builtinFinancialAnalysis:
-		"Three analysts, one desk each: your portfolio, its risks and its opportunities, managed by a Product Manager.",
+		"Three analysts, one desk each, working one task at a time: your portfolio, its risks and its opportunities, managed by a Product Manager.",
 	builtinMeta: "{names} · comes with Catervas",
 	templateBuiltin:
 		"Catervas comes with a team called {name}. Choose another name.",

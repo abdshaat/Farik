@@ -878,7 +878,7 @@ Every decision the plan raised, the founder's answer of 2026-09-15, and where it
 | D15 | Cost is shown on the board, not in the scene. | phase 6; phase 15; spec 12 |
 | D16 | Notifications use Tauri's notification plugin on all platforms. Since 2026-09-27 (ADR 0018) this is the desktop app's, which ships after the web launch; the launch uses browser notifications. | phase 11 step 03; phase 15 step 03 |
 | D17 | No launch recording. | phase 13 step 01 |
-| D18 | Teams have two to seven agents, at least one Product Manager and one Software Developer. Amended 2026-10-05 by the founder (ADR 0040, G5), from phase 14: at least one Product Manager; a team without a Software Developer runs, but cannot build software. Amended 2026-10-11 by ADR 0055 (standalone `predefined-teams`): a team needs an active Product Manager alone, in force. | phase 2 step 05; spec 1 and F1 |
+| D18 | Teams have two to seven agents, at least one Product Manager and one Software Developer. Amended 2026-10-05 by the founder (ADR 0040, G5), from phase 14: at least one Product Manager; a team without a Software Developer runs, but cannot build software. Amended 2026-10-10 by ADR 0055 (standalone `predefined-teams`): a team needs an active Product Manager alone, in force. | phase 2 step 05; spec 1 and F1 |
 | D19 | The default integration policy is `manual`: the human merges. Changed by the founder 2026-09-22: `auto_merge` is the default; `pull_request` is opt-in, every task's pull request needing the human's approval; `manual` is kept. | ADR 0012; phase 3 step 13; spec 5.14 |
 | D20 | A dependency must be accepted and integrated before the dependent task is assigned. | phase 1 step 08; spec 5.14 |
 

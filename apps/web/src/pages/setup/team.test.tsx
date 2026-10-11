@@ -780,7 +780,7 @@ describe("team setup", () => {
 			.closest("li") as HTMLElement;
 		expect(
 			within(row).getByText(
-				"Keeps the books and forecasts your spending, starting with the team's AI costs.",
+				"Keeps the books: what your business owns, spends, earns and has at stake.",
 			),
 		).toBeTruthy();
 		expect(row.querySelector("img")?.getAttribute("src")).toBe(
