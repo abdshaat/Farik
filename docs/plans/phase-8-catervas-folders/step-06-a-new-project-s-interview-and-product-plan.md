@@ -1,6 +1,6 @@
 # Phase 8, step 06: A new project's interview and product plan
 
-Status: ready
+Status: done (executed and landing-reviewed 2026-10-10; lands after fixes 1970b610, d6bd4ebc, b85ff4a5, aa88a25c; spec 0.96; the contract's owner-visible words in plain language)
 Branch: `phase/8-catervas-folders` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 4.1, 4.3, 5.3, 5.16, 6.1, 8.5; F5, F8
 Depends on: steps 01 and 01b of this phase (planned, not yet executed: `catervas_core::folders`, the Product Manager's docs tasks on `docs/CTV-<n>`, `REVIEWER_ROLE_FOR`'s Product Manager row, `no_task_no_write`); step 03b (planned, not yet executed: `result_needs_the_human`, which makes a task whose `allowed_paths` may change `spec.md` or `roadmap.md` wait for the owner's acceptance); step 05 (ready, not yet executed: `CHECKS` 24, `EVERY_RULE` 26); phase 7 and the Catervas rename, and task ids `CTV-<n>` (merged on main). Step 06b, next, builds the pages on what this step answers; step 07 consumes `product_plan_approved` and `Transitions::awaits_the_product_plan`.
