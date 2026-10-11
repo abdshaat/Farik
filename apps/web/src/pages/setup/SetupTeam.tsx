@@ -63,11 +63,23 @@ export function SetupTeam() {
 	const saved = listing?.templates ?? [];
 	// One chosen team per start, so switching starts never carries the other's choice.
 	const [slugs, setSlugs] = useState<{ builtin?: string; saved?: string }>({});
+	// The team a picker shows as chosen: the one picked here, else the one the rows already hold
+	// (the draft outlives this screen, so Back comes back to it), else the first.
+	const pick = (start: "builtin" | "saved") => {
+		const list = start === "builtin" ? builtin : saved;
+		return (
+			slugs[start] ??
+			(draft.start === start
+				? list.find((l) => l.template.name === draft.from)?.slug
+				: undefined) ??
+			list[0]?.slug
+		);
+	};
 	const begin = (start: Start, chosen?: string) => {
 		setErrors([]);
 		if (start === "builtin" || start === "saved") {
 			const list = start === "builtin" ? builtin : saved;
-			const slug = chosen ?? slugs[start] ?? list[0]?.slug;
+			const slug = chosen ?? pick(start);
 			setSlugs({ ...slugs, [start]: slug });
 			change(
 				draftOf(proposed, start, list.find((s) => s.slug === slug)?.template),
@@ -293,7 +305,7 @@ export function SetupTeam() {
 								<Choice<string>
 									name="builtin"
 									legend={t("startWhichBuiltin")}
-									value={slugs.builtin ?? builtin[0]?.slug ?? ""}
+									value={pick("builtin") ?? ""}
 									onChange={(chosen) => begin("builtin", chosen)}
 									options={builtin.map(({ slug, template }) => ({
 										value: slug,
@@ -322,7 +334,7 @@ export function SetupTeam() {
 								<Choice<string>
 									name="saved"
 									legend={t("startWhich")}
-									value={slugs.saved ?? saved[0]?.slug ?? ""}
+									value={pick("saved") ?? ""}
 									onChange={(chosen) => begin("saved", chosen)}
 									options={saved.map(({ slug, template }) => ({
 										value: slug,

@@ -2038,6 +2038,8 @@ describe("team setup's four starts", () => {
 		fireEvent.click(within(developer).getByRole("checkbox"));
 		expect(onward.disabled).toBe(true);
 		expect(screen.getByText(en.teamNameAll)).toBeTruthy();
+		// An unticked row's empty name holds nothing up: only ticked team rows are counted.
+		fireEvent.change(names[1] as HTMLInputElement, { target: { value: "" } });
 		fireEvent.click(
 			screen.getByRole("checkbox", { name: "Include the Finance Specialist" }),
 		);
@@ -2045,5 +2047,33 @@ describe("team setup's four starts", () => {
 		fireEvent.click(onward);
 		await s.reply(await asked(s, "team.validate"), { errors: [], effects: [] });
 		await screen.findByRole("heading", { name: en.mayTitle });
+	});
+
+	it("keeps_the_picked_team_checked_after_back", async () => {
+		const { s } = await opened(NO_FOLDER);
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A ready-made team/ }),
+		);
+		fireEvent.click(
+			within(
+				await screen.findByRole("group", { name: en.startWhichBuiltin }),
+			).getByRole("radio", { name: /^Online store/ }),
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		await s.reply(await asked(s, "team.validate"), { errors: [], effects: [] });
+		await screen.findByRole("heading", { name: en.spendTitle });
+		fireEvent.click(screen.getByRole("button", { name: en.back }));
+		// The team screen asks for the listing again; the draft it comes back to is kept.
+		await s.reply(await asked(s, "templates.list"), NO_FOLDER);
+		const which = await screen.findByRole("group", {
+			name: en.startWhichBuiltin,
+		});
+		const checked = (
+			within(which).getAllByRole("radio") as HTMLInputElement[]
+		).filter((r) => r.checked);
+		expect(checked.map((r) => r.closest("label")?.textContent)).toEqual([
+			expect.stringContaining("Online store"),
+		]);
+		expect(rowNames()).toEqual(["Mira", "Noor", "Lena", "Kai"]);
 	});
 });
