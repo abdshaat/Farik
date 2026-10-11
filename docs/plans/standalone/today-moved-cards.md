@@ -1,10 +1,10 @@
 # Standalone: what moved, as cards, newest first
 
-Status: draft
+Status: ready
 Branch: `feat/today-moved-cards`
 Spec: `docs/SPEC.md` the end of 5.7's last paragraph (line 340, Today's lists; nothing in the spec names "What moved" or `moved.since` yet), section 8's web UI (Today); `docs/design/web-ui.md` (Today's row, line 121)
 Depends on: none (`main` at `15d67ec`)
-Readiness confirmed by: <pending>
+Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-11 (two rounds, against `docs/standards/workflow.md` stage 2)
 
 ## Goal
 
@@ -18,6 +18,7 @@ The founder, 2026-10-11: "Under what moved since yesterday in the main endpoint,
 - The card: `<li>` with a picture, then a head line (name in `strong`, `RoleTag` for an agent, `time`), then the sentence. An agent on the team with an `avatar`: `Avatar` at 48 (the component's sizes are 32, 48 and 64; the board's 40 is not one) with `name=""`, so its `alt` is empty (`Avatar.tsx` renders `alt={name}`; no package change), then its display name; an agent on the team with no `avatar` (`Agent.avatar` is optional, `TeamSetup.tsx:21`): no picture, name and role tag only, as `AgentEntry` (`Today.tsx:387`). `"human"`: a `<span className={styles.you} aria-hidden="true">` holding an inline SVG person, `width="24" height="24" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.75"`, a `<circle cx="11" cy="8" r="3.5"/>` and a `<path d="M4 19c1-3.6 3.8-5.5 7-5.5s6 1.9 7 5.5"/>`; `.you` is 48 by 48, `flex-shrink: 0`, a centring inline-flex, `background: var(--catervas-color-ink)`, `color: var(--catervas-color-page)`, `border-radius: var(--catervas-radius-control)`; then "You" (`movedYou`). `"catervas"`: `logo-mark-1254.png` at 48, `alt=""`, named by `t("brand")`, as `AdsRow.tsx:125` draws Catervas's own row. An agent id the team does not hold (retired and removed): its id as the name, no picture, no role tag. The picture's `alt` is empty where the name follows it, so a screen reader reads the name once.
 - Time: today's `HH:MM`; an earlier date, "Yesterday HH:MM" (`movedYesterday`, "Yesterday {time}"), the list holding a day; both UTC from `at`, `time`'s `dateTime` the row's `at`. `yesterdayShort` ("Yday") and `yesterday` are deleted, Today being their only reader.
 - Show more: `useState(3)`; the list shows the first `shown` of the reversed rows. One `Button` (`kind` default), rendered while there are more than three rows, inside `<div className={styles.movedMore}>` (`.movedMore > button { width: 100%; }`, `Button` taking no `className`): while rows are hidden its words are "Show more ({n} more)" (`movedMore`) and it adds three; once all show its words are "Show fewer" (`movedFewer`) and it sets three again. Being one element whose words switch, it keeps focus when pressed (the new cards land above it). Rejected: pages with Newer and Older (the founder's first boards, replaced), a "load more" from the daemon (a day's moves are already in hand).
+- Where the board and this plan differ, the plan wins: pictures at 48 (not 40), the card's radius `--catervas-radius-raised`, and the button's words plain, "Show more ({n} more)", with no chevron and no muted part.
 - Style: `.moved` stays the bulletless grid; `.moved li` becomes the card (surface, `rule` border, `--catervas-radius-raised`, `space-3` `space-4` padding, flex with `space-3` gap); the head line wraps; `time` keeps the code face and `ink-muted`. The `Button` at the list's end takes the row's width.
 - Spec revision 0.87 (2026-10-11), a header sentence at `docs/SPEC.md:3`, and one sentence at the end of 5.7's last paragraph (line 340): Today's "What moved since yesterday" shows the moves newest first as cards with who made each, three at first, "Show more" adding three; `moved.since` gives `by`. `docs/design/web-ui.md`'s Today row (line 121) says "What moved" is cards, newest first, with Show more.
 
@@ -58,7 +59,7 @@ Files: `crates/store/src/activity.rs`, `crates/runtime/src/daemon/gates.rs`, `do
 
 Tests:
 
-- `says_what_moved_since` asserts `(at, by, line)`: `linus` for Linus's move, `human` for the human's move and acceptances, `catervas` for both integrations (`integrated_by: governor`), `grace` for the nap, `mira` for the standup; and two new events at `at(10, 8)`: a move with `requested_by` `governor`, `(at(10, 8), "catervas", "Catervas moved “Add a login form” to …")` with the status the event names, and an `agent.slept` with no agent id until 15:00, `(at(10, 8), "catervas", " reached its usage limit and will pick up again at 15:00")`.
+- `says_what_moved_since` asserts `(at, by, line)`: `linus` for Linus's move, `human` for the human's move and acceptances, `catervas` for both integrations (`integrated_by: governor`), `grace` for the nap, `mira` for the standup; and two new events at `at(10, 8)`: recorded first, `board.moved(at(10, 8), "CTV-1", ("rejected", "in_progress"), "governor", (Some("linus"), Some("grace")))`, `(at(10, 8), "catervas", "Catervas moved “Add a login form” to In progress")`, then, recorded after it (`moved_since` orders by `seq`), an `agent.slept` with no agent id until 15:00, `(at(10, 8), "catervas", " reached its usage limit and will pick up again at 15:00")`.
 - `moved_tells_of_the_posts` asserts `by` per line: `kai` for each "Kai wrote", `human` for allowed, stopped and not allowed, `catervas` for handed, did not take, did not go out, and stopped for the plan's end.
 - `says_what_moved_with_the_ads` asserts `by` is `catervas` on every line.
 - The daemon's shape test (`gates.rs:4069-4076`, the `movedSinceResult` query) holds the answer to the schema, which now requires `by` (`movedSinceResult` has `additionalProperties: false`, so the daemon's `by` fails it until the schema gains it, and the schema's `required` fails the daemon until it sends it).
