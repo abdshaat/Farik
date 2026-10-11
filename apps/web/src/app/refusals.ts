@@ -127,6 +127,12 @@ const WORDS: Record<string, keyof typeof en> = {
 	change_waiting: "refuseChangeWaiting",
 	is_a_link: "refuseIsALink",
 	too_large: "refuseTooLarge",
+	// The owner's draft of a new project's product plan (SPEC 4.3).
+	not_a_new_project: "refuseNotANewProject",
+	product_plan_approved: "refusePlanApproved",
+	product_plan_open: "refusePlanOpen",
+	product_plan_no_writer: "refusePlanNoWriter",
+	product_plan_no_reviewer: "refusePlanNoReviewer",
 	// A skill's refusals (SPEC 6.7), said at the field they belong to.
 	skill_runs_commands: "skillRunsCommands",
 	skill_attaches_files: "skillAttachesFiles",

@@ -80,7 +80,7 @@ Files: created `Heard.tsx`, `apps/web/src/test/productPlan.ts` (the mockup's fiv
 - `a_refused_draft_says_why` — refused `product_plan_no_reviewer: …`: shows "An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.". RED.
 - `passes_axe_on_the_chats` (`Chats.test.tsx:519`) holds with the interview shown.
 
-- [ ] `feat(web): interview the owner of a new project in the chat`
+- [x] `feat(web): interview the owner of a new project in the chat`
 
 ### Task 3: The product plan on Today
 

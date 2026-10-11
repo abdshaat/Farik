@@ -1090,6 +1090,18 @@ export const en = {
 	chatsKeyLink: "Check the key in Settings",
 	chatsNoAnswer: "{name} could not answer. Ask again.",
 	chatsRetired: "{name} has left the team. This chat is kept for you to read.",
+	chatsInterviewIntro:
+		"Before your team builds anything, {name} asks what you want to make. This chat only talks: your product plan is written next, and you approve it before anything is built.",
+	heardTitle: "What I heard",
+	heardCustomers: "Your customers",
+	heardProblem: "The problem",
+	heardMust: "It must",
+	heardNotNow: "Not now",
+	heardWorksWhen: "It works when",
+	draftPlan: "Draft the product plan",
+	draftPlanLine:
+		"I write it as my first task: a product description and a roadmap. It comes to you on Today to approve.",
+	draftPlanSent: "Drafting it as {id}. It comes to you on Today to approve.",
 	channelIntro:
 		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
 	channelMessages: "Messages",
@@ -2541,6 +2553,13 @@ export const en = {
 	refuseChangeWaiting:
 		"An earlier change to this file is not in your project yet. Edit it once it is.",
 	refuseIsALink: "This file is a link, which Catervas does not write through.",
+	refuseNotANewProject:
+		"This project was not started here, so it has no product plan to draft.",
+	refusePlanApproved: "Your product plan is approved already.",
+	refusePlanOpen: "{name} is drafting your product plan already.",
+	refusePlanNoWriter: "Your team has no Product Manager at work to write it.",
+	refusePlanNoReviewer:
+		"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
 	refuseTooLarge:
 		"This is too long to save here: a document can be at most about 256 KB.",
 };
