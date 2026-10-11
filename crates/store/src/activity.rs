@@ -186,6 +186,29 @@ pub fn activity(
     Ok(all)
 }
 
+/// Rewrites the lines of a new project whose product plan waits for approval: an idle agent
+/// has nothing to do until it is approved, and an agent waiting on the plan's task waits on the
+/// owner for it. A working, resting or paused agent keeps its line.
+pub fn while_the_plan_waits(all: &mut [AgentActivity], team: &Team, plan_task: Option<&TaskId>) {
+    for one in all {
+        match one.state {
+            ActivityState::Idle => {
+                let planner = team
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id.as_str() == one.agent_id)
+                    .is_some_and(|agent| Role::from(agent.role) == Role::ScrumMaster);
+                let what = if planner { "plan" } else { "do" };
+                one.line = format!("Nothing to {what} until your plan is approved");
+            }
+            ActivityState::Waiting if plan_task.is_some() && one.task_id.as_ref() == plan_task => {
+                one.line = "Waiting on you: your product plan".to_string();
+            }
+            _ => {}
+        }
+    }
+}
+
 /// What an agent waiting on the human is doing, in a sentence: for a connector call, a post
 /// outside the plan or a site to read, the question the dialog answers.
 fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> String {
@@ -573,7 +596,7 @@ mod tests {
     use catervas_core::team::validate_team;
     use serde_json::json;
 
-    use super::{ActivityState, activity, moved_since};
+    use super::{ActivityState, AgentActivity, activity, moved_since, while_the_plan_waits};
     use crate::waiting::fixtures::{Board, at};
 
     /// Ada, Linus, and Grace, with Mira and Theo beside them, Theo paused.
@@ -602,6 +625,58 @@ mod tests {
                 "summary": "Pie pre-orders are done.", "sprint_id": sprint, "proposed_by": "ada"
             }),
         );
+    }
+
+    #[test]
+    fn says_the_team_waits_for_the_plan() {
+        let team = five();
+        let one = |agent: &str, state, line: &str, task: Option<&str>| AgentActivity {
+            agent_id: agent.to_string(),
+            state,
+            line: line.to_string(),
+            task_id: task.map(|task| task.parse().expect("a task id")),
+            until: None,
+            session_id: None,
+            purpose: None,
+        };
+        let plan: catervas_core::contract::TaskId = "CTV-1".parse().expect("a task id");
+        let mut all = vec![
+            one("mira", ActivityState::Idle, "Nothing to do right now", None),
+            one(
+                "linus",
+                ActivityState::Idle,
+                "Nothing to do right now",
+                None,
+            ),
+            one(
+                "ada",
+                ActivityState::Waiting,
+                "Waiting on you: Plan",
+                Some("CTV-1"),
+            ),
+            one(
+                "grace",
+                ActivityState::Waiting,
+                "Waiting on you: Other",
+                Some("CTV-2"),
+            ),
+            one("theo", ActivityState::Paused, "Paused", None),
+        ];
+        while_the_plan_waits(&mut all, &team, Some(&plan));
+        let lines: Vec<&str> = all.iter().map(|one| one.line.as_str()).collect();
+        assert_eq!(
+            lines,
+            [
+                "Nothing to plan until your plan is approved",
+                "Nothing to do until your plan is approved",
+                "Waiting on you: your product plan",
+                "Waiting on you: Other",
+                "Paused",
+            ]
+        );
+        let mut working = vec![one("linus", ActivityState::Working, "Building it", None)];
+        while_the_plan_waits(&mut working, &team, None);
+        assert_eq!(working[0].line, "Building it");
     }
 
     const ROADMAP: &str = "docs/catervas/product/roadmap.md";

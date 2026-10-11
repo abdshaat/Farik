@@ -28,7 +28,7 @@ use catervas_protocol::event::{
     CatervasEvent, ContractWrittenBody, EventBody, EventKind, event_to_value, new_event,
 };
 use catervas_store::EventQuery;
-use catervas_store::activity::{ActivityState, activity, moved_since};
+use catervas_store::activity::{ActivityState, activity, moved_since, while_the_plan_waits};
 use catervas_store::diff::diff_of;
 use catervas_store::marketing::{
     BudgetReached, MarketingPlan, budgets_reached, created_campaigns, marketing_plans, social_posts,
@@ -256,8 +256,17 @@ pub(super) fn query(
         }
         "team.activity" => {
             let now = deps.clock.now();
-            let all = activity(&deps.log, &deps.projections, &deps.files, &team()?, now)
+            let team = team()?;
+            let mut all = activity(&deps.log, &deps.projections, &deps.files, &team, now)
                 .map_err(|e| internal(&e))?;
+            if deps
+                .transitions
+                .awaits_the_product_plan(&team)
+                .map_err(|e| internal(&e))?
+            {
+                let filed = product_plan_tasks(&deps.log).map_err(|e| internal(&e))?;
+                while_the_plan_waits(&mut all, &team, filed.last().map(|(id, _)| id));
+            }
             Ok(json!({ "activity": all.iter().map(|one| {
                 let mut wire = json!({
                     "agent_id": one.agent_id,
@@ -4451,6 +4460,40 @@ pub(super) mod tests {
         // Both on main: approved.
         harness.approve_the_product_plan();
         assert_eq!(stands(&harness)["approved"], true);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn tells_the_band_while_the_plan_waits() {
+        let line = |harness: &Harness, agent: &str| {
+            let answer = query(
+                &harness.daemon,
+                "team.activity",
+                &json!({}),
+                "teamActivityResult",
+            );
+            answer["activity"]
+                .as_array()
+                .expect("the activity")
+                .iter()
+                .find(|one| one["agent_id"] == agent)
+                .expect("the agent")["line"]
+                .as_str()
+                .expect("a line")
+                .to_string()
+        };
+        // An existing project's band is as it was.
+        let old = Harness::new("gates-band-old", |_| {});
+        assert_eq!(line(&old, "dev-a"), "Nothing to do right now");
+
+        let harness = Harness::new("gates-band-new", |_| {});
+        harness.started();
+        assert_eq!(
+            line(&harness, "dev-a"),
+            "Nothing to do until your plan is approved"
+        );
+        harness.approve_the_product_plan();
+        assert_eq!(line(&harness, "dev-a"), "Nothing to do right now");
     }
 
     #[test]

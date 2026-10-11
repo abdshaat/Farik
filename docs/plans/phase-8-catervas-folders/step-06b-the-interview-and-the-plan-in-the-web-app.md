@@ -68,7 +68,7 @@ Files: `activity.rs` (`while_the_plan_waits`, tests); `gates.rs` (the `team.acti
 - `says_the_team_waits_for_the_plan` (`activity.rs`) — an idle Scrum Master's line becomes "Nothing to plan until your plan is approved", an idle Developer's and Product Manager's "Nothing to do until your plan is approved", a Product Manager waiting on the product plan task "Waiting on you: your product plan", and a working or paused agent's line is unchanged. RED: no function.
 - `tells_the_band_while_the_plan_waits` (`gates.rs`, integration) — with `project.started`, `team.activity` answers the Developer's "Nothing to do until your plan is approved"; with both documents on `main`, "Nothing to do right now". RED.
 
-- [ ] `feat(store): say the team waits for a new project's product plan`
+- [x] `feat(store): say the team waits for a new project's product plan`
 
 ### Task 2: The interview in the chat
 
