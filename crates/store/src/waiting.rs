@@ -1110,15 +1110,24 @@ mod tests {
 
         let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
             .expect("the store reads");
-        let seen: Vec<(&str, WaitingKind, &str)> = listed
+        let seen: Vec<(&str, WaitingKind, Option<&str>, &str)> = listed
             .iter()
-            .map(|item| (item.task_id.as_str(), item.kind, item.line.as_str()))
+            .map(|item| {
+                (
+                    item.task_id.as_str(),
+                    item.kind,
+                    item.agent_id.as_deref(),
+                    item.line.as_str(),
+                )
+            })
             .collect();
         assert_eq!(
             seen,
             vec![(
                 "CTV-1",
                 WaitingKind::Acceptance,
+                // The row names the task's assignee, who wrote the plan: the card shows its author.
+                Some("linus"),
                 "Linus finished it and Grace reviewed it"
             )]
         );
