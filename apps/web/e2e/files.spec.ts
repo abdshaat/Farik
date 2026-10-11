@@ -67,9 +67,15 @@ test("the owner reads and edits the team's documents, through the real server an
 
 		// 3. The roadmap's version for the team.
 		await page.goto(at("/files/product/roadmap.md"));
-		// The Edit button ends the document's head, so its right edge is the document's.
+		// The Edit button ends the document's head, so this measures the head's right edge.
 		expect(
 			await shortOfRight(page, page.getByRole("button", { name: "Edit" })),
+		).toBeLessThanOrEqual(24);
+		expect(
+			await shortOfRight(
+				page,
+				page.getByText("Pie pre-orders.", { exact: true }),
+			),
 		).toBeLessThanOrEqual(24);
 		await page.getByRole("button", { name: "For the team" }).click();
 		await expect(page.getByText("Now: pie pre-orders.")).toBeVisible();
