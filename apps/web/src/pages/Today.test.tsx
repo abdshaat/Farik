@@ -373,7 +373,20 @@ describe("today", () => {
 		const asked = () =>
 			s.calls("query").filter((f) => f.params.name === "catervafication.get");
 		expect(asked()).toHaveLength(1);
-		await s.reply(command, { said: "started", events: [9] });
+		// A refusal is said under the card, which stays.
+		await s.reply(command, {
+			error: {
+				kind: "refused",
+				detail: "catervafication_started: the team is already documenting it",
+			},
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"Your team is already documenting this project.",
+		);
+		expect(asked()).toHaveLength(1);
+		fireEvent.click(start);
+		const again = await sent(s, 2);
+		await s.reply(again, { said: "started", events: [9] });
 		await waitFor(() => expect(asked()).toHaveLength(2));
 		await answerQuery(s, "catervafication.get", { offered: false, roles: [] });
 		await waitFor(() =>

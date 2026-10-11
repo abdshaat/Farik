@@ -1,11 +1,11 @@
-import { Button } from "@catervas/ui";
+import { Button, type Role } from "@catervas/ui";
 import { useId } from "react";
 import { t } from "../strings/t.ts";
 import styles from "./CatervaficationCard.module.css";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 
 /** What `catervafication.get` answers: whether the offer stands, and the roles that would write. */
-export type Catervafication = { offered: boolean; roles: string[] };
+export type Catervafication = { offered: boolean; roles: Role[] };
 
 /**
  * The quiet card for a project the team has not documented yet: where "Later" left the offer, on

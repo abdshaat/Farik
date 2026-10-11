@@ -28,13 +28,17 @@ export function joinedNames(names: string[]): string {
 /** The end of setup for a project that already exists: the offer to document it, Start or Later. */
 export function SetupReady() {
 	const navigate = useNavigate();
-	const { data: offer } = useQuery<Catervafication>("catervafication.get", {});
+	const { data: offer, error } = useQuery<Catervafication>(
+		"catervafication.get",
+		{},
+	);
 	const { data: team } = useQuery<{ team: Team }>("team.get", {});
 	const { busy, refusal, send } = useCommand(() =>
 		navigate("/", { replace: true }),
 	);
 	// A new project, or one already started, has nothing to offer: it lands where it did.
-	if (offer && !offer.offered) return <Navigate to="/" replace />;
+	// An offer that cannot be read is no offer.
+	if (error || (offer && !offer.offered)) return <Navigate to="/" replace />;
 	if (!offer || !team) return null;
 	const active = team.team.agents.filter((a) => a.status === "active");
 	return (
@@ -75,11 +79,6 @@ export function SetupReady() {
 					})}
 				</ul>
 				<p className={styles.note}>{t("readyNote")}</p>
-				{refusal && (
-					<p role="alert" className={styles.alert}>
-						{refusal}
-					</p>
-				)}
 				<div className={styles.actions}>
 					<Button
 						kind="primary"
@@ -93,6 +92,11 @@ export function SetupReady() {
 					</Button>
 					<span className={styles.note}>{t("readyLaterNote")}</span>
 				</div>
+				{refusal && (
+					<p role="alert" className={styles.alert}>
+						{refusal}
+					</p>
+				)}
 			</section>
 		</Wizard>
 	);

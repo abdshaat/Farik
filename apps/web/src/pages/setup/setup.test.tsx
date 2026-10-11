@@ -597,9 +597,16 @@ describe("setup", () => {
 					"catervafication_no_product_manager: the team has no active Product Manager",
 			},
 		});
-		expect((await screen.findByRole("alert")).textContent).toBe(
+		const alert = await screen.findByRole("alert");
+		expect(alert.textContent).toBe(
 			"Your Product Manager is paused. Resume them on the Team page, then start.",
 		);
+		// It is under the buttons.
+		expect(
+			alert.compareDocumentPosition(
+				screen.getByRole("button", { name: "Later" }),
+			) & Node.DOCUMENT_POSITION_PRECEDING,
+		).toBeTruthy();
 		expect(
 			screen.getByRole("heading", { name: "Your team is ready" }),
 		).toBeTruthy();
@@ -612,6 +619,22 @@ describe("setup", () => {
 		expect(
 			screen.queryByRole("heading", { name: "Your team is ready" }),
 		).toBeNull();
+		expect(s.calls("command")).toHaveLength(0);
+	});
+
+	it("goes_home_when_the_offer_cannot_be_read", async () => {
+		const rendered = await renderApp("/setup/ready");
+		const s = rendered.socket as FakeSocket;
+		const asked = await waitFor(() => {
+			const frame = s
+				.calls("query")
+				.find((f) => f.params.name === "catervafication.get");
+			if (!frame) throw new Error("no catervafication.get was asked");
+			return frame;
+		});
+		await s.fail(asked, -32000, "the offer cannot be read");
+		await answerStatus(s, false);
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(s.calls("command")).toHaveLength(0);
 	});
 
