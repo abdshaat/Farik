@@ -1,6 +1,6 @@
 # Phase 10, step 02: Reading the Claude Code history
 
-Status: ready
+Status: done
 Branch: `phase/10-many-teams` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 8.4, 8.6; no functional requirement of section 7 (ADR 0059)
 Depends on: none beyond `main`, with ADR 0059 and `docs/design/many-teams.md` on this branch. No code of phase 9 is consumed, though this branch carries it; nothing of step 01 (no code) or of steps 03 on.
@@ -256,7 +256,7 @@ Files: `discover.rs` (`discover`, the lines and the JSON); `state.rs` (`claude_d
 
 `docs/design/many-teams.md` section 2: the temporary folders are not projects; a folder with no git folds into its outermost session folder, and only roots with git are known roots for a folder that exists; a subagent's replies count under its parent session; a reply's counters are the largest seen.
 
-- [ ] `docs(spec): record reading the claude code history`
+- [x] `docs(spec): record reading the claude code history`
 
 ## Verification
 

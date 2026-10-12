@@ -137,6 +137,11 @@ The teams share only the user, the computer, the AI account and an optional spen
 - **Catervas's own sessions** are recognised by the session ids in each team's log and by paths under `.catervas/local/`, and are counted as that team's agent activity, never as a project.
 - **Yours or explored.** A repository with a commit by the owner's git email is theirs; one without is "explored" and starts ignored.
 - **Longer history.** If `cleanupPeriodDays` is unset or under 90, a notice offers to set it to 365 in `~/.claude/settings.json`, showing the change and keeping a backup. Never without the click.
+- **Settled in step 02's plan:**
+  - The temporary folders (`/`, `/tmp`, `/var/tmp`, and `TMPDIR` when set) are not projects, as home is not, and a git root that holds one is ignored as if there were no git.
+  - A folder with no git folds into the outermost session folder with no git that contains it, and only roots with git are known roots for a folder that still exists, so placement never depends on the order of earlier scans. A deleted folder may fall under any known root.
+  - A subagent's replies count under its parent session.
+  - A reply's counters are the largest seen, and the reply belongs to the session that started earliest.
 
 ## 2b. People who use Claude only on the web
 
