@@ -126,7 +126,7 @@ Files: modified `apps/web/src/pages/AgentEdit.tsx`; tested by `apps/web/src/page
 - `agent_page_opens_the_connect_dialog_from_the_suggestion_link` — at `/team/theo?connect=notion`, kit `[KIT_NOTION]`, nothing held: a dialog named "Connect Notion to Theo" is shown without a click.
 - `agent_page_ignores_connect_for_a_held_unknown_or_at_launch_service` — at `/team/theo?connect=notion` with `notion` held, at `/team/theo?connect=nothing`, and at `/team/theo?connect=google-ads` with kit `[KIT_ADS]` (`at_launch`): no dialog; the page's heading "Theo, your Developer" shows and the kit section lists as usual.
 
-- [ ] `feat(web): open a kit service's connect dialog from its link`
+- [x] `feat(web): open a kit service's connect dialog from its link`
 
 ### Task 6: the record
 

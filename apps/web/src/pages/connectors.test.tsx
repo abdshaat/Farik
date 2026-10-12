@@ -1667,8 +1667,9 @@ async function openedWithKit(
 	services: object[],
 	held: object[],
 	states: object[],
+	path = "/team/theo",
 ) {
-	const { container, socket } = await renderApp("/team/theo");
+	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", {
@@ -1695,6 +1696,40 @@ describe("a role's kit on the agent page", () => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
 		localStorage.clear();
+	});
+
+	it("agent_page_opens_the_connect_dialog_from_the_suggestion_link", async () => {
+		await openedWithKit([KIT_NOTION], [], [], "/team/theo?connect=notion");
+		expect(
+			screen.getByRole("dialog", { name: "Connect Notion to Theo" }),
+		).toBeTruthy();
+	});
+
+	it("agent_page_ignores_connect_for_a_held_unknown_or_at_launch_service", async () => {
+		const held = { service: [KIT_NOTION], held: [kitEntry("notion", "http")] };
+		for (const [services, heldEntries, states, name] of [
+			[
+				held.service,
+				held.held,
+				[{ ...KIT_STATES[0], server: "notion" }],
+				"notion",
+			],
+			[[KIT_NOTION], [], [], "nothing"],
+			[[KIT_ADS], [], [], "google-ads"],
+		] as const) {
+			const { container } = await openedWithKit(
+				[...services],
+				[...heldEntries],
+				[...states],
+				`/team/theo?connect=${name}`,
+			);
+			expect(screen.queryByRole("dialog")).toBeNull();
+			expect(
+				screen.getByRole("list", { name: "From the Developer’s kit" }),
+			).toBeTruthy();
+			cleanup();
+			container.remove();
+		}
 	});
 
 	it("agent_edit_lists_the_kit_above_your_own", async () => {
