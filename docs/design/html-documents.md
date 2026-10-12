@@ -30,7 +30,7 @@ The founder wants the team's documents written as HTML, not Markdown: HTML shows
 
 - **New documents** are written in the team's format. **An existing document keeps its format** when it is changed: the agent changes `spec.md` as Markdown in an HTML team.
 - `catervas_write_folder_doc` holds this:
-  - a path in the team's format is written; when the same name exists in the other format (`cadence.md` for `cadence.html`), the change also removes that file and its agent version, which is how a document is rewritten in place;
+  - a path in the team's format is written; when the same name exists in the other format (`cadence.md` for `cadence.html`), the same folder change removes that file, which is how an agent-only document is rewritten in place. The spec and the roadmap are not: writing `spec.html` while `spec.md` is there is refused with `other_format_exists`, since their rewrite reaches the owner through a task;
   - a path in the other format is written only when that file is already on the integration branch; otherwise it is refused with `wrong_format`, its message naming the path in the team's format.
 - Docs tasks are held by their prompt, not by a new Definition of Done rule: a task that adds a Markdown document in an HTML team still lands, and its document is read as any other. (`ponytail:` no Definition of Done rule for the format; add one if teams drift.)
 - The Team rules section of every session says, in an HTML team:
@@ -46,7 +46,7 @@ The founder wants the team's documents written as HTML, not Markdown: HTML shows
 
 ## Reading an HTML document
 
-- **The document route.** `GET /documents/raw?path=<path>[&task=<id>]` answers the document's bytes from the integration branch, or from the task's branch when `task` names one (the product plan card reads its texts there). Like every browser request it needs the session cookie. It answers `404` for a path that is not a `.md` or `.html` file under `docs/catervas/`, or that the branch does not hold.
+- **The document route.** `GET /documents/raw?path=<path>[&task=<id>]` answers an HTML document as the Files page reads it (the owner's waiting change included), or as the task's branch holds it when `task` names one (the product plan card reads its texts there). It needs the session cookie, as `GET /session` does: `403` from another host, `401` without a session, `404` for a path that is not an `.html` file under `docs/catervas/` the branch holds. Markdown documents are drawn in the page as today and never served here.
   - An HTML document is answered as `text/html; charset=utf-8` under its own policy: `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'`, with `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Cache-Control: no-store`. The document runs no script, reaches no network, cannot read the app's session or storage, and cannot be framed by another site.
   - **Fitted to the screen.** The route adds a fit block to every HTML document before its own styles: the viewport line, `body { margin: 0 auto; padding: 16px; max-width: 72rem; overflow-wrap: anywhere }`, `img, svg, video, canvas { max-width: 100%; height: auto }`, and `table, pre { display: block; max-width: 100%; overflow-x: auto }`. It is inserted after the opening `<head>` tag, else after the opening `<html>` tag, else after a doctype, else at the start. Because it comes first, a document's own styles win where they disagree, and nothing a document writes can widen the page past the screen except its own CSS.
 - **The Files page** shows an HTML document in `<iframe sandbox src="/documents/raw?path=…">`: no `allow-*` token at all, titled with the document's name. The frame takes the full width of the reading column and the height of the window below the page's header (at least 60% of the window), and scrolls inside itself. On a phone the frame is the full width under the picker. Above it, "Open full page" opens the same route in a new tab (`rel="noopener"`), where the route's own policy still holds. Markdown documents render exactly as today.
@@ -56,26 +56,26 @@ The founder wants the team's documents written as HTML, not Markdown: HTML shows
 
 ## Changing an HTML document
 
-- **Ask for a change** (every document the owner may edit, either format). A box under the document, "What should change?", with "Send to <role name>". Sending (`document_change_ask { path, words }`, 1 to 2000 characters) files a small task for the role that owns the folder: "Change <document name>", the owner's words quoted as the owner's, `allowed_paths` the document and its agent version, triaged at once with no triage session, as the re-derive task is filed. A change to the spec or the roadmap still waits for the owner's acceptance, as any task that may change them does. Refused for a path the owner may not edit (`not_editable`), and when the folder's role has no active agent (`no_owner`).
+- **Ask for a change** (every document the owner may edit, either format). A box under the document, "What should change?", with "Send to <role name>". Sending (`files.ask_change { path, words }`, 1 to 2000 characters) files a small task for the role that owns the folder: "Change <document name>", the owner's words quoted as the owner's, `allowed_paths` the document and its agent version, triaged at once with no triage session, as the re-derive task is filed. A change to the spec or the roadmap still waits for the owner's acceptance, as any task that may change them does. Refused for a path the owner may not edit (`not_editable`), and when the folder's role has no active agent (`no_owner`).
 - **Edit source** (Advanced, HTML documents only). The existing editor, on the document's HTML, with "Save" and "Cancel". There is no live preview, since an unsaved page has no route to be served from, so the frame shows the saved document once the save is in. Saving is the owner's edit as today (`files.save`): a folder change, and a re-derive of the agent version once integrated.
 - A Markdown document keeps "Edit" with "Preview" as today.
 
 ## Rewriting the documents as HTML
 
 - **The button.** Settings → Work → Documents shows "Rewrite documents as HTML" while the format is HTML and the Files page lists at least one `.md` document, with an ⓘ: "Each role rewrites its own documents as HTML. Marketing plans stay as they were approved."
-- **The command** `document_rewrite_start` files one epic, "Rewrite the documents as HTML", approved by that click, and records `document_rewrite.started { epic }`. The epic has one docs task for each role whose folder holds a `.md` document and who can take a task with a reviewer the team can staff, as Catervafication chooses its roles. Each task names the folder's `.md` documents found on the integration branch when the button is pressed.
+- **The method** `files.rewrite` files, as the owner's word, one docs task for each role whose folder holds a `.md` document and that can take a task with a reviewer the team can staff, each triaged at once as a re-derive is, and records `document_rewrite.started { tasks }`. Each task names the folder's `.md` documents found on the integration branch when the button is pressed. With sprints on, the tasks wait in the Backlog for the next sprint, as any small task does.
   - A task: "Rewrite <role>'s documents as HTML", `allowed_paths` its folder, one artifact criterion per document (`<name>.html` exists and holds `<h1`; the overview also `<svg`), and a review rubric: every `.md` named is gone with its agent version, and each `.html` says everything its `.md` said, nothing more.
   - Marketing plans (`marketing/plans/MP-<n>.*`) are not rewritten: each is the version the owner approved.
   - The spec and the roadmap come back to the owner once, as any change to them does.
   - The Scrum Master never takes a task. While a rewrite is started and `delivery/` still holds a `.md` document, its next retro is told: "Rewrite the documents in docs/catervas/delivery/ as HTML with catervas_write_folder_doc; writing <name>.html removes <name>.md."
-- **Refused** with `not_html` when the format is Markdown, `nothing_to_rewrite` when no folder of an active role holds a `.md` document other than marketing plans, and `rewrite_open` while the last rewrite's epic is neither done nor cancelled. The refusal's words are shown under the button.
+- **Refused** with `not_html` when the format is Markdown, `nothing_to_rewrite` when no folder of an active role holds a `.md` document other than marketing plans, and `rewrite_open` while a task of the last rewrite is neither accepted nor cancelled. The refusal's words are shown under the button.
 
 ## Events and wire
 
 - `policy.document_format` (`team.schema.json`, the template schema, `team.updated`, `team.get`).
-- Event `document_rewrite.started { epic }`; command `document_rewrite_start`; command `document_change_ask { path, words }`; the task it files carries `created_by` the owner.
-- `files.tree` lists `.html` documents; `files.read` answers `format: "markdown" | "html"`.
-- `catervas_write_folder_doc` refusal `wrong_format`; `files.save` accepts `.html` (its `not_markdown` becomes `not_a_document`).
+- Event `document_rewrite.started { tasks }`; methods `files.rewrite {}` and `files.ask_change { path, words }`, whose tasks carry `created_by: human`.
+- `files.tree` lists `.html` documents; the page tells a document's format by its extension.
+- `catervas_write_folder_doc` refusals `wrong_format` and `other_format_exists`; `files.save` accepts `.html` (its `not_markdown` becomes `not_a_document`).
 
 ## Out of scope
 

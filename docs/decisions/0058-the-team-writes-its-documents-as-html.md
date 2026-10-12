@@ -17,7 +17,7 @@ For showing HTML: rendering it into the page (a sanitizer, or the page's own pol
 
 ## Decision
 
-A team's documents are `.md` or `.html`, new ones in the team's `policy.document_format`, `html` unless set, and an existing document keeps its format until the owner's "Rewrite documents as HTML" files an epic that rewrites each role's folder. HTML documents hold no scripts and load nothing, and the browser reads them only through `GET /documents/raw`, a sandboxed frame under the route's own policy, with a fit block that keeps them to the reader's screen.
+A team's documents are `.md` or `.html`, new ones in the team's `policy.document_format`, `html` unless set, and an existing document keeps its format until the owner's "Rewrite documents as HTML" files a task for each role to rewrite its folder. HTML documents hold no scripts and load nothing, and the browser reads them only through `GET /documents/raw`, a sandboxed frame under the route's own policy, with a fit block that keeps them to the reader's screen.
 
 ## Consequences
 
