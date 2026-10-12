@@ -17,6 +17,8 @@ pub mod files;
 pub mod folder_docs;
 /// The repository Catervas works in.
 pub mod git;
+/// The machine-level index of the owner's Claude Code history, apart from every project's log.
+pub mod machine;
 /// The marketing plans the log holds.
 pub mod marketing;
 /// The harness metrics, from the projections.
