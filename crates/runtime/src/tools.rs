@@ -573,17 +573,13 @@ pub(crate) fn paths_of(name: &str, input: &Value) -> Vec<String> {
         "catervas_propose_marketing_plan" => [DocumentFormat::Markdown, DocumentFormat::Html]
             .map(|format| marketing::plan_file(0, format))
             .to_vec(),
-        "catervas_git_commit" => input
-            .get("paths")
-            .and_then(Value::as_array)
-            .map(|paths| {
-                paths
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default(),
+        "catervas_git_commit" => ["paths", "removed"]
+            .iter()
+            .filter_map(|key| input.get(key).and_then(Value::as_array))
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -794,6 +790,17 @@ mod tests {
             let tier = builtin_tool_tier(builtin).expect("a built-in with a tier");
             assert!(!writes_the_project(builtin, tier), "{builtin}");
         }
+    }
+
+    #[test]
+    fn a_commit_touches_the_paths_it_removes() {
+        let touched = super::paths_of(
+            "catervas_git_commit",
+            &json!({ "message": "m", "paths": ["a"], "removed": ["x"] }),
+        );
+        assert_eq!(touched, ["a", "x"]);
+        let only = super::paths_of("catervas_git_commit", &json!({ "paths": [], "removed": ["x"] }));
+        assert_eq!(only, ["x"]);
     }
 
     #[test]

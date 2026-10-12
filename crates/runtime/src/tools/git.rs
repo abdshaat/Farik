@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::TaskId;
+use catervas_core::governor::paths::{PathRefusal, check_allowed_paths, normalise};
+use catervas_core::governor::permissions::ToolRefusal;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -25,6 +27,9 @@ pub(crate) struct CommitInput {
     message: String,
     /// The paths to commit, relative to the worktree.
     paths: Vec<String>,
+    /// Paths, relative to the worktree, to delete and commit as removed.
+    #[serde(default)]
+    removed: Vec<String>,
 }
 
 /// `catervas_git_status`: what is uncommitted in the task's worktree, and whether nothing is.
@@ -56,8 +61,20 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
     if let Some(path) = input.paths.iter().find(|path| worktree.join(path).is_dir()) {
         return Err(Refusal::PathIsADirectory { path: path.clone() }.into());
     }
+    let removed = removals(&worktree, &input.removed)?;
+    // A deletion is not undone by a refused verification, so the contract's paths are checked now.
+    let (contract, _) = call.contract(task)?;
+    let allowed: Vec<String> = contract.allowed_paths.iter().map(ToString::to_string).collect();
+    if let Err(PathRefusal::Violations(violations)) = check_allowed_paths(&removed, &allowed) {
+        let path = violations.into_iter().next().map(|v| v.path).unwrap_or_default();
+        return Err(Refusal::Tool(ToolRefusal::PathOutsideAllowed { path }).into());
+    }
+    for path in &removed {
+        std::fs::remove_file(worktree.join(path)).map_err(failed)?;
+    }
     let deps = call.deps();
-    match deps.git.commit(&worktree, &input.message, &input.paths) {
+    let staged: Vec<String> = input.paths.iter().chain(&removed).cloned().collect();
+    match deps.git.commit(&worktree, &input.message, &staged) {
         Ok(sha) => Ok(json!({ "sha": sha })),
         Err(error) => {
             // The agent is told in the tool's answer, which it may ignore; a task whose work is
@@ -73,6 +90,32 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
             Err(failed(error))
         }
     }
+}
+
+/// The removed paths, normalised, once each is a regular file inside the worktree with no link on
+/// the way; any other is refused before anything is deleted.
+fn removals(worktree: &std::path::Path, removed: &[String]) -> Result<Vec<String>, ToolError> {
+    let mut checked = Vec::new();
+    for path in removed {
+        let refuse = |why: &str| failed(format!("{path} cannot be removed: {why}"));
+        let relative = normalise(path).ok_or_else(|| refuse("it is not inside the worktree"))?;
+        let mut at = worktree.to_path_buf();
+        for segment in relative.split('/') {
+            at.push(segment);
+            match std::fs::symlink_metadata(&at) {
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    return Err(refuse("a link is on the way"));
+                }
+                Ok(_) => {}
+                Err(_) => return Err(refuse("there is no such file")),
+            }
+        }
+        if at.is_dir() {
+            return Err(Refusal::PathIsADirectory { path: path.clone() }.into());
+        }
+        checked.push(relative);
+    }
+    Ok(checked)
 }
 
 /// `catervas_git_push`: pushes the task branch to `origin`, for the task's assignee alone. It spells
@@ -551,6 +594,132 @@ mod tests {
                 "docs/catervas/product/spec.md"
             ]
         );
+    }
+
+    /// The Product Manager's docs task `CTV-1`, with `spec.md` committed on its branch.
+    fn a_docs_task_holding_a_spec(
+        name: &str,
+        allowed: &[&str],
+    ) -> (TestProject, std::path::PathBuf) {
+        let project = TestProject::new(name, &a_team_of_three(|_| {}));
+        project.filed_with("CTV-1", "assigned", "task", None, |wire| {
+            wire["allowed_paths"] = json!(allowed);
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("architect");
+        });
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm", "reviewer": "dev-a" }),
+        );
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("docs/catervas/product")).expect("a directory");
+        std::fs::write(worktree.join("docs/catervas/product/spec.md"), "# Spec\n").expect("a file");
+        project
+            .deps
+            .git
+            .commit(
+                &worktree,
+                "docs(product): the spec",
+                &["docs/catervas/product/spec.md".to_string()],
+            )
+            .expect("the spec is committed");
+        (project, worktree)
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn commits_a_removed_path() {
+        let (project, worktree) =
+            a_docs_task_holding_a_spec("tools-git-removed", &["docs/catervas/product/**"]);
+        std::fs::write(worktree.join("docs/catervas/product/spec.html"), "<h1>Spec</h1>\n")
+            .expect("a file");
+        project
+            .call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({
+                    "message": "docs(product): the spec as HTML",
+                    "paths": ["docs/catervas/product/spec.html"],
+                    "removed": ["docs/catervas/product/spec.md"]
+                }),
+            )
+            .expect("the assignee commits a file and the removal of another");
+        assert!(!worktree.join("docs/catervas/product/spec.md").exists());
+        let tree = catervas_store::git::fixtures::git_output_in(
+            &worktree,
+            &["ls-tree", "-r", "--name-only", "HEAD", "docs/catervas/product"],
+        );
+        assert_eq!(tree.trim(), "docs/catervas/product/spec.html");
+
+        // Nothing there to remove is a refusal, not a quiet pass.
+        let missing = project
+            .call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({ "message": "m", "paths": [], "removed": ["docs/catervas/product/gone.md"] }),
+            )
+            .expect_err("a path that is not there");
+        assert!(format!("{missing:?}").contains("gone.md"), "{missing:?}");
+        // A directory is refused, as for `paths`.
+        let directory = project
+            .call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({ "message": "m", "paths": [], "removed": ["docs/catervas/product"] }),
+            )
+            .expect_err("a directory");
+        assert!(format!("{directory:?}").contains("path_is_a_directory"), "{directory:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_remove_through_a_link() {
+        let (project, worktree) =
+            a_docs_task_holding_a_spec("tools-git-removed-link", &["docs/catervas/**"]);
+        let outside = project.repo.path.join("outside");
+        std::fs::create_dir_all(&outside).expect("a directory");
+        std::fs::write(outside.join("keep.md"), "keep\n").expect("a file");
+        std::os::unix::fs::symlink(&outside, worktree.join("docs/catervas/linked"))
+            .expect("a link");
+        let refused = project
+            .call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({ "message": "m", "paths": [], "removed": ["docs/catervas/linked/keep.md"] }),
+            )
+            .expect_err("a removal through a link");
+        assert!(format!("{refused:?}").contains("linked"), "{refused:?}");
+        assert!(outside.join("keep.md").exists(), "nothing outside is deleted");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_removal_outside_the_allowed_paths() {
+        let (project, worktree) =
+            a_docs_task_holding_a_spec("tools-git-removed-scope", &["docs/catervas/product/**"]);
+        std::fs::create_dir_all(worktree.join("src")).expect("a directory");
+        std::fs::write(worktree.join("src/lib.rs"), "\n").expect("a file");
+        let refused = project
+            .call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({ "message": "m", "paths": [], "removed": ["src/lib.rs"] }),
+            )
+            .expect_err("outside the allowed paths");
+        assert!(matches!(refused, ToolError::Refused { .. }), "{refused:?}");
+        assert!(worktree.join("src/lib.rs").exists());
     }
 
     #[test]

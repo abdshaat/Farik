@@ -2151,7 +2151,8 @@ mod tests {
             product["intent"],
             "The owner asked for the team's documents as HTML. Rewrite each of these documents in \
              docs/catervas/product as <name>.html, saying everything it says, and delete the .md \
-             it replaces, with its agent version: spec.md, spec.agent.md."
+             it replaces, with its agent version, by naming each in `removed` when you commit with \
+             catervas_git_commit: spec.md, spec.agent.md."
         );
         let reaches = |contract: &Value| {
             let paths: Vec<String> = contract["allowed_paths"]

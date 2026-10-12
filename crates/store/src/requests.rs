@@ -603,7 +603,8 @@ pub fn rewrite_request(
         "intent": format!(
             "The owner asked for the team's documents as HTML. Rewrite each of these documents in \
              {folder} as <name>.html, saying everything it says, and delete the .md it replaces, \
-             with its agent version: {named}."
+             with its agent version, by naming each in `removed` when you commit with \
+             catervas_git_commit: {named}."
         ),
         "scope": {
             "in_scope": [format!("{folder}/**")],
