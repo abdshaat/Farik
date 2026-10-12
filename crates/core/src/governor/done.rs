@@ -398,7 +398,7 @@ fn pair_changed_alone(_: &TaskContract, evidence: &DoneEvidence) -> Option<DoneF
     Some(failure(
         DoneRule::PairChangedAlone,
         format!(
-            "the diff changes {}; a document for people and its .agent.md twin change together",
+            "the diff changes {}; the document and its agent version change together",
             lacking.join(", ")
         ),
     ))
@@ -1040,11 +1040,11 @@ mod tests {
         assert_eq!(failed_rules(&contract, &evidence), [R::PairChangedAlone]);
         assert_eq!(
             message_of(&contract, &evidence, R::PairChangedAlone),
-            "the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md; a document for people and its .agent.md twin change together"
+            "the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md; the document and its agent version change together"
         );
         assert_eq!(
             message_of(&contract, &changed(&[roadmap_twin]), R::PairChangedAlone),
-            "the diff changes docs/catervas/product/roadmap.agent.md without docs/catervas/product/roadmap.md; a document for people and its .agent.md twin change together"
+            "the diff changes docs/catervas/product/roadmap.agent.md without docs/catervas/product/roadmap.md; the document and its agent version change together"
         );
         let plan = "docs/catervas/marketing/plans/MP-2.md";
         assert_eq!(
@@ -1057,7 +1057,7 @@ mod tests {
                 &changed(&[spec, roadmap_twin]),
                 R::PairChangedAlone
             ),
-            "the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md, docs/catervas/product/roadmap.agent.md without docs/catervas/product/roadmap.md; a document for people and its .agent.md twin change together"
+            "the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md, docs/catervas/product/roadmap.agent.md without docs/catervas/product/roadmap.md; the document and its agent version change together"
         );
         let whole = changed(&[spec, spec_twin, "docs/catervas/architecture/overview.md"]);
         assert_eq!(evaluate_done(&contract, &whole), Ok(()));

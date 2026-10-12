@@ -184,7 +184,7 @@ Files: `crates/core/src/folders.rs` (tests in its `mod tests`); every user of a 
 - `folders_line_names_either_agent_version` — `folders_line` contains `.agent.html or .agent.md`.
 - `product_plan_on_takes_either_format` (`crates/store/tests/git.rs`) — true for an integration branch holding `spec.html` and `roadmap.md`; false for `spec.html` alone.
 
-- [ ] `feat(core): a team document is Markdown or HTML`
+- [x] `feat(core): a team document is Markdown or HTML`
 
 ### Task 2: the team's document format
 

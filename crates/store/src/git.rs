@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use catervas_core::folders::{
-    PRODUCT_PLAN, agent_twin, is_human_document, product_plan_approved, twin_is_stale,
+    DocumentFormat, PRODUCT_PLAN_STEMS, agent_twin, is_human_document, product_plan_approved,
+    twin_is_stale, with_format,
 };
 use catervas_core::team::Team;
 
@@ -1040,7 +1041,7 @@ pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
 }
 
 /// Whether the new project's product plan is on the team's integration branch: both documents of
-/// `PRODUCT_PLAN` are there (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
+/// `PRODUCT_PLAN_STEMS` are there, each as `.md` or `.html` (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
 ///
 /// # Errors
 ///
@@ -1053,9 +1054,13 @@ pub fn product_plan_on(git: &Git, team: &Team) -> Result<bool, GitError> {
         Err(other) => return Err(other),
     }
     let mut present = Vec::new();
-    for document in PRODUCT_PLAN {
-        if git.has_file(&branch, document)? {
-            present.push(document.to_string());
+    for stem in PRODUCT_PLAN_STEMS {
+        for format in [DocumentFormat::Markdown, DocumentFormat::Html] {
+            let document = with_format(stem, format);
+            if git.has_file(&branch, &document)? {
+                present.push(document);
+                break;
+            }
         }
     }
     Ok(product_plan_approved(&present))

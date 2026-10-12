@@ -552,7 +552,11 @@ impl Harness {
     /// Both documents of the product plan, committed on the branch checked out at the root.
     pub(crate) fn approve_the_product_plan(&self) {
         let root = &self.project.repo.path;
-        for path in catervas_core::folders::PRODUCT_PLAN {
+        for stem in catervas_core::folders::PRODUCT_PLAN_STEMS {
+            let path = &catervas_core::folders::with_format(
+                stem,
+                catervas_core::folders::DocumentFormat::Markdown,
+            );
             let file = root.join(path);
             std::fs::create_dir_all(file.parent().expect("a folder")).expect("the folder");
             std::fs::write(file, "# A document\n").expect("the file is written");

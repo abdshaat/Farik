@@ -12,7 +12,7 @@ use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
-use crate::folders::{ROLE_FOLDERS, plan_path};
+use crate::folders::{ROLE_FOLDERS, is_plan_of};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::team::{
     changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
@@ -963,7 +963,7 @@ fn paths_within_parent(
         .plan
         .as_ref()
         .zip(contract.parent.as_ref())
-        .filter(|(plan, parent)| plan.as_str() == plan_path(parent.as_str()))
+        .filter(|(plan, parent)| is_plan_of(plan.as_str(), parent.as_str()))
         .map(|(plan, _)| plan.as_str());
     let outside: Vec<&str> = paths_outside(&contract.allowed_paths, &parent.allowed_paths)
         .into_iter()
@@ -1064,7 +1064,7 @@ fn product_plan_first(_: &TaskContract, context: &ReadinessContext) -> Option<Re
     (context.awaits_the_product_plan && !context.is_the_product_plan).then(|| {
         failure(
             ReadinessRule::ProductPlanFirst,
-            "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec.md and docs/catervas/product/roadmap.md are on the integration branch".to_string(),
+            "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec and docs/catervas/product/roadmap, as .md or .html, are on the integration branch".to_string(),
         )
     })
 }
@@ -1331,7 +1331,7 @@ mod tests {
     fn refuses_everything_but_the_product_plan_until_it_is_approved() {
         let mut context = a_ready_context();
         context.awaits_the_product_plan = true;
-        let message = "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec.md and docs/catervas/product/roadmap.md are on the integration branch";
+        let message = "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec and docs/catervas/product/roadmap, as .md or .html, are on the integration branch";
         assert_eq!(failed_rules(&a_contract(), &context), [R::ProductPlanFirst]);
         assert_eq!(
             message_of(&a_contract(), &context, R::ProductPlanFirst),

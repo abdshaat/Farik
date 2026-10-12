@@ -6,7 +6,7 @@ use std::sync::Arc;
 use catervas_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
-use catervas_core::folders::plan_path;
+use catervas_core::folders::{DocumentFormat, plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy};
 use catervas_core::governor::gates::fits_the_open_sprint;
 use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
@@ -507,7 +507,7 @@ fn product_managers_message(
     step: &EpicStep,
     listed: &[(String, String, String)],
 ) -> Result<String, OrchestratorError> {
-    let plan = plan_path(contract.id.as_str());
+    let plan = with_format(&plan_stem(contract.id.as_str()), DocumentFormat::Markdown);
     if *step == EpicStep::WriteThePlansTasks {
         match deps
             .tools

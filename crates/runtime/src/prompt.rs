@@ -1108,7 +1108,7 @@ mod tests {
              - require_new_tests: no\n\
              - max_task_budget_usd: none\n\
              - document_paths: none (no task but a Software Developer's can be ready)\n\
-             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents."
+             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
         );
 
         inputs.rules = TeamRules {
@@ -1131,7 +1131,7 @@ mod tests {
              - max_task_budget_usd: 12.5\n\
              - forbidden_commands: ^rm -rf /\n\
              - document_paths: docs/**, **/*.md, CHANGELOG.md\n\
-             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents."
+             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
         );
     }
 

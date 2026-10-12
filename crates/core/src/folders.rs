@@ -16,7 +16,7 @@ pub const ROLE_FOLDERS: [(Role, &str); 6] = [
     (Role::MarketingSpecialist, "docs/catervas/marketing"),
 ];
 
-const TWIN_SUFFIX: &str = ".agent.md";
+const TWIN_MARK: &str = ".agent";
 const PLANS: &str = "docs/catervas/marketing/plans/";
 
 /// The folder a role owns, or `None` for a role that has none.
@@ -27,44 +27,112 @@ pub fn role_folder(role: Role) -> Option<&'static str> {
         .find_map(|(owner, folder)| (*owner == role).then_some(*folder))
 }
 
-/// The Architect's implementation plan for an epic.
-#[must_use]
-pub fn plan_path(epic: &str) -> String {
-    format!("docs/catervas/architecture/plans/{epic}.md")
+/// The format a team document is written in: its file's extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentFormat {
+    /// A `.md` file.
+    Markdown,
+    /// An `.html` file.
+    Html,
 }
 
-/// Whether a path is a human document: the product's `spec.md` and `roadmap.md`, or a marketing
-/// plan `plans/MP-<n>.md`, `n` decimal digits not starting with `0`. Each has an agent twin.
+impl DocumentFormat {
+    /// The extension, without its dot.
+    #[must_use]
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+            Self::Html => "html",
+        }
+    }
+
+    /// The format of a path's extension, `None` for any other.
+    #[must_use]
+    pub fn of(path: &str) -> Option<Self> {
+        if path.strip_suffix(".md").is_some() {
+            Some(Self::Markdown)
+        } else if path.strip_suffix(".html").is_some() {
+            Some(Self::Html)
+        } else {
+            None
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Markdown => Self::Html,
+            Self::Html => Self::Markdown,
+        }
+    }
+}
+
+/// The path without its `.md` or `.html`, `None` for any other extension. An agent version's stem
+/// ends `.agent`.
+#[must_use]
+pub fn stem_of(path: &str) -> Option<&str> {
+    path.strip_suffix(".md")
+        .or_else(|| path.strip_suffix(".html"))
+}
+
+/// The stem as a file in this format.
+#[must_use]
+pub fn with_format(stem: &str, format: DocumentFormat) -> String {
+    format!("{stem}.{}", format.extension())
+}
+
+/// The Architect's implementation plan for an epic, without its extension.
+#[must_use]
+pub fn plan_stem(epic: &str) -> String {
+    format!("docs/catervas/architecture/plans/{epic}")
+}
+
+/// Whether the path is the Architect's plan for the epic, in either format.
+#[must_use]
+pub fn is_plan_of(path: &str, epic: &str) -> bool {
+    stem_of(path).is_some_and(|stem| stem == plan_stem(epic))
+}
+
+/// Whether a path is a human document: the product's `spec` and `roadmap`, or a marketing plan
+/// `plans/MP-<n>`, `n` decimal digits not starting with `0`, each as `.md` or `.html`. Each has an
+/// agent twin.
 #[must_use]
 pub fn is_human_document(path: &str) -> bool {
     let Some(path) = normalise(path) else {
         return false;
     };
-    if path == "docs/catervas/product/spec.md" || path == "docs/catervas/product/roadmap.md" {
+    let Some(stem) = stem_of(&path) else {
+        return false;
+    };
+    if PRODUCT_PLAN_STEMS.contains(&stem) {
         return true;
     }
-    path.strip_prefix(PLANS)
+    stem.strip_prefix(PLANS)
         .and_then(|name| name.strip_prefix("MP-"))
-        .and_then(|name| name.strip_suffix(".md"))
         .is_some_and(|n| {
             n.bytes().all(|b| b.is_ascii_digit()) && !n.is_empty() && !n.starts_with('0')
         })
 }
 
-/// The twin of a human document: the path with `.agent` before its final `.md`.
+/// The twin of a human document: the path with `.agent` before its extension.
 #[must_use]
 pub fn agent_twin(path: &str) -> Option<String> {
     if !is_human_document(path) {
         return None;
     }
     let path = normalise(path)?;
-    Some(format!("{}{TWIN_SUFFIX}", path.strip_suffix(".md")?))
+    let format = DocumentFormat::of(&path)?;
+    Some(with_format(
+        &format!("{}{TWIN_MARK}", stem_of(&path)?),
+        format,
+    ))
 }
 
 /// The human document a twin belongs to.
 #[must_use]
 pub fn human_of_twin(path: &str) -> Option<String> {
-    let human = format!("{}.md", normalise(path)?.strip_suffix(TWIN_SUFFIX)?);
+    let path = normalise(path)?;
+    let stem = stem_of(&path)?.strip_suffix(TWIN_MARK)?;
+    let human = with_format(stem, DocumentFormat::of(&path)?);
     is_human_document(&human).then_some(human)
 }
 
@@ -88,41 +156,47 @@ pub fn pair_changed_alone(changed_paths: &[String], stale_twins: &[String]) -> V
     alone
 }
 
-/// The human documents the owner approves through `catervas_write_folder_doc` (section 5.7).
-pub const OWNER_ACCEPTED: [&str; 2] = [
-    "docs/catervas/product/spec.md",
-    "docs/catervas/product/roadmap.md",
+/// The stems of the human documents the owner approves through `catervas_write_folder_doc`
+/// (section 5.7).
+pub const OWNER_ACCEPTED_STEMS: [&str; 2] = [
+    "docs/catervas/product/spec",
+    "docs/catervas/product/roadmap",
 ];
 
-/// The two documents of a new project's product plan, which the owner approves (section 5.3).
-pub const PRODUCT_PLAN: [&str; 2] = [
-    "docs/catervas/product/spec.md",
-    "docs/catervas/product/roadmap.md",
+/// The stems of the two documents of a new project's product plan, which the owner approves
+/// (section 5.3).
+pub const PRODUCT_PLAN_STEMS: [&str; 2] = [
+    "docs/catervas/product/spec",
+    "docs/catervas/product/roadmap",
 ];
 
-/// Whether both documents of [`PRODUCT_PLAN`] are among the paths on the integration branch,
-/// compared after `normalise` and with letter case.
+/// Whether both documents of [`PRODUCT_PLAN_STEMS`], each as `.md` or `.html`, are among the
+/// paths on the integration branch, compared after `normalise` and with letter case.
 #[must_use]
 pub fn product_plan_approved(on_integration_branch: &[String]) -> bool {
     let present: Vec<String> = on_integration_branch
         .iter()
         .filter_map(|path| normalise(path))
         .collect();
-    PRODUCT_PLAN
+    PRODUCT_PLAN_STEMS
         .iter()
-        .all(|document| present.iter().any(|path| path == document))
+        .all(|stem| present.iter().any(|path| stem_of(path) == Some(stem)))
 }
 
-/// Whether a task with these `allowed_paths` may change a document of [`OWNER_ACCEPTED`]: either
-/// path passes the Definition of Done's own test of a diff (`check_allowed_paths`), or a glob does
-/// not compile, which fails closed.
+/// Whether a task with these `allowed_paths` may change a document of [`OWNER_ACCEPTED_STEMS`], in
+/// either format: a path passes the Definition of Done's own test of a diff
+/// (`check_allowed_paths`), or a glob does not compile, which fails closed.
 #[must_use]
 pub fn may_change_an_owner_document(allowed_paths: &[String]) -> bool {
-    OWNER_ACCEPTED.iter().any(|path| {
-        !matches!(
-            check_allowed_paths(&[(*path).to_string()], allowed_paths),
-            Err(PathRefusal::Violations(_))
-        )
+    OWNER_ACCEPTED_STEMS.iter().any(|stem| {
+        [DocumentFormat::Markdown, DocumentFormat::Html]
+            .into_iter()
+            .any(|format| {
+                !matches!(
+                    check_allowed_paths(&[with_format(stem, format)], allowed_paths),
+                    Err(PathRefusal::Violations(_))
+                )
+            })
     })
 }
 
@@ -131,7 +205,7 @@ pub fn may_change_an_owner_document(allowed_paths: &[String]) -> bool {
 pub struct FolderDocPath {
     /// The path, normalised.
     pub path: String,
-    /// Whether the path is in [`OWNER_ACCEPTED`].
+    /// Whether the path's stem is in [`OWNER_ACCEPTED_STEMS`].
     pub owner_accepted: bool,
 }
 
@@ -142,16 +216,16 @@ pub enum FolderDocPathRefusal {
     NoFolder,
     /// The path is not below the caller's folder.
     Outside,
-    /// The path is not a `.md` file.
-    NotMarkdown,
-    /// The path is an `.agent.md` twin, written from the human document's `agent_text`.
+    /// The path is not a `.md` or `.html` file.
+    NotADocument,
+    /// The path is an agent version, written from the human document's `agent_text`.
     AgentTwin,
     /// The path is a marketing plan, proposed with `catervas_propose_marketing_plan`.
     MarketingPlan,
 }
 
-/// Holds a path to a `.md` file at least one segment below the role's folder (letter case counts),
-/// not an `.agent.md` twin, and not a human document the owner does not approve here.
+/// Holds a path to a `.md` or `.html` file at least one segment below the role's folder (letter
+/// case counts), not an agent version, and not a human document the owner does not approve here.
 ///
 /// # Errors
 ///
@@ -168,13 +242,11 @@ pub fn check_folder_doc_path(
     {
         return Err(FolderDocPathRefusal::Outside);
     }
-    if path.strip_suffix(".md").is_none() {
-        return Err(FolderDocPathRefusal::NotMarkdown);
-    }
-    if path.strip_suffix(TWIN_SUFFIX).is_some() {
+    let stem = stem_of(&path).ok_or(FolderDocPathRefusal::NotADocument)?;
+    if stem.ends_with(TWIN_MARK) {
         return Err(FolderDocPathRefusal::AgentTwin);
     }
-    let owner_accepted = OWNER_ACCEPTED.contains(&path.as_str());
+    let owner_accepted = OWNER_ACCEPTED_STEMS.contains(&stem);
     if is_human_document(&path) && !owner_accepted {
         return Err(FolderDocPathRefusal::MarketingPlan);
     }
@@ -182,6 +254,66 @@ pub fn check_folder_doc_path(
         path,
         owner_accepted,
     })
+}
+
+/// Why a path is not in a format the team writes (`docs/design/html-documents.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormatRefusal {
+    /// A new document, written in the other format than the team's.
+    WrongFormat {
+        /// The path in the team's format.
+        instead: String,
+    },
+    /// An owner-accepted document that is there in the other format, changed there.
+    OtherFormatExists {
+        /// The path of the file that is there.
+        existing: String,
+    },
+}
+
+/// Holds a write to the team's format, or to the format a document is already in. `on_branch`
+/// says whether the integration branch holds a path. `Ok(Some(other))` is the same stem's file in
+/// the other format, which the write replaces; `Ok(None)` is a plain write.
+///
+/// # Errors
+///
+/// [`FormatRefusal::WrongFormat`] for a new document in the other format, and
+/// [`FormatRefusal::OtherFormatExists`] for a team-format write of an owner-accepted document
+/// whose other-format file is there.
+pub fn check_document_format(
+    path: &str,
+    format: DocumentFormat,
+    on_branch: &dyn Fn(&str) -> bool,
+) -> Result<Option<String>, FormatRefusal> {
+    let path = normalise(path).unwrap_or_else(|| path.to_string());
+    let (Some(stem), Some(written)) = (stem_of(&path), DocumentFormat::of(&path)) else {
+        return Ok(None);
+    };
+    if written == format {
+        let other = with_format(stem, format.other());
+        if !on_branch(&other) {
+            return Ok(None);
+        }
+        if OWNER_ACCEPTED_STEMS.contains(&stem) {
+            return Err(FormatRefusal::OtherFormatExists { existing: other });
+        }
+        return Ok(Some(other));
+    }
+    if on_branch(&path) {
+        return Ok(None);
+    }
+    Err(FormatRefusal::WrongFormat {
+        instead: with_format(stem, format),
+    })
+}
+
+/// The Team rules' line about the format of documents (`docs/design/html-documents.md`).
+#[must_use]
+pub fn format_line(format: DocumentFormat) -> String {
+    match format {
+        DocumentFormat::Html => "- documents: write a new document under docs/catervas/ as HTML (`.html`, a human document's agent version `.agent.html`): one self-contained page with `<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">`, one `<h1>`, styles in one `<style>` block, widths that fit a phone (percentages, `max-width`), diagrams, flowcharts and charts as inline SVG with a `viewBox`, one block element per line, no scripts and nothing loaded from anywhere else. A document already in `.md` stays Markdown when you change it. The kit names documents without their extension.".to_string(),
+        DocumentFormat::Markdown => "- documents: write a new document under docs/catervas/ as Markdown (`.md`, a human document's agent version `.agent.md`), diagrams in Mermaid blocks. A document already in `.html` stays HTML when you change it. The kit names documents without their extension.".to_string(),
+    }
 }
 
 /// The git author of a folder change: `<display name> (Catervas) <catervas@localhost>`, the name
@@ -220,21 +352,21 @@ pub fn folder_doc_message(
     format!("docs({scope}): {} by {agent_name}{owner}", names.join(", "))
 }
 
-/// The documents with a fixed name, in the order the Files page lists them. A step that adds a
-/// document adds its name here.
-pub const DOCUMENT_NAMES: [(&str, &str); 12] = [
-    ("docs/catervas/product/spec.md", "Product description"),
-    ("docs/catervas/product/roadmap.md", "Roadmap"),
-    ("docs/catervas/architecture/overview.md", "Overview"),
-    ("docs/catervas/architecture/features.md", "Features"),
-    ("docs/catervas/architecture/jobs.md", "Scheduled jobs"),
-    ("docs/catervas/architecture/structure.md", "Structure"),
-    ("docs/catervas/engineering/conventions.md", "Conventions"),
-    ("docs/catervas/engineering/workflow.md", "Workflow"),
-    ("docs/catervas/design/ui-inventory.md", "UI inventory"),
-    ("docs/catervas/delivery/cadence.md", "Sprint rhythm"),
-    ("docs/catervas/marketing/brand/brand-kit.md", "Brand kit"),
-    ("docs/catervas/marketing/brand/persona.md", "Brand persona"),
+/// The documents with a fixed name, by stem, in the order the Files page lists them. A step that
+/// adds a document adds its name here.
+pub const DOCUMENT_STEMS: [(&str, &str); 12] = [
+    ("docs/catervas/product/spec", "Product description"),
+    ("docs/catervas/product/roadmap", "Roadmap"),
+    ("docs/catervas/architecture/overview", "Overview"),
+    ("docs/catervas/architecture/features", "Features"),
+    ("docs/catervas/architecture/jobs", "Scheduled jobs"),
+    ("docs/catervas/architecture/structure", "Structure"),
+    ("docs/catervas/engineering/conventions", "Conventions"),
+    ("docs/catervas/engineering/workflow", "Workflow"),
+    ("docs/catervas/design/ui-inventory", "UI inventory"),
+    ("docs/catervas/delivery/cadence", "Sprint rhythm"),
+    ("docs/catervas/marketing/brand/brand-kit", "Brand kit"),
+    ("docs/catervas/marketing/brand/persona", "Brand persona"),
 ];
 
 /// A file stem or folder name as words: `-` and `_` as spaces, the first letter upper case.
@@ -252,11 +384,14 @@ pub fn plain_name(stem: &str) -> String {
 #[must_use]
 pub fn document_name(path: &str, title_of: &dyn Fn(&str) -> Option<String>) -> String {
     let path = normalise(path).unwrap_or_else(|| path.to_string());
-    if let Some((_, name)) = DOCUMENT_NAMES.iter().find(|(known, _)| *known == path) {
+    if let Some((_, name)) = DOCUMENT_STEMS
+        .iter()
+        .find(|(known, _)| stem_of(&path) == Some(*known))
+    {
         return (*name).to_string();
     }
     let file = path.rsplit('/').next().unwrap_or(&path);
-    let stem = file.strip_suffix(".md").unwrap_or(file);
+    let stem = stem_of(file).unwrap_or(file);
     let in_plans = ROLE_FOLDERS
         .iter()
         .any(|(_, folder)| path == format!("{folder}/plans/{file}"));
@@ -266,13 +401,13 @@ pub fn document_name(path: &str, title_of: &dyn Fn(&str) -> Option<String>) -> S
     plain_name(stem)
 }
 
-/// The sort key of a document: its place in [`DOCUMENT_NAMES`], the others after, then its path.
+/// The sort key of a document: its place in [`DOCUMENT_STEMS`], the others after, then its path.
 #[must_use]
 pub fn document_order(path: &str) -> (usize, String) {
-    let place = DOCUMENT_NAMES
+    let place = DOCUMENT_STEMS
         .iter()
-        .position(|(known, _)| *known == path)
-        .unwrap_or(DOCUMENT_NAMES.len());
+        .position(|(known, _)| stem_of(path) == Some(*known))
+        .unwrap_or(DOCUMENT_STEMS.len());
     (place, path.to_string())
 }
 
@@ -284,9 +419,9 @@ pub const OWNER_EDIT_LIMIT_BYTES: usize = 262_144;
 pub enum OwnerEditRefusal {
     /// The path climbs out, or is not under `docs/catervas/`.
     OutsideFolders,
-    /// The path is not a `.md` file.
-    NotMarkdown,
-    /// The path is an `.agent.md` twin, which the team writes.
+    /// The path is not a `.md` or `.html` file.
+    NotADocument,
+    /// The path is an agent version, which the team writes.
     AgentTwin,
     /// The path is a marketing plan, which changes through a new version on its page.
     MarketingPlan,
@@ -300,7 +435,7 @@ impl OwnerEditRefusal {
     pub fn code(self) -> &'static str {
         match self {
             Self::OutsideFolders => "outside_folders",
-            Self::NotMarkdown => "not_markdown",
+            Self::NotADocument => "not_a_document",
             Self::AgentTwin => "agent_twin",
             Self::MarketingPlan => "marketing_plan",
             Self::TooLarge => "too_large",
@@ -308,8 +443,8 @@ impl OwnerEditRefusal {
     }
 }
 
-/// Holds the owner's edit of a document to a `.md` file under `docs/catervas/` that is not an
-/// `.agent.md` twin or a marketing plan, within [`OWNER_EDIT_LIMIT_BYTES`]. Whether a folder of
+/// Holds the owner's edit of a document to a `.md` or `.html` file under `docs/catervas/` that is
+/// not an agent version or a marketing plan, within [`OWNER_EDIT_LIMIT_BYTES`]. Whether a folder of
 /// an active role holds it is the caller's to check.
 ///
 /// # Errors
@@ -319,13 +454,11 @@ pub fn check_owner_edit(path: &str, text_bytes: usize) -> Result<String, OwnerEd
     let path = normalise(path)
         .filter(|path| path.starts_with("docs/catervas/"))
         .ok_or(OwnerEditRefusal::OutsideFolders)?;
-    if path.strip_suffix(".md").is_none() {
-        return Err(OwnerEditRefusal::NotMarkdown);
-    }
-    if path.ends_with(TWIN_SUFFIX) {
+    let stem = stem_of(&path).ok_or(OwnerEditRefusal::NotADocument)?;
+    if stem.ends_with(TWIN_MARK) {
         return Err(OwnerEditRefusal::AgentTwin);
     }
-    if is_human_document(&path) && !OWNER_ACCEPTED.contains(&path.as_str()) {
+    if is_human_document(&path) && !OWNER_ACCEPTED_STEMS.contains(&stem) {
         return Err(OwnerEditRefusal::MarketingPlan);
     }
     if text_bytes > OWNER_EDIT_LIMIT_BYTES {
@@ -454,9 +587,9 @@ pub fn folders_line(role: Role, active_roles: &[Role]) -> String {
         |folder| format!("Yours is {folder}/: write no other folder named here."),
     );
     let reading = match read_access(role) {
-        ReadAccess::Open => "Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents.".to_string(),
+        ReadAccess::Open => "Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.".to_string(),
         held @ ReadAccess::Only(_) => format!(
-            "Read only {}: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.md twin beside it, read the twin, which is written for agents.",
+            "Read only {}: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.",
             held.named()
         ),
     };
@@ -493,9 +626,20 @@ fn document_lines(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Whether a line is a heading: it starts with `#`, or, trimmed, with `<h1` to `<h6` and then `>`
+/// or a space.
+fn is_heading(line: &str) -> bool {
+    let bytes = line.trim_start().as_bytes();
+    line.starts_with('#')
+        || (bytes.len() > 3
+            && bytes.starts_with(b"<h")
+            && (b'1'..=b'6').contains(&bytes[2])
+            && (bytes[3] == b'>' || bytes[3] == b' '))
+}
+
 /// The lines of two versions of a document that are worth showing: every changed line, the
 /// unchanged line just before and just after each run of changes, and the nearest unchanged
-/// heading (a line starting with `#`) above each run (section 5.7). Blank lines and a trailing
+/// heading (a line starting with `#`, or an HTML heading) above each run (section 5.7). Blank lines and a trailing
 /// `\r` are not compared. Within a run, the removed lines come before the added ones.
 ///
 /// ponytail: a middle whose two lengths multiply past 1,000,000 is shown whole, every old line
@@ -546,7 +690,7 @@ pub fn changed_lines(before: &str, after: &str) -> Vec<ShownLine> {
         }
         if let Some(heading) = all[..start]
             .iter()
-            .rposition(|(change, text)| *change == LineChange::Same && text.starts_with('#'))
+            .rposition(|(change, text)| *change == LineChange::Same && is_heading(text))
         {
             shown[heading] = true;
         }
@@ -615,10 +759,11 @@ fn compare<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(LineChange, &'a str)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        FolderDocPathRefusal, OWNER_ACCEPTED, ROLE_FOLDERS, ReadAccess, agent_twin,
-        check_folder_doc_path, folder_doc_author, folder_doc_message, folders_line, human_of_twin,
-        is_human_document, pair_changed_alone, plan_path, product_plan_approved, read_access,
-        role_folder,
+        DocumentFormat, FolderDocPathRefusal, FormatRefusal, OWNER_ACCEPTED_STEMS, ROLE_FOLDERS,
+        ReadAccess, agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
+        folder_doc_message, folders_line, format_line, human_of_twin, is_human_document,
+        is_plan_of, pair_changed_alone, plan_stem, product_plan_approved, read_access, role_folder,
+        stem_of, with_format,
     };
     use super::{LineChange, ShownLine, changed_lines, may_change_an_owner_document};
     use super::{
@@ -653,13 +798,10 @@ mod tests {
 
     #[test]
     fn names_an_epics_plan() {
-        assert_eq!(
-            plan_path("CTV-3"),
-            "docs/catervas/architecture/plans/CTV-3.md"
-        );
+        assert_eq!(plan_stem("CTV-3"), "docs/catervas/architecture/plans/CTV-3");
     }
 
-    const READ: &str = "Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents.";
+    const READ: &str = "Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.";
 
     fn product(name: &str) -> String {
         format!("docs/catervas/product/{name}")
@@ -861,7 +1003,7 @@ mod tests {
         }
         assert_eq!(
             check_owner_edit("docs/catervas/product/notes.txt", 10),
-            Err(OwnerEditRefusal::NotMarkdown)
+            Err(OwnerEditRefusal::NotADocument)
         );
         assert_eq!(
             check_owner_edit("docs/catervas/product/roadmap.agent.md", 10),
@@ -879,7 +1021,7 @@ mod tests {
         assert!(check_owner_edit(roadmap, 262_144).is_ok());
         let codes: Vec<&str> = [
             OwnerEditRefusal::OutsideFolders,
-            OwnerEditRefusal::NotMarkdown,
+            OwnerEditRefusal::NotADocument,
             OwnerEditRefusal::AgentTwin,
             OwnerEditRefusal::MarketingPlan,
             OwnerEditRefusal::TooLarge,
@@ -891,7 +1033,7 @@ mod tests {
             codes,
             [
                 "outside_folders",
-                "not_markdown",
+                "not_a_document",
                 "agent_twin",
                 "marketing_plan",
                 "too_large"
@@ -1079,7 +1221,7 @@ mod tests {
                     Role::MarketingSpecialist
                 ]
             ),
-            "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read only docs/catervas/product/ and docs/catervas/marketing/: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.md twin beside it, read the twin, which is written for agents."
+            "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read only docs/catervas/product/ and docs/catervas/marketing/: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
         );
     }
 
@@ -1113,7 +1255,7 @@ mod tests {
         }
         assert_eq!(
             check_folder_doc_path(Role::ScrumMaster, "docs/catervas/delivery/x.txt"),
-            Err(FolderDocPathRefusal::NotMarkdown)
+            Err(FolderDocPathRefusal::NotADocument)
         );
         assert_eq!(
             check_folder_doc_path(Role::ScrumMaster, "docs/catervas/delivery/x.agent.md"),
@@ -1146,8 +1288,12 @@ mod tests {
             check_folder_doc_path(Role::FinanceSpecialist, "docs/catervas/finance/x.md"),
             Err(FolderDocPathRefusal::NoFolder)
         );
-        assert_eq!(OWNER_ACCEPTED, [product("spec.md"), product("roadmap.md")]);
-        assert!(OWNER_ACCEPTED.iter().all(|path| is_human_document(path)));
+        assert_eq!(OWNER_ACCEPTED_STEMS, [product("spec"), product("roadmap")]);
+        assert!(
+            OWNER_ACCEPTED_STEMS
+                .iter()
+                .all(|stem| is_human_document(&with_format(stem, DocumentFormat::Markdown)))
+        );
     }
 
     #[test]
@@ -1304,5 +1450,238 @@ mod tests {
                 "{may_not:?}"
             );
         }
+    }
+
+    fn list(paths: &[&str]) -> Vec<String> {
+        paths.iter().map(|path| (*path).to_string()).collect()
+    }
+
+    fn cat(path: &str) -> String {
+        format!("docs/catervas/{path}")
+    }
+
+    #[test]
+    fn stem_drops_md_or_html_and_nothing_else() {
+        assert_eq!(stem_of("a/b.md"), Some("a/b"));
+        assert_eq!(stem_of("a/b.html"), Some("a/b"));
+        assert_eq!(stem_of("a/b.txt"), None);
+        assert_eq!(stem_of("a/b"), None);
+        assert_eq!(stem_of("a/spec.agent.html"), Some("a/spec.agent"));
+        assert_eq!(with_format("a/b", DocumentFormat::Html), "a/b.html");
+        assert_eq!(DocumentFormat::of("a/b.md"), Some(DocumentFormat::Markdown));
+        assert_eq!(DocumentFormat::of("a/b.htm"), None);
+        assert_eq!(DocumentFormat::Html.extension(), "html");
+    }
+
+    #[test]
+    fn pairs_in_either_format() {
+        for path in [
+            "product/spec.md",
+            "product/spec.html",
+            "product/roadmap.html",
+            "marketing/plans/MP-3.html",
+        ] {
+            assert!(is_human_document(&cat(path)), "{path}");
+        }
+        for path in ["marketing/plans/MP-03.html", "product/spec.htm"] {
+            assert!(!is_human_document(&cat(path)), "{path}");
+        }
+        let html = cat("product/spec.html");
+        assert_eq!(agent_twin(&html), Some(cat("product/spec.agent.html")));
+        assert_eq!(human_of_twin(&cat("product/spec.agent.html")), Some(html));
+        assert_eq!(
+            human_of_twin(&cat("product/spec.agent.md")),
+            Some(cat("product/spec.md"))
+        );
+    }
+
+    #[test]
+    fn pair_changed_alone_holds_html_pairs() {
+        let (spec, twin) = (cat("product/spec.html"), cat("product/spec.agent.html"));
+        assert_eq!(
+            pair_changed_alone(std::slice::from_ref(&spec), &[]),
+            [cat("product/spec.html")]
+        );
+        assert!(pair_changed_alone(&[spec, twin.clone()], &[]).is_empty());
+        let md = cat("product/spec.md");
+        assert_eq!(
+            pair_changed_alone(&[md.clone(), twin.clone()], &[]),
+            [md, twin]
+        );
+    }
+
+    #[test]
+    fn owner_documents_and_product_plan_by_stem() {
+        assert!(may_change_an_owner_document(&list(&[
+            "docs/catervas/product/spec.html"
+        ])));
+        let plan = |paths: &[&str]| product_plan_approved(&list(paths));
+        assert!(plan(&[
+            "docs/catervas/product/spec.html",
+            "docs/catervas/product/roadmap.md"
+        ]));
+        assert!(!plan(&["docs/catervas/product/spec.html"]));
+    }
+
+    #[test]
+    fn folder_doc_path_takes_md_and_html() {
+        let architect = |path: &str| check_folder_doc_path(Role::Architect, &cat(path));
+        assert!(architect("architecture/overview.html").is_ok());
+        assert_eq!(
+            architect("architecture/overview.txt"),
+            Err(FolderDocPathRefusal::NotADocument)
+        );
+        assert_eq!(
+            architect("architecture/spec.agent.html"),
+            Err(FolderDocPathRefusal::AgentTwin)
+        );
+        assert_eq!(
+            check_folder_doc_path(Role::MarketingSpecialist, &cat("marketing/plans/MP-2.html")),
+            Err(FolderDocPathRefusal::MarketingPlan)
+        );
+        let spec = check_folder_doc_path(Role::ProductManager, &cat("product/spec.html"));
+        assert!(spec.expect("spec").owner_accepted);
+    }
+
+    #[test]
+    fn owner_edit_takes_md_and_html() {
+        let roadmap = cat("product/roadmap.html");
+        assert_eq!(check_owner_edit(&roadmap, 10), Ok(roadmap));
+        assert_eq!(
+            check_owner_edit(&cat("product/notes.txt"), 10),
+            Err(OwnerEditRefusal::NotADocument)
+        );
+        assert_eq!(
+            check_owner_edit(&cat("product/roadmap.agent.html"), 10),
+            Err(OwnerEditRefusal::AgentTwin)
+        );
+        assert_eq!(OwnerEditRefusal::NotADocument.code(), "not_a_document");
+    }
+
+    fn on(held: &[&str]) -> impl Fn(&str) -> bool {
+        let held = list(held);
+        move |path: &str| held.iter().any(|h| h == path)
+    }
+
+    #[test]
+    fn format_check_writes_the_teams_format() {
+        let check = |path: &str| check_document_format(&cat(path), DocumentFormat::Html, &on(&[]));
+        assert_eq!(check("architecture/overview.html"), Ok(None));
+        assert_eq!(
+            check("architecture/overview.md"),
+            Err(FormatRefusal::WrongFormat {
+                instead: cat("architecture/overview.html")
+            })
+        );
+    }
+
+    #[test]
+    fn format_check_keeps_an_existing_documents_format() {
+        let held = on(&["docs/catervas/delivery/cadence.md"]);
+        let html = |path: &str| check_document_format(&cat(path), DocumentFormat::Html, &held);
+        assert_eq!(html("delivery/cadence.md"), Ok(None));
+        assert_eq!(
+            html("delivery/cadence.html"),
+            Ok(Some(cat("delivery/cadence.md")))
+        );
+        let held = on(&["docs/catervas/architecture/overview.html"]);
+        assert_eq!(
+            check_document_format(
+                &cat("architecture/overview.html"),
+                DocumentFormat::Markdown,
+                &held
+            ),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn format_check_refuses_a_spec_changing_format() {
+        let held = on(&["docs/catervas/product/spec.md"]);
+        assert_eq!(
+            check_document_format(&cat("product/spec.html"), DocumentFormat::Html, &held),
+            Err(FormatRefusal::OtherFormatExists {
+                existing: cat("product/spec.md")
+            })
+        );
+    }
+
+    #[test]
+    fn document_names_by_stem() {
+        let name = |path: &str, title: Option<&str>| {
+            document_name(&cat(path), &|_: &str| title.map(str::to_string))
+        };
+        assert_eq!(name("product/spec.html", None), "Product description");
+        assert_eq!(
+            name("architecture/plans/CTV-3.html", Some("Title")),
+            "Plan: Title"
+        );
+        assert_eq!(name("engineering/notes-on-x.html", None), "Notes on x");
+        let mut paths = vec![
+            cat("architecture/notes.html"),
+            cat("architecture/overview.html"),
+            cat("product/roadmap.md"),
+            cat("product/spec.html"),
+        ];
+        paths.sort_by_key(|path| document_order(path));
+        assert_eq!(
+            paths,
+            [
+                cat("product/spec.html"),
+                cat("product/roadmap.md"),
+                cat("architecture/overview.html"),
+                cat("architecture/notes.html")
+            ]
+        );
+    }
+
+    #[test]
+    fn plans_in_either_format() {
+        let plans = |name: &str| format!("docs/catervas/architecture/plans/{name}");
+        assert!(is_plan_of(&plans("CTV-3.html"), "CTV-3"));
+        assert!(is_plan_of(&plans("CTV-3.md"), "CTV-3"));
+        assert!(!is_plan_of(&plans("CTV-30.md"), "CTV-3"));
+    }
+
+    #[test]
+    fn format_line_says_each_format() {
+        let html = format_line(DocumentFormat::Html);
+        assert!(html.starts_with("- documents:"), "{html}");
+        for needle in [
+            ".agent.html",
+            "inline SVG",
+            "no scripts",
+            "viewport",
+            "one block element per line",
+            "stays Markdown",
+        ] {
+            assert!(html.contains(needle), "{needle}: {html}");
+        }
+        let md = format_line(DocumentFormat::Markdown);
+        assert!(md.starts_with("- documents:"), "{md}");
+        for needle in [".agent.md", "Mermaid", "stays HTML"] {
+            assert!(md.contains(needle), "{needle}: {md}");
+        }
+    }
+
+    #[test]
+    fn html_headings_head_a_run() {
+        let page = |last: &str| {
+            format!("<h1>T</h1>\n<p>a</p>\n<h2>Risks</h2>\n<p>b</p>\n<p>mid</p>\n<p>{last}</p>\n")
+        };
+        let under_risks = changed_lines(&page("c"), &page("d"));
+        assert_eq!(under_risks[0].text, "<h2>Risks</h2>");
+        let before = "<header>\n<p>x</p>\n<p>y</p>\n<p>z</p>\n<p>w</p>";
+        let after = "<header>\n<p>x</p>\n<p>y</p>\n<p>z</p>\n<p>q</p>";
+        assert!(
+            changed_lines(before, after)
+                .iter()
+                .all(|line| line.text != "<header>")
+        );
+    }
+
+    #[test]
+    fn folders_line_names_either_agent_version() {
+        assert!(folders_line(Role::Architect, &[]).contains(".agent.html or .agent.md"));
     }
 }

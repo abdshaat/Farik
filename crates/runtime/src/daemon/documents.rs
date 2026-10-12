@@ -68,7 +68,7 @@ fn edit_refusal(why: OwnerEditRefusal) -> Failure {
             "/path",
             "That document is not in one of the team's folders.",
         ),
-        OwnerEditRefusal::NotMarkdown => (
+        OwnerEditRefusal::NotADocument => (
             "/path",
             "Only a document that ends in .md can be saved here.",
         ),
@@ -1020,7 +1020,7 @@ mod tests {
             "docs/catervas/product/notes.txt",
             "x\n",
             &gone,
-            "not_markdown",
+            "not_a_document",
             "/path",
         );
         refused(ROADMAP_TWIN, "x\n", &gone, "agent_twin", "/path");

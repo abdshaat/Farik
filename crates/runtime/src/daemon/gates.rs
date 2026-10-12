@@ -11,7 +11,7 @@ use catervas_core::branch::task_branch;
 use catervas_core::contract::{
     Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract,
 };
-use catervas_core::folders::PRODUCT_PLAN;
+use catervas_core::folders::{DocumentFormat, PRODUCT_PLAN_STEMS, with_format};
 use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteOutcome, DesignerBrowser, check_contract_write,
 };
@@ -632,8 +632,9 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             .read_contract(&row.task_id)
             .map_err(|e| internal(&e))?;
         let branch = task_branch(&contract);
-        for path in PRODUCT_PLAN {
-            if let Ok(text) = deps.git.file_at(&branch, path) {
+        for stem in PRODUCT_PLAN_STEMS {
+            let path = with_format(stem, DocumentFormat::Markdown);
+            if let Ok(text) = deps.git.file_at(&branch, &path) {
                 documents.push(json!({ "path": path, "text": text }));
             }
         }

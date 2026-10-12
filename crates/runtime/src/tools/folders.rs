@@ -526,7 +526,7 @@ fn checked_path(
             "folder_doc_path",
             format!("{named} is not a file below {folder}/"),
         ),
-        FolderDocPathRefusal::NotMarkdown => {
+        FolderDocPathRefusal::NotADocument => {
             refused("folder_doc_path", format!("{named} is not a .md file"))
         }
         FolderDocPathRefusal::AgentTwin => refused(

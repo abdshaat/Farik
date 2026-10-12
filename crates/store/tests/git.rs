@@ -1508,3 +1508,20 @@ fn reads_the_product_plan_from_the_integration_branch() {
     // A branch the repository does not have is not an error: the plan is not there yet.
     assert!(!product_plan_on(&git, &team(Some("release"))).expect("the read works"));
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn product_plan_on_takes_either_format() {
+    use catervas_core::team::{fixtures::a_team_wire, validate_team};
+    use catervas_store::git::product_plan_on;
+
+    let team = validate_team(&a_team_wire()).expect("a team");
+    let repository = TempRepo::new("product-plan-either-format");
+    let adapter = repository.adapter();
+    repository.write("docs/catervas/product/spec.html", "<h1>Bakery</h1>\n");
+    repository.commit("write the spec");
+    assert!(!product_plan_on(&adapter, &team).expect("the read works"));
+    repository.write(ROADMAP, "# Roadmap\n");
+    repository.commit("write the roadmap");
+    assert!(product_plan_on(&adapter, &team).expect("the read works"));
+}
