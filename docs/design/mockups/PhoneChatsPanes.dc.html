@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chats, phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#161616;text-decoration:underline;text-underline-offset:3px}a:hover{color:#5B5347}
+button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #5F7A9B;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif; overflow: hidden;">
+<header style="flex-shrink: 0; background: #161616; color: #F3E7D3; padding: 12px 16px; font: 600 13px/18px 'JetBrains Mono', monospace; letter-spacing: 0.12em; text-transform: uppercase;">Catervas</header>
+<nav aria-label="Chats" style="flex-shrink: 0; border-bottom: 1px solid #D9CBB3; padding: 8px 16px;">
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; gap: 12px; overflow-x: auto;">
+<li><a href="#" aria-current="page" style="display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; text-decoration: none; font-weight: 600;"><span aria-hidden="true" style="width: 44px; height: 44px; background: #161616; color: #F3E7D3; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #F3E7D3, 0 0 0 4px #161616;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"></path></svg></span>Team</a></li>
+<li><a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; text-decoration: none;"><span aria-hidden="true" style="width: 44px; height: 44px; background: #C9A0A6;"></span>Mira</a></li>
+<li><a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; text-decoration: none;"><span aria-hidden="true" style="width: 44px; height: 44px; background: #A3B8A0;"></span>Sol</a></li>
+<li><a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; text-decoration: none;"><span aria-hidden="true" style="width: 44px; height: 44px; background: #D6B77A;"></span>Ada</a></li>
+<li><a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; text-decoration: none;"><span aria-hidden="true" style="width: 44px; height: 44px; background: #B7C7DA;"></span>Theo</a></li>
+</ul>
+</nav>
+<div style="flex-shrink: 0; padding: 12px 16px 8px; border-bottom: 1px solid #D9CBB3;">
+<h1 style="margin: 0; font-size: 22px; line-height: 28px;">Team</h1>
+</div>
+<div style="flex-grow: 1; min-height: 0; position: relative; display: flex; flex-direction: column;">
+<ol aria-label="Messages" style="flex-grow: 1; overflow-y: auto; list-style: none; margin: 0; padding: 12px 16px; display: flex; flex-direction: column; gap: 16px;">
+<li role="status" style="text-align: center; color: #5B5347; font-size: 13px;">Loading earlier messages…</li>
+<li style="display: flex; gap: 10px;"><span aria-hidden="true" style="width: 40px; height: 40px; flex-shrink: 0; background: #A3B8A0;"></span><div style="display: grid; gap: 2px;"><p style="margin: 0; display: flex; gap: 6px; align-items: center;"><strong>Sol</strong><span style="font: 600 11px 'JetBrains Mono', monospace; background: #A3B8A0; padding: 1px 6px;">SM</span><time style="font: 12px 'JetBrains Mono', monospace; color: #5B5347;">Mon 09:00</time></p><p style="margin: 0;">Standup is open. One line each, please.</p></div></li>
+<li style="display: flex; gap: 10px;"><span aria-hidden="true" style="width: 40px; height: 40px; flex-shrink: 0; background: #D6B77A;"></span><div style="display: grid; gap: 2px;"><p style="margin: 0; display: flex; gap: 6px; align-items: center;"><strong>Ada</strong><span style="font: 600 11px 'JetBrains Mono', monospace; background: #D6B77A; padding: 1px 6px;">ARCH</span><time style="font: 12px 'JetBrains Mono', monospace; color: #5B5347;">Mon 09:04</time></p><p style="margin: 0;">Reviewing the payment plan today.</p></div></li>
+<li style="display: flex; gap: 10px;"><span aria-hidden="true" style="width: 40px; height: 40px; flex-shrink: 0; background: #C9A0A6;"></span><div style="display: grid; gap: 2px;"><p style="margin: 0; display: flex; gap: 6px; align-items: center;"><strong>Mira</strong><span style="font: 600 11px 'JetBrains Mono', monospace; background: #C9A0A6; padding: 1px 6px;">PM</span><time style="font: 12px 'JetBrains Mono', monospace; color: #5B5347;">Mon 09:10</time></p><p style="margin: 0;">Two requests triaged; T-15 is first.</p></div></li>
+</ol>
+<button type="button" style="position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); min-height: 44px; padding: 0 16px; display: flex; align-items: center; gap: 6px; font: 600 14px 'Space Grotesk', sans-serif; background: #161616; color: #F3E7D3; border: 0;">New messages <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"></path></svg></button>
+</div>
+<form style="flex-shrink: 0; padding: 8px 16px; border-top: 1px solid #D9CBB3; display: flex; gap: 8px; align-items: flex-end;">
+<label for="post-p" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">Message the team</label>
+<textarea id="post-p" rows="1" placeholder="Message the team" style="flex-grow: 1; font: inherit; padding: 10px 8px; border: 1px solid #5B5347; background: #FBF6EC; resize: none;"></textarea>
+<button type="button" style="min-height: 44px; padding: 0 16px; font: 600 15px 'Space Grotesk', sans-serif; background: #161616; color: #F3E7D3; border: 0;">Post</button>
+</form>
+<nav aria-label="Places" style="flex-shrink: 0; background: #161616; display: flex; justify-content: space-around; padding: 8px;">
+<a href="#" style="color: #B9AE9C; text-decoration: none; padding: 8px; font-size: 13px;">Today</a>
+<a href="#" style="color: #B9AE9C; text-decoration: none; padding: 8px; font-size: 13px;">Board</a>
+<a href="#" aria-current="page" style="color: #F3E7D3; text-decoration: none; padding: 8px; font-size: 13px;">Chats</a>
+<a href="#" style="color: #B9AE9C; text-decoration: none; padding: 8px; font-size: 13px;">Team</a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

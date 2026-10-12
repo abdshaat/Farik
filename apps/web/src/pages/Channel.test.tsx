@@ -1,6 +1,7 @@
 import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
+	cleanup,
 	fireEvent,
 	screen,
 	waitFor,
@@ -120,8 +121,24 @@ const weekday = (date: string) =>
 		timeZone: "UTC",
 	});
 
+/** The box's size, which jsdom does not lay out: the tests set what the browser would say. */
+function stubBox(scrollHeight = 2000, clientHeight = 500) {
+	for (const [key, value] of Object.entries({ scrollHeight, clientHeight }))
+		Object.defineProperty(HTMLElement.prototype, key, {
+			configurable: true,
+			get: () => value,
+		});
+}
+const unstubBox = () => {
+	for (const key of ["scrollHeight", "clientHeight"])
+		Reflect.deleteProperty(HTMLElement.prototype, key);
+};
+
 describe("channel", () => {
-	afterEach(() => vi.unstubAllGlobals());
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		unstubBox();
+	});
 
 	it("shows_each_kind_of_message", async () => {
 		const { container } = await channel([
@@ -568,6 +585,153 @@ describe("channel", () => {
 		).toBeTruthy();
 	});
 
+	it("opens_at_the_newest_message", async () => {
+		stubBox();
+		const page = Array.from({ length: 100 }, (_, i) =>
+			message("theo", "ambient", `Newer ${i}.`, { seq: 1001 + i }),
+		);
+		await channel(page);
+		const region = await screen.findByRole("region", { name: en.channel });
+		expect(region.scrollTop).toBe(2000);
+	});
+
+	it("loads_earlier_messages_at_the_top", async () => {
+		stubBox();
+		const page = Array.from({ length: 100 }, (_, i) =>
+			message("theo", "ambient", `Newer ${i}.`, { seq: 1001 + i }),
+		);
+		const { s } = await channel(page);
+		const region = await screen.findByRole("region", { name: en.channel });
+		region.scrollTop = 0;
+		fireEvent.scroll(region);
+		fireEvent.scroll(region);
+		const asked = await waitFor(() => {
+			const f = pages(s)[1];
+			if (!f) throw new Error("no second page was asked");
+			return f;
+		});
+		expect(asked.params.params).toEqual({ before_seq: 1001, limit: 100 });
+		expect(pages(s)).toHaveLength(2);
+		await s.reply(asked, {
+			messages: [998, 999, 1000].map((n) =>
+				message("mira", "ambient", `Older ${n}.`, { seq: n }),
+			),
+		});
+		await screen.findByText("Older 998.");
+		const list = screen.getByRole("list", { name: en.channelMessages });
+		expect(
+			within(list)
+				.getAllByRole("listitem")
+				.slice(0, 3)
+				.map((li) => li.textContent),
+		).toEqual([
+			expect.stringContaining("Older 998."),
+			expect.stringContaining("Older 999."),
+			expect.stringContaining("Older 1000."),
+		]);
+	});
+
+	it("folds_the_meetings_below_1440", async () => {
+		const { container, s } = await channel([], {
+			sprint: { sprint_id: "S2", done: 0, total: 1 },
+			meetings: [
+				{
+					thread: "planning",
+					first_seq: 1,
+					at: "2026-09-21T09:01:00Z",
+					posts: 2,
+				},
+			],
+		});
+		const link = { name: `Planning, ${weekday("2026-09-21")}` };
+		const side = await screen.findByRole("complementary", {
+			name: en.channelMeetings,
+		});
+		const folded = side.querySelector("details") as HTMLDetailsElement;
+		expect(folded.open).toBe(false);
+		expect(folded.querySelector("summary")?.textContent).toBe(
+			en.channelMeetings,
+		);
+		expect(within(folded).getByRole("link", link)).toBeTruthy();
+		expect(within(side).queryByRole("heading", { level: 2 })).toBeNull();
+		await expectNoAxeViolations(container);
+
+		// The meetings move to the other side of the chat, and ask for themselves again there.
+		act(() => media.set("(min-width: 1440px)", true));
+		await answerQuery(s, "sprint.get", {
+			sprint_id: "S2",
+			status: "open",
+			started_at: "2026-09-21T09:00:00Z",
+			spent_usd: 0,
+			task_count: 0,
+			done_count: 0,
+			tasks: [],
+			meetings: [
+				{
+					thread: "planning",
+					first_seq: 1,
+					at: "2026-09-21T09:01:00Z",
+					posts: 2,
+				},
+			],
+		});
+		const beside = await screen.findByRole("complementary", {
+			name: en.channelMeetings,
+		});
+		expect(beside.querySelector("details")).toBeNull();
+		expect(
+			within(beside).getByRole("heading", {
+				level: 2,
+				name: en.channelMeetings,
+			}),
+		).toBeTruthy();
+		expect(within(beside).getByRole("link", link)).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("stays_at_the_bottom_when_the_meetings_fold_opens", async () => {
+		stubBox();
+		await channel([message("theo", "ambient", "Morning.")], {
+			sprint: { sprint_id: "S2", done: 0, total: 1 },
+			meetings: [
+				{
+					thread: "planning",
+					first_seq: 1,
+					at: "2026-09-21T09:01:00Z",
+					posts: 2,
+				},
+			],
+		});
+		const region = await screen.findByRole("region", { name: en.channel });
+		const side = await screen.findByRole("complementary", {
+			name: en.channelMeetings,
+		});
+		region.scrollTop = 1980;
+		fireEvent.scroll(region);
+		// A native details changes the box's height without a render of the page.
+		const folded = side.querySelector("details") as HTMLDetailsElement;
+		folded.open = true;
+		fireEvent(folded, new Event("toggle"));
+		expect(region.scrollTop).toBe(2000);
+	});
+
+	it("keeps_the_box_to_one_row_on_a_phone", async () => {
+		media.set("(min-width: 1024px)", false);
+		await channel([]);
+		await screen.findByRole("textbox", { name: en.channelPostPhone });
+		const rows = () =>
+			["channel-enter", "channel-hint"].map(
+				(id) => (document.getElementById(id) as HTMLElement).classList,
+			);
+		for (const classes of rows()) expect(classes).toContain(styles.hidden);
+		cleanup();
+
+		media.set("(min-width: 1024px)", true);
+		await channel([]);
+		await screen.findByRole("textbox", { name: en.channelPostLabel });
+		for (const classes of rows()) expect(classes).not.toContain(styles.hidden);
+	});
+
 	describe("a meeting link", () => {
 		const old = day(-3);
 		const today = `${day(0)}T09:00:00Z`;
@@ -617,6 +781,18 @@ describe("channel", () => {
 			const { s } = await channel(full(), { path: `/channel#${anchor}` });
 			await answerEarlier(s, planning);
 			await opened();
+		});
+
+		it("keeps_the_opened_thread_in_view", async () => {
+			stubBox(5000, 500);
+			scroll.mockImplementation(function (this: Element) {
+				(this.closest("section") as HTMLElement).scrollTop = 300;
+			});
+			const { s } = await channel(full(), { path: `/channel#${anchor}` });
+			await answerEarlier(s, planning);
+			await opened();
+			const region = screen.getByRole("region", { name: en.channel });
+			expect(region.scrollTop).toBe(300);
 		});
 
 		it("opens_a_thread_from_the_side_panel", async () => {

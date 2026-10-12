@@ -124,7 +124,7 @@ The screens map to phase 6's steps as follows:
 | Help needed (an escalation) | 08 | What happened in plain words, what the agent tried, and the user's options. |
 | Board | 09 | Lanes named for the kit's sprint board (To do, In progress, Review, Done) plus Planning before them and Stuck after In progress. Each task is a row showing its assignee's avatar, its title, and a status word. Filters are chips. Sprint controls sit at the top. |
 | Task detail | 09 | Summary, checks, history, the diff, notes, and cost, in that order. |
-| Channel | 10 | Chat with avatars. Ceremonies (standup, review, retro) are collapsible threads titled in plain words. |
+| Channel | 10 | Chat with avatars. Ceremonies (standup, review, retro) are collapsible threads titled in plain words. The page fills the window: the chat list and the open chat scroll apart, the chat opens at its newest message and reads older ones on scrolling up, and below 1440 px its meetings fold under the intro (`docs/design/mockups/ChatsPanes.dc.html`). |
 | Team | 06 | Each agent's card-sized profile: avatar, name, role, persona, model, and pause or retire. Its advanced view holds permissions and rules. |
 | Costs | 09 | Today's and this sprint's spend per agent, in dollars, with the harness metrics. |
 | Settings | 04, 06, 09 | A directory of eight sections at their own addresses under `/settings/`, a side list on a desktop and a list on a phone: General (theme, language), Allowed actions, Spending, How work runs (finishing, planning in sprints, the plan check; setup's answers, each changed on its own with its effect shown first), Your app (with a UI/UX Designer), Saved teams, This computer, and AI account. |
