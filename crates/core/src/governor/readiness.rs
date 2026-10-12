@@ -2428,6 +2428,17 @@ mod tests {
         let mut alone = a_ready_context();
         alone.rules.required_criteria = vec!["command".to_string()];
         assert!(rules_failed(&epic, &alone).contains(&R::RequiredCriteriaPresent));
+
+        // Only an epic is spared: a task in a member still needs its command.
+        let task = with_criteria(
+            &in_repo(a_task_for(Role::SoftwareDeveloper, &["src/**"]), "app"),
+            json!([{ "id": "C1", "text": "A reviewer read the change.",
+                     "verification": { "method": "review", "rubric": ["Is the change clear?"] } }]),
+        );
+        assert!(
+            rules_failed(&task, &context).contains(&R::RequiredCriteriaPresent),
+            "a task in a member is held to the required criteria"
+        );
     }
 
     fn rules_failed(contract: &TaskContract, context: &ReadinessContext) -> Vec<R> {
