@@ -57,7 +57,7 @@ Tests, each watched to fail before the closing changes:
 - `chat_closing_asks_for_a_summary_points_and_a_conclusion` — `closing(SessionPurpose::Chat)` contains "in Markdown", "a summary of one or two sentences", "a bulleted list", "a one-line conclusion" and "Never write a file's or a folder's path", in that order of appearance for the first four; `closing(SessionPurpose::Chat)` and `INTERVIEW_INSTRUCTION` both contain "Never write a file's or a folder's path: name it in plain words, as the user knows it."
 - the existing closing tests stay green (the chat closing still names `catervas_chat_reply`, the request, and ending the session).
 
-- [ ] `fix(runtime): ask a chat's reply for a summary, points and a conclusion, without paths`
+- [x] `fix(runtime): ask a chat's reply for a summary, points and a conclusion, without paths`
 
 ### Task 2: the chat shows an agent's reply formatted
 
