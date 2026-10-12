@@ -5,7 +5,7 @@ Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their 
 Spec: `docs/SPEC.md` 3, 4.1, 8.4, 8.5; F1
 Depends on: phase 8 (merged in #34); the phase's design and ADR 0057 (`docs/design/multi-repo-projects.md`, pull request #44, on this branch as 39923b4 and 4de2aa1). Nothing of steps 02 to 08.
 Mockups: none; this step has no screen (step 07 draws them).
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12 (one round, ADR 0032): ready, with no blocking finding; S1–S8 and the nits are folded below, as is the scan of a project folder (the advisor's review of the same day).
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12 (one round, ADR 0032): ready, with no blocking finding; S1–S8 and the nits are folded below, as is the scan of a project folder (the advisor's review of the same day). Amended the same day by step 07's readiness review: `too_many` is `too_many_repos`, and `create_folder`'s refusal of a member names its path; step 07's confirming round checks both.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 8e4bda0.
 
@@ -57,11 +57,11 @@ Out of scope, each a later step's:
   4. `nested` (inside a member, or holding one)
   5. `inside_project_folder`
   6. `holds_project_folder`
-  7. `too_many` (a seventeenth member)
+  7. `too_many_repos` (a seventeenth member; not `too_many`, which the web app already words as the team's limit, `refusals.ts:10`)
 
   Then store: `no_such_branch` (an `integration_branch` given that is not a local branch of the member).
 
-  Each refusal has one sentence, `message()`, used by both the wizard (`SetupError::Refused`) and the daemon (`REFUSED` with `data.errors: [{ path, message, code }]`, as `documents.rs` refuses), lower case with no full stop, as setup's are. `<x>` is filled in:
+  Each refusal has one sentence, `message()`, used by both the wizard (`SetupError::Refused`) and the daemon (`REFUSED` with `data.errors: [{ path, message, code }]`, as `documents.rs` refuses), lower case with no full stop, as setup's are. `<x>` is filled in. `CliHost::create_folder` refuses a member with its sentence, then `: ` and that member's `path` as sent (`that repository has a Catervas team of its own: Projects/shop-infra`), so that the page names the folder (step 07); the daemon's `repo.*` answer the sentence alone, with its pointer:
 
   | Code | Pointer | Sentence |
   |---|---|---|
@@ -77,7 +77,7 @@ Out of scope, each a later step's:
   | `nested` | `/path` | that folder and <name>, already in the project, are one inside the other |
   | `inside_project_folder` | `/path` | that folder is inside the project's own folder |
   | `holds_project_folder` | `/path` | that folder holds the project's own folder |
-  | `too_many` | `/name` | a project holds at most 16 repositories |
+  | `too_many_repos` | `/name` | a project holds at most 16 repositories |
   | `no_such_branch` | `/integration_branch` | that repository has no branch named <branch> |
 
   `home_itself` is not setup's `HOME_ITSELF`, whose words are about a project. No sentence starts with `has_team:`, the prefix the setup page reads as a replaceable team (`apps/web/src/pages/setup/SetupProject.tsx:63`). Paths in requests are relative to home, as `project.open`'s are (`setup.rs:65`); the canonical absolute path is what is stored.
@@ -86,7 +86,7 @@ Out of scope, each a later step's:
 ### Making and opening
 
 - **`project.create_folder { parent, name, repos: [{ name, path, integration_branch? }], no_sandbox }`**, a setup method beside `project.create`, answers `projectCreateResult { project_root }`.
-  - `name` follows `project.create`'s rule (`[a-z0-9-]`, 1 to 64 characters, `setup.rs:227-233`). There must be 2 to 16 `repos`: `projectCreateFolderRequest.params.repos` has `minItems: 2` and `maxItems: 16`, and `CliHost::create_folder` itself refuses fewer than two with "a project of several repositories needs at least two" and more than sixteen with `too_many`'s sentence. One repository is not a project folder of one: the first run sends a single repository to `project.open`, which makes the one-repo project ADR 0051 describes (step 07). So `repos.yaml` may hold one member, which only a removal leaves, while `create_folder` takes two or more.
+  - `name` follows `project.create`'s rule (`[a-z0-9-]`, 1 to 64 characters, `setup.rs:227-233`). There must be 2 to 16 `repos`: `projectCreateFolderRequest.params.repos` has `minItems: 2` and `maxItems: 16`, and `CliHost::create_folder` itself refuses fewer than two with "a project of several repositories needs at least two" and more than sixteen with `too_many_repos`'s sentence. One repository is not a project folder of one: the first run sends a single repository to `project.open`, which makes the one-repo project ADR 0051 describes (step 07). So `repos.yaml` may hold one member, which only a removal leaves, while `create_folder` takes two or more.
   - Every check runs before anything is made: the name; the parent inside home; `parent/name` not already there; each member as above against `parent/name` and the members before it; the account; git present.
   - The parent may not exist yet, since the wizard's default is `Catervas` under home (step 07). A `parent` with a `..`, root or prefix component is refused as `outside_home` before anything else is read. Then its nearest existing ancestor, followed through its links, must be inside home, else `outside_home`. Rejected: refusing a missing parent as `project.create` does, which would fail the default on every first project folder.
   - Then, in order:
@@ -252,7 +252,7 @@ Files: `daemon/setup.rs` (`create_folder`, `MemberRequest`); `web.rs` (`SETUP_ME
   - `app` and `app/src` (`not_the_top`)
   - a member at `<test>/shop/x` (`not_there`, since it is not made yet)
   - `app` with branch `nope` (`no_such_branch`)
-  - a member with a team (`has_team`)
+  - a member with a team (`has_team`), its sentence ending `: <its path as sent>`
   - no account
   RED.
 - `carries_the_team_into_a_new_project_folder` (`setup.rs`): with `leaving` a one-repo project, `create_folder` carries its team as `leaving_creates_a_project_with_the_carried_team` (`:884`) checks, with no setup marker, and records the two `repo.added`. RED.
@@ -266,7 +266,7 @@ Files: `daemon/setup.rs` (`create_folder`, `MemberRequest`); `web.rs` (`SETUP_ME
 Files: `daemon/repos.rs` (`QUERIES: [&str; 1] = ["repos.list"]`, `METHODS: [&str; 3]`, `query`, `call`, refusals as `documents.rs`'s `refusal`); `daemon.rs` (`mod repos;`, `home: OnceLock<PathBuf>`, `set_home`); `web.rs` (the method gate `:678-683`, the dispatch beside `documents`, `:723`, `:874`); `cli/src/state.rs` (`home_of`); `serve.rs:164` and `start.rs:258` (use it); `rpc.schema.json`; `client.ts`. Tests in `repos.rs` on a `TestProject` whose repository is the project folder, with home set to the temp folder that holds the `TempRepo`s, so each member's path is its `TempRepo` folder's name; `web` below is a third `TempRepo`.
 
 - `lists_the_members_and_which_are_missing`: `repos.list` answers both in file order, `infra`'s `integration_branch` `main`, `app`'s `null`, each `missing: false`. With `app`'s folder moved away, `app` is `missing: true`. On a one-repo `TestProject`, `{ repos: null }`. RED: unknown query.
-- `adds_a_member`: `repo.add { name: "web", path: "web" }` (relative to home) appends it with its canonical path and records `repo.added`. Each refusal is answered by its code and pointer, with nothing written or recorded: `not_a_project_folder` on a one-repo project, `name_taken`, `nested`, `outside_home`, `no_such_branch` at `/integration_branch`, and `too_many` at sixteen. RED.
+- `adds_a_member`: `repo.add { name: "web", path: "web" }` (relative to home) appends it with its canonical path and records `repo.added`. Each refusal is answered by its code and pointer, with nothing written or recorded: `not_a_project_folder` on a one-repo project, `name_taken`, `nested`, `outside_home`, `no_such_branch` at `/integration_branch`, and `too_many_repos` at sixteen. RED.
 - `removes_a_member_but_not_the_last`: removing `app` leaves `infra` and records `repo.removed`, and `app`'s folder is untouched. Removing `infra` then is `last_repo` at `/name`, and `nope` is `NOT_FOUND`. RED.
 - `locates_a_moved_member`: `app` moved to `<home>/apps/app`; `repo.locate { name: "app", path: "apps/app" }` writes the new path, records `repo.moved`, and `repos.list` then says `missing: false`. Locating `app` at `infra`'s folder is `path_taken`, and at its own present path is accepted. RED.
 - `changes_the_members_one_at_a_time`: with `integration_lock` held by the test, a `repo.add` on another thread has written nothing 300 ms in, as `waits_for_the_lock_file` (`tools/fixtures.rs:626`) checks, and adds once it is let go. RED: no lock taken.
