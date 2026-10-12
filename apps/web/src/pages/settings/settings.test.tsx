@@ -224,6 +224,7 @@ describe("settings directory", () => {
 			en.rulesSpendTitle,
 			en.rulesFinish,
 			en.rulesPlanning,
+			en.rulesDocuments,
 			en.planTitle,
 			en.uiPathsTitle,
 		];
@@ -233,7 +234,7 @@ describe("settings directory", () => {
 			[
 				"work",
 				en.sectionWork,
-				[en.rulesFinish, en.rulesPlanning, en.planTitle],
+				[en.rulesFinish, en.rulesPlanning, en.rulesDocuments, en.planTitle],
 			],
 		] as const;
 		for (const [path, name, held] of pages) {

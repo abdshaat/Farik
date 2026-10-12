@@ -890,6 +890,18 @@ export const en = {
 	planInSprints: "Plan work in sprints",
 	planInSprintsNote:
 		"The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks.\nNobody starts building until you start a sprint.\nWork that gets ready during a sprint waits in the Backlog for the next one.",
+	rulesDocuments: "Documents",
+	documentsHtml: "Write documents as HTML",
+	documentsHtmlNote:
+		"New documents are web pages with diagrams and charts.\nDocuments already in Markdown stay as they are.",
+	documentsRewrite: "Rewrite documents as HTML",
+	documentsRewriteNote:
+		"Each role rewrites its own documents as HTML.\nMarketing plans stay as they were approved.",
+	documentsRewriteStarted: "Your team will rewrite its documents as HTML.",
+	refuseNotHtml: "Turn on Write documents as HTML first.",
+	refuseRewriteOpen: "Your team is still rewriting its documents.",
+	refuseNothingToRewrite:
+		"Every document your team can rewrite is already HTML.",
 	finishSprints: "Your team works in sprints",
 	finishSprintsNote:
 		"The team gets your requests ready straight away, and starts building when you start a sprint from the Board. Until then, ready work waits in the Backlog.",

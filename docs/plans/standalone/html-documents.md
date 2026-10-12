@@ -456,7 +456,7 @@ Tests in `apps/web/src/pages/settings/settings.test.tsx`, whose Work heading lis
 - `offers_the_rewrite_while_markdown_remains` — an HTML team with `overview.md` in the tree shows the button, which calls `files.rewrite` and then the started line. There is no button with only `.html` documents and plans, nor in a Markdown team.
 - `says_why_a_rewrite_was_refused` — `rewrite_open` shows its words under the button.
 
-- [ ] `feat(web): the document format and the rewrite in Settings`
+- [x] `feat(web): the document format and the rewrite in Settings`
 
 ### Task 13: the spec
 

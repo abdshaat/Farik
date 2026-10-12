@@ -3,6 +3,7 @@ import { ShowAdvanced } from "../../components/ShowAdvanced.tsx";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 import {
+	Documents,
 	Finish,
 	Planning,
 	Plans,
@@ -22,6 +23,7 @@ export function Work() {
 				<>
 					<Finish key={key("finish")} {...part("finish")} />
 					<Planning key={key("planning")} {...part("planning")} />
+					<Documents key={key("documents")} {...part("documents")} />
 					<Plans key={key("plans")} {...part("plans")} />
 					<ShowAdvanced
 						open={advanced}
