@@ -24,18 +24,32 @@ export function Account() {
 	const [asking, setAsking] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [said, setSaid] = useState<string>();
+	// Disconnected, until another account is connected.
+	const [gone, setGone] = useState(false);
 	const disconnect = async () => {
 		if (!client) return;
 		setBusy(true);
 		try {
 			await client.call("account.disconnect", {});
 			setSaid(t("accountGone"));
+			setGone(true);
 			again();
 		} catch (e) {
 			setSaid(saidAll(e));
 		}
 		setAsking(false);
 		setBusy(false);
+	};
+	const connected = () => {
+		setSaid(t("accountBack"));
+		setGone(false);
+		again();
+	};
+	// A refused key connected again resumes the team, so there is nothing more to say.
+	const reconnected = () => {
+		setSaid(undefined);
+		setGone(false);
+		again();
 	};
 	const variable = data?.environmentVariable;
 	return (
@@ -50,7 +64,7 @@ export function Account() {
 						)}
 					</p>
 				) : (
-					<ConnectAgain onConnected={again} />
+					<ConnectAgain onConnected={reconnected} />
 				))}
 			{data?.source && data.kind ? (
 				<>
@@ -77,7 +91,7 @@ export function Account() {
 									)[data.source],
 								)}
 					</p>
-					{!variable && !said && !asking && (
+					{!variable && !gone && !asking && (
 						<div>
 							<Button onClick={() => setAsking(true)}>
 								{t("accountDisconnect")}
@@ -99,7 +113,14 @@ export function Account() {
 					)}
 				</>
 			) : (
-				data && <p>{t("accountNone")}</p>
+				data && (
+					<>
+						<p>{t("accountNone")}</p>
+						{!data.keyRefused && (
+							<ConnectAgain refused={false} onConnected={connected} />
+						)}
+					</>
+				)
 			)}
 			{said && <p role="status">{said}</p>}
 		</section>
