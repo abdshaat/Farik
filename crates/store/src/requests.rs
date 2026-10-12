@@ -220,7 +220,6 @@ pub fn file_request(
             product_plan: false,
             catervafies: None,
             filed_as: None,
-            reason: None,
         },
         (now, ids),
     )
@@ -321,7 +320,6 @@ pub fn file_rederive_request(
             product_plan: false,
             catervafies: None,
             filed_as: None,
-            reason: None,
         },
         (now, ids),
     )
@@ -355,7 +353,6 @@ pub fn file_raise_request(
             product_plan: false,
             catervafies: None,
             filed_as: None,
-            reason: None,
         },
         (now, ids),
     )
@@ -457,7 +454,6 @@ pub fn file_product_plan_request(
             product_plan: true,
             catervafies: None,
             filed_as: None,
-            reason: None,
         },
         (now, ids),
     )
@@ -491,7 +487,6 @@ pub fn file_catervafication_epic(
             product_plan: false,
             catervafies: Some(project),
             filed_as: None,
-            reason: None,
         },
         (now, ids),
     )
@@ -575,8 +570,7 @@ pub fn file_small_request(
             rederives: None,
             product_plan: false,
             catervafies: None,
-            filed_as: Some(filed_as),
-            reason: Some(reason),
+            filed_as: Some((filed_as, reason)),
         },
         (now, ids),
     )
@@ -592,9 +586,8 @@ struct Filing<'a> {
     rederives: Option<&'a str>,
     product_plan: bool,
     catervafies: Option<CatervaficationStartedBodyProject>,
-    filed_as: Option<TaskCreatedBodyFiledAs>,
-    /// Why `filed_as` is triaged small.
-    reason: Option<&'a str>,
+    /// How a whole contract was filed, and why it is triaged small.
+    filed_as: Option<(TaskCreatedBodyFiledAs, &'a str)>,
 }
 
 fn file(
@@ -721,7 +714,6 @@ fn creation_bodies(
         product_plan,
         catervafies,
         filed_as,
-        reason,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
@@ -742,11 +734,11 @@ fn creation_bodies(
                 twin.to_string()
                     .try_into()
                     .map_err(|_| RequestError::Refused {
-                        reason: format!("rederives {twin:?}, which is no .agent.md twin"),
+                        reason: format!("rederives {twin:?}, which is no agent version (.agent.md or .agent.html)"),
                     })
             })
             .transpose()?,
-        filed_as,
+        filed_as: filed_as.map(|(kind, _)| kind),
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
@@ -762,7 +754,7 @@ fn creation_bodies(
             triaged_by: "catervas".to_string(),
         }));
     }
-    if let (Some(_), Some(reason)) = (filed_as, reason) {
+    if let Some((_, reason)) = filed_as {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
             size: RequestTriagedBodySize::Small,
             reason: reason.to_string(),
@@ -1890,5 +1882,18 @@ mod tests {
             title.starts_with("Change aaa") && title.ends_with('…'),
             "{title}"
         );
+
+        let whole = super::change_request(
+            "docs/catervas/product/spec.html",
+            None,
+            &"a".repeat(113),
+            "x",
+            Role::ProductManager,
+            Role::Architect,
+            2.0,
+        );
+        let title = whole["title"].as_str().expect("a title");
+        assert_eq!(title.chars().count(), 120);
+        assert!(!title.ends_with('…'), "{title}");
     }
 }

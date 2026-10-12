@@ -279,8 +279,9 @@ fn judge(
 
 /// Whether the contract is judged now: written since refining began with no refusal by the
 /// governor since that write, or, with no such write, filed whole (a breakdown's task, a contract
-/// the human holds, a twin's re-derive, an owner's change or rewrite, a new project's product plan, a Catervafication's epic) and not refused
-/// since refining began. A raw request is not judged: its brief would fail and spend one of the three attempts.
+/// the human holds, a twin's re-derive, an owner's change or rewrite, a new project's product
+/// plan, a Catervafication's epic) and not refused since refining began. A raw request is not
+/// judged: its brief would fail and spend one of the three attempts.
 fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u64) -> bool {
     let refused_after = |after: u64| {
         history.iter().any(|event| {

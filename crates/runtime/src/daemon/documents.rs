@@ -190,6 +190,13 @@ fn ask_change(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         .find(|(_, folder)| path.starts_with(&format!("{folder}/")))
         .map(|(role, _)| *role)
         .ok_or_else(cannot)?;
+    if owner == Role::ScrumMaster {
+        return Err(refusal(
+            "no_task_taker",
+            "/path",
+            "The Scrum Master keeps this document up to date at its retro.",
+        ));
+    }
     if !team
         .active_agents()
         .any(|agent| Role::from(agent.role) == owner)
@@ -200,18 +207,13 @@ fn ask_change(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             "No one on your team owns this folder right now. Resume or add its role first.",
         ));
     }
-    if path.starts_with("docs/catervas/delivery/") {
-        return Err(refusal(
-            "no_task_taker",
-            "/path",
-            "The Scrum Master keeps this document up to date at its retro.",
-        ));
-    }
     let document = folders(&team, &entries)
         .into_iter()
         .flat_map(|folder| folder.documents)
         .find(|document| document.path == path)
         .ok_or_else(cannot)?;
+    // A human document's twin is named even when it is not there yet: the team writes it.
+    let twin = agent_twin(&path).or(document.twin);
     let reviewer = catervas_roles::reviewer_for(&team, owner)
         .ok_or_else(|| internal(&format!("no role reviews the tasks of {owner}")))?;
     let board = deps.projections.board().map_err(|e| internal(&e))?;
@@ -223,7 +225,7 @@ fn ask_change(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     });
     let wire = change_request(
         &path,
-        document.twin.as_deref(),
+        twin.as_deref(),
         &name,
         words,
         owner,
@@ -1853,9 +1855,9 @@ mod tests {
         assert_eq!(contract["title"], "Change Overview");
         assert_eq!(contract["allowed_paths"], json!([OVERVIEW_HTML]));
         assert!(
-            contract["intent"]
-                .as_str()
-                .is_some_and(|intent| intent.contains("Say less about the cache.")),
+            contract["intent"].as_str().is_some_and(
+                |intent| intent.ends_with("in these words:\n\nSay less about the cache.")
+            ),
             "{contract}"
         );
 
@@ -1929,6 +1931,35 @@ mod tests {
             "docs/catervas/delivery/cadence.md",
             "no_task_taker",
             "The Scrum Master keeps this document up to date at its retro.",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_delivery_ask_is_for_the_scrum_master_even_without_one() {
+        let harness = Harness::new("files-ask-no-sm", with_the_designer);
+        write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        commit(&harness, "the documents");
+        let reply = ask(&harness, "docs/catervas/delivery/cadence.md", "Change it.");
+        assert_eq!(
+            refusal(&reply),
+            ("no_task_taker".to_string(), "/path".to_string()),
+            "{reply}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_human_documents_ask_names_its_twin_even_when_it_has_none() {
+        let harness = Harness::new("files-ask-lone-spec", with_the_designer);
+        let spec = format!("{PRODUCT}/spec.html");
+        write(&harness, &spec, "<h1>spec</h1>\n");
+        commit(&harness, "the spec alone");
+        let reply = ask(&harness, &spec, "Add a refund limit.");
+        assert_eq!(reply["result"], json!({ "task_id": "CTV-1" }), "{reply}");
+        assert_eq!(
+            contract_of(&harness, "CTV-1")["allowed_paths"],
+            json!([spec, format!("{PRODUCT}/spec.agent.html")])
         );
     }
 

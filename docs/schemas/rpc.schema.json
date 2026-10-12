@@ -2640,7 +2640,7 @@
     },
     "filesAskChangeRequest": {
       "title": "Files Ask Change Request",
-      "description": "The owner asks the role that owns a document to change it (docs/SPEC.md 5.17): files a small, whole task for that role, with no triage or refine session, whose title is Change and the document's name and whose intent quotes words. A change to the spec or the roadmap still waits for the owner's acceptance. words is trimmed. Refused with -32005 and data.errors, each with path, message and code, in this order: not_editable (/path: outside the team's folders, not a document, an agent version, a marketing plan, or not listed by files.tree), no_words (/words: blank), no_owner (/path: no active agent of the folder's role) and no_task_taker (/path: the Scrum Master's folder, whose documents it keeps up to date at its retro).",
+      "description": "The owner asks the role that owns a document to change it (docs/SPEC.md 5.17): files a small, whole task for that role, with no triage or refine session, whose title is Change and the document's name and whose intent quotes words. A change to the spec or the roadmap still waits for the owner's acceptance. words is trimmed. Refused with -32005 and data.errors, each with path, message and code, in this order: not_editable (/path: outside the team's folders, not a document, an agent version or a marketing plan), no_words (/words: blank), no_task_taker (/path: the Scrum Master's folder, whose documents it keeps up to date at its retro), no_owner (/path: no active agent of the folder's role) and not_editable again (/path: a document files.tree does not list).",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
