@@ -5,7 +5,7 @@ Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their 
 Spec: `docs/SPEC.md` 3, 4.1, 8.4, 8.5; F1
 Depends on: phase 8 (merged in #34); the phase's design and ADR 0057 (`docs/design/multi-repo-projects.md`, pull request #44, on this branch as 39923b4 and 4de2aa1). Nothing of steps 02 to 08.
 Mockups: none; this step has no screen (step 07 draws them).
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12 (one round, ADR 0032): ready, with no blocking finding; S1–S8 and the nits are folded below, as is the scan of a project folder (the advisor's review of the same day). Amended the same day by step 07's readiness review: `too_many` is `too_many_repos`, and `create_folder`'s refusal of a member names its path; step 07's confirming round checks both.
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12 (one round, ADR 0032): ready, with no blocking finding; S1–S8 and the nits are folded below, as is the scan of a project folder (the advisor's review of the same day). Amended the same day by step 07's readiness review: `too_many` is `too_many_repos`, and `create_folder`'s refusal of a member names its path; step 07's confirming round checks both. Step 07b's review amends it again: `member_root` skips `has_team` for a folder whose `.catervas/local/moved-to` names this project folder, built in 07b's Task 4.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 8e4bda0.
 
@@ -104,7 +104,7 @@ Out of scope, each a later step's:
 - **The daemon knows home.** `DaemonState::set_home` is set by `connected_daemon` (`crates/cli/src/start.rs:258`) from `home_of(io)`, which is today's derivation in `serve.rs:164-168` (`HOME` when set and not empty, else the working directory) moved to `crates/cli/src/state.rs` and used by both. With no home set, `repo.add` and `repo.locate` answer `INTERNAL_ERROR` "the home folder is not known".
 - **`repos.list {}`** answers `{ repos: null }` for a one-repo project. For a project folder it answers `{ repos: [{ name, path, integration_branch, missing }] }` in file order, with `integration_branch` as written or `null`. `missing` is `!repo_present(path)`: the path is not a directory, or git's top folder of it is not the path itself. This is the design's `repo_missing`: a fact read when asked, with no event. A `repos.yaml` that `read_repos` refuses (`FilesError::Invalid`) makes `repos.list` and each `repo.*` answer `INTERNAL_ERROR` with the `FilesError`'s sentence.
 - **`repo.add { name, path, integration_branch? }`**:
-  - It is refused with `not_a_project_folder` at `/` ("This project is one repository; adding another comes later.") when there is no `repos.yaml`. Step 07b lifts this.
+  - It is refused with `not_a_project_folder` at `/` ("This project is one repository; adding another comes later.") when there is no `repos.yaml`. It stays refused: step 07b adds a second repository by `project.convert`.
   - Otherwise the checks above run, then `write_repos` with the member appended, then `repo.added`. It answers `{}`.
 - **`repo.remove { name }`**:
   - `NOT_FOUND` when no member has that name.
