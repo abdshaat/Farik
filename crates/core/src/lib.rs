@@ -25,6 +25,8 @@ pub mod pipeline;
 pub mod pricing;
 /// The renewals a register of vendors says are coming up.
 pub mod renewals;
+/// A project folder's member repositories and the rules for adding one.
+pub mod repos;
 /// A skill's hash.
 pub mod skill;
 /// The sprint and its validator.

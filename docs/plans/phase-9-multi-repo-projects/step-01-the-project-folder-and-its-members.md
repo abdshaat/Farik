@@ -206,7 +206,7 @@ Files: `repos.schema.json`, whose `$defs.repoName` gives typify's `RepoName`; `g
   Each `code()`, `pointer()` and `message()` is its row of the Decisions' table. RED.
 - `is_within_by_segment`: `/a/b` within `/a`, `/a` within `/a`, `/ab` not within `/a`, and `C:\\a\\b` within `C:\\a`. The doc comment says callers pass canonical paths. RED.
 
-- [ ] `feat(core): hold a project's repositories to their rules`
+- [x] `feat(core): hold a project's repositories to their rules`
 
 ### Task 2: The members on disk
 
