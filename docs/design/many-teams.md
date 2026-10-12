@@ -1,6 +1,6 @@
 # Many teams: several teams on one computer, found from the user's Claude history
 
-Status: approved by the founder on 2026-10-12, in a brainstorm in a Claude Code session (ADR 0059), and extended the same day with the founder's second set of requirements (proof before a link, the user journey, people who use Claude only on the web, duplicates). It is the design input to phase 10, Many teams, right after phase 9, Multi-repo projects, which merges into `main` first. Its screens are mocked up and approved before they are built (ADR 0032), all of them in step 01. The parts marked **Proposed** are the brainstorm's own answers to questions the founder did not rule on; they are open to the founder's change in review.
+Status: approved by the founder on 2026-10-12, in a brainstorm in a Claude Code session (ADR 0059), and extended the same day with the founder's second set of requirements (proof before a link, the user journey, people who use Claude only on the web, duplicates) and third (services the owner uses through Claude's connectors, notifications from the operating system, no Anthropic key read by Catervas). It is the design input to phase 10, Many teams, right after phase 9, Multi-repo projects, which merges into `main` first. Its screens are mocked up and approved before they are built (ADR 0032), all of them in step 01. The parts marked **Proposed** are the brainstorm's own answers to questions the founder did not rule on; they are open to the founder's change in review.
 
 ## Why
 
@@ -20,6 +20,11 @@ Second set:
 - **People who use Claude only on the web** are served too (section 2b).
 - **Duplicates** from more than one source are merged, never counted twice (section 2c).
 
+Third set:
+- **"Users may have claude connectors to other bookkeeping services such as Excel or zoho books. That must also be detected."** Catervas finds the services the owner reaches through Claude's connectors, where each is used, and what kind of work it is, so that bookkeeping done through a connector is found as a project like any folder (section 2d).
+- **"Yes, serve may send notification through the operating system."** The daily reminder reaches the owner with no Catervas tab open (section 6).
+- **"We are not storing or keeping any anthropic related keys with us. Anthropic keys will remain local to the user and will never be read by Catervas."** Nothing in this phase reads or keeps a key, Anthropic's or a connected service's (section 2d, and "A rule outside this phase").
+
 From the request: Catervas reads the user's history on the computer and never sends it to Catervas Cloud; nothing is created without the owner's approval.
 
 ## What Catervas can read, and what it may not
@@ -35,6 +40,9 @@ Checked against Anthropic's documentation and terms, and against a real `~/.clau
 | GitHub, through phase 7's GitHub connector | the owner's repositories, branches and pull requests from Claude Code on the web, each scheduled workflow's last run, deployment statuses (Vercel, Netlify and Render report theirs to GitHub) | stable |
 | the found repositories | GitHub Actions `schedule:`, `vercel.json` `crons`, Kubernetes `CronJob`, `render.yaml` cron services, Terraform `schedule_expression`; remotes, commit authors, manifests | stable |
 | crontab, systemd timers, launchd agents, Windows Task Scheduler | the computer's own schedules | stable |
+| Claude Code's MCP settings: `mcpServers` in `~/.claude.json` (the user's and each project's), a project's `.mcp.json`, enabled plugins' servers | the names of the services connected to Claude Code, and where | documented as settings (`code.claude.com/docs/en/mcp`); the file also holds each server's keys, which Catervas never reads |
+| claude.ai's connectors as Claude Code sees them: `claudeAiMcpEverConnected` in `~/.claude.json`, and tool calls named `mcp__claude_ai_<Name>__<tool>` in transcripts | the claude.ai connectors the owner uses from Claude Code, and in which project | the field is undocumented; tool names in transcripts are what the sessions called |
+| Claude Desktop's `claude_desktop_config.json` and its installed extensions | the services connected to the Claude app on this computer | a local settings file; keys in it are never read |
 
 Not available, by design or by rule:
 - **Reading claude.ai with the subscription's token.** The founder asked to query a web-only user's data "using the token available", the `CLAUDE_CODE_OAUTH_TOKEN` Catervas holds (ADR 0021). It cannot: that token "can only make model requests, so it can't establish Remote Control sessions or fetch claude.ai connectors" (`code.claude.com/docs/en/authentication`), and no documented API returns a consumer's conversations, Projects or memory (an open request for one, `anthropics/claude-code#100823`, has no answer). It may not either: Anthropic does not permit third-party developers "to route requests through Free, Pro, or Max plan credentials on behalf of their users", and they "may not collect, store, or intermediate Claude.ai credentials or session tokens" (`legal-and-compliance`); the Consumer Terms forbid accessing the Services "through automated or non-human means" except with an API key, and scraping. So Catervas never calls claude.ai, never drives a browser at it, and never uses the token for anything but running the unmodified `claude` program.
@@ -72,17 +80,18 @@ The journey is the product here: a wrong group or a confusing screen costs more 
 **Journey A: a new user with Claude Code history** (the main one).
 1. The first run's computer check finds Claude Code history: "Catervas can look through your Claude Code history to find your projects. Nothing leaves this computer." **Look for my projects** · **Skip** · ⓘ what is read and kept.
 2. Scanning: counts rise ("7 projects · 4 scheduled jobs · 312 sessions"). **Continue setup meanwhile**; "We'll show you when it's done."
-3. **Here's what you work on.** One row per project, newest first: name, last worked, a jobs badge, and a choice: **Team**, **Watch** or **Ignore**. Chosen for the owner: Team for their own projects worked on in the last 30 days, Watch for older ones, Ignore for explored clones. Explored, gone and home-folder rows sit in collapsed sections.
+3. **Here's what you work on.** One row per project, newest first, a bookkeeping project found through a connector among them: name, last worked, a jobs badge, the services it uses, and a choice: **Team**, **Watch** or **Ignore**. Chosen for the owner: Team for their own projects worked on in the last 30 days, Watch for older ones, Ignore for explored clones. Explored, gone and home-folder rows sit in collapsed sections.
 4. **Do these work together?** Only for pairs with proof (section 4), one pair per screen: the two projects side by side, the proof in one sentence ("web uses api's code"), ⓘ for the files and lines, **Yes, one team** · **No, keep separate**. Pairs with only hints come last, collapsed, under "Maybe related", each answered No unless the owner opens it.
 5. **Your teams.** A card per team: its projects, its jobs, a name, a team template (ADR 0055), why its projects are together. Rename, change template, move a project out. Optional: **Suggest names with Claude** (about $0.02, shown before it runs).
 6. **Create 3 teams.** They are created paused. All teams opens with each new team's next step: **Start** or **Document it first** (the Catervafication, phase 8). An **Undo** stays on each new team until it starts.
-7. The next morning: a notification, "3 things need you", opens the reminders (section 6).
+7. The next morning: a notification from the computer, "3 things need you", opens the reminders (section 6), with no Catervas tab needed.
 
 **Journey B: an existing Catervas user.** All teams shows "Find your other projects". The same steps follow; the project already driven shows as **Already a team**, and a link to it adds the other project to that team as a member (phase 9).
 
 **Journey C: someone who uses Claude only on the web.** The computer check finds no history: "Where do you use Claude?" **Claude Code on this computer** · **claude.ai or the Claude app** · **I'm new to Claude**. For claude.ai, two optional cards, each one screen:
 - **Bring your claude.ai history.** Numbered steps: open claude.ai, Settings, Privacy, Export data; wait for the email; download it within 24 hours; drop the file here. The card stays on All teams ("Waiting for your claude.ai export") until the file is dropped or the card dismissed.
 - **Connect GitHub to find your repositories** (phase 7's connector; a single click once Catervas Cloud runs, phase 11).
+- **Which of these do you use with Claude?** The catalog's services as tiles (Zoho Books, Excel, QuickBooks, Stripe…), each one tap; a bookkeeping service chosen becomes a project of its own.
 Then steps 3 to 7 of journey A. A repository not on this computer offers **Watch** (its schedules and deployments still come through GitHub) or **Copy to this computer** (a clone the owner confirms, into a folder they choose), after which it can be a team. A claude.ai Project shows as a project of its own, watched; it joins a team only by a link with proof.
 
 **Journey D: no history anywhere.** "I'm new to Claude", or Skip, leads to today's setup of one team, unchanged.
@@ -160,6 +169,33 @@ The same session, project or job can reach Catervas more than once: from the loc
 - **Re-imports** update by key. A thing missing from a newer export is marked "not in the latest export", not deleted.
 - **A folder and a GitHub repository with the same remote** are one project. A claude.ai Project and a repository are never merged by name; they can only be linked, with proof (section 4).
 
+## 2d. Services used through Claude
+
+A connector is how the owner's Claude reaches another service: Zoho Books, Excel, QuickBooks, Stripe. Bookkeeping often lives there rather than in a folder, so a connector is found like a project.
+
+- **Where they are found:**
+  - Claude Code's MCP settings (the user's, each project's, `.mcp.json`, enabled plugins).
+  - claude.ai's connectors as Claude Code knows them (`claudeAiMcpEverConnected`).
+  - Claude Desktop's settings and extensions.
+  - Above all, the tool calls in transcripts (`mcp__<server>__<tool>`), which say which service was used, in which folder, how often and when last.
+  - For someone who uses Claude only on the web, claude.ai's connectors cannot be listed, so journey C asks "Which of these do you use with Claude?" from the catalog below.
+- **Never a key.** From a settings file the reader takes only a server's name, its kind (local program or remote address), the host of its address and the name of its program; never `env`, `headers`, arguments or anything else. A fixture full of keys is read in a test, and none of them may reach `machine.db`.
+- **Not services:** Catervas's own servers (`catervas`, and `farik` from before the rename), Claude Code's internal ones, and plugins' servers that are only listed in a marketplace, not enabled.
+- **What kind of work.** A catalog in `catervas-core`, kept as data and updated with releases, matches a server's name or host to a service and its kind:
+  - bookkeeping: Zoho Books, QuickBooks, Xero, FreshBooks, Wave, Sage;
+  - spreadsheets: Microsoft 365 and Excel, Google Sheets;
+  - payments: Stripe, PayPal;
+  - selling: Shopify, Amazon Seller Central;
+  - marketing: Buffer, Google Ads;
+  - code: GitHub, Vercel, Sentry;
+  - an unknown server is "Other", shown by its name.
+- **Where it belongs.** A service is attached to every project whose sessions called it. Sessions with no project of their own (the home folder, a scratch folder) whose calls go mostly to one kind of service form a project named after the work and the service, such as "Bookkeeping (Zoho Books)". A folder with no git whose sessions read or write spreadsheets (`.xlsx`, `.csv`) also counts as bookkeeping.
+- **Its team.** A bookkeeping project proposes the Financial analysis team (ADR 0055) with the Finance Specialist. Since it has no folder, **Make a team** creates a new one, `~/Catervas/<name>/`, as Catervas's first run already does when it starts a new project, so business workspaces (phase 17) are still not needed.
+- **Catervas connects separately.** The team's agents never use the owner's Claude connectors or their keys. Where Catervas has a connector for the service, it appears in the team's suggested connections (Today, `suggested-connections`) for the owner to connect in Catervas, keys kept as Catervas keeps every connector key. Where it has none, the service shows "used with Claude; Catervas can't connect to it yet".
+- **Never proof of a link.** Two projects that both use Excel are not related on that account, and a shared service is not even a hint. The tempting corpus (section 4) includes such pairs.
+- **In the reminder and analytics:** a connector Claude Code has marked as needing to be signed in again (`mcp-needs-auth-cache.json`, undocumented, read only if present) is a reminder, "Zoho Books needs you to sign in again in Claude"; usage per team counts each service's calls.
+- **Kept once.** A service is keyed by its catalog entry, else by its name and host, so the same Zoho Books from Claude Code's settings, a claude.ai connector, Claude Desktop and the web-only picker is one record with all four sources.
+
 ## 3. Finding the jobs
 
 - **In each found repository:** GitHub Actions workflows with `on.schedule`, `vercel.json` `crons`, Kubernetes `CronJob` manifests, `render.yaml` services of type cron, Terraform `schedule_expression`. Each job keeps its name, schedule, file and repository.
@@ -205,7 +241,8 @@ The rules:
   - the same days;
   - similar names;
   - a session that read both;
-  - both depending on the same public package, which neither declares as its own.
+  - both depending on the same public package, which neither declares as its own;
+  - both using the same service through Claude.
 
   The test holds that no unrelated pair produces a proof. The live check and the usability test record every proposal and the owner's answer; a wrong proof is a bug fixed before the phase merges.
 
@@ -231,6 +268,7 @@ The rules:
   - GitHub disabled a scheduled workflow;
   - the latest deployment failed.
 - **Catervas teams:** what waits on the owner and escalations that have aged.
+- **Services:** a connector Claude Code says needs signing in again (section 2d).
 - **Today's runs**, collapsed.
 - **On each item:**
   - Snooze (a day, a week).
@@ -238,7 +276,11 @@ The rules:
   - Copy resume command (`cd <folder> && claude --resume <id>`), or for a web session, Open on claude.ai.
   - Give to the team: files a request in the project's team, prefilled from the session's title and state, for its Product Manager to triage.
   - Open on GitHub.
-- **Browser notifications** are phase 14 step 03's first slice, pulled forward: permission asked on All teams, one notification for the digest. They show only while a Catervas tab is open; otherwise the digest waits on All teams. **Open:** a notification from serve itself through the operating system when no tab is open.
+- **Notifications.** One notification per digest, never two:
+  - **With a Catervas tab open,** it is a browser notification (permission asked on All teams). This is phase 14 step 03's first slice, pulled forward.
+  - **With none open,** serve sends it through the operating system: Linux's notifications, macOS's Notification Center, Windows' notifications. Under WSL it goes to Windows' notifications, where the owner will see it.
+  - Clicking it opens All teams where the system allows. Settings, This computer turns either kind off.
+  - A machine with no way to notify keeps the digest on All teams.
 
 ## 7. Analytics
 
@@ -249,24 +291,27 @@ The rules:
 
 ## Out of scope
 
-Reading claude.ai or Claude Code on the web through any token or by automating a browser; claude.ai's memory export; Claude Code hooks or an OpenTelemetry receiver (the daily rescan covers this phase; either may replace it later for live updates); coordination between teams beyond a link; sharing memory between teams; status of Vercel crons or deployments that do not report to GitHub; work in a folder without git; running teams on more than one computer.
+Reading claude.ai or Claude Code on the web through any token or by automating a browser; using the owner's Claude connectors, or their keys, for Catervas's agents; claude.ai's memory export; Claude Code hooks or an OpenTelemetry receiver (the daily rescan covers this phase; either may replace it later for live updates); coordination between teams beyond a link; sharing memory between teams; status of Vercel crons or deployments that do not report to GitHub; work in a folder without git; running teams on more than one computer.
 
-## Open, outside this phase
+## A rule outside this phase
 
-The legal page's "may not collect, store, or intermediate Claude.ai credentials or session tokens" may cover Catervas keeping the subscription's `CLAUDE_CODE_OAUTH_TOKEN` in the keychain (ADR 0021), not only this phase. It needs a legal read and its own decision; letting the `claude` program hold its own sign-in, with Catervas never reading it, is the safer shape.
+The founder ruled on 2026-10-12: "We are not storing or keeping any anthropic related keys with us. Anthropic keys will remain local to the user and will never be read by Catervas." This phase follows it: it reads no key of any kind.
+
+Catervas as built does not follow it yet. The first run takes the owner's subscription token or API key and `crates/runtime/src/credential.rs` keeps it in the OS keychain (service `catervas`), or in `credential.json` in Catervas's state folder on a computer with no keychain, then reads it to pass to `claude` as `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` (ADR 0021, ADR 0022). The ruling needs a change there, in its own standalone plan and ADR before this phase: the owner signs in through Claude Code's own sign-in, which keeps the credential in Claude Code's own store; Catervas starts `claude` without passing a key, and the first run's check asks `claude` whether it is signed in rather than holding the answer itself.
 
 ## Steps
 
 | Step | Name | Delivers |
 |---|---|---|
-| 01 | The journey, mocked up | every screen of journeys A to F, their empty and error states, the reminder and the analytics, as clickable mockups, with the words in the house style; clicked through and approved by the founder before any code |
+| 01 | The journey, mocked up | every screen of journeys A to F, the services found and the web-only picker, their empty and error states, the reminder and its notifications, and the analytics, as clickable mockups, with the words in the house style; clicked through and approved by the founder before any code |
 | 02 | Several teams in one serve | `state.json`'s `projects`; serve driving several projects, each with its lock and orchestrator; adding and removing a team; "Agents working at once" and the round-robin start; the shared limit sleep; the computer's spending cap; ADR 0053's switch kept for moving one team |
 | 02b | Several teams in the web app | the team switcher, `/t/<team-slug>/` addresses, All teams with its cards and gathered "Waiting on you" |
 | 03 | Reading the Claude Code history | consent, `machine.db`, the tolerant reader with its version fixtures and refused paths, incremental daily scan, folding into projects, Catervas's own sessions, yours or explored, the retention offer; one record per session and per reply (section 2c) |
 | 04 | Web-only sources | claude.ai's export dropped and read, its fixtures and re-import; GitHub's repositories, `claude/…` branches and pull requests; copy to this computer; teleported sessions; projects and routines by hand; the keys and merging across sources (section 2c) |
 | 05 | Finding the jobs | repository schedule files, the computer's schedulers, session crons, background jobs, routines; scheduled runs, deployments and disabled workflows through GitHub |
+| 05b | Services used through Claude | connectors from Claude Code's settings, claude.ai's connectors as Claude Code knows them, Claude Desktop, and transcripts' tool calls, with no key read; the service catalog; projects formed from connector work ("Bookkeeping (Zoho Books)"), with the Financial analysis team and a new folder; the web-only picker; suggested connections; the sign-in reminder |
 | 06 | Linking with proof, and the proposal | same-project folding by remote; proofs and hints in `catervas-core`; the "Do these work together?" screens; `link.confirmed` and `link.rejected`; the group confirmation; the tempting fixture corpus; names from Claude with the secret scrub and its cost; creating paused teams, one-repo or project folder; watched and ignored; undo |
-| 07 | The daily reminder | the rules in `catervas-core`, the digest on All teams and Today, the browser notification, snooze, dismiss, resume, give to the team |
+| 07 | The daily reminder | the rules in `catervas-core`, the digest on All teams and Today, the browser notification with a tab open and the operating system's without one (WSL included), snooze, dismiss, resume, give to the team |
 | 08 | Analytics | usage per team counted once per reply, workflow, blockers, on All teams and per team |
 | 09 | The founder's live check | on the founder's computer: find the projects, answer every proof, create the teams, run two unrelated teams at once, act on a reminder; the journey's measures; `docs/milestones/many-teams.md`, signed off |
 | 09b | The usability test | three people other than the founder, unassisted and thinking aloud: one with several Claude Code repositories, one who uses Claude only on the web, one with a single project; the journey's measures, every proposal and answer, and what confused them, recorded in `docs/milestones/many-teams.md`; what they found is fixed before the phase merges |
@@ -278,8 +323,9 @@ Rust:
 - **Duplicates:** a resumed session, a teleported copy, two overlapping exports, SSH and HTTPS remotes, a linked folder.
 - **Folding:** worktree, deleted worktree, subfolder, no git, home, `/tmp`, Catervas's own sessions.
 - **Jobs:** the job parsers on sample files and scheduler output.
+- **Services:** settings files full of keys yielding names only; the catalog's matching; Catervas's own and internal servers left out; a connector-only bookkeeping project formed from tool calls; one service from four sources kept once.
 - **Links:** each proof kind found and checked; the tempting corpus yielding no proof; groups formed only through confirmed pairs; a rejected pair not asked again.
-- **The rest:** the scrub; the reminder rules with an injected clock; serve driving two projects with separate locks and logs, the round-robin start and the shared sleep; the computer's cap pausing every team.
+- **The rest:** the scrub; the reminder rules with an injected clock; one notification per digest, by the browser or the operating system, behind a fake; serve driving two projects with separate locks and logs, the round-robin start and the shared sleep; the computer's cap pausing every team.
 
 Web, each against a fake daemon:
 - every screen of step 01's journeys, the empty and error states among them;
