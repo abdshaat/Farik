@@ -35,7 +35,7 @@ A one-repo project becomes a multi-repo one when the owner adds a second reposit
   - `path`: the absolute path of the repository's top folder on this computer
   - `integration_branch`: the branch accepted work goes into, which defaults to the repository's default branch, read as spec 5.14 says
 - A member must be a git repository's top folder. It may not lie inside another member or the project folder, and two members may not be the same repository.
-- A member whose folder is gone when serve starts, or later, is reported as `repo_missing`. Today shows "Can't find <name>" with "Locate…", which records the new path (`repo.moved`). Tasks in that repository wait until it is found.
+- A member whose folder is gone when serve starts, or later, is reported as `repo_missing`: a fact read when asked, `repos.list`'s `missing` for the member, with no event (step 01). Today shows "Can't find <name>" with "Locate…", which records the new path (`repo.moved`). Tasks in that repository wait until it is found.
 
 ## Tasks across repositories
 
@@ -125,7 +125,7 @@ Tasks that are not done keep their ids; a task of a role that changes code, with
 
 ## Events
 
-- `repo.added { name, path, integration_branch }`
+- `repo.added { name, path, integration_branch }`: all three required, `integration_branch` `null` when the owner named none and the repository's default branch is meant (step 01)
 - `repo.removed { name }`
 - `repo.moved { name, path }`
 - `project.converted { project_folder, first_repo }`

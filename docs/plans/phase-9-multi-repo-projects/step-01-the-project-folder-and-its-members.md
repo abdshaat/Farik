@@ -285,7 +285,7 @@ Files: `daemon/repos.rs` (`QUERIES: [&str; 1] = ["repos.list"]`, `METHODS: [&str
 
 `docs/design/multi-repo-projects.md`: `repo.added` carries `integration_branch` as `null` when absent; `repo_missing` is `repos.list`'s `missing`, with no event.
 
-- [ ] `docs(spec): record project folders and their repositories`
+- [x] `docs(spec): record project folders and their repositories`
 
 ## Verification
 
