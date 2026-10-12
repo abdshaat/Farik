@@ -70,8 +70,8 @@ The founder wants the team's documents written as HTML, not Markdown: HTML shows
   - Marketing plans (`marketing/plans/MP-<n>.*`) are not rewritten: each is the version the owner approved.
   - The spec and the roadmap come back to the owner once, as any change to them does.
   - The Scrum Master never takes a task. While a rewrite is started and `delivery/` still holds a `.md` document, its next retro is told: "Rewrite the documents in docs/catervas/delivery/ as HTML with catervas_write_folder_doc; writing <name>.html removes <name>.md."
-- When the only `.md` documents are the Scrum Master's (or belong to roles no one on the team can review), the rewrite files no task and still records `document_rewrite.started { tasks: [] }`, which is what tells the Scrum Master's retro to rewrite `delivery/`.
-- **Refused** with `not_html` when the format is Markdown, `nothing_to_rewrite` when no task can be filed and `delivery/` holds no `.md` document, and `rewrite_open` while a task of the last rewrite is neither accepted nor cancelled. The button counts the same `.md` documents the method does, so it never shows only to be refused with `nothing_to_rewrite`. The refusal's words are shown under the button.
+- When the only `.md` documents are the Scrum Master's, the rewrite files no task and still records `document_rewrite.started { tasks: [] }`, which is what tells the Scrum Master's retro to rewrite `delivery/`.
+- **Refused** with `not_html` when the format is Markdown, `nothing_to_rewrite` when no task can be filed and `delivery/` holds no `.md` document, and `rewrite_open` while a task of the last rewrite is neither accepted nor cancelled. The button counts `.md` documents other than marketing plans; a rewrite the method cannot start is refused under it, in its words. The refusal's words are shown under the button.
 
 ## Events and wire
 

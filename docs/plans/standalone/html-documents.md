@@ -1,10 +1,10 @@
 # Standalone: the team writes its documents as HTML
 
-Status: draft (second readiness round)
+Status: ready
 Branch: `feat/html-documents` (work outside a phase, its own pull request to `main`, #47)
 Spec: `docs/SPEC.md` 4.5, 5.12 and 5.17 (and the kit lines of 6.x), revision 0.107; ADR 0058
 Depends on: `origin/main` at `9e3d4f3c` (#46 merged; phase 8 in #34)
-Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-12 (one round against `docs/standards/workflow.md` stage 2: NOT READY on three unmade decisions, which the founder's design left open and the planner decided within it: no "Ask for a change" on the Scrum Master's documents, a rewrite of zero tasks, an HTML marketing plan read framed before approval; recorded in the design and here. Its other twenty-one findings are folded into this revision.)
+Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-12 (one round against `docs/standards/workflow.md` stage 2: NOT READY on three unmade decisions, which the founder's design left open and the planner decided within it: no "Ask for a change" on the Scrum Master's documents, a rewrite of zero tasks, an HTML marketing plan read framed before approval; recorded in the design and here. Its other twenty-one findings are folded into this revision. A second round the same day found the three made: READY, with eight minor findings folded in.)
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
 
@@ -146,7 +146,7 @@ export function DocumentFrame(props: { path: string; task?: string; version?: st
 
 ### Task 1: documents in either format, in the core
 
-Files: `crates/core/src/folders.rs` (tests in its `mod tests`); every user of a renamed item, the compiler's list, including `crates/core/src/governor/{readiness,done}.rs`, `crates/store/src/git.rs` (`product_plan_on` checks each stem in either format), `crates/runtime/src/transitions.rs`, `crates/runtime/src/orchestrator/fixtures.rs`, `crates/store/tests/git.rs`; messages naming `.md` at `readiness.rs:1067` and `done.rs:401` say "the document and its agent version".
+Files: `crates/core/src/folders.rs` (tests in its `mod tests`); every user of a renamed item, the compiler's list, including `crates/core/src/governor/{readiness,done}.rs`, `crates/store/src/git.rs` (`product_plan_on` checks each stem in either format), `crates/runtime/src/transitions.rs`, `crates/runtime/src/orchestrator/fixtures.rs`, `crates/store/tests/git.rs`; `readiness.rs:966` switches to `is_plan_of` here; the message at `readiness.rs:1067` says "…until `docs/catervas/product/spec` and `docs/catervas/product/roadmap`, as `.md` or `.html`, are on the integration branch", and `done.rs:401`'s says "the document and its agent version"; the test in `crates/runtime/src/daemon/documents.rs` asserting `"not_markdown"` (`:1023`) asserts `"not_a_document"`.
 
 - `stem_drops_md_or_html_and_nothing_else` — `stem_of`: `a/b.md` and `a/b.html` give `a/b`; `a/b.txt` and `a/b` give `None`; `a/spec.agent.html` gives `a/spec.agent`.
 - `pairs_in_either_format` — `is_human_document`:
@@ -231,7 +231,6 @@ Tests in `tools/folders.rs`'s `mod tests` and `crates/protocol`'s event tests:
 ### Task 5: fixed documents found in either format
 
 Files:
-- `crates/core/src/governor/readiness.rs`: `is_plan_of`.
 - `docs/schemas/task-contract.schema.json`: `plan` matches `\.(md|html)$`.
 - `crates/runtime/src/orchestrator/rules.rs`: the refreshes are owed when the spec's or the structure's stem is there in either format.
 - `crates/runtime/src/orchestrator/messages.rs`:
@@ -241,7 +240,7 @@ Files:
 - `crates/runtime/src/orchestrator/requests.rs`: the plan is read by `plan_stem` in either format, and a new one is named in the team's.
 - `crates/runtime/src/daemon/gates.rs`:
   - `product_plan.state` reads each stem in either format and answers the path it found;
-  - `marketing_plan.get` answers `format`.
+  - (`marketing_plan.get`'s `format` comes from `crates/runtime/src/marketing.rs`'s `whole`, `:686`, which answers it from the proposal.)
 - `crates/store/src/requests.rs`: `product_plan_request(.., format)`, whose `allowed_paths`, intent, requirements and rubric name the format's files.
 - `crates/runtime/src/tools/marketing.rs`:
   - `plan_file(number, format)`, with numbering over both extensions and `html_plan_page`;
@@ -294,7 +293,7 @@ Files: `crates/runtime/src/daemon/documents.rs` (`is_markdown` becomes `is_docum
 
 - `lists_html_documents_with_their_agent_versions` — a folder with `spec.html`, `spec.agent.html`, `overview.md` and `notes.txt` lists `spec.html` (twin `spec.agent.html`) and `overview.md`.
 - `saves_the_owners_edit_of_an_html_document` — `files.save` of `roadmap.html` lands as a folder change; once integrated, `files.read` answers `stale: true`.
-- `askable_where_editable_but_delivery` — `askable` is true for `architecture/overview.html`, and false for `delivery/cadence.md` and for `spec.agent.html`.
+- `askable_where_editable_but_delivery` — `askable` is true for `architecture/overview.html`, and false for `delivery/cadence.md`; `files.read` of `spec.agent.html` is not found, as today.
 
 - [ ] `feat(runtime): the Files page lists and saves HTML documents`
 
@@ -331,6 +330,8 @@ Files:
 - `docs/schemas/rpc.schema.json`: `files.ask_change`, with params `{ path: 1..512, words: 1..2000 }` and result `{ task_id }`.
 - `crates/runtime/src/daemon/documents.rs`: `ask_change`, and `call` dispatching by method.
 
+`change_request`'s contract: R1 "`<path>` makes the change the owner asked for."; C1, by review, its rubric "`<path>` makes the change the owner's words ask for.", "Nothing else in `<path>` changes.", and for a pair "`<twin>` says what `<path>` now says."; `in_scope` the paths; `out_of_scope` "Every other file".
+
 Refusals are coded through `refusal(code, "/path", words)`:
 - `not_editable`: "This document can't be changed from here."
 - `no_owner`: "No one on your team owns this folder right now. Resume or add its role first."
@@ -363,6 +364,8 @@ Files:
 - `docs/schemas/rpc.schema.json`: `files.rewrite`.
 - `crates/runtime/src/daemon/documents.rs`: `rewrite`.
 - `crates/runtime/src/orchestrator/{rules,messages}.rs`: `rewrite_delivery`.
+
+`document_rewrite.started` is not added to `is_about_one_contract` (`event.rs:266`), since it names many tasks; `attribution` answers `None` for it; `EVERY_KIND` goes from 111 to 112.
 
 Refusals:
 - `not_html`: "Turn on Write documents as HTML first."
@@ -400,7 +403,7 @@ Files:
   - `ShowAdvanced` holds "Edit source" for HTML, which opens today's editor without the Preview tab.
 - `ProductPlanCard.tsx`: frames HTML with `task`, and its names are keyed by stem.
 - `DocumentChanges.tsx`: `plain(text, path)`, and names keyed by stem.
-- `MarketingPlan.tsx`: for `format: "html"`, `DocumentFrame` with `task` and the plan's path replaces the `<pre>`.
+- `MarketingPlan.tsx`: for `format: "html"`, `DocumentFrame` with `task={plan.taskId}` and `path` `docs/catervas/marketing/plans/${plan.plan}.html` replaces the `<pre>`.
 - `Files.module.css`: the frame is 100% wide, with `height: calc(100dvh - 12rem)` and `min-height: 60vh`, and no border.
 - `packages/protocol-client/src/client.ts`: `files.ask_change`.
 - `app/refusals.ts`: `not_editable`, `no_owner` and `no_task_taker`, each with its words from Task 9.
