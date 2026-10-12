@@ -469,7 +469,7 @@ Files: `docs/SPEC.md`:
 
 `docs/design/catervas-folders.md`: a line under its status pointing to `html-documents.md`.
 
-- [ ] `docs(spec): the team's documents in HTML (0.107)`
+- [x] `docs(spec): the team's documents in HTML (0.107)`
 
 ## Verification
 
