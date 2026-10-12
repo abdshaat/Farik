@@ -1,11 +1,11 @@
 # Phase 9, step 02: Tasks in a member repository
 
-Status: draft
+Status: ready (readiness review 2026-10-12, two rounds, findings folded)
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 5.3, 5.4, 5.11, 5.14, 8.4; F4
 Depends on: step 01 of this phase (planned and ready, not yet executed): `catervas_core::repos` (`Repos`, `Repo`, `RepoName`, `validate_repos`), `ProjectFiles::read_repos` and `is_project_folder`, `catervas_store::repos::repo_present`. Also the amendment to ADR 0057 of 2026-10-12 (6dd2287). Nothing of steps 02b to 08.
 Mockups: none; this step has no screen.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (an epic naming a builder role) and B2 (a builder's document tasks in the project folder), both decided below; S1–S9 and the nits folded. Round 2: (pending).
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (an epic naming a builder role) and B2 (a builder's document tasks in the project folder), both decided below; S1–S9 and the nits folded. Round 2 (the same reviewer, confirming): ready; its nits N1–N3 folded.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 37510b1.
 
@@ -55,7 +55,7 @@ Three rules, reported in this order after `AssigneeAvailable`. `ReadinessContext
 | `RepoRequired` | `context.repos` is `Some`, the contract is a task, `repo` is not set, the assignee's role changes code, and some of its `allowed_paths` is not a document path | this project has several repositories: set repo to the one this task changes (<names joined ", ">), or keep its allowed paths to the project's documents |
 | `RepoUnknown` | `context.repos` is `Some`, `repo` is set, `RepoNotAllowed` does not fail, and `repo` is not in `context.repos` | <repo> is not one of this project's repositories: <names joined ", "> |
 
-So a contract fails at most one of the three. `CHECKS` goes to 29 and `EVERY_RULE` (`plain.rs:83`) to 31. Each gets a plain sentence (`crates/core/src/governor/plain.rs:9`). The readiness totals asserted at `daemon/gates.rs:3758` and `:4359` go to 30 and 32, and the codes are `repo_not_allowed`, `repo_required` and `repo_unknown` by `rule_name` (`gates.rs:455`). `PathsWithinParent` and `LanesOverlap` still compare paths without their repositories until step 05 says how; a member task's paths are compared with its epic's as if both were the project folder's.
+So a contract fails at most one of the three. When the team's document globs do not compile, `RepoRequired` stays silent and `DocumentPathsOnly` reports the broken glob, so the refusal names the real cause. A builder's document task with no `repo` gets its usual `feature/CTV-<n>` branch, in the project folder (`branch.rs:16-22`). `CHECKS` goes to 29 and `EVERY_RULE` (`plain.rs:83`) to 31. Each gets a plain sentence (`crates/core/src/governor/plain.rs:9`). The readiness totals asserted at `daemon/gates.rs:3758` and `:4359` go to 30 and 32, and the codes are `repo_not_allowed`, `repo_required` and `repo_unknown` by `rule_name` (`gates.rs:455`). `PathsWithinParent` and `LanesOverlap` still compare paths without their repositories until step 05 says how; a member task's paths are compared with its epic's as if both were the project folder's.
 
 ### The task's repository
 
@@ -102,7 +102,7 @@ docs/SPEC.md                                                  modifies (Task 6)
 
 ## Interfaces
 
-Consumes: step 01's `read_repos`, `Repo`, `repo_present`; `check_contract_write`, `ContractWriteRefusal` (`gates.rs:1038`, `:877`); `ReadinessRule`, `ReadinessContext`, `CHECKS`, `failure` (`readiness.rs:27`, `:150`, `:185`); `plain_readiness`, `EVERY_RULE` (`plain.rs:9`, `:85`); `changes_code` (`team.rs:102`); `Git` with `create_worktree`, `commit_count`, `is_clean`, `changed_paths`, `diff`, `status`, `commit`, `push`, `merge_base`, `default_branch`, `task_branch_numbers` (`git.rs`); `integration_branch`; `task_branch` (`core/branch.rs:14`); `TestProject` (`tools/fixtures.rs:175`), `Harness` (`orchestrator/fixtures.rs:38`), `TempRepo`.
+Consumes: step 01's `read_repos`, `Repo`, `repo_present`; `check_contract_write`, `ContractWriteRefusal` (`gates.rs:1038`, `:877`); `ReadinessRule`, `ReadinessContext`, `CHECKS`, `failure` (`readiness.rs:27`, `:150`, `:185`); `plain_readiness`, `EVERY_RULE` (`plain.rs:9`, `:83`); `changes_code` (`team.rs:102`); `Git` with `create_worktree`, `commit_count`, `is_clean`, `changed_paths`, `diff`, `status`, `commit`, `push`, `merge_base`, `default_branch`, `task_branch_numbers` (`git.rs`); `integration_branch`; `task_branch` (`core/branch.rs:14`); `TestProject` (`tools/fixtures.rs:175`), `Harness` (`orchestrator/fixtures.rs:38`), `TempRepo`.
 
 Produces:
 
