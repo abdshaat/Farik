@@ -7890,6 +7890,9 @@ mod tests {
                 if scrum_master {
                     with_a_scrum_master(wire);
                 }
+                if name.ends_with("markdown") {
+                    wire["policy"]["document_format"] = json!("markdown");
+                }
             });
             harness.accepted("CTV-1");
             harness.open_sprint("S1", &["CTV-1"]);
@@ -7933,6 +7936,7 @@ mod tests {
             .await
         );
         assert!(!retro_told("orch-rewrite-retro-pm", false, true, md).await);
+        assert!(!retro_told("orch-rewrite-retro-markdown", true, true, md).await);
     }
 
     /// A new project (`project.started`) whose team has a Product Manager, an Architect, a Developer

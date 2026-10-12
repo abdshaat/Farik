@@ -12,7 +12,7 @@ use axum::response::{IntoResponse, Response};
 use catervas_core::contract::{TaskKind, TaskStatus};
 use catervas_core::folders::{
     DocumentFormat, Named, OwnerEditRefusal, ROLE_FOLDERS, agent_twin, check_owner_edit,
-    document_name, document_order, human_of_twin, named_in_subject, plain_name,
+    document_name, document_order, human_of_twin, is_human_document, named_in_subject, plain_name,
 };
 use catervas_core::governor::paths::normalise;
 use catervas_core::team::{Role, Team};
@@ -44,11 +44,15 @@ pub(super) const METHODS: [&str; 3] = ["files.save", "files.ask_change", "files.
 /// Where the team's documents live.
 const ROOT: &str = "docs/catervas";
 
-/// The Scrum Master's folder, whose documents it rewrites itself.
-const DELIVERY: &str = "docs/catervas/delivery";
-
 /// Where the marketing plans are; each is the version the owner approved, so none is rewritten.
-const MARKETING_PLANS: &str = "docs/catervas/marketing/plans/MP-";
+const MARKETING_PLANS: &str = "docs/catervas/marketing/plans/";
+
+/// Whether `path` is a marketing plan `MP-<n>` or its agent version.
+fn is_marketing_plan(path: &str) -> bool {
+    path.starts_with(MARKETING_PLANS)
+        && (is_human_document(path)
+            || human_of_twin(path).is_some_and(|human| is_human_document(&human)))
+}
 
 fn internal(error: &dyn Display) -> Failure {
     Failure::new(INTERNAL_ERROR, error.to_string())
@@ -253,11 +257,17 @@ fn ask_change(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     Ok(json!({ "task_id": filed.id }))
 }
 
+/// Held while a rewrite checks that none is open and files its tasks, so that two presses file one.
+static REWRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `files.rewrite {}`: one small, whole task for each role whose folder holds a Markdown document,
 /// to rewrite them as HTML, and `document_rewrite.started` naming the tasks. The Scrum Master's
 /// documents are rewritten at its next retro, so they file no task and only keep the rewrite
 /// from being refused as nothing to do.
 fn rewrite(deps: &ToolDeps) -> Result<Value, Failure> {
+    // ponytail: one lock for the process, as a Catervafication's start has; the command line files none.
+    let _filing = crate::locked(&REWRITING);
+    deps.projections.catch_up().map_err(|e| internal(&e))?;
     let (team, _, entries) = listing(deps)?;
     if team.document_format() != DocumentFormat::Html {
         return Err(refusal(
@@ -278,14 +288,16 @@ fn rewrite(deps: &ToolDeps) -> Result<Value, Failure> {
             ));
         }
     }
-    let delivery_holds_markdown = entries.iter().any(|entry| {
-        is_file(entry)
-            && entry.path.starts_with(&format!("{DELIVERY}/"))
-            && DocumentFormat::of(&entry.path) == Some(DocumentFormat::Markdown)
-    });
+    let mut delivery_holds_markdown = false;
     let mut wanted = Vec::new();
     for folder in folders(&team, &entries) {
         if folder.role == Role::ScrumMaster {
+            // It takes no task: its retro rewrites `delivery/`, if it has an active agent.
+            delivery_holds_markdown = folder
+                .documents
+                .iter()
+                .flat_map(|document| std::iter::once(&document.path).chain(&document.twin))
+                .any(|path| DocumentFormat::of(path) == Some(DocumentFormat::Markdown));
             continue;
         }
         let documents: Vec<String> = folder
@@ -294,7 +306,7 @@ fn rewrite(deps: &ToolDeps) -> Result<Value, Failure> {
             .flat_map(|document| std::iter::once(&document.path).chain(&document.twin))
             .filter(|path| {
                 DocumentFormat::of(path) == Some(DocumentFormat::Markdown)
-                    && !path.starts_with(MARKETING_PLANS)
+                    && !is_marketing_plan(path)
             })
             .cloned()
             .collect();
@@ -2129,14 +2141,35 @@ mod tests {
 
         let product = contract_of(&harness, "CTV-1");
         assert_eq!(product["assignee_role"], "product_manager", "{product}");
-        assert_eq!(product["allowed_paths"], json!([PRODUCT]));
+        assert_eq!(product["allowed_paths"], json!([format!("{PRODUCT}/**")]));
         assert_eq!(product["created_by"], "human");
+        assert_eq!(
+            product["title"],
+            "Rewrite the Product Manager's documents as HTML"
+        );
+        assert_eq!(
+            product["intent"],
+            "The owner asked for the team's documents as HTML. Rewrite each of these documents in \
+             docs/catervas/product as <name>.html, saying everything it says, and delete the .md \
+             it replaces, with its agent version: spec.md, spec.agent.md."
+        );
+        let reaches = |contract: &Value| {
+            let paths: Vec<String> = contract["allowed_paths"]
+                .as_array()
+                .expect("paths")
+                .iter()
+                .map(|path| path.as_str().expect("a path").to_string())
+                .collect();
+            catervas_core::folders::may_change_an_owner_document(&paths)
+        };
+        assert!(reaches(&product), "the spec comes back to the owner");
         let architect = contract_of(&harness, "CTV-2");
         assert_eq!(architect["assignee_role"], "architect", "{architect}");
         assert_eq!(
             architect["allowed_paths"],
-            json!(["docs/catervas/architecture"])
+            json!(["docs/catervas/architecture/**"])
         );
+        assert!(!reaches(&architect));
         let artifact = |contract: &Value, path: &str| {
             contract["exit_criteria"]
                 .as_array()
@@ -2197,7 +2230,12 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_delivery_only_rewrite_records_no_tasks() {
-        let harness = Harness::new("files-rewrite-delivery", with_the_designer);
+        let harness = Harness::new("files-rewrite-delivery", |wire| {
+            with_the_designer(wire);
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+            );
+        });
         write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
         commit(&harness, "the cadence");
         let reply = rewrite(&harness);
@@ -2230,6 +2268,39 @@ mod tests {
             "not_html",
             "Turn on Write documents as HTML first.",
         );
+
+        // A Markdown team holding only HTML is still refused for its format first.
+        let only_html = Harness::new("files-rewrite-markdown-html", |wire| {
+            with_the_designer(wire);
+            wire["policy"]["document_format"] = json!("markdown");
+        });
+        write(&only_html, &format!("{PRODUCT}/spec.html"), "<h1>s</h1>\n");
+        commit(&only_html, "the spec");
+        refused(
+            &rewrite(&only_html),
+            "not_html",
+            "Turn on Write documents as HTML first.",
+        );
+
+        // Delivery's Markdown is no one's to rewrite without a Scrum Master.
+        let lone = Harness::new("files-rewrite-no-sm", with_the_designer);
+        write(&lone, "docs/catervas/delivery/cadence.md", "cadence\n");
+        commit(&lone, "the cadence");
+        refused(
+            &rewrite(&lone),
+            "nothing_to_rewrite",
+            "Every document your team can rewrite is already HTML.",
+        );
+
+        // `plans/MP-notes.md` is not a marketing plan, so it is rewritten.
+        let notes = Harness::new("files-rewrite-notes", with_the_marketing_specialist);
+        write(
+            &notes,
+            "docs/catervas/marketing/plans/MP-notes.md",
+            "notes\n",
+        );
+        commit(&notes, "the notes");
+        assert_eq!(rewritten(&rewrite(&notes)), ["CTV-1"]);
 
         // Nothing but a plan, and no delivery `.md`.
         let plans = Harness::new("files-rewrite-nothing", with_the_marketing_specialist);
@@ -2268,5 +2339,14 @@ mod tests {
             .moved("CTV-2", "ready", "cancelled", &json!({}));
         assert_eq!(rewritten(&rewrite(&harness)), ["CTV-3", "CTV-4"]);
         assert_eq!(rewrite_events(&harness).len(), 2);
+        // The newest rewrite is the one that counts.
+        refused(&rewrite(&harness), "rewrite_open", open);
+        // And an open rewrite is refused as open, though no Markdown is left.
+        git(
+            &harness,
+            &["rm", "-q", &format!("{PRODUCT}/spec.md"), OVERVIEW],
+        );
+        commit(&harness, "the rewrite lands");
+        refused(&rewrite(&harness), "rewrite_open", open);
     }
 }

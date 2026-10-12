@@ -17,6 +17,7 @@ use catervas_core::governor::gates::{
 };
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::team::plain_role;
 use catervas_protocol::command::{Command, RequestSize, command_from_value};
 use catervas_protocol::event::{
     CatervaficationStartedBody, CatervaficationStartedBodyProject, CatervasEvent,
@@ -577,6 +578,16 @@ pub fn rewrite_request(
             })
         })
         .collect();
+    let plans = "The marketing plans (plans/MP-n), each the version the owner approved";
+    let mut rubric = vec![
+        format!("Every document named ({named}) is gone from {folder}, with its agent version."),
+        "Each .html says everything its .md said, and nothing more.".to_string(),
+    ];
+    let mut out_of_scope = vec!["Every other folder", "What the documents say"];
+    if folder.ends_with("/marketing") {
+        rubric.push(format!("{plans} stay as they are."));
+        out_of_scope.push(plans);
+    }
     let mut exit_criteria = criteria;
     exit_criteria.push(json!({
         "id": format!("C{}", documents.len() + 1),
@@ -584,21 +595,19 @@ pub fn rewrite_request(
         "satisfies": ["R1"],
         "verification": {
             "method": "review",
-            "rubric": [
-                format!("Every document named ({named}) is gone from {folder}, with its agent version."),
-                "Each .html says everything its .md said, and nothing more."
-            ]
+            "rubric": rubric
         }
     }));
     json!({
-        "title": format!("Rewrite {}'s documents as HTML", owner.to_string().replace('_', " ")),
+        "title": format!("Rewrite the {}'s documents as HTML", plain_role(owner)),
         "intent": format!(
-            "The owner asked for the team's documents as HTML. Rewrite these documents in {folder} as \
-             HTML with catervas_write_folder_doc, which removes the Markdown each one replaces: {named}."
+            "The owner asked for the team's documents as HTML. Rewrite each of these documents in \
+             {folder} as <name>.html, saying everything it says, and delete the .md it replaces, \
+             with its agent version: {named}."
         ),
         "scope": {
-            "in_scope": [folder],
-            "out_of_scope": ["Every other folder", "What the documents say"]
+            "in_scope": [format!("{folder}/**")],
+            "out_of_scope": out_of_scope
         },
         "requirements": [{ "id": "R1", "text": format!("{named} are HTML, and no longer Markdown.") }],
         "exit_criteria": exit_criteria,
@@ -606,7 +615,7 @@ pub fn rewrite_request(
         "reviewer_role": reviewer.to_string(),
         "risk": "low",
         "budget": { "max_cost_usd": max_cost_usd },
-        "allowed_paths": [folder]
+        "allowed_paths": [format!("{folder}/**")]
     })
 }
 
@@ -1899,6 +1908,26 @@ mod tests {
                 EventKind::ContractUnlocked
             ]
         );
+    }
+
+    #[test]
+    fn a_marketing_rewrite_leaves_the_approved_plans() {
+        use catervas_core::contract::Role;
+        let rewrite = |folder: &str| {
+            super::rewrite_request(
+                folder,
+                &[format!("{folder}/persona.md")],
+                Role::MarketingSpecialist,
+                Role::ProductManager,
+                5.0,
+            )
+        };
+        let plans = "The marketing plans (plans/MP-n), each the version the owner approved";
+        let wire = rewrite("docs/catervas/marketing");
+        assert!(wire["scope"]["out_of_scope"].to_string().contains(plans));
+        assert!(wire["exit_criteria"].to_string().contains(plans));
+        let product = rewrite("docs/catervas/product");
+        assert!(!product.to_string().contains("MP-n"));
     }
 
     #[test]
