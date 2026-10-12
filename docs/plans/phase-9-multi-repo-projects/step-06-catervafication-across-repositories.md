@@ -1,6 +1,6 @@
 # Phase 9, step 06: Catervafication across repositories
 
-Status: draft
+Status: ready (readiness review 2026-10-12, two rounds, findings folded)
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.1, 5.16, 5.17, 8.5; F5
 Depends on these steps of this phase, planned, not yet executed:
@@ -12,7 +12,7 @@ Depends on these steps of this phase, planned, not yet executed:
 
 Nothing of steps 02b, 02c, 07 or 08.
 Mockups: none; the offer's screens are step 07's.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (the epic's budget), B2 (a project-wide start against a member's own, and a member missing at Start) and B3 (the system row's dependencies), all decided below; S1–S8 and N1–N7 folded, the plan rewritten. Round 2: (pending).
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (the epic's budget), B2 (a project-wide start against a member's own, and a member missing at Start) and B3 (the system row's dependencies), all decided below; S1–S8 and N1–N7 folded, the plan rewritten. Round 2 (the same reviewer, confirming): ready; its nits N1–N7 folded.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at a66f5d3.
 
@@ -38,8 +38,8 @@ Out of scope: the offer's screens (07).
   - `repos`, 1 to 16 names in `repoName`'s pattern, copied: a project-wide start in a project folder, listing the members present at the Start
   - `repo`, one name: a member's own start, as the design has it (`multi-repo-projects.md:104`)
 
-  `catervafication_scope(history) -> Option<Scope>` replaces `catervafication_of` (`:294`) at its callers (`orchestrator/requests.rs:306`, `:556`), with `Scope { Repository(Project), Project(Vec<String>), Member(String) }`. A one-repo project's epic is `Repository(Existing | New)`, as today. The started body's `project` stays `existing` for the other two. Its test `knows_a_catervafication_from_its_history` becomes `knows_a_catervaficaions_scope`.
-- **A member missing at the Start** is not covered: the project-wide `repos` lists the present members only. Once found, it is offered alone (below), never filed into the project-wide epic. A covered member that goes missing after the Start has its rows filed when it is found again, while the epic is open. A project-wide start with no member present is refused `catervafication_no_repositories`: "None of your project's repositories can be found; locate them in Settings, then start."
+  `catervafication_scope(history) -> Option<Scope>` replaces `catervafication_of` (`:294`) at its callers (`orchestrator/requests.rs:306`, `:556`), with `Scope { Repository(Project), Project(Vec<String>), Member(String) }`. A one-repo project's epic is `Repository(Existing | New)`, as today. The started body's `project` stays `existing` for the other two. Its test `knows_a_catervafication_from_its_history` becomes `knows_a_catervafications_scope`.
+- **A member missing at the Start** is not covered: the project-wide `repos` lists the present members only. Once found, it is offered alone (below), never filed into the project-wide epic. A covered member that goes missing after the Start has its rows filed when it is found again, while the epic is open. A project-wide start with no member present is refused, after `catervafication_new_project` and before `catervafication_no_product_manager` in `human.rs:405-427`'s order, with `catervafication_no_repositories`: "None of your project's repositories can be found; locate them in Settings, then start."
 - **The store carries the scope.** `file_catervafication_epic` and `Filing` (`crates/store/src/requests.rs:462-497`, `:688`) take a `CatervaficationScope { project, repos: Option<&[String]>, repo: Option<&str> }`, a `Copy` view, in place of `CatervaficationStartedBodyProject`, and write the started body from it.
 
 ### The rows
@@ -59,12 +59,13 @@ Out of scope: the offer's screens (07).
   - While it waits, `file_due` answers `FileDue::Waits` (renamed from `MarketingWaits`, which also covers the Marketing row), so `in_progress_epic` (`orchestrator/requests.rs:570`) holds off the epic's close-out as it does today.
   - It is filed whole with its dependencies already accepted, so it is judged as any Catervafication row is, with no refine session.
   - A team with no Architect has no system row, and nothing waits for it.
+  - A covered member gone for good (moved and never located) keeps its rows unfiled, so the system row waits for ever and the epic stays open. The owner cancels the epic, or removes the member (step 01's `repo.remove`). A removed member no longer counts as covered for `file_due` or the system row's wait.
 - **The rows' criteria.** As phase 8's: one artifact criterion per document with `must_contain: ["# "]`. The member's `overview.md` keeps `` ```mermaid `` (`catervafication.rs:252-254`, whose `ends_with` already matches). `system.md` must also contain `## Repositories` and `` ```mermaid ``, and `deployment.md` `` ```mermaid ``. Each row's review asks phase 8's two questions. The system row adds "Does system.md name every repository the project has, and does every link name the file it was read from?".
 - **A row's place.** `task_contract` (`:219`) gains `place: &Place`, with `Place { Project, Member(String), System }`:
   - `Place::Project` is today's folder
   - `Place::Member(name)` is `member_folder(role, name)` (step 04)
   - `Place::System` is the three documents
-- **The epic's contract.** `epic_contract(project, max_cost_usd, scope: &Scope)` (`:169`). Its budget is `max_cost_usd` times the rows its scope can file, so that `budget_within_parent` (`readiness.rs:985-998`) lets every row through:
+- **The epic's contract.** `epic_contract(max_cost_usd, scope: &Scope)` (`:169`), the `project` parameter dropped since `Scope::Repository` carries it. Its budget is `max_cost_usd` times the rows its scope can file, so that `budget_within_parent` (`readiness.rs:985-998`) lets every row through:
   - `Repository`: today's 5 or 3
   - `Project(repos)`: 3 + 3 × `repos.len()`
   - `Member(_)`: 4
@@ -76,7 +77,7 @@ Out of scope: the offer's screens (07).
 
 - **The word.** `catervafication_start`'s body becomes `emptyBody` or a new `catervaficationStartBody { repo }` with `required: ["repo"]`, so no body matches two branches of `commandBodyWire`'s `oneOf` (`command.schema.json:228-231`, as `sprintStartBody` does). The reader (`command.rs:579`, `:821-829`, `:970`) accepts either. `Command::CatervaficationStart { repo: Option<String> }` is updated at its call sites: `human.rs:168`, `:3178-3352`; `orchestrator/requests.rs:2137`, `:2274`; `daemon/gates.rs:4582`.
 - **Its refusals, in order:**
-  - `repo_not_allowed`: "This project is one repository." (a one-repo project)
+  - `repo_not_allowed`: "This project is one repository." (a one-repo project). It is a command's refusal, a different one from step 02's readiness rule of that name, and SPEC 4.1 says so.
   - `repo_unknown`: not a member
   - `repo_missing`: "<name> cannot be found; locate it in Settings, then start." (the member is missing)
   - `catervafication_not_started`: "Start your project's Catervafication first; it covers every repository it can find then."
@@ -98,9 +99,10 @@ Each of the Architect's, the Developer's and the Designer's `catervafying-the-re
 
 ```
 crates/runtime/src/catervafication.rs              modifies, tests: Scope, Place, the rows, epic_contract, file_due's key, waits and scope, start's scope (Tasks 1–3)
-crates/store/src/requests.rs                       modifies: CatervaficationScope in file_catervafication_epic and Filing (Task 1)
+crates/store/src/requests.rs                       modifies: CatervaficationScope in file_catervafication_epic and Filing; its tests' calls at :1247, :1306, :1333 (Task 1)
+crates/runtime/src/orchestrator/rules.rs           modifies: `catervafication::start` at :333 with `repo: None` (Task 3)
 docs/schemas/event.schema.json, crates/protocol/src/{event.rs,event/fixtures.rs}   modifies, tests: catervafication.started's repos and repo (Task 1)
-crates/runtime/src/orchestrator/requests.rs        modifies, tests: catervafication_scope at :306, :556; FileDue::Waits at :570 (Task 2)
+crates/runtime/src/orchestrator/requests.rs        modifies, tests: catervafication_scope at :306, :556; FileDue::Waits at :570 (Task 2); `epic_contract`'s test call at :2100 (Task 1)
 docs/schemas/command.schema.json, crates/protocol/src/command.rs   modifies, tests: catervaficationStartBody (Task 3)
 crates/runtime/src/orchestrator/human.rs           modifies, tests: catervafication_start_for with a repo (:397-445), the call sites (Task 3)
 crates/runtime/src/daemon/gates.rs, docs/schemas/rpc.schema.json   modifies, tests: offered_repos; the call site at :4582 (Task 3)
@@ -126,7 +128,7 @@ Produces:
 // catervas_runtime::catervafication
 pub(crate) enum Scope { Repository(Project), Project(Vec<String>), Member(String) }
 pub(crate) enum Place { Project, Member(String), System }
-pub(crate) fn epic_contract(project: Project, max_cost_usd: f64, scope: &Scope) -> Value;
+pub(crate) fn epic_contract(max_cost_usd: f64, scope: &Scope) -> Value;
 pub(crate) fn task_contract(project: Project, role: Role, reviewer: Role, epic: &TaskId, max_cost_usd: f64, place: &Place) -> Value;
 pub(crate) fn catervafication_scope(history: &[CatervasEvent]) -> Option<Scope>;
 pub(crate) fn covered_repos(log: &EventLog) -> Result<BTreeSet<String>, StoreError>;
@@ -161,7 +163,7 @@ Files: `catervafication.rs` (`file_due`: the key, the scope, the system row's wa
   - The first filing tick files, in order: the Product Manager's task, then `app`'s Architect, Developer and Designer tasks, then `infra`'s. No system row is filed. `file_due` answers `Filed`.
   - With both Architect tasks accepted and integrated, the next tick files the system row, with `dependencies` the two.
   - A tick after that files nothing new.
-  - A cancelled `app` Developer task is not filed again, even after the owner rewrote its `allowed_paths`.
+  - The owner rewrites `app`'s Developer task's `allowed_paths` with `contract.save` while it is in `refining` (`gates.rs:1108-1140`), then cancels it: it is not filed again.
 
   RED: one task per role.
 - `waits_for_the_system_row`: with `app`'s Architect task accepted and `infra`'s in progress, `file_due` answers `Waits` and the epic is not closed. With `infra`'s cancelled, the system row is filed depending on `app`'s alone. With both cancelled, it is never filed, and `file_due` answers `Nothing`. RED.
