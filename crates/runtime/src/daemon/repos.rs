@@ -553,6 +553,36 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn needs_the_home_folder_to_add_or_locate() {
+        let folder = folder("no-home");
+        // The same project with a daemon that was never told where home is.
+        let state = Arc::new(DaemonState::new(Arc::clone(&folder.project.deps)));
+        let web = TempRepo::new("repos-no-home-web");
+        let before = repos_yaml(&folder);
+        let events_before = repo_events(&folder);
+        for (method, params) in [
+            (
+                "repo.add",
+                json!({ "name": "web", "path": named(&web.path) }),
+            ),
+            (
+                "repo.locate",
+                json!({ "name": "app", "path": named(&web.path) }),
+            ),
+        ] {
+            let reply = rpc(&state, method, &params);
+            assert_eq!(reply["error"]["code"], -32603, "{method}: {reply}");
+            assert_eq!(
+                reply["error"]["message"], "the home folder is not known",
+                "{method}: {reply}"
+            );
+            assert_eq!(repos_yaml(&folder), before, "{method}");
+            assert_eq!(repo_events(&folder), events_before, "{method}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn removes_a_member_but_not_the_last() {
         let folder = folder("removes");
         let removed = call(
