@@ -1,6 +1,6 @@
 # Standalone: an agent's chat reply, summed up and formatted
 
-Status: ready
+Status: done
 Branch: `fix/chat-reply-format` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 4.3 (asking an agent a question), F8 (the one-to-one chat in the web app)
 Depends on: none (`main` at `9e3d4f3c`)
