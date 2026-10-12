@@ -2317,7 +2317,7 @@ mod tests {
             );
             if role == Role::ScrumMaster {
                 assert!(text.contains("`catervas_write_folder_doc`"), "{role}");
-                assert!(text.contains("cadence.md"), "{role}");
+                assert!(text.contains("`cadence`"), "{role}");
             } else {
                 assert!(text.contains("`catervas_git_commit`"), "{role}");
             }
@@ -2331,12 +2331,12 @@ mod tests {
                     names(&[
                         "docs/catervas/product/",
                         "`catervas_propose_marketing_plan`",
-                        "`MP-<n>.agent.md`",
+                        "its agent version",
                         "Do not ask for `verifying` while the plan waits",
                     ]);
                 }
-                Role::ProductManager => names(&["spec.agent.md", "roadmap.agent.md"]),
-                Role::Architect => names(&["mermaid", "jobs.md"]),
+                Role::ProductManager => names(&["its agent version"]),
+                Role::Architect => names(&["a diagram", "`jobs`"]),
                 _ => {}
             }
         }
@@ -2389,7 +2389,7 @@ mod tests {
         let (_, catervafying) = kit_skill(Role::SoftwareDeveloper, "catervafying-the-repository");
         assert!(
             catervafying.contains(
-                "With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of workflow.md."
+                "With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of workflow."
             ),
             "{catervafying}"
         );
@@ -2537,7 +2537,7 @@ mod tests {
             (
                 "keeping-the-brand-kit",
                 "Use when the task touches the business's name, logo, colours, type, pictures or voice",
-                "docs/catervas/marketing/brand/brand-kit.md",
+                "docs/catervas/marketing/brand/brand-kit",
             ),
             (
                 "writing-the-brand-persona",

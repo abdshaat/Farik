@@ -10,8 +10,8 @@ Requirements are a product document. You write one only for an epic the user has
 ## 1. Check the approval first
 
 If the epic is not approved, stop: a document for work the user has not agreed to is a guess in
-writing. The requirements belong in `docs/catervas/product/spec.md`, for people, and in
-`docs/catervas/product/spec.agent.md`, for agents, changed together. Write them in a docs task of yours, `spec.md` and `spec.agent.md` (or the notes) changed and committed together.
+writing. The requirements belong in `docs/catervas/product/spec`, for people, and in
+its agent version, for agents, changed together. Write them in a docs task of yours, `spec` and its agent version (or the notes) changed and committed together.
 
 ## 2. The shape
 

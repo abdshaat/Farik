@@ -286,7 +286,7 @@ Tests in `prompt.rs`'s and `lib.rs`'s `mod tests`:
   
   No Architect text contains "Mermaid".
 
-- [ ] `feat(roles): name documents by stem and tell agents the team's format`
+- [x] `feat(roles): name documents by stem and tell agents the team's format`
 
 ### Task 7: the Files server reads HTML
 

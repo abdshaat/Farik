@@ -782,7 +782,7 @@ mod tests {
         let flat = PM_SKILL.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
             flat.contains(
-                "Name `docs/catervas/product/spec.md` or `roadmap.md` in a task's allowed paths, \
+                "Name `docs/catervas/product/spec` or `roadmap` in a task's allowed paths, \
                  or a pattern that reaches them, only when the task changes them: such a task \
                  waits for the owner to accept it."
             ),
@@ -1166,8 +1166,8 @@ mod tests {
             );
         }
         for path in [
-            "docs/catervas/marketing/brand/brand-kit.md",
-            "docs/catervas/marketing/brand/persona.md",
+            "docs/catervas/marketing/brand/brand-kit",
+            "docs/catervas/marketing/brand/persona",
             "docs/catervas/marketing/plans/",
         ] {
             assert!(prompt.contains(path), "the prompt does not name {path}");
@@ -1247,8 +1247,8 @@ mod tests {
         }
         let ships = of("marketing-what-ships").to_lowercase();
         for path in [
-            "docs/catervas/marketing/brand/brand-kit.md",
-            "docs/catervas/marketing/brand/persona.md",
+            "docs/catervas/marketing/brand/brand-kit",
+            "docs/catervas/marketing/brand/persona",
             "docs/catervas/marketing/plans/",
             "docs/catervas/marketing/research/",
         ] {
@@ -1313,7 +1313,7 @@ mod tests {
         assert!(
             skill
                 .body
-                .contains("docs/catervas/marketing/brand/brand-kit.md"),
+                .contains("docs/catervas/marketing/brand/brand-kit"),
             "{}",
             skill.body
         );
@@ -1379,15 +1379,14 @@ mod tests {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
-        for needle in ["agent_text", "MP-<n>.agent.md", "catervas_git_commit"] {
+        for needle in ["agent_text", "its agent version", "catervas_git_commit"] {
             assert!(
                 flat.contains(needle),
                 "the plan skill lost {needle}: {flat}"
             );
         }
         assert!(
-            flat.contains("MP-<n>.md and MP-<n>.agent.md together")
-                || flat.contains("`MP-<n>.md` and `MP-<n>.agent.md` together"),
+            flat.contains("`MP-<n>` and its agent version together"),
             "{flat}"
         );
     }
@@ -1397,12 +1396,7 @@ mod tests {
     #[test]
     fn the_product_manager_keeps_its_folder() {
         let definition = loaded(Role::ProductManager);
-        for needle in [
-            "docs/catervas/product/",
-            "spec.md",
-            "roadmap.md",
-            ".agent.md",
-        ] {
+        for needle in ["docs/catervas/product/", "spec", "roadmap", "agent version"] {
             assert!(
                 definition.system_prompt.contains(needle),
                 "the prompt does not name {needle}"
@@ -1415,7 +1409,7 @@ mod tests {
             .find(|skill| skill.name == "writing-requirements")
             .expect("the requirements skill");
         let requirements = &requirements.session_files["SKILL.md"];
-        for needle in ["spec.md", "spec.agent.md"] {
+        for needle in ["spec", "its agent version"] {
             assert!(requirements.contains(needle), "{requirements}");
         }
         assert!(
@@ -1485,7 +1479,7 @@ mod tests {
             )
         };
         let requirements = skill_text("writing-requirements");
-        for needle in ["docs task", "spec.agent.md"] {
+        for needle in ["docs task", "its agent version"] {
             assert!(requirements.contains(needle), "{needle}: {requirements}");
         }
         for name in ["writing-requirements", "scoping-a-release"] {
@@ -1518,6 +1512,72 @@ mod tests {
                 .find(|skill| skill.name == skill_name)
                 .expect("the skill");
             assert!(flattened(&skill.body).contains(sentence), "{skill_name}");
+        }
+    }
+
+    /// The six folder-owning roles name documents by stem: the team's format line says the
+    /// extension (`docs/design/html-documents.md`).
+    #[test]
+    fn kits_name_documents_without_an_extension() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("a folder") {
+                let path = entry.expect("an entry").path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else {
+                    out.push(path);
+                }
+            }
+        }
+        const NAMES: [&str; 12] = [
+            "spec.md",
+            "roadmap.md",
+            "overview.md",
+            "features.md",
+            "jobs.md",
+            "structure.md",
+            "conventions.md",
+            "workflow.md",
+            "ui-inventory.md",
+            "cadence.md",
+            "brand-kit.md",
+            "persona.md",
+        ];
+        for role in [
+            "product_manager",
+            "architect",
+            "software_developer",
+            "ui_ux_designer",
+            "scrum_master",
+            "marketing_specialist",
+        ] {
+            let mut files = Vec::new();
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("roles");
+            walk(&root.join(role), &mut files);
+            for file in files {
+                let text = std::fs::read_to_string(&file).expect("a text");
+                let mut gone: Vec<&str> = NAMES.to_vec();
+                gone.extend([".agent.md", "MP-<n>.md"]);
+                if role == "architect" {
+                    gone.push("Mermaid");
+                }
+                for needle in gone {
+                    assert!(!text.contains(needle), "{} holds {needle}", file.display());
+                }
+                for word in text.split(|c: char| {
+                    c.is_whitespace() || matches!(c, '`' | '"' | '\'' | '(' | ')' | ',' | ';')
+                }) {
+                    let word = word.trim_end_matches(['.', ':']);
+                    assert!(
+                        !(word.contains("docs/catervas/")
+                            && std::path::Path::new(word)
+                                .extension()
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))),
+                        "{} holds {word}",
+                        file.display()
+                    );
+                }
+            }
         }
     }
 

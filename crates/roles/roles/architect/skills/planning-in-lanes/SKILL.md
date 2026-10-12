@@ -24,7 +24,7 @@ A lane is the tasks one builder does, in order. Tasks in different lanes run sid
 
 ## 2. The outline
 
-Write `docs/catervas/architecture/plans/<epic-id>.md` in this shape:
+Write `docs/catervas/architecture/plans/<epic-id>` in this shape:
 
 ```
 # Plan for <epic-id>: <title>

@@ -3,7 +3,7 @@
 
 use catervas_core::contract::{Role, TaskContract};
 use catervas_core::criteria::CriteriaLibrary;
-use catervas_core::folders::{folders_line, stale_line};
+use catervas_core::folders::{DocumentFormat, folders_line, format_line, stale_line};
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::team::{Agent, TeamPermissions};
@@ -56,6 +56,8 @@ pub struct PromptInput<'a> {
     /// The `.agent.md` twins that are behind the document for people beside them, for the Team
     /// rules' line about them (`docs/SPEC.md` 5.17).
     pub stale_twins: &'a [String],
+    /// The format the team writes new documents in, for the Team rules' line about it.
+    pub document_format: DocumentFormat,
 }
 
 /// The prompt's section titles, each written as a `## ` heading, in the one order every prompt
@@ -229,6 +231,7 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
             input.rules,
             input.role.id,
             (input.active_roles, input.stale_twins),
+            input.document_format,
         )),
         if input.criteria.criteria.is_empty() {
             None
@@ -449,6 +452,7 @@ fn rules_section(
     rules: &TeamRules,
     role: Role,
     (active_roles, stale_twins): (&[Role], &[String]),
+    format: DocumentFormat,
 ) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
@@ -476,6 +480,7 @@ fn rules_section(
             )
         }),
         Some(folders_line(role, active_roles)),
+        Some(format_line(format)),
         stale_line(stale_twins),
     ]
     .into_iter()
@@ -578,6 +583,7 @@ mod tests {
         a_criteria_library_wire, an_empty_criteria_library_wire,
     };
     use catervas_core::criteria::{CriteriaLibrary, validate_criteria};
+    use catervas_core::folders::{DocumentFormat, format_line};
     use catervas_core::governor::permissions::{PermissionTier, default_tiers};
     use catervas_core::governor::team_rules::TeamRules;
     use catervas_core::team::fixtures::an_agent_wire;
@@ -678,6 +684,7 @@ mod tests {
                 connectors: &[],
                 active_roles: &[],
                 stale_twins: &[],
+                document_format: DocumentFormat::Html,
             }
         }
     }
@@ -1104,11 +1111,14 @@ mod tests {
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert_eq!(
             section(&prompt, "Team rules"),
-            "- protected_paths: .env, **/*.pem\n\
-             - require_new_tests: no\n\
-             - max_task_budget_usd: none\n\
-             - document_paths: none (no task but a Software Developer's can be ready)\n\
-             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
+            format!(
+                "- protected_paths: .env, **/*.pem\n\
+                 - require_new_tests: no\n\
+                 - max_task_budget_usd: none\n\
+                 - document_paths: none (no task but a Software Developer's can be ready)\n\
+                 - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.\n{}",
+                format_line(DocumentFormat::Html)
+            )
         );
 
         inputs.rules = TeamRules {
@@ -1124,14 +1134,17 @@ mod tests {
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert_eq!(
             section(&prompt, "Team rules"),
-            "- protected_paths: .env\n\
-             - allowed_paths_ceiling: src/**, docs/**\n\
-             - required_criteria: test\n\
-             - require_new_tests: yes\n\
-             - max_task_budget_usd: 12.5\n\
-             - forbidden_commands: ^rm -rf /\n\
-             - document_paths: docs/**, **/*.md, CHANGELOG.md\n\
-             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
+            format!(
+                "- protected_paths: .env\n\
+                 - allowed_paths_ceiling: src/**, docs/**\n\
+                 - required_criteria: test\n\
+                 - require_new_tests: yes\n\
+                 - max_task_budget_usd: 12.5\n\
+                 - forbidden_commands: ^rm -rf /\n\
+                 - document_paths: docs/**, **/*.md, CHANGELOG.md\n\
+                 - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.\n{}",
+                format_line(DocumentFormat::Html)
+            )
         );
     }
 
@@ -1149,7 +1162,10 @@ mod tests {
             ..inputs.full(SessionPurpose::Refine)
         });
         let rules = section(&prompt, "Team rules");
-        let last = rules.lines().last().expect("a last line");
+        let last = rules
+            .lines()
+            .find(|line| line.starts_with("- folders:"))
+            .expect("the folders line");
         assert!(
             last.contains("docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/delivery/ (Scrum Master). Yours is docs/catervas/architecture/"),
             "{last}"
@@ -1168,6 +1184,24 @@ mod tests {
     }
 
     #[test]
+    fn the_rules_say_the_teams_document_format() {
+        let inputs = Inputs::new(Role::Architect, "architect");
+        for format in [DocumentFormat::Html, DocumentFormat::Markdown] {
+            let prompt = assembled(&PromptInput {
+                document_format: format,
+                ..inputs.full(SessionPurpose::Refine)
+            });
+            let rules = section(&prompt, "Team rules");
+            let lines: Vec<&str> = rules.lines().collect();
+            let folders = lines
+                .iter()
+                .position(|line| line.starts_with("- folders:"))
+                .expect("the folders line");
+            assert_eq!(lines[folders + 1], format_line(format), "{rules}");
+        }
+    }
+
+    #[test]
     fn the_team_rules_say_which_twins_are_stale() {
         let inputs = Inputs::new(Role::Architect, "architect");
         let stale = ["docs/catervas/product/roadmap.agent.md".to_string()];
@@ -1183,6 +1217,10 @@ mod tests {
                 "- stale twins: docs/catervas/product/roadmap.agent.md. Each is behind the document for people beside it, which the owner changed: read that document as well until the twin is brought up to date."
             )
         );
+        assert_eq!(
+            lines.next(),
+            Some(format_line(DocumentFormat::Html).as_str())
+        );
         assert!(
             lines
                 .next()
@@ -1195,7 +1233,7 @@ mod tests {
             rules
                 .lines()
                 .last()
-                .is_some_and(|line| line.starts_with("- folders:")),
+                .is_some_and(|line| line.starts_with("- documents:")),
             "{rules}"
         );
     }

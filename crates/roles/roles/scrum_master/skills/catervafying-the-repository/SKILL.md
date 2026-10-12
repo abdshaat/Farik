@@ -17,7 +17,7 @@ the file.
 
 ## 2. What to write
 
-Write `docs/catervas/delivery/cadence.md` with `catervas_write_folder_doc`: how this team works in
+Write `docs/catervas/delivery/cadence` with `catervas_write_folder_doc`: how this team works in
 sprints, in lines an agent can follow.
 
 - How long a sprint runs, and when the team plans, reviews and holds the retro.
@@ -38,5 +38,5 @@ integration policy says. Say in the channel that the cadence is written, with
 
 ## Each sprint
 
-At each retro, keep `cadence.md` true: change a line only when the team changed how it works, and
+At each retro, keep `cadence` true: change a line only when the team changed how it works, and
 say what changed in the retro's notes.
