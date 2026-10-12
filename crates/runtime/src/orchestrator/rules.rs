@@ -1597,6 +1597,11 @@ async fn in_progress(
     {
         return Ok(None);
     }
+    // A member that is not where the project left it passes the task over until it is located,
+    // before a sandbox is made for it.
+    let Some(resume) = resume(deps, team, &contract, assignee)? else {
+        return Ok(None);
+    };
     // A task in a private folder (6.6) has no worktree to give a sandbox, and no command to run.
     let executor: Option<Arc<dyn Executor>> = if task_private_folder(&contract).is_some() {
         None
@@ -1604,7 +1609,6 @@ async fn in_progress(
         Some(orchestrator.sandbox_for(&row.task_id, team)?)
     };
     let cwd = session_dir(deps, &contract)?;
-    let resume = resume(deps, team, &contract, assignee)?;
     let message = implement_message(&contract, &resume);
     let end = run_session(
         deps,
@@ -1633,18 +1637,22 @@ async fn in_progress(
 
 /// Where the task's work stands: its branch's tip when the branch has a commit past the
 /// integration branch, the last note written since it last moved into `in_progress`, and, when that
-/// move came from `rejected`, the rejection that sent it back.
+/// move came from `rejected`, the rejection that sent it back. None when the task's member is not
+/// where the project left it: the task waits, and the next tick tries again (ADR 0057).
 fn resume(
     deps: &OrchestratorDeps,
     team: &Team,
     contract: &TaskContract,
     agent: &Agent,
-) -> Result<Resume, OrchestratorError> {
+) -> Result<Option<Resume>, OrchestratorError> {
     let task_id = &contract.id;
     let worktree = worktree(deps, task_id);
     let last_commit = if worktree.is_dir() {
-        let repository = task_repository_of(deps, team, contract)
-            .map_err(|error| repository_refused(task_id, &error))?;
+        let repository = match task_repository_of(deps, team, contract) {
+            Ok(repository) => repository,
+            Err(TaskRepositoryError::Missing { .. }) => return Ok(None),
+            Err(error) => return Err(repository_refused(task_id, &error)),
+        };
         if repository
             .git
             .commit_count(&repository.integration_branch, &task_branch(contract))?
@@ -1686,12 +1694,12 @@ fn resume(
             _ => {}
         }
     }
-    Ok(Resume {
+    Ok(Some(Resume {
         last_commit,
         last_note,
         rejection,
         posts: posts_heard_by(deps, agent)?,
-    })
+    }))
 }
 
 /// What `agent` hears of its social posts that settled since its previous implement session
@@ -3232,10 +3240,59 @@ mod tests {
     async fn waits_while_its_member_is_missing() {
         let (harness, members) = Harness::project_folder("orch-member-gone", &["app", "infra"]);
         harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        // The same member's task in progress, and its task verifying, each with its worktree
+        // made by the member.
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        let mut moving = people.clone();
+        moving["actor"] = json!("assignee");
+        moving["requested_by"] = json!("dev-a");
+        // The verifying task's one criterion is the reviewer's, so that no run of Catervas's own
+        // is recorded while the member is away.
+        harness.file("CTV-3", "ready", |wire| {
+            wire["repo"] = json!("app");
+            wire["allowed_paths"] = json!(["src/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "done.txt is at the root.",
+                "satisfies": ["R1"],
+                "verification": { "method": "review", "rubric": ["Is done.txt at the root?"] }
+            }]);
+        });
+        harness.project.moved(
+            "CTV-3",
+            "ready",
+            "assigned",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        harness.assigned_in("CTV-2", "dev-a", "dev-b", "app");
+        for task in ["CTV-2", "CTV-3"] {
+            harness
+                .project
+                .moved(task, "assigned", "in_progress", &moving);
+            members[0]
+                .adapter()
+                .create_worktree(&harness.worktree(task), &harness.branch(task), "main")
+                .expect("the member makes the worktree");
+        }
+        let worktree = harness.worktree("CTV-3");
+        std::fs::write(worktree.join("done.txt"), "").expect("done.txt is written");
+        members[0]
+            .adapter()
+            .commit(&worktree, "Add done.txt", &["done.txt".to_string()])
+            .expect("done.txt is committed");
+        harness.project.record(
+            "CTV-3",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Added done.txt.", "written_by": "dev-a" }),
+        );
+        harness
+            .project
+            .moved("CTV-3", "in_progress", "verifying", &moving);
         let moved = std::path::PathBuf::from(format!("{}-moved", members[0].path.display()));
         let _ = std::fs::remove_dir_all(&moved);
         std::fs::rename(&members[0].path, &moved).expect("the member is moved away");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let orchestrator =
+            harness.orchestrator(harness.recorded(vec![reads_a_file(), reads_a_file()]));
         let events = harness.project.event_count();
 
         for _ in 0..2 {
@@ -3244,10 +3301,17 @@ mod tests {
         }
 
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::Verifying);
         assert!(!harness.worktree("CTV-1").exists());
         assert_eq!(harness.project.event_count(), events);
 
-        // Located again: the next tick makes the worktree in the member, where it now is.
+        // The other repository's task still moves.
+        harness.assigned_in("CTV-4", "dev-a", "dev-b", "infra");
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("CTV-4"), "{report:?}");
+
+        // Located again: each task's next tick works in the member, where it now is.
         let files = &harness.project.deps.files;
         files
             .write_repos(
@@ -3258,12 +3322,40 @@ mod tests {
                 .expect("repos"),
             )
             .expect("repos.yaml is written");
-        let report = orchestrator.tick().await.expect("the tick runs");
+        // Git keeps a worktree's way back to its repository by path, so a moved repository is told
+        // where its worktrees are.
+        git_in(
+            &moved,
+            &[
+                "worktree",
+                "repair",
+                &harness.worktree("CTV-2").display().to_string(),
+                &harness.worktree("CTV-3").display().to_string(),
+            ],
+        );
+        let alone = |task: &str| TickScope {
+            task_id: Some(task.parse().expect("an id")),
+            rules: TickRules::All,
+        };
+        let report = orchestrator
+            .tick_within(&alone("CTV-1"))
+            .await
+            .expect("the tick runs");
         let made = common_dir_of(&harness.worktree("CTV-1"));
         let expected = std::fs::canonicalize(moved.join(".git")).expect("the moved member's .git");
-        let _ = std::fs::remove_dir_all(&moved);
         assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         assert_eq!(made, expected);
+        let report = orchestrator
+            .tick_within(&alone("CTV-2"))
+            .await
+            .expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
+        let report = orchestrator
+            .tick_within(&alone("CTV-3"))
+            .await
+            .expect("the tick runs");
+        let _ = std::fs::remove_dir_all(&moved);
+        assert_eq!(acted_on(&report), Some("CTV-3"), "{report:?}");
     }
 
     #[tokio::test]
@@ -3290,8 +3382,9 @@ mod tests {
             .active_agents()
             .find(|agent| agent.id.as_str() == "dev-a")
             .expect("dev-a");
-        let resume =
-            super::resume(&orchestrator.deps, &team, &contract, agent).expect("the resume reads");
+        let resume = super::resume(&orchestrator.deps, &team, &contract, agent)
+            .expect("the resume reads")
+            .expect("the member is there");
 
         let head = resume.last_commit.expect("the commit is named");
         assert_eq!(head.subject, "the first function");

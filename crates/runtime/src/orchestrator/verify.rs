@@ -20,6 +20,7 @@ use catervas_protocol::event::{
     NoteWrittenBodyKind, ReviewRecordedBody, new_event,
 };
 use catervas_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline, folder_in};
+use catervas_store::repos::TaskRepositoryError;
 use catervas_store::{EventQuery, Git, TaskProjection};
 
 use super::design::DESIGN_REVIEW_TOOLS;
@@ -386,8 +387,12 @@ async fn design_review_first(
     {
         return Ok(Some(ran_criteria(row, ran)));
     }
-    let repository = task_repository_of(deps, team, contract)
-        .map_err(|error| repository_refused(&row.task_id, &error))?;
+    // A member that is not where the project left it passes the task over until it is located.
+    let repository = match task_repository_of(deps, team, contract) {
+        Ok(repository) => repository,
+        Err(TaskRepositoryError::Missing { .. }) => return Ok(Some(ran_criteria(row, ran))),
+        Err(error) => return Err(repository_refused(&row.task_id, &error)),
+    };
     let diff = repository
         .git
         .diff(&repository.integration_branch, &task_branch(contract))?;
@@ -480,8 +485,12 @@ async fn review(
         files = folder_changes(&folder_in(deps.tools.files.root(), folder)?, &contract.id)?;
         Changes::Folder(&files)
     } else {
-        let repository = task_repository_of(deps, team, &contract)
-            .map_err(|error| repository_refused(&row.task_id, &error))?;
+        let repository = match task_repository_of(deps, team, &contract) {
+            Ok(repository) => repository,
+            // As in the design review: the task waits until its member is located.
+            Err(TaskRepositoryError::Missing { .. }) => return Ok(ran_criteria(row, ran)),
+            Err(error) => return Err(repository_refused(&row.task_id, &error)),
+        };
         diff = repository
             .git
             .diff(&repository.integration_branch, &task_branch(&contract))?;

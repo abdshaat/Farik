@@ -28,6 +28,7 @@ use catervas_roles::{ConnectorDefinition, builtin_connector, load_role};
 use catervas_store::EventQuery;
 use catervas_store::git::{integration_branch, stale_twins};
 use catervas_store::product_plan::is_the_product_plan;
+use catervas_store::repos::TaskRepositoryError;
 use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
@@ -497,10 +498,15 @@ async fn open_preview(
 ) -> Result<Result<Arc<dyn RunningPreview>, PreviewError>, OrchestratorError> {
     let tools = &deps.tools;
     // The task branch lives in the member the task names, so its tree is read there.
-    let tree = task_repository_of(deps, team, contract)
-        .map_err(|error| repository_refused(&contract.id, &error))?
-        .git
-        .tree(&task_branch(contract))?;
+    // One that is not where the project left it ends this session through `preview_failed`.
+    let repository = match task_repository_of(deps, team, contract) {
+        Ok(repository) => repository,
+        Err(TaskRepositoryError::Missing { repo, .. }) => {
+            return Ok(Err(PreviewError::RepositoryMissing { repo }));
+        }
+        Err(error) => return Err(repository_refused(&contract.id, &error)),
+    };
+    let tree = repository.git.tree(&task_branch(contract))?;
     let cache = tools
         .files
         .root()
@@ -1820,6 +1826,61 @@ mod tests {
                 &members[0].path,
                 &["rev-parse", "feature/CTV-1^{tree}"]
             )]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_session_whose_members_preview_cannot_open() {
+        use catervas_protocol::event::EscalationRaisedBodyReason;
+
+        use crate::preview::fixtures::FakePreviews;
+
+        let (mut harness, members) =
+            Harness::project_folder_with("preview-member-gone", &["app", "infra"], browsing);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness.assigned_in("CTV-1", "iris", "ada", "app");
+        harness.project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "iris", "assignee": "iris", "reviewer": "ada" }),
+        );
+        members[0]
+            .adapter()
+            .create_worktree(&harness.worktree("CTV-1"), &harness.branch("CTV-1"), "main")
+            .expect("the member makes the worktree");
+        let moved = std::path::PathBuf::from(format!("{}-moved", members[0].path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&members[0].path, &moved).expect("the member is moved away");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+
+        let ended = run_session(deps, &team, exploring(&harness, &team, &contract)).await;
+        let _ = std::fs::remove_dir_all(&moved);
+
+        ended.expect("a member that cannot be found is an answer, not an error");
+        assert!(adapter.started().is_empty(), "no session starts");
+        assert_eq!(
+            harness.row("CTV-1").status,
+            catervas_core::contract::TaskStatus::Escalated
+        );
+        let raised = harness.events(&[EventKind::EscalationRaised]);
+        let EventBody::EscalationRaised(body) = &raised[0].body else {
+            panic!("an escalation");
+        };
+        assert_eq!(body.reason, EscalationRaisedBodyReason::Preview);
+        assert!(
+            body.detail.contains("app cannot be found"),
+            "{}",
+            body.detail
         );
     }
 
