@@ -117,7 +117,7 @@ Tasks that are not done keep their ids and gain the first member's `repo`. Serve
 
 ## Screens (mocked up first)
 
-- **First run.** On the project page, "One repository" or "Several repositories". "Several" names the project, picks two or more folders, names each member, and shows where the project folder will be, with "Change".
+- **First run.** On the project page, "Yes, one or more repositories": the owner adds one repository or several, and the page recommends repositories that work together, since Catervas works best across connected repositories. With one, the project is a one-repo project as before (ADR 0051), its notes in the repository. From the second on, the owner names the project and each member, and sees where the project folder will be, with "Change". The founder asked for this on 2026-10-12: "I want the user to be able to create a project with one or more projects. Recommend the user that catervas works best when the repos are interconnected."
 - **Settings › Repositories.** Each member with its name, path and integration branch. "Add repository", "Remove" (refused `repo_in_use` while a task of it is not done or integrated), and "Locate…" for a missing member.
 - **Board and Today.** Each task card carries its repository's name as a tag.
 - **Files.** A picker above the tree: "Project" (the top-level folders) and each member (its `repos/<name>/` folders). Mermaid renders as in phase 8.

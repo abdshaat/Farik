@@ -10,7 +10,7 @@ Depends on these steps of this phase, planned and ready, not yet executed:
 - step 06: `catervafication.get`'s `offered_repos`, `catervafication_start { repo }`
 
 Nothing of 07b or 08.
-Mockups: drawn 2026-10-12 on the canvas page "Multi-repo projects" (`docs/design/mockups/SetupSeveralRepos.dc.html`, `SettingsRepositories.dc.html`, `TodayRepos.dc.html`, `BoardRepos.dc.html`, `FilesRepos.dc.html`); waiting on the founder's approval (ADR 0032). This plan is reviewed for readiness after it.
+Mockups: drawn 2026-10-12, the setup board redrawn the same day on the founder's word ("I want the user to be able to create a project with one or more projects. Recommend the user that catervas works best when the repos are interconnected."), on the canvas page "Multi-repo projects" (`docs/design/mockups/SetupRepos.dc.html`, `SettingsRepositories.dc.html`, `TodayRepos.dc.html`, `BoardRepos.dc.html`, `FilesRepos.dc.html`); waiting on the founder's approval (ADR 0032). This plan is reviewed for readiness after it.
 Readiness confirmed by: (pending; one round, after the mockups' approval)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 36fcf33.
@@ -18,7 +18,7 @@ Signatures, not bodies; test names and what each asserts, not test code; around 
 ## Goal
 
 The owner sets up, sees and changes a project of several repositories in the web app, as the mockups draw:
-- **The first run** offers "Yes, several that work together" beside the two existing choices. The owner names the project and each repository, sees where the team's notes will live, and can change that.
+- **The first run** asks for one or more repositories in its existing choice, now "Yes, one or more repositories", and recommends repositories that work together. With one, the project is a one-repo project, as today. From the second on, the owner names the project and each repository, sees where the team's notes will live, and can change that.
 - **Settings › Repositories** lists each repository with Add, Remove and Locate….
 - **Today** says when a repository can't be found, and offers to document a repository that joined later.
 - **The board's cards and Today's "What moved"** name each task's repository, or "notes" for the team's own.
@@ -36,13 +36,22 @@ A one-repo project's pages are unchanged, except that Settings › Repositories 
 
 ### The pages
 
-- **The first run's choice** (`apps/web/src/pages/setup/SetupProject.tsx`). `Mode` (`:12`) gains `"several"`, between `"existing"` and `"new"`, labelled "Yes, several that work together" with the mockup's note. Its form, in `Choice`'s `after` slot (`packages/ui/src/Choice.tsx:5-31`), holds:
-  - **The project's name:** `TextField id="several-name"`, slugged by `slug` (`:15`).
-  - **The repositories:** a list of rows, each with a name `TextField` (labelled "Name for <path>"), its folder in `<code>`, and Remove. "Add a repository" opens `FolderBrowser mode="project"` (`FolderBrowser.tsx:19-24`) as the existing choice does (view `"repo"`). A picked folder becomes a row whose name is the folder's last segment, lower-cased, each run of other characters one `-`, trimmed of `-`, cut to 32 characters, and prefixed `r-` if it does not start with a letter. The owner may edit it.
-  - **The notes' parent:** `"Catervas"`, shown as `~/Catervas/<name>` with "Change", which opens `FolderBrowser mode="parent"` (view `"parent"`) as the new-project choice does.
-  - **Continue** is disabled until the name slugs to something, there are 2 to 16 rows, and every row's name matches step 01's `repoName` pattern, with no name twice. A hint under the list says which of these is missing, in the mockup's words.
-  - **Continue sends** `take("project.create_folder", { parent, name, repos: [{ name, path }] })` through the existing `take` (`:49-71`), whose `method` type gains `"project.create_folder"`. It lands as `project.create` does.
-  - **A refusal** is a sentence with no pointer (step 01's `SetupError::Refused`), shown once under the list as `role="alert"`, through `daemonSaid(e, "setupRefused")`. It is never placed on a row: the mockup was redrawn so (36fcf33).
+- **The first run's choice** (`apps/web/src/pages/setup/SetupProject.tsx`). `Mode` (`:12`) keeps its two values. `"existing"` is relabelled "Yes, one or more repositories" with the note "Pick the folder of each repository your team will work in." (`projectExisting`, `projectExistingNote`), and `projectLead` takes the mockup's words. Its form, in `Choice`'s `after` slot (`packages/ui/src/Choice.tsx:5-31`), shown while `"existing"` is chosen, holds:
+  - **The repositories:** a list of rows, empty at first, each with its folder in `<code>` and Remove. "Add a repository" opens `FolderBrowser mode="project"` (`FolderBrowser.tsx:19-24`, view `"project"`), whose "Use this folder" now adds a row and returns to the question instead of sending `project.open`. A folder already in the list is not added twice; the hint says so. At 16 rows "Add a repository" is hidden.
+  - **The recommendation**, always under the list, a plain paragraph (not an alert): "Catervas works best when your repositories work together, such as an app and the code that runs it in the cloud, or a set of services. Add each one your team will work across."
+  - **With one row**, the help line says each needs to be a git repository, and "Where your team keeps its notes" says, without a control, that the notes live in that repository's `docs/catervas` folder and move to a folder of their own if a second repository is added.
+  - **From two rows on**, three things appear:
+    - the project's name, `TextField id="project-name"`, slugged by `slug` (`:15`)
+    - a name `TextField` on each row (labelled "Name for <path>"), defaulted from the folder's last segment: lower-cased, each run of other characters one `-`, trimmed of `-`, cut to 32 characters, and prefixed `r-` if it does not start with a letter; the owner may edit it
+    - the notes' parent, `"Catervas"`, shown as `~/Catervas/<name>` with "Change", which opens `FolderBrowser mode="parent"` (view `"parent"`) as the new-project choice does
+
+    Removing rows back to one hides them again and keeps what was typed.
+  - **Continue** is disabled with no row. With one row it is enabled. From two rows on it is disabled until the name slugs to something and every row's name matches step 01's `repoName` pattern, with no name twice; a hint under the list says which of these is missing, in the mockup's words.
+  - **Continue sends**, through the existing `take` (`:49-71`), whose `method` type gains `"project.create_folder"`:
+    - one row: `project.open { path }`, exactly as "Use this folder" sends it today, `has_team` and its replacing page included. That page's "No" (`replaceNo`) returns to the question with the row kept, instead of to the browser.
+    - two or more: `project.create_folder { parent, name, repos: [{ name, path }] }`, which lands as `project.create` does. Step 01's `create_folder` keeps its minimum of two: one repository is a one-repo project (ADR 0051's shape), not a project folder of one.
+  - **A refusal** is a sentence with no pointer (step 01's `SetupError::Refused`, and `project.open`'s refusals), shown once under the list as `role="alert"`, through `daemonSaid(e, "setupRefused")`. It is never placed on a row: the mockup was redrawn so (36fcf33).
+  - **The existing tests of this choice change with it**, their assertions kept: `browses_folders_and_uses_one` (`setup.test.tsx:307`) and `asks_before_replacing_a_team` (`:383`) press "Add a repository" instead of Continue to open the browser, and Continue after "Use this folder"; `e2e/setup-project.spec.ts:58-63` the same. None is skipped or loosened.
 - **Settings › Repositories.** `SECTIONS` (`apps/web/src/pages/settings/SettingsLayout.tsx:17-51`) gains `repositories` after `work`, with route `/settings/repositories` (`App.tsx:98-111`) and a new `apps/web/src/pages/settings/Repositories.tsx`, which queries `repos.list`.
   - With `repos: null` it shows the one-repo text and no button (07b adds one).
   - Otherwise it shows `Table` (`packages/ui/src/Table.tsx:4-19`): name, folder, "Finished work goes to" (the branch, or "its usual branch" when `null`), and status ("Found", or "Can't find it", bold). Each row has Remove, plus Locate… on a missing one. Under the table: "Add a repository" and "Up to 16.".
@@ -75,7 +84,7 @@ A one-repo project's pages are unchanged, except that Settings › Repositories 
 docs/schemas/event.schema.json, crates/store/src/requests.rs, crates/store/src/projections.rs, crates/protocol/src/event.rs   modifies, tests: contractSummary.repo, TaskProjection.repo (Task 1)
 crates/runtime/src/daemon/web.rs, docs/schemas/rpc.schema.json   modifies, tests: tasks.list's repo (Task 1); moved.since's task_id and repo (Task 1)
 crates/store/src/activity.rs, crates/runtime/src/daemon/gates.rs   modifies, tests: Moved.task, Moved.repo (Task 1)
-apps/web/src/pages/setup/SetupProject.tsx, setup.module.css, setup.test.tsx   modifies, tests: the several-repositories choice (Task 2)
+apps/web/src/pages/setup/SetupProject.tsx, setup.module.css, setup.test.tsx   modifies, tests: the choice of one or more repositories (Task 2)
 apps/web/e2e/setup-project.spec.ts                  modifies, tests: a project folder made through the wizard (Task 2)
 apps/web/src/pages/settings/{Repositories.tsx,Repositories.module.css,RepositoryDialogs.tsx}, SettingsLayout.tsx, App.tsx, settings.test.tsx   creates, modifies, tests (Task 3)
 apps/web/src/app/refusals.ts, refusals.test.ts      modifies, tests: the repositories' codes (Task 3)
@@ -106,7 +115,7 @@ Produces:
 // packages/ui
 export function RepoTag(props: { name: string | null }): JSX.Element;   // null: "notes"
 // apps/web
-type Mode = "existing" | "several" | "new";
+type Mode = "existing" | "new";   // unchanged; "existing" takes one or more repositories
 export function repoNameOf(folder: string): string;   // the default name from a folder's last segment
 export function Repositories(): JSX.Element;
 export function AddRepository(props: { onDone: () => void; onClose: () => void }): JSX.Element;
@@ -135,28 +144,29 @@ Files: the event schema, `summary_of`, `projections.rs`, `event.rs` (the drift t
 
 - [ ] `feat(store): carry each task's repository to the board and What moved`
 
-### Task 2: The first run takes several repositories
+### Task 2: The first run takes one or more repositories
 
 Files: `SetupProject.tsx`; `setup.module.css`; `en.ts`; `setup.test.tsx`; the e2e spec.
 
-- `offers_several_repositories` (`setup.test.tsx`):
-  - The three radios read, in order, "Yes, one project folder", "Yes, several that work together" and "No, start a new one".
-  - Picking the second shows the name field, an empty list, "Add a repository", and `~/Catervas/` with Change.
-  - Continue is disabled.
+- `takes_one_or_more_repositories` (`setup.test.tsx`):
+  - The two radios read, in order, "Yes, one or more repositories" and "No, start a new one".
+  - The first, chosen, shows an empty list, "Add a repository" and the recommendation as a paragraph with no `role="alert"`.
+  - Continue is disabled with no row.
 
   RED.
+- `one_repository_opens_as_before`: "Add a repository", pick `Projects/corner-bakery`, "Use this folder": one row, no name fields, the notes line naming `docs/catervas`, and Continue enabled. Adding the same folder again leaves one row and shows the hint. Continue sends `project.open { path: "Projects/corner-bakery", no_sandbox: … }` and no `project.create_folder`. RED.
 - `adds_repositories_from_the_folder_browser`:
-  - "Add a repository" shows the folder browser.
-  - Picking `Projects/Shop App` adds a row named `shop-app`, and `Projects/2024` one named `r-2024`.
-  - Renaming the first to `app` and adding a third, then removing it, leaves two rows.
-  - Continue is enabled once the project is named `shop`.
+  - Adding `Projects/Shop App`, then `Projects/2024` shows the project name, the notes folder with Change, and rows named `shop-app` and `r-2024`.
+  - Renaming the first to `app` and adding a third, then removing it, leaves two rows; removing one more hides the name fields again.
+  - With two rows, Continue is enabled once the project is named `shop`.
 
   RED.
 - `sends_the_project_folder`: Continue sends `project.create_folder` with `{ parent: "Catervas", name: "shop", repos: [{ name: "app", path: "Projects/Shop App" }, { name: "r-2024", path: "Projects/2024" }], no_sandbox: false }`, which `refusedBy("projectCreateFolderRequest", ..)` accepts. Then it reconnects as `starts_a_new_project` (`:445`) does. RED.
 - `refuses_in_words_under_the_list`: a refusal `-32005` "that repository has a Catervas team of its own" shows under the list as an alert, with the rows unchanged. Two rows both named `app` show the duplicate-name hint, and Continue stays disabled. RED.
-- `takes_on_a_project_folder` (`e2e/setup-project.spec.ts`): with two `gitProject`s in home, the wizard's "several" choice with both added lands on `/setup/scan`, and `screenshots()` at 360 and 1280 pass. RED.
+- `browses_folders_and_uses_one` and `asks_before_replacing_a_team` are changed as the Decisions say; `asks_before_replacing_a_team` also asserts that "No" returns to the question with the row kept. Each is run before the change against the new component and fails, then passes.
+- `takes_on_a_project_folder` (`e2e/setup-project.spec.ts`): with two `gitProject`s in home, both added through "Add a repository", the wizard lands on `/setup/scan`, and `screenshots()` at 360 and 1280 pass. The existing one-folder journey is changed as the Decisions say and still lands on `/setup/scan`. RED.
 
-- [ ] `feat(web): set up a project of several repositories`
+- [ ] `feat(web): set up a project of one or more repositories`
 
 ### Task 3: Settings › Repositories
 
@@ -200,7 +210,7 @@ Files: `Files.tsx`; `files.ts`; `FileDocument.tsx`; `Shell.tsx`; `en.ts`; the te
 ### Task 6: Spec
 
 `docs/SPEC.md`, at the next revision:
-- 4.1: the first run's third choice and its form
+- 4.1: the first run's choice of one or more repositories, its recommendation, and its form from the second repository on
 - 4.4: Settings › Repositories
 - 4.2: Today's missing-repository notice and the repository card; the repository tags on the board and What moved
 - 4.5: Files' picker
@@ -215,5 +225,5 @@ Files: `Files.tsx`; `files.ts`; `FileDocument.tsx`; `Shell.tsx`; `en.ts`; the te
 cargo xtask check --integration      # or /tmp/claude-0/fullcheck.sh in the cloud container; includes pnpm check
 # expected: xtask check: ok
 pnpm --filter web e2e -- setup-project
-# expected: 2 passed
+# expected: 2 passed (the one-folder journey and takes_on_a_project_folder)
 ```

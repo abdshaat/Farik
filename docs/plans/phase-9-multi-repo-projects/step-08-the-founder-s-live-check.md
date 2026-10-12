@@ -35,7 +35,7 @@ Out of scope: Windows, where no repository is a read root in this phase (step 03
 - **The team:** the six the setup suggests, the UI/UX Designer left out as in phase 8, and a second Developer added for the cross-repository feature. Commands "Yes", sending to the online repository "No", and a daily spending limit of $25 (phase 8's).
 - **The integration policy** stays the default, `auto_merge`, which in these copies merges locally in each repository, since no copy has a remote.
 - **Each step's result** is pass, fail, finding or skipped, as phase 8's step 08 defines them. A failure is fixed on the phase branch before sign-off under the workflow's rules, with a landing review, a rebuilt `bin/catervas`, and the step run again.
-- **The screens' words** are the approved mockups' (`docs/design/mockups/*Repos*.dc.html`, `SetupSeveralRepos`, `SettingsRepositories`, `AddSecondRepository`) and steps 07 and 07b's plans. Where the built words differ only in wording that keeps the meaning, that is a pass and a note.
+- **The screens' words** are the approved mockups' (`docs/design/mockups/*Repos*.dc.html`, `SetupRepos`, `SettingsRepositories`, `AddSecondRepository`) and steps 07 and 07b's plans. Where the built words differ only in wording that keeps the meaning, that is a pass and a note.
 
 ## File map
 
@@ -62,7 +62,7 @@ Task 1's commands. Then [A] hands the founder this runbook from B on, and the tw
 
 ### B. A project of several repositories [F]
 
-1. **Set up.** The account, the computer check, then "Yes, several that work together": name the project `montage`, add both repositories and keep their names, keep `~/Catervas/montage`. Then the team as in Decisions. Pass if: setup ends on "Your team is ready", and Settings › Repositories lists both repositories as "Found".
+1. **Set up.** The account, the computer check, then "Yes, one or more repositories": add both repositories, name the project `montage`, keep both names and `~/Catervas/montage`. Then the team as in Decisions. Pass if: setup ends on "Your team is ready", and Settings › Repositories lists both repositories as "Found".
 2. **What Catervas found.** The scan page shows each repository's facts and checks. Pass if: each repository's checks are named, such as `<repo>-the-tests-pass`.
 3. **The Catervafication.** Press Start. Pass if:
    - the board shows the Product Manager's task, then each repository's Architect and Developer tasks tagged "notes", and later the system map's task
@@ -91,7 +91,7 @@ Task 1's commands. Then [A] hands the founder this runbook from B on, and the tw
 
 ### F. A one-repo project gains a second repository [F]
 
-12. **A one-repo project.** Settings › Computer › Change project…, "Yes, one project folder", a fresh copy of the product repository.
+12. **A one-repo project.** Settings › Computer › Change project…, "Yes, one or more repositories" with one repository, a fresh copy of the product repository. Pass if: the page recommends repositories that work together, and Continue opens it as a one-repo project, its notes in its own `docs/catervas`.
 13. **Add a second.** With a task in progress, the dialog says so and waits. Once nothing is in progress, add the infrastructure copy. Pass if: the page says the notes are moving and lands on Settings with both repositories; the board keeps every task with its id; Files shows the moved notes.
 14. **The old files.** Pass if: Today reminds you to merge `catervas/moved-out`; once [F] merges it (`git merge catervas/moved-out` in the product copy), the reminder goes; `catervas serve` run in the product copy opens the project folder.
 
