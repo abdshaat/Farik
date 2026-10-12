@@ -154,7 +154,7 @@ claude --version                     # at least MIN_CLAUDE_VERSION
 - the date, the start-gate sha and every later binary's sha with the fix it carries, each repository's commit, OpenMontage's entry point, the team, the daily limit and each raise
 - one table per section, B to F, each row `| Step | Result | Note |`: the step's number and name, its result (pass, fail, finding, skipped), and the founder's words or what was seen
 - the failures, each with its fix commit, its landing review, and its result when run again
-- the findings, as a list of fixes for later, none made here (B2's scan page among them)
+- the findings, as a list of fixes for later, none made here (B1's three among them)
 - the founder's sign-off, in their own words: `Signed off by the founder, <date>: "<words>"`
 
 Sign-off needs every step to be pass or finding.
