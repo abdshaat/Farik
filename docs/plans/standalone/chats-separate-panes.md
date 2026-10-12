@@ -155,7 +155,7 @@ Files: `docs/SPEC.md` (0.103 header sentence; F8), `docs/design/web-ui.md` (Chan
 
 Tests: none (docs).
 
-- [ ] `docs(spec): say the chats open at the newest message, the list apart`
+- [x] `docs(spec): say the chats open at the newest message, the list apart`
 
 ## Verification
 
