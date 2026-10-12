@@ -240,3 +240,10 @@ It holds the calm green under reduced motion. */
 	justify-content: space-around;
 	padding: var(--catervas-space-2);
 }
+
+/* Team's page, on a phone, links to the places the bar leaves out. */
+.under {
+	display: flex;
+	gap: var(--catervas-space-4);
+	margin: var(--catervas-space-4) 0 0;
+}

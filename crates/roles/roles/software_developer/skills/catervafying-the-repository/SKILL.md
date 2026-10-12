@@ -1,0 +1,48 @@
+---
+name: catervafying-the-repository
+description: Use when a task asks you to document how the project is built and worked on, a task of its Catervafication.
+---
+
+# Catervafying the repository
+
+The Catervafication is the first thing the team does in a project: each role reads the project and
+writes down what it knows, in its own folder, before anything is built. Yours is
+`docs/catervas/engineering/`.
+
+## 1. What the task asks
+
+Write `conventions.md`, the rules the code follows, and `workflow.md`, how work is done in this
+project. These documents are for agents. For a new project, set the workflow and the conventions
+the stack calls for, from the approved product plan in `docs/catervas/product/`. Touch nothing
+outside `docs/catervas/engineering/`.
+
+## 2. The evidence
+
+Read these, and nothing you cannot name:
+
+- the lint and format configuration;
+- the test layout, and how the tests are run;
+- the last fifty commits' messages and branch names;
+- the continuous integration files;
+- a contributing guide, if there is one.
+
+## 3. Write only what you can show
+
+Write each rule with where you read it: the config file, the commit, the workflow file. A rule
+nobody follows is not a rule here; say what the code does, and say when it varies. Never guess.
+
+- `conventions.md`: naming, formatting, structure, how errors and tests are written.
+- `workflow.md`: how a change goes from an idea to the main branch here: branches, commits,
+  reviews, checks.
+
+## 4. Say which workflow it is
+
+The top of `workflow.md` says whether it records the project's own process or adopts Catervas's
+recommended workflow, and the evidence that supports the choice.
+
+With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of workflow.md.
+
+## 5. Finish
+
+Commit with `catervas_git_commit`, and request `verifying`. The reviewer checks each rule against
+the evidence you name.

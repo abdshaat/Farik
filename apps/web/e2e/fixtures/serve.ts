@@ -110,6 +110,30 @@ export function gitProject(
 	);
 }
 
+/** Writes each file in the project and commits them to its branch, as the owner would from their own checkout. */
+export function commitFiles(
+	project: string,
+	files: Record<string, string>,
+	message: string,
+): void {
+	const git = (...args: string[]) =>
+		execFileSync("git", args, { cwd: project });
+	for (const [name, text] of Object.entries(files)) {
+		mkdirSync(join(project, name, ".."), { recursive: true });
+		writeFileSync(join(project, name), text);
+	}
+	git("add", ...Object.keys(files));
+	git(
+		"-c",
+		"user.name=t",
+		"-c",
+		"user.email=t@example.com",
+		"commit",
+		"-m",
+		message,
+	);
+}
+
 /**
  * `catervas-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
  * With `project: false` it starts in an empty folder, for the first-run wizard: `HOME` is `home`,

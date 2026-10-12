@@ -4,6 +4,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fs::{File, OpenOptions};
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -11,6 +13,7 @@ use std::time::Duration;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetState, SessionLedger};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
+use catervas_core::folders::human_of_twin;
 use catervas_core::generated::team::Judgment;
 pub(crate) use catervas_core::governor::done::result_awaits_human;
 use catervas_core::governor::done::{
@@ -22,7 +25,7 @@ use catervas_core::governor::gates::{
     FolderWork, Rejection, WorkState, waits_for_a_sprint,
 };
 use catervas_core::governor::readiness::{
-    JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
+    JudgmentAnswer, JudgmentReview, LanedTask, ParentState, ReadinessContext,
 };
 use catervas_core::governor::team_rules::is_ui_change;
 use catervas_core::governor::transition::{
@@ -45,6 +48,33 @@ use catervas_protocol::event::{
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use catervas_store::git::integration_branch;
+use catervas_store::git::product_plan_on;
+use catervas_store::git::stale_twins;
+use catervas_store::product_plan::{is_the_product_plan, new_project};
+
+/// Where the integration lock lives, under the project root.
+pub(crate) const INTEGRATION_LOCK: &str = ".catervas/local/integration.lock";
+
+/// Takes the integration lock (`docs/SPEC.md` 5.14), waiting for whoever holds it, process or
+/// thread; it is let go when the file is dropped. Whatever moves the root's checkout holds it: an
+/// integration, a folder document's write and the owner's decision on one.
+///
+/// # Errors
+///
+/// The error of making the file or of locking it.
+pub(crate) fn integration_lock(root: &Path) -> std::io::Result<File> {
+    let path = root.join(INTEGRATION_LOCK);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)?;
+    file.lock()?;
+    Ok(file)
+}
 pub(crate) use catervas_store::waiting::{is_move_into, last_move_into, review_passed};
 use catervas_store::{
     EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection,
@@ -533,9 +563,18 @@ impl Transitions {
         if let Some(assignment) = assignment.as_mut() {
             assignment.private_folder_busy =
                 private_folder_busy(&self.files, &board, row, assignment.assignee_role)?;
+            assignment.lane_builder = lane_builder(&self.files, team, &board, row, &contract)?;
         }
 
         let review = self.review_of(team, &contract, &changed_paths, &history).1;
+        let stale_twins = if changed_paths
+            .iter()
+            .any(|path| human_of_twin(path).is_some())
+        {
+            stale_twins(&self.git, &integration_branch(team, &self.git)?)?
+        } else {
+            Vec::new()
+        };
         let (results, completion_note, review_note) = evidence_since_work_began(&history);
         let done = with_the_humans_acceptance(
             &contract,
@@ -552,6 +591,7 @@ impl Transitions {
                     ReviewState::Passed => DesignReviewNeed::Passed,
                     _ => DesignReviewNeed::Missing,
                 },
+                stale_twins,
             },
         );
         let hours = team.policy.blocked_limit_hours.get();
@@ -631,13 +671,27 @@ impl Transitions {
         )
     }
 
+    /// Whether this is a new project whose product plan is not on the integration branch yet:
+    /// false with no `project.started`, and then git is not asked. Every caller asks this one
+    /// method (`docs/SPEC.md` 5.3).
+    ///
+    /// # Errors
+    ///
+    /// What the log or git refuses.
+    pub fn awaits_the_product_plan(&self, team: &Team) -> Result<bool, TransitionError> {
+        if new_project(&self.log)?.is_none() {
+            return Ok(false);
+        }
+        Ok(!product_plan_on(&self.git, team)?)
+    }
+
     /// The Definition of Ready's context for `contract` as it is given, which need not be the
     /// file's: the browser checks a plan the human has not saved yet. Everything else is read from
     /// the store as `context` reads it.
     ///
     /// # Errors
     ///
-    /// As `context`'s, but for git, which it does not ask.
+    /// As `context`'s, and git for a new project (`awaits_the_product_plan`).
     pub fn readiness_context(
         &self,
         team: &Team,
@@ -699,6 +753,8 @@ impl Transitions {
             requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
             judgment_review: judgment_since_written(history),
             human_approves: asks_every_contract(team) || requires_human_acceptance(contract),
+            awaits_the_product_plan: self.awaits_the_product_plan(team)?,
+            is_the_product_plan: is_the_product_plan(history),
         };
 
         Ok((budget, open_sprint, sprint_left, readiness))
@@ -799,21 +855,31 @@ impl Transitions {
         let row = row_of(board, parent)?;
         let epic = self.files.read_contract(parent)?;
         let mut remaining = epic.budget.max_cost_usd - row.cost_usd;
+        let mut lanes = Vec::new();
         for sibling in board.iter().filter(|other| {
             other.parent.as_ref() == Some(parent)
                 && other.task_id != *child
                 && other.status != TaskStatus::Cancelled
         }) {
-            remaining -= self
-                .files
-                .read_contract(&sibling.task_id)?
-                .budget
-                .max_cost_usd;
+            let sibling = self.files.read_contract(&sibling.task_id)?;
+            remaining -= sibling.budget.max_cost_usd;
+            if let Some(lane) = sibling.lane {
+                lanes.push(LanedTask {
+                    task_id: sibling.id.to_string(),
+                    lane: lane.get(),
+                    allowed_paths: sibling
+                        .allowed_paths
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
+                });
+            }
         }
         Ok(Some(ParentState {
             status: row.status,
             allowed_paths: epic.allowed_paths.iter().map(ToString::to_string).collect(),
             remaining_budget_usd: remaining,
+            lanes,
         }))
     }
 }
@@ -1185,7 +1251,7 @@ fn assignment(
     let assignee_role = role_in(team, assignee_id);
     let (reviewer_id, reviewer_role) = match ask.reviewer_id.as_deref() {
         Some(reviewer) => (reviewer.to_string(), role_in(team, reviewer)),
-        // The human reviews an epic the Product Manager broke down (5.16 item 4), and has no agent
+        // The human reviews an epic the Product Manager holds (5.16 item 4), and has no agent
         // id.
         None => (String::new(), Role::Human),
     };
@@ -1196,7 +1262,13 @@ fn assignment(
         assignee_role,
         reviewer_id,
         reviewer_role,
-        assignee_open_tasks: open_tasks(team, open_sprint.as_deref(), board, assignee_id),
+        assignee_open_tasks: open_tasks(
+            team,
+            open_sprint.as_deref(),
+            board,
+            assignee_id,
+            row.parent.as_ref(),
+        ),
         wip_limit: u32::try_from(team.policy.wip_limit_per_agent).unwrap_or(u32::MAX),
         remaining_sprint_budget_usd: sprint_left_usd,
         open_sprint,
@@ -1217,7 +1289,60 @@ fn assignment(
         // Filled by `context`, which reads the contracts of the tasks that might hold the folder.
         private_folder_busy: false,
         skips_sprints: row.skips_sprints,
+        // Filled by `context`, which reads the contracts of the tasks in the lane.
+        lane_builder: None,
     })
+}
+
+/// The agent that builds the lane of `contract` (ADR 0051): of the epic's other tasks in that lane
+/// with the same assignee role, not cancelled, whose assignee is active, the assignee of the one
+/// with the highest id. `None` for a task with no lane or no epic, and for the first task of a lane
+/// to be assigned.
+///
+/// # Errors
+///
+/// `Files` when a contract that might share the lane cannot be read.
+pub(crate) fn lane_builder(
+    files: &ProjectFiles,
+    team: &Team,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+    contract: &TaskContract,
+) -> Result<Option<String>, TransitionError> {
+    let (Some(lane), Some(parent)) = (contract.lane, &row.parent) else {
+        return Ok(None);
+    };
+    let mut builder: Option<(u64, &str)> = None;
+    for other in board.iter().filter(|other| {
+        other.task_id != row.task_id
+            && other.parent.as_ref() == Some(parent)
+            && other.status != TaskStatus::Cancelled
+    }) {
+        let Some(assignee) = other.assignee_id.as_deref().filter(|assignee| {
+            team.active_agents()
+                .any(|agent| agent.id.as_str() == *assignee)
+        }) else {
+            continue;
+        };
+        match files.read_contract(&other.task_id) {
+            Ok(theirs)
+                if theirs.lane == Some(lane) && theirs.assignee_role == contract.assignee_role =>
+            {
+                let number = other
+                    .task_id
+                    .as_str()
+                    .strip_prefix("CTV-")
+                    .and_then(|number| number.parse().ok())
+                    .unwrap_or(0);
+                if builder.is_none_or(|(highest, _)| number > highest) {
+                    builder = Some((number, assignee));
+                }
+            }
+            Ok(_) | Err(FilesError::NotFound { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(builder.map(|(_, assignee)| assignee.to_string()))
 }
 
 /// Whether another task holds the private folder `assignee_role` works in (6.6): one assigned to
@@ -1286,17 +1411,20 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
 }
 
 /// The tasks an agent holds that are neither accepted nor cancelled (5.2), leaving out one that
-/// waits for a sprint while `open_sprint` is open: it is not being worked (ADR 0028).
+/// waits for a sprint while `open_sprint` is open: it is not being worked (ADR 0028), and the epic
+/// `under`, when one is named: an epic does not hold its own tasks back from its assignee.
 pub(crate) fn open_tasks(
     team: &Team,
     open_sprint: Option<&str>,
     board: &[TaskProjection],
     agent_id: &str,
+    under: Option<&TaskId>,
 ) -> u32 {
     let held = board
         .iter()
         .filter(|row| {
             row.assignee_id.as_deref() == Some(agent_id)
+                && under != Some(&row.task_id)
                 && !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
                 && !waits_for_a_sprint(&crate::sprints::sprint_hold(team, open_sprint, row))
         })
@@ -1516,8 +1644,9 @@ mod tests {
     use catervas_core::budget::default_session_limits;
     use catervas_core::contract::fixtures::a_contract_wire;
     use catervas_core::contract::{Role, TaskStatus, validate_contract};
+    use catervas_core::governor::done::{DoneRule, evaluate_done};
     use catervas_core::governor::gates::{Blocker, DependencyState, Rejection};
-    use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
+    use catervas_core::governor::readiness::{LanedTask, ReadinessRule, evaluate_readiness};
     use catervas_core::governor::transition::TransitionRefusal;
     use catervas_core::governor::transition::TransitionRequest;
     use catervas_core::governor::transition_table::GateId;
@@ -1986,6 +2115,81 @@ mod tests {
         if held != "assigned" {
             project.moved(task, "assigned", held, &people, at(10));
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_epics_own_task_is_not_held_by_the_epic() {
+        use super::open_tasks;
+
+        let project = Project::new(
+            "epic-own-task",
+            a_team(|wire| wire["policy"]["wip_limit_per_agent"] = json!(1)),
+            at(12),
+        );
+        // `maya` holds the epic CTV-1, in progress; CTV-4 is another epic, held by `dev-a`.
+        for (epic, holder) in [("CTV-1", "maya"), ("CTV-4", "dev-a")] {
+            project.file(epic, |wire| {
+                wire["kind"] = json!("epic");
+                wire["assignee_role"] = json!("product_manager");
+                wire["reviewer_role"] = json!("human");
+            });
+            project.created_under(epic, "ready", "epic", None);
+            let people = json!({ "assignee": holder });
+            project.moved(epic, "ready", "assigned", &people, at(10));
+            project.moved(epic, "assigned", "in_progress", &people, at(10));
+        }
+        // CTV-2 is a Product Manager's task under CTV-1, CTV-3 one under CTV-4.
+        for (task, epic) in [("CTV-2", "CTV-1"), ("CTV-3", "CTV-4")] {
+            project.file(task, |wire| {
+                wire["kind"] = json!("task");
+                wire["parent"] = json!(epic);
+                wire["assignee_role"] = json!("product_manager");
+                wire["reviewer_role"] = json!("software_developer");
+            });
+            project.created_under(task, "ready", "task", Some(epic));
+        }
+
+        let board = project.projections.board().expect("the board reads");
+        let epic = "CTV-1".parse().expect("a task id");
+        assert_eq!(
+            open_tasks(&project.team, None, &board, "maya", Some(&epic)),
+            0
+        );
+        assert_eq!(open_tasks(&project.team, None, &board, "maya", None), 1);
+        // Another epic's task does not lift the exception: `maya`'s own epic still counts.
+        let other = "CTV-4".parse().expect("a task id");
+        assert_eq!(
+            open_tasks(&project.team, None, &board, "maya", Some(&other)),
+            1
+        );
+
+        let asking = |task: &str| {
+            project.ask(
+                &a_request(
+                    task,
+                    TaskStatus::Assigned,
+                    TransitionActor::ProductManager,
+                    Some("maya"),
+                ),
+                &assigning("maya", "dev-b"),
+            )
+        };
+        let outcome = asking("CTV-2");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        // Under another epic, the epic `maya` holds still counts against her limit of one.
+        let TransitionOutcome::Refused(refusal) = asking("CTV-3") else {
+            panic!("CTV-3 was assigned to a Product Manager at her limit");
+        };
+        assert!(
+            refusal_details(&refusal)
+                .iter()
+                .any(|reason| reason.contains("limit")),
+            "{refusal:?}"
+        );
     }
 
     #[test]
@@ -2518,6 +2722,70 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn fills_the_stale_twins_for_a_diff_that_changes_a_twin() {
+        let project = Project::new("stale-twins", a_team(|_| {}), at(12));
+        let product = "docs/catervas/product";
+        for file in ["spec.md", "spec.agent.md", "roadmap.md", "roadmap.agent.md"] {
+            project.repo.write(&format!("{product}/{file}"), "one\n");
+        }
+        project.repo.commit("the documents");
+        project.repo.write(&format!("{product}/spec.md"), "two\n");
+        project.repo.commit("the owner changed the spec");
+        for (task, twin) in [("CTV-1", "spec.agent.md"), ("CTV-2", "roadmap.agent.md")] {
+            project.file(task, |wire| {
+                wire["allowed_paths"] = json!(["docs/catervas/**"]);
+            });
+            project.created(task, "verifying");
+            let worktree = project
+                .repo
+                .path
+                .join(".catervas/local/worktrees")
+                .join(task);
+            project
+                .repo
+                .adapter()
+                .create_worktree(&worktree, &project.branch(task), "main")
+                .expect("the worktree is made");
+            std::fs::write(worktree.join(product).join(twin), "rewritten\n").expect("written");
+            git_in(&worktree, &["add", "-A"]);
+            git_in(&worktree, &["commit", "-m", "the twin"]);
+        }
+        let done = |task: &str| {
+            let context = project.context(
+                &a_request(
+                    task,
+                    TaskStatus::Verifying,
+                    TransitionActor::Assignee,
+                    Some("dev-a"),
+                ),
+                &TransitionAsk::default(),
+            );
+            let contract = project
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the contract");
+            let failed: Vec<DoneRule> = evaluate_done(&contract, &context.done)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .map(|failure| failure.rule)
+                .collect();
+            (context.done.stale_twins, failed)
+        };
+
+        let (stale, failed) = done("CTV-1");
+        assert_eq!(stale, [format!("{product}/spec.agent.md")]);
+        assert!(!failed.contains(&DoneRule::PairChangedAlone), "{failed:?}");
+        let (stale, failed) = done("CTV-2");
+        assert!(
+            !stale.contains(&format!("{product}/roadmap.agent.md")),
+            "{stale:?}"
+        );
+        assert!(failed.contains(&DoneRule::PairChangedAlone), "{failed:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_the_blocked_time_from_the_last_move_into_blocked() {
         let project = Project::new("blocked-time", a_team(|_| {}), at(15));
         project.file("CTV-1", |_| {});
@@ -2622,6 +2890,214 @@ mod tests {
         let context = project.context(&request, &TransitionAsk::default());
         assert!(context.readiness.remaining_sprint_budget_usd.abs() < 1e-12);
         assert!(context.readiness.remaining_sprint_budget_usd >= 0.0);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_lanes_of_an_epics_other_tasks() {
+        let project = Project::new("epic-lanes", a_team(|_| {}), at(12));
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        for (task, status, lane, path) in [
+            ("CTV-2", "ready", Some(1), "src/**"),
+            ("CTV-3", "ready", None, "src/**"),
+            ("CTV-4", "cancelled", Some(2), "src/**"),
+            ("CTV-5", "refining", Some(2), "src/x.rs"),
+        ] {
+            project.file(task, |wire| {
+                wire["parent"] = json!("CTV-1");
+                wire["allowed_paths"] = json!([path]);
+                if let Some(lane) = lane {
+                    wire["lane"] = json!(lane);
+                }
+            });
+            project.created_under(task, status, "task", Some("CTV-1"));
+        }
+        let request = a_request("CTV-5", TaskStatus::Ready, TransitionActor::Governor, None);
+        let context = project.context(&request, &TransitionAsk::default());
+        let parent = context.readiness.parent.clone().expect("the epic");
+        assert_eq!(
+            parent.lanes,
+            vec![LanedTask {
+                task_id: "CTV-2".to_string(),
+                lane: 1,
+                allowed_paths: vec!["src/**".to_string()],
+            }]
+        );
+        let contract = project
+            .files
+            .read_contract(&"CTV-5".parse().expect("a task id"))
+            .expect("the file reads");
+        assert!(
+            evaluate_readiness(&contract, &context.readiness)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .any(|failure| failure.rule == ReadinessRule::LanesOverlap)
+        );
+    }
+
+    /// A task of the lane tests: `(id, parent, lane, its contract's assignee role, status, assignee)`.
+    type LaneTask<'a> = (
+        &'a str,
+        &'a str,
+        Option<u64>,
+        &'a str,
+        &'a str,
+        Option<&'a str>,
+    );
+
+    /// The builder `lane_builder` finds for `CTV-4`, a ready task of CTV-1 in `lane`, beside `others`.
+    fn the_builder_of(
+        name: &str,
+        team: Team,
+        lane: Option<u64>,
+        others: &[LaneTask],
+    ) -> Option<String> {
+        let project = Project::new(name, team, at(12));
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        let asked: LaneTask = ("CTV-4", "CTV-1", lane, "software_developer", "ready", None);
+        for (task, parent, lane, role, status, assignee) in std::iter::once(&asked).chain(others) {
+            project.file(task, |wire| {
+                wire["parent"] = json!(parent);
+                wire["assignee_role"] = json!(role);
+                if let Some(lane) = lane {
+                    wire["lane"] = json!(lane);
+                }
+            });
+            project.created_under(task, "ready", "task", Some(parent));
+            if let Some(assignee) = assignee {
+                let people = json!({ "assignee": assignee, "reviewer": "maya" });
+                project.moved(task, "ready", status, &people, at(10));
+            } else if *status != "ready" {
+                project.moved(task, "ready", status, &json!({}), at(10));
+            }
+        }
+        let id = "CTV-4".parse().expect("a task id");
+        let board = project.projections.board().expect("the board");
+        let row = board.iter().find(|row| row.task_id == id).expect("the row");
+        let contract = project.files.read_contract(&id).expect("the file reads");
+        let found = super::lane_builder(&project.files, &project.team, &board, row, &contract)
+            .expect("the lane reads");
+        // The board's order, ascending by task number, is not what picks the builder.
+        let mut reversed = board.clone();
+        reversed.reverse();
+        assert_eq!(
+            super::lane_builder(&project.files, &project.team, &reversed, row, &contract)
+                .expect("the lane reads"),
+            found,
+            "the builder depends on the board's order"
+        );
+        found
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn finds_the_builder_of_a_lane() {
+        let dev = "software_developer";
+        let base: Vec<LaneTask> = vec![
+            ("CTV-2", "CTV-1", Some(1), dev, "accepted", Some("dev-a")),
+            ("CTV-3", "CTV-1", Some(2), dev, "in_progress", Some("dev-b")),
+        ];
+        let with = |extra: LaneTask<'static>| [base.clone(), vec![extra]].concat();
+        let team = || a_team(|_| {});
+        let builder = |name: &str, team: Team, lane, others: &[LaneTask]| {
+            the_builder_of(name, team, lane, others)
+        };
+        assert_eq!(
+            builder("lane-a", team(), Some(1), &base),
+            Some("dev-a".to_string())
+        );
+        // The highest of the lane's tasks wins.
+        let later = with(("CTV-5", "CTV-1", Some(1), dev, "in_progress", Some("dev-b")));
+        assert_eq!(
+            builder("lane-b", team(), Some(1), &later),
+            Some("dev-b".to_string())
+        );
+        let cancelled = [
+            vec![("CTV-2", "CTV-1", Some(1), dev, "cancelled", Some("dev-a"))],
+            base[1..].to_vec(),
+        ]
+        .concat();
+        assert_eq!(builder("lane-c", team(), Some(1), &cancelled), None);
+        let paused = a_team(|wire| wire["agents"][1]["status"] = json!("paused"));
+        assert_eq!(builder("lane-d", paused, Some(1), &base), None);
+        let designers = [
+            vec![(
+                "CTV-2",
+                "CTV-1",
+                Some(1),
+                "ui_ux_designer",
+                "accepted",
+                Some("dev-a"),
+            )],
+            base[1..].to_vec(),
+        ]
+        .concat();
+        assert_eq!(builder("lane-e", team(), Some(1), &designers), None);
+        // Another epic's lane 1 is another lane.
+        let elsewhere = with(("CTV-6", "CTV-9", Some(1), dev, "in_progress", Some("dev-b")));
+        assert_eq!(
+            builder("lane-f", team(), Some(1), &elsewhere),
+            Some("dev-a".to_string())
+        );
+        assert_eq!(builder("lane-g", team(), None, &base), None);
+        // The highest number wins as a number, not by filing order or by its first digit.
+        let out_of_order = [
+            vec![(
+                "CTV-10",
+                "CTV-1",
+                Some(1),
+                dev,
+                "in_progress",
+                Some("dev-b"),
+            )],
+            vec![("CTV-9", "CTV-1", Some(1), dev, "accepted", Some("dev-a"))],
+        ]
+        .concat();
+        assert_eq!(
+            builder("lane-h", team(), Some(1), &out_of_order),
+            Some("dev-b".to_string())
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn holds_an_epics_lane_to_its_builder_at_the_gate() {
+        let project = Project::new("lane-gate", a_team(|_| {}), at(12));
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        for (task, status) in [("CTV-2", "assigned"), ("CTV-3", "ready")] {
+            project.file(task, |wire| {
+                wire["parent"] = json!("CTV-1");
+                wire["lane"] = json!(1);
+            });
+            project.created_under(task, "ready", "task", Some("CTV-1"));
+            if status != "ready" {
+                let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+                project.moved(task, "ready", status, &people, at(10));
+            }
+        }
+        let request = a_request(
+            "CTV-3",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+
+        let failures = assignment_failures(&project.ask(&request, &assigning("dev-b", "dev-a")));
+        assert!(
+            failures.iter().any(|failure| failure
+                .starts_with("lane_taken: lane 1 of CTV-1 is dev-a's, who builds its tasks")),
+            "{failures:?}"
+        );
+
+        let outcome = project.ask(&request, &assigning("dev-a", "dev-b"));
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
     }
 
     #[test]
@@ -3008,6 +3484,43 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Assigned);
         assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_product_manager_assigns_its_own_docs_task_to_itself() {
+        let team = a_team(|wire| {
+            wire["agents"] = json!([
+                an_agent_wire("mira", "product_manager"),
+                an_agent_wire("kai", "marketing_specialist"),
+            ]);
+        });
+        let project = Project::new("assign-own-docs", team, at(12));
+        project.file("CTV-1", |wire| {
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+        project.created("CTV-1", "ready");
+        let outcome = project.ask(
+            &a_request(
+                "CTV-1",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("mira"),
+            ),
+            &assigning("mira", "mira"),
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let row = project
+            .projections
+            .task(&"CTV-1".parse().expect("a task id"))
+            .expect("the board reads")
+            .expect("on the board");
+        assert_eq!(row.assignee_id.as_deref(), Some("mira"));
+        assert_eq!(row.reviewer_id.as_deref(), Some("mira"));
     }
 
     #[test]
@@ -3617,6 +4130,150 @@ mod tests {
             wire["policy"]["judgment"] = json!({ "required": "always" });
             change(wire);
         })
+    }
+
+    /// The project's `project.started`, about no task.
+    fn started(project: &Project) {
+        project.append_wire(&json!({
+            "seq": 1,
+            "recorded_at": at(9).to_rfc3339(),
+            "team_id": "catervas",
+            "project_id": "catervas",
+            "kind": "project.started",
+            "body": {
+                "name": "little-oak-cakes",
+                "description": "A bakery that sells cakes online and bakes to order."
+            },
+        }));
+    }
+
+    /// Both documents of the product plan, committed on `main`.
+    fn approve_the_product_plan(project: &Project) {
+        for document in catervas_core::folders::PRODUCT_PLAN {
+            project.repo.write(document, "# A document\n");
+        }
+        project.repo.commit("approve the product plan");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_another_task_of_a_new_project_until_the_plan_is_on_main() {
+        // Without project.started nothing is refused for it, whatever git holds.
+        let old = Project::new("plan-first-old", a_team(|_| {}), at(12));
+        old.file("CTV-1", |_| {});
+        old.created("CTV-1", "refining");
+        written(&old, "CTV-1");
+        let outcome = readying(&old, "CTV-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        let project = Project::new("plan-first", a_team(|_| {}), at(12));
+        started(&project);
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
+        // The product plan's own task is marked on its task.created.
+        project.file("CTV-2", |_| {});
+        project.record(
+            "CTV-2",
+            "task.created",
+            &json!({
+                "summary": { "kind": "task", "title": "Draft the product plan", "status": "refining", "risk": "low" },
+                "created_by": "human",
+                "product_plan": true
+            }),
+            at(9),
+        );
+        written(&project, "CTV-2");
+
+        let outcome = readying(&project, "CTV-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "CTV-1");
+        assert!(
+            holds(
+                &failures,
+                "this new project's product plan is not approved yet"
+            ),
+            "{failures:?}"
+        );
+        let outcome = readying(&project, "CTV-2");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        approve_the_product_plan(&project);
+        let outcome = readying(&project, "CTV-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn asks_the_owner_about_the_product_plans_contract_under_all() {
+        // The product plan's contract is the owner's to approve like any other under `all`: it
+        // needs the owner's summary and waits for the owner's word. Only the wait for the plan to
+        // be on main is lifted for it.
+        let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
+        let project = Project::new("plan-asks-all", all, at(12));
+        started(&project);
+        for (task, summary) in [
+            (
+                "CTV-1",
+                Some("A bakery site, so that people can order cakes."),
+            ),
+            ("CTV-2", None),
+        ] {
+            project.file(task, |wire| {
+                if let Some(summary) = summary {
+                    wire["summary"] = json!(summary);
+                }
+            });
+            project.record(
+                task,
+                "task.created",
+                &json!({
+                    "summary": { "kind": "task", "title": "Draft the product plan", "status": "refining", "risk": "low" },
+                    "created_by": "human",
+                    "product_plan": true
+                }),
+                at(9),
+            );
+            written(&project, task);
+        }
+        // With its summary the contract passes the checks and waits for the owner alone.
+        let outcome = readying(&project, "CTV-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "CTV-1");
+        assert!(
+            holds(
+                &failures,
+                "needs the human's acceptance before it leaves refining"
+            ),
+            "{failures:?}"
+        );
+        assert!(
+            !holds(&failures, "product plan is not approved yet"),
+            "{failures:?}"
+        );
+        // Without one the owner has nothing to read: the summary is asked of it as of any plan.
+        let outcome = readying(&project, "CTV-2");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "CTV-2");
+        assert!(holds(&failures, "no summary for the user"), "{failures:?}");
     }
 
     /// A `contract.written` of `task` by the Product Manager.

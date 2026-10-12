@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Stepper } from "./Stepper.tsx";
 import { expectNoAxeViolations } from "./test/axe.ts";
@@ -20,5 +20,30 @@ describe("Stepper", () => {
 		]);
 		expect(screen.getByText("Step 2 of 3")).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("marks_the_steps_behind_as_done", () => {
+		const steps = ["One", "Two", "Three", "Four"];
+		const { unmount } = render(<Stepper steps={steps} current={2} />);
+		const done = () =>
+			screen
+				.getAllByRole("listitem")
+				.map((item) => within(item).queryByText(", done") !== null);
+		expect(done()).toEqual([true, true, false, false]);
+		expect(
+			screen
+				.getAllByRole("listitem")
+				.map((i) => i.getAttribute("aria-current")),
+		).toEqual([null, null, "step", null]);
+		unmount();
+
+		// One past the last: every step is done and none is current.
+		render(<Stepper steps={steps} current={4} />);
+		expect(done()).toEqual([true, true, true, true]);
+		expect(
+			screen
+				.getAllByRole("listitem")
+				.map((i) => i.getAttribute("aria-current")),
+		).toEqual([null, null, null, null]);
 	});
 });

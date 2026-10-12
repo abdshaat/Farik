@@ -38,7 +38,7 @@
       "items": {
         "$ref": "#/$defs/templateAgent"
       },
-      "description": "Each agent becomes an active one where the template is used. validate_template holds the team they make to validate_team's rules: unique ids, an active Product Manager and Software Developer, a named judge on the team."
+      "description": "Each agent becomes an active one where the template is used. validate_template holds the team they make to validate_team's rules: unique ids, an active Product Manager, a named judge on the team."
     },
     "policy": {
       "$ref": "#/$defs/templatePolicy"

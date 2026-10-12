@@ -1,4 +1,4 @@
-# The Architect's kit: five skills and the services it only reads. Context7 signs in (route 1,
+# The Architect's kit: seven skills and the services it only reads. Context7 signs in (route 1,
 # ADR 0035); Grep needs no account; OSV is Catervas's own server, started by `catervas connector osv`
 # (ADR 0038); GitHub is reached with a key the user pastes, until Catervas Cloud signs users in
 # (ADR 0044, step 07c), and its headers keep the server to code and pull requests, read only.
@@ -13,6 +13,8 @@ skills:
   - security-review
   - setting-performance-budgets
   - using-architecture-sources
+  - planning-in-lanes
+  - catervafying-the-repository
 connectors:
   - name: context7
     transport: http

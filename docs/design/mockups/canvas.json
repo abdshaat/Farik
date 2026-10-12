@@ -1105,6 +1105,114 @@
       "title": "Phone: start a sprint, which approves the deploys planned into it (step 11b)",
       "page": "devops",
       "is_interactive": true
+    },
+    "Files.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 1008,
+      "title": "Files: the team’s folders, Ada’s overview with its diagram, a folder with nothing yet (phase 8 step 04)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "FilesForYou.dc.html": {
+      "x": 1480,
+      "y": 0,
+      "w": 1280,
+      "h": 802,
+      "title": "Files: the roadmap “For you”, a change waiting for your approval (phase 8 step 04)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "FilesEdit.dc.html": {
+      "x": 2960,
+      "y": 0,
+      "w": 1280,
+      "h": 972,
+      "title": "Files: editing the roadmap, Write and Preview, Save and Cancel (phase 8 step 04)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "FilesChanged.dc.html": {
+      "x": 4440,
+      "y": 0,
+      "w": 1280,
+      "h": 1104,
+      "title": "Files: the roadmap changed while you were editing, Reload (phase 8 step 04)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "FilesStale.dc.html": {
+      "x": 5920,
+      "y": 0,
+      "w": 1280,
+      "h": 930,
+      "title": "Files: the roadmap “For the team”, Mira bringing it up to date (phase 8 step 04)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "PhoneFiles.dc.html": {
+      "x": 7400,
+      "y": 0,
+      "w": 390,
+      "h": 1136,
+      "title": "Phone: Files, the picker above the document (phase 8 step 04)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "DocumentApproval.dc.html": {
+      "x": 0,
+      "y": 1436,
+      "w": 1280,
+      "h": 1697,
+      "title": "Today: product plan changes to approve, from the sprint review (phase 8 step 03)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "PhoneDocumentApproval.dc.html": {
+      "x": 1480,
+      "y": 1436,
+      "w": 390,
+      "h": 1693,
+      "title": "Phone: product plan changes to approve (phase 8 step 03)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "ProductInterview.dc.html": {
+      "x": 2070,
+      "y": 1436,
+      "w": 1280,
+      "h": 1665,
+      "title": "A new project: Mira’s questions in her chat, then Draft the product plan (phase 8 step 06)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "ProductPlanApproval.dc.html": {
+      "x": 3550,
+      "y": 1436,
+      "w": 1280,
+      "h": 1909,
+      "title": "Today for a new project: your product plan to approve (phase 8 step 06)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "CatervaficationOffer.dc.html": {
+      "x": 5030,
+      "y": 1436,
+      "w": 1280,
+      "h": 823,
+      "title": "End of setup for an existing project: start with a Catervafication sprint (phase 8 step 07)",
+      "page": "folders",
+      "is_interactive": true
+    },
+    "CatervaficationToday.dc.html": {
+      "x": 6510,
+      "y": 1436,
+      "w": 1280,
+      "h": 854,
+      "title": "Today after Later: your team hasn’t documented this project yet (phase 8 step 07)",
+      "page": "folders",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -1251,6 +1359,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_folders": {
+      "kind": "title1",
+      "maxW": 7790,
+      "page": "folders",
+      "text": "Catervas folders: the Files page, approving the team’s documents, a new project’s product plan, and Catervafication",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -1376,7 +1493,19 @@
     "DoneOnItsOwnDeploy.dc.html",
     "PhoneDoneOnItsOwnDeploy.dc.html",
     "PhoneDeployApproval.dc.html",
-    "PhoneSprintStartDeploys.dc.html"
+    "PhoneSprintStartDeploys.dc.html",
+    "Files.dc.html",
+    "FilesForYou.dc.html",
+    "FilesEdit.dc.html",
+    "FilesChanged.dc.html",
+    "FilesStale.dc.html",
+    "PhoneFiles.dc.html",
+    "DocumentApproval.dc.html",
+    "PhoneDocumentApproval.dc.html",
+    "ProductInterview.dc.html",
+    "ProductPlanApproval.dc.html",
+    "CatervaficationOffer.dc.html",
+    "CatervaficationToday.dc.html"
   ],
   "pages": [
     {
@@ -1442,6 +1571,10 @@
     {
       "id": "devops",
       "name": "DevOps Engineer"
+    },
+    {
+      "id": "folders",
+      "name": "Catervas folders"
     }
   ],
   "title": "Catervas web UI mockup"

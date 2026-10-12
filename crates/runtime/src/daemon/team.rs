@@ -1592,9 +1592,6 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["agents"] if message.starts_with("A team needs an active Product Manager") => {
             "needs_product_manager"
         }
-        ["agents"] if message.starts_with("A team needs an active Software Developer") => {
-            "needs_developer"
-        }
         ["agents"] if message.starts_with("an agent id names") => "repeated_id",
         ["agents"] if message.ends_with(WORKED) => "worked",
         ["agents", _, "display_name"] => "name",
@@ -2308,15 +2305,17 @@ pub(super) mod tests {
                 ("role", "testing-per-stack", "in_use"),
                 ("role", "answering-a-review", "in_use"),
                 ("role", "using-docs-and-the-browser", "in_use"),
+                ("role", "catervafying-the-repository", "in_use"),
+                ("role", "catervas-recommended-workflow", "in_use"),
                 ("team", "api-style", "in_use"),
                 ("agent", "notes", "in_use"),
             ]
         );
         assert!(
-            got["skills"][8]["bytes"].as_u64().unwrap_or_default() > 0,
+            got["skills"][10]["bytes"].as_u64().unwrap_or_default() > 0,
             "{got}"
         );
-        assert_eq!(got["skills"][8]["description"], "Use when notes.");
+        assert_eq!(got["skills"][10]["description"], "Use when notes.");
         let ghost = rpc(
             &harness.daemon,
             "query",
@@ -3834,8 +3833,8 @@ pub(super) mod tests {
                 {
                     "id": "pm",
                     "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
-                    "tiers": ["read", "network"],
-                    "base_tiers": ["read", "network"],
+                    "tiers": ["read", "network", "write_workspace", "git_local"],
+                    "base_tiers": ["read", "network", "write_workspace", "git_local"],
                 },
                 {
                     "id": "dev-a",
@@ -3924,7 +3923,8 @@ pub(super) mod tests {
                 team["agents"][1]["role"] = json!("architect");
                 team["agents"][2]["role"] = json!("architect");
             }),
-            ["/agents needs_developer"]
+            Vec::<String>::new(),
+            "a team with no Developer is a valid one (ADR 0055)"
         );
         assert_eq!(
             codes(&|team| {
@@ -4067,13 +4067,14 @@ pub(super) mod tests {
             "avatar": "extra-1", "status": "active",
         });
 
-        // Another role in the only Developer's place leaves the team with none: nothing changes.
+        // Another role in the only Product Manager's place leaves the team with none: nothing
+        // changes.
         let mut wrong = newcomer.clone();
         wrong["role"] = json!("architect");
         let reply = rpc(
             &harness.daemon,
             "agent.replace",
-            &json!({ "agent_id": "dev-a", "newcomer": wrong }),
+            &json!({ "agent_id": "pm", "newcomer": wrong }),
         );
         assert_eq!(reply["error"]["code"], -32005, "{reply}");
         assert_eq!(reply["error"]["data"]["errors"][0]["path"], "/agents");

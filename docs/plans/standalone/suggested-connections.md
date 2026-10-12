@@ -2,7 +2,7 @@
 
 Status: done
 Branch: `feat/suggested-connectors` (work outside a phase, its own pull request to `main`)
-Spec: `docs/SPEC.md` 6.7 (role kits; "Suggested connections on Today", added in 0.90), F9
+Spec: `docs/SPEC.md` 6.7 (role kits; "Suggested connections on Today", added in 0.105), F9
 Depends on: `origin/main` at `15d67ec2` (#35 merged; phase 7 in #22, the change-project plan in #32)
 Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-11 (one round, READY, against `docs/standards/workflow.md` stage 2; its fourteen findings are folded into this revision)
 
@@ -26,7 +26,7 @@ Signatures, not bodies; test names and what each asserts, not test code (ADR 000
 - The row's visible text: `<strong id="suggestion-<agent>-<service>">{title}</strong>` then `{agent name} · {about}` then `<InfoTip id="suggestion-<agent>-<service>-info">{why}</InfoTip>`, mirroring `KitRow` (`AgentEdit.tsx:886`). Strings: `suggestionsTitle` "Suggested connections" (the heading and the list's `aria-label`), `suggestionsConnect` "Connect", `suggestionsNotNow` "Not now", `suggestionsShowAll` "Show all {count}", `suggestionsShowFewer` "Show fewer", `suggestionsLine` "{agent} · {about}", in `apps/web/src/strings/en.ts`; none exists today. The section sits between the Waiting section and `<SellerMailSections>` (`Today.tsx:323-325`). The Connect link's accessible name is `suggestionsConnect` with `aria-describedby` on the row's title, as `WaitingRow` does.
 - Four rows show at first (`SUGGESTIONS_SHOWN = 4`); the toggle is a `Button` with `expanded` (its `aria-expanded`) and `controls` naming the list. Chose four over all: the kits hold up to seven services per role, and Today is quiet below the band (`docs/design/web-ui.md`).
 - Not now removes the row at once (the page's own state) and sends `connector_suggestion.hide`; a refusal or failure puts the row back and shows the message under the list in `muted`. No optimistic hide survives a failed call.
-- No ADR: no spec decision is reversed, and the new file follows ADR 0053's precedent. `docs/SPEC.md` 6.7 gains a paragraph and F9 a sentence, revision 0.90 (main reached 0.88 with `today-moved-cards` while this branch was open, and `feat/predefined-teams` holds 0.89).
+- No ADR: no spec decision is reversed, and the new file follows ADR 0053's precedent. `docs/SPEC.md` 6.7 gains a paragraph and F9 a sentence, revision 0.105 (0.90 when planned; renumbered on 2026-10-12, when `main` had reached 0.103 and `fix/chats-separate-panes` held 0.104).
 
 ## File map
 
@@ -130,7 +130,7 @@ Files: modified `apps/web/src/pages/AgentEdit.tsx`; tested by `apps/web/src/page
 
 ### Task 6: the record
 
-Files: modified `docs/SPEC.md` (the header's revision 0.90 note; 6.7 a paragraph "Suggested connections on Today (added in 0.90; standalone plan `suggested-connections`)" after "Service logos and info buttons", saying what is suggested and left out, the file, the command and its refusal, `hidden_suggestions`, `?connect=`; F9 one sentence naming the command and the field), `docs/design/suggested-connections.md` (status: built), this plan (status and ticks).
+Files: modified `docs/SPEC.md` (the header's revision 0.105 note; 6.7 a paragraph "Suggested connections on Today (added in 0.105; standalone plan `suggested-connections`)" after "Service logos and info buttons", saying what is suggested and left out, the file, the command and its refusal, `hidden_suggestions`, `?connect=`; F9 one sentence naming the command and the field), `docs/design/suggested-connections.md` (status: built), this plan (status and ticks).
 
 - [x] `docs(spec): suggested connections on Today, revision 0.90`
 

@@ -580,7 +580,7 @@ mod tests {
                 }),
             );
             project.filed_with("CTV-1", "assigned", "task", None, |wire| {
-                wire["allowed_paths"] = json!(["docs/marketing/**"]);
+                wire["allowed_paths"] = json!(["docs/catervas/marketing/**"]);
                 wire["assignee_role"] = json!("marketing_specialist");
                 wire["reviewer_role"] = json!("product_manager");
             });

@@ -570,6 +570,7 @@ fn told_at_listen<T: Send + 'static>(
                 daemon.register_session(SessionRegistration {
                     session_id: "probe".to_string(),
                     web: catervas_core::governor::sites::WebAccess::Open,
+                    reads: catervas_core::folders::ReadAccess::Open,
                     agent_id: "probe".to_string(),
                     task_id: None,
                     purpose: SessionPurpose::Triage,
@@ -1238,6 +1239,7 @@ fn creates_a_project_paused_with_its_first_request() {
     let description = "A shop for bread, with an order page and a daily menu.";
     let create = |description: &str| json!({ "parent": "", "name": "bakery", "description": description, "no_sandbox": false });
 
+    let padded = format!("  {description}\n");
     let short = call(
         serving.port,
         &serving.cookie,
@@ -1255,7 +1257,7 @@ fn creates_a_project_paused_with_its_first_request() {
         serving.port,
         &serving.cookie,
         "project.create",
-        create(description),
+        create(&padded),
     );
     let root = home.join("bakery").canonicalize().expect("bakery is made");
     assert_eq!(
@@ -1284,10 +1286,26 @@ fn creates_a_project_paused_with_its_first_request() {
         })
         .expect("the log reads");
     assert_eq!(paused.len(), 1);
+    // The project is recorded as new, with the paragraph trimmed.
+    assert_eq!(
+        catervas_store::product_plan::new_project(&log).expect("the log reads"),
+        Some(catervas_store::product_plan::NewProject {
+            name: "bakery".to_string(),
+            description: description.to_string(),
+        })
+    );
+    let started = log
+        .read(&catervas_store::EventQuery {
+            kinds: vec![EventKind::ProjectStarted],
+            ..catervas_store::EventQuery::default()
+        })
+        .expect("the log reads");
+    assert_eq!(started.len(), 1);
     let contract = catervas_store::files::ProjectFiles::open(root.clone())
         .read_contract(&"CTV-1".parse().expect("an id"))
         .expect("the first request is filed");
-    assert_eq!(contract.intent.as_str(), description);
+    // The request keeps the paragraph as it was sent; only the event trims it.
+    assert_eq!(contract.intent.as_str(), padded);
 }
 
 #[test]
@@ -1338,6 +1356,14 @@ fn takes_on_the_chosen_project_on_the_same_port() {
     )
     .expect("JSON");
     assert_eq!(written["last_project"], json!(root.display().to_string()));
+    // Taking on a repository does not make it a new project.
+    let log =
+        catervas_store::open_event_log(&root.join(".catervas/local/catervas.db"), project::at())
+            .expect("the log opens");
+    assert_eq!(
+        catervas_store::product_plan::new_project(&log).expect("the log reads"),
+        None
+    );
 }
 
 #[test]

@@ -13,13 +13,13 @@ const tone: Record<Role, string> = {
 	procurement_specialist: styles.procurementSpecialist as string,
 };
 
-export function RoleTag({ role }: { role: Role }) {
+export function RoleTag({ role, label }: { role: Role; label?: string }) {
 	return (
 		<abbr
 			className={`${styles.tag} ${tone[role]}`}
 			title={uiStrings.roleName[role]}
 		>
-			{uiStrings.roleShort[role]}
+			{label ?? uiStrings.roleShort[role]}
 		</abbr>
 	);
 }

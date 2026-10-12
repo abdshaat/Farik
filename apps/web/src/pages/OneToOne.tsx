@@ -10,7 +10,7 @@ import {
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
-import { useEvents } from "../app/store.ts";
+import { useEvents, useQuery } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
 import { sendOnEnter } from "../components/MentionBox.tsx";
 import { renderMessageText } from "../components/MessageText.tsx";
@@ -18,6 +18,9 @@ import { useWide } from "../shell/Shell.tsx";
 import { t } from "../strings/t.ts";
 import channel from "./Channel.module.css";
 import styles from "./Chats.module.css";
+import { useCommand } from "./dialogs/StartSprint.tsx";
+import { Heard, type HeardSummary } from "./Heard.tsx";
+import type { ProductPlanState } from "./ProductPlanCard.tsx";
 import type { Agent } from "./setup/TeamSetup.tsx";
 
 type Proposal = { title: string; text: string };
@@ -29,6 +32,7 @@ type ChatMessage = {
 	text: string;
 	inReplyTo: number | null;
 	request: Proposal | null;
+	heard: HeardSummary | null;
 	sentAs: string | null;
 };
 type Because =
@@ -77,6 +81,14 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 	const [round, setRound] = useState(0);
 	const id = agent.id;
 	const name = agent.displayName;
+	// Only the Product Manager interviews a new project's owner.
+	const plan = useQuery<ProductPlanState>(
+		"product_plan.state",
+		{},
+		agent.role !== "product_manager",
+	).data;
+	const interviewing = !!plan?.newProject && !plan.approved;
+	const newestOfHers = messages.findLast((m) => m.author === id)?.seq;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: round asks for the page again
 	useEffect(() => {
@@ -144,7 +156,14 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 						<RoleTag role={agent.role} />
 					</div>
 					<p className={channel.muted}>
-						{t(wide ? "chatsIntro" : "chatsIntroPhone", { name })}
+						{t(
+							interviewing
+								? "chatsInterviewIntro"
+								: wide
+									? "chatsIntro"
+									: "chatsIntroPhone",
+							{ name },
+						)}
 					</p>
 				</div>
 				<Link to="/channel" className={styles.back}>
@@ -158,6 +177,11 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 						message={m}
 						agents={agents}
 						onSent={(taskId) => markSent(m.seq, taskId)}
+						action={
+							interviewing && m.seq === newestOfHers ? (
+								<DraftPlan taskId={plan?.task?.taskId ?? null} name={name} />
+							) : undefined
+						}
 					/>
 				))}
 			</ol>
@@ -187,6 +211,7 @@ function fromEvent(e: Event, chat: string): ChatMessage | undefined {
 		text: string;
 		inReplyTo?: number;
 		request?: Proposal;
+		heard?: HeardSummary;
 	};
 	if (body.chat !== chat) return undefined;
 	return {
@@ -196,6 +221,7 @@ function fromEvent(e: Event, chat: string): ChatMessage | undefined {
 		text: body.text,
 		inReplyTo: body.inReplyTo ?? null,
 		request: body.request ?? null,
+		heard: body.heard ?? null,
 		sentAs: null,
 	};
 }
@@ -250,10 +276,13 @@ function Row({
 	message,
 	agents,
 	onSent,
+	action,
 }: {
 	message: ChatMessage;
 	agents: Agent[];
 	onSent: (taskId: string) => void;
+	/** What the owner can do about this reply: it sits inside "What I heard", else under the text. */
+	action?: ReactNode;
 }) {
 	const mine = message.author === "human";
 	const agent = agents.find((a) => a.id === message.author);
@@ -283,6 +312,7 @@ function Row({
 				<p className={`${channel.text} ${styles.lines}`}>
 					{renderMessageText(message.text, agents, [])}
 				</p>
+				{message.heard ? <Heard heard={message.heard}>{action}</Heard> : action}
 				{message.request && (
 					<ProposalBox
 						seq={message.seq}
@@ -294,6 +324,37 @@ function Row({
 				)}
 			</div>
 		</li>
+	);
+}
+
+/**
+ * "Draft the product plan", which files it as the team's first task; once filed, the task it is
+ * drafted as. A refusal shows its words under the button.
+ */
+function DraftPlan({ taskId, name }: { taskId: string | null; name: string }) {
+	const { busy, refusal, send } = useCommand(() => {}, { name });
+	if (taskId)
+		return (
+			<p role="status" className={styles.drafting}>
+				{t("draftPlanSent", { id: taskId })}
+			</p>
+		);
+	return (
+		<div className={styles.draft}>
+			<Button
+				kind="primary"
+				busy={busy}
+				onClick={() => send({ command: "product_plan_draft", body: {} })}
+			>
+				{t("draftPlan")}
+			</Button>
+			<p>{t("draftPlanLine")}</p>
+			{refusal && (
+				<p role="alert" className={channel.alert}>
+					{refusal}
+				</p>
+			)}
+		</div>
 	);
 }
 

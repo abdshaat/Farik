@@ -1,17 +1,15 @@
-//! The work tools: transitions, assignment, blocks, criterion results, notes, questions, and
-//! product documents.
+//! The work tools: transitions, assignment, blocks, criterion results, notes and questions.
 
 use std::str::FromStr;
 
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus, wire_method};
-use catervas_core::governor::gates::{Blocker, Rejection, check_product_doc_write};
+use catervas_core::governor::gates::{Blocker, Rejection};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::{TransitionActor, find_transitions};
 use catervas_protocol::event::{
     CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, NoteWrittenBody,
-    NoteWrittenBodyKind, ProductDocWrittenBody, QuestionAskedBody,
+    NoteWrittenBodyKind, QuestionAskedBody,
 };
-use catervas_store::EventQuery;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -19,7 +17,7 @@ use serde_json::{Value, json};
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, actor_wire, contract_accepted, refusal_details, refusal_wire,
+    TransitionAsk, TransitionOutcome, actor_wire, refusal_details, refusal_wire,
 };
 
 /// What is in the way, for a block.
@@ -146,16 +144,6 @@ pub(crate) struct ChoiceInput {
     hint: Option<String>,
 }
 
-/// `catervas_write_product_doc`'s input.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct WriteProductDocInput {
-    /// Where under `.catervas/product/`.
-    path: String,
-    /// The document.
-    content: String,
-}
-
 /// Asks the governor to move the session's task, as the first actor of the matching rows the
 /// caller is: the assignee or the reviewer the board names, or the Product Manager or Scrum Master
 /// by role. When it is none of them nothing is asked, and nothing is recorded.
@@ -265,9 +253,12 @@ pub(super) fn record_criterion(
     let task = call.task()?;
     let (contract, _) = call.contract(task)?;
     let me = Some(call.agent_id());
-    let run_by = if contract.assignee.as_deref() == me {
+    let is_reviewer = contract.reviewer.as_deref() == me;
+    // An agent holding both slots, a Product Manager reviewing its own docs task, runs the
+    // criterion as the reviewer in its review session and as the assignee in any other.
+    let run_by = if contract.assignee.as_deref() == me && !(is_reviewer && call.in_review()) {
         CriterionRecordedBodyRunBy::Assignee
-    } else if contract.reviewer.as_deref() == me {
+    } else if is_reviewer {
         CriterionRecordedBodyRunBy::Reviewer
     } else {
         return Err(Refusal::NotTheRunner {
@@ -325,6 +316,12 @@ pub(super) fn write_note(call: &Call<'_>, input: WriteNoteInput) -> Result<Value
         NoteKind::Review => (NoteWrittenBodyKind::Review, is_reviewer),
         NoteKind::Progress => (NoteWrittenBodyKind::Progress, is_assignee || is_reviewer),
     };
+    if kind == NoteWrittenBodyKind::Completion && allowed && is_reviewer && call.in_review() {
+        return Err(Refusal::CompletionInReview.into());
+    }
+    if kind == NoteWrittenBodyKind::Review && allowed && is_assignee && !call.in_review() {
+        return Err(Refusal::ReviewInImplement.into());
+    }
     if !allowed {
         return Err(Refusal::NotTheNotesWriter {
             agent_id: call.agent_id().to_string(),
@@ -387,43 +384,6 @@ pub(super) fn ask_human(call: &Call<'_>, input: AskHumanInput) -> Result<Value, 
         "question_id": event.envelope.seq,
         "next": "end your turn: the human's answer starts the next session",
     }))
-}
-
-/// Writes a product document for the session's epic when `check_product_doc_write` allows it: the
-/// user's approval is a `human.accepted { contract }` of the contract the epic has now.
-pub(super) fn write_product_doc(
-    call: &Call<'_>,
-    input: WriteProductDocInput,
-) -> Result<Value, ToolError> {
-    let task = call.task()?;
-    let (contract, row) = call.contract(task)?;
-    let history = call
-        .deps()
-        .log
-        .read(&EventQuery {
-            task_id: Some(task.clone()),
-            ..EventQuery::default()
-        })
-        .map_err(failed)?;
-    check_product_doc_write(
-        contract.kind,
-        row.status,
-        contract_accepted(&history),
-        call.role(),
-    )
-    .map_err(|details| Refusal::GateFailed { details })?;
-    call.deps()
-        .files
-        .write_product_doc(&input.path, &input.content)
-        .map_err(failed)?;
-    let event = call.append(
-        Some(task),
-        EventBody::ProductDocWritten(ProductDocWrittenBody {
-            path: input.path,
-            written_by: call.agent_id().to_string(),
-        }),
-    )?;
-    Ok(json!({ "seq": event.envelope.seq }))
 }
 
 /// The first actor, among the rows from the contract's status to `to`, that the caller is.
@@ -719,6 +679,83 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_a_self_review_as_the_reviewers_run() {
+        use crate::session::SessionPurpose::{Implement, Verify};
+
+        let project = a_project("tools-self-review");
+        project.filed_with("CTV-1", "assigned", "task", None, |wire| {
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The plan reads well.",
+                "satisfies": ["R1"],
+                "verification": { "method": "review", "rubric": ["Is the plan clear?"] }
+            }]);
+        });
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm", "reviewer": "pm" }),
+        );
+        let record = |purpose| {
+            project
+                .call_in(
+                    purpose,
+                    "pm",
+                    Some("CTV-1"),
+                    "catervas_record_criterion_result",
+                    json!({ "criterion_id": "C1", "passed": true, "evidence": "read it through" }),
+                )
+                .expect("the criterion is recorded");
+            let recorded = project.events(&[EventKind::CriterionRecorded]);
+            let Some(EventBody::CriterionRecorded(body)) = recorded.last().map(|event| &event.body)
+            else {
+                panic!("a criterion.recorded");
+            };
+            body.run_by.to_string()
+        };
+        assert_eq!(record(Verify), "reviewer");
+        assert_eq!(record(Implement), "assignee");
+
+        let summary = "Wrote the plan and checked it against the request.\n\nNothing is left out.";
+        let note = |purpose| {
+            project.call_in(
+                purpose,
+                "pm",
+                Some("CTV-1"),
+                "catervas_write_note",
+                json!({ "kind": "completion", "text": summary }),
+            )
+        };
+        let reason = refused_with(note(Verify), "completion_in_review");
+        assert_eq!(
+            reason,
+            "completion_in_review: a review session writes a review note; the completion note is written in the implement session"
+        );
+        note(Implement).expect("the implement session writes its completion note");
+
+        // The review note is the fresh session's: the session that did the work cannot write it.
+        let review = |purpose, agent| {
+            project.call_in(
+                purpose,
+                agent,
+                Some("CTV-1"),
+                "catervas_write_note",
+                json!({ "kind": "review", "text": summary }),
+            )
+        };
+        let reason = refused_with(review(Implement, "pm"), "review_in_implement");
+        assert_eq!(
+            reason,
+            "review_in_implement: the review note is written in a fresh review session, not the session that did the work"
+        );
+        review(Verify, "pm").expect("the review session writes its review note");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_a_criterion_result_as_its_runner() {
         let project = a_project("tools-criterion");
         in_progress(&project);
@@ -984,60 +1021,6 @@ mod tests {
             panic!("a question");
         };
         assert_eq!(body.asked_by, "pm");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_product_document_before_the_user_approves_the_epic() {
-        let project = a_project("tools-product-doc");
-        project.filed("CTV-1", "in_progress", "epic", None);
-        let reason = refused_with(
-            project.call(
-                "pm",
-                Some("CTV-1"),
-                "catervas_write_product_doc",
-                json!({ "path": "prd.md", "content": "# Sign-in" }),
-            ),
-            "gate_failed",
-        );
-        assert!(reason.contains("has not approved"), "{reason}");
-        assert!(
-            !project.repo.path.join(".catervas/product/prd.md").exists(),
-            "nothing is written"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn writes_a_product_document_once_the_epic_is_approved() {
-        let project = a_project("tools-product-doc-approved");
-        project.filed("CTV-1", "escalated", "epic", None);
-        project.moved("CTV-1", "refining", "escalated", &json!({}));
-        project.record(
-            "CTV-1",
-            "human.accepted",
-            &json!({ "subject": "contract", "accepted_by": "human" }),
-        );
-        project.moved("CTV-1", "escalated", "ready", &json!({}));
-        let write = || {
-            project.call(
-                "pm",
-                Some("CTV-1"),
-                "catervas_write_product_doc",
-                json!({ "path": "prd.md", "content": "# Sign-in" }),
-            )
-        };
-        write().expect("the human approved the epic's contract");
-        assert_eq!(
-            std::fs::read_to_string(project.repo.path.join(".catervas/product/prd.md"))
-                .expect("the document is written"),
-            "# Sign-in"
-        );
-        assert_eq!(project.events(&[EventKind::ProductDocWritten]).len(), 1);
-
-        project.moved("CTV-1", "ready", "cancelled", &json!({}));
-        let reason = refused_with(write(), "gate_failed");
-        assert!(reason.contains("cancelled"), "{reason}");
     }
 
     #[test]

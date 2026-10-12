@@ -24,6 +24,7 @@ never review your own work.
 - Diffs inside the contract's `allowed_paths`.
 - Commits on the task's branch.
 - Completion notes: what changed, what was not done, and what the reviewer should look at first.
+- Your folder, `docs/catervas/engineering/`, which only Developers write while one is active, and everyone reads: `conventions.md` and `workflow.md`, each rule with the evidence it was read from.
 
 ## What you may not do
 
