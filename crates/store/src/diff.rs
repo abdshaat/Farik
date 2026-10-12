@@ -354,7 +354,8 @@ mod tests {
         files
             .write_repos(
                 &catervas_core::repos::validate_repos(&json!({ "repos": [
-                    { "name": "app", "path": app.path.display().to_string() },
+                    { "name": "app", "path": app.path.display().to_string(),
+                      "integration_branch": "release" },
                     { "name": "infra", "path": infra.path.display().to_string() },
                 ] }))
                 .expect("repos"),
@@ -362,6 +363,10 @@ mod tests {
             .expect("repos.yaml is written");
         a_branch_with(&app, "feature/CTV-2", "a.txt");
         a_branch_with(&infra, "feature/CTV-3", "b.txt");
+        // `app` integrates into `release`, which holds a file `main` does not.
+        app.git(&["checkout", "-b", "release"]);
+        app.write("r.txt", "one\n");
+        app.commit("add r.txt");
         a_branch_with(&app, "feature/CTV-4", "c.txt");
         let mut children = Vec::new();
         for (repository, id, repo) in [(&app, "CTV-2", "app"), (&infra, "CTV-3", "infra")] {
@@ -395,7 +400,7 @@ mod tests {
         assert_eq!(
             before.files,
             ["c.txt"],
-            "against app's main, not the project's"
+            "against app's release, not the project's trunk or app's main"
         );
     }
 }
