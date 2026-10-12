@@ -47,6 +47,7 @@ export function Feed({
 	const last = useRef<{
 		newest?: number | undefined;
 		oldest?: number | undefined;
+		top?: number | undefined;
 		height: number;
 	}>({ height: 0 });
 	const atBottom = useRef(true);
@@ -66,6 +67,14 @@ export function Feed({
 		const el = box.current;
 		if (!el) return;
 		const before = last.current;
+		// The page moved the view itself, as a meeting link's scrollIntoView does, before any
+		// scroll event came to say so: where it left the view is where the user is.
+		if (before.top !== undefined && el.scrollTop !== before.top)
+			atBottom.current =
+				Math.min(before.height, el.scrollHeight) -
+					el.scrollTop -
+					el.clientHeight <=
+				EDGE;
 		if (before.newest === undefined && newest) toNewest(el);
 		else if (before.oldest !== undefined && oldest !== before.oldest) {
 			el.scrollTop += el.scrollHeight - before.height;
@@ -74,7 +83,12 @@ export function Feed({
 			if (newest.mine || atBottom.current) toNewest(el);
 			else setBehind(true);
 		} else if (atBottom.current) toNewest(el);
-		last.current = { newest: newest?.seq, oldest, height: el.scrollHeight };
+		last.current = {
+			newest: newest?.seq,
+			oldest,
+			height: el.scrollHeight,
+			top: el.scrollTop,
+		};
 	});
 
 	const scrolled = () => {

@@ -146,6 +146,14 @@ describe("Feed", () => {
 		expect(feed.box().scrollTop).toBe(300);
 	});
 
+	it("keeps_a_move_the_page_made", () => {
+		const feed = open();
+		// The page moved the view itself (a meeting link's scrollIntoView), and no scroll event came.
+		feed.box().scrollTop = 300;
+		feed.change({}, { scrollHeight: 2100 });
+		expect(feed.box().scrollTop).toBe(300);
+	});
+
 	it("asks_for_earlier_at_the_top", () => {
 		const onEarlier = vi.fn();
 		const feed = open({ more: true, onEarlier });

@@ -757,6 +757,18 @@ describe("channel", () => {
 			await opened();
 		});
 
+		it("keeps_the_opened_thread_in_view", async () => {
+			stubBox(5000, 500);
+			scroll.mockImplementation(function (this: Element) {
+				(this.closest("section") as HTMLElement).scrollTop = 300;
+			});
+			const { s } = await channel(full(), { path: `/channel#${anchor}` });
+			await answerEarlier(s, planning);
+			await opened();
+			const region = screen.getByRole("region", { name: en.channel });
+			expect(region.scrollTop).toBe(300);
+		});
+
 		it("opens_a_thread_from_the_side_panel", async () => {
 			const { s } = await channel(full(), {
 				sprint: { sprint_id: "S2", done: 0, total: 1 },
