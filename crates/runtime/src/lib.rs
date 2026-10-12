@@ -161,3 +161,84 @@ pub use templates::{TemplateError, TemplateListing, Templates};
 pub use tools::{
     CatervasTool, KitSource, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors,
 };
+
+#[cfg(all(test, unix))]
+mod write_private_tests {
+    use super::write_private;
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::path::PathBuf;
+
+    fn scratch(test: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("catervas-private-{}-{test}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch folder");
+        dir
+    }
+
+    #[test]
+    fn a_reader_never_sees_a_private_file_half_written() {
+        const ROUNDS: usize = 2000;
+        let dir = scratch("reader");
+        let file = dir.join("state.json");
+        let values = [
+            serde_json::json!({ "last_project": "/one/project" }).to_string(),
+            serde_json::json!({ "last_project": "/another/project/entirely" }).to_string(),
+        ];
+        write_private(&file, values[0].as_bytes()).expect("first write");
+        let writer = {
+            let (file, values) = (file.clone(), values.clone());
+            std::thread::spawn(move || {
+                for round in 0..ROUNDS {
+                    write_private(&file, values[round % 2].as_bytes()).expect("rewrite");
+                }
+            })
+        };
+        for _ in 0..ROUNDS * 2 {
+            let text = std::fs::read_to_string(&file).expect("a private file is always there");
+            assert!(values.contains(&text), "read a half-written file: {text:?}");
+        }
+        writer.join().expect("writer finished");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn keeps_the_file_readable_by_its_owner_alone() {
+        let dir = scratch("mode");
+        let file = dir.join("secret.json");
+        std::fs::write(&file, b"old").expect("old file, readable by others");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("mode");
+        write_private(&file, b"new").expect("write");
+        assert_eq!(std::fs::read(&file).expect("read"), b"new");
+        let mode = std::fs::metadata(&file)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn leaves_no_temporary_file_behind() {
+        let dir = scratch("tmp");
+        let file = dir.join("state.json");
+        for round in 0..5 {
+            write_private(&file, format!("{round}").as_bytes()).expect("write");
+        }
+        let names = |dir: &PathBuf| {
+            let mut names: Vec<_> = std::fs::read_dir(dir)
+                .expect("list")
+                .map(|entry| entry.expect("entry").file_name())
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(names(&dir), ["state.json"]);
+
+        let blocked = dir.join("blocked");
+        std::fs::create_dir(&blocked).expect("a directory where the file goes");
+        assert!(write_private(&blocked, b"x").is_err());
+        assert_eq!(names(&dir), ["blocked", "state.json"]);
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+}
