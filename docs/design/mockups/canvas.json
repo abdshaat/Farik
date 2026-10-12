@@ -1213,6 +1213,60 @@
       "title": "Today after Later: your team hasn’t documented this project yet (phase 8 step 07)",
       "page": "folders",
       "is_interactive": true
+    },
+    "SetupSeveralRepos.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 2200,
+      "title": "First run: a project of several repositories",
+      "page": "repos",
+      "is_interactive": true
+    },
+    "SettingsRepositories.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1280,
+      "h": 3400,
+      "title": "Settings › Repositories: add, remove, locate",
+      "page": "repos",
+      "is_interactive": true
+    },
+    "TodayRepos.dc.html": {
+      "x": 2880,
+      "y": 0,
+      "w": 1280,
+      "h": 1060,
+      "title": "Today: a repository Catervas can’t find, and one to document",
+      "page": "repos",
+      "is_interactive": true
+    },
+    "BoardRepos.dc.html": {
+      "x": 4240,
+      "y": 0,
+      "w": 1280,
+      "h": 820,
+      "title": "Board: each task’s repository, and the project’s name",
+      "page": "repos",
+      "is_interactive": true
+    },
+    "FilesRepos.dc.html": {
+      "x": 5600,
+      "y": 0,
+      "w": 1280,
+      "h": 1900,
+      "title": "Files: the project’s notes and each repository’s",
+      "page": "repos",
+      "is_interactive": true
+    },
+    "AddSecondRepository.dc.html": {
+      "x": 6960,
+      "y": 0,
+      "w": 1280,
+      "h": 2000,
+      "title": "A one-repository project gains a second repository",
+      "page": "repos",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -1505,7 +1559,13 @@
     "ProductInterview.dc.html",
     "ProductPlanApproval.dc.html",
     "CatervaficationOffer.dc.html",
-    "CatervaficationToday.dc.html"
+    "CatervaficationToday.dc.html",
+    "SetupSeveralRepos.dc.html",
+    "SettingsRepositories.dc.html",
+    "TodayRepos.dc.html",
+    "BoardRepos.dc.html",
+    "FilesRepos.dc.html",
+    "AddSecondRepository.dc.html"
   ],
   "pages": [
     {
@@ -1575,6 +1635,10 @@
     {
       "id": "folders",
       "name": "Catervas folders"
+    },
+    {
+      "id": "repos",
+      "name": "Multi-repo projects"
     }
   ],
   "title": "Catervas web UI mockup"
