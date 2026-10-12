@@ -509,6 +509,9 @@
           "$ref": "#/$defs/projectCreateRequest"
         },
         {
+          "$ref": "#/$defs/projectCreateFolderRequest"
+        },
+        {
           "$ref": "#/$defs/accountConnectRequest"
         },
         {
@@ -627,7 +630,7 @@
         },
         "result": {
           "type": "object",
-          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
+          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, which project.create_folder answers too, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
         }
       }
     },
@@ -1534,6 +1537,43 @@
             "description",
             "no_sandbox"
           ]
+        }
+      }
+    },
+    "projectCreateFolderRequest": {
+      "title": "Project Create Folder Request",
+      "description": "Makes the project folder parent/name, relative to home, of two to sixteen existing repositories (docs/SPEC.md 4.1; ADR 0057): a local git repository with no remote, holding .catervas/ and docs/catervas/, whose .catervas/repos.yaml lists repos. parent need not exist yet. Every check runs before anything is made, and a refusal is -32005 with a sentence that ends, for a repository, in its path as sent. Answers projectCreateResult. Records team.paused (or, while a project is being left, carries its team) and one repo.added for each repository, and no project.started.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "project.create_folder" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["parent", "name", "repos", "no_sandbox"],
+          "properties": {
+            "parent": { "type": "string" },
+            "name": { "type": "string" },
+            "repos": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "path"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "path": { "type": "string", "description": "The repository's top folder, relative to home." },
+                  "integration_branch": { "type": "string" }
+                }
+              }
+            },
+            "no_sandbox": { "type": "boolean" }
+          }
         }
       }
     },

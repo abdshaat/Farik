@@ -259,7 +259,7 @@ Files: `daemon/setup.rs` (`create_folder`, `MemberRequest`); `web.rs` (`SETUP_ME
 - `never_clears_a_project_folder` (`setup.rs`): while leaving, `open` of a project folder with `replace: true`, and with `replace: false`, is refused with the Decisions' sentence, never with `HAS_TEAM`, and its `.catervas/` is untouched. A folder whose `.catervas/` holds `repos.yaml`, an old `local/catervas.db` and no `team.yaml` is taken on with `repos.yaml` kept, the old log gone and the carried team written. RED.
 - `serves_a_project_folder` (`tests/serving.rs`, as `takes_on_the_chosen_project_on_the_same_port`, `:1313`): `project.create_folder` over the wizard on the held port. `serve.status`'s `project_root` is the project folder. RED.
 
-- [ ] `feat(cli): make a project folder of several repositories`
+- [x] `feat(cli): make a project folder of several repositories`
 
 ### Task 5: The daemon lists, adds, removes and locates members
 

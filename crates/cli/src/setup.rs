@@ -6,16 +6,19 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use catervas_core::repos::{MAX_REPOS, MemberRefusal, Repo, Repos, check_member, validate_repos};
 use catervas_protocol::clock::Clock;
-use catervas_protocol::event::{EventBody, ProjectStartedBody};
+use catervas_protocol::event::{EventBody, ProjectStartedBody, RepoAddedBody};
 use catervas_runtime::claude::CredentialKind;
 use catervas_runtime::computer::on_path;
 use catervas_runtime::connectors::ConnectorSecrets;
 use catervas_runtime::credential::{
     CredentialError, CredentialStore, Source, credential_of_kind, load_credential, save_credential,
 };
-use catervas_runtime::daemon::{SETUP_PENDING, SetupError, SetupHost};
-use catervas_store::files::{LocalSettings, Sandbox};
+use catervas_runtime::daemon::{MemberRequest, SETUP_PENDING, SetupError, SetupHost};
+use catervas_store::Git;
+use catervas_store::files::{LocalSettings, ProjectFiles, Sandbox};
+use catervas_store::repos::{MemberPathRefusal, member_root};
 use catervas_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_brief,
 };
@@ -34,6 +37,13 @@ const NO_ACCOUNT: &str = "connect your AI account first";
 /// What `open` refuses a folder that already has a team with, while a project is being left, unless
 /// the user chose to replace it. The page recognises the prefix `has_team`.
 pub(crate) const HAS_TEAM: &str = "has_team: that folder already has a Catervas team";
+/// What `open` refuses a project folder with, while a project is being left: its team is its own
+/// and is never replaced, so the page does not offer Replace for it.
+const PROJECT_FOLDER: &str =
+    "that folder is a project of several repositories; it cannot take your team";
+/// What a project's name is refused with.
+const NOT_A_NAME: &str =
+    "a project's name is lowercase letters, digits, and -, up to 64 characters";
 /// What `open` refuses a folder outside home with.
 const OUTSIDE_HOME: &str = "that folder is outside your home folder";
 /// What `open` refuses home itself with: Catervas's settings folder, `~/.config/catervas`, would be in
@@ -72,6 +82,88 @@ impl CliHost {
         } else {
             Err(refused(OUTSIDE_HOME))
         }
+    }
+
+    /// The folder `parent`, relative to home, which need not exist yet: its nearest folder that
+    /// does, followed through its links, must be inside home. A `..`, a root or a prefix in
+    /// `parent` is refused before anything is read.
+    fn parent_in_home(&self, parent: &str) -> Result<PathBuf, SetupError> {
+        let home = std::fs::canonicalize(&self.home)
+            .map_err(|error| failed(format!("your home folder cannot be read: {error}")))?;
+        let mut parts = Vec::new();
+        for component in Path::new(parent).components() {
+            match component {
+                std::path::Component::Normal(part) => parts.push(part),
+                std::path::Component::CurDir => {}
+                _ => return Err(refused(OUTSIDE_HOME)),
+            }
+        }
+        let mut folder = home.clone();
+        for (made, part) in parts.iter().enumerate() {
+            let next = folder.join(part);
+            if std::fs::symlink_metadata(&next).is_err() {
+                return Ok(parts[made..]
+                    .iter()
+                    .fold(folder, |path, part| path.join(part)));
+            }
+            folder = std::fs::canonicalize(&next).map_err(|_| refused(OUTSIDE_HOME))?;
+            if !folder.starts_with(&home) {
+                return Err(refused(OUTSIDE_HOME));
+            }
+        }
+        Ok(folder)
+    }
+
+    /// The members `repos` asks for, held to every rule, each refusal ending in the path as sent
+    /// so that the page names the folder.
+    fn members_of(&self, root: &Path, repos: &[MemberRequest]) -> Result<Repos, SetupError> {
+        let project_folder = root.to_str().ok_or_else(|| {
+            failed(format!(
+                "{} is not a path Catervas can write",
+                root.display()
+            ))
+        })?;
+        let mut kept: Vec<Repo> = Vec::new();
+        let mut entries = Vec::new();
+        for request in repos {
+            let said = |sentence: String| refused(&format!("{sentence}: {}", request.path));
+            let path = member_root(&self.home, &request.path).map_err(|why| said(why.message()))?;
+            let path_text = path.to_str().ok_or_else(|| {
+                failed(format!(
+                    "{} is not a path Catervas can write",
+                    path.display()
+                ))
+            })?;
+            check_member(project_folder, &kept, &request.name, path_text)
+                .map_err(|why| said(why.message()))?;
+            if let Some(branch) = &request.integration_branch
+                && !Git::open(path.clone())
+                    .has_local_branch(branch)
+                    .map_err(|error| failed(error.to_string()))?
+            {
+                let why = MemberPathRefusal::NoSuchBranch {
+                    branch: branch.clone(),
+                };
+                return Err(said(why.message()));
+            }
+            let mut entry = serde_json::json!({ "name": request.name, "path": path_text });
+            if let Some(branch) = &request.integration_branch {
+                entry["integration_branch"] = serde_json::json!(branch);
+            }
+            kept.push(
+                serde_json::from_value(entry.clone()).map_err(|error| said(error.to_string()))?,
+            );
+            entries.push(entry);
+        }
+        validate_repos(&serde_json::json!({ "repos": entries })).map_err(|errors| {
+            refused(
+                &errors
+                    .iter()
+                    .map(|error| format!("{} {}", error.path, error.message))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            )
+        })
     }
 
     /// Refuses unless a credential is kept.
@@ -201,16 +293,30 @@ impl SetupHost for CliHost {
             None => return Err(refused(BUSY)),
         }
         self.has_account()?;
-        // Only while a project is being left: a folder with a team is the user's to replace.
+        // Only while a project is being left: a folder with a team is the user's to replace,
+        // unless it is a project folder, whose team is never replaced.
         if self.leaving.is_some() {
+            let files = ProjectFiles::open(root.clone());
             if root.join(".catervas/team.yaml").exists() {
+                if files.is_project_folder() {
+                    return Err(refused(PROJECT_FOLDER));
+                }
                 if !replace {
                     return Err(refused(HAS_TEAM));
                 }
                 self.clear(&root)?;
             } else if std::fs::symlink_metadata(root.join(".catervas")).is_ok() {
-                // A leftover with no team: none of it may carry context into the new team.
+                // A leftover with no team: none of it may carry context into the new team, except
+                // the members a project folder lists.
+                let members = files
+                    .read_repos()
+                    .map_err(|error| failed(error.to_string()))?;
                 self.clear(&root)?;
+                if let Some(members) = members {
+                    files
+                        .write_repos(&members)
+                        .map_err(|error| failed(error.to_string()))?;
+                }
             }
         }
         self.taken_on(&root, no_sandbox)?;
@@ -224,15 +330,7 @@ impl SetupHost for CliHost {
         description: &str,
         no_sandbox: bool,
     ) -> Result<PathBuf, SetupError> {
-        let named = (1..=64).contains(&name.len())
-            && name
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if !named {
-            return Err(refused(
-                "a project's name is lowercase letters, digits, and -, up to 64 characters",
-            ));
-        }
+        check_name(name)?;
         let length = description.trim().chars().count();
         if length < 20 {
             return Err(refused(
@@ -306,6 +404,67 @@ impl SetupHost for CliHost {
         Ok(self.choose(root))
     }
 
+    fn create_folder(
+        &self,
+        parent: &str,
+        name: &str,
+        repos: &[MemberRequest],
+        no_sandbox: bool,
+    ) -> Result<PathBuf, SetupError> {
+        check_name(name)?;
+        if repos.len() < 2 {
+            return Err(refused(
+                "a project of several repositories needs at least two",
+            ));
+        }
+        if repos.len() > MAX_REPOS {
+            return Err(refused(&MemberRefusal::TooMany.message()));
+        }
+        let parent = self.parent_in_home(parent)?;
+        let root = parent.join(name);
+        if std::fs::symlink_metadata(&root).is_ok() {
+            return Err(refused("a folder with that name is already there"));
+        }
+        let members = self.members_of(&root, repos)?;
+        self.has_account()?;
+        on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
+
+        std::fs::create_dir_all(&parent)
+            .map_err(|error| failed(format!("{} cannot be made: {error}", parent.display())))?;
+        std::fs::create_dir(&root)
+            .map_err(|error| failed(format!("{} cannot be made: {error}", root.display())))?;
+        self.git(&root, &["init", "-b", "main"])?;
+        std::fs::write(
+            root.join("README.md"),
+            format!(
+                "# {name}\n\nThe Catervas project folder for {name}: its team and its documents. \
+                 Its repositories are listed in .catervas/repos.yaml.\n"
+            ),
+        )
+        .map_err(|error| failed(format!("README.md cannot be written: {error}")))?;
+        self.git(&root, &["add", "README.md"])?;
+        self.git(&root, &["commit", "-m", "Start the project"])?;
+        // Written before the events that record it, as a sprint's file is (spec 8.4).
+        ProjectFiles::open(root.clone())
+            .write_repos(&members)
+            .map_err(|error| failed(error.to_string()))?;
+
+        let (project, _) = self.taken_on(&root, no_sandbox)?;
+        for repo in &members.repos {
+            let added: RepoAddedBody = serde_json::from_value(serde_json::json!({
+                "name": repo.name.as_str(),
+                "path": repo.path.as_str(),
+                "integration_branch": repo.integration_branch.as_ref().map(|branch| branch.as_str()),
+            }))
+            .map_err(|error| failed(format!("a repository the log cannot hold: {error}")))?;
+            let event = project
+                .event(EventBody::RepoAdded(added), self.clock.now(), None)
+                .map_err(failed)?;
+            project.append(&event).map_err(failed)?;
+        }
+        Ok(self.choose(root))
+    }
+
     fn connect(&self, kind: CredentialKind, secret: &str) -> Result<(Source, bool), SetupError> {
         let credential = credential_of_kind(kind, secret).map_err(|why| refused(&why))?;
         if let Some(directory) = state_dir(&self.env) {
@@ -337,6 +496,19 @@ impl SetupHost for CliHost {
     }
 }
 
+/// Refuses a project's name that is not lowercase letters, digits and `-`, 1 to 64 characters.
+fn check_name(name: &str) -> Result<(), SetupError> {
+    let named = (1..=64).contains(&name.len())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if named {
+        Ok(())
+    } else {
+        Err(refused(NOT_A_NAME))
+    }
+}
+
 fn refused(sentence: &str) -> SetupError {
     SetupError::Refused(sentence.to_string())
 }
@@ -352,6 +524,8 @@ mod tests {
     use std::sync::Arc;
 
     use catervas_core::criteria::fixtures::a_criteria_library_wire;
+    use catervas_core::repos::fixtures::two_repos_wire;
+    use catervas_core::repos::validate_repos;
     use catervas_core::team::fixtures::an_agent_wire;
     use catervas_core::team::{AgentId, carried_team, validate_team};
     use catervas_protocol::clock::FixedClock;
@@ -360,7 +534,7 @@ mod tests {
     use catervas_runtime::connectors::{
         ConnectorEntry, ConnectorSecrets, MemoryConnectorSecrets, SecretAt, local_project_id,
     };
-    use catervas_runtime::daemon::{SetupError, SetupHost};
+    use catervas_runtime::daemon::{MemberRequest, SetupError, SetupHost};
     use catervas_store::EventQuery;
     use catervas_store::files::{LocalSettings, ProjectFiles, Sandbox};
     use catervas_store::git::fixtures::TempRepo;
@@ -903,6 +1077,356 @@ mod tests {
         assert!(!chosen.join(".catervas/local/setup-pending").exists());
         assert!(events(&chosen, EventKind::TeamPaused).is_empty());
         std::fs::remove_dir_all(home().join(&parent)).expect("cleaned");
+    }
+
+    /// A member the wizard asks for: `repository`'s folder under home, named `name`.
+    fn member(name: &str, repository: &TempRepo, branch: Option<&str>) -> MemberRequest {
+        MemberRequest {
+            name: name.to_string(),
+            path: named(repository),
+            integration_branch: branch.map(str::to_string),
+        }
+    }
+
+    /// A parent for a test's project folder that is not there yet, named by the test.
+    fn new_parent(test: &str) -> String {
+        let parent = format!("catervas-folder-{test}-{}/x", std::process::id());
+        forget(&parent);
+        parent
+    }
+
+    fn forget(parent: &str) {
+        let top = parent.split('/').next().unwrap_or(parent);
+        let _ = std::fs::remove_dir_all(home().join(top));
+    }
+
+    /// What git prints for `args` in `folder`.
+    fn git_says(folder: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(folder)
+            .output()
+            .expect("git");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    const FOLDER_README: &str = "# shop\n\nThe Catervas project folder for shop: its team and its documents. Its repositories are listed in .catervas/repos.yaml.\n";
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn makes_a_project_folder_of_its_repositories() {
+        let world = World::new("folder-makes");
+        let app = TempRepo::new("folder-makes-app");
+        let infra = TempRepo::new("folder-makes-infra");
+        let parent = new_parent("makes");
+        assert!(!home().join(&parent).exists());
+
+        let chosen = world
+            .host(None)
+            .create_folder(
+                &parent,
+                "shop",
+                &[
+                    member("app", &app, None),
+                    member("infra", &infra, Some("main")),
+                ],
+                false,
+            )
+            .expect("made");
+
+        let expected = root_of(&home()).join(&parent).join("shop");
+        assert_eq!(chosen, expected);
+        assert_eq!(read(&chosen, "README.md"), FOLDER_README.as_bytes());
+        let git = |args: &[&str]| git_says(&chosen, args);
+        assert_eq!(git(&["log", "--format=%s"]), "Start the project");
+        assert_eq!(git(&["ls-files", "README.md"]), "README.md");
+        assert_eq!(git(&["status", "--porcelain", "README.md"]), "");
+        assert_eq!(git(&["remote"]), "");
+        assert_eq!(git(&["symbolic-ref", "--short", "HEAD"]), "main");
+
+        let repos = ProjectFiles::open(chosen.clone())
+            .read_repos()
+            .expect("the file reads")
+            .expect("the file is there");
+        assert_eq!(
+            serde_json::to_value(&repos).expect("wire"),
+            json!({ "repos": [
+                { "name": "app", "path": root_of(&app.path).display().to_string() },
+                {
+                    "name": "infra",
+                    "path": root_of(&infra.path).display().to_string(),
+                    "integration_branch": "main"
+                },
+            ] })
+        );
+
+        let project = open_project(&chosen, Utc::now()).expect("a project");
+        let kinds: Vec<EventKind> = project
+            .log
+            .read(&EventQuery::default())
+            .expect("events")
+            .iter()
+            .map(|event| event.body.kind())
+            .filter(|kind| {
+                [
+                    EventKind::TeamPaused,
+                    EventKind::RepoAdded,
+                    EventKind::ProjectStarted,
+                    EventKind::TaskCreated,
+                ]
+                .contains(kind)
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                EventKind::TeamPaused,
+                EventKind::RepoAdded,
+                EventKind::RepoAdded
+            ]
+        );
+        let added: Vec<Value> = events(&chosen, EventKind::RepoAdded)
+            .iter()
+            .map(|body| serde_json::to_value(body).expect("wire")["body"].clone())
+            .collect();
+        assert_eq!(
+            added,
+            [
+                json!({
+                    "name": "app",
+                    "path": root_of(&app.path).display().to_string(),
+                    "integration_branch": null
+                }),
+                json!({
+                    "name": "infra",
+                    "path": root_of(&infra.path).display().to_string(),
+                    "integration_branch": "main"
+                }),
+            ]
+        );
+        assert!(
+            project
+                .files
+                .list_contracts()
+                .expect("contracts")
+                .is_empty()
+        );
+        assert!(chosen.join(".catervas/local/setup-pending").exists());
+        forget(&parent);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one assertion for each refusal the plan lists"
+    )]
+    fn refuses_a_project_folder_before_making_anything() {
+        let world = World::new("folder-refuses");
+        let app = TempRepo::new("folder-refuses-app");
+        let infra = TempRepo::new("folder-refuses-infra");
+        let teamed = a_project("folder-refuses-teamed", |_| {});
+        std::fs::create_dir_all(app.path.join("src")).expect("a folder inside the repository");
+        let parent = new_parent("refuses");
+        let (app_member, infra_member) = (member("app", &app, None), member("infra", &infra, None));
+        let host = world.host(None);
+        let refused = |host: &CliHost, parent: &str, name: &str, repos: &[MemberRequest]| {
+            let said = host.create_folder(parent, name, repos, false);
+            assert!(!home().join(parent).join(name).exists(), "{name} was made");
+            match said {
+                Err(SetupError::Refused(sentence)) => sentence,
+                other => panic!("expected a refusal, got {other:?}"),
+            }
+        };
+        let both = [app_member.clone(), infra_member.clone()];
+
+        assert_eq!(
+            refused(&host, &parent, "Shop", &both),
+            "a project's name is lowercase letters, digits, and -, up to 64 characters"
+        );
+        assert!(!home().join(&parent).exists(), "the parent was made");
+
+        std::fs::create_dir_all(home().join(&parent).join("shop")).expect("shop is there");
+        assert_eq!(
+            host.create_folder(&parent, "shop", &both, false),
+            Err(SetupError::Refused(
+                "a folder with that name is already there".to_string()
+            ))
+        );
+        assert!(!home().join(&parent).join("shop/README.md").exists());
+        forget(&parent);
+
+        assert_eq!(
+            refused(&host, "../elsewhere", "shop", &both),
+            "that folder is outside your home folder"
+        );
+        let deep = format!("{}/missing/../../../elsewhere", new_parent("deep"));
+        assert_eq!(
+            refused(&host, &deep, "shop", &both),
+            "that folder is outside your home folder"
+        );
+        assert!(!Path::new("/elsewhere").exists());
+        assert!(!home().join(new_parent("deep")).exists());
+
+        assert_eq!(
+            refused(&host, &parent, "shop", std::slice::from_ref(&app_member)),
+            "a project of several repositories needs at least two"
+        );
+        assert_eq!(
+            refused(
+                &host,
+                &parent,
+                "shop",
+                &[app_member.clone(), member("app", &infra, None)]
+            ),
+            format!(
+                "another of the project's repositories is named app: {}",
+                named(&infra)
+            )
+        );
+        let inside = MemberRequest {
+            name: "src".to_string(),
+            path: format!("{}/src", named(&app)),
+            integration_branch: None,
+        };
+        assert_eq!(
+            refused(
+                &host,
+                &parent,
+                "shop",
+                &[app_member.clone(), inside.clone()]
+            ),
+            format!(
+                "that folder is inside a git repository; choose {} instead: {}",
+                root_of(&app.path).display(),
+                inside.path
+            )
+        );
+        let not_made = MemberRequest {
+            name: "x".to_string(),
+            path: format!("{parent}/shop/x"),
+            integration_branch: None,
+        };
+        assert_eq!(
+            refused(
+                &host,
+                &parent,
+                "shop",
+                &[app_member.clone(), not_made.clone()]
+            ),
+            format!("that folder is not there: {}", not_made.path)
+        );
+        assert_eq!(
+            refused(
+                &host,
+                &parent,
+                "shop",
+                &[member("app", &app, Some("nope")), infra_member.clone()]
+            ),
+            format!("that repository has no branch named nope: {}", named(&app))
+        );
+        assert_eq!(
+            refused(
+                &host,
+                &parent,
+                "shop",
+                &[app_member.clone(), member("other", &teamed, None)]
+            ),
+            format!(
+                "that repository has a Catervas team of its own: {}",
+                named(&teamed)
+            )
+        );
+
+        let mut without_account = World::new("folder-refuses-no-account");
+        without_account.env.remove("ANTHROPIC_API_KEY");
+        assert_eq!(
+            refused(&without_account.host(None), &parent, "shop", &both),
+            NO_ACCOUNT
+        );
+        assert!(!home().join(&parent).exists(), "the parent was made");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn carries_the_team_into_a_new_project_folder() {
+        let world = World::new("folder-carries");
+        let old = a_project("folder-carries-old", |_| {});
+        let app = TempRepo::new("folder-carries-app");
+        let infra = TempRepo::new("folder-carries-infra");
+        let parent = new_parent("carries");
+
+        let chosen = world
+            .host(Some(&root_of(&old.path)))
+            .create_folder(
+                &parent,
+                "shop",
+                &[member("app", &app, None), member("infra", &infra, None)],
+                false,
+            )
+            .expect("made");
+
+        let new = open_project(&chosen, Utc::now()).expect("a project");
+        assert_eq!(new.team, carried_of(&old));
+        assert!(new.files.list_contracts().expect("contracts").is_empty());
+        assert!(!chosen.join(".catervas/local/setup-pending").exists());
+        assert!(events(&chosen, EventKind::TeamPaused).is_empty());
+        assert_eq!(events(&chosen, EventKind::RepoAdded).len(), 2);
+        forget(&parent);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn never_clears_a_project_folder() {
+        let world = World::new("folder-never");
+        let old = a_project("folder-never-old", |_| {});
+        let app = TempRepo::new("folder-never-app");
+        let infra = TempRepo::new("folder-never-infra");
+        let parent = new_parent("never");
+        let folder = world
+            .host(None)
+            .create_folder(
+                &parent,
+                "shop",
+                &[member("app", &app, None), member("infra", &infra, None)],
+                false,
+            )
+            .expect("made");
+        let leaving = world.host(Some(&root_of(&old.path)));
+        let (team, repos) = (
+            read(&folder, ".catervas/team.yaml"),
+            read(&folder, ".catervas/repos.yaml"),
+        );
+        let marker = "that folder is a project of several repositories; it cannot take your team";
+
+        for replace in [true, false] {
+            let refused = leaving.open(&format!("{parent}/shop"), false, replace);
+            assert_eq!(refused, Err(SetupError::Refused(marker.to_string())));
+        }
+        assert_eq!(read(&folder, ".catervas/team.yaml"), team);
+        assert_eq!(read(&folder, ".catervas/repos.yaml"), repos);
+        forget(&parent);
+
+        // A leftover with the members and no team keeps the members and nothing else.
+        let target = TempRepo::new("folder-never-leftover");
+        let members = validate_repos(&two_repos_wire()).expect("a list");
+        ProjectFiles::open(target.path.clone())
+            .write_repos(&members)
+            .expect("written");
+        write(
+            &target.path,
+            ".catervas/agents/theo/memory.md",
+            b"stale context\n",
+        );
+        write(&target.path, ".catervas/local/catervas.db", b"an old log");
+        let chosen = leaving
+            .open(&named(&target), false, false)
+            .expect("taken on");
+        let new = open_project(&chosen, Utc::now()).expect("a project");
+        assert_eq!(new.team, carried_of(&old));
+        assert_eq!(new.files.read_repos(), Ok(Some(members)));
+        let theo = AgentId::try_from("theo").expect("an id");
+        assert_eq!(new.files.read_memory(&theo).expect("memory"), "");
     }
 
     #[test]

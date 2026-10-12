@@ -1368,6 +1368,58 @@ fn takes_on_the_chosen_project_on_the_same_port() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn serves_a_project_folder() {
+    let app = TempRepo::new("setup-folder-app");
+    let infra = TempRepo::new("setup-folder-infra");
+    let home = app.path.parent().expect("a parent").to_path_buf();
+    let (cwd, state) = setup_folders("setup-folder");
+    let parent = format!("catervas-serving-folder-{}", std::process::id());
+    let serving = serving_setup(&cwd, &home, &state);
+
+    let (made, closed) = call_then_closed(
+        serving.port,
+        &serving.cookie,
+        "project.create_folder",
+        json!({
+            "parent": parent,
+            "name": "shop",
+            "repos": [
+                { "name": "app", "path": name_of(&app.path) },
+                { "name": "infra", "path": name_of(&infra.path), "integration_branch": "main" },
+            ],
+            "no_sandbox": false,
+        }),
+    );
+    let root = home
+        .join(&parent)
+        .join("shop")
+        .canonicalize()
+        .expect("the project folder is made");
+    assert_eq!(
+        made["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{made}"
+    );
+    assert!(closed, "the setup daemon closes the socket");
+    until("the team is driven", || {
+        root.join(".catervas/local/daemon.json").exists()
+    });
+    let status = serve_status(serving.port, &serving.cookie);
+    let stopped = run(&root, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+    assert_eq!(
+        status["project_root"],
+        json!(root.display().to_string()),
+        "{status}"
+    );
+    assert!(root.join(".catervas/repos.yaml").is_file());
+    let _ = std::fs::remove_dir_all(home.join(&parent));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn stays_in_setup_when_the_project_is_busy() {
     let repository = a_team("setup-busy");
     let home = repository.path.parent().expect("a parent").to_path_buf();

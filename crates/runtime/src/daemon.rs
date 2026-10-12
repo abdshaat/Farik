@@ -67,7 +67,7 @@ pub(crate) use hooks::APPROVAL_NEEDED;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };
-pub use setup::{SetupError, SetupHost};
+pub use setup::{MemberRequest, SetupError, SetupHost};
 pub(crate) use signed_in::{Fresh, refreshed_entry};
 pub use team::SETUP_PENDING;
 pub use team::{custom_entry, kit_entry, labelled, matches_kit, plan_tools_of};
