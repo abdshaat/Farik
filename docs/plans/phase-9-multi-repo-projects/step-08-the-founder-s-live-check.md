@@ -1,10 +1,10 @@
 # Phase 9, step 08: The founder's live check
 
-Status: draft (one decision open: the repositories, below)
+Status: draft
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 11; the flows it exercises are 4.1, 4.2, 4.4, 4.5, 5.3, 5.6, 5.14, 5.16 and 5.17
 Depends on: steps 01 to 07b of this phase. A start gate applies: Task 1 does not begin until 07b has landed and `cargo xtask check --integration` passes on the phase branch's head, whose sha is recorded.
-Readiness confirmed by: (pending; one round, once the open decision is made)
+Readiness confirmed by: (pending; one round)
 
 Signatures, not bodies; around 300 lines at most (ADR 0008). This step writes no product code. It is a runbook, like phase 8's step 08, and keeps its two roles:
 - **[A]** is the controller session preparing, fixing and recording.
@@ -29,9 +29,12 @@ Out of scope: Windows, where no repository is a read root in this phase (step 03
 ## Decisions
 
 - **[A] prepares a fresh run folder `~/catervas-p9-check/`**, as phase 8's `~/catervas-p8-check/`. It has its own `bin/catervas` and an `env.sh` that makes the run folder the home folder. An existing one is moved aside whole, never deleted.
-- **Open: the repositories.** The founder names a product repository and the repository that runs it (infrastructure as code, a deploy setup, or a service it calls), their own or public. [A] copies each with `git clone --no-hardlinks` into `~/catervas-p9-check/` and removes `origin` in each copy, so nothing is pushed anywhere.
-  - [A]'s proposal, if the founder has no pair: a copy of OpenMontage as the product, and a small `montage-infra` repository [A] writes in Task 1. It would hold a Compose file running OpenMontage's server, a Terraform module for its storage bucket, and a CI deploy job, each naming OpenMontage's paths, so that the system map has real links to find.
-  - A third repository for section D is a further small public repository, or one [A] writes, `montage-web`.
+- **The repositories are [A]'s proposal** (the founder, 2026-10-12: "use the proposa[l]"):
+  - **the product:** a copy of the founder's own OpenMontage, as phase 8's run used: `git -C ~/OpenMontage status --short` recorded first, then `git clone --no-hardlinks ~/OpenMontage ~/catervas-p9-check/OpenMontage`
+  - **its infrastructure:** `montage-infra`, a small repository [A] writes in Task 1: a Compose file running OpenMontage's server, a Terraform module for its storage bucket, and a CI deploy job, each naming OpenMontage's paths, so that the system map has real links to find. Its check is `python3 -m unittest` over a script that validates the Compose file's service names, since the safe box has no pytest (phase 8's finding).
+  - **a third, for section D:** `montage-web`, a small static site [A] writes in Task 1 that calls OpenMontage's server, with a `node --test` check
+
+  `origin` is removed in the copy, so nothing is pushed anywhere. The two repositories [A] writes are made with `git init -b main` and one commit each.
 - **The team:** the six the setup suggests, the UI/UX Designer left out as in phase 8, and a second Developer added for the cross-repository feature. Commands "Yes", sending to the online repository "No", and a daily spending limit of $25 (phase 8's).
 - **The integration policy** stays the default, `auto_merge`, which in these copies merges locally in each repository, since no copy has a remote.
 - **Each step's result** is pass, fail, finding or skipped, as phase 8's step 08 defines them. A failure is fixed on the phase branch before sign-off under the workflow's rules, with a landing review, a rebuilt `bin/catervas`, and the step run again.
