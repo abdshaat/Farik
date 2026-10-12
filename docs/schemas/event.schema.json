@@ -167,7 +167,8 @@
         "folder_change.integrated",
         "folder_change.escalated",
         "project.started",
-        "catervafication.started"
+        "catervafication.started",
+        "document_rewrite.started"
       ]
     },
     "eventBodyWire": {
@@ -274,7 +275,8 @@
         { "$ref": "#/$defs/folderChangeIntegratedBody" },
         { "$ref": "#/$defs/folderChangeEscalatedBody" },
         { "$ref": "#/$defs/projectStartedBody" },
-        { "$ref": "#/$defs/catervaficationStartedBody" }
+        { "$ref": "#/$defs/catervaficationStartedBody" },
+        { "$ref": "#/$defs/documentRewriteStartedBody" }
       ]
     },
     "contractSummary": {
@@ -1858,6 +1860,21 @@
       "required": ["project"],
       "properties": {
         "project": { "type": "string", "enum": ["existing", "new"] }
+      }
+    },
+    "documentRewriteStartedBody": {
+      "title": "Document Rewrite Started Body",
+      "description": "The owner asked the team to rewrite its Markdown documents as HTML (docs/SPEC.md 5.17): tasks are the rewrite tasks filed, one for each role whose folder held a Markdown document, none when only the Scrum Master's delivery documents did. It names no one; each task.created names the owner's word.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks"],
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 6,
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
+        }
       }
     },
     "connectorTag": {

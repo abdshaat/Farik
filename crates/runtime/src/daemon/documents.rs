@@ -9,10 +9,10 @@ use axum::extract::{RawQuery, State};
 use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
-use catervas_core::contract::TaskStatus;
+use catervas_core::contract::{TaskKind, TaskStatus};
 use catervas_core::folders::{
-    Named, OwnerEditRefusal, ROLE_FOLDERS, agent_twin, check_owner_edit, document_name,
-    document_order, human_of_twin, named_in_subject, plain_name,
+    DocumentFormat, Named, OwnerEditRefusal, ROLE_FOLDERS, agent_twin, check_owner_edit,
+    document_name, document_order, human_of_twin, named_in_subject, plain_name,
 };
 use catervas_core::governor::paths::normalise;
 use catervas_core::team::{Role, Team};
@@ -23,7 +23,9 @@ use catervas_store::requests::rederive_tasks;
 use serde_json::{Value, json};
 
 use catervas_protocol::event::{EventBody, TaskCreatedBodyFiledAs};
-use catervas_store::requests::{change_request, file_small_request, placeholder_budget_usd};
+use catervas_store::requests::{
+    change_request, file_small_request, placeholder_budget_usd, rewrite_request, rewrite_tasks,
+};
 
 use super::DaemonState;
 use super::gates::off_the_worker;
@@ -37,10 +39,16 @@ use crate::transitions::integration_lock;
 pub(super) const QUERIES: [&str; 2] = ["files.tree", "files.read"];
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 2] = ["files.save", "files.ask_change"];
+pub(super) const METHODS: [&str; 3] = ["files.save", "files.ask_change", "files.rewrite"];
 
 /// Where the team's documents live.
 const ROOT: &str = "docs/catervas";
+
+/// The Scrum Master's folder, whose documents it rewrites itself.
+const DELIVERY: &str = "docs/catervas/delivery";
+
+/// Where the marketing plans are; each is the version the owner approved, so none is rewritten.
+const MARKETING_PLANS: &str = "docs/catervas/marketing/plans/MP-";
 
 fn internal(error: &dyn Display) -> Failure {
     Failure::new(INTERNAL_ERROR, error.to_string())
@@ -245,6 +253,92 @@ fn ask_change(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     Ok(json!({ "task_id": filed.id }))
 }
 
+/// `files.rewrite {}`: one small, whole task for each role whose folder holds a Markdown document,
+/// to rewrite them as HTML, and `document_rewrite.started` naming the tasks. The Scrum Master's
+/// documents are rewritten at its next retro, so they file no task and only keep the rewrite
+/// from being refused as nothing to do.
+fn rewrite(deps: &ToolDeps) -> Result<Value, Failure> {
+    let (team, _, entries) = listing(deps)?;
+    if team.document_format() != DocumentFormat::Html {
+        return Err(refusal(
+            "not_html",
+            "",
+            "Turn on Write documents as HTML first.",
+        ));
+    }
+    for id in rewrite_tasks(&deps.log).map_err(|e| internal(&e))? {
+        let row = deps.projections.task(&id).map_err(|e| internal(&e))?;
+        if row
+            .is_some_and(|row| !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
+        {
+            return Err(refusal(
+                "rewrite_open",
+                "",
+                "Your team is still rewriting its documents.",
+            ));
+        }
+    }
+    let delivery_holds_markdown = entries.iter().any(|entry| {
+        is_file(entry)
+            && entry.path.starts_with(&format!("{DELIVERY}/"))
+            && DocumentFormat::of(&entry.path) == Some(DocumentFormat::Markdown)
+    });
+    let mut wanted = Vec::new();
+    for folder in folders(&team, &entries) {
+        if folder.role == Role::ScrumMaster {
+            continue;
+        }
+        let documents: Vec<String> = folder
+            .documents
+            .iter()
+            .flat_map(|document| std::iter::once(&document.path).chain(&document.twin))
+            .filter(|path| {
+                DocumentFormat::of(path) == Some(DocumentFormat::Markdown)
+                    && !path.starts_with(MARKETING_PLANS)
+            })
+            .cloned()
+            .collect();
+        // A role the team cannot staff a reviewer for gets no task.
+        if let Some(reviewer) =
+            catervas_roles::default_reviewer_role(&team, TaskKind::Task, folder.role)
+            && !documents.is_empty()
+        {
+            wanted.push((folder.path, folder.role, reviewer, documents));
+        }
+    }
+    if wanted.is_empty() && !delivery_holds_markdown {
+        return Err(refusal(
+            "nothing_to_rewrite",
+            "",
+            "Every document your team can rewrite is already HTML.",
+        ));
+    }
+    let mut tasks = Vec::new();
+    for (folder, role, reviewer, documents) in wanted {
+        let wire = rewrite_request(
+            folder,
+            &documents,
+            role,
+            reviewer,
+            placeholder_budget_usd(&team.rules()),
+        );
+        let filed = file_small_request(
+            &deps.files,
+            &deps.log,
+            wire,
+            "human",
+            TaskCreatedBodyFiledAs::DocumentRewrite,
+            &format!("the owner's rewrite of {folder} as HTML"),
+            (deps.clock.now(), &deps.ids),
+        )
+        .map_err(|e| internal(&e))?;
+        tasks.push(filed.id.to_string());
+    }
+    let body = serde_json::from_value(json!({ "tasks": tasks })).map_err(|e| internal(&e))?;
+    append(deps, EventBody::DocumentRewriteStarted(body))?;
+    Ok(json!({ "tasks": tasks }))
+}
+
 /// The methods, whose params the schema already passed.
 pub(super) async fn call(
     state: &DaemonState,
@@ -257,6 +351,11 @@ pub(super) async fn call(
     let params = params.clone();
     if method == "files.ask_change" {
         let filed = off_the_worker(move || ask_change(&deps, &params)).await?;
+        state.wakes().notify_one();
+        return Ok(filed);
+    }
+    if method == "files.rewrite" {
+        let filed = off_the_worker(move || rewrite(&deps)).await?;
         state.wakes().notify_one();
         return Ok(filed);
     }
@@ -1980,5 +2079,194 @@ mod tests {
                 .events(&[EventKind::TaskCreated, EventKind::RequestTriaged])
                 .is_empty()
         );
+    }
+
+    /// The reply to `files.rewrite`.
+    fn rewrite(harness: &Harness) -> Value {
+        rpc(&harness.daemon, "files.rewrite", &json!({}))
+    }
+
+    /// The ids `files.rewrite` answered.
+    fn rewritten(reply: &Value) -> Vec<String> {
+        conforms(&reply["result"], "filesRewriteResult", reply);
+        reply["result"]["tasks"]
+            .as_array()
+            .unwrap_or_else(|| panic!("tasks: {reply}"))
+            .iter()
+            .map(|id| id.as_str().expect("an id").to_string())
+            .collect()
+    }
+
+    /// `document_rewrite.started`'s tasks, one array for each event.
+    fn rewrite_events(harness: &Harness) -> Vec<Value> {
+        harness
+            .project
+            .events(&[EventKind::DocumentRewriteStarted])
+            .iter()
+            .map(|event| catervas_protocol::event::event_to_value(event)["body"]["tasks"].clone())
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_rewrite_task_for_each_folder_with_markdown() {
+        let harness = project("files-rewrite", "manual");
+        write(&harness, &format!("{PRODUCT}/spec.md"), "spec\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/spec.agent.md"),
+            "spec agents\n",
+        );
+        write(&harness, OVERVIEW, "the overview\n");
+        write(
+            &harness,
+            "docs/catervas/marketing/plans/MP-1.md",
+            "a marketing plan\n",
+        );
+        commit(&harness, "the documents");
+        let tasks = rewritten(&rewrite(&harness));
+        assert_eq!(tasks, ["CTV-1", "CTV-2"]);
+
+        let product = contract_of(&harness, "CTV-1");
+        assert_eq!(product["assignee_role"], "product_manager", "{product}");
+        assert_eq!(product["allowed_paths"], json!([PRODUCT]));
+        assert_eq!(product["created_by"], "human");
+        let architect = contract_of(&harness, "CTV-2");
+        assert_eq!(architect["assignee_role"], "architect", "{architect}");
+        assert_eq!(
+            architect["allowed_paths"],
+            json!(["docs/catervas/architecture"])
+        );
+        let artifact = |contract: &Value, path: &str| {
+            contract["exit_criteria"]
+                .as_array()
+                .expect("criteria")
+                .iter()
+                .find(|criterion| criterion["verification"]["path"] == path)
+                .map_or_else(
+                    || panic!("no criterion for {path}: {contract}"),
+                    |criterion| criterion["verification"].clone(),
+                )
+        };
+        let spec = artifact(&product, &format!("{PRODUCT}/spec.html"));
+        assert_eq!(spec["method"], "artifact");
+        assert_eq!(spec["must_contain"], json!(["<h1"]));
+        artifact(&product, &format!("{PRODUCT}/spec.agent.html"));
+        let overview = artifact(&architect, "docs/catervas/architecture/overview.html");
+        assert_eq!(overview["must_contain"], json!(["<h1", "<svg"]));
+
+        let created: Vec<Value> = harness
+            .project
+            .events(&[EventKind::TaskCreated])
+            .iter()
+            .map(|event| {
+                catervas_protocol::event::event_to_value(event)["body"]["filed_as"].clone()
+            })
+            .collect();
+        assert_eq!(
+            created,
+            [json!("document_rewrite"), json!("document_rewrite")]
+        );
+        assert_eq!(rewrite_events(&harness), [json!(["CTV-1", "CTV-2"])]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_role_without_a_reviewer_gets_no_rewrite_task() {
+        // No Architect and no Developer to review the Designer; the Scrum Master reviews the
+        // Product Manager.
+        let harness = Harness::new("files-rewrite-no-reviewer", |wire| {
+            use catervas_core::team::fixtures::an_agent_wire;
+            wire["agents"] = json!([
+                an_agent_wire("pm", "product_manager"),
+                an_agent_wire("sm", "scrum_master"),
+                an_agent_wire("iris", "ui_ux_designer"),
+            ]);
+        });
+        write(&harness, &format!("{PRODUCT}/spec.md"), "spec\n");
+        write(&harness, "docs/catervas/design/screens.md", "screens\n");
+        commit(&harness, "the documents");
+        let tasks = rewritten(&rewrite(&harness));
+        assert_eq!(tasks, ["CTV-1"]);
+        assert_eq!(
+            contract_of(&harness, "CTV-1")["assignee_role"],
+            "product_manager"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_delivery_only_rewrite_records_no_tasks() {
+        let harness = Harness::new("files-rewrite-delivery", with_the_designer);
+        write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        commit(&harness, "the cadence");
+        let reply = rewrite(&harness);
+        assert_eq!(rewritten(&reply), Vec::<String>::new(), "{reply}");
+        assert_eq!(rewrite_events(&harness), [json!([])]);
+        assert!(
+            harness
+                .project
+                .events(&[EventKind::TaskCreated, EventKind::RequestTriaged])
+                .is_empty()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_rewrite_it_cannot_start() {
+        let refused = |reply: &Value, code: &str, words: &str| {
+            assert_eq!(refusal(reply), (code.to_string(), String::new()), "{reply}");
+            assert_eq!(said(reply), words);
+        };
+        // A Markdown team.
+        let markdown = Harness::new("files-rewrite-markdown", |wire| {
+            with_the_designer(wire);
+            wire["policy"]["document_format"] = json!("markdown");
+        });
+        write(&markdown, &format!("{PRODUCT}/spec.md"), "spec\n");
+        commit(&markdown, "the spec");
+        refused(
+            &rewrite(&markdown),
+            "not_html",
+            "Turn on Write documents as HTML first.",
+        );
+
+        // Nothing but a plan, and no delivery `.md`.
+        let plans = Harness::new("files-rewrite-nothing", with_the_marketing_specialist);
+        write(
+            &plans,
+            "docs/catervas/marketing/plans/MP-1.md",
+            "a marketing plan\n",
+        );
+        write(
+            &plans,
+            "docs/catervas/delivery/cadence.html",
+            "<h1>c</h1>\n",
+        );
+        commit(&plans, "the plan");
+        refused(
+            &rewrite(&plans),
+            "nothing_to_rewrite",
+            "Every document your team can rewrite is already HTML.",
+        );
+        assert!(rewrite_events(&plans).is_empty());
+
+        // A rewrite whose tasks are still on the board.
+        let harness = project("files-rewrite-open", "manual");
+        write(&harness, &format!("{PRODUCT}/spec.md"), "spec\n");
+        write(&harness, OVERVIEW, "the overview\n");
+        commit(&harness, "the documents");
+        assert_eq!(rewritten(&rewrite(&harness)), ["CTV-1", "CTV-2"]);
+        let open = "Your team is still rewriting its documents.";
+        refused(&rewrite(&harness), "rewrite_open", open);
+        harness
+            .project
+            .moved("CTV-1", "ready", "accepted", &json!({}));
+        refused(&rewrite(&harness), "rewrite_open", open);
+        harness
+            .project
+            .moved("CTV-2", "ready", "cancelled", &json!({}));
+        assert_eq!(rewritten(&rewrite(&harness)), ["CTV-3", "CTV-4"]);
+        assert_eq!(rewrite_events(&harness).len(), 2);
     }
 }

@@ -865,6 +865,7 @@ pub(super) fn retro_message(
     tasks: &[SprintTask],
     retro: Option<&str>,
     cadence: Option<DocumentFormat>,
+    rewrite_delivery: bool,
 ) -> String {
     let mut facts = Vec::new();
     for task in tasks {
@@ -902,11 +903,20 @@ pub(super) fn retro_message(
             untrusted_block("retro", last_bytes(text, NOTE_CAP_BYTES), NOTE_CAP_BYTES)
         )),
     );
-    match cadence {
+    let message = match cadence {
         Some(format) => format!("{message}\n{}", cadence_line(format)),
         None => message,
+    };
+    if rewrite_delivery {
+        format!("{message}\n{REWRITE_DELIVERY_LINE}")
+    } else {
+        message
     }
 }
+
+/// What the retro is told once the owner has asked for the documents as HTML and `delivery/` still
+/// holds Markdown: the Scrum Master takes no task, so it rewrites its own documents here.
+const REWRITE_DELIVERY_LINE: &str = "Rewrite the documents in docs/catervas/delivery/ as HTML with catervas_write_folder_doc; writing <name>.html removes <name>.md.";
 
 /// What the retro of a sprint that documented the project ends with: the Scrum Master writes the
 /// team's cadence (ADR 0051).
@@ -2152,9 +2162,10 @@ mod tests {
             &[],
             Some("# Retro\nkeep it small"),
             Some(catervas_core::folders::DocumentFormat::Markdown),
+            false,
         );
         assert!(with.ends_with(line), "{with}");
-        let without = retro_message("S1", &[], Some("# Retro\nkeep it small"), None);
+        let without = retro_message("S1", &[], Some("# Retro\nkeep it small"), None, false);
         assert!(
             !without.contains("catervafying-the-repository"),
             "{without}"

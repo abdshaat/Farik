@@ -463,6 +463,32 @@ fn finished_sprint(
     }))
 }
 
+/// Whether the owner has asked for the documents as HTML (`document_rewrite.started`), the team
+/// writes HTML, and the integration branch's `delivery/` still holds a Markdown document.
+fn delivery_to_rewrite(
+    tools: &crate::tools::ToolDeps,
+    team: &Team,
+) -> Result<bool, OrchestratorError> {
+    use catervas_core::folders::DocumentFormat;
+    if team.document_format() != DocumentFormat::Html {
+        return Ok(false);
+    }
+    let asked = tools.log.read(&EventQuery {
+        kinds: vec![EventKind::DocumentRewriteStarted],
+        limit: Some(1),
+        ..EventQuery::default()
+    })?;
+    if asked.is_empty() {
+        return Ok(false);
+    }
+    let branch = integration_branch(team, &tools.git)?;
+    Ok(tools
+        .git
+        .tree_entries(&branch, "docs/catervas/delivery")?
+        .iter()
+        .any(|entry| DocumentFormat::of(&entry.path) == Some(DocumentFormat::Markdown)))
+}
+
 /// The latest ended sprint's review, then its retro (5.9), under `All` alone in a tick scoped to no
 /// task, while no newer sprint has started (`ended_sprint`): the ceremony runner gets one
 /// `ceremony` session in the `review` thread until the review has run, then one in the `retro`
@@ -473,6 +499,10 @@ fn finished_sprint(
 /// Between them (`due_refresh`), the Product Manager and the Architect each get one `review`
 /// session that refreshes the product plan and the architecture notes. Passed over for a sprint
 /// whose file lists no task, with no runner, or on a spent day.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the review, the retro and the refresh, side by side"
+)]
 async fn review_and_retro(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -520,10 +550,19 @@ async fn review_and_retro(
                     file.task_ids.iter().any(|id| id.as_str() == epic.as_str())
                 }))
             .then_some(team.document_format());
+            // After the owner's rewrite, it rewrites `delivery/`, which no task reaches.
+            let rewrite_delivery =
+                Role::from(runner.role) == Role::ScrumMaster && delivery_to_rewrite(tools, team)?;
             (
                 runner,
                 Thread::Retro,
-                retro_message(&sprint.sprint_id, &tasks, retro.as_deref(), cadence),
+                retro_message(
+                    &sprint.sprint_id,
+                    &tasks,
+                    retro.as_deref(),
+                    cadence,
+                    rewrite_delivery,
+                ),
                 RETRO_TOOLS,
                 "retro ceremony",
             )
@@ -7839,6 +7878,61 @@ mod tests {
                 started[1].initial_prompt
             );
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_retro_rewrites_delivery_after_a_rewrite() {
+        let line = "Rewrite the documents in docs/catervas/delivery/ as HTML with \
+                    catervas_write_folder_doc; writing <name>.html removes <name>.md.";
+        let retro_told = |name: &str, scrum_master: bool, rewrite: bool, file: &str| {
+            let harness = Harness::new(name, |wire| {
+                if scrum_master {
+                    with_a_scrum_master(wire);
+                }
+            });
+            harness.accepted("CTV-1");
+            harness.open_sprint("S1", &["CTV-1"]);
+            harness.project.record(
+                "CTV-1",
+                "note.written",
+                &json!({ "kind": "completion", "text": "The login page is done.", "written_by": "dev-a" }),
+            );
+            harness.spent(Some("CTV-1"), "s-1", 1.25);
+            std::fs::create_dir_all(harness.project.repo.path.join("docs/catervas/delivery"))
+                .expect("the folder is made");
+            harness.commit_at_root(file, "cadence\n", "the cadence");
+            if rewrite {
+                harness
+                    .project
+                    .record("", "document_rewrite.started", &json!({ "tasks": [] }));
+            }
+            let adapter = harness.recorded(vec![review(), retro()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            async move {
+                // The project lives as long as the ticks.
+                let _harness = harness;
+                for _ in 0..3 {
+                    orchestrator.tick().await.expect("the tick runs");
+                }
+                let started = adapter.started();
+                assert_eq!(started.len(), 2, "{started:?}");
+                started[1].initial_prompt.contains(line)
+            }
+        };
+        let md = "docs/catervas/delivery/cadence.md";
+        assert!(retro_told("orch-rewrite-retro", true, true, md).await);
+        assert!(!retro_told("orch-rewrite-retro-none", true, false, md).await);
+        assert!(
+            !retro_told(
+                "orch-rewrite-retro-html",
+                true,
+                true,
+                "docs/catervas/delivery/cadence.html"
+            )
+            .await
+        );
+        assert!(!retro_told("orch-rewrite-retro-pm", false, true, md).await);
     }
 
     /// A new project (`project.started`) whose team has a Product Manager, an Architect, a Developer

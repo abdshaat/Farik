@@ -542,6 +542,103 @@ pub fn change_request(
     })
 }
 
+/// The whole contract of the task that rewrites `owner`'s Markdown `documents` (their paths, an
+/// agent version beside its document) as HTML (`docs/SPEC.md` 5.17): `owner` writes it and
+/// `reviewer` checks it, within `max_cost_usd`. It may change `folder`, and nothing else. Each
+/// `.html` must exist and hold a heading, and the overview a drawing.
+#[must_use]
+pub fn rewrite_request(
+    folder: &str,
+    documents: &[String],
+    owner: Role,
+    reviewer: Role,
+    max_cost_usd: f64,
+) -> Value {
+    let html = |path: &str| format!("{}.html", path.strip_suffix(".md").unwrap_or(path));
+    let named = documents
+        .iter()
+        .map(|path| path.rsplit('/').next().unwrap_or(path))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let criteria: Vec<Value> = documents
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let page = html(path);
+            let mut must = vec!["<h1"];
+            if page.ends_with("architecture/overview.html") {
+                must.push("<svg");
+            }
+            json!({
+                "id": format!("C{}", index + 1),
+                "text": format!("{page} exists and holds {}.", must.join(" and ")),
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": page, "must_contain": must }
+            })
+        })
+        .collect();
+    let mut exit_criteria = criteria;
+    exit_criteria.push(json!({
+        "id": format!("C{}", documents.len() + 1),
+        "text": "Each Markdown document is gone, and its HTML says what it said.",
+        "satisfies": ["R1"],
+        "verification": {
+            "method": "review",
+            "rubric": [
+                format!("Every document named ({named}) is gone from {folder}, with its agent version."),
+                "Each .html says everything its .md said, and nothing more."
+            ]
+        }
+    }));
+    json!({
+        "title": format!("Rewrite {}'s documents as HTML", owner.to_string().replace('_', " ")),
+        "intent": format!(
+            "The owner asked for the team's documents as HTML. Rewrite these documents in {folder} as \
+             HTML with catervas_write_folder_doc, which removes the Markdown each one replaces: {named}."
+        ),
+        "scope": {
+            "in_scope": [folder],
+            "out_of_scope": ["Every other folder", "What the documents say"]
+        },
+        "requirements": [{ "id": "R1", "text": format!("{named} are HTML, and no longer Markdown.") }],
+        "exit_criteria": exit_criteria,
+        "assignee_role": owner.to_string(),
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": [folder]
+    })
+}
+
+/// The tasks the last `document_rewrite.started` filed, none before the first.
+///
+/// # Errors
+///
+/// What the log refused, or `InvalidEvent` for an id that is not a task's.
+pub fn rewrite_tasks(log: &EventLog) -> Result<Vec<TaskId>, StoreError> {
+    let started = log.read(&EventQuery {
+        kinds: vec![EventKind::DocumentRewriteStarted],
+        newest_first: true,
+        limit: Some(1),
+        ..EventQuery::default()
+    })?;
+    let Some(EventBody::DocumentRewriteStarted(body)) = started.first().map(|event| &event.body)
+    else {
+        return Ok(Vec::new());
+    };
+    body.tasks
+        .iter()
+        .map(|id| {
+            id.as_str().parse().map_err(|_| StoreError::InvalidEvent {
+                detail: format!(
+                    "a document_rewrite.started holds {:?} as a task id",
+                    id.as_str()
+                ),
+            })
+        })
+        .collect()
+}
+
 /// Files a whole contract for `created_by` that no refine session rewrites, as `file_request`
 /// files one: `task.created` carries `filed_as`, and `request.triaged { small, reason }` by
 /// `catervas` follows at once, so that no triage session runs.

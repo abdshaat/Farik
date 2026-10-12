@@ -539,6 +539,9 @@
           "$ref": "#/$defs/filesAskChangeRequest"
         },
         {
+          "$ref": "#/$defs/filesRewriteRequest"
+        },
+        {
           "$ref": "#/$defs/teamSaveRequest"
         },
         {
@@ -2666,6 +2669,36 @@
       "required": ["task_id"],
       "properties": {
         "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
+      }
+    },
+    "filesRewriteRequest": {
+      "title": "Files Rewrite Request",
+      "description": "The owner asks the team to rewrite its Markdown documents as HTML (docs/SPEC.md 5.17): files, as the owner's word, one small, whole task for each role other than the Scrum Master whose folder holds a Markdown document (a marketing plan, MP-n, excepted) and that has a reviewer the team can staff, with no triage or refine session, and records document_rewrite.started. Each task rewrites the folder's Markdown documents, and their agent versions, as HTML and removes the Markdown. The Scrum Master's delivery documents are rewritten at its next retro. Refused with -32005 and data.errors, each with an empty path, a message and a code, in this order: not_html (the team writes new documents as Markdown), rewrite_open (a task of the last rewrite is neither accepted nor cancelled) and nothing_to_rewrite (no task can be filed and delivery holds no Markdown document).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "files.rewrite" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "filesRewriteResult": {
+      "description": "The tasks filed for the rewrite, in the order the folders are listed; none when only the Scrum Master's documents were Markdown.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks"],
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "maxItems": 6,
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
+        }
       }
     },
     "filesTreeQuery": {

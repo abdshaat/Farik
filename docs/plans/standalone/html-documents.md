@@ -391,7 +391,7 @@ Tests in each `mod tests`:
 - `the_retro_rewrites_delivery_after_a_rewrite` — with a rewrite started and `delivery/cadence.md` there, the Scrum Master's retro message holds the design's line. It does not without the rewrite, with `cadence.html` only, or with a Product Manager running the retro.
 - `reads_document_rewrite_started` (protocol) — the event round-trips with zero tasks and with two.
 
-- [ ] `feat(runtime): rewrite the team's documents as HTML`
+- [x] `feat(runtime): rewrite the team's documents as HTML`
 
 ### Task 11: reading and changing HTML in the web app
 
