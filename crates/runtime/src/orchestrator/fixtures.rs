@@ -12,9 +12,9 @@ use std::time::Duration;
 use catervas_core::contract::TaskId;
 use catervas_protocol::clock::{Clock, IdSource, MovableClock, SequentialIds};
 use catervas_protocol::event::{CatervasEvent, EventKind, NewEvent, event_from_value};
-use catervas_store::TaskProjection;
 use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
 use catervas_store::requests::file_request;
+use catervas_store::{Git, TaskProjection};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
@@ -478,12 +478,37 @@ impl Harness {
         notes: bool,
         change: impl FnOnce(&mut Value),
     ) {
-        self.file(task, "ready", change);
+        self.verifying_in(
+            task,
+            commits_done,
+            notes,
+            &self.project.deps.git,
+            None,
+            change,
+        );
+    }
+
+    /// `verifying_with` in the repository `git` opens, which `repo` names in the task's contract
+    /// when it is a member of the project folder.
+    fn verifying_in(
+        &self,
+        task: &str,
+        commits_done: bool,
+        notes: bool,
+        git: &Git,
+        repo: Option<&str>,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.file(task, "ready", |wire| {
+            if let Some(repo) = repo {
+                wire["repo"] = json!(repo);
+            }
+            change(wire);
+        });
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         self.project.moved(task, "ready", "assigned", &people);
         self.project.moved(task, "assigned", "in_progress", &people);
         let worktree = self.worktree(task);
-        let git = &self.project.deps.git;
         git.create_worktree(&worktree, &self.branch(task), "main")
             .expect("the task's worktree is made");
         if commits_done {
@@ -533,7 +558,21 @@ impl Harness {
 
     /// `verifying`, then moved to `accepted` by the Product Manager, its worktree left in place.
     pub(crate) fn accepted_with_worktree(&self, task: &str) {
-        self.verifying(task);
+        self.accepted_in(task, self.project.repo.path.as_path(), None);
+    }
+
+    /// `task` accepted in the repository at `member`, the member `repo` of the project folder when
+    /// one is named: its worktree made by `member`'s git from `main` with `done.txt` committed,
+    /// and left in place.
+    pub(crate) fn accepted_in(&self, task: &str, member: &Path, repo: Option<&str>) {
+        self.verifying_in(
+            task,
+            true,
+            true,
+            &Git::open(member.to_path_buf()),
+            repo,
+            |_| {},
+        );
         self.project.moved(
             task,
             "verifying",
@@ -628,16 +667,20 @@ impl Harness {
 
     /// A bare repository beside the project, added to it as `origin`, with `main` pushed there.
     pub(crate) fn with_origin(&self) -> PathBuf {
-        let origin = self.project.repo.path.with_extension("origin.git");
+        Self::with_origin_in(&self.project.repo.path)
+    }
+
+    /// `with_origin` for the repository at `repo`, a member of the project folder among them.
+    pub(crate) fn with_origin_in(repo: &Path) -> PathBuf {
+        let origin = repo.with_extension("origin.git");
         let _ = std::fs::remove_dir_all(&origin);
         std::fs::create_dir_all(&origin).expect("a directory for the remote");
         git_in(&origin, &["init", "--bare", "-b", "main"]);
-        let root = &self.project.repo.path;
         git_in(
-            root,
+            repo,
             &["remote", "add", "origin", origin.to_str().expect("a path")],
         );
-        git_in(root, &["push", "origin", "main"]);
+        git_in(repo, &["push", "origin", "main"]);
         origin
     }
 
@@ -649,7 +692,13 @@ impl Harness {
 
     /// `merge_on_the_forge` for any branch of the project, a folder change's among them.
     pub(crate) fn merge_branch_on_the_forge(&self, origin: &Path, branch: &str) -> String {
-        let clone = self.project.repo.path.with_extension("forge");
+        Self::merge_branch_on_the_forge_in(&self.project.repo.path, origin, branch)
+    }
+
+    /// `merge_branch_on_the_forge` for a branch of the repository at `repo`, which `origin` is the
+    /// remote of.
+    pub(crate) fn merge_branch_on_the_forge_in(repo: &Path, origin: &Path, branch: &str) -> String {
+        let clone = repo.with_extension("forge");
         let _ = std::fs::remove_dir_all(&clone);
         let parent = clone.parent().expect("a parent");
         git_in(
@@ -663,7 +712,7 @@ impl Harness {
         git_in(&clone, &["config", "user.name", "Catervas Test"]);
         git_in(&clone, &["config", "user.email", "test@catervas.invalid"]);
         git_in(&clone, &["config", "commit.gpgsign", "false"]);
-        let root = self.project.repo.path.to_str().expect("a path").to_string();
+        let root = repo.to_str().expect("a path").to_string();
         git_in(&clone, &["fetch", &root, &format!("refs/heads/{branch}")]);
         git_in(
             &clone,
@@ -1397,6 +1446,7 @@ impl FakeGh {
              sub=\"$2\"\n\
              for arg in \"$@\"; do printf '%s\\0' \"$arg\"; done >> \"$dir/calls\"\n\
              printf '\\n' >> \"$dir/calls\"\n\
+             pwd -P >> \"$dir/cwds\"\n\
              cat > \"$dir/$sub.stdin\"\n\
              if [ -f \"$dir/$sub.out\" ]; then cat \"$dir/$sub.out\"; fi\n\
              if [ -f \"$dir/$sub.err\" ]; then cat \"$dir/$sub.err\" >&2; fi\n\
@@ -1454,6 +1504,15 @@ impl FakeGh {
                     .map(str::to_string)
                     .collect()
             })
+            .collect()
+    }
+
+    /// The directory each call ran in, canonicalised by the shell, oldest first.
+    pub(crate) fn cwds(&self) -> Vec<PathBuf> {
+        std::fs::read_to_string(self.dir.join("cwds"))
+            .unwrap_or_default()
+            .lines()
+            .map(PathBuf::from)
             .collect()
     }
 

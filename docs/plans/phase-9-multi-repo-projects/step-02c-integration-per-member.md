@@ -120,7 +120,7 @@ Files: `integrate.rs` (the target, its resolution in `integrate_locked`, the fiv
 - `waits_for_a_dependency_in_another_repository` (`rules.rs`, shaped as `waits_for_an_accepted_dependency_until_it_is_integrated`, `:2781`): `CTV-2` (`repo: infra`, `ready`) depends on `CTV-1`. Under `manual`, while `CTV-1` awaits integration, the tick is `Idle` and `adapter.started()` is empty. After `catervas integrate CTV-1` has merged it into `app`, the next tick acts on `CTV-2` with one session started. RED: `catervas integrate CTV-1` escalates, so `CTV-2` never moves.
 - `still_integrates_a_docs_task_and_a_folder_change_in_the_project_folder` (a guard: it passes before the change and must still pass after it; on step 02's `Harness::project_folder_with(.., with_the_suggested_six)`): under `auto_merge`, an Architect's task with no `repo` and a folder change each land on the project folder's `main`, and `app`'s and `infra`'s `main` are untouched. Under `pull_request`, with an origin added to the project folder by `with_origin_in`, every `cwds()` entry is the project root's canonical path.
 
-- [ ] `feat(runtime): integrate a task into its member repository`
+- [x] `feat(runtime): integrate a task into its member repository`
 
 ### Task 2: The member is rescanned after its integration
 

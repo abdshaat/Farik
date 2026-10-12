@@ -2842,6 +2842,45 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_dependency_in_another_repository() {
+        let (harness, members) =
+            Harness::project_folder_with("orch-plan-dependency-repo", &["app", "infra"], |wire| {
+                wire["policy"]["integration"] = json!("manual");
+            });
+        harness.accepted_in("CTV-1", &members[0].path, Some("app"));
+        members[0]
+            .adapter()
+            .remove_worktree(&harness.worktree("CTV-1"))
+            .expect("the worktree goes");
+        harness.file("CTV-2", "ready", |wire| {
+            wire["repo"] = json!("infra");
+            wire["dependencies"] = json!(["CTV-1"]);
+        });
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert!(adapter.started().is_empty());
+
+        orchestrator
+            .integrate(&"CTV-1".parse().expect("a task id"))
+            .await
+            .expect("the human integrates it into app");
+        assert!(!harness.row("CTV-1").awaiting_integration);
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
+        assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_dependency_the_board_does_not_hold() {
         let harness = Harness::new("orch-plan-dependency-missing", |_| {});
         harness.file("CTV-2", "ready", |wire| {
