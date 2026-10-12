@@ -633,7 +633,8 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             .map_err(|e| internal(&e))?;
         let branch = task_branch(&contract);
         for stem in PRODUCT_PLAN_STEMS {
-            if let Ok(Some(path)) = crate::transitions::held_document(&deps.git, &branch, stem)
+            if let Ok(Some(path)) =
+                catervas_store::git::held_document(&deps.git, &branch, stem, team.document_format())
                 && let Ok(text) = deps.git.file_at(&branch, &path)
             {
                 documents.push(json!({ "path": path, "text": text }));

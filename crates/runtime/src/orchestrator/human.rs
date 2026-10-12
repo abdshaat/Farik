@@ -3027,6 +3027,20 @@ mod tests {
             contract.reviewer_role,
             catervas_core::contract::Role::Architect
         );
+        // The team writes HTML (the default), so the plan's files are pages.
+        assert_eq!(
+            contract
+                .allowed_paths
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            [
+                "docs/catervas/product/spec.html",
+                "docs/catervas/product/spec.agent.html",
+                "docs/catervas/product/roadmap.html",
+                "docs/catervas/product/roadmap.agent.html",
+            ]
+        );
 
         // Rule 10 and rule 9 move it to ready with no refine session; sprints are on and none is
         // open, and it is not held: the Scrum Master's plan session takes it to assigned.

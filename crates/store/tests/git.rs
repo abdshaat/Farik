@@ -1754,3 +1754,40 @@ fn product_plan_on_takes_either_format() {
     repository.commit("write the roadmap");
     assert!(product_plan_on(&adapter, &team).expect("the read works"));
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn held_document_keeps_the_format_it_finds() {
+    use catervas_core::folders::DocumentFormat::{Html, Markdown};
+    use catervas_store::git::held_document;
+
+    let repository = TempRepo::new("held-document");
+    let adapter = repository.adapter();
+    let stem = "docs/catervas/product/spec";
+    repository.write("README.md", "# A project\n");
+    repository.commit("start");
+    assert_eq!(
+        held_document(&adapter, "HEAD", stem, Html).expect("reads"),
+        None
+    );
+    repository.write("docs/catervas/product/spec.md", "# Bakery\n");
+    repository.commit("write the spec");
+    // Only one format is there: either team gets it.
+    for format in [Markdown, Html] {
+        assert_eq!(
+            held_document(&adapter, "HEAD", stem, format).expect("reads"),
+            Some("docs/catervas/product/spec.md".to_string())
+        );
+    }
+    // Both are there: an existing document keeps its format, so the other one is preferred.
+    repository.write("docs/catervas/product/spec.html", "<h1>Bakery</h1>\n");
+    repository.commit("write the spec as a page");
+    assert_eq!(
+        held_document(&adapter, "HEAD", stem, Markdown).expect("reads"),
+        Some("docs/catervas/product/spec.html".to_string())
+    );
+    assert_eq!(
+        held_document(&adapter, "HEAD", stem, Html).expect("reads"),
+        Some("docs/catervas/product/spec.md".to_string())
+    );
+}

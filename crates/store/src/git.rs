@@ -1074,6 +1074,32 @@ pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
     }
 }
 
+/// The path `stem` has on `branch`, in whichever format the branch holds it, else `None`. When both
+/// formats are held, the one other than the team's `format` comes first: an existing document keeps
+/// its format (`check_document_format` refuses the team-format path of such a document).
+///
+/// # Errors
+///
+/// `CommandFailed` when `branch` names nothing, as `Git::has_file` does.
+pub fn held_document(
+    git: &Git,
+    branch: &str,
+    stem: &str,
+    format: DocumentFormat,
+) -> Result<Option<String>, GitError> {
+    let other = match format {
+        DocumentFormat::Markdown => DocumentFormat::Html,
+        DocumentFormat::Html => DocumentFormat::Markdown,
+    };
+    for held in [other, format] {
+        let path = with_format(stem, held);
+        if git.has_file(branch, &path)? {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
 /// Whether the new project's product plan is on the team's integration branch: both documents of
 /// `PRODUCT_PLAN_STEMS` are there, each as `.md` or `.html` (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
 ///
@@ -1089,13 +1115,7 @@ pub fn product_plan_on(git: &Git, team: &Team) -> Result<bool, GitError> {
     }
     let mut present = Vec::new();
     for stem in PRODUCT_PLAN_STEMS {
-        for format in [DocumentFormat::Markdown, DocumentFormat::Html] {
-            let document = with_format(stem, format);
-            if git.has_file(&branch, &document)? {
-                present.push(document);
-                break;
-            }
-        }
+        present.extend(held_document(git, &branch, stem, team.document_format())?);
     }
     Ok(product_plan_approved(&present))
 }

@@ -824,7 +824,7 @@ pub(super) fn product_refresh_message(
 }
 
 /// The Architect's refresh at a sprint review (`docs/SPEC.md` 5.9): to bring the architecture's
-/// `features.md`, `jobs.md` and `structure.md` up to date with what the sprint added; then each
+/// `features`, `jobs` and `structure`, each in the format it is held in up to date with what the sprint added; then each
 /// integrated task's id and title and its completion note, as untrusted text.
 pub(super) fn architecture_refresh_message(
     sprint_id: &str,

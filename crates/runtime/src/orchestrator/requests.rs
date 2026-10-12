@@ -19,7 +19,7 @@ use catervas_protocol::event::{
 };
 use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
-use catervas_store::git::GitError;
+use catervas_store::git::{GitError, held_document};
 use catervas_store::product_plan::is_the_product_plan;
 
 use super::messages::{
@@ -39,8 +39,8 @@ use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, held_document, integration_branch, last_move_into,
-    refining_began, refusal_details, result_accepted, the_human_reviews_the_epic,
+    TransitionAsk, TransitionOutcome, integration_branch, last_move_into, refining_began,
+    refusal_details, result_accepted, the_human_reviews_the_epic,
 };
 
 /// The human, as the reviewer of an epic the Product Manager holds (5.16 item 4).
@@ -512,7 +512,7 @@ fn product_managers_message(
         let git = &deps.tools.git;
         let branch = integration_branch(team, git)?;
         // The plan is read in the format it was written in.
-        match held_document(git, &branch, &unextended) {
+        match held_document(git, &branch, &unextended, team.document_format()) {
             Ok(Some(plan)) => {
                 let text = git.file_at(&branch, &plan)?;
                 return Ok(plan_tasks_message(contract, &plan, &text, listed));
@@ -2212,6 +2212,20 @@ mod tests {
             );
         }
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        // The team writes HTML (the default): the Architect is asked for pages, a diagram among them.
+        let architects = serde_json::to_string(
+            &harness
+                .project
+                .deps
+                .files
+                .read_contract(&task("CTV-3"))
+                .expect("the Architect's task"),
+        )
+        .expect("a contract is json");
+        assert!(
+            architects.contains("architecture/overview.html") && !architects.contains(".md"),
+            "{architects}"
+        );
 
         // A Designer whose browser is not ready (no preview can run) gets no task.
         let unready = Harness::new(
@@ -3350,6 +3364,25 @@ mod tests {
                 spec.initial_prompt
             );
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn names_a_new_plan_in_the_teams_html() {
+        // No document_format: the default team writes HTML.
+        let harness = Harness::new("epic-plan-task-html", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(
+            prompt.contains("docs/catervas/architecture/plans/CTV-1.html"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("plans/CTV-1.md"), "{prompt}");
     }
 
     /// CTV-2 under the Scrum Master's epic CTV-1: the plan task, accepted, with `plan` and its one

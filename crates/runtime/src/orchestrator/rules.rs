@@ -21,6 +21,7 @@ use catervas_protocol::event::{
     SessionStartedBodyPurpose, Thread, new_event,
 };
 use catervas_store::baseline::{copy_baseline, folder_in};
+use catervas_store::git::held_document;
 use catervas_store::marketing::{marketing_plans, social_posts};
 use catervas_store::product_plan::{new_project, product_plan_tasks};
 use catervas_store::{CostScope, EventQuery, Git, GitError, TaskProjection};
@@ -681,16 +682,21 @@ fn held_on_the_integration_branch(
     stem: &str,
 ) -> Result<Option<String>, OrchestratorError> {
     let git = &deps.tools.git;
-    match transitions::held_document(git, &integration_branch(team, git)?, stem) {
+    match held_document(
+        git,
+        &integration_branch(team, git)?,
+        stem,
+        team.document_format(),
+    ) {
         Err(GitError::CommandFailed { .. }) => Ok(None),
         other => Ok(other?),
     }
 }
 
 /// The refresh the reviewed `sprint` owes next, once per sprint under the ceremonies' bound
-/// (`reviewed_by`): the Product Manager's, when its `spec.md` is on the integration branch and it
+/// (`reviewed_by`): the Product Manager's, when its `spec` (either format) is on the integration branch and it
 /// has not reviewed (a Product Manager that ran the review has: its review was its refresh); then
-/// the Architect's, when its `structure.md` is and a task of the sprint was integrated after the
+/// the Architect's, when its `structure` (either format) is and a task of the sprint was integrated after the
 /// sprint started, read from the log. Under `auto_merge` they wait while a task of the sprint is
 /// accepted and awaiting its integration, which rule 2 does first, unless its integration was
 /// escalated to the human. Passed over on a spent day or while the agent sleeps, as the review is.
@@ -8881,6 +8887,30 @@ mod tests {
             .find("docs/catervas/product/reports/S1.md")
             .expect("the refresh's asks");
         assert!(facts < asks, "{review_of_pm}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_product_managers_review_is_its_refresh_for_an_html_spec() {
+        // No Scrum Master, the default (HTML) team, and the spec is a page on main.
+        let harness = Harness::new("orch-refresh-pm-runs-html", |_| {});
+        a_sprint_of_one_task(&harness, true);
+        on_main(&harness, "docs/catervas/product/spec.html");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let review_of_pm = &adapter.started()[0].initial_prompt;
+        for named in [
+            "Then keep the product plan true to what the sprint did.",
+            "docs/catervas/product/spec.html",
+            "docs/catervas/product/reports/S1.html",
+        ] {
+            assert!(review_of_pm.contains(named), "{named}: {review_of_pm}");
+        }
     }
 
     /// Records `text` in `agent`'s chat as `author`, and answers its seq.

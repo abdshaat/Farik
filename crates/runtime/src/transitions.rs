@@ -13,7 +13,7 @@ use std::time::Duration;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetState, SessionLedger};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
-use catervas_core::folders::{DocumentFormat, human_of_twin, with_format};
+use catervas_core::folders::human_of_twin;
 use catervas_core::generated::team::Judgment;
 pub(crate) use catervas_core::governor::done::result_awaits_human;
 use catervas_core::governor::done::{
@@ -86,25 +86,6 @@ use crate::cost::{CostError, budget_state, extra_tries};
 use crate::preview::PreviewFactory;
 use crate::tools::design::{DesignReview, ReviewState, design_review};
 use crate::tools::sheets::private_path;
-
-/// The path `stem` has on `branch`, in whichever format the branch holds it, else `None`.
-///
-/// # Errors
-///
-/// `CommandFailed` when `branch` names nothing, as `Git::has_file` does.
-pub(crate) fn held_document(
-    git: &Git,
-    branch: &str,
-    stem: &str,
-) -> Result<Option<String>, GitError> {
-    for format in [DocumentFormat::Markdown, DocumentFormat::Html] {
-        let path = with_format(stem, format);
-        if git.has_file(branch, &path)? {
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
-}
 
 /// The governor's door: everything a transition is judged on and recorded in.
 pub struct Transitions {

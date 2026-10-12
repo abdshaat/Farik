@@ -811,7 +811,7 @@ mod tests {
         let project = a_marketing_project_in("tools-plan-html", "html");
         let worktree = works_on(&project, "CTV-1");
         let mut plan = a_plan();
-        plan["title"] = json!("A & B");
+        plan["title"] = json!("A & <B> \"C\"");
         plan["text"] = json!(format!("<p>{}</p>", "x".repeat(300)));
         plan["agent_text"] = json!(format!("<p>{}</p>", "y".repeat(300)));
 
@@ -822,7 +822,7 @@ mod tests {
             format!(
                 "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
                  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-                 <title>MP-1: A &amp; B</title>\n</head>\n<body>\n<h1>MP-1: A &amp; B</h1>\n\
+                 <title>MP-1: A &amp; &lt;B&gt; &quot;C&quot;</title>\n</head>\n<body>\n<h1>MP-1: A &amp; &lt;B&gt; &quot;C&quot;</h1>\n\
                  {body}\n</body>\n</html>\n"
             )
         };
