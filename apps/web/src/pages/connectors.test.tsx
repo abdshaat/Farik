@@ -1706,30 +1706,38 @@ describe("a role's kit on the agent page", () => {
 	});
 
 	it("agent_page_ignores_connect_for_a_held_unknown_or_at_launch_service", async () => {
-		const held = { service: [KIT_NOTION], held: [kitEntry("notion", "http")] };
 		for (const [services, heldEntries, states, name] of [
 			[
-				held.service,
-				held.held,
+				[KIT_NOTION],
+				[kitEntry("notion", "http")],
 				[{ ...KIT_STATES[0], server: "notion" }],
 				"notion",
 			],
 			[[KIT_NOTION], [], [], "nothing"],
 			[[KIT_ADS], [], [], "google-ads"],
 		] as const) {
-			const { container } = await openedWithKit(
+			await openedWithKit(
 				[...services],
 				[...heldEntries],
 				[...states],
 				`/team/theo?connect=${name}`,
 			);
-			expect(screen.queryByRole("dialog")).toBeNull();
+			expect(screen.queryByRole("dialog"), name).toBeNull();
 			expect(
 				screen.getByRole("list", { name: "From the Developer’s kit" }),
 			).toBeTruthy();
 			cleanup();
-			container.remove();
+			localStorage.clear();
 		}
+	});
+
+	it("agent_page_keeps_the_connect_dialog_closed_after_cancel", async () => {
+		await openedWithKit([KIT_NOTION], [], [], "/team/theo?connect=notion");
+		const dialog = screen.getByRole("dialog", {
+			name: "Connect Notion to Theo",
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
 	it("agent_edit_lists_the_kit_above_your_own", async () => {
