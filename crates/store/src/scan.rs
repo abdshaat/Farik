@@ -279,35 +279,45 @@ pub fn renamed(repo: &str, found: &[CriterionTemplate]) -> Vec<CriterionTemplate
 
 /// The library a project folder has after its `members` were scanned.
 ///
-/// Kept: every entry that is not `source: project_scan`, and every `project_scan` entry whose
-/// `repo` is none of `members`. Then each of `found` whose name is not already kept is appended in
-/// order, up to `LIBRARY_CAP`; the names that did not fit come back with the library. A human's
-/// entry wins a name clash, as in `seeded_library`, which stays for a project of one repository.
+/// The existing library is walked in order. A `source: project_scan` entry whose `repo` is one of
+/// `members` is replaced in place by the entry of `found` with the same name, which is then used
+/// up; if none of `found` has that name, it is dropped. Every other entry stays where it is. Then
+/// each of `found` not used up, and whose name is not already kept, is appended in order, up to
+/// `LIBRARY_CAP`; the names that did not fit come back with the library. A human's entry wins a
+/// name clash, as in `seeded_library`, which stays for a project of one repository.
 #[must_use]
 pub fn reseeded(
     found: &[CriterionTemplate],
     existing: Option<&CriteriaLibrary>,
     members: &[&str],
 ) -> (CriteriaLibrary, Vec<String>) {
-    let mut criteria: Vec<CriterionTemplate> = existing
-        .map(|library| {
-            library
-                .criteria
-                .iter()
-                .filter(|one| {
-                    one.source != Some(CriterionSource::ProjectScan)
-                        || !one
-                            .repo
-                            .as_ref()
-                            .is_some_and(|repo| members.contains(&repo.as_str()))
-                })
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut used = vec![false; found.len()];
+    let mut criteria: Vec<CriterionTemplate> = Vec::new();
+    for one in existing
+        .map(|library| library.criteria.as_slice())
+        .unwrap_or_default()
+    {
+        let scanned = one.source == Some(CriterionSource::ProjectScan)
+            && one
+                .repo
+                .as_ref()
+                .is_some_and(|repo| members.contains(&repo.as_str()));
+        if !scanned {
+            criteria.push(one.clone());
+            continue;
+        }
+        if let Some(at) = found
+            .iter()
+            .enumerate()
+            .position(|(at, new)| !used[at] && new.name == one.name)
+        {
+            used[at] = true;
+            criteria.push(found[at].clone());
+        }
+    }
     let mut left_out = Vec::new();
-    for one in found {
-        if criteria.iter().any(|kept| kept.name == one.name) {
+    for (at, one) in found.iter().enumerate() {
+        if used[at] || criteria.iter().any(|kept| kept.name == one.name) {
             continue;
         }
         if criteria.len() >= LIBRARY_CAP {
@@ -1742,6 +1752,12 @@ mod tests {
         // Dropping a member keeps the others.
         let (library, _) = reseeded(&[], Some(&existing), &["app"]);
         assert_eq!(names(&library), ["infra-the-tests-pass", "my-check"]);
+
+        // A check found again keeps its place: nothing new, nothing moves.
+        let again = [entry("app-the-tests-pass", "project_scan", Some("app"))];
+        let (library, left_out) = reseeded(&again, Some(&existing), &["app"]);
+        assert_eq!(library, existing);
+        assert_eq!(left_out, Vec::<String>::new());
     }
 
     #[test]

@@ -433,14 +433,6 @@ fn names(library: &CriteriaLibrary) -> Vec<&str> {
         .collect()
 }
 
-/// The names a library holds, in alphabetical order: what a rescan keeps, whatever order the kept
-/// entries and the found ones come back in.
-fn sorted_names(library: &CriteriaLibrary) -> Vec<&str> {
-    let mut held = names(library);
-    held.sort_unstable();
-    held
-}
-
 fn recorded(log: &EventLog, kind: EventKind) -> Vec<EventBody> {
     log.read(&EventQuery {
         kinds: vec![kind],
@@ -519,6 +511,11 @@ fn scans_every_member() {
     assert_eq!(recorded(&log, EventKind::CriteriaUpdated).len(), 1);
     assert_eq!(recorded(&log, EventKind::ProjectScanned).len(), 2);
 
+    // One member scanned again with nothing changed keeps its place, and is not recorded either.
+    let one = rescan(&files, &log, Some("app"), CATERVAS_ACTOR).expect("scanned again");
+    assert!(!one.library_changed);
+    assert_eq!(recorded(&log, EventKind::CriteriaUpdated).len(), 1);
+
     // A member that is away reads as not found, and keeps its entries whoever asks.
     let away = infra.path.with_extension("away");
     let _ = std::fs::remove_dir_all(&away);
@@ -529,14 +526,14 @@ fn scans_every_member() {
         format!("app: {app_says}; infra: not found")
     );
     assert_eq!(
-        sorted_names(&files.read_criteria().expect("the library")),
-        sorted_names(&library)
+        names(&files.read_criteria().expect("the library")),
+        names(&library)
     );
     let everyone = rescan(&files, &log, None, CATERVAS_ACTOR).expect("scanned");
     assert!(everyone.read_back.ends_with("infra: not found"));
     assert_eq!(
-        sorted_names(&files.read_criteria().expect("the library")),
-        sorted_names(&library)
+        names(&files.read_criteria().expect("the library")),
+        names(&library)
     );
 
     // A member whose scan fails reads as not read, and keeps its entries too.
@@ -552,8 +549,8 @@ fn scans_every_member() {
     );
     assert!(failed.read_back.ends_with(&format!("infra: {infra_says}")));
     assert_eq!(
-        sorted_names(&files.read_criteria().expect("the library")),
-        sorted_names(&library)
+        names(&files.read_criteria().expect("the library")),
+        names(&library)
     );
 }
 

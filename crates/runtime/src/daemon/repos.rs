@@ -742,7 +742,8 @@ mod tests {
         );
         assert!(texts(&held, "app-the-tests-pass").is_some());
         let updates = criteria_updates(&folder);
-        assert!(updates.len() >= 3, "{updates:?}");
+        // Add, locate, remove's drop, and the rescan dropping `infra`'s stale entry.
+        assert_eq!(updates.len(), 4, "{updates:?}");
         let last = updates.last().expect("an update");
         assert_eq!(last.1, "catervas");
         assert!(!last.0.contains(&"web-the-tests-pass".to_string()));
