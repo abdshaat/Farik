@@ -40,6 +40,12 @@ describe("Markdown", () => {
 		expect(document.querySelector("code")?.textContent).toBe("c");
 	});
 
+	it("renders a table", () => {
+		render(<Markdown text={"| a | b |\n|---|---|\n| 1 | 2 |"} />);
+		expect(screen.getByRole("table")).toBeTruthy();
+		expect(screen.getAllByRole("columnheader")).toHaveLength(2);
+	});
+
 	it("shows raw html as text", async () => {
 		const { container, unmount } = render(
 			<Markdown
