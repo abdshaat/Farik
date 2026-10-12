@@ -2030,7 +2030,7 @@ const MOST_FOLDER_DOC_NOTE: usize = 600;
     clippy::too_many_lines,
     reason = "the checks, then approving or sending back"
 )]
-fn folder_doc_decide(
+pub(crate) fn folder_doc_decide(
     tools: &ToolDeps,
     proposals: &[u64],
     approve: bool,

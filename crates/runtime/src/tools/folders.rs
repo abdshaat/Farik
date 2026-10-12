@@ -471,12 +471,22 @@ fn check_input<'a>(
     let path = target.path;
     let into = integration_branch(&call.team, &call.deps().git).map_err(failed)?;
     let git = &call.deps().git;
-    let removed = check_document_format(&path, call.team.document_format(), &|held: &str| {
-        git.has_file(&into, held).unwrap_or(false)
-    })
-    .map_err(|why| format_refusal(&path, call.team.document_format(), why))?
-    .into_iter()
-    .collect::<Vec<_>>();
+    // A git error reads as "absent" inside the check, so the first one is kept and fails the call
+    // after it: an unreadable branch must not let a document change format.
+    let unreadable = std::cell::RefCell::new(None);
+    let format_check = check_document_format(&path, call.team.document_format(), &|held: &str| {
+        git.has_file(&into, held).unwrap_or_else(|error| {
+            unreadable.borrow_mut().get_or_insert(error.to_string());
+            false
+        })
+    });
+    if let Some(detail) = unreadable.into_inner() {
+        return Err(ToolError::Failed { detail });
+    }
+    let removed = format_check
+        .map_err(|why| format_refusal(&path, call.team.document_format(), why))?
+        .into_iter()
+        .collect::<Vec<_>>();
     if check_protected_paths(&removed, &call.team.rules().protected_paths).is_err() {
         return Err(refused(
             "folder_doc_path",
@@ -1125,6 +1135,103 @@ mod tests {
         assert_eq!(proposed.len(), 1);
         let wire = catervas_protocol::event::event_to_value(&proposed[0]);
         assert_eq!(wire["body"]["path"], "docs/catervas/product/spec.html");
+        // Its approval writes the document and its agent version in the same format.
+        crate::orchestrator::human::folder_doc_decide(
+            &project.deps,
+            &[proposed[0].envelope.seq],
+            true,
+            None,
+        )
+        .expect("approved");
+        let git = &project.deps.git;
+        assert_eq!(
+            git.file_at("docs/folder-1", "docs/catervas/product/spec.html")
+                .expect("the document"),
+            "<p>a</p>\n"
+        );
+        assert_eq!(
+            git.file_at("docs/folder-1", "docs/catervas/product/spec.agent.html")
+                .expect("its agent version"),
+            "<p>b</p>\n"
+        );
+        assert!(
+            git.file_at("docs/folder-1", "docs/catervas/product/spec.agent.md")
+                .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_replace_a_protected_document_with_its_other_format() {
+        let project = html_project("folder-doc-protected-rewrite");
+        project
+            .repo
+            .write("docs/catervas/delivery/secret.md", "old\n");
+        project.repo.commit("a secret");
+        let before = project.event_count();
+        let refused = write(
+            &ceremony(&project, "sm", Thread::Retro),
+            "docs/catervas/delivery/secret.html",
+            "<p>new</p>\n",
+        )
+        .expect_err("refused");
+        assert_eq!(code(&refused), "folder_doc_path");
+        assert_eq!(project.event_count(), before);
+        assert_eq!(branches(&project), "");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_integration_branch_not_the_working_tree() {
+        let project = html_project("folder-doc-branch-not-tree");
+        // Uncommitted at the root: the integration branch does not hold it.
+        project
+            .repo
+            .write("docs/catervas/architecture/features.md", "draft\n");
+        let refused = write(
+            &ceremony(&project, "arch", Thread::Review),
+            "docs/catervas/architecture/features.md",
+            "a\n",
+        )
+        .expect_err("a new document in the other format");
+        assert_eq!(code(&refused), "wrong_format");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_markdown_team_is_told_to_write_markdown() {
+        let project = project_in("folder-doc-md-team", "auto_merge", true, false, "markdown");
+        let refused = write(
+            &ceremony(&project, "arch", Thread::Review),
+            FEATURES_HTML,
+            "<p>a</p>\n",
+        )
+        .expect_err("refused");
+        assert_eq!(code(&refused), "wrong_format");
+        assert!(
+            reason_of(&refused)
+                .ends_with("as Markdown: write docs/catervas/architecture/features.md"),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn fails_when_the_integration_branch_cannot_be_read() {
+        let team = a_team_of_three(|wire| {
+            wire["policy"]["document_format"] = json!("html");
+            wire["policy"]["integration_branch"] = json!("nowhere");
+        });
+        let project = TestProject::new("folder-doc-unreadable", &team);
+        s4_ended(&project);
+        let input = json!({
+            "path": "docs/catervas/product/spec.html", "text": "<p>a</p>\n",
+            "agent_text": "<p>b</p>\n", "summary": "why"
+        });
+        let failed = run(&ceremony(&project, "pm", Thread::Review), TOOL, input)
+            .expect_err("a branch that cannot be read fails the call");
+        assert!(matches!(failed, ToolError::Failed { .. }), "{failed:?}");
+        assert!(project.events(&[EventKind::FolderDocProposed]).is_empty());
     }
 
     #[test]
