@@ -134,6 +134,9 @@ export function Channel() {
 		more: boolean;
 	}>();
 	const [opened, setOpened] = useState<Record<string, boolean>>({});
+	// The folded meetings' own open state, kept here so that opening them renders the page, and
+	// the feed follows the box's new height.
+	const [fold, setFold] = useState(false);
 
 	useEffect(() => {
 		if (!client) return;
@@ -229,6 +232,8 @@ export function Channel() {
 		<Meetings
 			sprintId={sprint.sprintId}
 			folded={!beside}
+			open={fold}
+			onToggle={setFold}
 			onOpen={(anchor) => {
 				setGone(false);
 				setPaging(undefined);
@@ -510,11 +515,16 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 function Meetings({
 	sprintId,
 	folded,
+	open,
+	onToggle,
 	onOpen,
 }: {
 	sprintId: string;
 	/** Under the chat's intro, closed until opened, instead of a column beside the chat. */
 	folded: boolean;
+	/** Whether the folded meetings are open. */
+	open: boolean;
+	onToggle: (open: boolean) => void;
 	onOpen: (anchor: string) => void;
 }) {
 	const { data } = useQuery<{ meetings: Meeting[] }>("sprint.get", {
@@ -539,7 +549,11 @@ function Meetings({
 	return (
 		<aside className={styles.side} aria-labelledby="channel-meetings">
 			{folded ? (
-				<details className={styles.fold}>
+				<details
+					className={styles.fold}
+					open={open}
+					onToggle={(e) => onToggle(e.currentTarget.open)}
+				>
 					<summary id="channel-meetings">{t("channelMeetings")}</summary>
 					{links}
 				</details>

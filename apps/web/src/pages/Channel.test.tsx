@@ -689,6 +689,32 @@ describe("channel", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("stays_at_the_bottom_when_the_meetings_fold_opens", async () => {
+		stubBox();
+		await channel([message("theo", "ambient", "Morning.")], {
+			sprint: { sprint_id: "S2", done: 0, total: 1 },
+			meetings: [
+				{
+					thread: "planning",
+					first_seq: 1,
+					at: "2026-09-21T09:01:00Z",
+					posts: 2,
+				},
+			],
+		});
+		const region = await screen.findByRole("region", { name: en.channel });
+		const side = await screen.findByRole("complementary", {
+			name: en.channelMeetings,
+		});
+		region.scrollTop = 1980;
+		fireEvent.scroll(region);
+		// A native details changes the box's height without a render of the page.
+		const folded = side.querySelector("details") as HTMLDetailsElement;
+		folded.open = true;
+		fireEvent(folded, new Event("toggle"));
+		expect(region.scrollTop).toBe(2000);
+	});
+
 	it("keeps_the_box_to_one_row_on_a_phone", async () => {
 		media.set("(min-width: 1024px)", false);
 		await channel([]);
