@@ -129,7 +129,7 @@ Files: `integrate.rs` (`refresh_the_scan`).
 - `rescans_the_member_it_integrated_into`: `app` has a committed `package-lock.json` (as 02b's fixture) and `app-the-tests-pass` in the library. The task adds `scripts.lint` to `app`'s `package.json`. After `auto_merge` the library has `app-the-linter-is-clean` (`repo: app`), `infra`'s entries are unchanged, `criteria.updated { updated_by: governor }` and `project.scanned` are recorded, and the outcome's scan is `Refreshed`. `updated_by: governor` is deliberate: it is the integration's actor, as today's rescan records it (`integrate.rs:428`), where 02b's are the human's and `catervas`'s own. RED: 02b answers `Unchanged` for every integration in a project folder.
 - `skips_the_rescan_when_the_members_checkout_is_elsewhere`: with `app`'s checkout on another branch at integration time, the outcome's scan is `Skipped` with the Decisions' words naming `app`. RED.
 
-- [ ] `feat(runtime): rescan a member after work lands in it`
+- [x] `feat(runtime): rescan a member after work lands in it`
 
 ### Task 3: A member task's worktrees
 

@@ -19,7 +19,7 @@ use catervas_store::folder_docs::{FolderChange, folder_docs};
 use catervas_store::repos::{TaskRepositoryError, task_repository};
 use catervas_store::{
     EventQuery, Git, GitError, MergeOutcome, TaskProjection, material, names_of, project_document,
-    scan_project, seeded_library,
+    rescan_members, scan_project, seeded_library,
 };
 
 use super::verify::{GOVERNOR, append, append_stamped};
@@ -267,6 +267,8 @@ async fn attempt(
 /// Where an integration happens: the repository the subject's branch is in, with its adapter, its
 /// forge, and the branch accepted work goes into (5.14).
 struct IntegrationTarget {
+    /// The member's name, or `None` for the project's own folder.
+    repo: Option<String>,
     git: Git,
     forge: Forge,
     into: String,
@@ -308,6 +310,7 @@ fn target(
                 None => forge.clone(),
             };
             Ok(IntegrationTarget {
+                repo: found.repo,
                 git: found.git,
                 forge,
                 into: found.integration_branch,
@@ -425,9 +428,13 @@ fn integrations_of(tools: &ToolDeps, subject: &Subject) -> Result<usize, Orchest
 fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, target: &IntegrationTarget) -> ScanRefresh {
     let into = target.into.as_str();
     // A project folder's own scan never runs: its criteria are its members', and a scan of the
-    // folder would wipe them. It reports nothing, so no integration says the scan was skipped.
+    // folder would wipe them. What landed in a member is read from that member, and the project
+    // folder's own work reports nothing, so no integration says the scan was skipped.
     if tools.files.is_project_folder() {
-        return ScanRefresh::Unchanged;
+        return match target.repo.as_deref() {
+            Some(repo) => refresh_the_member(tools, repo, target),
+            None => ScanRefresh::Unchanged,
+        };
     }
     // `scan_project` reads the working tree at the root, which holds what landed only when it is
     // the integration branch that is checked out there.
@@ -445,6 +452,47 @@ fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, target: &IntegrationTarg
         }
     }
     rescan(tools, task_id).unwrap_or_else(|error| ScanRefresh::Failed { error })
+}
+
+/// The scan of the member `repo` a task landed in, when its checkout is on the integration branch,
+/// which is where its working tree holds what landed.
+fn refresh_the_member(tools: &ToolDeps, repo: &str, target: &IntegrationTarget) -> ScanRefresh {
+    match target.git.current_branch() {
+        Ok(branch) if branch == target.into => {}
+        Ok(branch) => {
+            return ScanRefresh::Skipped {
+                why: format!("{repo}'s checkout is on {branch}, not {}", target.into),
+            };
+        }
+        Err(_) => {
+            return ScanRefresh::Skipped {
+                why: format!("{repo}'s checkout is not on a branch"),
+            };
+        }
+    }
+    rescan_member(tools, repo).unwrap_or_else(|error| ScanRefresh::Failed { error })
+}
+
+/// The member's checks read again and the library reseeded from them, the other members' kept.
+fn rescan_member(tools: &ToolDeps, repo: &str) -> Result<ScanRefresh, String> {
+    let scanned = rescan_members(
+        &tools.files,
+        &tools.log,
+        &tools.ids,
+        tools.clock.now(),
+        Some(repo),
+        GOVERNOR,
+    )
+    .map_err(|error| error.to_string())?;
+    tools
+        .projections
+        .catch_up()
+        .map_err(|error| error.to_string())?;
+    Ok(if scanned.library_changed {
+        ScanRefresh::Refreshed
+    } else {
+        ScanRefresh::Unchanged
+    })
 }
 
 /// The refresh itself, once the checkout is known to hold what landed.
@@ -3019,5 +3067,142 @@ mod tests {
             "{cwds:?}"
         );
         let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    /// `app`: an npm project that runs its tests, committed.
+    fn an_npm_app(app: &TempRepo) {
+        app.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+        app.write(
+            "package.json",
+            "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\"}}\n",
+        );
+        app.write("src/index.ts", "export const one = 1;\n");
+        app.commit("an app");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn rescans_the_member_it_integrated_into() {
+        let (harness, members) = in_members("int-member-rescan", "auto_merge");
+        let (app, infra) = (&members[0], &members[1]);
+        an_npm_app(app);
+        infra.write("Cargo.lock", "version = 4\n");
+        infra.write("Cargo.toml", "[package]\nname = \"infra\"\n");
+        infra.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+        infra.commit("an infra");
+        let deps = &harness.project.deps;
+        catervas_store::rescan_members(
+            &deps.files,
+            &deps.log,
+            &deps.ids,
+            deps.clock.now(),
+            None,
+            "human",
+        )
+        .expect("the members are scanned");
+        deps.projections
+            .catch_up()
+            .expect("the board is brought up");
+        let before = deps.files.read_criteria().expect("the library reads");
+        let names_before: Vec<&str> = before.criteria.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            names_before.contains(&"app-the-tests-pass"),
+            "{names_before:?}"
+        );
+        assert!(!names_before.contains(&"app-the-linter-is-clean"));
+
+        // The task adds a lint script to app's package.json.
+        harness.accepted_in("CTV-1", &app.path, Some("app"));
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(
+            worktree.join("package.json"),
+            "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\",\"lint\":\"eslint .\"}}\n",
+        )
+        .expect("package.json is written");
+        app.adapter()
+            .commit(
+                &worktree,
+                "Add a lint script",
+                &["package.json".to_string()],
+            )
+            .expect("the change is committed");
+        app.adapter()
+            .remove_worktree(&worktree)
+            .expect("the worktree is removed");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
+
+        assert!(
+            matches!(
+                &merged,
+                Ok(IntegrationOutcome::Merged {
+                    scan: ScanRefresh::Refreshed,
+                    ..
+                })
+            ),
+            "{merged:?}"
+        );
+        let after = deps.files.read_criteria().expect("the library reads");
+        let linter = after
+            .criteria
+            .iter()
+            .find(|one| one.name.as_str() == "app-the-linter-is-clean")
+            .expect("the new check is in the library");
+        assert_eq!(linter.repo.as_ref().map(|repo| repo.as_str()), Some("app"));
+        let of_infra = |library: &catervas_core::criteria::CriteriaLibrary| -> Vec<_> {
+            library
+                .criteria
+                .iter()
+                .filter(|one| one.name.as_str().starts_with("infra-"))
+                .cloned()
+                .collect()
+        };
+        assert!(!of_infra(&before).is_empty());
+        assert_eq!(of_infra(&after), of_infra(&before));
+        let updated = harness.events(&[EventKind::CriteriaUpdated]);
+        assert!(
+            matches!(&updated.last().expect("an update").body,
+                EventBody::CriteriaUpdated(body) if body.updated_by == "governor"),
+            "{updated:?}"
+        );
+        assert_eq!(harness.events(&[EventKind::ProjectScanned]).len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn skips_the_rescan_when_the_members_checkout_is_elsewhere() {
+        let (harness, members) = in_members("int-member-rescan-elsewhere", "auto_merge");
+        let app = &members[0];
+        // The branch to integrate into is named, so the merge does not follow the checkout.
+        harness
+            .project
+            .deps
+            .files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": app_canonical(app).display().to_string(),
+                      "integration_branch": "main" },
+                    { "name": "infra", "path": members[1].path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        accepted_in_app(&harness, app, "CTV-1");
+        app.git(&["checkout", "-b", "topic"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
+
+        assert_eq!(
+            merged,
+            Ok(IntegrationOutcome::Merged {
+                sha: app.git_output(&["rev-parse", "main"]),
+                scan: ScanRefresh::Skipped {
+                    why: "app's checkout is on topic, not main".to_string()
+                }
+            })
+        );
+        assert!(harness.events(&[EventKind::ProjectScanned]).is_empty());
     }
 }
