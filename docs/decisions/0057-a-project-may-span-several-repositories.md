@@ -28,7 +28,7 @@ A project is either a one-repo project, as today, or a multi-repo project.
 A multi-repo project is a local project folder (`~/Catervas/<slug>/` by default) with its own git repository and no remote. It holds `.catervas/` and `docs/catervas/`, and lists 1 to 16 member repositories by name, path and integration branch in `.catervas/repos.yaml`. Members are added from local folders. Catervas writes nothing into a member except a task's branch.
 
 Tasks:
-- A task contract gains `repo`. A builder's task names one member. A docs task names none and works in the project folder.
+- A task contract gains `repo`. A task that changes code names one member; a task whose allowed paths are all document paths, a builder's included, names none and works in the project folder; an epic never names one (the amendment's "Where a task works").
 - A task may depend on a task in another repository.
 - Agents read every member and write only their task's worktree.
 - The team's one integration policy applies to each member's own integration branch. Folder changes in the project folder are merged locally at once.
