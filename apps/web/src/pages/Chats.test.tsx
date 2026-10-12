@@ -309,6 +309,40 @@ describe("chats", () => {
 		).toBeNull();
 	});
 
+	it("pages_back_twice_in_a_one_to_one", async () => {
+		const { s } = await chats("/channel/mira", { messages: fullPage() });
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.channelEarlier }),
+		);
+		const first = await waitFor(() => {
+			const f = asked(s)[1];
+			if (!f) throw new Error("no earlier page was asked");
+			return f;
+		});
+		await s.reply(first, {
+			messages: Array.from({ length: 100 }, (_, i) =>
+				chat("mira", `Older ${i}.`, { seq: 101 + i }),
+			),
+			waiting: null,
+		});
+		await screen.findByText("Older 0.");
+		const button = await screen.findByRole("button", {
+			name: en.channelEarlier,
+		});
+		expect((button as HTMLButtonElement).disabled).toBe(false);
+		fireEvent.click(button);
+		const second = await waitFor(() => {
+			const f = asked(s)[2];
+			if (!f) throw new Error("no third page was asked");
+			return f;
+		});
+		expect(second.params.params).toEqual({
+			agent_id: "mira",
+			before_seq: 101,
+			limit: 100,
+		});
+	});
+
 	it("asks_earlier_at_the_top_of_a_one_to_one", async () => {
 		stubBox();
 		const { s } = await chats("/channel/mira", { messages: fullPage() });
