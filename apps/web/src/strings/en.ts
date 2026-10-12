@@ -1140,6 +1140,7 @@ export const en = {
 	channelEarlier: "Show earlier messages",
 	channelEarlierFailed:
 		"Catervas could not read the earlier messages. Try again in a moment.",
+	chatsNewMessages: "New messages",
 	channelPreview: "In the channel",
 	channelOpen: "Open the channel",
 	sprintReadIt: "Read it",

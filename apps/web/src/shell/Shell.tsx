@@ -1,6 +1,6 @@
 import icon from "@catervas/brand/assets/icons/icon-48.png";
 import { Button } from "@catervas/ui";
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import {
 	Link,
 	Navigate,
@@ -19,12 +19,6 @@ import styles from "./Shell.module.css";
 
 const WIDE = "(min-width: 1024px)";
 
-function subscribe(changed: () => void) {
-	const query = matchMedia(WIDE);
-	query.addEventListener("change", changed);
-	return () => query.removeEventListener("change", changed);
-}
-
 /** The rail's places, in order (steps 09 and 10). */
 const PLACES = [
 	["/", "today"],
@@ -39,9 +33,22 @@ const PLACES = [
 /** The places a phone's bar leaves out; Team's page links to them. */
 const UNDER_TEAM: string[] = ["/files", "/settings"];
 
+/** Whether the screen matches the media `query`, and when it starts or stops. */
+export function useMedia(query: string): boolean {
+	const subscribe = useCallback(
+		(changed: () => void) => {
+			const list = matchMedia(query);
+			list.addEventListener("change", changed);
+			return () => list.removeEventListener("change", changed);
+		},
+		[query],
+	);
+	return useSyncExternalStore(subscribe, () => matchMedia(query).matches);
+}
+
 /** Whether the screen is 1024 px or wider: the rail, else the top and bottom bars. */
 export function useWide(): boolean {
-	return useSyncExternalStore(subscribe, () => matchMedia(WIDE).matches);
+	return useMedia(WIDE);
 }
 
 export function Shell() {
@@ -50,6 +57,8 @@ export function Shell() {
 	const navigate = useNavigate();
 	const { data, again } = useQuery<ServeStatus>("serve.status", {});
 	const path = useLocation().pathname;
+	// The chats fill the window and scroll inside it, so the window itself does not.
+	const filled = path === "/channel" || path.startsWith("/channel/");
 	// Nothing shows, and nothing is asked of the project, until Catervas says where it stands.
 	if (!data) return null;
 	// During setup, every path goes where "/" would.
@@ -89,7 +98,9 @@ export function Shell() {
 	const name = data.projectRoot?.split(/[\\/]/).at(-1);
 	const pause = data && <PauseControl paused={data.paused} short={!wide} />;
 	return (
-		<div className={wide ? styles.wide : styles.narrow}>
+		<div
+			className={`${wide ? styles.wide : styles.narrow}${filled ? ` ${styles.fill}` : ""}`}
+		>
 			{wide ? (
 				<header className={styles.rail}>
 					<p className={styles.logo}>
