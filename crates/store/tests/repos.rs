@@ -5,8 +5,14 @@
 
 use std::path::{Path, PathBuf};
 
-use catervas_store::git::fixtures::git_in;
-use catervas_store::repos::{MemberPathRefusal, member_root, repo_present};
+use catervas_core::repos::validate_repos;
+use catervas_core::team::{Team, validate_team};
+use catervas_store::files::ProjectFiles;
+use catervas_store::git::fixtures::{TempRepo, git_in};
+use catervas_store::repos::{
+    MemberPathRefusal, TaskRepositoryError, member_root, repo_present,
+    task_branch_numbers_everywhere, task_repository,
+};
 
 /// A home folder of its own, removed when the value is dropped however the test ends.
 struct Home {
@@ -148,4 +154,144 @@ fn says_whether_a_member_is_present() {
     std::fs::create_dir_all(outer.join("inner")).expect("a plain folder inside it");
     assert!(repo_present(&outer));
     assert!(!repo_present(&outer.join("inner")));
+}
+
+/// A team whose policy names `trunk` as the project folder's integration branch.
+fn a_team_on_trunk() -> Team {
+    let mut wire = catervas_core::team::fixtures::a_team_wire();
+    wire["policy"]["integration_branch"] = serde_json::json!("trunk");
+    validate_team(&wire).expect("a team")
+}
+
+/// A project folder that is a git repository of its own, with `repos.yaml` naming `members`, each
+/// `(name, repository, integration branch)`.
+fn project_folder(
+    name: &str,
+    members: &[(&str, &TempRepo, Option<&str>)],
+) -> (TempRepo, ProjectFiles) {
+    let project = TempRepo::new(name);
+    let files = ProjectFiles::open(project.path.clone());
+    let repos: Vec<_> = members
+        .iter()
+        .map(|(name, repo, branch)| {
+            serde_json::json!({
+                "name": name,
+                "path": repo.path.display().to_string(),
+                "integration_branch": branch,
+            })
+        })
+        .collect();
+    let repos = repos
+        .into_iter()
+        .map(|mut repo| {
+            if repo["integration_branch"].is_null() {
+                repo.as_object_mut()
+                    .expect("an object")
+                    .remove("integration_branch");
+            }
+            repo
+        })
+        .collect::<Vec<_>>();
+    files
+        .write_repos(&validate_repos(&serde_json::json!({ "repos": repos })).expect("repos"))
+        .expect("repos.yaml is written");
+    (project, files)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn resolves_a_tasks_repository() {
+    let app = TempRepo::new("task-repo-app");
+    let infra = TempRepo::new("task-repo-infra");
+    infra.git(&["branch", "release"]);
+    let (project, files) = project_folder(
+        "task-repo-project",
+        &[("app", &app, None), ("infra", &infra, Some("release"))],
+    );
+    let team = a_team_on_trunk();
+    let project_git = project.adapter();
+
+    let own = task_repository(&files, &team, &project_git, None).expect("the project's own");
+    assert_eq!(own.repo, None);
+    assert_eq!(own.git.root(), project.path.as_path());
+    assert_eq!(own.integration_branch, "trunk");
+
+    let in_app = task_repository(&files, &team, &project_git, Some("app")).expect("app");
+    assert_eq!(in_app.repo.as_deref(), Some("app"));
+    assert_eq!(in_app.git.root(), app.path.as_path());
+    assert_eq!(in_app.integration_branch, "main");
+
+    let in_infra = task_repository(&files, &team, &project_git, Some("infra")).expect("infra");
+    assert_eq!(in_infra.git.root(), infra.path.as_path());
+    assert_eq!(in_infra.integration_branch, "release");
+
+    assert!(matches!(
+        task_repository(&files, &team, &project_git, Some("web")),
+        Err(TaskRepositoryError::UnknownRepo { repo }) if repo == "web"
+    ));
+
+    let moved = PathBuf::from(format!("{}-moved", app.path.display()));
+    std::fs::rename(&app.path, &moved).expect("the folder is moved");
+    let error = task_repository(&files, &team, &project_git, Some("app"))
+        .err()
+        .expect("a member that is gone");
+    std::fs::rename(&moved, &app.path).expect("the folder is moved back");
+    assert!(
+        matches!(&error, TaskRepositoryError::Missing { repo, path }
+            if repo == "app" && path == &app.path),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "app is not at {}: locate it in Settings",
+            app.path.display()
+        )
+    );
+
+    let alone = TempRepo::new("task-repo-alone");
+    let error = task_repository(
+        &ProjectFiles::open(alone.path.clone()),
+        &team,
+        &alone.adapter(),
+        Some("app"),
+    )
+    .err()
+    .expect("a one-repo project");
+    assert!(matches!(&error, TaskRepositoryError::NotAProjectFolder { repo } if repo == "app"));
+    assert_eq!(
+        error.to_string(),
+        "this task names repository app, but this project is one repository"
+    );
+    let unknown = task_repository(&files, &team, &project_git, Some("web"))
+        .err()
+        .expect("a name that is not a member");
+    assert_eq!(
+        unknown.to_string(),
+        "this task names repository web, which this project does not have"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn counts_task_branches_in_every_repository() {
+    let app = TempRepo::new("branches-app");
+    let infra = TempRepo::new("branches-infra");
+    app.git(&["branch", "feature/CTV-4"]);
+    infra.git(&["branch", "fix/CTV-9"]);
+    let (project, files) = project_folder(
+        "branches-project",
+        &[("app", &app, None), ("infra", &infra, None)],
+    );
+    project.git(&["branch", "docs/CTV-2"]);
+    assert_eq!(
+        task_branch_numbers_everywhere(&files).into_iter().max(),
+        Some(9)
+    );
+
+    let moved = PathBuf::from(format!("{}-moved", infra.path.display()));
+    std::fs::rename(&infra.path, &moved).expect("the folder is moved");
+    let highest = task_branch_numbers_everywhere(&files).into_iter().max();
+    std::fs::rename(&moved, &infra.path).expect("the folder is moved back");
+    assert_eq!(highest, Some(4));
 }

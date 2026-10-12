@@ -26,7 +26,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::files::{FilesError, ProjectFiles};
-use crate::git::Git;
+use crate::repos::task_branch_numbers_everywhere;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
 /// Who the human is in the log: the id every act of theirs is recorded under.
@@ -572,7 +572,7 @@ fn file(
     // Past every contract the repository already holds as well as the counter: the log is
     // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
     // would hand out CTV-1 again. `list_contracts` is in number order, so the last is the highest.
-    // And past every task branch the repository holds, whatever its contracts say: a project
+    // And past every task branch the project holds in any of its repositories, whatever its contracts say: a project
     // whose `.catervas/` was removed or carried elsewhere still has the branches of its old tasks. A
     // folder whose refs cannot be listed counts as having none; a collision then shows when the
     // worktree is made.
@@ -581,9 +581,7 @@ fn file(
         .last()
         .and_then(|id| id.as_str().trim_start_matches("CTV-").parse::<u64>().ok())
         .unwrap_or(0);
-    let branches = Git::open(files.root().to_path_buf())
-        .task_branch_numbers()
-        .unwrap_or_default()
+    let branches = task_branch_numbers_everywhere(files)
         .into_iter()
         .max()
         .unwrap_or(0);
@@ -1433,6 +1431,28 @@ mod tests {
             "CTV-11",
             "past the contract, with the lower branch"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_past_every_repositorys_task_branches() {
+        let (project, log) = a_project("requests-member-branch");
+        let root = project.root.clone();
+        git_in(&root, &["init", "-b", "main"]);
+        let app = crate::git::fixtures::TempRepo::new("requests-member-app");
+        app.git(&["branch", "feature/CTV-7"]);
+        let files = project.files();
+        files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": app.path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
+            .expect("the request is filed");
+        assert_eq!(request.id.as_str(), "CTV-8");
     }
 
     #[test]

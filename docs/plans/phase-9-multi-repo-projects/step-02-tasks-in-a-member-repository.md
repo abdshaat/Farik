@@ -178,7 +178,7 @@ Files: `store/src/repos.rs` (the two functions, `TaskRepository`, its error); `r
 - `counts_task_branches_in_every_repository`: `feature/CTV-4` in `app`, `docs/CTV-2` in the project folder, `fix/CTV-9` in `infra` gives a maximum of 9. With `infra` moved away it is 4. RED.
 - `files_past_every_repositorys_task_branches` (`requests.rs`): with `feature/CTV-7` in `app` alone, the next filed request is `CTV-8`. RED: it is `CTV-1`.
 
-- [ ] `feat(store): resolve a task's repository`
+- [x] `feat(store): resolve a task's repository`
 
 ### Task 4: The task's work is in its member
 
