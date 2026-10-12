@@ -80,7 +80,7 @@ Order: write `renders an agent's reply as Markdown`, watch it fail, render agent
 
 Files: modified `docs/SPEC.md` (header 0.107, 4.3, F8, as Decisions says)
 
-- [ ] `docs(spec): an agent's chat reply is summed up, without paths, and formatted`
+- [x] `docs(spec): an agent's chat reply is summed up, without paths, and formatted`
 
 ## Verification
 
