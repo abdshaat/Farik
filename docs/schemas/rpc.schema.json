@@ -5535,6 +5535,63 @@
         }
       }
     },
+    "scanFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "toolchain",
+        "workspace",
+        "packages",
+        "tests_in",
+        "tracked_files",
+        "last_commit"
+      ],
+      "properties": {
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The language with the most tracked files."
+        },
+        "toolchain": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The toolchain's name."
+        },
+        "workspace": {
+          "type": "boolean",
+          "description": "Whether the project is a workspace."
+        },
+        "packages": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many packages the workspace has."
+        },
+        "tests_in": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where the tests are, as a location."
+        },
+        "tracked_files": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many files git tracks."
+        },
+        "last_commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "How long ago the last commit was, in words; null before the first commit."
+        }
+      }
+    },
     "projectScanResult": {
       "type": "object",
       "additionalProperties": false,
@@ -5547,61 +5604,7 @@
       ],
       "properties": {
         "facts": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "language",
-            "toolchain",
-            "workspace",
-            "packages",
-            "tests_in",
-            "tracked_files",
-            "last_commit"
-          ],
-          "properties": {
-            "language": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "The language with the most tracked files."
-            },
-            "toolchain": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "The toolchain's name."
-            },
-            "workspace": {
-              "type": "boolean",
-              "description": "Whether the project is a workspace."
-            },
-            "packages": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "How many packages the workspace has."
-            },
-            "tests_in": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "Where the tests are, as a location."
-            },
-            "tracked_files": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "How many files git tracks."
-            },
-            "last_commit": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "How long ago the last commit was, in words; null before the first commit."
-            }
-          }
+          "$ref": "#/$defs/scanFacts"
         },
         "checks": {
           "type": "array",
@@ -5659,9 +5662,13 @@
                 "description": "The member repository's name."
               },
               "facts": {
-                "type": [
-                  "object",
-                  "null"
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/scanFacts"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ],
                 "description": "What the scan found in the member, shaped as the project's own facts; null when the member is not there or its scan failed."
               },

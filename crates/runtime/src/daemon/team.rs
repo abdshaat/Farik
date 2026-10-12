@@ -4846,6 +4846,30 @@ pub(super) mod tests {
         assert_eq!(scanned["repos"], Value::Null);
     }
 
+    #[test]
+    fn refuses_a_scan_whose_member_facts_are_not_facts() {
+        let facts = json!({
+            "language": "Rust", "toolchain": "cargo", "workspace": false, "packages": 0,
+            "tests_in": null, "tracked_files": 3, "last_commit": null,
+        });
+        let result = |member: &Value| {
+            json!({
+                "facts": facts, "checks": [], "app_start": null, "kept_private": [],
+                "repos": [{ "name": "app", "facts": member, "checks": [], "error": null }],
+            })
+        };
+        crate::daemon::gates::tests::conforms(&result(&facts), "projectScanResult", &facts);
+        crate::daemon::gates::tests::conforms(&result(&Value::Null), "projectScanResult", &facts);
+        let bogus = result(&json!({ "bogus": 1 }));
+        let refused = std::panic::catch_unwind(|| {
+            crate::daemon::gates::tests::conforms(&bogus, "projectScanResult", &bogus);
+        });
+        assert!(
+            refused.is_err(),
+            "a member's facts are typed like the project's own"
+        );
+    }
+
     /// A pnpm project committed to `harness`'s repository, with `scripts` in its `package.json`.
     fn a_pnpm_project(harness: &Harness, scripts: &Value) {
         let repo = &harness.project.repo;
