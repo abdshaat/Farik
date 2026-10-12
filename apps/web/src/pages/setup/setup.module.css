@@ -544,3 +544,46 @@
 .example meter {
 	width: 100%;
 }
+
+/* The offer at the end of setup for an existing project, as in the "Catervafication" mockup. */
+.offer {
+	display: grid;
+	gap: var(--catervas-space-4);
+	max-width: 720px;
+	padding: var(--catervas-space-4) var(--catervas-space-5);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-raised);
+}
+
+.offer > p {
+	margin: 0;
+}
+
+.writers {
+	display: grid;
+	gap: var(--catervas-space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.writers li {
+	display: grid;
+	grid-template-columns: 40px minmax(0, 1fr);
+	gap: var(--catervas-space-3);
+	align-items: center;
+}
+
+.writers img {
+	width: 40px;
+	height: 40px;
+	image-rendering: pixelated;
+}
+
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-3);
+	align-items: center;
+}

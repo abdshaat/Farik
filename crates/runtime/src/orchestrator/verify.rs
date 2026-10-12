@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::{ExitCriterion, TaskContract, TaskId, TaskStatus, wire_method};
-use catervas_core::governor::done::{CriterionResult, RunBy, requires_human_acceptance};
+use catervas_core::governor::done::{CriterionResult, RunBy, result_needs_the_human};
 use catervas_core::governor::gates::Rejection;
 use catervas_core::governor::team_rules::is_ui_change;
 use catervas_core::governor::transition::{TransitionContext, TransitionRequest};
@@ -115,9 +115,10 @@ pub(super) async fn verifying(
     if !unanswered.is_empty() {
         return review(orchestrator, team, row, reviewer, &unanswered, waiting, ran).await;
     }
-    // Only the human's acceptance satisfies a `high` risk task or a `human` criterion: until it is
+    // Only the human's acceptance satisfies a `high` risk task, a task that may change the product
+    // plan, or a `human` criterion: until it is
     // given, a session would ask for a move the Definition of Done refuses.
-    if (requires_human_acceptance(&contract) || contract.exit_criteria.iter().any(is_human))
+    if (result_needs_the_human(&contract) || contract.exit_criteria.iter().any(is_human))
         && !context.done.human_accepted
     {
         return Ok(ran_criteria(row, ran));

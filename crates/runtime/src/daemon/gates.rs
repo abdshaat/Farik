@@ -7,11 +7,13 @@ use std::fmt::Display;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
+use catervas_core::branch::task_branch;
 use catervas_core::contract::{
     Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract,
 };
+use catervas_core::folders::PRODUCT_PLAN;
 use catervas_core::governor::gates::{
-    ContractWriteActor, ContractWriteOutcome, check_contract_write,
+    ContractWriteActor, ContractWriteOutcome, DesignerBrowser, check_contract_write,
 };
 use catervas_core::governor::plain::plain_readiness;
 use catervas_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
@@ -26,11 +28,12 @@ use catervas_protocol::event::{
     CatervasEvent, ContractWrittenBody, EventBody, EventKind, event_to_value, new_event,
 };
 use catervas_store::EventQuery;
-use catervas_store::activity::{ActivityState, activity, moved_since};
+use catervas_store::activity::{ActivityState, activity, moved_since, while_the_plan_waits};
 use catervas_store::diff::diff_of;
 use catervas_store::marketing::{
     BudgetReached, MarketingPlan, budgets_reached, created_campaigns, marketing_plans, social_posts,
 };
+use catervas_store::product_plan::{drafts_the_plan, new_project, product_plan_tasks};
 use catervas_store::purchase_orders::purchase_orders;
 use catervas_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_raise_request, file_request,
@@ -245,13 +248,25 @@ pub(super) fn query(
             // What Catervas could not keep within a budget or keep paused comes first: it is money.
             let mut rows = ads_rows(state, deps).map_err(|e| internal(&e))?;
             rows.extend(listed.iter().map(|item| waiting_row(deps, item)));
+            rows.extend(
+                crate::tools::folders::integration_rows(deps, &team).map_err(|e| internal(&e))?,
+            );
             rows.extend(design_reviews_waiting(deps, &team)?);
             Ok(json!({ "waiting": rows }))
         }
         "team.activity" => {
             let now = deps.clock.now();
-            let all = activity(&deps.log, &deps.projections, &deps.files, &team()?, now)
+            let team = team()?;
+            let mut all = activity(&deps.log, &deps.projections, &deps.files, &team, now)
                 .map_err(|e| internal(&e))?;
+            if deps
+                .transitions
+                .awaits_the_product_plan(&team)
+                .map_err(|e| internal(&e))?
+            {
+                let filed = product_plan_tasks(&deps.log).map_err(|e| internal(&e))?;
+                while_the_plan_waits(&mut all, &team, filed.last().map(|(id, _)| id));
+            }
             Ok(json!({ "activity": all.iter().map(|one| {
                 let mut wire = json!({
                     "agent_id": one.agent_id,
@@ -286,7 +301,7 @@ pub(super) fn query(
             let moved = moved_since(&deps.log, &deps.projections, &team()?, since)
                 .map_err(|e| internal(&e))?;
             Ok(
-                json!({ "moved": moved.iter().map(|one| json!({ "at": one.at, "line": one.line })).collect::<Vec<_>>() }),
+                json!({ "moved": moved.iter().map(|one| json!({ "at": one.at, "by": one.by, "line": one.line })).collect::<Vec<_>>() }),
             )
         }
         "marketing_plan.list" => marketing_plan_list(deps),
@@ -294,6 +309,9 @@ pub(super) fn query(
             marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
         }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
+        "folder_doc_proposals.list" => {
+            crate::tools::folders::proposals_list(deps, &team()?).map_err(|e| internal(&e))
+        }
         "seller_replies.list" => {
             crate::procurement::seller_replies_list(deps).map_err(|e| internal(&e))
         }
@@ -314,6 +332,8 @@ pub(super) fn query(
         })),
         "sprint.current" => sprint_current(deps),
         "backlog.summary" => backlog_summary(deps, &team()?),
+        "product_plan.state" => product_plan_state(deps, &team()?),
+        "catervafication.get" => catervafication_get(deps, &team()?),
         "questions.list" => questions(deps, params["task_id"].as_str()),
         _ => {
             let task_id = task_of(deps, params)?;
@@ -588,6 +608,72 @@ fn backlog_summary(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     Ok(json!({ "plan_in_sprints": team.plans_in_sprints(), "count": count }))
 }
 
+/// `product_plan.state`: a new project's name, whether its plan is approved, the newest task that
+/// still drafts it, and, while that task is verifying, the two documents as its branch has them.
+fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
+    let project = new_project(&deps.log).map_err(|e| internal(&e))?;
+    let approved = project.is_some()
+        && !deps
+            .transitions
+            .awaits_the_product_plan(team)
+            .map_err(|e| internal(&e))?;
+    let board = deps.projections.board().map_err(|e| internal(&e))?;
+    let filed = product_plan_tasks(&deps.log).map_err(|e| internal(&e))?;
+    let open = filed.iter().rev().find_map(|(id, created_at)| {
+        let row = board.iter().find(|row| row.task_id == *id)?;
+        drafts_the_plan(row).then_some((row, *created_at))
+    });
+    let mut documents = Vec::new();
+    if let Some((row, _)) = open
+        && row.status == TaskStatus::Verifying
+    {
+        let contract = deps
+            .files
+            .read_contract(&row.task_id)
+            .map_err(|e| internal(&e))?;
+        let branch = task_branch(&contract);
+        for path in PRODUCT_PLAN {
+            if let Ok(text) = deps.git.file_at(&branch, path) {
+                documents.push(json!({ "path": path, "text": text }));
+            }
+        }
+    }
+    Ok(json!({
+        "new_project": project.map(|project| json!({ "name": project.name })),
+        "approved": approved,
+        "task": open.map(|(row, created_at)| json!({
+            "task_id": row.task_id,
+            "status": row.status.to_string(),
+            "created_at": created_at,
+        })),
+        "documents": documents,
+    }))
+}
+
+/// `catervafication.get`: whether the team offers to document an existing repository, which it does
+/// while the log holds neither a Catervafication nor a new project and a Start would not be refused
+/// for want of a Product Manager and someone to check its notes, and the roles that would get a task.
+fn catervafication_get(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
+    let ready = deps.transitions.designer_browser(team) == DesignerBrowser::Ready;
+    let roles = crate::catervafication::catervafication_roles(
+        team,
+        crate::catervafication::Project::Existing,
+        ready,
+    );
+    let begun = crate::catervafication::started(&deps.log)
+        .map_err(|e| internal(&e))?
+        .is_some()
+        || new_project(&deps.log).map_err(|e| internal(&e))?.is_some();
+    let offered = !begun
+        && roles
+            .first()
+            .is_some_and(|(role, _)| *role == catervas_core::contract::Role::ProductManager);
+    Ok(json!({
+        "offered": offered,
+        "roles": roles.iter().map(|(role, _)| role.to_string()).collect::<Vec<_>>(),
+    }))
+}
+
 /// `questions.list`: every question, of `task` when one is named, oldest first, with its answer.
 fn questions(deps: &ToolDeps, task: Option<&str>) -> Result<Value, Failure> {
     let events = deps
@@ -803,7 +889,7 @@ async fn post_picture(deps: &ToolDeps, params: &Value) -> Result<Value, Failure>
 }
 
 /// `work`, which reads and writes the store, run where it cannot hold up the daemon's worker.
-async fn off_the_worker<T: Send + 'static>(
+pub(super) async fn off_the_worker<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, Failure> + Send + 'static,
 ) -> Result<T, Failure> {
     tokio::task::spawn_blocking(work)
@@ -1178,6 +1264,7 @@ pub(super) mod tests {
     use crate::orchestrator::fixtures::Harness;
     use crate::orchestrator::{Waited, command_handler};
     use crate::tools::fixtures::at;
+    use catervas_store::git::fixtures::git_in;
 
     /// The reply frame to `method` with `params`, answered on a runtime of its own.
     pub(crate) fn rpc(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
@@ -2928,6 +3015,216 @@ pub(super) mod tests {
         }
     }
 
+    const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+    const SPEC: &str = "docs/catervas/product/spec.md";
+
+    /// A harness whose Product Manager `pm` is Mira and Scrum Master `sm` is Sol, integrating
+    /// under `policy`.
+    fn folders_integrating(name: &str, policy: &'static str) -> Harness {
+        Harness::new(name, move |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "sm", "display_name": "Sol", "role": "scrum_master", "status": "active"
+            }));
+            wire["policy"]["integration"] = json!(policy);
+        })
+    }
+
+    /// `pm`'s proposal of `path` at the sprint review `sprint`, and its number.
+    fn pm_proposes(harness: &Harness, sprint: &str, path: &str, text: &str, summary: &str) -> u64 {
+        harness
+            .project
+            .record_in(
+                Some("pm"),
+                Some("session-1"),
+                "",
+                "folder_doc.proposed",
+                &json!({
+                    "path": path, "text": text, "agent_text": format!("{text} (for agents)"),
+                    "summary": summary, "sprint_id": sprint, "proposed_by": "pm"
+                }),
+            )
+            .envelope
+            .seq
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_the_changes_waiting_for_the_owner() {
+        let harness = folders_integrating("gates-folder-doc-proposals", "pull_request");
+        let root = &harness.project.repo;
+        root.write(ROADMAP, "# Roadmap\n\n## Now\n\nPie pre-orders.\n");
+        root.commit("the roadmap");
+        let approved = pm_proposes(&harness, "S3", SPEC, "# Old\n", "Old spec.");
+        harness.project.record(
+            "",
+            "folder_doc.approved",
+            &json!({ "proposals": [approved] }),
+        );
+        let returned = pm_proposes(&harness, "S3", ROADMAP, "# Old\n", "Old roadmap.");
+        harness.project.record(
+            "",
+            "folder_doc.returned",
+            &json!({ "proposals": [returned], "reason": "No" }),
+        );
+        pm_proposes(&harness, "S4", ROADMAP, "# Roadmap\n", "Older roadmap.");
+        let roadmap = pm_proposes(
+            &harness,
+            "S4",
+            ROADMAP,
+            "# Roadmap\n\n## Now\n\nGift cards.\n\nPie pre-orders.\n",
+            "Roadmap summary.",
+        );
+        let spec = pm_proposes(
+            &harness,
+            "S4",
+            SPEC,
+            "# Spec\n\nA shop for pies.\n",
+            "Spec summary.",
+        );
+
+        let listed = query(
+            &harness.daemon,
+            "folder_doc_proposals.list",
+            &json!({}),
+            "folderDocProposalsListResult",
+        );
+
+        assert_eq!(
+            listed,
+            json!({
+                "integration": "pull_request",
+                "cards": [{
+                    "sprint_id": "S4", "agent_id": "pm",
+                    "summary": "Roadmap summary. Spec summary.",
+                    "documents": [
+                        { "proposal": roadmap, "path": ROADMAP, "lines": [
+                            { "change": "same", "text": "## Now" },
+                            { "change": "added", "text": "Gift cards." },
+                            { "change": "same", "text": "Pie pre-orders." },
+                        ] },
+                        { "proposal": spec, "path": SPEC, "lines": [
+                            { "change": "added", "text": "# Spec" },
+                            { "change": "added", "text": "A shop for pies." },
+                        ] },
+                    ]
+                }]
+            })
+        );
+
+        let harness = folders_integrating("gates-folder-doc-none", "manual");
+        let listed = query(
+            &harness.daemon,
+            "folder_doc_proposals.list",
+            &json!({}),
+            "folderDocProposalsListResult",
+        );
+        assert_eq!(listed, json!({ "integration": "manual", "cards": [] }));
+
+        let harness = folders_integrating("gates-folder-doc-two-reviews", "pull_request");
+        let third = pm_proposes(&harness, "S3", ROADMAP, "# Roadmap\n", "Roadmap.");
+        let fourth = pm_proposes(&harness, "S4", SPEC, "# Spec\n", "Spec.");
+        let listed = query(
+            &harness.daemon,
+            "folder_doc_proposals.list",
+            &json!({}),
+            "folderDocProposalsListResult",
+        );
+        let cards = listed["cards"].as_array().expect("cards");
+        assert_eq!(cards.len(), 2, "one card for each sprint review: {listed}");
+        assert_eq!(cards[0]["sprint_id"], "S3");
+        assert_eq!(
+            cards[0]["documents"].as_array().expect("documents").len(),
+            1
+        );
+        assert_eq!(cards[0]["documents"][0]["proposal"], json!(third));
+        assert_eq!(cards[1]["sprint_id"], "S4");
+        assert_eq!(
+            cards[1]["documents"].as_array().expect("documents").len(),
+            1
+        );
+        assert_eq!(cards[1]["documents"][0]["proposal"], json!(fourth));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_a_folder_change_waiting_to_be_added_under_manual() {
+        let harness = folders_integrating("gates-folder-change-manual", "manual");
+        let roadmap = pm_proposes(&harness, "S4", ROADMAP, "# Roadmap\n", "Roadmap.");
+        let spec = pm_proposes(&harness, "S4", SPEC, "# Spec\n", "Spec.");
+        harness.project.record(
+            "",
+            "folder_doc.approved",
+            &json!({ "proposals": [roadmap, spec], "change": 1, "sha": "abc" }),
+        );
+        harness.project.record_in(
+            Some("sm"),
+            Some("session-2"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                "change": 2, "sha": "def"
+            }),
+        );
+        let integration_rows = |harness: &Harness| {
+            let listed = query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult",
+            );
+            listed["waiting"]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .filter(|row| row["kind"] == "integration")
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            integration_rows(&harness),
+            [
+                json!({
+                    "kind": "integration", "folder_change": 1, "agent_id": "pm",
+                    "title": "Roadmap and Product description from the sprint 4 review",
+                    "line": "You approved it; it waits for you to add it"
+                }),
+                json!({
+                    "kind": "integration", "folder_change": 2, "agent_id": "sm",
+                    "title": "delivery/cadence.md by Sol",
+                    "line": "Sol wrote it; it waits for you to add it"
+                }),
+            ]
+        );
+
+        harness.project.record(
+            "",
+            "folder_change.integrated",
+            &json!({ "change": 1, "sha": "abc", "into": "main", "integrated_by": "governor" }),
+        );
+        harness.project.record(
+            "",
+            "folder_change.escalated",
+            &json!({ "change": 2, "detail": "conflict" }),
+        );
+        assert!(integration_rows(&harness).is_empty());
+
+        let harness = folders_integrating("gates-folder-change-auto", "auto_merge");
+        harness.project.record_in(
+            Some("sm"),
+            Some("session-2"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                "change": 1, "sha": "def"
+            }),
+        );
+        assert!(integration_rows(&harness).is_empty());
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn lists_a_design_review_that_waits_on_the_human() {
@@ -3215,6 +3512,7 @@ pub(super) mod tests {
             deps.clock.as_ref(),
             &deps.ids,
             crate::chat::NewChatMessage {
+                heard: None,
                 chat: "dev-a".to_string(),
                 author: author.to_string(),
                 text: "Could customers also pay with Apple Pay?".to_string(),
@@ -3457,7 +3755,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-1", "contract": draft }),
             "contractCheckResult",
         );
-        assert_eq!(checked["total"], 23, "{checked}");
+        assert_eq!(checked["total"], 27, "{checked}");
         let failures = checked["failures"].as_array().expect("failures");
         assert_eq!(failures.len(), 1, "{checked}");
         assert_eq!(failures[0]["rule"], "reviewer_available");
@@ -4058,7 +4356,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-3", "contract": contract }),
             "contractCheckResult",
         );
-        assert_eq!(checked, json!({ "failures": [], "total": 25 }));
+        assert_eq!(checked, json!({ "failures": [], "total": 29 }));
 
         // The activity and what moved answer in their shapes.
         query(
@@ -4097,6 +4395,134 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_where_the_product_plan_stands() {
+        let stands = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "product_plan.state",
+                &json!({}),
+                "productPlanStateResult",
+            )
+        };
+        // An existing project has no product plan to draft.
+        let old = Harness::new("gates-plan-old", |_| {});
+        assert_eq!(
+            stands(&old),
+            json!({ "new_project": null, "approved": false, "task": null, "documents": [] })
+        );
+
+        // A new one: its name, not approved, no task yet.
+        let harness = Harness::new("gates-plan-new", |_| {});
+        harness.started();
+        assert_eq!(
+            stands(&harness),
+            json!({
+                "new_project": { "name": "little-oak-cakes" },
+                "approved": false, "task": null, "documents": []
+            })
+        );
+
+        // After the draft: its task.
+        let deps = &harness.project.deps;
+        let plan = catervas_store::requests::file_product_plan_request(
+            &deps.files,
+            &deps.log,
+            catervas_store::requests::product_plan_request(
+                catervas_core::contract::Role::Architect,
+                5.0,
+            ),
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("filed");
+        let filed_at = deps
+            .log
+            .read(&catervas_store::EventQuery {
+                kinds: vec![EventKind::TaskCreated],
+                ..catervas_store::EventQuery::default()
+            })
+            .expect("the log reads")[0]
+            .envelope
+            .recorded_at;
+        let task =
+            |status: &str| json!({ "task_id": "CTV-1", "status": status, "created_at": filed_at });
+        assert_eq!(
+            stands(&harness),
+            json!({
+                "new_project": { "name": "little-oak-cakes" },
+                "approved": false, "task": task("draft"), "documents": []
+            })
+        );
+
+        // Verifying, with both files on its branch: their texts, the spec first.
+        let root = &harness.project.repo.path;
+        let branch = catervas_core::branch::task_branch(&plan);
+        git_in(root, &["checkout", "-b", &branch]);
+        for (path, text) in [
+            ("docs/catervas/product/roadmap.md", "# Roadmap\n\nNow\n"),
+            ("docs/catervas/product/spec.md", "# Little Oak Cakes\n"),
+        ] {
+            std::fs::create_dir_all(root.join(path).parent().expect("a folder")).expect("a folder");
+            std::fs::write(root.join(path), text).expect("written");
+            git_in(root, &["add", "--", path]);
+        }
+        git_in(root, &["commit", "-m", "Draft the product plan"]);
+        git_in(root, &["checkout", "main"]);
+        harness
+            .project
+            .moved("CTV-1", "draft", "verifying", &json!({}));
+        assert_eq!(
+            stands(&harness),
+            json!({
+                "new_project": { "name": "little-oak-cakes" },
+                "approved": false, "task": task("verifying"),
+                "documents": [
+                    { "path": "docs/catervas/product/spec.md", "text": "# Little Oak Cakes\n" },
+                    { "path": "docs/catervas/product/roadmap.md", "text": "# Roadmap\n\nNow\n" }
+                ]
+            })
+        );
+
+        // Both on main: approved.
+        harness.approve_the_product_plan();
+        assert_eq!(stands(&harness)["approved"], true);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn tells_the_band_while_the_plan_waits() {
+        let line = |harness: &Harness, agent: &str| {
+            let answer = query(
+                &harness.daemon,
+                "team.activity",
+                &json!({}),
+                "teamActivityResult",
+            );
+            answer["activity"]
+                .as_array()
+                .expect("the activity")
+                .iter()
+                .find(|one| one["agent_id"] == agent)
+                .expect("the agent")["line"]
+                .as_str()
+                .expect("a line")
+                .to_string()
+        };
+        // An existing project's band is as it was.
+        let old = Harness::new("gates-band-old", |_| {});
+        assert_eq!(line(&old, "dev-a"), "Nothing to do right now");
+
+        let harness = Harness::new("gates-band-new", |_| {});
+        harness.started();
+        assert_eq!(
+            line(&harness, "dev-a"),
+            "Nothing to do until your plan is approved"
+        );
+        harness.approve_the_product_plan();
+        assert_eq!(line(&harness, "dev-a"), "Nothing to do right now");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn summarises_the_backlog() {
         let summary = |harness: &Harness| {
             query(
@@ -4114,6 +4540,76 @@ pub(super) mod tests {
         assert_eq!(
             summary(&a_backlog("gates-backlog-off", false)),
             json!({ "plan_in_sprints": false, "count": 0 })
+        );
+    }
+
+    /// `harness` with its daemon taking commands through its orchestrator.
+    fn driven_by(harness: Harness) -> Harness {
+        let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
+        assert!(
+            harness
+                .daemon
+                .set_command_handler(command_handler(orchestrator))
+        );
+        harness
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_catervafication_until_it_starts() {
+        let offer = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "catervafication.get",
+                &json!({}),
+                "catervaficationGetResult",
+            )
+        };
+        let harness = driven_by(Harness::with_the_suggested_six("gates-catervafication"));
+        assert_eq!(
+            offer(&harness),
+            json!({
+                "offered": true,
+                "roles": [
+                    "product_manager", "architect", "software_developer", "ui_ux_designer",
+                    "marketing_specialist"
+                ]
+            })
+        );
+        let started = rpc(
+            &harness.daemon,
+            "command",
+            &json!({ "command": { "command": "catervafication_start", "body": {} } }),
+        );
+        assert!(started["error"].is_null(), "{started}");
+        assert_eq!(offer(&harness)["offered"], false);
+
+        // A Designer whose browser is not ready (no preview can run) is left out of the offer.
+        let unready = driven_by(Harness::new(
+            "gates-catervafication-unready",
+            crate::tools::fixtures::with_the_suggested_six,
+        ));
+        assert_eq!(
+            offer(&unready)["roles"],
+            json!([
+                "product_manager",
+                "architect",
+                "software_developer",
+                "marketing_specialist"
+            ])
+        );
+
+        // A new project documents itself once its plan is approved; nothing is offered.
+        let new = driven_by(Harness::with_the_suggested_six("gates-catervafication-new"));
+        new.started();
+        assert_eq!(offer(&new)["offered"], false);
+
+        // A Product Manager is enough to be offered: with no Architect or Scrum Master it reviews
+        // its own task, and the two Developers review each other's.
+        let no_writers = driven_by(Harness::new("gates-catervafication-none", |_| {}));
+        assert_eq!(
+            offer(&no_writers),
+            json!({ "offered": true, "roles": ["product_manager", "software_developer"] })
         );
     }
 
@@ -4225,6 +4721,7 @@ pub(super) mod tests {
             deps.clock.as_ref(),
             &deps.ids,
             crate::chat::NewChatMessage {
+                heard: None,
                 chat: "pm".to_string(),
                 author: "human".to_string(),
                 text: "Could customers also pay with Apple Pay?".to_string(),

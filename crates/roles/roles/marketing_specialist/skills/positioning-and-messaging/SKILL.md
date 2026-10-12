@@ -20,7 +20,7 @@ copy, and write it down so the user can disagree with it.
   you have not found it.
 - **What is the proof?** A number, a fact, a review or a demonstration the user can show.
 
-If the user can answer one of these and you cannot find it in the project, ask with
+If the user can answer one of these and you cannot find it in `docs/catervas/product/` or your own folder, ask with
 `catervas_ask_human`. Do not fill the gap with a guess.
 
 ## 2. Write the positioning
@@ -31,7 +31,7 @@ sentence for a customer, with the proof that backs it beside it.
 
 ## 3. No claim without a source
 
-Every claim names where it comes from: a file in the project, a page the user pasted, a source you
+Every claim names where it comes from: a document in `docs/catervas/product/` or `docs/catervas/marketing/`, a page the user pasted, a source you
 read and the day you read it. If you cannot name one, mark the sentence as a guess for the user to
 confirm, or take it out. Never invent a number, a customer or a quote.
 

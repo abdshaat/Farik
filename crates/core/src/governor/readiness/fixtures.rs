@@ -32,6 +32,9 @@ pub fn a_ready_context() -> ReadinessContext {
             (Role::Architect, 1),
             (Role::SoftwareDeveloper, 1),
             (Role::MarketingSpecialist, 1),
+            (Role::FinanceSpecialist, 1),
+            (Role::ProcurementSpecialist, 1),
+            (Role::UiUxDesigner, 1),
         ]
         .into_iter()
         .collect(),
@@ -47,5 +50,7 @@ pub fn a_ready_context() -> ReadinessContext {
             reason: "Two files, one form; the test runs the form.".to_string(),
         }),
         human_approves: false,
+        awaits_the_product_plan: false,
+        is_the_product_plan: false,
     }
 }

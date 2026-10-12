@@ -5,6 +5,7 @@ import { Chats } from "../pages/Chats.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
+import { Files } from "../pages/Files.tsx";
 import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
 import { MarketingPlan } from "../pages/MarketingPlan.tsx";
@@ -32,6 +33,7 @@ import { SetupComputer } from "../pages/setup/SetupComputer.tsx";
 import { SetupFinish } from "../pages/setup/SetupFinish.tsx";
 import { SetupPermissions } from "../pages/setup/SetupPermissions.tsx";
 import { SetupProject } from "../pages/setup/SetupProject.tsx";
+import { SetupReady } from "../pages/setup/SetupReady.tsx";
 import { SetupScan } from "../pages/setup/SetupScan.tsx";
 import { SetupSpending } from "../pages/setup/SetupSpending.tsx";
 import { SetupTeam } from "../pages/setup/SetupTeam.tsx";
@@ -61,6 +63,8 @@ export function App() {
 			<Route path="/setup/account" element={<SetupAccount />} />
 			<Route path="/setup/project" element={<SetupProject />} />
 			<Route path="/setup/scan" element={<SetupScan />} />
+			{/* The offer to document an existing project, after the team starts; it needs no draft. */}
+			<Route path="/setup/ready" element={<SetupReady />} />
 			{/* The team screens share one draft, which "Start the team" sends. */}
 			<Route element={<TeamSetup />}>
 				<Route path="/setup/team" element={<SetupTeam />} />
@@ -77,6 +81,8 @@ export function App() {
 				<Route path="/board" element={<Board />} />
 				<Route path="/channel" element={<Chats />} />
 				<Route path="/channel/:id" element={<Chats />} />
+				<Route path="/files" element={<Files />} />
+				<Route path="/files/*" element={<Files />} />
 				<Route path="/sprints/:id" element={<SprintPage />} />
 				<Route path="/costs" element={<Costs />} />
 				<Route path="/events" element={<Events />} />

@@ -1,4 +1,4 @@
-# The UI/UX Designer's kit. Its one connector is the built-in Playwright browser (docs/SPEC.md 5.6,
+# The UI/UX Designer's kit: one skill, and its one connector is the built-in Playwright browser (docs/SPEC.md 5.6,
 # step 12's plan), a `container` connector: Catervas runs it in Docker itself, confined to the preview.
 # The image is pinned by digest at its newest release on 2026-09-30, @playwright/mcp 0.0.82; the tag
 # is kept beside the digest to say which release it is, and docker resolves the digest alone.
@@ -8,7 +8,8 @@
 # Every tool the image lists has a tag here: `network` tools reach only the preview, every other is
 # `denied`, and a tool a new pin adds goes in as `denied` in the same commit (the drift test).
 role: ui_ux_designer
-skills: []
+skills:
+  - catervafying-the-repository
 connectors:
   - name: playwright
     transport: container

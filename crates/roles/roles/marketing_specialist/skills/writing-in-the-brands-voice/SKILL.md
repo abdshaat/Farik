@@ -10,10 +10,10 @@ so a reader could not tell which of you wrote it.
 
 ## 1. Read what already exists
 
-Before you write, read the business's own words: its website, README, existing posts and emails,
-packaging, the replies the user has sent. Do not start from a blank page when there is a voice to
-copy. If nothing exists, ask the user with `catervas_ask_human` for two or three examples of writing
-they like, and do not invent a voice.
+Before you write, read the business's own words: its website, existing posts and emails, packaging,
+the replies the user has sent, and the Product Manager's spec in `docs/catervas/product/`. Do not
+start from a blank page when there is a voice to copy. If nothing exists, ask the user with
+`catervas_ask_human` for two or three examples of writing they like, and do not invent a voice.
 
 ## 2. Write the voice down
 

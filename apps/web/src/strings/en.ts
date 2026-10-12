@@ -243,7 +243,7 @@ export const en = {
 	jobDesigner:
 		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees. Checks every screen {developer} builds.",
 	jobFinance:
-		"Keeps the books and forecasts your spending, starting with the team's AI costs.",
+		"Keeps the books: what your business owns, spends, earns and has at stake.",
 	jobProcurement:
 		"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
 	setupMoreRoles: "More roles",
@@ -363,7 +363,7 @@ export const en = {
 	planJudgeNone: "The {role}, once the team has one",
 	team: "Team",
 	teamPageLead:
-		"{count} agents work on {name}. A team needs a Product Manager and a Developer; everyone else is up to you. You can have up to seven.",
+		"{count} agents work on {name}. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
 	agentEditLink: "Edit {name}",
 	agentPause: "Pause {name}",
 	agentResume: "Resume {name}",
@@ -431,11 +431,13 @@ export const en = {
 	accountKeyRefused:
 		"The key did not work, so your team is paused. Connect your AI account again with a new key.",
 	accountConnectAgain: "Connect again",
+	accountConnect: "Connect account",
+	accountBack: "Connected. If your team is paused, press Resume.",
 	accountKeyRefusedEnvironment:
 		"The key in {variable} did not work, so your team is paused. Change it where Catervas runs, start Catervas again, then press Resume.",
 	accountDisconnect: "Disconnect this account",
 	accountGone:
-		"Disconnected. The team is paused; start Catervas again to connect another account.",
+		"Disconnected. The team is paused until you connect an account and press Resume.",
 	accountKept:
 		"Catervas reads this key from the {variable} variable on this computer, so it cannot remove it. Remove it there, then start Catervas again.",
 	statusPlanning: "Planning",
@@ -494,8 +496,10 @@ export const en = {
 	waitingKeyConnect: "Connect again",
 	checksPassed: "All {count} of Catervas’s checks passed.",
 	movedTitle: "What moved since yesterday",
-	yesterday: "Yesterday",
-	yesterdayShort: "Yday",
+	movedYou: "You",
+	movedYesterday: "Yesterday {time}",
+	movedMore: "Show more ({n} more)",
+	movedFewer: "Show fewer",
 	movedNone: "Nothing moved since yesterday.",
 	backToToday: "Back to Today",
 	requestTitle: "Your request is with the team",
@@ -704,8 +708,6 @@ export const en = {
 		"A team has seven people at most. Retire someone before adding another.",
 	refuseNeedsProductManager:
 		"Your team needs a Product Manager to write its plans. Include one.",
-	refuseNeedsDeveloper:
-		"Your team needs a Developer to do the work. Include one.",
 	refuseRepeatedId: "Two people on the team have the same name. Rename one.",
 	refuseWorked:
 		"Someone you took off the team has already done work. Retire them from their card instead.",
@@ -1090,6 +1092,18 @@ export const en = {
 	chatsKeyLink: "Check the key in Settings",
 	chatsNoAnswer: "{name} could not answer. Ask again.",
 	chatsRetired: "{name} has left the team. This chat is kept for you to read.",
+	chatsInterviewIntro:
+		"Before your team builds anything, {name} asks what you want to make. This chat only talks: your product plan is written next, and you approve it before anything is built.",
+	heardTitle: "What I heard",
+	heardCustomers: "Your customers",
+	heardProblem: "The problem",
+	heardMust: "It must",
+	heardNotNow: "Not now",
+	heardWorksWhen: "It works when",
+	draftPlan: "Draft the product plan",
+	draftPlanLine:
+		"I write it as my first task: a product description and a roadmap. It comes to you on Today to approve.",
+	draftPlanSent: "Drafting it as {id}. It comes to you on Today to approve.",
 	channelIntro:
 		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
 	channelMessages: "Messages",
@@ -1519,10 +1533,23 @@ export const en = {
 	waitingNeedsBrowserLine:
 		"{designer} opens your app with Playwright. Turn Playwright on for {designer} on the Team page; until then {designer} takes no work, and nobody checks the screens {developer} builds.",
 	startsLegend:
-		"Start from the team Catervas suggests, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
+		"Start from the team Catervas suggests, from a ready-made team, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
 	startSuggested: "The suggested team",
 	startSuggestedNote:
 		"Six people, one for each job. A good start for a first project.",
+	startBuiltin: "A ready-made team",
+	startBuiltinNote:
+		"Teams Catervas comes with, one for each purpose. Pick one, then change anyone below.",
+	startWhichBuiltin: "Which ready-made team?",
+	builtinSoftwareProduct:
+		"Plans, designs, builds and markets a software product.",
+	builtinOnlineStore:
+		"Plans the shop, finds and orders stock, keeps the books and markets it.",
+	builtinFinancialAnalysis:
+		"Three analysts, one desk each, working one task at a time: your portfolio, its risks and its opportunities, managed by a Product Manager.",
+	builtinMeta: "{names} · comes with Catervas",
+	templateBuiltin:
+		"Catervas comes with a team called {name}. Choose another name.",
 	startSaved: "A saved team",
 	startSavedNote:
 		"A team you tuned before and saved from a Team page. It brings everyone’s name, picture, persona and model, and your answers to the setup questions.",
@@ -1531,14 +1558,15 @@ export const en = {
 	startWhich: "Which saved team?",
 	startScratch: "From scratch",
 	startScratchNote:
-		"Start with the two every team needs, a Product Manager and a Developer, and add whoever else you want.",
+		"Start with a Product Manager and a Developer, keep or untick the Developer, and add whoever else you want.",
 	teamLeadSaved:
 		"Filled from {name}. Change anyone before you continue; the saved team itself stays as it is.",
 	teamLeadScratch:
-		"Every team needs a Product Manager to plan and a Developer to build. Name them, then add whoever else you want.",
+		"Every team needs a Product Manager to plan. Name them, then add whoever else you want.",
 	teamScratchNote:
 		"Every team needs one. Picture, persona and model are the role’s own; change them later on the Team page.",
-	teamNameBoth: "Name both to continue.",
+	teamNameAll:
+		"Name the Product Manager and at least one more person to continue.",
 	teamSavedAnswers:
 		"{name} also holds your answers about what they may do, spending, finishing work and checking plans. You will see them on the next screens, already chosen.",
 	templateMeta: "{names} · saved {date}",
@@ -1588,7 +1616,8 @@ export const en = {
 	templateChanged:
 		"This saved team was saved again since you looked at it. Go back and look at what changes once more.",
 	useLead:
-		"Pick a team you saved. Catervas shows you who stays, who joins and who leaves before anything changes.",
+		"Pick a ready-made team or one you saved. Catervas shows you who stays, who joins and who leaves before anything changes.",
+	useBuiltinList: "Ready-made",
 	useList: "Saved teams",
 	useSettingsBefore: "Rename or delete saved teams in ",
 	useShow: "Show what changes",
@@ -1616,8 +1645,8 @@ export const en = {
 	templatePausedRetired:
 		"{paused} stays but is paused, and {retired} would be retired.",
 	templateResume:
-		"Resume {paused} on the Team page first, or choose another saved team.",
-	templateChooseAnother: "Choose another saved team.",
+		"Resume {paused} on the Team page first, or choose another team.",
+	templateChooseAnother: "Choose another team.",
 	savedTeams: "Saved teams",
 	savedTeamsLead:
 		"Teams you saved from a Team page.\nAny project on this computer can start from one.\nRenaming or deleting one changes no project’s team.",
@@ -2457,4 +2486,144 @@ export const en = {
 		"Catervas could not keep the key on this computer. If it asks whether Catervas may use the keychain, choose “Always”, then try again.",
 	refuseSellerMessageClosed:
 		"This message went with an order that was decided without it, so it is not sent.",
+	// The product plan's changes the owner approves on Today (spec 5.7).
+	docChangesTitle: "Product plan changes to approve",
+	docChangesFrom: "From {name}, after the sprint {n} review",
+	docChangesLegend: "Lines marked + are added; lines marked − are removed.",
+	docNameRoadmap: "Roadmap",
+	docNameSpec: "Product description",
+	docChangeAdded: "Added: ",
+	docChangeRemoved: "Removed: ",
+	docChangesTeamOnly: "Only the version for the team changes.",
+	docChangesNotes: "Notes for {name}",
+	docChangesNotesHint: "(needed to send it back)",
+	docChangesApprove: "Approve",
+	docChangesSendBack: "Send back",
+	docChangesNeedNotes: "Write what {name} should change first.",
+	docChangesNothingYet: "Nothing changes until you approve.",
+	docChangesPullRequest:
+		"Nothing changes until you approve. Then Catervas opens a pull request, and the change is in your project once it is merged.",
+	docChangesManual:
+		"Nothing changes until you approve. Then it waits under Waiting on you for you to add it to your project.",
+	planToApprove: "Your product plan to approve",
+	planFrom: "From {name}, written from your chat {when}",
+	planWhenMorning: "this morning",
+	planWhenAfternoon: "this afternoon",
+	planWhenEvening: "this evening",
+	planWhenYesterday: "yesterday",
+	planWhenOn: "on {weekday}",
+	planIntro:
+		"Here is what we will build and in what order. Read both parts, then approve it or send it back with what to change.",
+	planGate:
+		"Nothing else is planned until you approve. Then your team documents the plan in a first sprint.",
+	todayWaitsForPlan: "{project}: your team waits for your product plan",
+	refuseFolderDocDecided: "These changes were decided already.",
+	refuseFolderDocSuperseded: "A newer version of these changes is waiting.",
+	refuseUnknownFolderDoc: "These changes are no longer there.",
+	refuseFolderDocMixed: "These changes come from more than one agent.",
+	refuseFolderDocReasonNeeded: "Write what to change before sending it back.",
+	refuseFolderDocBusy:
+		"One of these files has changes of yours that are not committed. Commit or undo them, then approve.",
+	refuseFolderDocLink:
+		"One of these files is a link, which Catervas does not write through.",
+	refuseFolderDocWaiting:
+		"An earlier change to one of these files is not in your project yet. Approve once it is.",
+	diagram: "Diagram",
+	diagramFailed: "This diagram could not be drawn.",
+	files: "Files",
+	filesLead:
+		"What your team knows about this project, one folder for each role. Each folder is written by its owner.",
+	filesNothingHere: "Nothing here yet",
+	filesNoSuch: "There is no such document.",
+	filesBack: "Back",
+	filesFile: "File",
+	filesCrumb: "{folder} › {name}",
+	filesOwnerFolder: "{owner}’s folder, {folder}",
+	filesEmptyOption: "{folder}: nothing here yet",
+	filesWhichVersion: "Which version",
+	filesForYou: "For you",
+	filesForTeam: "For the team",
+	filesEdit: "Edit",
+	filesWrittenForTeam: "Written for your team. You can read it and change it.",
+	filesTeamReads:
+		"This is how your team reads the {name}. To change it, change the version for you; {owner} keeps this one in step.",
+	filesBringing: "{owner} is bringing this up to date with your change.",
+	filesOlder: "The team’s version is older than yours",
+	filesChanged: "Changed by {who} {when}",
+	filesChangedIn: ", in ",
+	filesYou: "you",
+	filesJustNow: "just now",
+	filesOpen: "Open in Files",
+	filesEditing: "You are changing the version for you.",
+	filesEditOrPreview: "Edit or preview",
+	filesWrite: "Write",
+	filesPreview: "Preview",
+	filesHint:
+		"A line starting with # is a heading, one starting with - is a list item, and **two stars** make words bold.",
+	filesText: "{name} text",
+	filesSave: "Save",
+	filesCancel: "Cancel",
+	filesSaveAuto: "Saving keeps your change at once.",
+	filesSavePullRequest:
+		"Saving puts your change in a pull request; it is in your project once that is merged.",
+	filesSaveManual:
+		"Saving puts your change on a branch for you to add with catervas integrate.",
+	filesThenAuto: "{owner} will update the team’s version.",
+	filesThen: "Then {owner} updates the team’s version.",
+	filesWaitingAuto: "Saved. Catervas adds it to your project in a moment.",
+	filesWaitingPullRequest: "Saved. It goes out with a pull request.",
+	filesWaitingManual:
+		"Saved. It goes out when you run catervas integrate folder-{change}.",
+	filesChangedWhile:
+		"This file changed while you were editing. Your text is still here; copy it, then reload to see the new version.",
+	filesReload: "Reload",
+	refuseFileBusy:
+		"This file was also changed on your computer, outside Catervas. Finish or undo that change, then save here again.",
+	refuseMarketingPlan:
+		"A marketing plan changes through a new version on its page.",
+	refuseChangeWaiting:
+		"An earlier change to this file is not in your project yet. Edit it once it is.",
+	refuseIsALink: "This file is a link, which Catervas does not write through.",
+	refuseNotANewProject:
+		"This project was not started here, so it has no product plan to draft.",
+	refusePlanApproved: "Your product plan is approved already.",
+	refusePlanOpen: "{name} is drafting your product plan already.",
+	refusePlanNoWriter: "Your team has no Product Manager at work to write it.",
+	refusePlanNoReviewer:
+		"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+	refuseTooLarge:
+		"This is too long to save here: a document can be at most about 256 KB.",
+	// The end of setup for a project that already exists (4.1, 5.17).
+	readyTitle: "Your team is ready",
+	readyLead:
+		"{names} have joined {team}. They know what Catervas found in your project; next, they can learn it properly.",
+	readyRecommended: "Recommended",
+	readyOfferTitle: "Start with a Catervafication sprint",
+	readyOfferLead:
+		"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
+	readyPm:
+		"writes what your product is and what comes next, as your product plan to approve.",
+	readyArchitect: "writes how your project is put together, with diagrams.",
+	readyDeveloper:
+		"writes how your project is built and worked on: its habits and rules.",
+	readyDesigner: "writes down every screen your project has.",
+	readyMarketing:
+		"writes your marketing plan, after you approve the product plan.",
+	readyNote:
+		"Your team only adds its notes; nothing else in your project changes.",
+	readyStart: "Start",
+	readyLater: "Later",
+	readyLaterNote: "Later keeps this on Today.",
+	refuseCatervaficationStarted:
+		"Your team is already documenting this project.",
+	refuseCatervaficationNewProject:
+		"A new project's documenting sprint starts by itself once you approve its product plan.",
+	refuseCatervaficationNoPm:
+		"Your Product Manager is paused. Resume them on the Team page, then start.",
+	refuseCatervaficationNoWriters:
+		"No one on your team can both write and have their notes checked. Add an Architect or a Scrum Master on the Team page, then start.",
+	cardTitle: "Your team hasn’t documented this project yet",
+	cardLead:
+		"A first sprint where your team reads your project and writes down what it learns, before building anything.",
+	toldCatervafication: "Catervas filed it to document the project.",
 };

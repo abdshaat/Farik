@@ -12,7 +12,12 @@ import { type Refusal, refusalsOf, said } from "../../app/refusals.ts";
 import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
 import pages from "../pages.module.css";
-import { Faces, templateMeta, useTemplates } from "../SavedTeams.tsx";
+import {
+	builtinMeta,
+	Faces,
+	templateMeta,
+	useTemplates,
+} from "../SavedTeams.tsx";
 import { PreviewFields } from "./PreviewFields.tsx";
 import styles from "./setup.module.css";
 import {
@@ -41,30 +46,59 @@ const JOBS = {
 	procurement_specialist: "jobProcurement",
 } as const;
 
+/** Each ready-made team's line, by its slug; a slug Catervas does not know shows its names alone. */
+const BUILTIN_LINES = {
+	"software-product": "builtinSoftwareProduct",
+	"online-store": "builtinOnlineStore",
+	"financial-analysis": "builtinFinancialAnalysis",
+} as const;
+
 /** Setup's fifth step: where the team starts from, then its agents, named, and anyone added. */
 export function SetupTeam() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
 	const { draft, proposed, change, unavailable, checkAgain } = useSetup();
 	const { listing, noFolder } = useTemplates();
+	const builtin = listing?.builtin ?? [];
 	const saved = listing?.templates ?? [];
-	const [slug, setSlug] = useState<string>();
-	const begin = (start: Start, chosen = slug ?? saved[0]?.slug) => {
+	// One chosen team per start, so switching starts never carries the other's choice.
+	const [slugs, setSlugs] = useState<{ builtin?: string; saved?: string }>({});
+	// The team a picker shows as chosen: the one picked here, else the one the rows already hold
+	// (the draft outlives this screen, so Back comes back to it), else the first.
+	const pick = (start: "builtin" | "saved") => {
+		const list = start === "builtin" ? builtin : saved;
+		return (
+			slugs[start] ??
+			(draft.start === start
+				? list.find((l) => l.template.name === draft.from)?.slug
+				: undefined) ??
+			list[0]?.slug
+		);
+	};
+	const begin = (start: Start, chosen?: string) => {
 		setErrors([]);
-		setSlug(chosen);
-		const template = saved.find((s) => s.slug === chosen)?.template;
-		change(draftOf(proposed, start, template));
+		if (start === "builtin" || start === "saved") {
+			const list = start === "builtin" ? builtin : saved;
+			const slug = chosen ?? pick(start);
+			setSlugs({ ...slugs, [start]: slug });
+			change(
+				draftOf(proposed, start, list.find((s) => s.slug === slug)?.template),
+			);
+		} else change(draftOf(proposed, start));
 	};
 	const scratch = draft.start === "scratch";
-	// From scratch, the two required rows have to be named before going on; a role offered under
-	// "More roles" is named by the daemon's check when it is ticked.
-	const unnamed =
-		scratch &&
-		draft.members.some((m) => !m.more && !m.agent.displayName.trim());
 	const [errors, setErrors] = useState<Checked["errors"]>([]);
 	const [busy, setBusy] = useState(false);
 	const [editing, setEditing] = useState(() => !draft.preview.start.trim());
 	const on = draft.members.filter((m) => m.on);
+	// From scratch, the Product Manager and one more have to be ticked and named before going on;
+	// a role offered under "More roles" is named by the daemon's check when it is ticked.
+	const held =
+		scratch &&
+		(on.length < 2 ||
+			draft.members.some(
+				(m) => m.on && !m.more && !m.agent.displayName.trim(),
+			));
 	const pm =
 		draft.members.find((m) => m.agent.role === "product_manager")?.agent
 			.displayName ?? roleName("product_manager");
@@ -100,9 +134,10 @@ export function SetupTeam() {
 	};
 	const add = () => {
 		setErrors([]);
-		const developer = draft.members.find(
-			(m) => m.agent.role === "software_developer",
-		)?.agent;
+		// A ready-made team may hold no Developer: the newcomer is like the suggested one.
+		const developer = proposed.team.agents.find(
+			(a) => a.role === "software_developer",
+		);
 		if (!developer) return;
 		change({
 			...draft,
@@ -150,7 +185,7 @@ export function SetupTeam() {
 		const cannot = unavailable.includes(agent.role);
 		return (
 			<li key={member.key} className={styles.member}>
-				{(member.more || !scratch) && (
+				{(member.more || !scratch || agent.role !== "product_manager") && (
 					<input
 						type="checkbox"
 						checked={included}
@@ -180,7 +215,7 @@ export function SetupTeam() {
 					/>
 				</span>
 				<span className={styles.persona}>
-					{!member.more && scratch
+					{!member.more && scratch && agent.role === "product_manager"
 						? t("teamScratchNote")
 						: !member.more && draft.from
 							? agent.persona
@@ -295,6 +330,31 @@ export function SetupTeam() {
 						description: t("startSuggestedNote"),
 					},
 					{
+						value: "builtin",
+						label: t("startBuiltin"),
+						description: t("startBuiltinNote"),
+						disabled: !builtin.length,
+						after: draft.start === "builtin" && (
+							<div className={styles.which}>
+								<Choice<string>
+									name="builtin"
+									legend={t("startWhichBuiltin")}
+									value={pick("builtin") ?? ""}
+									onChange={(chosen) => begin("builtin", chosen)}
+									options={builtin.map(({ slug, template }) => ({
+										value: slug,
+										label: template.name,
+										description:
+											slug in BUILTIN_LINES
+												? t(BUILTIN_LINES[slug as keyof typeof BUILTIN_LINES])
+												: builtinMeta(template),
+										extra: <Faces agents={template.agents} />,
+									}))}
+								/>
+							</div>
+						),
+					},
+					{
 						value: "saved",
 						label: t("startSaved"),
 						description: noFolder
@@ -308,7 +368,7 @@ export function SetupTeam() {
 								<Choice<string>
 									name="saved"
 									legend={t("startWhich")}
-									value={slug ?? ""}
+									value={pick("saved") ?? ""}
 									onChange={(chosen) => begin("saved", chosen)}
 									options={saved.map(({ slug, template }) => ({
 										value: slug,
@@ -362,11 +422,11 @@ export function SetupTeam() {
 			<div className={styles.foot}>
 				<Button onClick={() => navigate("/setup/scan")}>{t("back")}</Button>
 				<span>
-					{unnamed && <span className={styles.note}>{t("teamNameBoth")}</span>}
+					{held && <span className={styles.note}>{t("teamNameAll")}</span>}
 					<Button
 						kind="primary"
 						busy={busy}
-						disabled={on.length === 0 || unnamed}
+						disabled={on.length === 0 || held}
 						onClick={onward}
 					>
 						{t(

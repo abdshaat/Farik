@@ -18,6 +18,20 @@ describe("Button", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("is described by the element it points at", () => {
+		render(
+			<>
+				<p id="why">Removes the draft</p>
+				<Button aria-describedby="why">Delete</Button>
+			</>,
+		);
+		expect(
+			screen
+				.getByRole("button", { name: "Delete" })
+				.getAttribute("aria-describedby"),
+		).toBe("why");
+	});
+
 	it("a busy button cannot be pressed twice", async () => {
 		const onClick = vi.fn();
 		const { container } = render(

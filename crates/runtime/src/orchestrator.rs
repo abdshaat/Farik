@@ -256,6 +256,13 @@ pub enum TickReport {
         /// What was done.
         what: String,
     },
+    /// Something was done about a folder change: integrated, put in a pull request, or escalated.
+    FolderChange {
+        /// The change's number, the n of `docs/folder-<n>`.
+        change: u64,
+        /// What was done.
+        what: String,
+    },
 }
 
 /// How a wait for a sleeping agent ended.
@@ -522,7 +529,8 @@ impl Orchestrator {
                 TickReport::Acted { .. }
                 | TickReport::Sprint { .. }
                 | TickReport::Conversation { .. }
-                | TickReport::Chat { .. } => {}
+                | TickReport::Chat { .. }
+                | TickReport::FolderChange { .. } => {}
             }
         }
         Ok(())
@@ -566,6 +574,22 @@ impl Orchestrator {
         task_id: &TaskId,
     ) -> Result<IntegrationOutcome, OrchestratorError> {
         integrate::integrate(self, task_id).await
+    }
+
+    /// Adds a folder change to the project now, as the human asks (`catervas integrate
+    /// folder-<n>`), whatever escalations it carries, as `integrate` does for an accepted task. A
+    /// change already integrated answers the commit it was integrated at.
+    ///
+    /// # Errors
+    ///
+    /// `Refused` with `no_such_folder_change` for a number that is none; `Lock` when the
+    /// integration lock cannot be taken; the store's, the files', and git's own failures. A merge
+    /// or push that cannot land is not an error: it is `Escalated`.
+    pub async fn integrate_folder_change(
+        &self,
+        change: u64,
+    ) -> Result<IntegrationOutcome, OrchestratorError> {
+        integrate::integrate_folder_change(self, change).await
     }
 
     /// Does what the human asks (`docs/SPEC.md` sections 5.2, 5.7, 5.11, 5.14, 5.16, F1): answer

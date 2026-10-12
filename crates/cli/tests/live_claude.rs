@@ -224,6 +224,7 @@ impl Project {
         state.register_session(SessionRegistration {
             session_id: session_id.clone(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             cwd: repo.path.clone(),
@@ -695,6 +696,7 @@ fn a_live_session_loads_a_skill_on_use() {
     project.state.register_session(SessionRegistration {
         session_id: project.session_id.clone(),
         web: catervas_core::governor::sites::WebAccess::Open,
+        reads: catervas_core::folders::ReadAccess::Open,
         agent_id: "dev-a".to_string(),
         task_id: None,
         cwd: project.repo.path.clone(),

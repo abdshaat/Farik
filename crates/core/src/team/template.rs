@@ -539,17 +539,12 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_template_without_a_developer() {
-        let mut wire = a_template_wire();
-        wire["agents"][1]["role"] = json!("architect");
-        assert_eq!(
-            refusals(&wire),
-            [(
-                "/agents".to_string(),
-                "A team needs an active Software Developer to do the work, and this one has none."
-                    .to_string()
-            )]
-        );
+    fn accepts_a_template_without_a_developer() {
+        let wire = template_with(&[
+            joining("mira", "Mira", "product_manager"),
+            joining("kai", "Kai", "marketing_specialist"),
+        ]);
+        assert!(validate_template(&wire).is_ok(), "{:?}", refusals(&wire));
     }
 
     #[test]
@@ -639,8 +634,8 @@ mod tests {
 
     // Applying a template (Task 3).
 
-    const NEEDS_DEVELOPER: &str =
-        "A team needs an active Software Developer to do the work, and this one has none.";
+    const NEEDS_PRODUCT_MANAGER: &str =
+        "A team needs an active Product Manager to write its plans, and this one has none.";
 
     /// The agents `team.propose` suggests, one per role: each with its role's persona, picture and
     /// model, and the Designer with its connector (step 12).
@@ -849,18 +844,20 @@ mod tests {
     fn refuses_when_a_kept_match_is_paused() {
         let result = applied(
             &project(&[
-                an_agent_wire("mira", "product_manager"),
-                an_agent_wire("ada", "software_developer"),
-                with_status("theo", "software_developer", "paused"),
+                with_status("mira", "product_manager", "paused"),
+                an_agent_wire("pat", "product_manager"),
             ]),
-            &a_template_wire(),
-            &["ada"],
+            &template_with(&[
+                joining("mira", "Mira", "product_manager"),
+                joining("theo", "Theo", "software_developer"),
+            ]),
+            &["pat"],
         );
-        assert_eq!(result.kept, ids(&["mira", "theo"]));
-        assert_eq!(result.retired, ids(&["ada"]));
+        assert_eq!(result.kept, ids(&["mira"]));
+        assert_eq!(result.retired, ids(&["pat"]));
         assert_eq!(
             errors(&result),
-            [("/agents".to_string(), NEEDS_DEVELOPER.to_string())]
+            [("/agents".to_string(), NEEDS_PRODUCT_MANAGER.to_string())]
         );
     }
 

@@ -555,9 +555,13 @@ describe("team setup", () => {
 		fireEvent.click(
 			await screen.findByRole("radio", { name: /^From scratch/ }),
 		);
-		// The two rows every team needs have no tick; each row of "More roles" has one.
+		// Only the Product Manager has no tick; the Developer and each row of "More roles" have one.
 		const list = screen.getByRole("list", { name: en.teamMembers });
-		expect(within(list).queryAllByRole("checkbox")).toHaveLength(0);
+		expect(
+			within(list)
+				.getAllByRole("checkbox")
+				.map((tick) => tick.getAttribute("aria-label")),
+		).toEqual(["Include the Developer"]);
 		const more = screen.getByRole("region", { name: en.setupMoreRoles });
 		const ticks = within(more).getAllByRole("checkbox") as HTMLInputElement[];
 		expect(
@@ -794,7 +798,7 @@ describe("team setup", () => {
 			.closest("li") as HTMLElement;
 		expect(
 			within(row).getByText(
-				"Keeps the books and forecasts your spending, starting with the team's AI costs.",
+				"Keeps the books: what your business owns, spends, earns and has at stake.",
 			),
 		).toBeTruthy();
 		expect(row.querySelector("img")?.getAttribute("src")).toBe(
@@ -1865,10 +1869,98 @@ describe("team setup", () => {
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		await waitFor(() => expect(s.calls("team.start")).toHaveLength(2));
 		await s.reply(s.calls("team.start")[1] as never, {});
+		// The offer to document the project has none for this team: it goes on to Today.
+		await answerQuery(s, "catervafication.get", { offered: false, roles: [] });
 		await answerStatus(s, false, 1, { setup_pending: false });
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});
 });
+
+const ready = (
+	slug: string,
+	name: string,
+	agents: Record<string, string>[],
+) => ({
+	slug,
+	template: {
+		version: 1,
+		name,
+		saved_at: "2026-10-10T00:00:00Z",
+		agents,
+		policy: {
+			permissions: { run_commands: true, push: false },
+			judgment: { required: "always", questions: [BUDGET], judge: "auto" },
+			integration: "manual",
+		},
+		budgets: {},
+	},
+});
+const MIRA = {
+	id: "mira",
+	display_name: "Mira",
+	role: "product_manager",
+	avatar: "product-manager",
+	persona: "Asks the questions that decide what to build",
+};
+const KAI = {
+	id: "kai",
+	display_name: "Kai",
+	role: "marketing_specialist",
+	avatar: "marketing-specialist",
+	persona: "Owns your brand and how you reach people",
+};
+const NOOR_SHOP = {
+	id: "noor",
+	display_name: "Noor",
+	role: "procurement_specialist",
+	avatar: "extra-5",
+	persona: "Finds the best seller at the right price",
+};
+const LENA_SHOP = {
+	id: "lena",
+	display_name: "Lena",
+	role: "finance_specialist",
+	avatar: "finance-specialist",
+	persona: "Keeps your numbers straight",
+};
+const SOFTWARE = ready("software-product", "Software product", [
+	MIRA,
+	{
+		id: "ada",
+		display_name: "Ada",
+		role: "architect",
+		avatar: "architect",
+		persona: "Thinks about how it all fits together",
+	},
+	{
+		id: "theo",
+		display_name: "Theo",
+		role: "software_developer",
+		avatar: "developer",
+		persona: "Builds it and tests it",
+	},
+	KAI,
+]);
+const ONLINE = ready("online-store", "Online store", [
+	MIRA,
+	NOOR_SHOP,
+	LENA_SHOP,
+	KAI,
+]);
+const FINANCIAL = ready("financial-analysis", "Financial analysis", [
+	MIRA,
+	{ ...LENA_SHOP, id: "noor", display_name: "Noor", persona: "Portfolio desk" },
+	{ ...LENA_SHOP, id: "ivo", display_name: "Ivo", persona: "Risk desk" },
+	LENA_SHOP,
+]);
+const BUILTIN = [SOFTWARE, ONLINE, FINANCIAL];
+/** A listing with no state folder: the ready-made teams alone. */
+const NO_FOLDER = {
+	folder: null,
+	builtin: BUILTIN,
+	templates: [],
+	unreadable: [],
+};
 
 /** A saved team as `templates.list` answers it: Mira and Ada with the template's own personas, Theo with none. */
 const THREE = {
@@ -1899,6 +1991,7 @@ const THREE = {
 };
 const LISTED = {
 	folder: "/home/me/.config/catervas/templates",
+	builtin: BUILTIN,
 	unreadable: [],
 };
 /** A saved team that holds a Procurement Specialist. */
@@ -1938,10 +2031,10 @@ const SHOP = {
 	},
 };
 
-describe("team setup's three starts", () => {
+describe("team setup's four starts", () => {
 	afterEach(() => sessionStorage.clear());
 
-	it("offers_three_starts", async () => {
+	it("offers_four_starts", async () => {
 		const { container, socket } = await renderApp("/setup/team");
 		const s = socket as FakeSocket;
 		await answerQuery(
@@ -1952,17 +2045,39 @@ describe("team setup's three starts", () => {
 			}),
 		);
 		await answerStatus(s, false, 1, { setup_pending: true });
-		await answerQuery(s, "templates.list", { ...LISTED, templates: [THREE] });
+		await answerQuery(s, "templates.list", NO_FOLDER);
 		const starts = await screen.findByRole("group", { name: en.startsLegend });
 		const radios = within(starts).getAllByRole("radio") as HTMLInputElement[];
-		expect(radios.map((r) => r.closest("label")?.textContent)).toEqual([
-			`${en.startSuggested}${en.startSuggestedNote}`,
-			`${en.startSaved}${en.startSavedNote}`,
-			`${en.startScratch}${en.startScratchNote}`,
-		]);
+		// A saved team needs a folder; the ready-made teams do not.
+		await waitFor(() =>
+			expect(radios.map((r) => r.closest("label")?.textContent)).toEqual([
+				`${en.startSuggested}${en.startSuggestedNote}`,
+				`${en.startBuiltin}${en.startBuiltinNote}`,
+				`${en.startSaved}${en.templateNoFolder}`,
+				`${en.startScratch}${en.startScratchNote}`,
+			]),
+		);
+		expect(radios.map((r) => r.disabled)).toEqual([false, false, true, false]);
 		expect(radios[0]?.checked).toBe(true);
 		const list = screen.getByRole("list", { name: en.teamMembers });
 		expect(membersOf(list)).toHaveLength(6);
+		fireEvent.click(radios[1] as HTMLInputElement);
+		const which = await screen.findByRole("group", {
+			name: en.startWhichBuiltin,
+		});
+		const lines = [
+			["Software product", en.builtinSoftwareProduct, 4],
+			["Online store", en.builtinOnlineStore, 4],
+			["Financial analysis", en.builtinFinancialAnalysis, 4],
+		] as const;
+		const options = within(which).getAllByRole("radio");
+		expect(options).toHaveLength(3);
+		options.forEach((option, i) => {
+			const [name, line, faces] = lines[i] as (typeof lines)[number];
+			const label = option.closest("label") as HTMLElement;
+			expect(label.textContent).toContain(`${name}${line}`);
+			expect(label.querySelectorAll("img")).toHaveLength(faces);
+		});
 		await expectNoAxeViolations(container);
 	});
 
@@ -2169,13 +2284,17 @@ describe("team setup's three starts", () => {
 			["Name for the Product Manager", ""],
 			["Name for the Developer", ""],
 		]);
-		// Both rows are required: neither can be left out.
-		expect(within(list).queryAllByRole("checkbox")).toHaveLength(0);
+		// Only the Product Manager is required: the Developer can be left out.
+		expect(
+			within(list)
+				.getAllByRole("checkbox")
+				.map((c) => c.getAttribute("aria-label")),
+		).toEqual(["Include the Developer"]);
 		const onward = screen.getByRole("button", {
 			name: en.teamContinue,
 		}) as HTMLButtonElement;
 		expect(onward.disabled).toBe(true);
-		expect(screen.getByText(en.teamNameBoth)).toBeTruthy();
+		expect(screen.getByText(en.teamNameAll)).toBeTruthy();
 		await expectNoAxeViolations(container);
 
 		fireEvent.change(names[0] as HTMLInputElement, {
@@ -2220,16 +2339,7 @@ describe("team setup's three starts", () => {
 		const t2 = second.socket as FakeSocket;
 		await answerQuery(t2, "team.propose", proposed());
 		await answerStatus(t2, false, 1, { setup_pending: true });
-		const listing = await waitFor(() => {
-			const f = t2
-				.calls("query")
-				.find((q) => q.params.name === "templates.list");
-			if (!f) throw new Error("no templates.list was asked");
-			return f;
-		});
-		await t2.fail(listing, -32005, "catervas has no state folder", {
-			errors: [{ path: "/", message: "no folder", code: "no_state_folder" }],
-		});
+		await answerQuery(t2, "templates.list", NO_FOLDER);
 		const nowhere = (await screen.findByRole("radio", {
 			name: /^A saved team/,
 		})) as HTMLInputElement;
@@ -2240,5 +2350,202 @@ describe("team setup's three starts", () => {
 		);
 		expect(nowhere.disabled).toBe(true);
 		await expectNoAxeViolations(second.container);
+	});
+
+	/** Opens setup's team screen with the five suggested and these listed teams. */
+	async function opened(listing: unknown, propose: unknown = proposed()) {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", propose);
+		await answerStatus(s, false, 1, { setup_pending: true });
+		await answerQuery(s, "templates.list", listing);
+		return { container, s };
+	}
+	const rowNames = () =>
+		(
+			within(screen.getByRole("list", { name: en.teamMembers })).getAllByRole(
+				"textbox",
+			) as HTMLInputElement[]
+		).map((n) => n.value);
+
+	it("starts_from_a_ready_made_team", async () => {
+		const { container, s } = await opened(NO_FOLDER);
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A ready-made team/ }),
+		);
+		const which = await screen.findByRole("group", {
+			name: en.startWhichBuiltin,
+		});
+		fireEvent.click(
+			within(which).getByRole("radio", { name: /^Online store/ }),
+		);
+		await screen.findByText(t("teamLeadSaved", { name: "Online store" }));
+		const list = screen.getByRole("list", { name: en.teamMembers });
+		expect(rowNames()).toEqual(["Mira", "Noor", "Lena", "Kai"]);
+		const rows = membersOf(list);
+		expect(
+			rows.map(
+				(r) => (within(r).getByRole("checkbox") as HTMLInputElement).checked,
+			),
+		).toEqual([true, true, true, true]);
+		const face = (row: HTMLElement) =>
+			row.querySelector("img")?.getAttribute("src");
+		expect(face(rows[1] as HTMLElement)).toBe(AVATAR_URLS["extra-5"]);
+		expect(face(rows[2] as HTMLElement)).toBe(
+			AVATAR_URLS["finance-specialist"],
+		);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		await s.reply(await asked(s, "team.validate"), { errors: [], effects: [] });
+		await screen.findByRole("heading", { name: en.spendTitle });
+		fireEvent.click(screen.getByRole("button", { name: en.continue }));
+		await screen.findByRole("heading", { name: en.finishTitle });
+		expect(
+			screen.getByRole("region", {
+				name: t("finishCarried", { name: "Online store" }),
+			}),
+		).toBeTruthy();
+	});
+
+	it("keeps_one_slug_per_start", async () => {
+		await opened({ ...LISTED, templates: [THREE] });
+		const pick = async (start: RegExp) =>
+			fireEvent.click(await screen.findByRole("radio", { name: start }));
+		await pick(/^A ready-made team/);
+		const which = await screen.findByRole("group", {
+			name: en.startWhichBuiltin,
+		});
+		fireEvent.click(
+			within(which).getByRole("radio", { name: /^Financial analysis/ }),
+		);
+		expect(rowNames()).toEqual(["Mira", "Noor", "Ivo", "Lena"]);
+		await pick(/^A saved team/);
+		expect(rowNames()).toEqual(["Mira", "Ada", "Theo"]);
+		await pick(/^A ready-made team/);
+		expect(rowNames()).toEqual(["Mira", "Noor", "Ivo", "Lena"]);
+		expect(
+			(
+				within(
+					await screen.findByRole("group", { name: en.startWhichBuiltin }),
+				).getByRole("radio", {
+					name: /^Financial analysis/,
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
+	});
+
+	it("a_ready_made_designer_is_held_off_without_a_sandbox", async () => {
+		const withNova = ready("online-store", "Online store", [
+			MIRA,
+			{ id: "nova", display_name: "Nova", role: "ui_ux_designer" },
+		]);
+		await opened(
+			{ ...NO_FOLDER, builtin: [withNova] },
+			{
+				...proposed((team) => {
+					team.agents = SIX;
+				}),
+				unavailable: [{ agent_id: "iris", reason: "designer_needs_sandbox" }],
+			},
+		);
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A ready-made team/ }),
+		);
+		const include = (await screen.findByRole("checkbox", {
+			name: "Include the UI/UX Designer",
+		})) as HTMLInputElement;
+		expect([include.checked, include.disabled]).toEqual([false, true]);
+		expect(
+			within(include.closest("li") as HTMLElement).getByText(
+				en.teamNeedsSandbox,
+			),
+		).toBeTruthy();
+	});
+
+	it("adds_someone_to_a_team_without_a_developer", async () => {
+		await opened(NO_FOLDER);
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A ready-made team/ }),
+		);
+		const which = await screen.findByRole("group", {
+			name: en.startWhichBuiltin,
+		});
+		fireEvent.click(
+			within(which).getByRole("radio", { name: /^Online store/ }),
+		);
+		await screen.findByText(t("teamLeadSaved", { name: "Online store" }));
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		expect(rowNames()).toEqual(["Mira", "Noor", "Lena", "Kai", "Ivo"]);
+		const list = screen.getByRole("list", { name: en.teamMembers });
+		const fifth = membersOf(list)[4] as HTMLElement;
+		expect(fifth.querySelector("img")?.getAttribute("src")).toBe(
+			AVATAR_URLS["extra-2"],
+		);
+	});
+
+	it("from_scratch_needs_a_product_manager_and_one_more", async () => {
+		const { s } = await opened({ ...LISTED, templates: [] });
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^From scratch/ }),
+		);
+		const list = screen.getByRole("list", { name: en.teamMembers });
+		const [pm, developer] = membersOf(list) as [HTMLElement, HTMLElement];
+		expect(within(pm).queryByRole("checkbox")).toBeNull();
+		expect(within(pm).getByText(en.teamScratchNote)).toBeTruthy();
+		expect(within(developer).getByRole("checkbox")).toBeTruthy();
+		expect(within(developer).getByText(en.jobDeveloper)).toBeTruthy();
+		const onward = screen.getByRole("button", {
+			name: en.teamContinue,
+		}) as HTMLButtonElement;
+		const names = within(list).getAllByRole("textbox") as HTMLInputElement[];
+		fireEvent.change(names[0] as HTMLInputElement, {
+			target: { value: "Mira" },
+		});
+		fireEvent.change(names[1] as HTMLInputElement, {
+			target: { value: "Theo" },
+		});
+		expect(onward.disabled).toBe(false);
+		// Without the Developer, the Product Manager is alone and Continue is held.
+		fireEvent.click(within(developer).getByRole("checkbox"));
+		expect(onward.disabled).toBe(true);
+		expect(screen.getByText(en.teamNameAll)).toBeTruthy();
+		// An unticked row's empty name holds nothing up: only ticked team rows are counted.
+		fireEvent.change(names[1] as HTMLInputElement, { target: { value: "" } });
+		fireEvent.click(
+			screen.getByRole("checkbox", { name: "Include the Finance Specialist" }),
+		);
+		expect(onward.disabled).toBe(false);
+		fireEvent.click(onward);
+		await s.reply(await asked(s, "team.validate"), { errors: [], effects: [] });
+		await screen.findByRole("heading", { name: en.mayTitle });
+	});
+
+	it("keeps_the_picked_team_checked_after_back", async () => {
+		const { s } = await opened(NO_FOLDER);
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A ready-made team/ }),
+		);
+		fireEvent.click(
+			within(
+				await screen.findByRole("group", { name: en.startWhichBuiltin }),
+			).getByRole("radio", { name: /^Online store/ }),
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		await s.reply(await asked(s, "team.validate"), { errors: [], effects: [] });
+		await screen.findByRole("heading", { name: en.spendTitle });
+		fireEvent.click(screen.getByRole("button", { name: en.back }));
+		// The team screen asks for the listing again; the draft it comes back to is kept.
+		await s.reply(await asked(s, "templates.list"), NO_FOLDER);
+		const which = await screen.findByRole("group", {
+			name: en.startWhichBuiltin,
+		});
+		const checked = (
+			within(which).getAllByRole("radio") as HTMLInputElement[]
+		).filter((r) => r.checked);
+		expect(checked.map((r) => r.closest("label")?.textContent)).toEqual([
+			expect.stringContaining("Online store"),
+		]);
+		expect(rowNames()).toEqual(["Mira", "Noor", "Lena", "Kai"]);
 	});
 });

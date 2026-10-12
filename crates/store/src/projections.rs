@@ -634,8 +634,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
     match &event.body {
         EventBody::TaskCreated(body) => {
             write_summary(transaction, &id, &body.summary, seq)?;
-            // The request that raises a marketing plan's budget skips the sprint queue.
-            if body.raises.is_some() {
+            // The request that raises a marketing plan's budget, and a new project's product plan
+            // task, skip the sprint queue.
+            if body.raises.is_some() || body.product_plan.is_some() {
                 update(
                     transaction,
                     "UPDATE task_projections SET skips_sprints = 1 WHERE task_id = ?1",
@@ -769,7 +770,20 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::SellerMessageFailed(_)
         | EventBody::SellerMessageDiscarded(_)
         | EventBody::SellerReplyReceived(_)
-        | EventBody::SellerReplyDismissed(_) => Ok(()),
+        | EventBody::SellerReplyDismissed(_)
+        // Folder documents and folder changes are read from the log by `folder_docs`; they are
+        // about no task.
+        | EventBody::FolderDocWritten(_)
+        | EventBody::FolderDocProposed(_)
+        | EventBody::FolderDocApproved(_)
+        | EventBody::FolderDocReturned(_)
+        | EventBody::FolderDocEdited(_)
+        | EventBody::FolderChangeOpened(_)
+        | EventBody::FolderChangeIntegrated(_)
+        | EventBody::FolderChangeEscalated(_)
+        | EventBody::ProjectStarted(_)
+        // The epic's board row is made by its `task.created`; this event only says what it is for.
+        | EventBody::CatervaficationStarted(_) => Ok(()),
     }
 }
 
@@ -2657,6 +2671,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             [("CTV-1".to_string(), false), ("CTV-2".to_string(), true)]
         );
+    }
+
+    #[test]
+    fn a_product_plan_task_skips_the_sprints() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        let mut plan = about(EventKind::TaskCreated, "CTV-2");
+        let catervas_protocol::event::EventBody::TaskCreated(body) = &mut plan.body else {
+            panic!("a task.created");
+        };
+        body.product_plan = Some(true);
+        record(&log, &projections, &plan);
+        assert!(!row_of(&projections, "CTV-1").skips_sprints);
+        assert!(row_of(&projections, "CTV-2").skips_sprints);
     }
 
     #[test]

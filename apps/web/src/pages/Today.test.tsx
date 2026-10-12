@@ -21,6 +21,7 @@ import {
 	UNREAD_ROW,
 } from "../test/ads.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
+import { CARD, docs as folderDocs } from "../test/folderDocs.ts";
 import { sentCommand } from "../test/gate.ts";
 import {
 	TEAM as MARKETING_TEAM,
@@ -49,11 +50,18 @@ import {
 } from "../test/pipelines.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import {
+	APPROVED,
+	IN_REVIEW,
+	INTERVIEWING,
+	PRODUCT_PLAN_ROW,
+} from "../test/productPlan.ts";
+import {
 	answerQuery,
 	answerStatus,
 	eventArrives,
 	renderApp,
 } from "../test/render-app.tsx";
+import { bodyOf, refusedBy } from "../test/schema.ts";
 import {
 	SCRIPT_ROW,
 	MARKUP as SITE_MARKUP,
@@ -102,6 +110,9 @@ async function today(fields: {
 	sprint?: unknown;
 	team?: unknown;
 	backlog?: unknown;
+	docs?: unknown;
+	plan?: unknown;
+	catervafication?: unknown;
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -112,6 +123,11 @@ async function today(fields: {
 	await answerQuery(s, "moved.since", { moved: fields.moved ?? [] });
 	await answerQuery(s, "sprint.current", fields.sprint ?? null);
 	if (fields.backlog) await answerQuery(s, "backlog.summary", fields.backlog);
+	if (fields.docs)
+		await answerQuery(s, "folder_doc_proposals.list", fields.docs);
+	if (fields.plan) await answerQuery(s, "product_plan.state", fields.plan);
+	if (fields.catervafication)
+		await answerQuery(s, "catervafication.get", fields.catervafication);
 	return { container, s };
 }
 
@@ -255,6 +271,271 @@ describe("today", () => {
 			return f;
 		});
 		expect(filed.params).toEqual({ text: "Add gift cards to checkout" });
+	});
+
+	it("adds_a_folder_change_from_its_row", async () => {
+		const { s } = await today({
+			waiting: [
+				{
+					kind: "integration",
+					folder_change: 1,
+					agent_id: "mira",
+					title: "Roadmap and Product description from the sprint 4 review",
+					line: "You approved it; it waits for you to add it",
+				},
+				{
+					task_id: "CTV-5",
+					kind: "integration",
+					agent_id: "theo",
+					title: "the photos",
+					line: "Accepted, waiting for you to add it",
+				},
+			],
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const [folder, task] = within(list).getAllByRole(
+			"listitem",
+		) as HTMLElement[];
+		expect(
+			within(folder as HTMLElement).getByText(
+				"Add Roadmap and Product description from the sprint 4 review to your project",
+			),
+		).toBeTruthy();
+		expect(
+			within(folder as HTMLElement).getByText(
+				"You approved it; it waits for you to add it",
+			),
+		).toBeTruthy();
+		expect(within(folder as HTMLElement).queryByRole("link")).toBeNull();
+		const add = within(folder as HTMLElement).getByRole("button", {
+			name: "Add",
+		});
+		// The button is described by the row's title, as a task's link is.
+		const describedBy = add.getAttribute("aria-describedby");
+		expect(describedBy).toBeTruthy();
+		expect(document.getElementById(describedBy as string)?.textContent).toBe(
+			"Add Roadmap and Product description from the sprint 4 review to your project",
+		);
+		fireEvent.click(add);
+		const sent = await sentCommand(s);
+		expect(sent.params).toEqual({
+			command: { command: "folder_change_integrate", body: { change: 1 } },
+		});
+		expect(refusedBy("folderChangeIntegrateBody", bodyOf(sent))).toEqual([]);
+		// A task's row still goes to its page.
+		expect(
+			within(task as HTMLElement)
+				.getByRole("link", { name: "Add" })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-5/accept");
+	});
+
+	it("keeps_a_quiet_card_until_it_starts", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		const { s, container } = await today({
+			waiting: [question],
+			catervafication: { offered: true, roles: ["product_manager"] },
+		});
+		const title = await screen.findByText(
+			"Your team hasn\u2019t documented this project yet",
+		);
+		const start = screen.getByRole("button", { name: "Start" });
+		expect(start.getAttribute("aria-describedby")).toBe(title.id);
+		expect(
+			screen.getByText(
+				"A first sprint where your team reads your project and writes down what it learns, before building anything.",
+			),
+		).toBeTruthy();
+		// It follows the request box, and is no "Waiting on you" item.
+		const request = screen.getByLabelText(en.requestLabel);
+		expect(
+			request.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		const waitingList = screen.getByRole("list", { name: en.waitingList });
+		expect(waitingList.contains(title)).toBe(false);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(start);
+		const command = await sent(s);
+		expect(command.params).toEqual({
+			command: { command: "catervafication_start", body: {} },
+		});
+		expect(refusedBy("emptyBody", bodyOf(command))).toEqual([]);
+		const asked = () =>
+			s.calls("query").filter((f) => f.params.name === "catervafication.get");
+		expect(asked()).toHaveLength(1);
+		// A refusal is said under the card, which stays.
+		await s.reply(command, {
+			error: {
+				kind: "refused",
+				detail: "catervafication_started: the team is already documenting it",
+			},
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"Your team is already documenting this project.",
+		);
+		expect(asked()).toHaveLength(1);
+		fireEvent.click(start);
+		const again = await sent(s, 2);
+		await s.reply(again, { said: "started", events: [9] });
+		await waitFor(() => expect(asked()).toHaveLength(2));
+		await answerQuery(s, "catervafication.get", { offered: false, roles: [] });
+		await waitFor(() =>
+			expect(screen.queryByText(title.textContent ?? "")).toBeNull(),
+		);
+		expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+	});
+
+	it("counts_and_lists_the_document_changes", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		const { s } = await today({
+			waiting: [question],
+			docs: folderDocs([CARD]),
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (2)" }),
+		).toBeTruthy();
+		const list = screen.getByRole("list", { name: en.waitingList });
+		const items = within(list).getAllByRole("listitem") as HTMLElement[];
+		const region = await screen.findByRole("region", {
+			name: en.docChangesTitle,
+		});
+		const asked = items.findIndex((one) => one.contains(region));
+		expect(asked).toBeGreaterThan(
+			items.findIndex((one) => one.textContent?.includes("question line")),
+		);
+		expect(
+			s
+				.calls("query")
+				.some((q) => q.params.name === "folder_doc_proposals.list"),
+		).toBe(true);
+	});
+
+	it("counts_no_card_when_none_waits_and_lists_one_alone", async () => {
+		cleanup();
+		await today({
+			waiting: [
+				{
+					task_id: "CTV-3",
+					kind: "question",
+					agent_id: "mira",
+					title: "the launch post",
+					line: "question line",
+				},
+			],
+			docs: folderDocs([]),
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		cleanup();
+
+		await today({ waiting: [], docs: folderDocs([CARD]) });
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		expect(
+			await screen.findByRole("region", { name: en.docChangesTitle }),
+		).toBeTruthy();
+		expect(screen.queryByText(en.waitingNone)).toBeNull();
+	});
+
+	it("puts_the_plan_in_place_of_its_acceptance_row", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		const other = {
+			task_id: "CTV-5",
+			kind: "acceptance",
+			agent_id: "mira",
+			title: "the weekly report",
+			line: "Accept the result",
+		};
+		await today({
+			waiting: [PRODUCT_PLAN_ROW, question, other],
+			plan: IN_REVIEW,
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (3)" }),
+		).toBeTruthy();
+		const list = screen.getByRole("list", { name: en.waitingList });
+		expect(
+			await within(list).findByRole("region", {
+				name: "Your product plan to approve",
+			}),
+		).toBeTruthy();
+		// The plan's task has no row of its own besides the card; the question keeps its row.
+		expect(within(list).getByText("Mira has a question")).toBeTruthy();
+		// Another acceptance stays the generic row beside the one plan card.
+		expect(within(list).getByText("Accept the weekly report")).toBeTruthy();
+		expect(
+			within(list).getAllByRole("region", {
+				name: "Your product plan to approve",
+			}),
+		).toHaveLength(1);
+		expect(
+			within(list).queryByText("Accept Draft the product plan"),
+		).toBeNull();
+		cleanup();
+
+		// Until both documents are there, the generic row, which still accepts.
+		await today({
+			waiting: [PRODUCT_PLAN_ROW, question],
+			plan: { ...IN_REVIEW, documents: [] },
+		});
+		const generic = await screen.findByRole("list", { name: en.waitingList });
+		expect(
+			await within(generic).findByText("Accept Draft the product plan"),
+		).toBeTruthy();
+		expect(
+			screen.queryByRole("region", { name: "Your product plan to approve" }),
+		).toBeNull();
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (2)" }),
+		).toBeTruthy();
+	});
+
+	it("says_the_team_waits_for_the_plan", async () => {
+		const sprint = { sprint_id: "S2", done: 4, total: 7 };
+		await today({
+			plan: INTERVIEWING,
+			sprint,
+			backlog: { plan_in_sprints: true, count: 2 },
+		});
+		const line = await screen.findByRole("link", {
+			name: "Little Oak Cakes: your team waits for your product plan",
+		});
+		// The mockup draws it as a link: to the Product Manager's chat.
+		expect(line.getAttribute("href")).toBe("/channel/mira");
+		expect(line.closest("p")?.textContent).toBe(line.textContent);
+		expect(screen.queryByText(/Sprint 2 is running/)).toBeNull();
+		expect(screen.queryByText(/wait in the Backlog/)).toBeNull();
+		cleanup();
+
+		await today({ plan: APPROVED, sprint });
+		expect(await screen.findByText(/Sprint 2 is running/)).toBeTruthy();
+		expect(
+			screen.queryByText(/your team waits for your product plan/),
+		).toBeNull();
 	});
 
 	it("lists_what_waits_on_you", async () => {
@@ -556,32 +837,72 @@ describe("today", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	/** The moved list's cards, newest first as the page draws them. */
+	const cards = async () =>
+		within(
+			await screen.findByRole("list", { name: en.movedTitle }),
+		).getAllByRole("listitem");
+	/** `n` moves by Theo on an earlier day, `minute` apart, oldest first as the daemon answers. */
+	const moves = (n: number) =>
+		Array.from({ length: n }, (_, i) => ({
+			at: `2026-01-01T10:${String(i).padStart(2, "0")}:00Z`,
+			by: "theo",
+			line: `Theo did thing ${i + 1}.`,
+		}));
+
 	it("says_what_moved", async () => {
 		const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 		const { container, s } = await today({
 			moved: [
 				{
-					at: now,
-					line: "Theo finished the checkout page and asked Ada to review it.",
+					at: "2026-01-01T21:40:00Z",
+					by: "catervas",
+					line: "Catervas stopped the X post for 09:00: its plan ended.",
 				},
 				{
-					at: "2026-01-01T21:40:00Z",
-					line: "The menu page's new photos were accepted and merged.",
+					at: now,
+					by: "human",
+					line: "You accepted “Menu photos”",
+				},
+				{
+					at: now,
+					by: "theo",
+					line: "Theo finished the checkout page and asked Ada to review it.",
 				},
 			],
 		});
-		const list = await screen.findByRole("list", { name: en.movedTitle });
-		const time = within(list).getByText(now.slice(11, 16));
-		expect(time.getAttribute("datetime")).toBe(now);
-		// What moved on an earlier day says so, as the mockup's "Yday".
-		const [, older] = within(list).getAllByRole("listitem");
+		const [newest, middle, oldest] = (await cards()) as HTMLElement[];
+		// The newest is first: the daemon answers oldest first and the page turns it round.
 		expect(
-			within(older as HTMLElement).getByTitle("Yesterday").textContent,
-		).toBe("Yday");
-		expect(
-			within(list).getByText(
+			within(newest as HTMLElement).getByText(
 				"Theo finished the checkout page and asked Ada to review it.",
 			),
+		).toBeTruthy();
+		// An agent's card: the picture (named by nothing extra), the name, the role tag, the time.
+		// (An image with empty alt has no role, so it is found by its tag.)
+		const picture = (newest as HTMLElement).querySelector("img");
+		expect(picture?.getAttribute("alt")).toBe("");
+		expect(
+			within(newest as HTMLElement).getByText("Theo", { selector: "strong" }),
+		).toBeTruthy();
+		expect(within(newest as HTMLElement).getByTitle("Developer")).toBeTruthy();
+		const time = within(newest as HTMLElement).getByText(now.slice(11, 16));
+		expect(time.tagName).toBe("TIME");
+		expect(time.getAttribute("datetime")).toBe(now);
+		expect(
+			within(middle as HTMLElement).getByText("You", { selector: "strong" }),
+		).toBeTruthy();
+		expect(
+			within(oldest as HTMLElement).getByText("Catervas", {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect(
+			(oldest as HTMLElement).querySelector("img")?.getAttribute("alt"),
+		).toBe("");
+		// What moved on an earlier day says so.
+		expect(
+			within(oldest as HTMLElement).getByText("Yesterday 21:40"),
 		).toBeTruthy();
 		// Since yesterday: 24 hours back from now.
 		const asked = s.calls("query").find((q) => q.params.name === "moved.since");
@@ -590,6 +911,105 @@ describe("today", () => {
 		);
 		expect(Math.abs(Date.now() - 86_400_000 - since)).toBeLessThan(60_000);
 		await expectNoAxeViolations(container);
+	});
+
+	it("shows_three_moves_then_more", async () => {
+		const { container } = await today({ moved: moves(7) });
+		const lines = async () =>
+			(await cards()).map((card) => card.textContent ?? "");
+		const first = await cards();
+		expect(first).toHaveLength(3);
+		expect(first[0]?.textContent).toContain("Theo did thing 7.");
+		expect(first[1]?.textContent).toContain("Theo did thing 6.");
+		expect(first[2]?.textContent).toContain("Theo did thing 5.");
+		const button = screen.getByRole("button", { name: "Show more (4 more)" });
+		button.focus();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(button);
+		const six = await lines();
+		expect(six).toHaveLength(6);
+		expect(six.slice(0, 3)).toEqual(first.map((card) => card.textContent));
+		expect(six[5]).toContain("Theo did thing 2.");
+		const more = screen.getByRole("button", { name: "Show more (1 more)" });
+		expect(document.activeElement).toBe(more);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(more);
+		expect(await lines()).toHaveLength(7);
+		const fewer = screen.getByRole("button", { name: "Show fewer" });
+		expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
+		expect(document.activeElement).toBe(fewer);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(fewer);
+		expect(await lines()).toHaveLength(3);
+		expect(
+			document.activeElement ===
+				screen.getByRole("button", { name: "Show more (4 more)" }),
+		).toBe(true);
+		await expectNoAxeViolations(container);
+	});
+
+	it("shows_no_button_for_three_or_fewer", async () => {
+		await today({ moved: moves(3) });
+		expect(await cards()).toHaveLength(3);
+		expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
+		expect(screen.queryByRole("button", { name: /Show fewer/ })).toBeNull();
+	});
+
+	it("names_an_agent_the_team_does_not_hold", async () => {
+		await today({
+			moved: [
+				{
+					at: "2026-01-01T10:00:00Z",
+					by: "assignee",
+					line: "assignee moved “Menu photos” to Review",
+				},
+			],
+		});
+		const [card] = (await cards()) as HTMLElement[];
+		expect(
+			within(card as HTMLElement).getByText("assignee", {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect((card as HTMLElement).querySelector("img")).toBeNull();
+		expect(card?.querySelector("abbr")).toBeNull();
+	});
+
+	it("draws_the_person_and_catervas", async () => {
+		const team = {
+			...TEAM,
+			agents: [
+				...TEAM.agents,
+				{
+					id: "kai",
+					display_name: "Kai",
+					role: "marketing_specialist",
+					status: "active",
+				},
+			],
+		};
+		await today({
+			team,
+			moved: [
+				{ at: "2026-01-01T10:00:00Z", by: "kai", line: "Kai wrote a post." },
+				{ at: "2026-01-01T10:01:00Z", by: "catervas", line: "Catervas did." },
+				{ at: "2026-01-01T10:02:00Z", by: "human", line: "You did." },
+			],
+		});
+		const [human, catervas, kai] = (await cards()) as HTMLElement[];
+		const tile = (human as HTMLElement).querySelector("[aria-hidden='true']");
+		expect(tile?.querySelector("svg")).toBeTruthy();
+		expect((human as HTMLElement).querySelector("img")).toBeNull();
+		const mark = (catervas as HTMLElement).querySelector("img");
+		expect(mark?.getAttribute("alt")).toBe("");
+		expect(mark?.getAttribute("src")).toContain("logo-mark");
+		expect((kai as HTMLElement).querySelector("img")).toBeNull();
+		expect(
+			within(kai as HTMLElement).getByTitle("Marketing Specialist"),
+		).toBeTruthy();
 	});
 
 	it("counts_the_backlog_on_today", async () => {

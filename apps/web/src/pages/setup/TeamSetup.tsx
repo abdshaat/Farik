@@ -85,12 +85,12 @@ export type Draft = {
 	answers: { commands?: boolean; push?: boolean };
 	/** How to open the app, asked on the Designer's row. */
 	preview: PreviewForm;
-	/** Where the team started from: the suggested team, a saved team, or from scratch. */
+	/** Where the team started from: the suggested team, a ready-made or saved team, or from scratch. */
 	start: Start;
 	/** The saved team's name, when it started from one; its permission answers are not asked again. */
 	from?: string;
 };
-export type Start = "suggested" | "saved" | "scratch";
+export type Start = "suggested" | "builtin" | "saved" | "scratch";
 /** What `team.propose` answers: the suggested team and checks, and the agents this computer cannot run. */
 export type Proposed = {
 	team: Team;
@@ -209,7 +209,7 @@ function teamDraftOf(
 		preview: formOf(proposed.team.preview),
 		start,
 	};
-	if (start === "saved" && template) {
+	if ((start === "saved" || start === "builtin") && template) {
 		const { permissions, judgment, integration, planInSprints } =
 			template.policy;
 		const { dailyUsd: _, ...budgets } = proposed.team.budgets;
@@ -333,7 +333,7 @@ export function useSetup(): Setup {
 	return useOutletContext<Setup>();
 }
 
-/** "Start the team": the draft saved, the marker gone, the team resumed; then home. */
+/** "Start the team": the draft saved, the marker gone, the team resumed; then the offer, which goes home when it has none. */
 export function useStart() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
@@ -350,7 +350,7 @@ export function useStart() {
 				criteria: draft.criteria,
 			});
 			forgetDraft();
-			navigate("/", { replace: true });
+			navigate("/setup/ready", { replace: true });
 		} catch (e) {
 			setRefused(saidAll(e));
 			setBusy(false);

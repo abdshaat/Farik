@@ -57,7 +57,11 @@
         "seller_message_send",
         "seller_message_discard",
         "seller_reply_dismiss",
-        "purchase_order_send"
+        "purchase_order_send",
+        "folder_change_integrate",
+        "folder_doc_decide",
+        "product_plan_draft",
+        "catervafication_start"
       ]
     },
     "commandBodyWire": {
@@ -99,6 +103,8 @@
         { "$ref": "#/$defs/sellerMessageDiscardBody" },
         { "$ref": "#/$defs/sellerReplyDismissBody" },
         { "$ref": "#/$defs/purchaseOrderSendBody" },
+        { "$ref": "#/$defs/folderChangeIntegrateBody" },
+        { "$ref": "#/$defs/folderDocDecideBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -404,6 +410,34 @@
         "reply": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
       }
     },
+    "folderChangeIntegrateBody": {
+      "title": "Folder Change Integrate Body",
+      "description": "The owner adds folder change change (docs/catervas documents Catervas committed on a branch docs/folder-<change>) to the project now, as catervas integrate folder-<change> does, whatever escalations it carries (docs/SPEC.md 5.14). Refused no_such_folder_change; a change already integrated answers its commit.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change"],
+      "properties": {
+        "change": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "folderDocDecideBody": {
+      "title": "Folder Doc Decide Body",
+      "description": "The owner approves (decision approve: Catervas makes one folder change of both files of each proposal) or sends back (decision return: the agent's next sprint review reads note as the owner's own words) the proposals of one card on Today, proposals being their numbers, 1 to 20 (docs/SPEC.md 5.7). note is at most 600 characters; return requires one. folder_doc.approved or folder_doc.returned is appended. Refused unknown_folder_doc, folder_doc_decided, folder_doc_superseded, folder_doc_mixed, folder_doc_reason_needed, folder_doc_busy, folder_doc_link and folder_doc_waiting; all or nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposals", "decision"],
+      "properties": {
+        "proposals": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+        },
+        "decision": { "type": "string", "enum": ["approve", "return"] },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
     "purchaseOrderSendBody": {
       "title": "Purchase Order Send Body",
       "description": "The owner presses Approve and send on a purchase order (docs/SPEC.md 6.10; ADR 0039, its amendment of 2026-10-07): Catervas emails message, the order's own, with the order's workbook, orders/PO-<order>.xlsx, attached, to the seller, with the subject and body the owner saw, and only then appends purchase_order.approved (with note), seller_message.sent and purchase_order.placed (today, UTC), each with the order's task on its envelope and no agent and no session. A failed send appends seller_message.failed alone and the order still waits. The owner pays the seller outside Catervas. Refused as purchase_order_decide refuses an order, and unknown_seller_message, seller_message_not_this_order (message is not this order's waiting message), and as seller_message_send refuses a message; a second send of the order's message while the first is in flight is refused seller_message_sent (purchase_order_sending is purchase_order_decide's, for an order being emailed). A message that sends an order is sent by this command alone, under ask and auto alike.",
@@ -519,7 +553,7 @@
     },
     "emptyBody": {
       "title": "Empty Body",
-      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, and team_resume.",
+      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, team_resume, product_plan_draft, and catervafication_start.",
       "type": "object",
       "additionalProperties": false,
       "properties": {}

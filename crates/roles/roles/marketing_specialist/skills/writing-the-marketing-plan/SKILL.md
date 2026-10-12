@@ -7,12 +7,13 @@ description: Use when the task asks for a marketing plan.
 
 A marketing plan is the owner's decision. You write it, propose it with its budget, and end your
 turn; the owner approves it or sends it back, and nothing in it is spent or posted until they
-approve it. It also becomes the file `docs/marketing/plans/MP-<n>.md`.
+approve it. It also becomes the file `docs/catervas/marketing/plans/MP-<n>.md`, for people, beside
+its twin `MP-<n>.agent.md`, for agents.
 
 ## 1. Research first
 
-Read `docs/marketing/brand/brand-kit.md`, `docs/marketing/brand/persona.md` and the notes under
-`docs/marketing/research/`. If the research is missing or old, do `researching-the-market` first.
+Read `docs/catervas/marketing/brand/brand-kit.md`, `docs/catervas/marketing/brand/persona.md` and the notes under
+`docs/catervas/marketing/research/`. If the research is missing or old, do `researching-the-market` first.
 A plan must not rest on what you have not read.
 
 ## 2. Goals and how each is measured
@@ -43,11 +44,15 @@ the plan's text what each campaign advertises, and which campaigns are not at a 
 
 ## 6. Propose it and end your turn
 
-Propose the plan with `catervas_propose_marketing_plan`: a title, a summary, the full text, its
-dates (at most 92 days), the currency, the budget, the campaigns, the post slots and the measures.
-Catervas checks the numbers and the dates and answers every fault at once, so fix them all. When it
-accepts the plan, end your turn: the owner's decision starts your next session. Do not ask for
-`verifying` while the plan waits; Catervas refuses it.
+Propose the plan with `catervas_propose_marketing_plan`: a title, a summary, the full text, the
+same plan written for agents as `agent_text` (200 to 16,000 characters: precise, with no pleasantries,
+the figures and keys exactly as in the plan), its dates (at most 92 days), the currency, the budget,
+the campaigns, the post slots and the measures. Catervas checks the numbers and the dates and answers
+every fault at once, so fix them all. It writes `MP-<n>.md` and `MP-<n>.agent.md` into your worktree;
+commit `MP-<n>.md` and `MP-<n>.agent.md` together with `catervas_git_commit`, naming both files,
+since the Definition of Done refuses a diff that changes one of them alone. When it accepts the
+plan, end your turn: the owner's decision starts your next session. Do not ask for `verifying` while
+the plan waits; Catervas refuses it.
 
 ## 7. What the owner sees
 

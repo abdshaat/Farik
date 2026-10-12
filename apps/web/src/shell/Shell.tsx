@@ -30,10 +30,14 @@ const PLACES = [
 	["/", "today"],
 	["/board", "board"],
 	["/channel", "chats"],
+	["/files", "files"],
 	["/team", "team"],
 	["/costs", "costs"],
 	["/settings", "settings"],
 ] as const;
+
+/** The places a phone's bar leaves out; Team's page links to them. */
+const UNDER_TEAM: string[] = ["/files", "/settings"];
 
 /** Whether the screen is 1024 px or wider: the rail, else the top and bottom bars. */
 export function useWide(): boolean {
@@ -50,16 +54,25 @@ export function Shell() {
 	if (!data) return null;
 	// During setup, every path goes where "/" would.
 	if (landing(data) !== "/") return <Navigate to={landing(data)} replace />;
-	// Settings sits under Team on a phone (web-ui.md), so the bar has five places.
+	// Files and Settings sit under Team on a phone (web-ui.md), so the bar has five places.
 	const places = (
 		<ul className={styles.places}>
-			{PLACES.filter(([to]) => wide || to !== "/settings").map(([to, word]) => (
-				<li key={to}>
-					<NavLink to={to} end={to === "/"}>
-						{t(word)}
-					</NavLink>
-				</li>
-			))}
+			{PLACES.filter(([to]) => wide || !UNDER_TEAM.includes(to)).map(
+				([to, word]) => (
+					<li key={to}>
+						{!wide && to === "/team" && path.startsWith("/files") ? (
+							// Files sits under Team on a phone: Team stays marked (NavLink marks only its own path).
+							<Link to={to} aria-current="page">
+								{t(word)}
+							</Link>
+						) : (
+							<NavLink to={to} end={to === "/"}>
+								{t(word)}
+							</NavLink>
+						)}
+					</li>
+				),
+			)}
 		</ul>
 	);
 	const dismissKeys = async (thenTeam: boolean) => {
@@ -146,7 +159,10 @@ export function Shell() {
 				)}
 				<Outlet />
 				{!wide && path.startsWith("/team") && (
-					<Link to="/settings">{t("settings")}</Link>
+					<p className={styles.under}>
+						<Link to="/files">{t("files")}</Link>
+						<Link to="/settings">{t("settings")}</Link>
+					</p>
 				)}
 			</main>
 			{!wide && (

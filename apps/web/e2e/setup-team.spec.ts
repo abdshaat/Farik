@@ -70,6 +70,9 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		await expect(page).toHaveURL(/\/setup\/finish$/);
 		await page.getByLabel(/^Catervas adds it for me/).check();
 		await page.getByRole("button", { name: "Start the team" }).click();
+		// An existing project is offered a Catervafication; "Later" goes on to Today.
+		await expect(page).toHaveURL(/\/setup\/ready$/);
+		await page.getByRole("button", { name: "Later" }).click();
 		await expect(page).toHaveURL(/:\d+\/$/);
 
 		const yaml = readFileSync(

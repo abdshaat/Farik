@@ -1,3 +1,4 @@
+import mark from "@catervas/brand/assets/logo-mark-1254.png";
 import {
 	Avatar,
 	type AvatarKey,
@@ -5,7 +6,7 @@ import {
 	RoleTag,
 	uiStrings,
 } from "@catervas/ui";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
@@ -16,7 +17,16 @@ import { t } from "../strings/t.ts";
 import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
 import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
+import {
+	type Catervafication,
+	CatervaficationCard,
+} from "./CatervaficationCard.tsx";
 import { ChannelPreview } from "./Channel.tsx";
+import {
+	DocumentChanges,
+	type DocumentChangesCard,
+	type Integration,
+} from "./DocumentChanges.tsx";
 import { DataPipeline, type PipelineAsk } from "./dialogs/DataPipeline.tsx";
 import {
 	isScript,
@@ -39,6 +49,11 @@ import {
 	PostCard,
 	type PostMedia,
 } from "./PostGoingOut.tsx";
+import {
+	ProductPlanCard,
+	type ProductPlanState,
+	projectName,
+} from "./ProductPlanCard.tsx";
 import { RenewalsSection } from "./Renewals.tsx";
 import { SellerMailSections } from "./SellerMail.tsx";
 import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
@@ -73,7 +88,10 @@ type PostAsk = {
 	at: string;
 };
 type Waiting = {
-	taskId: string;
+	/** Absent on a folder change waiting to be added, which no task holds. */
+	taskId?: string | undefined;
+	/** The folder change an `integration` row waits to add, when it is about one. */
+	folderChange?: number | undefined;
 	kind:
 		| Kind
 		| "tool_approval"
@@ -93,7 +111,7 @@ type Waiting = {
 	Partial<SiteAsk> &
 	Partial<OrderAsk> &
 	Partial<PipelineAsk>;
-type Moved = { at: string; line: string };
+type Moved = { at: string; by: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
 
@@ -190,6 +208,23 @@ export function Today() {
 	const { data: posts, again: askPostsAgain } = useQuery<{
 		posts: GoingOutPost[];
 	}>("social_posts.list", {});
+	// The product plan's changes, one card for each sprint review and agent that proposed them.
+	const { data: planChanges, again: askPlanChangesAgain } = useQuery<{
+		integration: Integration;
+		cards: DocumentChangesCard[];
+	}>("folder_doc_proposals.list", {});
+	const cards = planChanges?.cards ?? [];
+	// A new project's product plan: while it is interviewed, the band says so; once both documents
+	// are written, the plan's acceptance row is shown as the plan itself.
+	const { data: plan, again: askPlanAgain } = useQuery<ProductPlanState>(
+		"product_plan.state",
+		{},
+	);
+	const interviewing = !!plan?.newProject && !plan.approved;
+	const planTask = plan?.documents.length === 2 ? plan.task?.taskId : undefined;
+	// "Later" leaves a quiet card here until the owner starts the documenting sprint.
+	const { data: documenting, again: askDocumentingAgain } =
+		useQuery<Catervafication>("catervafication.get", {});
 	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
 	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
 	// The daemon counts nothing while the team does not plan in sprints.
@@ -205,11 +240,22 @@ export function Today() {
 	const pm = agents.find(
 		(a) => a.role === "product_manager" && a.status !== "retired",
 	);
+	const waitsForPlan = t("todayWaitsForPlan", {
+		project: projectName(plan?.newProject?.name ?? ""),
+	});
 	return (
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("today")}</h1>
 			<div className={styles.band}>
-				{sprint ? (
+				{interviewing && plan.newProject ? (
+					<p>
+						{pm ? (
+							<Link to={`/channel/${pm.id}`}>{waitsForPlan}</Link>
+						) : (
+							waitsForPlan
+						)}
+					</p>
+				) : sprint ? (
 					<p>
 						<Link to={`/sprints/${sprint.sprintId}`}>
 							{t("sprintLine", {
@@ -244,20 +290,46 @@ export function Today() {
 			<RequestBox
 				pmName={pm?.displayName ?? uiStrings.roleName.product_manager}
 			/>
+			{documenting?.offered && (
+				<CatervaficationCard again={askDocumentingAgain} />
+			)}
 			{waiting && (
 				<section className={styles.section} aria-labelledby="waiting-heading">
 					<h2 id="waiting-heading">
 						{t("waitingTitle", {
-							count: String(waiting.waiting.length + (keyRefused ? 1 : 0)),
+							count: String(
+								waiting.waiting.length + cards.length + (keyRefused ? 1 : 0),
+							),
 						})}
 					</h2>
-					{waiting.waiting.length === 0 && !keyRefused ? (
+					{waiting.waiting.length === 0 && cards.length === 0 && !keyRefused ? (
 						<p className={styles.muted}>{t("waitingNone")}</p>
 					) : (
 						<ul className={styles.rows} aria-label={t("waitingList")}>
 							{keyRefused && <KeyRefusedRow />}
 							{waiting.waiting.map((item) =>
-								item.kind === "tool_approval" ? (
+								item.kind === "acceptance" &&
+								plan &&
+								planTask &&
+								item.taskId === planTask ? (
+									<li key={`plan-${item.taskId}`}>
+										<ProductPlanCard
+											state={plan}
+											name={
+												agent(item.agentId)?.displayName ??
+												pm?.displayName ??
+												""
+											}
+											avatar={
+												(agent(item.agentId) ?? pm)?.avatar as
+													| AvatarKey
+													| undefined
+											}
+											integration={team?.team.policy.integration as Integration}
+											again={askPlanAgain}
+										/>
+									</li>
+								) : item.kind === "tool_approval" ? (
 									<ToolApprovalRow
 										key={`${item.kind}-${item.approval}`}
 										item={item}
@@ -305,7 +377,7 @@ export function Today() {
 									/>
 								) : (
 									<WaitingRow
-										key={`${item.kind}-${item.taskId}`}
+										key={`${item.kind}-${item.taskId ?? `folder-${item.folderChange}`}`}
 										item={item}
 										agent={agent(item.agentId)}
 										developer={
@@ -318,6 +390,21 @@ export function Today() {
 									/>
 								),
 							)}
+							{planChanges &&
+								cards.map((card) => {
+									const one = agent(card.agentId);
+									return (
+										<li key={`plan-${card.sprintId}-${card.agentId}`}>
+											<DocumentChanges
+												card={card}
+												integration={planChanges.integration}
+												name={one?.displayName ?? card.agentId}
+												avatar={one?.avatar as AvatarKey | undefined}
+												again={askPlanChangesAgain}
+											/>
+										</li>
+									);
+								})}
 						</ul>
 					)}
 				</section>
@@ -350,27 +437,119 @@ export function Today() {
 					{moved.moved.length === 0 ? (
 						<p className={styles.muted}>{t("movedNone")}</p>
 					) : (
-						<ul className={styles.moved} aria-label={t("movedTitle")}>
-							{moved.moved.map((one) => (
-								<li key={`${one.at}-${one.line}`}>
-									{/* Times are HH:MM UTC, as the team's own lines say them; the
-									list holds a day, so an earlier date is yesterday's. */}
-									<time dateTime={one.at}>
-										{one.at.slice(0, 10) === today ? (
-											one.at.slice(11, 16)
-										) : (
-											<abbr title={t("yesterday")}>{t("yesterdayShort")}</abbr>
-										)}
-									</time>
-									<span>{one.line}</span>
-								</li>
-							))}
-						</ul>
+						<MovedList moved={moved.moved} agents={agents} today={today} />
 					)}
 				</section>
 			)}
 			<ChannelPreview agents={agents} />
 		</div>
+	);
+}
+
+/** How many moves show at first, and how many each "Show more" adds. */
+const MOVED_STEP = 3;
+
+/** What moved, newest first: three cards, then "Show more" adds three; "Show fewer" goes back. */
+function MovedList({
+	moved,
+	agents,
+	today,
+}: {
+	moved: Moved[];
+	agents: Agent[];
+	today: string;
+}) {
+	const [shown, setShown] = useState(MOVED_STEP);
+	// The daemon answers oldest first, as a log reads; the page turns it round.
+	const newest = [...moved].reverse();
+	const hidden = newest.length - shown;
+	return (
+		<>
+			<ul className={styles.moved} aria-label={t("movedTitle")}>
+				{newest.slice(0, shown).map((one) => (
+					<MovedCard
+						key={`${one.at}-${one.by}-${one.line}`}
+						one={one}
+						agent={agents.find((a) => a.id === one.by)}
+						today={today}
+					/>
+				))}
+			</ul>
+			{newest.length > MOVED_STEP && (
+				<div className={styles.movedMore}>
+					<Button
+						onClick={() =>
+							setShown(hidden > 0 ? shown + MOVED_STEP : MOVED_STEP)
+						}
+					>
+						{hidden > 0 ? t("movedMore", { n: hidden }) : t("movedFewer")}
+					</Button>
+				</div>
+			)}
+		</>
+	);
+}
+
+/** One move: who made it (picture, name, role tag), when, and the sentence. */
+function MovedCard({
+	one,
+	agent,
+	today,
+}: {
+	one: Moved;
+	agent: Agent | undefined;
+	today: string;
+}) {
+	// Times are HH:MM UTC, as the team's own lines say them; the list holds a day, so an
+	// earlier date is yesterday's.
+	const hhmm = one.at.slice(11, 16);
+	const time =
+		one.at.slice(0, 10) === today ? hhmm : t("movedYesterday", { time: hhmm });
+	let picture: ReactNode = null;
+	let name: string;
+	if (one.by === "human") {
+		name = t("movedYou");
+		picture = (
+			<span className={styles.you} aria-hidden="true">
+				<svg
+					width="24"
+					height="24"
+					viewBox="0 0 22 22"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="1.75"
+					aria-hidden="true"
+				>
+					<circle cx="11" cy="8" r="3.5" />
+					<path d="M4 19c1-3.6 3.8-5.5 7-5.5s6 1.9 7 5.5" />
+				</svg>
+			</span>
+		);
+	} else if (one.by === "catervas") {
+		name = t("brand");
+		picture = <img src={mark} alt="" width={48} height={48} />;
+	} else {
+		name = agent?.displayName ?? one.by;
+		if (agent?.avatar) {
+			picture = (
+				<Avatar avatarKey={agent.avatar as AvatarKey} name="" size={48} />
+			);
+		}
+	}
+	return (
+		<li>
+			{picture}
+			<div className={styles.movedText}>
+				<span className={styles.movedHead}>
+					<strong>{name}</strong>
+					{agent && one.by !== "human" && one.by !== "catervas" && (
+						<RoleTag role={agent.role} />
+					)}
+					<time dateTime={one.at}>{time}</time>
+				</span>
+				<span>{one.line}</span>
+			</div>
+		</li>
 	);
 }
 
@@ -466,7 +645,8 @@ function WaitingRow({
 }) {
 	const kind = KINDS[item.kind as Kind];
 	const name = agent?.displayName ?? item.agentId ?? "";
-	const titleId = `waiting-${item.kind}-${item.taskId}`;
+	const { busy, refusal, send } = useCommand(() => {});
+	const titleId = `waiting-${item.kind}-${item.taskId ?? `folder-${item.folderChange}`}`;
 	return (
 		<li className={styles.row}>
 			{agent?.avatar && (
@@ -479,19 +659,43 @@ function WaitingRow({
 				<span>
 					{kind.line ? t(kind.line, { designer: name, developer }) : item.line}
 				</span>
-				{item.kind === "acceptance" && <ChecksPassed taskId={item.taskId} />}
+				{item.kind === "acceptance" && item.taskId && (
+					<ChecksPassed taskId={item.taskId} />
+				)}
+				{refusal && (
+					<p role="alert" className={styles.alert}>
+						{refusal}
+					</p>
+				)}
 			</div>
-			<Link
-				className={styles.action}
-				to={
-					kind.page.startsWith("/")
-						? kind.page.replace("{agent}", item.agentId ?? "")
-						: `/tasks/${item.taskId}/${kind.page}`
-				}
-				aria-describedby={titleId}
-			>
-				{t(kind.word)}
-			</Link>
+			{item.folderChange !== undefined ? (
+				<div className={styles.decide}>
+					<Button
+						busy={busy}
+						aria-describedby={titleId}
+						onClick={() =>
+							send({
+								command: "folder_change_integrate",
+								body: { change: item.folderChange },
+							})
+						}
+					>
+						{t(kind.word)}
+					</Button>
+				</div>
+			) : (
+				<Link
+					className={styles.action}
+					to={
+						kind.page.startsWith("/")
+							? kind.page.replace("{agent}", item.agentId ?? "")
+							: `/tasks/${item.taskId}/${kind.page}`
+					}
+					aria-describedby={titleId}
+				>
+					{t(kind.word)}
+				</Link>
+			)}
 		</li>
 	);
 }
@@ -854,7 +1058,7 @@ function ToolApprovalRow({
 				<span>
 					{t("waitingToolApprovalLine", {
 						tool: ask.tool.replaceAll("_", " "),
-						task: item.taskId,
+						task: item.taskId ?? "",
 						title: item.title,
 						agent: name,
 					})}
@@ -885,7 +1089,7 @@ function ToolApprovalRow({
 						}
 					}
 					kit={kit}
-					taskId={item.taskId}
+					taskId={item.taskId ?? ""}
 					title={item.title}
 					onClose={() => setOpen(false)}
 				/>

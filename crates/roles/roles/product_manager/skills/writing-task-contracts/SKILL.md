@@ -1,6 +1,6 @@
 ---
 name: writing-task-contracts
-description: Use when a request from the user needs triage, or a draft or refining task needs its contract written, whether an epic or a standalone task, so that it passes the Definition of Ready.
+description: Use when a request from the user needs triage, or a draft or refining task needs its contract written, whether an epic or a standalone task, so that it passes the Definition of Ready, or an approved epic needs its tasks.
 ---
 
 # Writing task contracts
@@ -48,19 +48,24 @@ The team's rules and the criterion library are in this prompt; call `catervas_re
 - **Requirements**: numbered `R1`, `R2`, ..., each one thing that must be true afterwards.
 - **Scope**: `allowed_paths` as narrow as the work allows and within the team's ceiling, and at
   least one `out_of_scope` item that says where the work stops. An empty exclusion list predicts
-  scope creep.
+  scope creep. Name `docs/catervas/product/spec.md` or `roadmap.md` in a task's allowed paths,
+  or a pattern that reaches them, only when the task changes them: such a task waits for the
+  owner to accept it.
 - **Only the Developer and the UI/UX Designer change code**: a task for any other role keeps every
   `allowed_paths` entry inside the team's `document_paths` (`catervas_read_rules`), and a Developer's
   or a Designer's task says `change: fix` when it repairs a defect.
-- **Keep other roles off the marketing folder**: While the team has a Marketing Specialist,
-  another role's task names no path that could reach docs/marketing/ (not docs/** or docs); name
-  the folder it needs, such as docs/adr/**.
+- **Keep other roles off the owners' folders**: While a role that owns a folder under
+  docs/catervas/ has an active agent, another role's task names no path that could reach that
+  folder (not docs/**, docs/catervas/**, docs, ** or **/*.md); name the folder it needs, such as
+  docs/adr/** or src/**/*.rs. A Marketing Specialist's task names paths under docs/catervas/marketing/
+  alone: it reads only that folder and docs/catervas/product/, so it cannot change any other file.
 - **Exit criteria**: see below.
 - **Assignee role and reviewer role**: a Developer's task is reviewed by an active Architect when
   the team has one, else by another active Developer, which needs two active Developers; a
   UI/UX Designer's by an active Architect, else by a Developer; an Architect's or a Marketing Specialist's by you. Paused and retired agents do not count. When
   the team has neither, the contract fails readiness: ask the user for a reviewer with
-  `catervas_ask_human` rather than naming one nobody can staff. Nobody reviews their own work.
+  `catervas_ask_human` rather than naming one nobody can staff. Nobody reviews their own work but you, in a fresh session, for your own docs tasks (below). When the governor says nobody on the team holds the task's role, ask the user to add one with `catervas_ask_human`; do not give the work to a role whose job it is not.
+- **Your own docs tasks**: A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself, reviewed in a fresh session that knows nothing of the work, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.
 - **Risk** and **budget**: set both. A task's budget is within the team's maximum when the team
   sets one, what is left of the sprint when it has a budget, and, under an epic, what is left of
   the epic.
@@ -89,12 +94,30 @@ Include every method the team's rules require.
 A contract written as sections 3 and 4 say meets the Definition of Ready. Request `ready` with `catervas_request_transition`. If the governor refuses, every failed rule is
 in the answer with what to change; fix them all and ask again. A contract that fails three times
 escalates to the user. When no agent can review, ask the user to add one, an Architect or a second
-Developer; do not change the reviewer role to one nobody on the team holds.
+Developer; do not change the reviewer role to one nobody on the team holds. When the governor says nobody on the team holds the task's role, ask the user to add one with `catervas_ask_human`; do not give the work to a role whose job it is not.
 
 ## 6. After approval
 
 An epic always waits for the user's approval before it is ready, and so does a `high` risk task or
-any task the team's policy names. Only after an epic is approved do you write its product
-documents under `.catervas/product/` with `catervas_write_product_doc`. When you break an approved epic
-down, file each task with `catervas_create_task` and its `parent` set, each with clear deliverables and
-exit criteria of its own, then assign them with `catervas_assign_task`.
+any task the team's policy names. Only after an epic is approved do you write its requirements into the spec,
+by `writing-requirements`.
+
+## 7. An approved epic's tasks
+
+An approved epic's tasks are yours to write. Read the epic and the tasks already under it
+(`catervas_read_board`) first.
+
+1. With an active Architect, file one task for it with `catervas_create_task`, `parent` the epic,
+   `assignee_role` `architect`, `plan` and `allowed_paths` `docs/catervas/architecture/plans/<epic-id>.md`,
+   no `lane`, an `artifact` criterion that the plan exists, and in its requirements how many
+   builders (Software Developers and UI/UX Designers) are active.
+2. Once the plan is on the integration branch, file one task per planned task: its `plan`, its
+   `lane`, the planned tasks it needs in `dependencies`, the Architect's paths as `allowed_paths`
+   and its constraints as `constraints`, with acceptance criteria from the epic's requirements and
+   the spec.
+3. With no Architect, plan the lanes yourself: each task gets its `lane` and no `plan`.
+4. The governor refuses lanes that could meet (`lanes_overlap`) and a lane past the builders
+   (`lane_beyond_builders`); narrow the paths, or put the tasks in one lane.
+
+Each task has clear deliverables and exit criteria of its own. The Scrum Master, or you when the
+team has none, assigns them.

@@ -20,6 +20,16 @@ pub use crate::generated::task_contract::{
     ExitCriterionVerification as VerificationWire, Role,
 };
 
+impl Role {
+    /// Whether an agent of this role may review its own task, in a fresh session (spec 5.1): the
+    /// Product Manager alone, for its docs tasks, when the team has no Architect or Scrum Master.
+    /// The one place that exception lives.
+    #[must_use]
+    pub fn reviews_its_own(self) -> bool {
+        self == Role::ProductManager
+    }
+}
+
 /// A criterion's verification method with named variants. The generated wire enum names its
 /// variants by position; this is the one mapping `catervas-core` keeps at its edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -554,6 +564,41 @@ mod tests {
             "{}",
             errors[0].message
         );
+    }
+
+    #[test]
+    fn reads_a_plan_and_a_lane() {
+        let mut input = a_contract_wire();
+        input["plan"] = json!("docs/catervas/architecture/plans/CTV-3.md");
+        input["lane"] = json!(2);
+        let contract = validate_contract(&input).expect("valid");
+        assert_eq!(
+            contract.plan.as_ref().map(|plan| plan.as_str()),
+            Some("docs/catervas/architecture/plans/CTV-3.md")
+        );
+        assert_eq!(contract.lane.map(std::num::NonZeroU64::get), Some(2));
+        for lane in [json!(0), json!(17), json!("2")] {
+            let mut input = a_contract_wire();
+            input["lane"] = lane.clone();
+            let errors = refusal(&input);
+            assert!(
+                errors.iter().any(|e| e.path == "/lane"),
+                "{lane}: {errors:?}"
+            );
+        }
+        for plan in [
+            "docs/catervas/architecture/CTV-3.md",
+            "docs/catervas/architecture/plans/CTV-3.md/x",
+            "docs/catervas/architecture/plans/T-3.md",
+        ] {
+            let mut input = a_contract_wire();
+            input["plan"] = json!(plan);
+            let errors = refusal(&input);
+            assert!(
+                errors.iter().any(|e| e.path == "/plan"),
+                "{plan}: {errors:?}"
+            );
+        }
     }
 
     #[test]

@@ -9,6 +9,8 @@ pub mod budget;
 pub mod contract;
 /// The criterion library and its validator.
 pub mod criteria;
+/// Each role's folder under `docs/catervas/`, its human documents and their agent twins.
+pub mod folders;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
 /// The governor: every rule of `docs/SPEC.md` section 5 as pure functions.

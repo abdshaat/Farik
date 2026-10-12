@@ -129,7 +129,12 @@ mod tests {
         executor: Arc<dyn Executor>,
         input: Value,
     ) -> Result<Value, ToolError> {
-        project.call_with(executor, "dev-a", None, "catervas_exec", input)
+        // A command runs only in an implement session about a task, so the project has one.
+        let task: catervas_core::contract::TaskId = "CTV-1".parse().expect("a task id");
+        if project.deps.files.read_contract(&task).is_err() {
+            project.filed("CTV-1", "in_progress", "task", None);
+        }
+        project.call_with(executor, "dev-a", Some("CTV-1"), "catervas_exec", input)
     }
 
     #[test]

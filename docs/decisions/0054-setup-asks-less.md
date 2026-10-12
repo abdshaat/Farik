@@ -23,4 +23,4 @@ Catervas is for non-technical users (ADR 0016). A port is a number most of them 
 - An app that listens on several ports gets the lowest that answers its first page; a user who wants another sets the port in Settings.
 - An app with no `package.json` script, or on another toolchain, still asks for its start command; the port stays optional for it too.
 - `docs/schemas/team.schema.json` loses `port` from the preview's `required`; a team file with a port is unchanged.
-- `docs/SPEC.md` 4.1 and 8.3 change in revision 0.87.
+- `docs/SPEC.md` 4.1 and 8.3 change in revision 0.106 (0.87 when written; renumbered on 2026-10-12, when `main` had reached 0.103).

@@ -7,7 +7,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::sync::{Mutex, PoisonError};
 
-use catervas_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use catervas_core::criteria::{CriteriaLibrary, TemplateVerification};
 use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteRefusal, FIELDS_FIXED_AT_CREATION,
@@ -18,8 +18,9 @@ use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_protocol::command::{Command, RequestSize, command_from_value};
 use catervas_protocol::event::{
-    CatervasEvent, ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds,
-    EventKind, RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
+    CatervaficationStartedBody, CatervaficationStartedBodyProject, CatervasEvent,
+    ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds, EventKind,
+    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -214,6 +215,108 @@ pub fn file_request(
             parent,
             from_chat_message,
             raises: None,
+            rederives: None,
+            product_plan: false,
+            catervafies: None,
+        },
+        (now, ids),
+    )
+}
+
+/// Every task filed to bring an `.agent.md` twin up to date (`task.created` with `rederives`,
+/// `docs/SPEC.md` 5.17), oldest first, each with its twin. Whether one is still open is the
+/// board's to say.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn rederive_tasks(log: &EventLog) -> Result<Vec<(TaskId, String)>, StoreError> {
+    let created = log.read(&EventQuery {
+        kinds: vec![EventKind::TaskCreated],
+        ..EventQuery::default()
+    })?;
+    Ok(created
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::TaskCreated(body) => Some((
+                event.envelope.ids.task_id.clone()?,
+                body.rederives.as_ref()?.to_string(),
+            )),
+            _ => None,
+        })
+        .collect())
+}
+
+/// The whole contract of the task that brings `twin`, the version of `human` written for agents,
+/// up to date with the owner's change to `human` (`docs/SPEC.md` 5.17): `owner` writes it and
+/// `reviewer` checks it, within `max_cost_usd`, and it may change nothing but the twin.
+#[must_use]
+pub fn rederive_request(
+    human: &str,
+    twin: &str,
+    owner: Role,
+    reviewer: Role,
+    max_cost_usd: f64,
+) -> Value {
+    let file = |path: &str| path.rsplit('/').next().unwrap_or(path).to_string();
+    let says = format!("{twin} says what {human} says now");
+    json!({
+        "title": format!("Bring {} up to date with the owner's change", file(twin)),
+        "intent": format!(
+            "The owner changed {human} on the Files page. Rewrite {twin}, the version written for \
+             agents, so that it says what {human} now says."
+        ),
+        "scope": {
+            "in_scope": [twin],
+            "out_of_scope": [format!("{human}, which stays as the owner left it")]
+        },
+        "requirements": [{ "id": "R1", "text": format!("{says}, written for agents.") }],
+        "exit_criteria": [{
+            "id": "C1",
+            "text": format!("{says}."),
+            "satisfies": ["R1"],
+            "verification": {
+                "method": "review",
+                "rubric": [
+                    format!("Every fact, decision and limit in {human} is in {twin}."),
+                    format!("Nothing in {twin} contradicts {human}.")
+                ]
+            }
+        }],
+        "assignee_role": owner.to_string(),
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": [twin]
+    })
+}
+
+/// Files the whole contract `rederive_request` makes, as `file_request` files one: `task.created`
+/// names the twin in `rederives` and `catervas` filed it, and `request.triaged { small }` follows
+/// at once, by `catervas`, so that no triage session runs.
+///
+/// # Errors
+///
+/// As `file_request`.
+pub fn file_rederive_request(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    twin: &str,
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by: "catervas",
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            rederives: Some(twin),
+            product_plan: false,
+            catervafies: None,
         },
         (now, ids),
     )
@@ -243,6 +346,139 @@ pub fn file_raise_request(
             parent: None,
             from_chat_message: None,
             raises: Some(plan),
+            rederives: None,
+            product_plan: false,
+            catervafies: None,
+        },
+        (now, ids),
+    )
+}
+
+/// The whole contract of the task that drafts a new project's product plan (`docs/SPEC.md` 4.3,
+/// 5.16): the Product Manager writes `spec.md` and `roadmap.md` and their `.agent.md` twins from
+/// the owner's interview, `reviewer` checks them within `max_cost_usd`, and the owner accepts them.
+#[must_use]
+pub fn product_plan_request(reviewer: Role, max_cost_usd: f64) -> Value {
+    json!({
+        "title": "Draft the product plan",
+        "intent": "Write this new project's product plan from the owner's interview in your one-to-one chat, which From the human holds: docs/catervas/product/spec.md, the product description, and docs/catervas/product/roadmap.md, the roadmap, each for the owner to read, with its .agent.md version for the team. Nothing else is planned until the owner approves it.",
+        "summary": "The Product Manager writes the product description and the roadmap from your interview, for you to read and approve. Nothing else is planned until you approve them.",
+        "scope": {
+            "in_scope": ["The product description (spec.md) and the roadmap (roadmap.md), each with the team's copy."],
+            "out_of_scope": ["Code, and every other document"]
+        },
+        "requirements": [
+            {
+                "id": "R1",
+                "text": "spec.md has the product's name as its title, a paragraph on what it is and the problem it solves, and the sections Who it is for, What it must do, Not now and How we'll know it works, with Limits when the owner named any, in the owner's words where they gave them."
+            },
+            {
+                "id": "R2",
+                "text": "roadmap.md has the sections Now, Next and Later, each item one line: its name, then one sentence."
+            },
+            {
+                "id": "R3",
+                "text": "The team's copies of both (spec.agent.md, roadmap.agent.md) say the same, written for the agents."
+            }
+        ],
+        "exit_criteria": [
+            {
+                "id": "C1",
+                "text": "The product description and the roadmap have every part listed above.",
+                "satisfies": ["R1", "R2"],
+                "verification": {
+                    "method": "review",
+                    "rubric": [
+                        "spec.md has the title, the paragraph and the sections R1 names.",
+                        "roadmap.md has Now, Next and Later, each item one line.",
+                        "Both are in plain words, with no technical term the owner did not use."
+                    ]
+                }
+            },
+            {
+                "id": "C2",
+                "text": "The team's copies say the same as the documents you read.",
+                "satisfies": ["R3"],
+                "verification": {
+                    "method": "review",
+                    "rubric": [
+                        "Every fact, decision and limit in spec.md and roadmap.md is in their .agent.md versions.",
+                        "Nothing in an .agent.md version contradicts its version for the owner."
+                    ]
+                }
+            }
+        ],
+        "assignee_role": "product_manager",
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": [
+            "docs/catervas/product/spec.md",
+            "docs/catervas/product/spec.agent.md",
+            "docs/catervas/product/roadmap.md",
+            "docs/catervas/product/roadmap.agent.md"
+        ]
+    })
+}
+
+/// Files the contract `product_plan_request` makes, as the owner's word: `created_by` is `human`,
+/// `task.created` has `product_plan`, which skips the sprint queue and has the contract judged as
+/// filed, and `request.triaged { small }` follows at once, by `catervas`, so that no triage
+/// session runs.
+///
+/// # Errors
+///
+/// As `file_request`.
+pub fn file_product_plan_request(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by: HUMAN,
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            rederives: None,
+            product_plan: true,
+            catervafies: None,
+        },
+        (now, ids),
+    )
+}
+
+/// Files the epic of a Catervafication (`docs/SPEC.md` 5.16): `file_request` for an epic, which no
+/// request sets the kind of, and `request.triaged { large }` and `catervafication.started` follow at
+/// once, by `catervas`, under the one filing lock, so that no triage session runs.
+///
+/// # Errors
+///
+/// As `file_request`.
+pub fn file_catervafication_epic(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    created_by: &str,
+    project: CatervaficationStartedBodyProject,
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            rederives: None,
+            product_plan: false,
+            catervafies: Some(project),
         },
         (now, ids),
     )
@@ -255,6 +491,9 @@ struct Filing<'a> {
     parent: Option<&'a TaskId>,
     from_chat_message: Option<u64>,
     raises: Option<&'a str>,
+    rederives: Option<&'a str>,
+    product_plan: bool,
+    catervafies: Option<CatervaficationStartedBodyProject>,
 }
 
 fn file(
@@ -305,6 +544,9 @@ fn file(
     if let Some(parent) = parent {
         object.insert("kind".to_string(), json!("task"));
         object.insert("parent".to_string(), json!(parent.to_string()));
+    }
+    if filing.catervafies.is_some() {
+        object.insert("kind".to_string(), json!("epic"));
     }
 
     let command = command_from_value(&json!({
@@ -374,10 +616,14 @@ fn creation_bodies(
         parent,
         from_chat_message,
         raises,
+        rederives,
+        product_plan,
+        catervafies,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
         summary: summary_of(contract),
+        product_plan: product_plan.then_some(true),
         from_chat_message: from_chat_message.and_then(NonZeroU64::new),
         raises: raises
             .map(|plan| {
@@ -385,6 +631,15 @@ fn creation_bodies(
                     .try_into()
                     .map_err(|_| RequestError::Refused {
                         reason: format!("raises {plan:?}, which is no marketing plan's id"),
+                    })
+            })
+            .transpose()?,
+        rederives: rederives
+            .map(|twin| {
+                twin.to_string()
+                    .try_into()
+                    .map_err(|_| RequestError::Refused {
+                        reason: format!("rederives {twin:?}, which is no .agent.md twin"),
                     })
             })
             .transpose()?,
@@ -402,6 +657,36 @@ fn creation_bodies(
             reason: format!("a raised marketing budget for {plan}"),
             triaged_by: "catervas".to_string(),
         }));
+    }
+    if let Some(twin) = rederives {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: format!("a re-derive of {twin}"),
+            triaged_by: "catervas".to_string(),
+        }));
+    }
+    if product_plan {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: "a new project's product plan".to_string(),
+            triaged_by: "catervas".to_string(),
+        }));
+    }
+    if let Some(project) = catervafies {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Large,
+            reason: match project {
+                CatervaficationStartedBodyProject::Existing => {
+                    "the Catervafication of an existing repository"
+                }
+                CatervaficationStartedBodyProject::New => "the Catervafication of a new project",
+            }
+            .to_string(),
+            triaged_by: "catervas".to_string(),
+        }));
+        bodies.push(EventBody::CatervaficationStarted(
+            CatervaficationStartedBody { project },
+        ));
     }
     Ok(bodies)
 }
@@ -815,7 +1100,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        PLACEHOLDER, RequestError, file_request, hold_contract, placeholder_budget_usd,
+        PLACEHOLDER, RequestError, file_catervafication_epic, file_product_plan_request,
+        file_request, hold_contract, placeholder_budget_usd, product_plan_request,
         request_from_brief, triage_by_human,
     };
     use crate::files::fixtures::{TempProject, a_team};
@@ -873,6 +1159,195 @@ mod tests {
         .iter()
         .map(|text| text.as_str().unwrap_or_default().to_string())
         .collect()
+    }
+
+    #[test]
+    fn writes_the_product_plans_contract() {
+        use catervas_core::contract::Role;
+        use catervas_core::governor::readiness::evaluate_readiness;
+        use catervas_core::governor::readiness::fixtures::a_ready_context;
+
+        let (project, log) = a_project("product-plan-request");
+        let wire = product_plan_request(Role::Architect, 20.0);
+        let paths = [
+            "docs/catervas/product/spec.md",
+            "docs/catervas/product/spec.agent.md",
+            "docs/catervas/product/roadmap.md",
+            "docs/catervas/product/roadmap.agent.md",
+        ];
+        assert_eq!(wire["title"], "Draft the product plan");
+        assert_eq!(wire["allowed_paths"], json!(paths));
+        assert_eq!(wire["assignee_role"], "product_manager");
+        assert_eq!(wire["reviewer_role"], "architect");
+        assert_eq!(wire["risk"], "low");
+        assert_eq!(wire["budget"]["max_cost_usd"], 20.0);
+        let criteria = wire["exit_criteria"].as_array().expect("criteria");
+        assert_eq!(criteria.len(), 2);
+        assert!(
+            criteria
+                .iter()
+                .all(|criterion| criterion["verification"]["method"] == "review")
+        );
+
+        let contract = file_product_plan_request(&project.files(), &log, wire, (at(), &ids()))
+            .expect("the store files it");
+        assert_eq!(contract.assignee_role, Role::ProductManager);
+        assert_eq!(contract.allowed_paths, paths);
+        assert_eq!(evaluate_readiness(&contract, &a_ready_context()), Ok(()));
+        // The owner reads and accepts the result.
+        assert!(catervas_core::governor::done::result_needs_the_human(
+            &contract
+        ));
+        // The words the owner reads are plain, and these are the ones they get.
+        assert_eq!(
+            contract.scope.in_scope,
+            [
+                "The product description (spec.md) and the roadmap (roadmap.md), each with the team's copy."
+            ]
+        );
+        assert_eq!(
+            contract.requirements[2].text.to_string(),
+            "The team's copies of both (spec.agent.md, roadmap.agent.md) say the same, written for the agents."
+        );
+        assert_eq!(
+            contract.exit_criteria[0].text.to_string(),
+            "The product description and the roadmap have every part listed above."
+        );
+        assert_eq!(
+            contract.exit_criteria[1].text.to_string(),
+            "The team's copies say the same as the documents you read."
+        );
+
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.body.kind())
+                .collect::<Vec<_>>(),
+            [EventKind::TaskCreated, EventKind::RequestTriaged]
+        );
+        let EventBody::TaskCreated(created) = &events[0].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "human");
+        assert_eq!(created.product_plan, Some(true));
+        let EventBody::RequestTriaged(triaged) = &events[1].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.size, RequestTriagedBodySize::Small);
+        assert_eq!(triaged.triaged_by, "catervas");
+    }
+
+    #[test]
+    fn files_a_catervafication_epic_triaged_by_catervas() {
+        use catervas_protocol::event::CatervaficationStartedBodyProject as Project;
+
+        let (project, log) = a_project("catervafication-epic");
+        let files = project.files();
+        let epic = file_catervafication_epic(
+            &files,
+            &log,
+            a_request(),
+            "human",
+            Project::Existing,
+            (at(), &ids()),
+        )
+        .expect("the epic is filed");
+        assert_eq!(epic.kind, TaskKind::Epic);
+        assert_eq!(epic.status, TaskStatus::Draft);
+        assert_eq!(
+            files.read_contract(&epic.id).expect("held").kind,
+            TaskKind::Epic
+        );
+
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.body.kind())
+                .collect::<Vec<_>>(),
+            [
+                EventKind::TaskCreated,
+                EventKind::RequestTriaged,
+                EventKind::CatervaficationStarted
+            ]
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| event.envelope.ids.task_id.as_ref() == Some(&epic.id))
+        );
+        let EventBody::TaskCreated(created) = &events[0].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "human");
+        let EventBody::RequestTriaged(triaged) = &events[1].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.size, RequestTriagedBodySize::Large);
+        assert_eq!(
+            triaged.reason,
+            "the Catervafication of an existing repository"
+        );
+        assert_eq!(triaged.triaged_by, "catervas");
+        let EventBody::CatervaficationStarted(started) = &events[2].body else {
+            panic!("a catervafication.started");
+        };
+        assert_eq!(started.project, Project::Existing);
+        let projections = open_projections(Arc::clone(&log)).expect("the projections open");
+        let row = projections
+            .task(&epic.id)
+            .expect("the board reads")
+            .expect("the epic is on it");
+        assert_eq!(row.kind, TaskKind::Epic);
+        assert!(row.triaged);
+
+        let (project, log) = a_project("catervafication-epic-new");
+        file_catervafication_epic(
+            &project.files(),
+            &log,
+            a_request(),
+            "catervas",
+            Project::New,
+            (at(), &ids()),
+        )
+        .expect("the epic is filed");
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        let EventBody::RequestTriaged(triaged) = &events[1].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.reason, "the Catervafication of a new project");
+        let EventBody::CatervaficationStarted(started) = &events[2].body else {
+            panic!("a catervafication.started");
+        };
+        assert_eq!(started.project, Project::New);
+    }
+
+    #[test]
+    fn refuses_an_epic_wire_that_sets_its_kind() {
+        use catervas_protocol::event::CatervaficationStartedBodyProject as Project;
+
+        let (project, log) = a_project("catervafication-epic-kind");
+        let mut wire = a_request();
+        wire["kind"] = json!("epic");
+        let refused = file_catervafication_epic(
+            &project.files(),
+            &log,
+            wire,
+            "human",
+            Project::Existing,
+            (at(), &ids()),
+        )
+        .expect_err("the kind is Catervas's to give");
+        let RequestError::Refused { reason } = refused else {
+            panic!("a refusal, not a failure: {refused:?}");
+        };
+        assert!(reason.starts_with("sets kind,"), "{reason}");
+        assert!(kinds(&log).is_empty(), "nothing is recorded");
+        assert!(
+            project.files().list_contracts().expect("a list").is_empty(),
+            "nothing is filed"
+        );
     }
 
     #[test]

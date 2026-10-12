@@ -13,29 +13,30 @@ pub use catervas_core::contract::{TaskId, ValidationError};
 
 pub use crate::generated::event::{
     AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
-    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, ChatMessagePostedBody, CheckTheme,
-    CheckWidth, ConnectorConnectedBody, ConnectorDisconnectedBody,
-    ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
-    ContractJudgedBody, ContractLockedBody, ContractSummary, ContractSummaryKind,
-    ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody,
-    ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
-    CriteriaUpdatedBody, CriterionRecordedBody, CriterionRecordedBodyRunBy, DecisionWrittenBody,
-    DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, DriftDetectedBody,
-    DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
-    EscalationResolvedBody, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer,
-    MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
+    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CatervaficationStartedBody,
+    CatervaficationStartedBodyProject, ChatMessagePostedBody, CheckTheme, CheckWidth,
+    ConnectorConnectedBody, ConnectorDisconnectedBody, ConnectorTag as ConnectorTagWire,
+    ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractJudgedBody, ContractLockedBody,
+    ContractSummary, ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk,
+    ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody, CostRecordedBody,
+    CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
+    CriterionRecordedBodyRunBy, DecisionWrittenBody, DesignPlanProposedBody, DesignReviewCheck,
+    DesignReviewRecordedBody, DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody,
+    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, Heard,
+    HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, MarketingBudgetReachedBody,
+    MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
     MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBody,
     MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody, MarketingPlanBudget,
     MarketingPlanCampaign, MarketingPlanCampaignChannel, MarketingPlanEndedBody,
     MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
     MarketingPlanProposedBody, MarketingPlanReturnedBody, MemoryWrittenBody, MessagePostedBody,
     NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
-    ProductDocWrittenBody, ProjectScannedBody, ProposedRequest, PullRequestOpenedBody,
-    QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody, RequestTriagedBody,
-    RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody, SessionEndedBody,
-    SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
-    SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody, SprintEndedBody,
-    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    ProductDocWrittenBody, ProjectScannedBody, ProjectStartedBody, ProposedRequest,
+    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody,
+    RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
+    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
+    SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody,
+    SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
     TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
     TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
     TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
@@ -52,6 +53,12 @@ pub use crate::generated::event::{
 pub use crate::generated::event::{
     DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineDeclinedBody,
     DataPipelineEscalatedBody, DataPipelineNumber, DataPipelineRequestedBody,
+};
+/// The bodies of the seven `folder_doc.` and `folder_change.` kinds.
+pub use crate::generated::event::{
+    FolderChangeEscalatedBody, FolderChangeIntegratedBody, FolderChangeIntegratedBodyIntegratedBy,
+    FolderChangeOpenedBody, FolderDocApprovedBody, FolderDocEditedBody, FolderDocProposedBody,
+    FolderDocReturnedBody, FolderDocWrittenBody,
 };
 /// The bodies of the eight mailbox and seller mail kinds (`mailbox.`, `seller_message.`,
 /// `seller_reply.`), with the vocabularies they repeat.
@@ -239,6 +246,16 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::SellerMessageDiscarded => "sellerMessageDiscardedBody",
         EventKind::SellerReplyReceived => "sellerReplyReceivedBody",
         EventKind::SellerReplyDismissed => "sellerReplyDismissedBody",
+        EventKind::FolderDocWritten => "folderDocWrittenBody",
+        EventKind::FolderDocProposed => "folderDocProposedBody",
+        EventKind::FolderDocApproved => "folderDocApprovedBody",
+        EventKind::FolderDocReturned => "folderDocReturnedBody",
+        EventKind::FolderDocEdited => "folderDocEditedBody",
+        EventKind::FolderChangeOpened => "folderChangeOpenedBody",
+        EventKind::FolderChangeIntegrated => "folderChangeIntegratedBody",
+        EventKind::FolderChangeEscalated => "folderChangeEscalatedBody",
+        EventKind::ProjectStarted => "projectStartedBody",
+        EventKind::CatervaficationStarted => "catervaficationStartedBody",
     }
 }
 
@@ -296,6 +313,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::PurchaseOrderExpired
             | EventKind::DataPipelineRequested
             | EventKind::SellerMessageDrafted
+            | EventKind::CatervaficationStarted
     )
 }
 
@@ -321,7 +339,11 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// do the four `site.` kinds: the agent that asked is on the envelope of `site.requested`, and the
 /// other three are the owner's. Nor do the four `data_pipeline.` kinds: the agent that asked is on
 /// the envelope of `data_pipeline.requested`, and `by` of an approval or a decline says whether
-/// the Product Manager or the owner decided it.
+/// the Product Manager or the owner decided it. `folder_doc.written` and `folder_doc.proposed` name
+/// the agent in `written_by` and `proposed_by`; the other kinds of the folder documents name no one in
+/// the body: the owner decided or edited, or Catervas integrated or escalated a change.
+/// `project.started` names no one: the first run recorded it for the owner's paragraph.
+/// `catervafication.started` names no one: `task.created` names who filed the epic.
 #[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
@@ -352,6 +374,8 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::DecisionWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::ChatMessagePosted(body) => Some(("author", &mut body.author)),
         EventBody::MarketingPlanProposed(body) => Some(("proposed_by", &mut body.proposed_by)),
+        EventBody::FolderDocWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::FolderDocProposed(body) => Some(("proposed_by", &mut body.proposed_by)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -425,13 +449,21 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SellerMessageFailed(_)
         | EventBody::SellerMessageDiscarded(_)
         | EventBody::SellerReplyReceived(_)
-        | EventBody::SellerReplyDismissed(_) => None,
+        | EventBody::SellerReplyDismissed(_)
+        | EventBody::FolderDocApproved(_)
+        | EventBody::FolderDocReturned(_)
+        | EventBody::FolderDocEdited(_)
+        | EventBody::FolderChangeOpened(_)
+        | EventBody::FolderChangeIntegrated(_)
+        | EventBody::FolderChangeEscalated(_)
+        | EventBody::ProjectStarted(_)
+        | EventBody::CatervaficationStarted(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 101] = [
+pub const EVERY_KIND: [EventKind; 111] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -533,6 +565,16 @@ pub const EVERY_KIND: [EventKind; 101] = [
     EventKind::SellerMessageDiscarded,
     EventKind::SellerReplyReceived,
     EventKind::SellerReplyDismissed,
+    EventKind::FolderDocWritten,
+    EventKind::FolderDocProposed,
+    EventKind::FolderDocApproved,
+    EventKind::FolderDocReturned,
+    EventKind::FolderDocEdited,
+    EventKind::FolderChangeOpened,
+    EventKind::FolderChangeIntegrated,
+    EventKind::FolderChangeEscalated,
+    EventKind::ProjectStarted,
+    EventKind::CatervaficationStarted,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -877,6 +919,36 @@ pub enum EventBody {
     /// The owner dismissed a seller's reply on Today.
     #[serde(rename = "seller_reply.dismissed")]
     SellerReplyDismissed(SellerReplyDismissedBody),
+    /// An agent wrote a document of its own folder, which Catervas committed as a folder change.
+    #[serde(rename = "folder_doc.written")]
+    FolderDocWritten(FolderDocWrittenBody),
+    /// An agent proposed a change to a document the owner approves.
+    #[serde(rename = "folder_doc.proposed")]
+    FolderDocProposed(FolderDocProposedBody),
+    /// The owner approved proposals, which Catervas committed as a folder change.
+    #[serde(rename = "folder_doc.approved")]
+    FolderDocApproved(FolderDocApprovedBody),
+    /// The owner sent proposals back with their reason.
+    #[serde(rename = "folder_doc.returned")]
+    FolderDocReturned(FolderDocReturnedBody),
+    /// The owner saved a document on the Files page, which Catervas committed as a folder change.
+    #[serde(rename = "folder_doc.edited")]
+    FolderDocEdited(FolderDocEditedBody),
+    /// Catervas opened a pull request for a folder change.
+    #[serde(rename = "folder_change.opened")]
+    FolderChangeOpened(FolderChangeOpenedBody),
+    /// A folder change reached the integration branch.
+    #[serde(rename = "folder_change.integrated")]
+    FolderChangeIntegrated(FolderChangeIntegratedBody),
+    /// Catervas could not integrate a folder change and left it to the human.
+    #[serde(rename = "folder_change.escalated")]
+    FolderChangeEscalated(FolderChangeEscalatedBody),
+    /// The first run made this project from the owner's paragraph.
+    #[serde(rename = "project.started")]
+    ProjectStarted(ProjectStartedBody),
+    /// The team began documenting the project: the epic the event is about is the Catervafication.
+    #[serde(rename = "catervafication.started")]
+    CatervaficationStarted(CatervaficationStartedBody),
 }
 
 impl EventBody {
@@ -986,6 +1058,16 @@ impl EventBody {
             Self::SellerMessageDiscarded(_) => EventKind::SellerMessageDiscarded,
             Self::SellerReplyReceived(_) => EventKind::SellerReplyReceived,
             Self::SellerReplyDismissed(_) => EventKind::SellerReplyDismissed,
+            Self::FolderDocWritten(_) => EventKind::FolderDocWritten,
+            Self::FolderDocProposed(_) => EventKind::FolderDocProposed,
+            Self::FolderDocApproved(_) => EventKind::FolderDocApproved,
+            Self::FolderDocReturned(_) => EventKind::FolderDocReturned,
+            Self::FolderDocEdited(_) => EventKind::FolderDocEdited,
+            Self::FolderChangeOpened(_) => EventKind::FolderChangeOpened,
+            Self::FolderChangeIntegrated(_) => EventKind::FolderChangeIntegrated,
+            Self::FolderChangeEscalated(_) => EventKind::FolderChangeEscalated,
+            Self::ProjectStarted(_) => EventKind::ProjectStarted,
+            Self::CatervaficationStarted(_) => EventKind::CatervaficationStarted,
         }
     }
 }
@@ -2006,7 +2088,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 101);
+        assert_eq!(EVERY_KIND.len(), 111);
     }
 
     #[test]
@@ -2035,7 +2117,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 101);
+        assert_eq!(EVERY_KIND.len(), 111);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2112,6 +2194,170 @@ mod tests {
     }
 
     #[test]
+    fn folder_doc_bodies_hold_their_bounds() {
+        let kinds = [
+            EventKind::FolderDocWritten,
+            EventKind::FolderDocProposed,
+            EventKind::FolderDocApproved,
+            EventKind::FolderDocReturned,
+            EventKind::FolderDocEdited,
+            EventKind::FolderChangeOpened,
+            EventKind::FolderChangeIntegrated,
+            EventKind::FolderChangeEscalated,
+        ];
+        for kind in kinds {
+            assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+            let wire = a_full_event_wire(kind);
+            let event = event_from_value(&wire).expect("a valid folder event");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+            assert!(!is_about_one_contract(kind), "{kind}");
+        }
+        for (kind, field, value) in [
+            (
+                EventKind::FolderDocProposed,
+                "summary",
+                json!("x".repeat(301)),
+            ),
+            (EventKind::FolderDocProposed, "summary", json!("")),
+            (EventKind::FolderDocProposed, "path", json!("docs/x.md")),
+            (EventKind::FolderDocProposed, "sprint_id", json!("S0")),
+            (EventKind::FolderDocProposed, "text", json!("")),
+            (
+                EventKind::FolderDocProposed,
+                "agent_text",
+                json!("x".repeat(262_145)),
+            ),
+            (
+                EventKind::FolderDocWritten,
+                "path",
+                json!("docs/catervas/x.txt"),
+            ),
+            (EventKind::FolderDocWritten, "change", json!(0)),
+            (EventKind::FolderDocEdited, "change", json!(0)),
+            (EventKind::FolderDocApproved, "proposals", json!([])),
+            (EventKind::FolderDocApproved, "proposals", json!([2, 2])),
+            (EventKind::FolderDocApproved, "proposals", json!([0])),
+            (EventKind::FolderDocApproved, "note", json!("x".repeat(601))),
+            (EventKind::FolderDocReturned, "reason", json!("")),
+            (EventKind::FolderChangeIntegrated, "change", json!(0)),
+            (
+                EventKind::FolderChangeIntegrated,
+                "integrated_by",
+                json!("agent"),
+            ),
+            (EventKind::FolderChangeOpened, "number", json!(0)),
+            (EventKind::FolderChangeEscalated, "detail", json!("")),
+        ] {
+            let mut wire = an_event_wire(kind);
+            wire["body"][field] = value.clone();
+            assert!(!refusal(&wire).is_empty(), "{kind} {field} {value}");
+        }
+        // An approval may name the change it made, its commit and the owner's words.
+        let mut approved = an_event_wire(EventKind::FolderDocApproved);
+        approved["body"]["change"] = json!(4);
+        approved["body"]["sha"] = json!("abc123");
+        approved["body"]["note"] = json!("Thanks");
+        event_from_value(&approved).expect("an approval with its change");
+        // A written document names its writer.
+        let mut written = an_event_wire(EventKind::FolderDocWritten);
+        written["body"]["written_by"] = json!("   ");
+        let errors = refusal(&written);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body/written_by");
+        let mut proposed = an_event_wire(EventKind::FolderDocProposed);
+        proposed["body"]["proposed_by"] = json!("   ");
+        assert_eq!(refusal(&proposed)[0].path, "/body/proposed_by");
+    }
+
+    #[test]
+    fn reads_a_catervafication_started_event() {
+        let wire = |project: serde_json::Value| {
+            let mut wire = an_event_wire(EventKind::RequestTriaged);
+            wire["kind"] = json!("catervafication.started");
+            wire["body"] = json!({ "project": project });
+            wire
+        };
+        for project in ["existing", "new"] {
+            let input = wire(json!(project));
+            let event = event_from_value(&input).expect("a valid catervafication.started");
+            assert_eq!(event.body.kind().to_string(), "catervafication.started");
+            assert_eq!(event_to_value(&event), input);
+            assert!(event.envelope.ids.task_id.is_some());
+        }
+        assert!(!refusal(&wire(json!("old"))).is_empty());
+        let mut missing = wire(json!("new"));
+        missing["body"] = json!({});
+        assert!(!refusal(&missing).is_empty());
+        let mut extra = wire(json!("new"));
+        extra["body"]["by"] = json!("human");
+        assert!(!refusal(&extra).is_empty());
+        let mut about_nothing = wire(json!("new"));
+        about_nothing
+            .as_object_mut()
+            .expect("an object")
+            .remove("task_id");
+        assert!(!refusal(&about_nothing).is_empty());
+    }
+
+    #[test]
+    fn project_started_holds_its_bounds() {
+        let kind = EventKind::ProjectStarted;
+        assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+        let wire = a_full_event_wire(kind);
+        let event = event_from_value(&wire).expect("a valid project.started");
+        assert_eq!(event.body.kind(), kind);
+        assert_eq!(event_to_value(&event), wire);
+        assert!(!is_about_one_contract(kind));
+        for (field, value) in [
+            ("name", json!("Bakery")),
+            ("name", json!("x".repeat(65))),
+            ("name", json!("")),
+            ("description", json!("x".repeat(19))),
+            ("description", json!("x".repeat(2001))),
+        ] {
+            let mut wire = an_event_wire(kind);
+            wire["body"][field] = value.clone();
+            assert!(!refusal(&wire).is_empty(), "{field} {value}");
+        }
+        let mut created = an_event_wire(EventKind::TaskCreated);
+        created["body"]["product_plan"] = json!(false);
+        assert!(!refusal(&created).is_empty());
+        created["body"]["product_plan"] = json!(true);
+        event_from_value(&created).expect("a product plan task");
+    }
+
+    #[test]
+    fn reads_a_folder_doc_edited_event() {
+        let mut wire = an_event_wire(EventKind::FolderDocEdited);
+        wire["body"] =
+            json!({ "path": "docs/catervas/product/roadmap.md", "change": 2, "sha": "a1" });
+        let event = event_from_value(&wire).expect("the owner's edit reads");
+        assert_eq!(event.body.kind(), EventKind::FolderDocEdited);
+        assert_eq!(event_to_value(&event), wire);
+        assert!(!is_about_one_contract(EventKind::FolderDocEdited));
+        assert!(EVERY_KIND.contains(&EventKind::FolderDocEdited));
+        for (field, value) in [("path", json!("src/a.md")), ("change", json!(0))] {
+            let mut wire = wire.clone();
+            wire["body"][field] = value;
+            assert_eq!(refusal(&wire)[0].path, format!("/body/{field}"));
+        }
+        let mut bare = wire.clone();
+        bare["body"]["sha"] = json!("");
+        assert_eq!(refusal(&bare)[0].path, "/body/sha");
+    }
+
+    #[test]
+    fn reads_a_task_created_that_rederives() {
+        let mut wire = an_event_wire(EventKind::TaskCreated);
+        wire["body"]["rederives"] = json!("docs/catervas/product/roadmap.agent.md");
+        let event = event_from_value(&wire).expect("a re-derive reads");
+        assert_eq!(event_to_value(&event), wire);
+        wire["body"]["rederives"] = json!("docs/catervas/product/roadmap.md");
+        assert_eq!(refusal(&wire)[0].path, "/body/rederives");
+    }
+
+    #[test]
     fn round_trips_every_pipeline_event() {
         let kinds = [
             EventKind::DataPipelineRequested,
@@ -2133,7 +2379,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 101);
+        assert_eq!(EVERY_KIND.len(), 111);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2274,7 +2520,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 101);
+        assert_eq!(EVERY_KIND.len(), 111);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -2589,7 +2835,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 101);
+        assert_eq!(EVERY_KIND.len(), 111);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

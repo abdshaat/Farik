@@ -9,7 +9,6 @@ export type Refusal = { path: string; message: string; code?: string };
 const WORDS: Record<string, keyof typeof en> = {
 	too_many: "refuseTooMany",
 	needs_product_manager: "refuseNeedsProductManager",
-	needs_developer: "refuseNeedsDeveloper",
 	repeated_id: "refuseRepeatedId",
 	worked: "refuseWorked",
 	name: "refuseName",
@@ -22,6 +21,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	last_judge: "refuseLastJudge",
 	too_short: "requestTooShort",
 	template_exists: "templateExists",
+	template_builtin: "templateBuiltin",
 	template_name: "templateName",
 	template_unreadable: "templateUnreadable",
 	no_state_folder: "templateNoFolder",
@@ -112,6 +112,27 @@ const WORDS: Record<string, keyof typeof en> = {
 	secret_store_unavailable: "refuseSecretStore",
 	seller_reply_dismissed: "refuseSellerReplyDismissed",
 	unknown_seller_reply: "refuseSellerReplyUnknown",
+	// The owner's decisions on the product plan's changes (SPEC 5.7).
+	folder_doc_decided: "refuseFolderDocDecided",
+	folder_doc_superseded: "refuseFolderDocSuperseded",
+	unknown_folder_doc: "refuseUnknownFolderDoc",
+	folder_doc_mixed: "refuseFolderDocMixed",
+	folder_doc_reason_needed: "refuseFolderDocReasonNeeded",
+	folder_doc_busy: "refuseFolderDocBusy",
+	folder_doc_link: "refuseFolderDocLink",
+	folder_doc_waiting: "refuseFolderDocWaiting",
+	// The owner's save of a document in a role's folder (SPEC 4.5).
+	file_busy: "refuseFileBusy",
+	marketing_plan: "refuseMarketingPlan",
+	change_waiting: "refuseChangeWaiting",
+	is_a_link: "refuseIsALink",
+	too_large: "refuseTooLarge",
+	// The owner's draft of a new project's product plan (SPEC 4.3).
+	not_a_new_project: "refuseNotANewProject",
+	product_plan_approved: "refusePlanApproved",
+	product_plan_open: "refusePlanOpen",
+	product_plan_no_writer: "refusePlanNoWriter",
+	product_plan_no_reviewer: "refusePlanNoReviewer",
 	// A skill's refusals (SPEC 6.7), said at the field they belong to.
 	skill_runs_commands: "skillRunsCommands",
 	skill_attaches_files: "skillAttachesFiles",
@@ -122,6 +143,11 @@ const WORDS: Record<string, keyof typeof en> = {
 	skill_description_invalid: "skillDescriptionInvalid",
 	skill_name_taken: "skillNameTaken",
 	skill_limit_reached: "skillLimitReached",
+	// The owner's Start of the documenting sprint (SPEC 4.1).
+	catervafication_started: "refuseCatervaficationStarted",
+	catervafication_new_project: "refuseCatervaficationNewProject",
+	catervafication_no_product_manager: "refuseCatervaficationNoPm",
+	catervafication_no_writers: "refuseCatervaficationNoWriters",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */

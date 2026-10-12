@@ -5,13 +5,14 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::paths::{
-    GlobError, PathRefusal, check_allowed_paths, reaches_the_catervas_directory,
-    reaches_the_marketing_directory,
+    GlobError, PathRefusal, check_allowed_paths, could_overlap, reaches_the_catervas_directory,
+    reaches_the_folder,
 };
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
+use crate::folders::{ROLE_FOLDERS, plan_path};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::team::{
     changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
@@ -38,8 +39,12 @@ pub enum ReadinessRule {
     /// The budget does not exceed the remaining sprint budget.
     BudgetWithinSprint,
     /// Someone other than the assignee can review: the human, for an epic only; otherwise one
-    /// active agent of the reviewer role, or two when it is the assignee's role.
+    /// active agent of the reviewer role, or two when it is the assignee's role (one, for a role
+    /// that reviews its own task in a fresh session: the Product Manager).
     ReviewerAvailable,
+    /// At least one active agent holds the assignee's role (a human assignee is exempt: the
+    /// reviewer rule refuses one).
+    AssigneeAvailable,
     /// Scope names at least one `out_of_scope` item that is not blank.
     OutOfScopePresent,
     /// Every listed dependency exists and is at least `ready`.
@@ -53,9 +58,9 @@ pub enum ReadinessRule {
     /// A task not assigned to the Software Developer keeps every allowed path within the team's
     /// document paths: only the Developer changes code.
     DocumentPathsOnly,
-    /// While the team has an active Marketing Specialist, no other role's task names a path that
-    /// could reach `docs/marketing/`, which the Marketing Specialist owns.
-    MarketingPathsOwned,
+    /// While a role that owns a folder under `docs/catervas/` has an active agent, no other role's
+    /// task names a path that could reach that folder.
+    FolderOwned,
     /// No allowed path reaches under `.catervas/`, whose files change only through Catervas's tools.
     NoCatervasPaths,
     /// A task for a role with a private folder works only there: every allowed path lies within
@@ -76,6 +81,14 @@ pub enum ReadinessRule {
     PathsWithinParent,
     /// A task's budget fits in its parent's remaining budget.
     BudgetWithinParent,
+    /// A task's lane is no more than the team's active builders: Software Developers and UI/UX
+    /// Designers, one lane each.
+    LaneBeyondBuilders,
+    /// A task's allowed paths could not meet those of a task in another lane of its epic.
+    LanesOverlap,
+    /// A new project plans nothing but its product plan until the plan is on the integration
+    /// branch.
+    ProductPlanFirst,
     /// The judge's review is recorded when the team's policy checks plans.
     JudgmentRecorded,
     /// The judge answered yes to every question it was asked.
@@ -104,6 +117,17 @@ pub struct JudgmentReview {
     pub reason: String,
 }
 
+/// Another task of an epic that has a lane: what `LanesOverlap` reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanedTask {
+    /// The task's id.
+    pub task_id: String,
+    /// The task's lane.
+    pub lane: u64,
+    /// The task's allowed paths.
+    pub allowed_paths: Vec<String>,
+}
+
 /// What the readiness check needs to know about a task's epic (`docs/SPEC.md` section 5.16).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParentState {
@@ -113,10 +137,16 @@ pub struct ParentState {
     pub allowed_paths: Vec<String>,
     /// What is left of the epic's budget for its tasks, in dollars.
     pub remaining_budget_usd: f64,
+    /// Every other task of the epic that is not cancelled and has a lane.
+    pub lanes: Vec<LanedTask>,
 }
 
 /// Everything the readiness check needs from the world, passed in by the runtime.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one fact the runtime read from the world about this contract"
+)]
 pub struct ReadinessContext {
     /// What is left of the sprint's budget, in dollars.
     pub remaining_sprint_budget_usd: f64,
@@ -135,6 +165,10 @@ pub struct ReadinessContext {
     /// Whether the human approves this plan before work starts, and so reads its summary first:
     /// the team's policy is `all`, or the contract is an epic or a `high` risk task.
     pub human_approves: bool,
+    /// Whether this is a new project whose product plan is not on the integration branch yet.
+    pub awaits_the_product_plan: bool,
+    /// Whether this contract is that product plan's own task.
+    pub is_the_product_plan: bool,
 }
 
 /// One rule the contract fails, with a message that says what to change.
@@ -148,7 +182,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 22] = [
+const CHECKS: [Check; 26] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -156,13 +190,14 @@ const CHECKS: [Check; 22] = [
     command_criteria_complete,
     budget_within_sprint,
     reviewer_available,
+    assignee_available,
     out_of_scope_present,
     dependencies_ready,
     required_criteria_present,
     new_tests_required_by_rule,
     allowed_paths_within_ceiling,
     document_paths_only,
-    marketing_paths_owned,
+    folder_owned,
     no_catervas_paths,
     private_folder_task,
     private_folder_reviewer,
@@ -171,6 +206,9 @@ const CHECKS: [Check; 22] = [
     parent_in_progress,
     paths_within_parent,
     budget_within_parent,
+    lane_beyond_builders,
+    lanes_overlap,
+    product_plan_first,
 ];
 
 /// The judge's review, asked of a contract only once every other rule passes, so that a
@@ -368,7 +406,9 @@ fn reviewer_available(
                 .to_string(),
         ));
     }
-    let needed = if contract.reviewer_role == contract.assignee_role {
+    let needed = if contract.reviewer_role == contract.assignee_role
+        && !contract.reviewer_role.reviews_its_own()
+    {
         2
     } else {
         1
@@ -388,6 +428,30 @@ fn reviewer_available(
         ));
     }
     None
+}
+
+fn assignee_available(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    // An epic is taken by the Scrum Master or the Product Manager whatever role it names.
+    if contract.assignee_role == Role::Human || contract.kind == Kind::Epic {
+        return None;
+    }
+    let active = context
+        .active_agents_by_role
+        .get(&contract.assignee_role)
+        .copied()
+        .unwrap_or(0);
+    (active == 0).then(|| {
+        failure(
+            ReadinessRule::AssigneeAvailable,
+            format!(
+                "nobody can take this task: the team has no active {}; add one on the Team page",
+                plain_role(contract.assignee_role)
+            ),
+        )
+    })
 }
 
 fn out_of_scope_present(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
@@ -622,37 +686,50 @@ fn document_paths_only(
     ))
 }
 
-/// While the team has an active Marketing Specialist, another role's task may not name a path that
-/// could reach `docs/marketing/` (5.3, ADR 0042): the brand kit and the marketing plans are the
-/// Marketing Specialist's, and everyone else reads them. An epic names a ceiling and is not held.
-fn marketing_paths_owned(
-    contract: &TaskContract,
-    context: &ReadinessContext,
-) -> Option<ReadinessFailure> {
-    if contract.kind != Kind::Task
-        || contract.assignee_role == Role::MarketingSpecialist
-        || context
-            .active_agents_by_role
-            .get(&Role::MarketingSpecialist)
-            .is_none_or(|count| *count == 0)
-    {
+/// While a role that owns a folder under `docs/catervas/` has an active agent, another role's
+/// task may not name a path that could reach that folder (5.3, 5.17, ADR 0051): only a folder's
+/// owner changes the documents in it, and everyone else reads them. A folder whose owner has no
+/// active agent is anyone's. An epic names a ceiling and is not held.
+fn folder_owned(contract: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    if contract.kind != Kind::Task {
         return None;
     }
+    let owned: Vec<(Role, &str)> = ROLE_FOLDERS
+        .iter()
+        .copied()
+        .filter(|(owner, _)| {
+            *owner != contract.assignee_role
+                && context
+                    .active_agents_by_role
+                    .get(owner)
+                    .is_some_and(|count| *count > 0)
+        })
+        .collect();
     let reaching: Vec<&str> = contract
         .allowed_paths
         .iter()
         .map(String::as_str)
-        .filter(|path| reaches_the_marketing_directory(path))
+        .filter(|path| {
+            owned
+                .iter()
+                .any(|(_, folder)| reaches_the_folder(path, folder))
+        })
         .collect();
     if reaching.is_empty() {
         return None;
     }
+    let folders: Vec<String> = owned
+        .iter()
+        .filter(|(_, folder)| reaching.iter().any(|path| reaches_the_folder(path, folder)))
+        .map(|(owner, folder)| format!("{folder}/ ({})", plain_role(*owner)))
+        .collect();
     Some(failure(
-        ReadinessRule::MarketingPathsOwned,
+        ReadinessRule::FolderOwned,
         format!(
-            "allowed paths {} could reach docs/marketing/, which the Marketing Specialist owns; \
-             name narrower paths or give the task to the Marketing Specialist",
-            reaching.join(", ")
+            "allowed paths {} could reach folders other roles own: {}; name narrower paths, or \
+             give the task to the folder's owner",
+            reaching.join(", "),
+            folders.join(", ")
         ),
     ))
 }
@@ -881,7 +958,17 @@ fn paths_within_parent(
     let Some(parent) = &context.parent else {
         return None;
     };
-    let outside = paths_outside(&contract.allowed_paths, &parent.allowed_paths);
+    // The plan lies inside its epic: the task that writes it, or is built from it, may name it.
+    let plan = contract
+        .plan
+        .as_ref()
+        .zip(contract.parent.as_ref())
+        .filter(|(plan, parent)| plan.as_str() == plan_path(parent.as_str()))
+        .map(|(plan, _)| plan.as_str());
+    let outside: Vec<&str> = paths_outside(&contract.allowed_paths, &parent.allowed_paths)
+        .into_iter()
+        .filter(|path| Some(*path) != plan)
+        .collect();
     if outside.is_empty() {
         return None;
     }
@@ -913,6 +1000,73 @@ fn budget_within_parent(
         ));
     }
     None
+}
+
+fn lane_beyond_builders(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    let lane = contract.lane?.get();
+    contract.parent.as_ref()?;
+    let builders: u32 = context
+        .active_agents_by_role
+        .iter()
+        .filter(|(role, _)| changes_code(**role))
+        .map(|(_, count)| *count)
+        .sum();
+    if lane <= u64::from(builders) {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::LaneBeyondBuilders,
+        format!(
+            "lane {lane} is beyond the team's builders: it has {builders} active, Software Developers and UI/UX Designers, one lane each"
+        ),
+    ))
+}
+
+fn lanes_overlap(contract: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    let lane = contract.lane?.get();
+    contract.parent.as_ref()?;
+    let parent = context.parent.as_ref()?;
+    let clauses: Vec<String> = parent
+        .lanes
+        .iter()
+        .filter(|other| other.lane != lane)
+        .filter_map(|other| {
+            contract.allowed_paths.iter().find_map(|ours| {
+                other
+                    .allowed_paths
+                    .iter()
+                    .find(|theirs| could_overlap(ours, theirs))
+                    .map(|theirs| {
+                        format!(
+                            "{} in lane {} ({ours} and {theirs})",
+                            other.task_id, other.lane
+                        )
+                    })
+            })
+        })
+        .collect();
+    if clauses.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::LanesOverlap,
+        format!(
+            "lane {lane} could meet {}; tasks in different lanes are built side by side, so their allowed paths must part before their first wildcard: narrow the paths, or put the tasks in one lane",
+            clauses.join(", ")
+        ),
+    ))
+}
+
+fn product_plan_first(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    (context.awaits_the_product_plan && !context.is_the_product_plan).then(|| {
+        failure(
+            ReadinessRule::ProductPlanFirst,
+            "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec.md and docs/catervas/product/roadmap.md are on the integration branch".to_string(),
+        )
+    })
 }
 
 fn judgment_recorded(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
@@ -955,8 +1109,8 @@ mod tests {
 
     use super::fixtures::{a_contract, a_ready_context};
     use super::{
-        JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext, ReadinessRule as R,
-        TeamRules, evaluate_readiness,
+        JudgmentAnswer, JudgmentReview, LanedTask, ParentState, ReadinessContext,
+        ReadinessRule as R, TeamRules, evaluate_readiness,
     };
     use crate::contract::fixtures::a_contract_wire;
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire, validate_contract};
@@ -1007,6 +1161,7 @@ mod tests {
             status: TaskStatus::InProgress,
             allowed_paths: vec!["src/**".to_string()],
             remaining_budget_usd: 50.0,
+            lanes: vec![],
         }
     }
 
@@ -1128,6 +1283,73 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_contract_whose_assignee_role_nobody_holds() {
+        let mut context = a_ready_context();
+        context
+            .active_agents_by_role
+            .remove(&Role::SoftwareDeveloper);
+        context.active_agents_by_role.insert(Role::Architect, 2);
+        assert_eq!(
+            failed_rules(&a_contract(), &context),
+            [R::AssigneeAvailable]
+        );
+        assert_eq!(
+            message_of(&a_contract(), &context, R::AssigneeAvailable),
+            "nobody can take this task: the team has no active Software Developer; add one on the Team page"
+        );
+        context
+            .active_agents_by_role
+            .insert(Role::SoftwareDeveloper, 1);
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+        // A human assignee is not an agent the team holds; the reviewer rule is what refuses it.
+        let mut contract = a_contract();
+        contract.assignee_role = Role::Human;
+        assert!(!failed_rules(&contract, &context).contains(&R::AssigneeAvailable));
+        // An epic is taken by the Scrum Master or the Product Manager whatever role it names.
+        let mut epic = a_contract();
+        epic.kind = Kind::Epic;
+        context
+            .active_agents_by_role
+            .remove(&Role::SoftwareDeveloper);
+        assert_eq!(evaluate_readiness(&epic, &context), Ok(()));
+    }
+
+    #[test]
+    fn the_assignee_rule_comes_after_the_reviewers() {
+        let mut context = a_ready_context();
+        context
+            .active_agents_by_role
+            .remove(&Role::SoftwareDeveloper);
+        context.active_agents_by_role.remove(&Role::Architect);
+        assert_eq!(
+            failed_rules(&a_contract(), &context),
+            [R::ReviewerAvailable, R::AssigneeAvailable]
+        );
+    }
+
+    #[test]
+    fn refuses_everything_but_the_product_plan_until_it_is_approved() {
+        let mut context = a_ready_context();
+        context.awaits_the_product_plan = true;
+        let message = "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec.md and docs/catervas/product/roadmap.md are on the integration branch";
+        assert_eq!(failed_rules(&a_contract(), &context), [R::ProductPlanFirst]);
+        assert_eq!(
+            message_of(&a_contract(), &context, R::ProductPlanFirst),
+            message
+        );
+        let mut epic = a_contract();
+        epic.kind = Kind::Epic;
+        epic.reviewer_role = Role::Human;
+        assert_eq!(failed_rules(&epic, &context), [R::ProductPlanFirst]);
+        context.is_the_product_plan = true;
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+        context.awaits_the_product_plan = false;
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+        context.is_the_product_plan = false;
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+    }
+
+    #[test]
     fn lets_the_human_review_an_epic_but_not_a_task() {
         let mut epic = a_contract();
         epic.kind = Kind::Epic;
@@ -1157,6 +1379,28 @@ mod tests {
             .active_agents_by_role
             .insert(Role::SoftwareDeveloper, 2);
         assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+    }
+
+    #[test]
+    fn lets_a_lone_product_manager_review_its_own_docs() {
+        let mut contract = a_contract();
+        contract.assignee_role = Role::ProductManager;
+        contract.reviewer_role = Role::ProductManager;
+        contract.allowed_paths = vec!["docs/catervas/product/plan.md".to_string()];
+        let mut context = a_ready_context();
+        context.active_agents_by_role.clear();
+        context
+            .active_agents_by_role
+            .insert(Role::ProductManager, 1);
+        context
+            .active_agents_by_role
+            .insert(Role::SoftwareDeveloper, 1);
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+        context.active_agents_by_role.remove(&Role::ProductManager);
+        assert_eq!(
+            failed_rules(&contract, &context),
+            [R::ReviewerAvailable, R::AssigneeAvailable]
+        );
     }
 
     #[test]
@@ -1287,40 +1531,37 @@ mod tests {
             for role in [Role::SoftwareDeveloper, Role::Architect] {
                 let mut task = a_task_for(role, &["docs/x.md", path]);
                 assert!(
-                    failed_rules(&task, &a_context_without_marketing())
-                        .contains(&R::NoCatervasPaths),
+                    failed_rules(&task, &a_ready_context()).contains(&R::NoCatervasPaths),
                     "{path} for {role:?}"
                 );
                 task.kind = Kind::Epic;
                 assert!(
-                    failed_rules(&task, &a_context_without_marketing())
-                        .contains(&R::NoCatervasPaths),
+                    failed_rules(&task, &a_ready_context()).contains(&R::NoCatervasPaths),
                     "{path} for an epic"
                 );
             }
         }
         let task = a_task_for(Role::Architect, &["**/*.md"]);
         assert_eq!(
-            failed_rules(&task, &a_context_without_marketing()),
-            [R::NoCatervasPaths]
+            failed_rules(&task, &a_ready_context()),
+            [R::FolderOwned, R::NoCatervasPaths]
         );
         assert!(
-            message_of(&task, &a_context_without_marketing(), R::NoCatervasPaths)
-                .contains("**/*.md"),
+            message_of(&task, &a_ready_context(), R::NoCatervasPaths).contains("**/*.md"),
             "the message names the path"
         );
         for path in [
             "src/**",
             "*.md",
             "*",
-            "docs/**",
+            "docs/adr/**",
             ".catervasx/**",
             ".github/**",
             "src/.catervas/x",
         ] {
             let task = a_task_for(Role::SoftwareDeveloper, &[path]);
             assert_eq!(
-                evaluate_readiness(&task, &a_context_without_marketing()),
+                evaluate_readiness(&task, &a_ready_context()),
                 Ok(()),
                 "{path}"
             );
@@ -1330,14 +1571,14 @@ mod tests {
     #[test]
     fn keeps_a_ceiling_with_a_file_filter_exact() {
         let mut contract = a_contract();
-        contract.allowed_paths = vec!["docs/**".to_string()];
-        let mut context = a_context_without_marketing();
-        context.rules.allowed_paths_ceiling = vec!["docs/**/*.md".to_string()];
+        contract.allowed_paths = vec!["docs/adr/**".to_string()];
+        let mut context = a_ready_context();
+        context.rules.allowed_paths_ceiling = vec!["docs/adr/**/*.md".to_string()];
         assert_eq!(
             failed_rules(&contract, &context),
             [R::AllowedPathsWithinCeiling]
         );
-        contract.allowed_paths = vec!["docs/**/*.md".to_string()];
+        contract.allowed_paths = vec!["docs/adr/**/*.md".to_string()];
         assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
     }
 
@@ -1347,99 +1588,123 @@ mod tests {
         for path in ["docs*/**", "docs?/x", "docs{,rc}/**", "docs[x]/**"] {
             let mut contract = a_contract();
             contract.allowed_paths = vec![path.to_string()];
-            let mut context = a_context_without_marketing();
+            let mut context = a_ready_context();
             context.rules.allowed_paths_ceiling = vec!["docs/**".to_string()];
+            // `docs*` and `docs{,rc}` also reach `docs/`, which holds the owners' folders.
+            let reaches_docs = path.starts_with("docs*") || path.starts_with("docs{");
+            let expected: &[R] = if reaches_docs {
+                &[R::AllowedPathsWithinCeiling, R::FolderOwned]
+            } else {
+                &[R::AllowedPathsWithinCeiling]
+            };
             assert_eq!(
                 failed_rules(&contract, &context),
-                [R::AllowedPathsWithinCeiling],
+                expected,
                 "{path} against the ceiling"
             );
             let task = a_task_for(Role::Architect, &[path]);
+            let expected: &[R] = if reaches_docs {
+                &[R::DocumentPathsOnly, R::FolderOwned]
+            } else {
+                &[R::DocumentPathsOnly]
+            };
             assert_eq!(
-                failed_rules(&task, &a_context_without_marketing()),
-                [R::DocumentPathsOnly],
+                failed_rules(&task, &a_ready_context()),
+                expected,
                 "{path} against the document paths"
             );
         }
-        for path in ["docs", "docs/**", "docs/*.md"] {
+        for path in ["docs/adr", "docs/adr/**", "docs/adr/*.md"] {
             let task = a_task_for(Role::Architect, &[path]);
             assert_eq!(
-                evaluate_readiness(&task, &a_context_without_marketing()),
+                evaluate_readiness(&task, &a_ready_context()),
                 Ok(()),
                 "{path}"
             );
         }
     }
 
-    /// The ready context with no Marketing Specialist, for the tests of the rules about paths
-    /// that name `docs/` or everything: `marketing_paths_owned` would hold those paths too.
-    fn a_context_without_marketing() -> ReadinessContext {
-        let mut context = a_ready_context();
-        context
-            .active_agents_by_role
-            .remove(&Role::MarketingSpecialist);
-        context
-    }
-
     #[test]
-    fn another_role_may_not_name_the_marketing_folder() {
+    fn another_role_may_not_name_an_owned_folder() {
         let failed = |task: &TaskContract, context: &ReadinessContext| -> Vec<R> {
             match evaluate_readiness(task, context) {
                 Ok(()) => Vec::new(),
                 Err(failures) => failures.iter().map(|failure| failure.rule).collect(),
             }
         };
-        // `a_ready_context()` has one active Marketing Specialist.
-        let mut with_marketing = a_task_for(Role::ProductManager, &["docs/adr/**", "docs/**"]);
-        with_marketing.reviewer_role = Role::Architect;
+        let others = "docs/catervas/product/ (Product Manager), docs/catervas/engineering/ \
+                      (Software Developer), docs/catervas/design/ (UI/UX Designer), \
+                      docs/catervas/delivery/ (Scrum Master), docs/catervas/marketing/ (Marketing Specialist); name narrower paths, or \
+                      give the task to the folder's owner";
+        // `a_ready_context()` has one active agent of every launch role, a UI/UX Designer among
+        // them.
+        let architects = a_task_for(Role::Architect, &["docs/adr/**", "docs/**"]);
+        assert_eq!(failed(&architects, &a_ready_context()), [R::FolderOwned]);
         assert_eq!(
-            failed(&with_marketing, &a_ready_context()),
-            [R::MarketingPathsOwned]
+            message_of(&architects, &a_ready_context(), R::FolderOwned),
+            format!("allowed paths docs/** could reach folders other roles own: {others}")
         );
-        let message = message_of(&with_marketing, &a_ready_context(), R::MarketingPathsOwned);
+        let two = a_task_for(Role::Architect, &["docs/**", "docs/catervas/delivery/x.md"]);
+        assert_eq!(failed(&two, &a_ready_context()), [R::FolderOwned]);
         assert_eq!(
-            message,
-            "allowed paths docs/** could reach docs/marketing/, which the Marketing Specialist \
-             owns; name narrower paths or give the task to the Marketing Specialist"
+            message_of(&two, &a_ready_context(), R::FolderOwned),
+            format!(
+                "allowed paths docs/**, docs/catervas/delivery/x.md could reach folders other \
+                 roles own: {others}"
+            )
         );
-        // The same task passes once nobody on the team is a Marketing Specialist, or one is paused.
+        // A folder whose owner has no active agent is anyone's.
+        let mut scrum = a_task_for(Role::ProductManager, &["docs/catervas/delivery/**"]);
+        scrum.reviewer_role = Role::Architect;
+        assert_eq!(failed(&scrum, &a_ready_context()), [R::FolderOwned]);
         for count in [None, Some(0)] {
             let mut context = a_ready_context();
-            context
-                .active_agents_by_role
-                .remove(&Role::MarketingSpecialist);
+            context.active_agents_by_role.remove(&Role::ScrumMaster);
             if let Some(count) = count {
                 context
                     .active_agents_by_role
-                    .insert(Role::MarketingSpecialist, count);
+                    .insert(Role::ScrumMaster, count);
             }
-            assert_eq!(
-                evaluate_readiness(&with_marketing, &context),
-                Ok(()),
-                "{count:?}"
-            );
+            assert_eq!(evaluate_readiness(&scrum, &context), Ok(()), "{count:?}");
         }
-        // Any other role is held, and a narrower path passes.
-        for role in [Role::Architect, Role::SoftwareDeveloper] {
-            let task = a_task_for(role, &["docs/**"]);
-            assert_eq!(
-                failed(&task, &a_ready_context()),
-                [R::MarketingPathsOwned],
-                "{role:?}"
-            );
-            let task = a_task_for(role, &["docs/adr/**"]);
-            assert_eq!(failed(&task, &a_ready_context()), [], "{role:?}");
+        // The owner's own folder, and a path no folder is under.
+        for (role, paths) in [
+            (
+                Role::Architect,
+                &["docs/catervas/architecture/**", "docs/adr/**"][..],
+            ),
+            (Role::SoftwareDeveloper, &["docs/catervas/engineering/**"]),
+            (Role::SoftwareDeveloper, &["src/**"]),
+        ] {
+            let task = a_task_for(role, paths);
+            assert_eq!(failed(&task, &a_ready_context()), [], "{role:?} {paths:?}");
         }
-        // The Marketing Specialist's own task may name its folder.
-        let own = a_task_for(
-            Role::MarketingSpecialist,
-            &["docs/marketing/**", "CHANGELOG.md"],
+        let task = a_task_for(Role::SoftwareDeveloper, &["docs/**/*.rs"]);
+        assert_eq!(failed(&task, &a_ready_context()), [R::FolderOwned]);
+        let task = a_task_for(
+            Role::SoftwareDeveloper,
+            &["docs/catervas/architecture/x.md"],
         );
-        assert_eq!(evaluate_readiness(&own, &a_ready_context()), Ok(()));
+        assert_eq!(
+            message_of(&task, &a_ready_context(), R::FolderOwned),
+            "allowed paths docs/catervas/architecture/x.md could reach folders other roles own: \
+             docs/catervas/architecture/ (Architect); name narrower paths, or give the task to the \
+             folder's owner"
+        );
+        // A role added to the team holds its folder too.
+        let mut context = a_ready_context();
+        context.active_agents_by_role.insert(Role::UiUxDesigner, 1);
+        let task = a_task_for(Role::SoftwareDeveloper, &["docs/catervas/design/x.md"]);
+        assert_eq!(
+            message_of(&task, &context, R::FolderOwned),
+            "allowed paths docs/catervas/design/x.md could reach folders other roles own: \
+             docs/catervas/design/ (UI/UX Designer); name narrower paths, or give the task to the \
+             folder's owner"
+        );
         // An epic is not held: it names the ceiling its tasks fall within.
         let mut epic = a_task_for(Role::Architect, &["docs/**"]);
         epic.kind = Kind::Epic;
-        assert!(!failed(&epic, &a_ready_context()).contains(&R::MarketingPathsOwned));
+        assert!(!failed(&epic, &a_ready_context()).contains(&R::FolderOwned));
     }
 
     /// A task for the Finance Specialist, reviewed by the Product Manager, allowed `paths`, with
@@ -1524,7 +1789,7 @@ mod tests {
                   "verification": { "method": "command", "command": "make", "expect": { "exit_code": 0 } } }
             ]),
         );
-        let context = a_context_without_marketing();
+        let context = a_ready_context();
         assert_eq!(failed_rules(&runs, &context), [R::PrivateFolderTask]);
         assert!(
             message_of(&runs, &context, R::PrivateFolderTask)
@@ -1712,15 +1977,15 @@ mod tests {
                     &[
                         ".catervas/local/finance/**",
                         ".catervas/local/financeX/**",
-                        "docs/**",
+                        "docs/adr/**",
                     ],
                     the_books_criteria(),
                 ),
-                "allowed paths .catervas/local/financeX/**, docs/** lie outside .catervas/local/finance",
+                "allowed paths .catervas/local/financeX/**, docs/adr/** lie outside .catervas/local/finance",
             ),
         ];
         for (task, said) in cases {
-            let context = a_context_without_marketing();
+            let context = a_ready_context();
             let failed = failed_rules(&task, &context);
             // `.catervas/local/financeX/**` is also under `.catervas/`.
             let wanted: &[R] = if said.contains("financeX") {
@@ -1736,11 +2001,12 @@ mod tests {
         // within the folder.
         let mut under_an_epic = a_finance_task(folder, the_books_criteria());
         under_an_epic.parent = Some("CTV-3".parse().expect("a task id"));
-        let mut context = a_context_without_marketing();
+        let mut context = a_ready_context();
         context.parent = Some(ParentState {
             status: TaskStatus::InProgress,
             allowed_paths: vec!["**".to_string()],
             remaining_budget_usd: 50.0,
+            lanes: vec![],
         });
         assert_eq!(
             failed_rules(&under_an_epic, &context),
@@ -1787,17 +2053,11 @@ mod tests {
         context.rules.document_paths = vec!["docs/**".to_string()];
         assert_eq!(evaluate_readiness(&task, &context), Ok(()));
         // Another role's task is held to both.
-        let developers = a_task_for(Role::SoftwareDeveloper, &["docs/**"]);
+        let developers = a_task_for(Role::SoftwareDeveloper, &["docs/adr/**"]);
         assert_eq!(
-            failed_rules(&developers, &a_context_without_marketing_under_a_ceiling()),
+            failed_rules(&developers, &context),
             [R::AllowedPathsWithinCeiling]
         );
-    }
-
-    fn a_context_without_marketing_under_a_ceiling() -> ReadinessContext {
-        let mut context = a_context_without_marketing();
-        context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
-        context
     }
 
     #[test]
@@ -1811,7 +2071,7 @@ mod tests {
         ] {
             let task = a_task_for(role, &[".catervas/local/finance/**"]);
             assert!(
-                failed_rules(&task, &a_context_without_marketing()).contains(&R::NoCatervasPaths),
+                failed_rules(&task, &a_ready_context()).contains(&R::NoCatervasPaths),
                 "{role:?}"
             );
         }
@@ -1911,7 +2171,7 @@ mod tests {
 
     #[test]
     fn refuses_every_document_task_with_an_empty_list() {
-        let task = a_task_for(Role::MarketingSpecialist, &["docs/marketing/**"]);
+        let task = a_task_for(Role::MarketingSpecialist, &["docs/catervas/marketing/**"]);
         let mut context = a_ready_context();
         context.rules.document_paths.clear();
         assert_eq!(failed_rules(&task, &context), [R::DocumentPathsOnly]);
@@ -1973,6 +2233,102 @@ mod tests {
             ..an_in_progress_parent()
         });
         assert_eq!(failed_rules(&contract, &context), [R::PathsWithinParent]);
+    }
+
+    fn in_lane(lane: u64) -> TaskContract {
+        let mut contract = a_contract();
+        contract.lane = std::num::NonZeroU64::new(lane);
+        contract
+    }
+
+    #[test]
+    fn refuses_a_lane_beyond_the_builders() {
+        let (_, mut context) = a_task_under(an_in_progress_parent());
+        context.active_agents_by_role.remove(&Role::UiUxDesigner);
+        let parent = || Some("CTV-3".parse().expect("a task id"));
+        let mut contract = in_lane(2);
+        contract.parent = parent();
+        assert_eq!(failed_rules(&contract, &context), [R::LaneBeyondBuilders]);
+        assert_eq!(
+            message_of(&contract, &context, R::LaneBeyondBuilders),
+            "lane 2 is beyond the team's builders: it has 1 active, Software Developers and UI/UX Designers, one lane each"
+        );
+        let mut with_a_designer = context.clone();
+        with_a_designer
+            .active_agents_by_role
+            .insert(Role::UiUxDesigner, 1);
+        assert_eq!(evaluate_readiness(&contract, &with_a_designer), Ok(()));
+        let mut first = in_lane(1);
+        first.parent = parent();
+        assert_eq!(evaluate_readiness(&first, &context), Ok(()));
+        let mut without_a_developer = context.clone();
+        without_a_developer
+            .active_agents_by_role
+            .remove(&Role::SoftwareDeveloper);
+        assert_eq!(
+            failed_rules(&first, &without_a_developer),
+            [R::AssigneeAvailable, R::LaneBeyondBuilders]
+        );
+        // A lane is read only on a task with a parent.
+        assert_eq!(evaluate_readiness(&in_lane(2), &a_ready_context()), Ok(()));
+        let mut epic = in_lane(3);
+        epic.kind = Kind::Epic;
+        assert_eq!(evaluate_readiness(&epic, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
+    fn refuses_lanes_whose_paths_could_meet() {
+        let a_lane = |task_id: &str, lane: u64, path: &str| LanedTask {
+            task_id: task_id.to_string(),
+            lane,
+            allowed_paths: vec![path.to_string()],
+        };
+        let (mut contract, mut context) = a_task_under(ParentState {
+            lanes: vec![
+                a_lane("CTV-7", 1, "src/**"),
+                a_lane("CTV-8", 2, "src/a/b.rs"),
+                a_lane("CTV-9", 3, "apps/**"),
+            ],
+            ..an_in_progress_parent()
+        });
+        context
+            .active_agents_by_role
+            .insert(Role::SoftwareDeveloper, 3);
+        contract.lane = std::num::NonZeroU64::new(2);
+        contract.allowed_paths = vec!["src/a/**".to_string(), "src/c.rs".to_string()];
+        assert_eq!(failed_rules(&contract, &context), [R::LanesOverlap]);
+        assert_eq!(
+            message_of(&contract, &context, R::LanesOverlap),
+            "lane 2 could meet CTV-7 in lane 1 (src/a/** and src/**); tasks in different lanes are built side by side, so their allowed paths must part before their first wildcard: narrow the paths, or put the tasks in one lane"
+        );
+        context.parent.as_mut().expect("a parent").lanes.remove(0);
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+        contract.lane = None;
+        context.parent.as_mut().expect("a parent").lanes = vec![a_lane("CTV-7", 1, "src/**")];
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+    }
+
+    #[test]
+    fn keeps_an_epics_plan_inside_it() {
+        let (mut contract, context) = a_task_under(an_in_progress_parent());
+        let fails_the_parent_paths = |contract: &TaskContract| {
+            evaluate_readiness(contract, &context)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .any(|failure| failure.rule == R::PathsWithinParent)
+        };
+        let plan = "docs/catervas/architecture/plans/CTV-3.md";
+        contract.plan = Some(plan.parse().expect("a plan path"));
+        contract.allowed_paths = vec![plan.to_string()];
+        assert!(!fails_the_parent_paths(&contract));
+        let other = "docs/catervas/architecture/plans/CTV-4.md";
+        contract.plan = Some(other.parse().expect("a plan path"));
+        contract.allowed_paths = vec![other.to_string()];
+        assert!(fails_the_parent_paths(&contract));
+        contract.plan = None;
+        contract.allowed_paths = vec![plan.to_string()];
+        assert!(fails_the_parent_paths(&contract));
     }
 
     #[test]
