@@ -833,6 +833,7 @@ mod tests {
         );
         write(&harness, &format!("{PRODUCT}/overview.md"), "overview\n");
         write(&harness, &format!("{PRODUCT}/notes.txt"), "notes\n");
+        write(&harness, &format!("{PRODUCT}/x.htm"), "<h1>x</h1>\n");
         commit(&harness, "the documents");
         let listed = tree(&harness.daemon);
         let found: Vec<(&str, Value)> = listed["folders"][0]["documents"]
@@ -901,6 +902,11 @@ mod tests {
             "<h1>o</h1>\n",
         );
         write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        write(
+            &harness,
+            "docs/catervas/architecture/notes.agent.html",
+            "<h1>n</h1>\n",
+        );
         write(&harness, &format!("{PRODUCT}/spec.html"), "<h1>spec</h1>\n");
         write(
             &harness,
@@ -914,6 +920,11 @@ mod tests {
         let cadence = read_path(&harness, "docs/catervas/delivery/cadence.md");
         assert_eq!(cadence["editable"], true, "{cadence}");
         assert_eq!(cadence["askable"], false);
+        let stray = read_path(&harness, "docs/catervas/architecture/notes.agent.html");
+        assert_eq!(
+            (&stray["editable"], &stray["askable"]),
+            (&json!(false), &json!(false))
+        );
         let reply = rpc(
             &harness.daemon,
             "query",
@@ -1121,12 +1132,16 @@ mod tests {
         ] {
             refused(outside, "x\n", &gone, "outside_folders", "/path");
         }
-        refused(
+        let not_a_document = refused(
             "docs/catervas/product/notes.txt",
             "x\n",
             &gone,
             "not_a_document",
             "/path",
+        );
+        assert_eq!(
+            said(&not_a_document),
+            "Only a document that ends in .md or .html can be saved here."
         );
         refused(ROADMAP_TWIN, "x\n", &gone, "agent_twin", "/path");
         refused(

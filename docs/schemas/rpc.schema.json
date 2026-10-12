@@ -2647,7 +2647,7 @@
       }
     },
     "filesTreeResult": {
-      "description": "integration is the team's policy, which the page's words follow. folders has one folder for each role that owns one and has an active agent, in the order of the Team rules: folder is its path, name its last segment as words, role the role that owns it, agent_id that role's first active agent, and documents its .md and .html files at any depth, in the order of the known documents and then by path, each with path, name (the Files page's name for it; a plan's carries its title, which is the agent's own words and untrusted text) and twin, the path of its .agent.md twin when it has one that is a file, else null. A twin of a document that is present is not listed on its own; a link is not listed.",
+      "description": "integration is the team's policy, which the page's words follow. folders has one folder for each role that owns one and has an active agent, in the order of the Team rules: folder is its path, name its last segment as words, role the role that owns it, agent_id that role's first active agent, and documents its .md and .html files at any depth, in the order of the known documents and then by path, each with path, name (the Files page's name for it; a plan's carries its title, which is the agent's own words and untrusted text) and twin, the path of its .agent.md or .agent.html twin when it has one that is a file, else null. A twin of a document that is present is not listed on its own; a link is not listed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["integration", "folders"],
