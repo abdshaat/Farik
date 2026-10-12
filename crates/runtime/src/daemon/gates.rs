@@ -286,7 +286,7 @@ pub(super) fn query(
             let moved = moved_since(&deps.log, &deps.projections, &team()?, since)
                 .map_err(|e| internal(&e))?;
             Ok(
-                json!({ "moved": moved.iter().map(|one| json!({ "at": one.at, "line": one.line })).collect::<Vec<_>>() }),
+                json!({ "moved": moved.iter().map(|one| json!({ "at": one.at, "by": one.by, "line": one.line })).collect::<Vec<_>>() }),
             )
         }
         "marketing_plan.list" => marketing_plan_list(deps),

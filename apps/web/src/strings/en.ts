@@ -431,11 +431,13 @@ export const en = {
 	accountKeyRefused:
 		"The key did not work, so your team is paused. Connect your AI account again with a new key.",
 	accountConnectAgain: "Connect again",
+	accountConnect: "Connect account",
+	accountBack: "Connected. If your team is paused, press Resume.",
 	accountKeyRefusedEnvironment:
 		"The key in {variable} did not work, so your team is paused. Change it where Catervas runs, start Catervas again, then press Resume.",
 	accountDisconnect: "Disconnect this account",
 	accountGone:
-		"Disconnected. The team is paused; start Catervas again to connect another account.",
+		"Disconnected. The team is paused until you connect an account and press Resume.",
 	accountKept:
 		"Catervas reads this key from the {variable} variable on this computer, so it cannot remove it. Remove it there, then start Catervas again.",
 	statusPlanning: "Planning",
@@ -500,8 +502,10 @@ export const en = {
 	waitingKeyConnect: "Connect again",
 	checksPassed: "All {count} of Catervas’s checks passed.",
 	movedTitle: "What moved since yesterday",
-	yesterday: "Yesterday",
-	yesterdayShort: "Yday",
+	movedYou: "You",
+	movedYesterday: "Yesterday {time}",
+	movedMore: "Show more ({n} more)",
+	movedFewer: "Show fewer",
 	movedNone: "Nothing moved since yesterday.",
 	backToToday: "Back to Today",
 	requestTitle: "Your request is with the team",

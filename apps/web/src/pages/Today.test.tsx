@@ -566,32 +566,72 @@ describe("today", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	/** The moved list's cards, newest first as the page draws them. */
+	const cards = async () =>
+		within(
+			await screen.findByRole("list", { name: en.movedTitle }),
+		).getAllByRole("listitem");
+	/** `n` moves by Theo on an earlier day, `minute` apart, oldest first as the daemon answers. */
+	const moves = (n: number) =>
+		Array.from({ length: n }, (_, i) => ({
+			at: `2026-01-01T10:${String(i).padStart(2, "0")}:00Z`,
+			by: "theo",
+			line: `Theo did thing ${i + 1}.`,
+		}));
+
 	it("says_what_moved", async () => {
 		const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 		const { container, s } = await today({
 			moved: [
 				{
-					at: now,
-					line: "Theo finished the checkout page and asked Ada to review it.",
+					at: "2026-01-01T21:40:00Z",
+					by: "catervas",
+					line: "Catervas stopped the X post for 09:00: its plan ended.",
 				},
 				{
-					at: "2026-01-01T21:40:00Z",
-					line: "The menu page's new photos were accepted and merged.",
+					at: now,
+					by: "human",
+					line: "You accepted “Menu photos”",
+				},
+				{
+					at: now,
+					by: "theo",
+					line: "Theo finished the checkout page and asked Ada to review it.",
 				},
 			],
 		});
-		const list = await screen.findByRole("list", { name: en.movedTitle });
-		const time = within(list).getByText(now.slice(11, 16));
-		expect(time.getAttribute("datetime")).toBe(now);
-		// What moved on an earlier day says so, as the mockup's "Yday".
-		const [, older] = within(list).getAllByRole("listitem");
+		const [newest, middle, oldest] = (await cards()) as HTMLElement[];
+		// The newest is first: the daemon answers oldest first and the page turns it round.
 		expect(
-			within(older as HTMLElement).getByTitle("Yesterday").textContent,
-		).toBe("Yday");
-		expect(
-			within(list).getByText(
+			within(newest as HTMLElement).getByText(
 				"Theo finished the checkout page and asked Ada to review it.",
 			),
+		).toBeTruthy();
+		// An agent's card: the picture (named by nothing extra), the name, the role tag, the time.
+		// (An image with empty alt has no role, so it is found by its tag.)
+		const picture = (newest as HTMLElement).querySelector("img");
+		expect(picture?.getAttribute("alt")).toBe("");
+		expect(
+			within(newest as HTMLElement).getByText("Theo", { selector: "strong" }),
+		).toBeTruthy();
+		expect(within(newest as HTMLElement).getByTitle("Developer")).toBeTruthy();
+		const time = within(newest as HTMLElement).getByText(now.slice(11, 16));
+		expect(time.tagName).toBe("TIME");
+		expect(time.getAttribute("datetime")).toBe(now);
+		expect(
+			within(middle as HTMLElement).getByText("You", { selector: "strong" }),
+		).toBeTruthy();
+		expect(
+			within(oldest as HTMLElement).getByText("Catervas", {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect(
+			(oldest as HTMLElement).querySelector("img")?.getAttribute("alt"),
+		).toBe("");
+		// What moved on an earlier day says so.
+		expect(
+			within(oldest as HTMLElement).getByText("Yesterday 21:40"),
 		).toBeTruthy();
 		// Since yesterday: 24 hours back from now.
 		const asked = s.calls("query").find((q) => q.params.name === "moved.since");
@@ -600,6 +640,105 @@ describe("today", () => {
 		);
 		expect(Math.abs(Date.now() - 86_400_000 - since)).toBeLessThan(60_000);
 		await expectNoAxeViolations(container);
+	});
+
+	it("shows_three_moves_then_more", async () => {
+		const { container } = await today({ moved: moves(7) });
+		const lines = async () =>
+			(await cards()).map((card) => card.textContent ?? "");
+		const first = await cards();
+		expect(first).toHaveLength(3);
+		expect(first[0]?.textContent).toContain("Theo did thing 7.");
+		expect(first[1]?.textContent).toContain("Theo did thing 6.");
+		expect(first[2]?.textContent).toContain("Theo did thing 5.");
+		const button = screen.getByRole("button", { name: "Show more (4 more)" });
+		button.focus();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(button);
+		const six = await lines();
+		expect(six).toHaveLength(6);
+		expect(six.slice(0, 3)).toEqual(first.map((card) => card.textContent));
+		expect(six[5]).toContain("Theo did thing 2.");
+		const more = screen.getByRole("button", { name: "Show more (1 more)" });
+		expect(document.activeElement).toBe(more);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(more);
+		expect(await lines()).toHaveLength(7);
+		const fewer = screen.getByRole("button", { name: "Show fewer" });
+		expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
+		expect(document.activeElement).toBe(fewer);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(fewer);
+		expect(await lines()).toHaveLength(3);
+		expect(
+			document.activeElement ===
+				screen.getByRole("button", { name: "Show more (4 more)" }),
+		).toBe(true);
+		await expectNoAxeViolations(container);
+	});
+
+	it("shows_no_button_for_three_or_fewer", async () => {
+		await today({ moved: moves(3) });
+		expect(await cards()).toHaveLength(3);
+		expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
+		expect(screen.queryByRole("button", { name: /Show fewer/ })).toBeNull();
+	});
+
+	it("names_an_agent_the_team_does_not_hold", async () => {
+		await today({
+			moved: [
+				{
+					at: "2026-01-01T10:00:00Z",
+					by: "assignee",
+					line: "assignee moved “Menu photos” to Review",
+				},
+			],
+		});
+		const [card] = (await cards()) as HTMLElement[];
+		expect(
+			within(card as HTMLElement).getByText("assignee", {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect((card as HTMLElement).querySelector("img")).toBeNull();
+		expect(card?.querySelector("abbr")).toBeNull();
+	});
+
+	it("draws_the_person_and_catervas", async () => {
+		const team = {
+			...TEAM,
+			agents: [
+				...TEAM.agents,
+				{
+					id: "kai",
+					display_name: "Kai",
+					role: "marketing_specialist",
+					status: "active",
+				},
+			],
+		};
+		await today({
+			team,
+			moved: [
+				{ at: "2026-01-01T10:00:00Z", by: "kai", line: "Kai wrote a post." },
+				{ at: "2026-01-01T10:01:00Z", by: "catervas", line: "Catervas did." },
+				{ at: "2026-01-01T10:02:00Z", by: "human", line: "You did." },
+			],
+		});
+		const [human, catervas, kai] = (await cards()) as HTMLElement[];
+		const tile = (human as HTMLElement).querySelector("[aria-hidden='true']");
+		expect(tile?.querySelector("svg")).toBeTruthy();
+		expect((human as HTMLElement).querySelector("img")).toBeNull();
+		const mark = (catervas as HTMLElement).querySelector("img");
+		expect(mark?.getAttribute("alt")).toBe("");
+		expect(mark?.getAttribute("src")).toContain("logo-mark");
+		expect((kai as HTMLElement).querySelector("img")).toBeNull();
+		expect(
+			within(kai as HTMLElement).getByTitle("Marketing Specialist"),
+		).toBeTruthy();
 	});
 
 	it("counts_the_backlog_on_today", async () => {

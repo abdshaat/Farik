@@ -3208,12 +3208,16 @@
                 "type": "string",
                 "format": "date-time"
               },
+              "by": {
+                "type": "string"
+              },
               "line": {
                 "type": "string"
               }
             },
             "required": [
               "at",
+              "by",
               "line"
             ]
           }

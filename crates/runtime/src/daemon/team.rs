@@ -4346,7 +4346,7 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn disconnects_the_account_and_pauses() {
+    fn disconnects_the_account_pauses_and_connects_another() {
         let harness = driven("team-disconnect");
         let store = Arc::new(MemoryStore::default());
         store
@@ -4354,7 +4354,7 @@ pub(super) mod tests {
                 "sk-ant-api-x".to_string(),
             )))
             .expect("kept");
-        served(&harness, &store, &[]);
+        let in_use = served(&harness, &store, &[]);
         assert_eq!(
             query(
                 &harness.daemon,
@@ -4385,12 +4385,32 @@ pub(super) mod tests {
             json!({ "provider": null, "kind": null, "source": null })
         );
 
+        // Another account is connected without starting Catervas again: kept, put in place for
+        // the next session, and the team stays paused until the human resumes it.
+        assert_eq!(
+            call(
+                &harness.daemon,
+                "account.connect",
+                &json!({ "kind": "api_key", "secret": "sk-ant-api-new" }),
+                "accountConnectResult",
+            ),
+            json!({ "stored_in": "keychain", "taking_on": false })
+        );
+        let new = ClaudeCredential::ApiKey(Secret::new("sk-ant-api-new".to_string()));
+        assert_eq!(store.load().expect("reads"), Some(new.clone()));
+        assert_eq!(*in_use.lock().expect("not poisoned"), new);
+        assert_eq!(
+            query(
+                &harness.daemon,
+                "account.status",
+                &json!({}),
+                "accountStatusResult"
+            ),
+            json!({ "provider": "anthropic", "kind": "api_key", "source": "keychain" })
+        );
+        assert!(paused(&harness.project.deps.log).expect("reads"));
+
         // On a team already paused, disconnecting pauses nothing, and says so.
-        store
-            .save(&ClaudeCredential::ApiKey(Secret::new(
-                "sk-ant-api-x".to_string(),
-            )))
-            .expect("kept");
         assert_eq!(
             call(
                 &harness.daemon,
