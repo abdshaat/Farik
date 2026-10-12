@@ -1413,6 +1413,109 @@ fn takes_back_a_removal_when_the_commit_fails() {
     assert_eq!(repository.git_output(&["status", "--porcelain"]), "");
 }
 
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn a_removal_of_an_ignored_file_absent_at_from_keeps_it() {
+    let repository = TempRepo::new("commit-files-removal-ignored");
+    repository.write(".gitignore", "*.md\n");
+    repository.commit("ignore markdown");
+    repository.write(OLD, "the owner's ignored text\n");
+    let outcome = repository
+        .adapter()
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(NEW, "<p>new</p>\n"),
+            &[OLD.to_string()],
+            "docs: x",
+            None,
+        )
+        .expect("the commit is made");
+    assert!(
+        matches!(outcome, CommitOutcome::Committed { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repository.path.join(OLD)).expect("kept"),
+        "the owner's ignored text\n"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn a_removal_of_a_held_file_alone_commits() {
+    let repository = TempRepo::new("commit-files-removal-held");
+    repository.write(OLD, "old\n");
+    repository.write(NEW, "<p>new</p>\n");
+    repository.commit("both documents");
+    let outcome = repository
+        .adapter()
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(NEW, "<p>new</p>\n"),
+            &[OLD.to_string()],
+            "docs: x",
+            None,
+        )
+        .expect("the commit is made");
+    assert!(
+        matches!(outcome, CommitOutcome::Committed { .. }),
+        "{outcome:?}"
+    );
+    let tree = repository.git_output(&["ls-tree", "-r", "--name-only", "docs/folder-1"]);
+    assert!(tree.contains(NEW) && !tree.contains(OLD), "{tree}");
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_remove_through_a_link() {
+    use std::os::unix::fs::symlink;
+
+    let repository = TempRepo::new("commit-files-removal-link");
+    let outside = repository.path.join("elsewhere");
+    std::fs::create_dir_all(outside.join("delivery")).expect("a directory");
+    std::fs::write(outside.join("delivery/b.md"), "outside\n").expect("a file");
+    std::fs::create_dir_all(repository.path.join("docs")).expect("docs");
+    symlink(&outside, repository.path.join("docs/catervas")).expect("a link");
+    let git = repository.adapter();
+    let answer = git
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(NEW, "<p>new</p>\n"),
+            &[OLD.to_string()],
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(answer, CommitOutcome::Linked("docs/catervas".to_string()));
+    assert!(
+        outside.join("delivery/b.md").exists(),
+        "the outside file survives"
+    );
+
+    std::fs::remove_file(repository.path.join("docs/catervas")).expect("link removed");
+    std::fs::create_dir_all(repository.path.join("docs/catervas/delivery")).expect("real");
+    symlink(outside.join("delivery/b.md"), repository.path.join(OLD)).expect("a link");
+    let answer = git
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(NEW, "<p>new</p>\n"),
+            &[OLD.to_string()],
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(answer, CommitOutcome::Linked(OLD.to_string()));
+    assert!(
+        outside.join("delivery/b.md").exists(),
+        "the link's target survives"
+    );
+}
+
 const PRODUCT: &str = "docs/catervas/product";
 
 #[test]

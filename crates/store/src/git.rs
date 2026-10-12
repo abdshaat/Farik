@@ -674,12 +674,14 @@ impl Git {
     }
 
     /// Makes the branch `branch` at `from` with one commit that writes `files` (`(path, text)`,
-    /// repository-relative) and removes `removed`, in the root's checkout as `merge` does, and puts the branch that was
-    /// checked out back (`docs/SPEC.md` 5.14).
+    /// repository-relative) and removes `removed`, in the root's checkout as `merge` does, and
+    /// puts the branch that was checked out back (`docs/SPEC.md` 5.14).
     ///
     /// In order: `Linked` when a file, or a directory between the root and it, is a symbolic link;
     /// `Busy` when `git status` names any of the files or removed paths; `Unchanged` when every
-    /// file's text equals the file at `from` and every removed path is absent there. Otherwise
+    /// file's text equals the file at `from` and `from` holds none of the removed paths (a
+    /// removed path it lacks is left alone, even when the owner has an ignored file there).
+    /// Otherwise
     /// `git checkout -b`, each file written and each removed path deleted, `git add`, and
     /// `git commit --only` over them, so nothing else the owner staged is committed. The
     /// commit's author is `author` (`Name <email>`) when given, and its committer the person git
@@ -715,26 +717,35 @@ impl Git {
         if !busy.is_empty() {
             return Ok(CommitOutcome::Busy(busy));
         }
-        if files
+        let removed: Vec<&str> = removed
             .iter()
-            .all(|(path, text)| self.file_at(from, path).is_ok_and(|held| held == *text))
-            && removed.iter().all(|path| self.file_at(from, path).is_err())
+            .map(String::as_str)
+            .filter(|path| self.file_at(from, path).is_ok())
+            .collect();
+        if removed.is_empty()
+            && files
+                .iter()
+                .all(|(path, text)| self.file_at(from, path).is_ok_and(|held| held == *text))
         {
             return Ok(CommitOutcome::Unchanged);
         }
+        let paths: Vec<&str> = files
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .chain(removed.iter().copied())
+            .collect();
         self.at_root(&["checkout", "-b", branch, from])?;
-        let sha = match self
-            .commit_files_on_the_new_branch(files, removed, &paths, from, message, author)
-        {
-            Ok(sha) => sha,
-            Err(failure) => {
-                self.take_back(from, files, &paths);
-                // Best effort: the failure being reported is the one worth keeping.
-                let _ = self.at_root(&["checkout", &was_on]);
-                let _ = self.at_root(&["branch", "-D", branch]);
-                return Err(failure);
-            }
-        };
+        let sha =
+            match self.commit_files_on_the_new_branch(files, &removed, &paths, message, author) {
+                Ok(sha) => sha,
+                Err(failure) => {
+                    self.take_back(from, files, &paths);
+                    // Best effort: the failure being reported is the one worth keeping.
+                    let _ = self.at_root(&["checkout", &was_on]);
+                    let _ = self.at_root(&["branch", "-D", branch]);
+                    return Err(failure);
+                }
+            };
         self.at_root(&["checkout", &was_on])?;
         Ok(CommitOutcome::Committed { sha })
     }
@@ -776,14 +787,13 @@ impl Git {
             .collect())
     }
 
-    /// Writes `files`, deletes `removed`, stages and commits them on the branch just made. A
-    /// removed path that `from` does not hold is nothing to stage, and is left out of the commit.
+    /// Writes `files`, deletes `removed` (paths `from` holds), stages and commits them on the
+    /// branch just made.
     fn commit_files_on_the_new_branch(
         &self,
         files: &[(String, String)],
-        removed: &[String],
+        removed: &[&str],
         paths: &[&str],
-        from: &str,
         message: &str,
         author: Option<&str>,
     ) -> Result<String, GitError> {
@@ -809,15 +819,8 @@ impl Git {
                 _ => {}
             }
         }
-        let staged: Vec<&str> = paths
-            .iter()
-            .copied()
-            .filter(|path| {
-                files.iter().any(|(written, _)| written == path) || self.file_at(from, path).is_ok()
-            })
-            .collect();
         let mut add = vec!["--literal-pathspecs", "add", "--"];
-        add.extend_from_slice(&staged);
+        add.extend_from_slice(paths);
         self.at_root(&add)?;
         let author_option = author.map(|author| format!("--author={author}"));
         let mut commit = vec!["--literal-pathspecs", "commit", "--only", "-m", message];
@@ -825,13 +828,14 @@ impl Git {
             commit.push(option);
         }
         commit.push("--");
-        commit.extend_from_slice(&staged);
+        commit.extend_from_slice(paths);
         self.at_root(&as_someone(&self.root, &commit))?;
         self.at_root(&["rev-parse", "HEAD"])
     }
 
     /// Undoes what `commit_files_on_the_new_branch` did to the files: each is unstaged, and put
-    /// back to the text at `from` or, when `from` had none, removed with the directories made for it.
+    /// back to the text at `from` or, when `from` had none, removed with the directories made for
+    /// it.
     fn take_back(&self, from: &str, files: &[(String, String)], paths: &[&str]) {
         let mut unstage = vec!["--literal-pathspecs", "reset", "-q", "--"];
         unstage.extend_from_slice(paths);

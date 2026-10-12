@@ -127,7 +127,8 @@ fn next_by(policy: Integration, branch: &str, into: &str) -> String {
 ///
 /// # Errors
 ///
-/// `Waiting` for a file or removed path an earlier change holds that is neither integrated nor escalated, `Link`,
+/// `Waiting` for a file or removed path an earlier change holds that is neither integrated nor
+/// escalated, `Link`,
 /// `Busy`, and `Git` when git or the log failed. `Ok(None)` when every file already says its text on
 /// the integration branch, which makes nothing.
 pub(crate) fn land(
