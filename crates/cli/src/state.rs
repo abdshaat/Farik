@@ -17,6 +17,15 @@ pub(crate) fn state_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
         .or_else(|| set("APPDATA").map(|base| PathBuf::from(base).join("catervas")))
 }
 
+/// Where Claude Code keeps its history: `CLAUDE_CONFIG_DIR` when it is set and not empty, as Claude
+/// Code itself honours it, else `$HOME/.claude`; `None` when neither is set.
+pub(crate) fn claude_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
+    let set = |name: &str| env.get(name).filter(|value| !value.is_empty());
+    set("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| set("HOME").map(|home| PathBuf::from(home).join(".claude")))
+}
+
 /// Home: `HOME` when it is set and not empty, else where the command was run. A project folder's
 /// member repositories, and the folders the first-run wizard browses, are relative to it.
 pub(crate) fn home_of(io: &CliIo<'_>) -> PathBuf {
@@ -70,7 +79,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use super::state_dir;
+    use super::{claude_dir, state_dir};
 
     fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
@@ -91,5 +100,14 @@ mod tests {
         let only_appdata = env(&[("APPDATA", "/a")]);
         assert_eq!(state_dir(&only_appdata), Some(PathBuf::from("/a/catervas")));
         assert_eq!(state_dir(&env(&[])), None);
+    }
+
+    #[test]
+    fn claude_dir_prefers_claude_config_dir() {
+        let both = env(&[("CLAUDE_CONFIG_DIR", "/c"), ("HOME", "/h")]);
+        assert_eq!(claude_dir(&both), Some(PathBuf::from("/c")));
+        let empty = env(&[("CLAUDE_CONFIG_DIR", ""), ("HOME", "/h")]);
+        assert_eq!(claude_dir(&empty), Some(PathBuf::from("/h/.claude")));
+        assert_eq!(claude_dir(&env(&[])), None);
     }
 }

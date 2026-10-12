@@ -30,6 +30,9 @@ pub mod contract;
 mod contract_new;
 /// One exchange with the daemon a `daemon.json` names.
 pub mod daemon_client;
+/// `catervas discover`: what Catervas found in the Claude Code history.
+#[cfg(unix)]
+mod discover;
 /// Everything this project disagrees with itself about.
 pub mod doctor;
 /// The hooks Claude Code runs around a tool call, carried to the daemon and back.
@@ -368,6 +371,13 @@ enum Commands {
     Metrics,
     /// Say where the files and the log disagree, and what else this project got wrong.
     Doctor,
+    /// Read your Claude Code history on this computer and say what Catervas found (ADR 0059).
+    #[cfg(unix)]
+    Discover {
+        /// Delete what Catervas found and read nothing.
+        #[arg(long)]
+        forget: bool,
+    },
     /// Show the team's rules (5.12).
     Rules {
         #[command(subcommand)]
@@ -1231,6 +1241,8 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             let code = report(found, parsed.json, io);
             return if told && code == OK { REFUSED } else { code };
         }
+        #[cfg(unix)]
+        Commands::Discover { forget } => discover::discover(io, *forget),
         Commands::Rules {
             command: RulesCommands::Show,
         } => open_project(&io.cwd, now).and_then(|project| team::rules(&project)),
