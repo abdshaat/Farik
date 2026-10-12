@@ -12,6 +12,7 @@ import { useConnection } from "../app/connection.tsx";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useEvents, useQuery } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
+import { Feed } from "../components/Feed.tsx";
 import { sendOnEnter } from "../components/MentionBox.tsx";
 import { renderMessageText } from "../components/MessageText.tsx";
 import { useWide } from "../shell/Shell.tsx";
@@ -79,6 +80,11 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [waiting, setWaiting] = useState<Waiting>(null);
 	const [round, setRound] = useState(0);
+	// Whether an earlier page exists, known from the first answer alone: a later ask for the
+	// newest page says nothing of the pages before it.
+	const [more, setMore] = useState(false);
+	const [paging, setPaging] = useState<"busy" | "failed">();
+	const answered = useRef(false);
 	const id = agent.id;
 	const name = agent.displayName;
 	// Only the Product Manager interviews a new project's owner.
@@ -88,6 +94,7 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 		agent.role !== "product_manager",
 	).data;
 	const interviewing = !!plan?.newProject && !plan.approved;
+	const newest = messages.at(-1);
 	const newestOfHers = messages.findLast((m) => m.author === id)?.seq;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: round asks for the page again
@@ -101,6 +108,10 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 				if (!live) return;
 				setMessages((m) => bySeq(m, page.messages));
 				setWaiting(page.waiting);
+				if (!answered.current) {
+					answered.current = true;
+					setMore(page.messages.length === PAGE);
+				}
 			})
 			.catch(() => {});
 		return () => {
@@ -137,6 +148,23 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 			setRound((n) => n + 1);
 	}, [events, id]);
 
+	const earlier = async () => {
+		if (!client) return;
+		setPaging("busy");
+		try {
+			const answer = (await client.query("chat.messages", {
+				agentId: id,
+				beforeSeq: messages[0]?.seq,
+				limit: PAGE,
+			})) as { messages: ChatMessage[] };
+			setMessages((m) => bySeq(m, answer.messages));
+			setMore(answer.messages.length === PAGE);
+			setPaging(undefined);
+		} catch {
+			setPaging("failed");
+		}
+	};
+
 	const retired = agent.status === "retired";
 	const because = retired ? "retired" : waiting?.because;
 	const markSent = (seq: number, taskId: string) =>
@@ -152,7 +180,9 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 				)}
 				<div className={styles.heading}>
 					<div className={styles.titled}>
-						<h1 className={channel.title}>{t("chatsTitle", { name })}</h1>
+						<h1 id="chat-title" className={channel.title}>
+							{t("chatsTitle", { name })}
+						</h1>
 						<RoleTag role={agent.role} />
 					</div>
 					<p className={channel.muted}>
@@ -170,21 +200,30 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 					{t("chatsBack")}
 				</Link>
 			</div>
-			<ol className={channel.messages} aria-label={t("channelMessages")}>
-				{messages.map((m) => (
-					<Row
-						key={m.seq}
-						message={m}
-						agents={agents}
-						onSent={(taskId) => markSent(m.seq, taskId)}
-						action={
-							interviewing && m.seq === newestOfHers ? (
-								<DraftPlan taskId={plan?.task?.taskId ?? null} name={name} />
-							) : undefined
-						}
-					/>
-				))}
-			</ol>
+			<Feed
+				labelledBy="chat-title"
+				newest={newest && { seq: newest.seq, mine: newest.author === "human" }}
+				oldest={messages[0]?.seq}
+				more={more}
+				paging={paging}
+				onEarlier={earlier}
+			>
+				<ol className={channel.messages} aria-label={t("channelMessages")}>
+					{messages.map((m) => (
+						<Row
+							key={m.seq}
+							message={m}
+							agents={agents}
+							onSent={(taskId) => markSent(m.seq, taskId)}
+							action={
+								interviewing && m.seq === newestOfHers ? (
+									<DraftPlan taskId={plan?.task?.taskId ?? null} name={name} />
+								) : undefined
+							}
+						/>
+					))}
+				</ol>
+			</Feed>
 			<p role="status" className={styles.waiting}>
 				{because && agent.avatar && (
 					<span aria-hidden="true">
@@ -197,7 +236,7 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 				)}
 				{because && <span>{waitingWords(because, name, waiting?.until)}</span>}
 			</p>
-			{!retired && <Composer agent={agent} />}
+			{!retired && <Composer agent={agent} wide={wide} />}
 		</div>
 	);
 }
@@ -436,7 +475,7 @@ function ProposalBox({
 }
 
 /** "Message <Name>": `chat_message_post { agent_id, text }`, refused here when it is too long. */
-function Composer({ agent }: { agent: Agent }) {
+function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 	const { client } = useConnection();
 	const [text, setText] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -464,7 +503,10 @@ function Composer({ agent }: { agent: Agent }) {
 	};
 	return (
 		<form className={channel.composer} onSubmit={post}>
-			<label htmlFor="chat-post" className={channel.label}>
+			<label
+				htmlFor="chat-post"
+				className={wide ? channel.label : channel.hidden}
+			>
 				{t("chatsLabel", { name: agent.displayName })}
 			</label>
 			<div className={channel.row}>
@@ -481,7 +523,7 @@ function Composer({ agent }: { agent: Agent }) {
 					{t("chatsSend")}
 				</Button>
 			</div>
-			<p id="chat-enter" className={channel.muted}>
+			<p id="chat-enter" className={wide ? channel.muted : channel.hidden}>
 				{t("chatsEnterSends")}
 			</p>
 			{refusal && (

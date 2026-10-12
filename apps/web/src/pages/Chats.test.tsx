@@ -22,6 +22,7 @@ import {
 	renderApp,
 } from "../test/render-app.tsx";
 import { bodyOf, refusedBy } from "../test/schema.ts";
+import channel from "./Channel.module.css";
 import own from "./Chats.module.css";
 
 const WIDE = "(min-width: 1024px)";
@@ -145,8 +146,27 @@ const APPLE = {
 	text: "Add Apple Pay to the checkout page, next to paying by card.",
 };
 
+/** The box's size, which jsdom does not lay out: the tests set what the browser would say. */
+function stubBox(scrollHeight = 2000, clientHeight = 500) {
+	for (const [key, value] of Object.entries({ scrollHeight, clientHeight }))
+		Object.defineProperty(HTMLElement.prototype, key, {
+			configurable: true,
+			get: () => value,
+		});
+}
+
+/** A full page of `chat.messages`, seq 201 to 300, Mira's. */
+const fullPage = () =>
+	Array.from({ length: 100 }, (_, i) =>
+		chat("mira", `Newer ${i}.`, { seq: 201 + i }),
+	);
+
 describe("chats", () => {
-	afterEach(() => vi.unstubAllGlobals());
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		for (const key of ["scrollHeight", "clientHeight"])
+			Reflect.deleteProperty(HTMLElement.prototype, key);
+	});
 
 	it("lists_the_chats", async () => {
 		media.set(WIDE, true);
@@ -239,6 +259,147 @@ describe("chats", () => {
 		const hers = rows[1] as HTMLElement;
 		expect(within(hers).getByRole("img").getAttribute("alt")).toBe("Mira");
 		expect(within(hers).getByText("Yes.")).toBeTruthy();
+	});
+
+	it("opens_a_one_to_one_at_the_newest_message", async () => {
+		stubBox();
+		await chats("/channel/mira", {
+			messages: Array.from({ length: 20 }, (_, i) =>
+				chat("mira", `Line ${i}.`),
+			),
+		});
+		const region = await screen.findByRole("region", {
+			name: "Talking with Mira",
+		});
+		expect(region.scrollTop).toBe(2000);
+	});
+
+	it("pages_back_in_a_one_to_one", async () => {
+		const { s } = await chats("/channel/mira", { messages: fullPage() });
+		const more = await screen.findByRole("button", { name: en.channelEarlier });
+		fireEvent.click(more);
+		const earlier = await waitFor(() => {
+			const f = asked(s)[1];
+			if (!f) throw new Error("no earlier page was asked");
+			return f;
+		});
+		expect(earlier.params.params).toEqual({
+			agent_id: "mira",
+			before_seq: 201,
+			limit: 100,
+		});
+		await s.reply(earlier, {
+			messages: [198, 199, 200].map((n) =>
+				chat("mira", `Older ${n}.`, { seq: n }),
+			),
+			waiting: null,
+		});
+		await screen.findByText("Older 198.");
+		const rows = within(
+			screen.getByRole("list", { name: en.channelMessages }),
+		).getAllByRole("listitem");
+		expect(rows.slice(0, 4).map((li) => li.textContent)).toEqual([
+			expect.stringContaining("Older 198."),
+			expect.stringContaining("Older 199."),
+			expect.stringContaining("Older 200."),
+			expect.stringContaining("Newer 0."),
+		]);
+		expect(
+			screen.queryByRole("button", { name: en.channelEarlier }),
+		).toBeNull();
+	});
+
+	it("asks_earlier_at_the_top_of_a_one_to_one", async () => {
+		stubBox();
+		const { s } = await chats("/channel/mira", { messages: fullPage() });
+		const region = await screen.findByRole("region", {
+			name: "Talking with Mira",
+		});
+		region.scrollTop = 0;
+		fireEvent.scroll(region);
+		fireEvent.scroll(region);
+		const earlier = await waitFor(() => {
+			const f = asked(s)[1];
+			if (!f) throw new Error("no earlier page was asked");
+			return f;
+		});
+		expect(earlier.params.params).toEqual({
+			agent_id: "mira",
+			before_seq: 201,
+			limit: 100,
+		});
+		expect(asked(s)).toHaveLength(2);
+	});
+
+	it("keeps_more_after_a_live_message", async () => {
+		const { s } = await chats("/channel/mira", { messages: fullPage() });
+		await screen.findByRole("button", { name: en.channelEarlier });
+		live(s, 400, "chat_message.posted", {
+			chat: "mira",
+			author: "mira",
+			text: "On it.",
+		});
+		const again = await waitFor(() => {
+			const f = asked(s)[1];
+			if (!f) throw new Error("the newest page was not asked again");
+			return f;
+		});
+		await s.reply(again, {
+			messages: [
+				chat("human", "Hm.", { seq: 399 }),
+				chat("mira", "On it.", { seq: 400 }),
+			],
+			waiting: null,
+		});
+		await screen.findByText("On it.");
+		expect(
+			screen.getByRole("button", { name: en.channelEarlier }),
+		).toBeTruthy();
+	});
+
+	it("has_no_earlier_button_under_a_full_page", async () => {
+		await chats("/channel/mira", {
+			messages: Array.from({ length: 5 }, (_, i) => chat("mira", `Line ${i}.`)),
+		});
+		await screen.findByText("Line 0.");
+		expect(
+			screen.queryByRole("button", { name: en.channelEarlier }),
+		).toBeNull();
+	});
+
+	it("says_when_an_earlier_chat_page_cannot_be_read", async () => {
+		const { s } = await chats("/channel/mira", { messages: fullPage() });
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.channelEarlier }),
+		);
+		const earlier = await waitFor(() => {
+			const f = asked(s)[1];
+			if (!f) throw new Error("no earlier page was asked");
+			return f;
+		});
+		await s.fail(earlier, -32000, "the store is busy");
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.channelEarlierFailed,
+		);
+	});
+
+	it("keeps_the_chat_box_to_one_row_on_a_phone", async () => {
+		media.set(WIDE, false);
+		await chats("/channel/mira");
+		const hidden = () =>
+			[
+				screen.getByText("Message Mira"),
+				document.getElementById("chat-enter") as HTMLElement,
+			].map((x) => x.classList);
+		await screen.findByRole("textbox", { name: "Message Mira" });
+		for (const classes of hidden()) expect(classes).toContain(channel.hidden);
+		cleanup();
+
+		media.set(WIDE, true);
+		await chats("/channel/mira");
+		await screen.findByRole("textbox", { name: "Message Mira" });
+		for (const classes of hidden())
+			expect(classes).not.toContain(channel.hidden);
 	});
 
 	it("sends_a_chat", async () => {

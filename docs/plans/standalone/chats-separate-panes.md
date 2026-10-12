@@ -134,7 +134,7 @@ Tests (`Chats.test.tsx`):
 - `keeps_the_chat_box_to_one_row_on_a_phone` — `(min-width: 1024px)` false: the label "Message Mira" and `#chat-enter` have `channel.hidden` (adding `import channel from "./Channel.module.css"`); true: neither has it.
 - every other test of the file still passes.
 
-- [ ] `fix(web): open a one-to-one at its newest message and page back`
+- [x] `fix(web): open a one-to-one at its newest message and page back`
 
 ### Task 5: the browser proves it
 
