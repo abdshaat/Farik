@@ -169,7 +169,7 @@ Files: `daemon/repos.rs` (`repo.remove`).
 - 5.15: a task in a missing member waits to integrate; its worktrees removed as folders, and the stale registration until the member is next pruned
 - the section that lists the web app's queries and methods, where step 01 records `repo.*` and their refusals: `repo_in_use`
 
-- [ ] `docs(spec): record integration per member`
+- [x] `docs(spec): record integration per member`
 
 ## Verification
 
