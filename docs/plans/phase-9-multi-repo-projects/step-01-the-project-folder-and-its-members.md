@@ -32,7 +32,7 @@ Out of scope, each a later step's:
   - Rejected: a project root that is not a git repository. Every reader of `files.root()` (about 106) assumes one, and phase 8 reads documents from git.
 - **Its scan, in this step, is its own.** `init` scans the project folder as it scans any repository, so `project.scanned`'s read-back describes a folder holding a README, and the criteria library it seeds has no command. That is this step's whole behaviour, and is deliberate. ADR 0057's amendment of 2026-10-12 gives a project folder one criteria library whose entries name their member, seeded by a scan of each member, and step 02b builds it; until then a project folder's tasks have no library command to name.
 - **What makes it one is `.catervas/repos.yaml`**, held to `docs/schemas/repos.schema.json`: `{ repos: [{ name, path, integration_branch? }] }`, 1 to 16 entries.
-  - `name` matches `^[a-z][a-z0-9-]{0,31}$`.
+  - `name` matches `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 32 characters: kebab-case starting with a letter, so that `<name>-<criterion>` is always a valid criterion name (step 02b's review, 2026-10-12; was `^[a-z][a-z0-9-]{0,31}$`).
   - `path` is an absolute path: `^(/|[A-Za-z]:[\\/])`, 1 to 4096 characters.
   - `integration_branch` is 1 to 255 characters, with no whitespace. When absent, the member's default branch is read when it is needed (step 02), as `integration_branch` (`crates/store/src/git.rs:1031`) reads the team's.
   - There is no `version` field. Unknown keys are refused.
@@ -71,7 +71,7 @@ Out of scope, each a later step's:
   | `not_a_repository` | `/path` | that folder is not a git repository |
   | `not_the_top` | `/path` | that folder is inside a git repository; choose <top> instead |
   | `has_team` | `/path` | that repository has a Catervas team of its own |
-  | `repo_name` | `/name` | a repository's name is lowercase letters, digits, and -, starting with a letter, up to 32 characters |
+  | `repo_name` | `/name` | a repository's name is lowercase letters and digits in words joined by single -, starting with a letter, up to 32 characters |
   | `name_taken` | `/name` | another of the project's repositories is named <name> |
   | `path_taken` | `/path` | that repository is already in the project, as <name> |
   | `nested` | `/path` | that folder and <name>, already in the project, are one inside the other |
@@ -191,7 +191,7 @@ Wire (`rpc.schema.json`): `project.create_folder` as Decisions; `repos.list {}` 
 
 Files: `repos.schema.json`, whose `$defs.repoName` gives typify's `RepoName`; `generated/mod.rs` (`pub mod repos`, as `sprint`); `repos.rs` (validator as `sprint.rs:20-43`, rules as `validate_team`'s, `team.rs:258`); `repos/fixtures.rs` (`two_repos_wire() -> Value`, as `a_criteria_library_wire`: `app` at `/home/me/app`, `infra` at `/home/me/infra` with `integration_branch: main`; Task 2's store tests take `validate_repos(&two_repos_wire())`).
 
-- `reads_a_projects_repositories`: `two_repos_wire()` reads, and serialises back equal to itself; one entry reads; 17 are refused at `/repos`, an empty list at `/repos`, `name: "App"` and `name: "1app"` at `/repos/0/name`, a 33-character name likewise, `path: "app"` at `/repos/0/path`, `C:\\work\\app` reads, an unknown key at `/repos/0`, and `integration_branch: ""` at `/repos/0/integration_branch`. RED: no module.
+- `reads_a_projects_repositories`: `two_repos_wire()` reads, and serialises back equal to itself; one entry reads; 17 are refused at `/repos`, an empty list at `/repos`, `name: "App"`, `"1app"`, `"app-"` and `"a--b"` at `/repos/0/name`, a 33-character name likewise, `path: "app"` at `/repos/0/path`, `C:\\work\\app` reads, an unknown key at `/repos/0`, and `integration_branch: ""` at `/repos/0/integration_branch`. RED: no module.
 - `refuses_a_name_or_a_path_twice`: two `app` entries are refused at `/repos/1/name` with the Decisions' sentence; `/home/me/app` twice at `/repos/1/path` with "/home/me/app is named twice, as app and infra"; `/home/me/app` and `/home/me/app/web` at `/repos/1/path`, naming both; `/home/me/app` and `/home/me/apples` read. RED.
 - `checks_a_new_member`: against project folder `/home/me/shop` and `two_repos_wire()`'s entries:
   - `("web", "/home/me/web")` is `Ok`

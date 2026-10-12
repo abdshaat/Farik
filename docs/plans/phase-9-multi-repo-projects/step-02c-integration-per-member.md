@@ -45,7 +45,7 @@ Out of scope:
   - then calls `rescan_members(files, log, ids, now, Some(<repo>), GOVERNOR)`
   - and answers `Refreshed` when `library_changed`, else `Unchanged`; a scan error is `Failed { error }`
 
-  A task with no `repo` keeps 02b's skip. `rescan_members` records `project.scanned` on every such integration, one event per member integration, since a member's read-back reads its last commit. Rejected: comparing `material` first (`scan.rs:235`), which needs the other members' last read-backs that no event keeps apart.
+  A task with no `repo` keeps 02b's `Unchanged`. `rescan_members` records `project.scanned` on every such integration, one event per member integration, since a member's read-back reads its last commit. Rejected: comparing `material` first (`scan.rs:235`), which needs the other members' last read-backs that no event keeps apart.
 - **Removing a finished task's worktrees.** `remove_workspace` (`integrate.rs:959`) reads the task's contract and resolves its repository. When that succeeds, the target's `Git` removes `<id>-base` and `<id>` (`remove_worktree`, `:1001`). When the member is `Missing`, or the contract cannot be read, the two folders are removed as plain folders and the member's registry of them is left for git's own `worktree prune`. The sandbox, the browser folder and the order are unchanged. `recover.rs:88` calls it as before.
 - **Dependencies across repositories need nothing new.** A dependency counts as integrated when it is `accepted` and not awaiting integration (`transitions.rs:1218-1229`), whichever repository it went into. The dependent task's worktree is made from its own member's integration branch (step 02). A test pins it.
 - **`repo.remove` refuses a member with work.** Step 01's `repo.remove` gains `repo_in_use` at `/name`, checked before `last_repo`. It fails when any task on the board names the member and is neither `cancelled` nor `accepted` and integrated (`!awaiting_integration`). The sentence: "<n> of the project's tasks still work in <name>: <ids joined ", ">; finish or cancel them first". An epic names no repository, so it never counts.
@@ -110,7 +110,7 @@ Files: `integrate.rs` (the target, its resolution in `integrate_locked`, the fiv
 
 Files: `integrate.rs` (`refresh_the_scan`).
 
-- `rescans_the_member_it_integrated_into`: `app` has `app-test` in the library. The task adds `scripts.lint` to `app`'s `package.json`. After `auto_merge` the library has `app-lint` (`repo: app`), `infra-test` is unchanged, `criteria.updated { updated_by: governor }` and `project.scanned` are recorded, and the outcome's scan is `Refreshed`. RED: 02b skips every rescan in a project folder.
+- `rescans_the_member_it_integrated_into`: `app` has `app-the-tests-pass` in the library. The task adds `scripts.lint` to `app`'s `package.json`. After `auto_merge` the library has `app-the-linter-is-clean` (`repo: app`), `infra`'s entries are unchanged, `criteria.updated { updated_by: governor }` and `project.scanned` are recorded, and the outcome's scan is `Refreshed`. RED: 02b answers `Unchanged` for every integration in a project folder.
 - `skips_the_rescan_when_the_members_checkout_is_elsewhere`: with `app`'s checkout on another branch at integration time, the outcome's scan is `Skipped` with the Decisions' words naming `app`. RED.
 
 - [ ] `feat(runtime): rescan a member after work lands in it`

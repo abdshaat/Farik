@@ -32,7 +32,7 @@ Out of scope, each a later step's:
 
 ### The contract's `repo`
 
-- **The field.** `repo`, optional, a member's name, `^[a-z][a-z0-9-]{0,31}$`, the pattern copied from `repos.schema.json`'s `$defs.repoName` and held equal by a test.
+- **The field.** `repo`, optional, a member's name, `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` with at most 32 characters, the pattern copied from `repos.schema.json`'s `$defs.repoName` and held equal by a test.
   - The description says it is set by the Product Manager, read only in a project folder, and fixed once set (ADR 0057).
   - `allowed_paths`, the command criterion's and the artifact criterion's paths are relative to the task's repository: the member it names, else the project root. The hook already reads them relative to the session's worktree (`crates/runtime/src/daemon/hooks.rs:863`), so only the words change (`task-contract.schema.json:215`, `:344`, `:400`; `crates/core/src/contract.rs:39`, `:58`).
   - Rejected: `repo` in `FIELDS_FIXED_AT_CREATION`. A request the human files, and a triaged one, has no repository until the Product Manager refines it.
