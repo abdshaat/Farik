@@ -11,7 +11,7 @@ Depends on steps 01, 02 and 02b of this phase, planned and ready or in review, n
 
 Nothing of steps 03 to 08.
 Mockups: none.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (`remove_workspace` when the task's repository cannot be resolved), decided below; S1–S5 and N1–N8 folded. Round 2 (the same reviewer, confirming): ready; its S1, S2 and N1–N4 folded.
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (`remove_workspace` when the task's repository cannot be resolved), decided below; S1–S5 and N1–N8 folded. Round 2 (the same reviewer, confirming): ready; its S1, S2 and N1–N4 folded. Task 3b added by the planner, 2026-10-12, from step 02's fixes (a located member's worktrees).
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at c99ea62.
 
@@ -66,7 +66,8 @@ Out of scope:
 ```
 crates/runtime/src/orchestrator/integrate.rs        modifies, tests: IntegrationTarget, its resolution and use (Task 1); refresh_the_scan per member (Task 2); remove_workspace (Task 3)
 crates/runtime/src/orchestrator/fixtures.rs         modifies: FakeGh's cwds, with_origin_in, merge_branch_on_the_forge_in, accepted_in (Task 1)
-crates/store/src/git.rs, crates/store/tests/git.rs  modifies, tests: prune_worktrees (Task 3)
+crates/store/src/git.rs, crates/store/tests/git.rs  modifies, tests: prune_worktrees (Task 3); repair_worktrees (Task 3b)
+crates/runtime/src/daemon/repos.rs                  modifies, tests: the repair at locate (Task 3b)
 crates/runtime/src/orchestrator/rules.rs            tests: a dependency in another repository (Task 1)
 crates/runtime/src/daemon/repos.rs                  modifies, tests: repo_in_use (Task 4)
 docs/schemas/rpc.schema.json                        none: repo.remove's refusal travels in data.errors as its others do
@@ -93,6 +94,7 @@ enum Unresolved { Missing(String), Other(String) }   // the sentence; Missing wa
 fn target(tools: &ToolDeps, forge: &Forge, team: &Team, subject: &Subject) -> Result<IntegrationTarget, Unresolved>;
 // catervas_store::git::Git
 pub fn prune_worktrees(&self) -> Result<(), GitError>;   // git worktree prune
+pub fn repair_worktrees(&self) -> Result<(), GitError>;   // git worktree repair (Task 3b)
 // the five functions take `target: &IntegrationTarget` in place of their `into: &str` and their reads of tools.git / forge
 // FakeGh
 pub(crate) fn cwds(&self) -> Vec<PathBuf>;
@@ -139,6 +141,17 @@ Files: `integrate.rs` (`remove_workspace`); `git.rs` (`prune_worktrees`) and `te
 - `removes_the_folders_of_a_moved_and_located_member`: `app` moved and located, then `CTV-1` cancelled. The tick removes its folders, though `app`'s git refuses the worktree as not its own, and `git -C app worktree list` no longer lists `CTV-1`. RED: it stays listed as `prunable`.
 
 - [ ] `feat(runtime): remove a member task's worktrees with its member's git`
+
+### Task 3b: A located member's worktrees work again
+
+Added by the planner on 2026-10-12, from step 02's fixes: when a member moves and is located, the worktrees of its open tasks (under the project folder's `.catervas/local/worktrees/`) still link to its old `.git`, so `resume` and verification fail there until `git worktree repair` runs in the member. Step 01's `repo.locate` (`crates/runtime/src/daemon/repos.rs`, `locate`), after writing `repos.yaml` and before `repo.moved`, runs `git worktree repair` in the located member (`Git::repair_worktrees`, new, `git worktree repair` with no paths, which repairs every worktree's link from the main working tree). A failure of the repair does not fail the locate: the folder is recorded, and the sentence of the failure is logged to the daemon's log.
+
+Files: `git.rs` (`repair_worktrees`) and `tests/git.rs`; `daemon/repos.rs`.
+
+- `repairs_worktrees_after_a_move` (`tests/git.rs`, ignored as its neighbours): a repository with a worktree outside it is moved; `git -C <worktree> status` fails; after `repair_worktrees` on the moved repository, it succeeds. RED.
+- `a_located_members_tasks_work_again` (`daemon/repos.rs`): `CTV-1` `in_progress` in `app` with its worktree; `app` moved and `repo.locate`d; `git -C <worktree> status` succeeds, and `waits_while_its_member_is_missing`'s `git worktree repair` workaround (step 02's test) is removed, the test still passing. RED: the worktree's `git status` fails after the locate.
+
+- [ ] `fix(runtime): repair a located member's worktrees`
 
 ### Task 4: A member with work is kept
 
