@@ -1309,6 +1309,7 @@ mod tests {
         assert!(at("a summary of one or two sentences") < at("a bulleted list"));
         assert!(at("a bulleted list") < at("a one-line conclusion"));
         assert!(text.contains("Never write a file's or a folder's path"));
+        assert!(text.contains("Markdown tables and") && text.contains("mermaid"));
         let sentence = "Never write a file's or a folder's path: name it in plain words, as the user knows it.";
         assert!(text.contains(sentence));
         assert!(INTERVIEW_INSTRUCTION.contains(sentence));
