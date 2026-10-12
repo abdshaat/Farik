@@ -9,6 +9,8 @@ pub mod autopilot;
 pub mod baseline;
 /// The branch names a new branch may not take.
 pub mod branches;
+/// Reading Claude Code's transcripts into the machine index, and placing each session in its project.
+pub mod claude_history;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// Where the team's documents are read from.

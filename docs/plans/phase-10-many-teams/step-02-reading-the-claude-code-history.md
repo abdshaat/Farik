@@ -217,7 +217,7 @@ Files: `claude_history.rs` (`read_transcripts`, `HistoryError`); `machine.rs` (t
 - `refuses_whatever_is_not_a_transcript`: with `.credentials.json` beside `projects/` holding `SECRET-MARKER`, a link `projects/-x/evil.jsonl` to it, a link `projects/-x/out.jsonl` to a transcript outside the Claude folder, `jobs/j/state.json`, `history.jsonl` and `projects/-x/<s>/tool-results/r.jsonl`, each holding the marker in a turn: `refused` is 2, no `transcript_files` row names any of them, and `machine.db` holds no `SECRET-MARKER`. RED.
 - `counts_what_it_could_not_read`: a file of three `not json` lines alone has a row with `turns` 0 and `unreadable_lines` 3, and no session row. RED.
 
-- [ ] `feat(store): read claude code transcripts into the machine index`
+- [x] `feat(store): read claude code transcripts into the machine index`
 
 ### Task 5: Each session in its project
 
