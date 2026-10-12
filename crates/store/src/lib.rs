@@ -35,6 +35,8 @@ pub mod purchase_orders;
 pub mod reconcile;
 /// The renewals Catervas flagged for the owner.
 pub mod renewals;
+/// A project folder's member repositories on the file system.
+pub mod repos;
 /// Filing a request, for every caller.
 pub mod requests;
 /// What the repository says it is.

@@ -7,6 +7,7 @@
 
 use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
 use catervas_store::git::stale_twins;
+use catervas_store::repos::MemberPathRefusal;
 use catervas_store::{CommitOutcome, Git, GitError, MergeOutcome};
 
 #[test]
@@ -1507,4 +1508,25 @@ fn reads_the_product_plan_from_the_integration_branch() {
     assert!(!product_plan_on(&git, &team(Some("develop"))).expect("the read works"));
     // A branch the repository does not have is not an error: the plan is not there yet.
     assert!(!product_plan_on(&git, &team(Some("release"))).expect("the read works"));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_a_local_branch() {
+    let repository = TempRepo::new("local-branch");
+    let git = repository.adapter();
+    assert_eq!(git.has_local_branch("main"), Ok(true));
+    assert_eq!(git.has_local_branch("feature/x"), Ok(false));
+    repository.git(&["branch", "feature/x"]);
+    assert_eq!(git.has_local_branch("feature/x"), Ok(true));
+
+    let refusal = MemberPathRefusal::NoSuchBranch {
+        branch: "nope".to_string(),
+    };
+    assert_eq!(refusal.code(), "no_such_branch");
+    assert_eq!(refusal.pointer(), "/integration_branch");
+    assert_eq!(
+        refusal.message(),
+        "that repository has no branch named nope"
+    );
 }

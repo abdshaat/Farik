@@ -226,7 +226,7 @@ Files: `files.rs` (`REPOS = "repos.yaml"` with the consts at `:750`; read and wr
 - `says_whether_a_member_is_present` (`tests/repos.rs`): `app` is present; once moved away it is not; a plain folder put at its path is not. RED.
 - `knows_a_local_branch` (`tests/git.rs`): `main` true, `feature/x` false, and true once made. `NoSuchBranch { branch: "nope" }`'s `pointer()` is `/integration_branch` and its `message()` names `nope`. RED.
 
-- [ ] `feat(store): read and write a project folder's repositories`
+- [x] `feat(store): read and write a project folder's repositories`
 
 ### Task 3: The members in the log
 
