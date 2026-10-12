@@ -1,6 +1,6 @@
 # Phase 9, step 07: Several repositories in the web app
 
-Status: draft
+Status: ready (readiness review 2026-10-12, two rounds, findings folded)
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.1, 4.2, 4.4, 4.5, 8.5; F12
 Depends on these steps of this phase, planned and ready, not yet executed:
@@ -12,7 +12,7 @@ Depends on these steps of this phase, planned and ready, not yet executed:
 
 Nothing of 07b or 08.
 Mockups: drawn 2026-10-12, the setup board redrawn the same day on the founder's word ("I want the user to be able to create a project with one or more projects. Recommend the user that catervas works best when the repos are interconnected."), on the canvas page "Multi-repo projects" (`docs/design/mockups/SetupRepos.dc.html`, `SettingsRepositories.dc.html`, `TodayRepos.dc.html`, `BoardRepos.dc.html`, `FilesRepos.dc.html`); approved by the founder on 2026-10-12 ("Approve", ADR 0032), the setup board's one repository making a one-repo project as drawn.
-Readiness confirmed by: (pending; one round)
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12. Round 1: not ready on B1 (`folders.list` answered only while setting up), B2 (words the mockups do not have, and the refused folder not named), B3 (`too_many` already the team's words) and B4 (`repo_in_use`'s fill); folded, with step 01 amended. Round 2: ready, with its three notes folded.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 36fcf33.
 
@@ -101,7 +101,7 @@ Each is an `en.ts` key and its text, the code or `SENTENCES` prefix it answers, 
   The others (`not_there`, `outside_home`, the project's name, `name_taken`, which the page's hint catches first, and "needs at least two", which the page never sends) read as the existing `SENTENCES` entries or `setupRefused`.
 - **Settings' refusals**, by code: `not_there` `refuseRepoNotThere` "That folder is not there."; `outside_home` `refuseRepoOutsideHome` "That folder is outside your home folder."; `home_itself` `refuseRepoHome` "Your home folder itself can't be one of the project's repositories."; `not_a_repository` `refuseRepoNotGit` "That folder is not a git repository."; `not_the_top` `refuseRepoInsideGit` "That folder is inside another git repository. Choose that repository's own folder."; `has_team` `refuseRepoHasTeam` "That repository has a Catervas team of its own."; `repo_name` `refuseRepoName` "A repository's name is lowercase letters and digits, words joined by single dashes, starting with a letter, up to 32 characters."; `name_taken` `refuseRepoNameTaken` "Another of the project's repositories has that name."; `path_taken` `refuseRepoPathTaken` "That repository is already in the project."; `nested` `refuseRepoNested` "That folder and one of the project's repositories are one inside the other."; `inside_project_folder` `refuseRepoInsideNotes` "That folder is inside the folder for your team's notes."; `holds_project_folder` `refuseRepoHoldsNotes` "That folder holds the folder for your team's notes."; `too_many_repos` `refuseTooManyRepos` "A project holds at most 16 repositories."; `no_such_branch` `refuseNoSuchBranch` "That repository has no branch with that name."; `last_repo` `refuseLastRepo` "A project keeps at least one repository."; `not_a_project_folder` `refuseNotProjectFolder` "This project is one repository."; `repo_in_use` `refuseRepoInUse` "{count} of your team's tasks still work in {name}: {tasks}. Finish or cancel them first."
 - **Step 06's codes**, for the repository card: `repo_not_allowed` `refuseRepoNotAllowed` "This project is one repository."; `repo_unknown` `refuseRepoUnknown` "That is not one of the project's repositories."; `repo_missing` `refuseRepoMissing` "Catervas can't find that repository. Locate it in Settings, then start."; `catervafication_not_started` `refuseCatervaficationNotStarted` "Start your project's Catervafication first. It covers every repository it can find then."
-- **Settings:** `reposSummary` "The repositories your team works across"; `reposLead` "Your team works across these. Each stays its own repository on GitHub. Your team's notes about all of them are kept in {notes}, on this computer only."; `reposOneRepo` "This project is one repository, {name}."; the table's heads, buttons, dialogs and Today's notice and card in the mockups' words, one key each.
+- **Settings:** `reposSummary` "The repositories your team works across"; `reposLead` "Your team works across these. Each stays its own repository on GitHub. Your team's notes about all of them are kept in {notes}, on this computer only.", `{notes}` being `shownPath(projectRoot, home)`; `reposOneRepo` "This project is one repository, {name}.", `{name}` the project root's last segment, as `Shell.tsx:98` names it; the table's heads, buttons, dialogs and Today's notice and card in the mockups' words, one key each.
 
 ## File map
 
@@ -157,7 +157,7 @@ export type Repos = { repos: Repo[] | null; home: string | null };
 ```
 
 ```rust
-// catervas_store
+// catervas_runtime
 // DaemonState gains `pub fn home(&self) -> Option<&Path>`; ContractSummary gains `repo: Option<…>`; TaskProjection gains `pub repo: Option<String>`; Moved gains `pub task: Option<TaskId>`, `pub repo: Option<String>`
 ```
 
@@ -262,5 +262,5 @@ Files: `Files.tsx`; `files.ts`; `FileDocument.tsx`; `Shell.tsx`; `en.ts`; the te
 cargo xtask check --integration      # or /tmp/claude-0/fullcheck.sh in the cloud container; includes pnpm check
 # expected: xtask check: ok
 pnpm --filter web e2e -- setup-project
-# expected: 2 passed (the one-folder journey and takes_on_a_project_folder)
+# expected: 2 passed (the one-folder journey and "a project of two repositories is set up through the wizard")
 ```
