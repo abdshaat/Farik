@@ -88,7 +88,7 @@ Tests (`Feed.test.tsx`, rendering `Feed` in a small harness whose rows and props
 - `offers_earlier_by_button_and_says_when_it_failed` — `more`: "Show earlier messages" is inside `box`, before the list, and pressing it calls `onEarlier`; `paging` `"busy"`: the button is busy; `"failed"`: the alert reads `channelEarlierFailed`; `more` false: no button.
 - `passes_axe` — with the button "New messages" showing and "Show earlier messages" showing: no violations.
 
-- [ ] `feat(web): add a chat feed that opens at the newest message`
+- [x] `feat(web): add a chat feed that opens at the newest message`
 
 ### Task 2: the shell gives the chats the window; two panes
 

@@ -1,0 +1,41 @@
+/* The messages of a chat, between its head and its box, scrolling on their own. */
+.feed {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 0;
+	min-height: 0;
+}
+
+/* The browser's own anchoring would move the view a second time after the feed has. */
+.scroller {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 0;
+	gap: var(--catervas-space-4);
+	overflow-y: auto;
+	overflow-anchor: none;
+}
+
+.scroller:focus-visible {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: -2px;
+}
+
+/* A short chat sits right above the box, and a long one still reaches its top. */
+.scroller > :first-child {
+	margin-top: auto;
+}
+
+.alert {
+	margin: 0;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+}
+
+.jump {
+	position: absolute;
+	bottom: var(--catervas-space-3);
+	left: 50%;
+	transform: translateX(-50%);
+}
