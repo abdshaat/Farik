@@ -204,7 +204,7 @@ Files: `verify.rs` (`run_what_catervas_runs`, `:153-199`); `criteria.rs` (`NewTe
 - 5.4: checks run in the task's member
 - 8.5: when `project.scanned` and `criteria.updated` are recorded in a project folder
 
-- [ ] `docs(spec): record checks and scans per member`
+- [x] `docs(spec): record checks and scans per member`
 
 ## Verification
 
