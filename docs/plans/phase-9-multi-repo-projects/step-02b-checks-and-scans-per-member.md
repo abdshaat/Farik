@@ -151,7 +151,7 @@ Files: `readiness.rs` (the rule after `RepoUnknown` in `CHECKS`, `required_crite
 - `requires_no_command_of_such_an_epic`: with `rules.required_criteria: [command]` and `repos: Some([app])`, an epic with only a `review` criterion passes `RequiredCriteriaPresent`; with `repos: None` it fails it. RED.
 - `plain_readiness_covers_every_rule` passes with 32, and the daemon's totals read 31 and 33. RED: the counts.
 
-- [ ] `feat(core): an epic across repositories gives its commands to its tasks`
+- [x] `feat(core): an epic across repositories gives its commands to its tasks`
 
 ### Task 3: Scanning the members
 

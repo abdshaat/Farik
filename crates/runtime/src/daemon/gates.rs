@@ -1284,6 +1284,10 @@ pub(super) mod tests {
         assert_eq!(named(ReadinessRule::RepoNotAllowed), "repo_not_allowed");
         assert_eq!(named(ReadinessRule::RepoRequired), "repo_required");
         assert_eq!(named(ReadinessRule::RepoUnknown), "repo_unknown");
+        assert_eq!(
+            named(ReadinessRule::EpicCommandInProjectFolder),
+            "epic_command_in_project_folder"
+        );
     }
 
     /// The reply frame to `method` with `params`, answered on a runtime of its own.
@@ -3775,7 +3779,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-1", "contract": draft }),
             "contractCheckResult",
         );
-        assert_eq!(checked["total"], 30, "{checked}");
+        assert_eq!(checked["total"], 31, "{checked}");
         let failures = checked["failures"].as_array().expect("failures");
         assert_eq!(failures.len(), 1, "{checked}");
         assert_eq!(failures[0]["rule"], "reviewer_available");
@@ -4452,7 +4456,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-3", "contract": contract }),
             "contractCheckResult",
         );
-        assert_eq!(checked, json!({ "failures": [], "total": 32 }));
+        assert_eq!(checked, json!({ "failures": [], "total": 33 }));
 
         // The activity and what moved answer in their shapes.
         query(

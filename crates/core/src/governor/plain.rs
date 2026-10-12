@@ -33,6 +33,9 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
             "The plan changes code in a project with several repositories and does not say which one."
         }
         ReadinessRule::RepoUnknown => "The plan names a repository this project does not have.",
+        ReadinessRule::EpicCommandInProjectFolder => {
+            "The epic asks for a command to run, and with several repositories its tasks run them. Move it to the tasks."
+        }
         ReadinessRule::OutOfScopePresent => "The plan does not say what it leaves out.",
         ReadinessRule::DependenciesReady => "Work this plan depends on is not ready yet.",
         ReadinessRule::RequiredCriteriaPresent => {
@@ -89,7 +92,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 31] = [
+    const EVERY_RULE: [ReadinessRule; 32] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
@@ -101,6 +104,7 @@ mod tests {
         RepoNotAllowed,
         RepoRequired,
         RepoUnknown,
+        EpicCommandInProjectFolder,
         OutOfScopePresent,
         DependenciesReady,
         RequiredCriteriaPresent,
@@ -137,6 +141,7 @@ mod tests {
             | RepoNotAllowed
             | RepoRequired
             | RepoUnknown
+            | EpicCommandInProjectFolder
             | OutOfScopePresent
             | DependenciesReady
             | RequiredCriteriaPresent

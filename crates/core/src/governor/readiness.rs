@@ -53,6 +53,9 @@ pub enum ReadinessRule {
     RepoRequired,
     /// The task's `repo` is not one of the project folder's member repositories.
     RepoUnknown,
+    /// An epic in a project folder has a `command` or `test` criterion: such an epic runs no
+    /// command, since it has no repository to run one in, so its tasks carry them.
+    EpicCommandInProjectFolder,
     /// Scope names at least one `out_of_scope` item that is not blank.
     OutOfScopePresent,
     /// Every listed dependency exists and is at least `ready`.
@@ -193,7 +196,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 29] = [
+const CHECKS: [Check; 30] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -205,6 +208,7 @@ const CHECKS: [Check; 29] = [
     repo_not_allowed,
     repo_required,
     repo_unknown,
+    epic_command_in_project_folder,
     out_of_scope_present,
     dependencies_ready,
     required_criteria_present,
@@ -534,12 +538,14 @@ fn required_criteria_present(
         .collect();
     // A task in a private folder has no worktree to run a command or a test in.
     let in_a_folder = task_private_folder(contract).is_some();
+    // So has an epic in a project folder: it runs no command, its tasks do.
+    let runs_none = in_a_folder || (context.repos.is_some() && contract.kind == Kind::Epic);
     let missing: Vec<&str> = context
         .rules
         .required_criteria
         .iter()
         .map(String::as_str)
-        .filter(|method| !(in_a_folder && matches!(*method, "command" | "test")))
+        .filter(|method| !(runs_none && matches!(*method, "command" | "test")))
         .filter(|method| !methods.contains(method))
         .collect();
     if missing.is_empty() {
@@ -655,6 +661,35 @@ fn repo_unknown(contract: &TaskContract, context: &ReadinessContext) -> Option<R
             repos.join(", ")
         ),
     ))
+}
+
+fn epic_command_in_project_folder(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    if context.repos.is_none() || contract.kind != Kind::Epic {
+        return None;
+    }
+    let commands = criterion_ids(contract, |verification, _| runs_a_command(verification));
+    if commands.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::EpicCommandInProjectFolder,
+        format!(
+            "an epic in a project of several repositories runs no command: give {} to its tasks \
+             instead",
+            commands.join(", ")
+        ),
+    ))
+}
+
+/// Whether a criterion runs a command: a `command` or a `test`.
+fn runs_a_command(verification: &Verification) -> bool {
+    matches!(
+        verification,
+        Verification::Command { .. } | Verification::Test { .. }
+    )
 }
 
 /// Splits a glob at its first `*`, `?`, `[`, or `{` into its literal prefix and the rest.
@@ -2324,6 +2359,82 @@ mod tests {
         );
         let unknown = in_repo(a_task_for(Role::Architect, &["docs/**"]), "web");
         assert_eq!(failed_repo_rules(&unknown, &context), [R::RepoNotAllowed]);
+    }
+
+    /// `contract` with `criteria` (wire exit criteria) in place of its own.
+    fn with_criteria(contract: &TaskContract, criteria: serde_json::Value) -> TaskContract {
+        let mut wire = serde_json::to_value(contract).expect("serializes");
+        wire["exit_criteria"] = criteria;
+        validate_contract(&wire).expect("a contract with these criteria")
+    }
+
+    fn a_command_and_a_review() -> serde_json::Value {
+        json!([
+            { "id": "C1", "text": "The check passes in the repository.",
+              "verification": { "method": "command", "command": "cargo test",
+                                "expect": { "exit_code": 0 } } },
+            { "id": "C2", "text": "A reviewer read the plan.",
+              "verification": { "method": "review", "rubric": ["Is the plan clear?"] } }
+        ])
+    }
+
+    #[test]
+    fn an_epic_in_a_project_folder_runs_no_command() {
+        let mut epic = a_task_for(Role::Architect, &["docs/**"]);
+        epic.kind = Kind::Epic;
+        let epic = with_criteria(&epic, a_command_and_a_review());
+        let context = a_project_folder_context(&["app"]);
+        assert!(rules_failed(&epic, &context).contains(&R::EpicCommandInProjectFolder));
+        assert_eq!(
+            message_of(&epic, &context, R::EpicCommandInProjectFolder),
+            "an epic in a project of several repositories runs no command: give C1 to its tasks \
+             instead"
+        );
+        // A test criterion is a command too.
+        let mut tested = a_command_and_a_review();
+        tested[1] = json!({ "id": "C2", "text": "The tests pass in the repository.",
+            "verification": { "method": "test", "command": "cargo test" } });
+        let tested = with_criteria(&epic, tested);
+        assert_eq!(
+            message_of(&tested, &context, R::EpicCommandInProjectFolder),
+            "an epic in a project of several repositories runs no command: give C1, C2 to its \
+             tasks instead"
+        );
+
+        // The same epic in a project of one repository, and a task in a project folder.
+        assert!(!rules_failed(&epic, &a_ready_context()).contains(&R::EpicCommandInProjectFolder));
+        let task = with_criteria(
+            &in_repo(a_task_for(Role::SoftwareDeveloper, &["src/**"]), "app"),
+            a_command_and_a_review(),
+        );
+        assert!(
+            !rules_failed(&task, &context).contains(&R::EpicCommandInProjectFolder),
+            "a task keeps its commands"
+        );
+    }
+
+    #[test]
+    fn requires_no_command_of_such_an_epic() {
+        let mut epic = a_task_for(Role::Architect, &["docs/**"]);
+        epic.kind = Kind::Epic;
+        let epic = with_criteria(
+            &epic,
+            json!([{ "id": "C1", "text": "A reviewer read the plan.",
+                     "verification": { "method": "review", "rubric": ["Is the plan clear?"] } }]),
+        );
+        let mut context = a_project_folder_context(&["app"]);
+        context.rules.required_criteria = vec!["command".to_string()];
+        assert!(!rules_failed(&epic, &context).contains(&R::RequiredCriteriaPresent));
+        let mut alone = a_ready_context();
+        alone.rules.required_criteria = vec!["command".to_string()];
+        assert!(rules_failed(&epic, &alone).contains(&R::RequiredCriteriaPresent));
+    }
+
+    fn rules_failed(contract: &TaskContract, context: &ReadinessContext) -> Vec<R> {
+        match evaluate_readiness(contract, context) {
+            Ok(()) => vec![],
+            Err(failures) => failures.iter().map(|failure| failure.rule).collect(),
+        }
     }
 
     #[test]
