@@ -6,8 +6,11 @@ use std::path::Path;
 
 use catervas_core::repos::{Repo, Repos, check_member};
 use catervas_protocol::event::EventBody;
+use catervas_protocol::generated::event::CriteriaUpdatedBody;
 use catervas_store::Git;
+use catervas_store::files::FilesError;
 use catervas_store::repos::{MemberPathRefusal, member_root, repo_present};
+use catervas_store::scan::{CATERVAS_ACTOR, names_of, rescan_members, reseeded};
 use serde_json::{Value, json};
 
 use super::DaemonState;
@@ -138,6 +141,47 @@ fn check(
     Ok(text.to_string())
 }
 
+/// Scans the members again, `only` one of them when it is named, as Catervas's own doing. A
+/// member's scan error is in the read-back; anything else answers `INTERNAL_ERROR`, and the member
+/// stays added, moved or removed.
+fn rescan(deps: &ToolDeps, only: Option<&str>) -> Result<(), Failure> {
+    rescan_members(
+        &deps.files,
+        &deps.log,
+        &deps.ids,
+        deps.clock.now(),
+        only,
+        CATERVAS_ACTOR,
+    )
+    .map_err(|e| internal(&e))?;
+    deps.projections.catch_up().map_err(|e| internal(&e))?;
+    Ok(())
+}
+
+/// Drops the checks the scan found in the member `name`, which no longer is one, and records the
+/// library when anything went. A person's entry that names it stays.
+fn drop_the_checks_of(deps: &ToolDeps, name: &str) -> Result<(), Failure> {
+    let existing = match deps.files.read_criteria() {
+        Ok(library) => library,
+        Err(FilesError::NotFound { .. }) => return Ok(()),
+        Err(other) => return Err(internal(&other)),
+    };
+    let (library, _) = reseeded(&[], Some(&existing), &[name]);
+    if library == existing {
+        return Ok(());
+    }
+    deps.files
+        .write_criteria(&library)
+        .map_err(|e| internal(&e))?;
+    append(
+        deps,
+        EventBody::CriteriaUpdated(CriteriaUpdatedBody {
+            criterion_names: names_of(&library.criteria),
+            updated_by: CATERVAS_ACTOR.to_string(),
+        }),
+    )
+}
+
 /// `repo.add`.
 fn add(deps: &ToolDeps, home: Option<&Path>, params: &Value) -> Result<Value, Failure> {
     let Some(repos) = deps.files.read_repos().map_err(|e| internal(&e))? else {
@@ -177,6 +221,7 @@ fn add(deps: &ToolDeps, home: Option<&Path>, params: &Value) -> Result<Value, Fa
     }))
     .map_err(|e| internal(&e))?;
     append(deps, EventBody::RepoAdded(body))?;
+    rescan(deps, Some(name))?;
     Ok(json!({}))
 }
 
@@ -206,6 +251,8 @@ fn remove(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         .map_err(|e| internal(&e))?;
     let body = serde_json::from_value(json!({ "name": name })).map_err(|e| internal(&e))?;
     append(deps, EventBody::RepoRemoved(body))?;
+    drop_the_checks_of(deps, name)?;
+    rescan(deps, None)?;
     Ok(json!({}))
 }
 
@@ -251,6 +298,7 @@ fn locate(deps: &ToolDeps, home: Option<&Path>, params: &Value) -> Result<Value,
     let body =
         serde_json::from_value(json!({ "name": name, "path": path })).map_err(|e| internal(&e))?;
     append(deps, EventBody::RepoMoved(body))?;
+    rescan(deps, Some(name))?;
     Ok(json!({}))
 }
 
@@ -259,6 +307,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
+    use catervas_core::criteria::validate_criteria;
     use catervas_core::repos::validate_repos;
     use catervas_core::team::Team;
     use catervas_protocol::event::{EventBody, EventKind};
@@ -551,6 +600,163 @@ mod tests {
             "{reply}"
         );
         assert!(!one.repo.path.join(".catervas/repos.yaml").exists());
+    }
+
+    /// `repository` made a vitest project, as the scan reads one.
+    fn made_a_vitest_project(repository: &TempRepo) {
+        repository.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+        repository.write(
+            "package.json",
+            "{\"name\":\"member\",\"scripts\":{\"test\":\"vitest\"}}\n",
+        );
+        repository.write("src/index.ts", "export const one = 1;\n");
+        repository.commit("a vitest project");
+    }
+
+    /// The library `folder` holds, as `(name, text)` pairs in file order.
+    fn library_of(folder: &Folder) -> Vec<(String, String)> {
+        folder
+            .project
+            .deps
+            .files
+            .read_criteria()
+            .expect("the library reads")
+            .criteria
+            .iter()
+            .map(|one| (one.name.to_string(), one.text.to_string()))
+            .collect()
+    }
+
+    fn texts(library: &[(String, String)], name: &str) -> Option<String> {
+        library
+            .iter()
+            .find(|(held, _)| held == name)
+            .map(|(_, text)| text.clone())
+    }
+
+    /// The names a `criteria.updated` event lists, newest last, and who recorded it.
+    fn criteria_updates(folder: &Folder) -> Vec<(Vec<String>, String)> {
+        folder
+            .project
+            .events(&[EventKind::CriteriaUpdated])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::CriteriaUpdated(body) => Some((body.criterion_names, body.updated_by)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn scans(folder: &Folder) -> usize {
+        folder.project.events(&[EventKind::ProjectScanned]).len()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one block for each of add, locate and remove"
+    )]
+    fn scans_a_member_as_it_joins_and_leaves() {
+        let folder = folder("scans");
+        made_a_vitest_project(&folder.app);
+        // What an earlier scan left: a check of each member, and one a person wrote about web.
+        let library = validate_criteria(&json!({ "criteria": [
+            { "name": "app-the-tests-pass", "text": "Stale app text, to be rewritten.",
+              "source": "project_scan", "repo": "app",
+              "verification": { "method": "test", "command": "npm run test" } },
+            { "name": "infra-the-tests-pass", "text": "Stale infra text, to be kept.",
+              "source": "project_scan", "repo": "infra",
+              "verification": { "method": "test", "command": "cargo test" } },
+            { "name": "shop-check", "text": "A person wrote this one about web.",
+              "source": "human", "repo": "web",
+              "verification": { "method": "human", "question": "Does the shop work?" } },
+        ]}))
+        .expect("a library");
+        folder
+            .project
+            .deps
+            .files
+            .write_criteria(&library)
+            .expect("the library is written");
+
+        // Add: the new member's checks join; the others are untouched.
+        let web = TempRepo::new("repos-scans-web");
+        made_a_vitest_project(&web);
+        call(
+            &folder.state,
+            "repo.add",
+            &json!({ "name": "web", "path": named(&web.path) }),
+            "emptyResult",
+        );
+        let held = library_of(&folder);
+        assert_eq!(
+            texts(&held, "web-the-tests-pass").as_deref(),
+            Some("Every test passes: the project's own test script.")
+        );
+        assert_eq!(
+            texts(&held, "app-the-tests-pass").as_deref(),
+            Some("Stale app text, to be rewritten."),
+            "app was not scanned"
+        );
+        assert_eq!(scans(&folder), 1);
+        let updates = criteria_updates(&folder);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].1, "catervas");
+        assert!(updates[0].0.contains(&"web-the-tests-pass".to_string()));
+
+        // Locate: the member at its new path is scanned alone.
+        let moved = folder.app.path.with_extension("moved");
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&folder.app.path, &moved).expect("app is moved");
+        call(
+            &folder.state,
+            "repo.locate",
+            &json!({ "name": "app", "path": named(&moved) }),
+            "emptyResult",
+        );
+        let held = library_of(&folder);
+        assert_eq!(
+            texts(&held, "app-the-tests-pass").as_deref(),
+            Some("Every test passes: the project's own test script.")
+        );
+        assert_eq!(
+            texts(&held, "infra-the-tests-pass").as_deref(),
+            Some("Stale infra text, to be kept."),
+            "infra was not scanned"
+        );
+        assert_eq!(scans(&folder), 2);
+
+        // Remove: the member's checks go, a person's stay, and project.md forgets it.
+        call(
+            &folder.state,
+            "repo.remove",
+            &json!({ "name": "web" }),
+            "emptyResult",
+        );
+        let held = library_of(&folder);
+        assert_eq!(texts(&held, "web-the-tests-pass"), None);
+        assert!(
+            texts(&held, "shop-check").is_some(),
+            "a person's entry stays"
+        );
+        assert!(texts(&held, "app-the-tests-pass").is_some());
+        let updates = criteria_updates(&folder);
+        assert!(updates.len() >= 3, "{updates:?}");
+        let last = updates.last().expect("an update");
+        assert_eq!(last.1, "catervas");
+        assert!(!last.0.contains(&"web-the-tests-pass".to_string()));
+        assert_eq!(scans(&folder), 3);
+        let document = folder
+            .project
+            .deps
+            .files
+            .read_project_scan()
+            .expect("project.md reads");
+        assert!(!document.contains("web:"), "{document}");
+        assert!(!document.contains("web-the-tests-pass"), "{document}");
+        assert!(document.contains("app: "), "{document}");
+        let _ = std::fs::remove_dir_all(&moved);
     }
 
     #[test]

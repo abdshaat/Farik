@@ -5542,7 +5542,8 @@
         "facts",
         "checks",
         "app_start",
-        "kept_private"
+        "kept_private",
+        "repos"
       ],
       "properties": {
         "facts": {
@@ -5637,6 +5638,50 @@
             "type": "string"
           },
           "description": "The protected-path globs that match something on disk, walked four folders deep without .git and node_modules, over at most 2000 entries."
+        },
+        "repos": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "facts",
+              "checks",
+              "error"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The member repository's name."
+              },
+              "facts": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "What the scan found in the member, shaped as the project's own facts; null when the member is not there or its scan failed."
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The text of each check the member's scan found; empty when it was not read."
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why the member was not read: not found, or the scan's own sentence; null when it was read."
+              }
+            }
+          },
+          "description": "One row per member repository in repos.yaml order, each from a scan of that member alone; null for a project of one repository. The facts, checks and app_start above stay the project folder's own."
         }
       }
     },

@@ -183,7 +183,7 @@ Files: `init.rs` (the project-folder branch, in the Decisions' order); `daemon/r
 - `answers_each_members_scan` (`daemon/team.rs`): `project.scan` in a project folder answers `repos` with `app` and `infra`, each with its facts, checks and `error: null`. With `infra` moved away its row has `facts: null`, `checks: []` and `error: "not found"`. In a one-repo project it answers `repos: null`. RED: no field.
 - `never_rescans_a_project_folder_itself` (`integrate.rs`, `Harness::project_folder_with(.., with_the_suggested_six)`, step 02's): integrating an Architect's docs task, which names no `repo`, leaves `app-the-tests-pass` in the library and answers `Unchanged`. RED: `seeded_library` drops it.
 
-- [ ] `feat(runtime): scan a project folder's members when they join, move or leave`
+- [x] `feat(runtime): scan a project folder's members when they join, move or leave`
 
 ### Task 5: A task's checks run in its member
 

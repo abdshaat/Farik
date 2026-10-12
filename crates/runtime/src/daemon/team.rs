@@ -22,7 +22,8 @@ use catervas_protocol::command::{Command, CommandReply};
 use catervas_protocol::event::{EventBody, new_event};
 use catervas_protocol::generated::event::{CriteriaUpdatedBody, TeamUpdatedBody};
 use catervas_roles::{Kit, KitConnector, load_role};
-use catervas_store::{EventQuery, names_of, scan_project};
+use catervas_store::repos::repo_present;
+use catervas_store::{EventQuery, Git, names_of, scan_project};
 use serde_json::{Value, json};
 
 use super::signed_in::Binding;
@@ -1512,24 +1513,63 @@ fn scanned(deps: &ToolDeps) -> Result<Value, Failure> {
             )
         })
         .collect();
-    let facts = &scan.facts;
     Ok(json!({
-        "facts": {
-            "language": facts.language,
-            "toolchain": facts.toolchain,
-            "workspace": facts.workspace,
-            "packages": facts.packages,
-            "tests_in": facts.tests_in,
-            "tracked_files": facts.tracked_files,
-            "last_commit": facts.last_commit,
-        },
+        "facts": facts_json(&scan.facts),
         "checks": scan.detected_criteria.iter().map(|one| one.text.to_string()).collect::<Vec<_>>(),
         "app_start": scan.app_start.as_ref().map(|app| json!({
             "prepare": app.prepare,
             "start": app.start,
         })),
         "kept_private": kept_private,
+        "repos": members_scanned(deps)?,
     }))
+}
+
+/// What one scan found, as the rows the browser shows.
+fn facts_json(facts: &catervas_store::ScanFacts) -> Value {
+    json!({
+        "language": facts.language,
+        "toolchain": facts.toolchain,
+        "workspace": facts.workspace,
+        "packages": facts.packages,
+        "tests_in": facts.tests_in,
+        "tracked_files": facts.tracked_files,
+        "last_commit": facts.last_commit,
+    })
+}
+
+/// Each member of a project folder scanned on its own, in `repos.yaml` order, or null for a
+/// project of one repository. A member that is not there, or whose scan fails, has no facts and
+/// no checks, and says why.
+fn members_scanned(deps: &ToolDeps) -> Result<Value, Failure> {
+    let Some(repos) = deps.files.read_repos().map_err(|e| internal(&e))? else {
+        return Ok(Value::Null);
+    };
+    let rows: Vec<Value> = repos
+        .repos
+        .iter()
+        .map(|member| {
+            let (name, path) = (member.name.as_str(), Path::new(member.path.as_str()));
+            let scanned = if repo_present(path) {
+                scan_project(&Git::open(path.to_path_buf()), deps.clock.now())
+                    .map_err(|error| error.to_string())
+            } else {
+                Err("not found".to_string())
+            };
+            match scanned {
+                Ok(scan) => json!({
+                    "name": name,
+                    "facts": facts_json(&scan.facts),
+                    "checks": scan.detected_criteria.iter().map(|one| one.text.to_string()).collect::<Vec<_>>(),
+                    "error": null,
+                }),
+                Err(error) => json!({
+                    "name": name, "facts": null, "checks": [], "error": error,
+                }),
+            }
+        })
+        .collect();
+    Ok(Value::Array(rows))
 }
 
 /// Adds the paths under `dir`, as `prefix` and each name, to `found`, in name order and folders
@@ -4730,6 +4770,80 @@ pub(super) mod tests {
             uncapped["kept_private"],
             json!([".env", "**/*.pem", "**/*.key"])
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_each_members_scan() {
+        let (harness, members) = Harness::project_folder("project-scan-members", &["app", "infra"]);
+        let (app, infra) = (&members[0], &members[1]);
+        app.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+        app.write(
+            "package.json",
+            "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\"}}\n",
+        );
+        app.write("src/index.ts", "export const one = 1;\n");
+        app.commit("an app");
+        infra.write("Cargo.lock", "version = 4\n");
+        infra.write("Cargo.toml", "[package]\nname = \"infra\"\n");
+        infra.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+        infra.commit("an infra");
+        let scan = || {
+            query(
+                &harness.daemon,
+                "project.scan",
+                &json!({}),
+                "projectScanResult",
+            )
+        };
+
+        let scanned = scan();
+        let facts_of = |repository: &catervas_store::git::fixtures::TempRepo| {
+            let found = catervas_store::scan_project(&repository.adapter(), at()).expect("scans");
+            (
+                json!({
+                    "language": found.facts.language,
+                    "toolchain": found.facts.toolchain,
+                    "workspace": found.facts.workspace,
+                    "packages": found.facts.packages,
+                    "tests_in": found.facts.tests_in,
+                    "tracked_files": found.facts.tracked_files,
+                    "last_commit": found.facts.last_commit,
+                }),
+                found
+                    .detected_criteria
+                    .iter()
+                    .map(|one| one.text.to_string())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let (app_facts, app_checks) = facts_of(app);
+        let (infra_facts, infra_checks) = facts_of(infra);
+        assert_eq!(
+            scanned["repos"],
+            json!([
+                { "name": "app", "facts": app_facts, "checks": app_checks, "error": null },
+                { "name": "infra", "facts": infra_facts, "checks": infra_checks, "error": null },
+            ])
+        );
+        assert_ne!(app_checks, infra_checks);
+
+        // A member that is away has no facts and says why; the other is still read.
+        let away = infra.path.with_extension("away");
+        let _ = std::fs::remove_dir_all(&away);
+        std::fs::rename(&infra.path, &away).expect("infra is moved away");
+        let scanned = scan();
+        assert_eq!(
+            scanned["repos"][1],
+            json!({ "name": "infra", "facts": null, "checks": [], "error": "not found" })
+        );
+        assert_eq!(scanned["repos"][0]["error"], Value::Null);
+        std::fs::rename(&away, &infra.path).expect("infra is moved back");
+
+        // A project of one repository answers null.
+        let one = driven("project-scan-one");
+        let scanned = query(&one.daemon, "project.scan", &json!({}), "projectScanResult");
+        assert_eq!(scanned["repos"], Value::Null);
     }
 
     /// A pnpm project committed to `harness`'s repository, with `scripts` in its `package.json`.
