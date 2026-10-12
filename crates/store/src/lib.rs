@@ -25,6 +25,8 @@ pub mod folder_docs;
 pub mod git;
 /// The team's documents kept on this computer.
 pub mod local_documents;
+/// The machine-level index of the owner's Claude Code history, apart from every project's log.
+pub mod machine;
 /// The marketing plans the log holds.
 pub mod marketing;
 /// Whether Catervas may merge its pull requests on this computer.

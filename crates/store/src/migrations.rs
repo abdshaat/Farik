@@ -108,13 +108,44 @@ pub(crate) fn apply_through(
     last_version: i64,
     now: DateTime<Utc>,
 ) -> Result<(), StoreError> {
+    apply_list(connection, &MIGRATIONS, last_version, now)
+}
+
+/// The migrations of the machine-level index (`machine.db`), numbered apart from a project log's so
+/// the two never meet in one folder.
+const MACHINE_MIGRATIONS: [Migration; 1] = [Migration {
+    version: 1,
+    sql: include_str!("migrations/machine/0001_history.sql"),
+}];
+
+/// Brings the machine-level index to the shape this version expects.
+///
+/// # Errors
+///
+/// As `apply`.
+pub(crate) fn apply_machine(
+    connection: &mut Connection,
+    now: DateTime<Utc>,
+) -> Result<(), StoreError> {
+    let last = MACHINE_MIGRATIONS
+        .last()
+        .map_or(0, |migration| migration.version);
+    apply_list(connection, &MACHINE_MIGRATIONS, last, now)
+}
+
+fn apply_list(
+    connection: &mut Connection,
+    list: &[Migration],
+    last_version: i64,
+    now: DateTime<Utc>,
+) -> Result<(), StoreError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version    INTEGER PRIMARY KEY,
             applied_at TEXT NOT NULL
         ) STRICT;",
     )?;
-    for migration in MIGRATIONS
+    for migration in list
         .iter()
         .take_while(|migration| migration.version <= last_version)
     {

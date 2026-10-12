@@ -204,7 +204,7 @@ Files: `migrations.rs`; `0001_history.sql`; `machine.rs` (open, forget, `applied
 - `opens_the_machine_index_and_records_its_migration`: `open_machine_index` on a path in a folder not yet made makes both; `applied_migrations` is `[1]`; opening again applies nothing and keeps `[1]`; the four tables exist. The event log's `known_versions()` is unchanged. RED: no module.
 - `forgets_the_machine_index`: with `machine.db` and a `machine.db-journal` beside it, `forget_machine_index` answers `true` and both are gone, the folder and a `state.json` in it kept; again, `false`. RED.
 
-- [ ] `feat(store): keep a machine-level index of claude code history`
+- [x] `feat(store): keep a machine-level index of claude code history`
 
 ### Task 4: Reading the transcripts into the index
 
