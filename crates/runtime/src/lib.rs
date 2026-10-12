@@ -114,27 +114,41 @@ pub(crate) fn locked<Value>(mutex: &std::sync::Mutex<Value>) -> std::sync::Mutex
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Writes `bytes` to `path` readable by its owner alone, replacing whatever was there. The file is
-/// removed first, because a mode is only given to a file as it is created, and a file left
-/// behind may be readable by others.
+/// Writes `bytes` to `path` readable by its owner alone, replacing whatever was there, whole. The
+/// bytes go to a temporary file beside `path` (mode 0600 from its creation, so it is never
+/// readable by others), are synced, and the file is renamed over `path`: a reader sees the whole
+/// old file or the whole new one, never a missing or half-written one. On an error the temporary
+/// file is removed.
 ///
 /// # Errors
 ///
-/// The error of removing the old file, or of creating or writing the new one.
+/// The error of creating, writing or syncing the temporary file, or of renaming it into place.
 #[cfg(unix)]
 pub fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
-    match std::fs::remove_file(path) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
-        _ => {}
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = path.with_file_name(format!(
+        ".{name}.{}.{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temporary);
     }
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?
-        .write_all(bytes)
+    written
 }
 
 pub use exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
