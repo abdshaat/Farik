@@ -47,8 +47,8 @@ Checks, branches and epics per repository are ADR 0057's amendment of 2026-10-12
   - In a one-repo project `repo` is refused.
 - Readiness adds three refusals:
   - `repo_unknown`: the name is not a member.
-  - `repo_required`: a builder's task names no repository.
-  - `repo_not_allowed`: a one-repo project names one, or a docs task does.
+  - `repo_required`: a task of a role that changes code names no repository, and some of its allowed paths is not a document path.
+  - `repo_not_allowed`: a one-repo project names one, or an epic does, or a task of a role that does not change code does.
 - `allowed_paths` are relative to the task's repository, or to the project folder for a docs task. `folder_owned` applies to the project folder's `docs/catervas/`. `lanes_overlap` compares only tasks in the same repository.
 - A task's branch and its git worktree come from its repository. The worktree goes under the project folder's `.catervas/local/worktrees/CTV-<n>`, and the branch keeps phase 3's naming. The Definition of Done reads the diff from that repository.
 - Task ids stay one counter for the whole project. The counter moves past every `feature|fix|docs/CTV-<n>` branch in every member and in the project folder (ADR 0053's rule, extended to each repository).
@@ -113,7 +113,7 @@ Phase 8's PM → Architect → PM → Scrum Master flow, with these changes:
 3. Records both members.
 4. Removes `.catervas/` and `docs/catervas/` from that repository in one commit, integrated by the team's policy, since the documents now live locally.
 
-Tasks that are not done keep their ids and gain the first member's `repo`. Serve restarts the drive on the project folder, as ADR 0053's switch does, and the new member's Catervafication is offered.
+Tasks that are not done keep their ids; a task of a role that changes code, with an allowed path that is not a document path, gains the first member's `repo`. Serve restarts the drive on the project folder, as ADR 0053's switch does, and the new member's Catervafication is offered.
 
 ## Screens (mocked up first)
 
