@@ -5,6 +5,8 @@
 pub mod branch;
 /// Budgets and limits: session limits, the session ledger, and the budget check.
 pub mod budget;
+/// What Claude Code's history says: one transcript line, and where each session belongs.
+pub mod claude_history;
 /// The task contract and its validator.
 pub mod contract;
 /// The criterion library and its validator.

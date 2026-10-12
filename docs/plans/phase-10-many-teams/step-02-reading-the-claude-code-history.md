@@ -183,7 +183,7 @@ Files: `claude_history.rs` (the line reader and `once_per_reply`); `fixtures.rs`
 - `reads_a_line_tolerantly`: a turn with an unknown extra field reads; one with `timestamp` `"yesterday"` is `Unreadable`; an `assistant` with no `message.id` and no `requestId` is a `Turn` with no reply; one with `usage` lacking `cache_read_input_tokens` reads it as 0; an `ai-title` of 300 characters is cut to 200, of `"  "` is `Other`; `""` and `[]` are `Unreadable`. RED.
 - `counts_a_reply_once`: `once_per_reply` of 10/1/1000/200 and 10/40/1000/200 is 10/40/1000/200 either way round, and of a value with itself is that value. RED.
 
-- [ ] `feat(core): read a claude code transcript line`
+- [x] `feat(core): read a claude code transcript line`
 
 ### Task 2: Placing folders and sessions in core
 
