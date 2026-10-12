@@ -279,7 +279,7 @@ fn judge(
 
 /// Whether the contract is judged now: written since refining began with no refusal by the
 /// governor since that write, or, with no such write, filed whole (a breakdown's task, a contract
-/// the human holds, a twin's re-derive, a new project's product plan, a Catervafication's epic) and not refused
+/// the human holds, a twin's re-derive, an owner's change or rewrite, a new project's product plan, a Catervafication's epic) and not refused
 /// since refining began. A raw request is not judged: its brief would fail and spend one of the three attempts.
 fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u64) -> bool {
     let refused_after = |after: u64| {
@@ -295,7 +295,7 @@ fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u6
         .find(|event| event.envelope.seq > began && event.body.kind() == EventKind::ContractWritten)
         .map(|event| event.envelope.seq);
     let is_a_rederive = history.iter().any(
-        |event| matches!(&event.body, EventBody::TaskCreated(body) if body.rederives.is_some()),
+        |event| matches!(&event.body, EventBody::TaskCreated(body) if body.rederives.is_some() || body.filed_as.is_some()),
     );
     // The product plan's task and the Catervafication's epic are Catervas's contracts, filed
     // whole: no refine session rewrites them.
@@ -2078,6 +2078,53 @@ mod tests {
             (deps.clock.now(), &deps.ids),
         )
         .expect("the re-derive is filed");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            moves_of(&harness, "CTV-1"),
+            ["draft -> refining", "refining -> ready"]
+        );
+        assert!(
+            adapter.started().is_empty(),
+            "no refine session rewrites it"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_owners_change_is_judged_without_refining() {
+        use catervas_core::contract::Role;
+        use catervas_protocol::event::TaskCreatedBodyFiledAs;
+        use catervas_store::requests::{change_request, file_small_request};
+
+        let harness = Harness::new(
+            "req-owner-change-whole",
+            crate::tools::fixtures::with_the_designer,
+        );
+        let deps = &harness.project.deps;
+        let path = "docs/catervas/architecture/overview.html";
+        file_small_request(
+            &deps.files,
+            &deps.log,
+            change_request(
+                path,
+                None,
+                "Overview",
+                "Say less.",
+                Role::Architect,
+                Role::ProductManager,
+                2.0,
+            ),
+            "human",
+            TaskCreatedBodyFiledAs::OwnerChange,
+            "the owner's change of Overview",
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("the change is filed");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 

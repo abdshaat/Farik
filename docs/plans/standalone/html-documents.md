@@ -354,7 +354,7 @@ Tests in each `mod tests`:
 - `refuses_an_ask_the_owner_may_not_make` — gives `not_editable` for an agent version or a marketing plan, `no_owner` for a folder with no active agent, and `no_task_taker` for `delivery/cadence.md`. Nothing is filed.
 - `rederive_keeps_its_reviewer` — `reviewer_for` answers what `file_rederive` chose before, for a team without the preferred reviewer.
 
-- [ ] `feat(runtime): the owner asks the team to change a document`
+- [x] `feat(runtime): the owner asks the team to change a document`
 
 ### Task 10: rewrite the documents as HTML
 

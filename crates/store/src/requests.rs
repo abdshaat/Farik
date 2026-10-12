@@ -21,7 +21,7 @@ use catervas_protocol::command::{Command, RequestSize, command_from_value};
 use catervas_protocol::event::{
     CatervaficationStartedBody, CatervaficationStartedBodyProject, CatervasEvent,
     ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds, EventKind,
-    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
+    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, TaskCreatedBodyFiledAs, new_event,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -219,6 +219,8 @@ pub fn file_request(
             rederives: None,
             product_plan: false,
             catervafies: None,
+            filed_as: None,
+            reason: None,
         },
         (now, ids),
     )
@@ -318,6 +320,8 @@ pub fn file_rederive_request(
             rederives: Some(twin),
             product_plan: false,
             catervafies: None,
+            filed_as: None,
+            reason: None,
         },
         (now, ids),
     )
@@ -350,6 +354,8 @@ pub fn file_raise_request(
             rederives: None,
             product_plan: false,
             catervafies: None,
+            filed_as: None,
+            reason: None,
         },
         (now, ids),
     )
@@ -450,6 +456,8 @@ pub fn file_product_plan_request(
             rederives: None,
             product_plan: true,
             catervafies: None,
+            filed_as: None,
+            reason: None,
         },
         (now, ids),
     )
@@ -482,6 +490,93 @@ pub fn file_catervafication_epic(
             rederives: None,
             product_plan: false,
             catervafies: Some(project),
+            filed_as: None,
+            reason: None,
+        },
+        (now, ids),
+    )
+}
+
+/// The longest title a contract has.
+const TITLE_LIMIT: usize = 120;
+
+/// The whole contract of the task that makes the change the owner asked `owner` for in `words`
+/// (`docs/SPEC.md` 5.17): `owner` writes it and `reviewer` checks it, within `max_cost_usd`. It
+/// may change `path` and `twin`, its agent version when it has one, and nothing else. `name` is
+/// the document's name on the Files page.
+#[must_use]
+pub fn change_request(
+    path: &str,
+    twin: Option<&str>,
+    name: &str,
+    words: &str,
+    owner: Role,
+    reviewer: Role,
+    max_cost_usd: f64,
+) -> Value {
+    let mut title = format!("Change {name}");
+    if title.chars().count() > TITLE_LIMIT {
+        title = title.chars().take(TITLE_LIMIT - 1).collect::<String>() + "…";
+    }
+    let paths: Vec<&str> = std::iter::once(path).chain(twin).collect();
+    let mut rubric = vec![
+        format!("{path} makes the change the owner's words ask for."),
+        format!("Nothing else in {path} changes."),
+    ];
+    if let Some(twin) = twin {
+        rubric.push(format!("{twin} says what {path} now says."));
+    }
+    json!({
+        "title": title,
+        "intent": format!(
+            "The owner asked on the Files page for a change to {path}, in these words:\n\n{words}"
+        ),
+        "scope": { "in_scope": paths, "out_of_scope": ["Every other file"] },
+        "requirements": [{ "id": "R1", "text": format!("{path} makes the change the owner asked for.") }],
+        "exit_criteria": [{
+            "id": "C1",
+            "text": format!("{path} makes the change the owner's words ask for."),
+            "satisfies": ["R1"],
+            "verification": { "method": "review", "rubric": rubric }
+        }],
+        "assignee_role": owner.to_string(),
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": paths
+    })
+}
+
+/// Files a whole contract for `created_by` that no refine session rewrites, as `file_request`
+/// files one: `task.created` carries `filed_as`, and `request.triaged { small, reason }` by
+/// `catervas` follows at once, so that no triage session runs.
+///
+/// # Errors
+///
+/// As `file_request`.
+pub fn file_small_request(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    created_by: &str,
+    filed_as: TaskCreatedBodyFiledAs,
+    reason: &str,
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            rederives: None,
+            product_plan: false,
+            catervafies: None,
+            filed_as: Some(filed_as),
+            reason: Some(reason),
         },
         (now, ids),
     )
@@ -497,6 +592,9 @@ struct Filing<'a> {
     rederives: Option<&'a str>,
     product_plan: bool,
     catervafies: Option<CatervaficationStartedBodyProject>,
+    filed_as: Option<TaskCreatedBodyFiledAs>,
+    /// Why `filed_as` is triaged small.
+    reason: Option<&'a str>,
 }
 
 fn file(
@@ -622,6 +720,8 @@ fn creation_bodies(
         rederives,
         product_plan,
         catervafies,
+        filed_as,
+        reason,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
@@ -646,6 +746,7 @@ fn creation_bodies(
                     })
             })
             .transpose()?,
+        filed_as,
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
@@ -658,6 +759,13 @@ fn creation_bodies(
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
             size: RequestTriagedBodySize::Small,
             reason: format!("a raised marketing budget for {plan}"),
+            triaged_by: "catervas".to_string(),
+        }));
+    }
+    if let (Some(_), Some(reason)) = (filed_as, reason) {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: reason.to_string(),
             triaged_by: "catervas".to_string(),
         }));
     }
@@ -1701,6 +1809,86 @@ mod tests {
                 EventKind::ContractLocked,
                 EventKind::ContractUnlocked
             ]
+        );
+    }
+
+    #[test]
+    fn a_pairs_change_reaches_both_files() {
+        use catervas_core::contract::Role;
+        let spec = "docs/catervas/product/spec.html";
+        let twin = "docs/catervas/product/spec.agent.html";
+        let wire = super::change_request(
+            spec,
+            Some(twin),
+            "Product spec",
+            "Add a refund limit.",
+            Role::ProductManager,
+            Role::Architect,
+            2.0,
+        );
+        assert_eq!(wire["allowed_paths"], json!([spec, twin]));
+        assert_eq!(wire["scope"]["in_scope"], json!([spec, twin]));
+        assert_eq!(wire["scope"]["out_of_scope"], json!(["Every other file"]));
+        assert_eq!(wire["title"], "Change Product spec");
+        assert_eq!(wire["assignee_role"], "product_manager");
+        assert_eq!(wire["reviewer_role"], "architect");
+        assert_eq!(
+            wire["requirements"][0]["text"],
+            format!("{spec} makes the change the owner asked for.")
+        );
+        assert_eq!(
+            wire["exit_criteria"][0]["verification"]["rubric"],
+            json!([
+                format!("{spec} makes the change the owner's words ask for."),
+                format!("Nothing else in {spec} changes."),
+                format!("{twin} says what {spec} now says."),
+            ])
+        );
+        assert!(
+            wire["intent"]
+                .as_str()
+                .is_some_and(|intent| intent.contains("Add a refund limit.")),
+            "{wire}"
+        );
+
+        let alone = super::change_request(
+            "docs/catervas/architecture/overview.html",
+            None,
+            "Overview",
+            "Shorter.",
+            Role::Architect,
+            Role::ProductManager,
+            2.0,
+        );
+        assert_eq!(
+            alone["allowed_paths"],
+            json!(["docs/catervas/architecture/overview.html"])
+        );
+        assert_eq!(
+            alone["exit_criteria"][0]["verification"]["rubric"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn a_long_name_is_cut_to_the_titles_limit() {
+        use catervas_core::contract::Role;
+        let wire = super::change_request(
+            "docs/catervas/product/spec.html",
+            None,
+            &"a".repeat(200),
+            "x",
+            Role::ProductManager,
+            Role::Architect,
+            2.0,
+        );
+        let title = wire["title"].as_str().expect("a title");
+        assert_eq!(title.chars().count(), 120, "{title}");
+        assert!(
+            title.starts_with("Change aaa") && title.ends_with('…'),
+            "{title}"
         );
     }
 }

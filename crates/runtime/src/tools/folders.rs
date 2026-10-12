@@ -4,7 +4,7 @@
 //! team's integration policy adds it to the project as it does an accepted task's branch; a
 //! document the owner approves is proposed at the sprint review and waits for the owner.
 
-use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
+use catervas_core::contract::{TaskId, TaskStatus};
 use catervas_core::folders::{
     DocumentFormat, FolderDocPath, FolderDocPathRefusal, FormatRefusal, LineChange, ROLE_FOLDERS,
     agent_twin, changed_lines, check_document_format, check_folder_doc_path, document_name,
@@ -239,14 +239,7 @@ pub(crate) fn file_rederive(
     let (false, Some(owner)) = (waiting, owner) else {
         return Ok(None);
     };
-    let reviewer =
-        catervas_roles::default_reviewer_role(team, TaskKind::Task, owner).or_else(|| {
-            catervas_roles::REVIEWER_ROLE_FOR
-                .iter()
-                .find(|(assignee, _)| *assignee == owner)
-                .and_then(|(_, preferred)| preferred.first().copied())
-        });
-    let Some(reviewer) = reviewer else {
+    let Some(reviewer) = catervas_roles::reviewer_for(team, owner) else {
         return Err(RequestError::Refused {
             reason: format!("no role reviews the tasks of {owner}"),
         });

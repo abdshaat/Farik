@@ -536,6 +536,9 @@
           "$ref": "#/$defs/filesSaveRequest"
         },
         {
+          "$ref": "#/$defs/filesAskChangeRequest"
+        },
+        {
           "$ref": "#/$defs/teamSaveRequest"
         },
         {
@@ -2633,6 +2636,36 @@
       "properties": {
         "change": { "type": ["integer", "null"], "minimum": 1 },
         "branch": { "type": ["string", "null"] }
+      }
+    },
+    "filesAskChangeRequest": {
+      "title": "Files Ask Change Request",
+      "description": "The owner asks the role that owns a document to change it (docs/SPEC.md 5.17): files a small, whole task for that role, with no triage or refine session, whose title is Change and the document's name and whose intent quotes words. A change to the spec or the roadmap still waits for the owner's acceptance. words is trimmed. Refused with -32005 and data.errors, each with path, message and code, in this order: not_editable (/path: outside the team's folders, not a document, an agent version, a marketing plan, or not listed by files.tree), no_words (/words: blank), no_owner (/path: no active agent of the folder's role) and no_task_taker (/path: the Scrum Master's folder, whose documents it keeps up to date at its retro).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "files.ask_change" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "words"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "words": { "type": "string", "minLength": 1, "maxLength": 2000 }
+          }
+        }
+      }
+    },
+    "filesAskChangeResult": {
+      "description": "The task filed for the owner's ask.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id"],
+      "properties": {
+        "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
       }
     },
     "filesTreeQuery": {

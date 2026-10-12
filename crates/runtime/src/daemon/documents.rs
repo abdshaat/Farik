@@ -22,7 +22,8 @@ use catervas_store::marketing::marketing_plans;
 use catervas_store::requests::rederive_tasks;
 use serde_json::{Value, json};
 
-use catervas_protocol::event::EventBody;
+use catervas_protocol::event::{EventBody, TaskCreatedBodyFiledAs};
+use catervas_store::requests::{change_request, file_small_request, placeholder_budget_usd};
 
 use super::DaemonState;
 use super::gates::off_the_worker;
@@ -36,7 +37,7 @@ use crate::transitions::integration_lock;
 pub(super) const QUERIES: [&str; 2] = ["files.tree", "files.read"];
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 1] = ["files.save"];
+pub(super) const METHODS: [&str; 2] = ["files.save", "files.ask_change"];
 
 /// Where the team's documents live.
 const ROOT: &str = "docs/catervas";
@@ -167,16 +168,96 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     Ok(json!({ "change": landed.change, "branch": landed.branch }))
 }
 
+/// `files.ask_change { path, words }`: a small, whole task for the role that owns the document,
+/// to make the change the owner's words ask for. Nothing is filed when the owner may not ask.
+fn ask_change(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    let cannot = || {
+        refusal(
+            "not_editable",
+            "/path",
+            "This document can't be changed from here.",
+        )
+    };
+    let path =
+        check_owner_edit(params["path"].as_str().unwrap_or_default(), 0).map_err(|_| cannot())?;
+    let words = params["words"].as_str().unwrap_or_default().trim();
+    if words.is_empty() {
+        return Err(refusal("no_words", "/words", "Say what should change."));
+    }
+    let (team, _, entries) = listing(deps)?;
+    let owner = ROLE_FOLDERS
+        .iter()
+        .find(|(_, folder)| path.starts_with(&format!("{folder}/")))
+        .map(|(role, _)| *role)
+        .ok_or_else(cannot)?;
+    if !team
+        .active_agents()
+        .any(|agent| Role::from(agent.role) == owner)
+    {
+        return Err(refusal(
+            "no_owner",
+            "/path",
+            "No one on your team owns this folder right now. Resume or add its role first.",
+        ));
+    }
+    if path.starts_with("docs/catervas/delivery/") {
+        return Err(refusal(
+            "no_task_taker",
+            "/path",
+            "The Scrum Master keeps this document up to date at its retro.",
+        ));
+    }
+    let document = folders(&team, &entries)
+        .into_iter()
+        .flat_map(|folder| folder.documents)
+        .find(|document| document.path == path)
+        .ok_or_else(cannot)?;
+    let reviewer = catervas_roles::reviewer_for(&team, owner)
+        .ok_or_else(|| internal(&format!("no role reviews the tasks of {owner}")))?;
+    let board = deps.projections.board().map_err(|e| internal(&e))?;
+    let name = document_name(&path, &|stem: &str| {
+        board
+            .iter()
+            .find(|row| row.task_id.as_str() == stem)
+            .map(|row| row.title.clone())
+    });
+    let wire = change_request(
+        &path,
+        document.twin.as_deref(),
+        &name,
+        words,
+        owner,
+        reviewer,
+        placeholder_budget_usd(&team.rules()),
+    );
+    let filed = file_small_request(
+        &deps.files,
+        &deps.log,
+        wire,
+        "human",
+        TaskCreatedBodyFiledAs::OwnerChange,
+        &format!("the owner's change of {name}"),
+        (deps.clock.now(), &deps.ids),
+    )
+    .map_err(|e| internal(&e))?;
+    Ok(json!({ "task_id": filed.id }))
+}
+
 /// The methods, whose params the schema already passed.
 pub(super) async fn call(
     state: &DaemonState,
-    _method: &str,
+    method: &str,
     params: &Value,
 ) -> Result<Value, Failure> {
     let Some(deps) = state.deps().cloned() else {
         return Err(Failure::new(NO_PROJECT, super::NO_PROJECT));
     };
     let params = params.clone();
+    if method == "files.ask_change" {
+        let filed = off_the_worker(move || ask_change(&deps, &params)).await?;
+        state.wakes().notify_one();
+        return Ok(filed);
+    }
     let saved = off_the_worker(move || save(&deps, &params)).await?;
     if !saved["change"].is_null() {
         state.wakes().notify_one();
@@ -1704,5 +1785,169 @@ mod tests {
             .await
             .expect("a body");
         assert_eq!((status, body.len()), (404, 0));
+    }
+
+    /// The reply to `files.ask_change`.
+    fn ask(harness: &Harness, path: &str, words: &str) -> Value {
+        rpc(
+            &harness.daemon,
+            "files.ask_change",
+            &json!({ "path": path, "words": words }),
+        )
+    }
+
+    /// A project with a Scrum Master, holding the documents the asks are about.
+    fn asked_project(name: &str) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            with_the_designer(wire);
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+            );
+        });
+        write(&harness, OVERVIEW_HTML, "<h1>overview</h1>\n");
+        write(&harness, &format!("{PRODUCT}/spec.html"), "<h1>spec</h1>\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/spec.agent.html"),
+            "<h1>agents</h1>\n",
+        );
+        write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        write(
+            &harness,
+            "docs/catervas/marketing/plans/MP-1.md",
+            "a marketing plan\n",
+        );
+        write(
+            &harness,
+            "docs/catervas/marketing/brand/persona.md",
+            "the persona\n",
+        );
+        commit(&harness, "the documents");
+        harness
+    }
+
+    /// The contract `id` as JSON.
+    fn contract_of(harness: &Harness, id: &str) -> Value {
+        serde_json::to_value(
+            harness
+                .project
+                .deps
+                .files
+                .read_contract(&id.parse().expect("an id"))
+                .expect("the contract is filed"),
+        )
+        .expect("a contract is JSON")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_the_owners_change_for_the_folders_role() {
+        let harness = asked_project("files-ask-change");
+        let reply = ask(&harness, OVERVIEW_HTML, "  Say less about the cache.  ");
+        conforms(&reply["result"], "filesAskChangeResult", &reply);
+        assert_eq!(reply["result"], json!({ "task_id": "CTV-1" }), "{reply}");
+
+        let contract = contract_of(&harness, "CTV-1");
+        assert_eq!(contract["assignee_role"], "architect", "{contract}");
+        assert_eq!(contract["created_by"], "human");
+        assert_eq!(contract["title"], "Change Overview");
+        assert_eq!(contract["allowed_paths"], json!([OVERVIEW_HTML]));
+        assert!(
+            contract["intent"]
+                .as_str()
+                .is_some_and(|intent| intent.contains("Say less about the cache.")),
+            "{contract}"
+        );
+
+        let filed = harness
+            .project
+            .events(&[EventKind::TaskCreated, EventKind::RequestTriaged]);
+        let kinds: Vec<_> = filed.iter().map(|event| event.body.kind()).collect();
+        assert_eq!(kinds, [EventKind::TaskCreated, EventKind::RequestTriaged]);
+        let created = catervas_protocol::event::event_to_value(&filed[0])["body"].clone();
+        assert_eq!(created["filed_as"], "owner_change", "{created}");
+        assert_eq!(created["created_by"], "human");
+        let triaged = catervas_protocol::event::event_to_value(&filed[1])["body"].clone();
+        assert_eq!(triaged["size"], "small", "{triaged}");
+        assert_eq!(triaged["triaged_by"], "catervas");
+
+        // A pair's ask reaches both files.
+        let spec = format!("{PRODUCT}/spec.html");
+        let reply = ask(&harness, &spec, "Add a refund limit.");
+        assert_eq!(reply["result"], json!({ "task_id": "CTV-2" }), "{reply}");
+        let pair = contract_of(&harness, "CTV-2");
+        assert_eq!(pair["assignee_role"], "product_manager");
+        assert_eq!(
+            pair["allowed_paths"],
+            json!([spec, format!("{PRODUCT}/spec.agent.html")])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_ask_the_owner_may_not_make() {
+        let harness = asked_project("files-ask-refused");
+        let refused = |path: &str, code: &str, words: &str| {
+            let reply = ask(&harness, path, "Change it.");
+            assert_eq!(
+                refusal(&reply),
+                (code.to_string(), "/path".to_string()),
+                "{path}: {reply}"
+            );
+            assert_eq!(said(&reply), words, "{path}");
+            assert!(
+                harness
+                    .project
+                    .events(&[EventKind::TaskCreated, EventKind::RequestTriaged])
+                    .is_empty(),
+                "{path}"
+            );
+        };
+        let cannot = "This document can't be changed from here.";
+        refused(
+            &format!("{PRODUCT}/spec.agent.html"),
+            "not_editable",
+            cannot,
+        );
+        refused(
+            "docs/catervas/marketing/plans/MP-1.md",
+            "not_editable",
+            cannot,
+        );
+        refused("README.md", "not_editable", cannot);
+        refused(
+            "docs/catervas/architecture/gone.html",
+            "not_editable",
+            cannot,
+        );
+        refused(
+            "docs/catervas/marketing/brand/persona.md",
+            "no_owner",
+            "No one on your team owns this folder right now. Resume or add its role first.",
+        );
+        refused(
+            "docs/catervas/delivery/cadence.md",
+            "no_task_taker",
+            "The Scrum Master keeps this document up to date at its retro.",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_blank_words() {
+        let harness = asked_project("files-ask-blank");
+        let reply = ask(&harness, OVERVIEW_HTML, " \t\n ");
+        assert_eq!(
+            refusal(&reply),
+            ("no_words".to_string(), "/words".to_string()),
+            "{reply}"
+        );
+        assert_eq!(said(&reply), "Say what should change.");
+        assert!(
+            harness
+                .project
+                .events(&[EventKind::TaskCreated, EventKind::RequestTriaged])
+                .is_empty()
+        );
     }
 }

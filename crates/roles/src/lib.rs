@@ -33,7 +33,7 @@ pub use kit::{
     SetupCopy, is_catervas_connector, load_kit, parse_fixture_kit, parse_kit, pin_drift,
     quoted_labels, shipped_skill_names,
 };
-pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
+pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role, reviewer_for};
 pub use skill_check::{
     CheckedSkill, SHIPPED_ROLES, SkillRefusal, check_skill, core_skill_names,
     declared_name_and_description, skill_name_ok,

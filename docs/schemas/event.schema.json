@@ -313,8 +313,13 @@
         "rederives": {
           "type": "string",
           "maxLength": 512,
-          "pattern": "^docs/catervas/.+\\.agent\\.md$",
-          "description": "The .agent.md twin this request brings up to date with the owner's change to the document beside it (docs/SPEC.md 5.17); Catervas files it, so created_by is catervas."
+          "pattern": "^docs/catervas/.+\\.agent\\.(md|html)$",
+          "description": "The .agent.md or .agent.html twin this request brings up to date with the owner's change to the document beside it (docs/SPEC.md 5.17); Catervas files it, so created_by is catervas."
+        },
+        "filed_as": {
+          "type": "string",
+          "enum": ["owner_change", "document_rewrite"],
+          "description": "This request is a whole contract Catervas filed for the owner, judged as filed with no refine session (docs/SPEC.md 5.17): owner_change is the owner's ask on the Files page for the role that owns a document to change it; document_rewrite is the task that rewrites a folder's Markdown documents as HTML. Only Catervas writes it."
         }
       }
     },

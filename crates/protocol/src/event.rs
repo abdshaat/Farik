@@ -38,11 +38,11 @@ pub use crate::generated::event::{
     SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
     SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody, SprintEndedBody,
     SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
-    TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal, Violation,
+    TaskCreatedBodyFiledAs, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy,
+    TeamPausedBodyReason, TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody,
+    ToolApprovalRequestedBody, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `catervas-core`'s own types of the same name.
