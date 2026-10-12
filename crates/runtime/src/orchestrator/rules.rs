@@ -1851,6 +1851,7 @@ async fn ready(
             thread: None,
             initial_prompt: plan_message(
                 &contract,
+                team,
                 &assignees,
                 &reviewers,
                 lane_builder.as_deref(),

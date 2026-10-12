@@ -20,6 +20,16 @@ pub use crate::generated::task_contract::{
     ExitCriterionVerification as VerificationWire, Role,
 };
 
+impl Role {
+    /// Whether an agent of this role may review its own task, in a fresh session (spec 5.1): the
+    /// Product Manager alone, for its docs tasks, when the team has no Architect or Scrum Master.
+    /// The one place that exception lives.
+    #[must_use]
+    pub fn reviews_its_own(self) -> bool {
+        self == Role::ProductManager
+    }
+}
+
 /// A criterion's verification method with named variants. The generated wire enum names its
 /// variants by position; this is the one mapping `catervas-core` keeps at its edge.
 #[derive(Debug, Clone, PartialEq, Eq)]

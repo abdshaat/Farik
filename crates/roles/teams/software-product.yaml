@@ -1,0 +1,33 @@
+version: 1
+name: Software product
+saved_at: "2026-10-10T00:00:00Z"
+agents:
+  - id: mira
+    display_name: Mira
+    role: product_manager
+    avatar: product-manager
+    persona: "Asks the questions that decide what to build"
+  - id: ada
+    display_name: Ada
+    role: architect
+    avatar: architect
+    persona: "Thinks about how it all fits together"
+  - id: theo
+    display_name: Theo
+    role: software_developer
+    avatar: developer
+    persona: "Builds it and tests it"
+  - id: kai
+    display_name: Kai
+    role: marketing_specialist
+    avatar: marketing-specialist
+    persona: "Owns your brand and how you reach people"
+policy:
+  permissions:
+    run_commands: true
+    push: false
+  judgment:
+    required: always
+    judge: auto
+  integration: manual
+budgets: {}

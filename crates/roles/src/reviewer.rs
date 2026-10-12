@@ -7,7 +7,7 @@ use catervas_core::team::Team;
 /// work to the Architect, then another Developer; a UI/UX Designer's to the Architect, then a
 /// Developer; an Architect's, a Marketing Specialist's, a Finance Specialist's and a Procurement
 /// Specialist's to the Product Manager; the Product Manager's, written in its docs tasks, to the
-/// Architect, then the Scrum Master. The Scrum Master's own tasks have no row.
+/// Architect, then the Scrum Master, then itself in a fresh session. The Scrum Master's own tasks have no row.
 pub const REVIEWER_ROLE_FOR: &[(Role, &[Role])] = &[
     (
         Role::SoftwareDeveloper,
@@ -17,7 +17,10 @@ pub const REVIEWER_ROLE_FOR: &[(Role, &[Role])] = &[
         Role::UiUxDesigner,
         &[Role::Architect, Role::SoftwareDeveloper],
     ),
-    (Role::ProductManager, &[Role::Architect, Role::ScrumMaster]),
+    (
+        Role::ProductManager,
+        &[Role::Architect, Role::ScrumMaster, Role::ProductManager],
+    ),
     (Role::Architect, &[Role::ProductManager]),
     (Role::MarketingSpecialist, &[Role::ProductManager]),
     (Role::FinanceSpecialist, &[Role::ProductManager]),
@@ -27,7 +30,7 @@ pub const REVIEWER_ROLE_FOR: &[(Role, &[Role])] = &[
 /// The `reviewer_role` the contract's writer fills in for a task whose assignee will hold
 /// `assignee_role`: the first preferred role the team can staff, counted as the Definition of
 /// Ready's `ReviewerAvailable` counts (two active agents when the reviewer's role is the
-/// assignee's, one otherwise).
+/// assignee's, one otherwise or when that role reviews its own task).
 ///
 /// `None` when the team can staff none of them, when the assignee's role has no row, and for an
 /// epic, whose reviewer the assignment gate decides.
@@ -40,7 +43,11 @@ pub fn default_reviewer_role(team: &Team, kind: TaskKind, assignee_role: Role) -
         .iter()
         .find(|(assignee, _)| *assignee == assignee_role)?;
     preferred.iter().copied().find(|&reviewer| {
-        let needed = if reviewer == assignee_role { 2 } else { 1 };
+        let needed = if reviewer == assignee_role && !reviewer.reviews_its_own() {
+            2
+        } else {
+            1
+        };
         team.active_agents()
             .filter(|agent| Role::from(agent.role) == reviewer)
             .count()
@@ -155,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn the_architect_reviews_the_product_managers_task() {
+    fn a_lone_product_manager_reviews_its_own_docs() {
         let with_an_architect = a_team(&[
             ("dev-a", "software_developer", "active"),
             ("arch", "architect", "active"),
@@ -180,10 +187,14 @@ mod tests {
         ]);
         assert_eq!(
             default_reviewer_role(&with_neither, TaskKind::Task, Role::ProductManager),
-            None
+            Some(Role::ProductManager)
         );
         assert_eq!(
             default_reviewer_role(&with_an_architect, TaskKind::Epic, Role::ProductManager),
+            None
+        );
+        assert_eq!(
+            default_reviewer_role(&a_lone_developer(), TaskKind::Task, Role::SoftwareDeveloper),
             None
         );
     }

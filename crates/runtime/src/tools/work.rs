@@ -253,9 +253,12 @@ pub(super) fn record_criterion(
     let task = call.task()?;
     let (contract, _) = call.contract(task)?;
     let me = Some(call.agent_id());
-    let run_by = if contract.assignee.as_deref() == me {
+    let is_reviewer = contract.reviewer.as_deref() == me;
+    // An agent holding both slots, a Product Manager reviewing its own docs task, runs the
+    // criterion as the reviewer in its review session and as the assignee in any other.
+    let run_by = if contract.assignee.as_deref() == me && !(is_reviewer && call.in_review()) {
         CriterionRecordedBodyRunBy::Assignee
-    } else if contract.reviewer.as_deref() == me {
+    } else if is_reviewer {
         CriterionRecordedBodyRunBy::Reviewer
     } else {
         return Err(Refusal::NotTheRunner {
@@ -313,6 +316,12 @@ pub(super) fn write_note(call: &Call<'_>, input: WriteNoteInput) -> Result<Value
         NoteKind::Review => (NoteWrittenBodyKind::Review, is_reviewer),
         NoteKind::Progress => (NoteWrittenBodyKind::Progress, is_assignee || is_reviewer),
     };
+    if kind == NoteWrittenBodyKind::Completion && allowed && is_reviewer && call.in_review() {
+        return Err(Refusal::CompletionInReview.into());
+    }
+    if kind == NoteWrittenBodyKind::Review && allowed && is_assignee && !call.in_review() {
+        return Err(Refusal::ReviewInImplement.into());
+    }
     if !allowed {
         return Err(Refusal::NotTheNotesWriter {
             agent_id: call.agent_id().to_string(),
@@ -666,6 +675,83 @@ mod tests {
         let moved = verifying(json!({ "to": "verifying", "workbooks": ["books.xlsx"] }))
             .expect("the books are in the folder");
         assert_eq!(moved["status"], "verifying");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_a_self_review_as_the_reviewers_run() {
+        use crate::session::SessionPurpose::{Implement, Verify};
+
+        let project = a_project("tools-self-review");
+        project.filed_with("CTV-1", "assigned", "task", None, |wire| {
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The plan reads well.",
+                "satisfies": ["R1"],
+                "verification": { "method": "review", "rubric": ["Is the plan clear?"] }
+            }]);
+        });
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm", "reviewer": "pm" }),
+        );
+        let record = |purpose| {
+            project
+                .call_in(
+                    purpose,
+                    "pm",
+                    Some("CTV-1"),
+                    "catervas_record_criterion_result",
+                    json!({ "criterion_id": "C1", "passed": true, "evidence": "read it through" }),
+                )
+                .expect("the criterion is recorded");
+            let recorded = project.events(&[EventKind::CriterionRecorded]);
+            let Some(EventBody::CriterionRecorded(body)) = recorded.last().map(|event| &event.body)
+            else {
+                panic!("a criterion.recorded");
+            };
+            body.run_by.to_string()
+        };
+        assert_eq!(record(Verify), "reviewer");
+        assert_eq!(record(Implement), "assignee");
+
+        let summary = "Wrote the plan and checked it against the request.\n\nNothing is left out.";
+        let note = |purpose| {
+            project.call_in(
+                purpose,
+                "pm",
+                Some("CTV-1"),
+                "catervas_write_note",
+                json!({ "kind": "completion", "text": summary }),
+            )
+        };
+        let reason = refused_with(note(Verify), "completion_in_review");
+        assert_eq!(
+            reason,
+            "completion_in_review: a review session writes a review note; the completion note is written in the implement session"
+        );
+        note(Implement).expect("the implement session writes its completion note");
+
+        // The review note is the fresh session's: the session that did the work cannot write it.
+        let review = |purpose, agent| {
+            project.call_in(
+                purpose,
+                agent,
+                Some("CTV-1"),
+                "catervas_write_note",
+                json!({ "kind": "review", "text": summary }),
+            )
+        };
+        let reason = refused_with(review(Implement, "pm"), "review_in_implement");
+        assert_eq!(
+            reason,
+            "review_in_implement: the review note is written in a fresh review session, not the session that did the work"
+        );
+        review(Verify, "pm").expect("the review session writes its review note");
     }
 
     #[test]

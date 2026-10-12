@@ -298,7 +298,10 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
                 "the runtime named no agent for the reviewer, and a task is reviewed by one"
                     .to_string(),
             );
-        } else if input.reviewer_id.trim() == input.assignee_id.trim() {
+        } else if input.reviewer_id.trim() == input.assignee_id.trim()
+            && !(contract.assignee_role == contract.reviewer_role
+                && contract.assignee_role.reviews_its_own())
+        {
             reasons.push(format!(
                 "{} cannot review its own work; name another agent as reviewer",
                 input.assignee_id.trim()
@@ -1428,6 +1431,39 @@ mod tests {
         assert_eq!(
             reasons(check_assignment(&a_contract(), &input)),
             ["dev-1 cannot review its own work; name another agent as reviewer"]
+        );
+    }
+
+    #[test]
+    fn lets_a_product_manager_review_its_own_docs_task() {
+        let mut docs = a_contract();
+        docs.assignee_role = Role::ProductManager;
+        docs.reviewer_role = Role::ProductManager;
+        let mut input = an_assignment();
+        input.assignee_id = "mira".to_string();
+        input.assignee_role = Role::ProductManager;
+        input.reviewer_id = "mira".to_string();
+        input.reviewer_role = Role::ProductManager;
+        let refused = check_assignment(&docs, &input).err().unwrap_or_default();
+        assert!(
+            !refused
+                .iter()
+                .any(|reason| reason.contains("cannot review its own work")),
+            "{refused:?}"
+        );
+        let mut developers = a_contract();
+        developers.assignee_role = Role::SoftwareDeveloper;
+        developers.reviewer_role = Role::Architect;
+        // The input's roles say Product Manager both ways; the contract's roles decide.
+        let mut input = an_assignment();
+        input.assignee_id = "mira".to_string();
+        input.assignee_role = Role::ProductManager;
+        input.reviewer_id = "mira".to_string();
+        input.reviewer_role = Role::ProductManager;
+        assert!(
+            reasons(check_assignment(&developers, &input))
+                .iter()
+                .any(|reason| reason.contains("mira cannot review its own work"))
         );
     }
 

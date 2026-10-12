@@ -1,4 +1,3 @@
-import type { RpcError } from "@catervas/protocol-client";
 import { AVATAR_URLS, type AvatarKey, Button, InfoTip } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
@@ -25,20 +24,23 @@ export type Template = {
 	budgets: { dailyUsd?: number };
 };
 export type Listing = {
-	folder: string;
+	/** Where saved teams are kept, or null when Catervas has no folder for them. */
+	folder: string | null;
+	/** The teams Catervas comes with. */
+	builtin: { slug: string; template: Template }[];
 	templates: { slug: string; template: Template }[];
 	unreadable: { slug: string }[];
 };
 
-/** The saved teams, or why there are none to read: Catervas has no state folder. */
+/** The ready-made and saved teams; `noFolder` says there is nowhere to keep saved ones. */
 export function useTemplates() {
-	const { data, error, again } = useQuery<Listing>("templates.list", {});
-	return { listing: data, noFolder: noFolder(error), again };
+	const { data, again } = useQuery<Listing>("templates.list", {});
+	return { listing: data, noFolder: noFolder(data), again };
 }
 
-/** Whether a refusal says Catervas has no folder to keep saved teams in. */
-export function noFolder(error: RpcError | undefined): boolean {
-	return !!error && refusalsOf(error).some((e) => e.code === "no_state_folder");
+/** Whether Catervas has no folder to keep saved teams in. */
+export function noFolder(listing: Listing | undefined): boolean {
+	return listing?.folder === null;
 }
 
 /** "Mira", "Mira and Theo", "Mira, Ada and Theo". */
@@ -59,6 +61,13 @@ export function templateMeta(template: Template, year = false): string {
 	return t("templateMeta", {
 		names: andList(template.agents.map((a) => a.displayName)),
 		date,
+	});
+}
+
+/** "Mira, Ada and Theo · comes with Catervas": a ready-made team's names. */
+export function builtinMeta(template: Template): string {
+	return t("builtinMeta", {
+		names: andList(template.agents.map((a) => a.displayName)),
 	});
 }
 
@@ -116,7 +125,7 @@ export function SavedTeams() {
 							))}
 						</ul>
 						<p className={styles.muted}>
-							{t("savedFolder", { folder: listing.folder })}
+							{t("savedFolder", { folder: listing.folder ?? "" })}
 						</p>
 					</>
 				)
@@ -158,7 +167,7 @@ function SavedRow({
 			setRefused(
 				code === "template_exists"
 					? t("templateRenameTaken", { name: next.trim() })
-					: said(code),
+					: said(code, { name: next.trim() }),
 			);
 		}
 		setBusy(false);

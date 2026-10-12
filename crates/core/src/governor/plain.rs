@@ -23,6 +23,9 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::ReviewerAvailable => {
             "Nobody on the team is free to review the work but the one doing it."
         }
+        ReadinessRule::AssigneeAvailable => {
+            "Nobody on the team has the role this task is for. Add one on the Team page."
+        }
         ReadinessRule::OutOfScopePresent => "The plan does not say what it leaves out.",
         ReadinessRule::DependenciesReady => "Work this plan depends on is not ready yet.",
         ReadinessRule::RequiredCriteriaPresent => {
@@ -79,7 +82,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 27] = [
+    const EVERY_RULE: [ReadinessRule; 28] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
@@ -87,6 +90,7 @@ mod tests {
         CommandCriteriaComplete,
         BudgetWithinSprint,
         ReviewerAvailable,
+        AssigneeAvailable,
         OutOfScopePresent,
         DependenciesReady,
         RequiredCriteriaPresent,
@@ -119,6 +123,7 @@ mod tests {
             | CommandCriteriaComplete
             | BudgetWithinSprint
             | ReviewerAvailable
+            | AssigneeAvailable
             | OutOfScopePresent
             | DependenciesReady
             | RequiredCriteriaPresent

@@ -57,14 +57,11 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
         )
 });
 
-/// The two roles a team cannot work without, and what each of them is for.
+/// The role a team cannot work without, and what it is for (ADR 0055).
 ///
-/// `docs/SPEC.md` section 3 and F1: a team with nobody to write a contract has no way to start, and
-/// a team with nobody to do the work has no way to finish. Every other role is the human's choice.
-const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
-    (RoleWire::ProductManager, "write its plans"),
-    (RoleWire::SoftwareDeveloper, "do the work"),
-];
+/// A team with nobody to write a contract has no way to start. Every other role is the human's
+/// choice: a task nobody on the team can take is held by the Definition of Ready instead.
+const REQUIRED_ROLES: [(RoleWire, &str); 1] = [(RoleWire::ProductManager, "write its plans")];
 
 /// The connectors Catervas ships, by name (spec 5.6); `catervas-roles` holds their definitions.
 pub const BUILTIN_CONNECTORS: [&str; 1] = ["playwright"];
@@ -237,11 +234,12 @@ pub fn carried_team(team: &Team) -> Result<Team, Vec<ValidationError>> {
 /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
 /// team.
 ///
-/// Four rules are this function's rather than the schema's. Three of them are there because
-/// `typify` cannot generate a
-/// usable type from an array that carries a `contains` — it writes an empty enum for the array and
-/// the whole team becomes unbuildable. So the schema says two to seven agents and this says the
-/// rest: ids are unique, and an active Product Manager and an active Software Developer are there.
+/// Four rules are this function's rather than the schema's. Two of them are there because
+/// `typify` cannot generate a usable type from an array that carries a `contains` — it writes an
+/// empty enum for the array and the whole team becomes unbuildable. So the schema says two agents
+/// at least and this says the rest: ids are unique, and an active Product Manager is there.
+/// A third, seven agents at most that are not retired, is here because a schema cannot count only
+/// some of an array's items.
 /// The fourth is there because the schema has no way to say it either: an agent may not have `read`
 /// taken away, since everyone reads (5.6) and an agent that cannot read is one every tool call is
 /// refused for.
@@ -1551,7 +1549,17 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_team_with_nobody_to_write_a_contract_or_do_the_work() {
+    fn accepts_a_team_without_a_developer() {
+        let mut wire = a_team_wire();
+        wire["agents"] = json!([
+            an_agent_wire("ada", "product_manager"),
+            an_agent_wire("linus", "architect"),
+        ]);
+        assert!(validate_team(&wire).is_ok(), "{:?}", validate_team(&wire));
+    }
+
+    #[test]
+    fn refuses_a_team_without_a_product_manager() {
         let mut wire = a_team_wire();
         wire["agents"] = json!([
             an_agent_wire("ada", "architect"),
@@ -1563,11 +1571,8 @@ mod tests {
             .collect();
         assert_eq!(
             messages,
-            [
-                "A team needs an active Product Manager to write its plans, and this one has none.",
-                "A team needs an active Software Developer to do the work, and this one has none.",
-            ],
-            "both, not the first of them"
+            ["A team needs an active Product Manager to write its plans, and this one has none."],
+            "exactly one"
         );
     }
 
@@ -1577,8 +1582,8 @@ mod tests {
         // running the command twice.
         let mut wire = a_team_wire();
         wire["agents"] = json!([
-            an_agent_wire("ada", "product_manager"),
             an_agent_wire("ada", "architect"),
+            an_agent_wire("ada", "scrum_master"),
         ]);
         let messages: Vec<String> = refusals(&wire)
             .into_iter()
@@ -1586,11 +1591,7 @@ mod tests {
             .collect();
         assert_eq!(messages.len(), 2, "{messages:?}");
         assert!(messages[0].contains("the id ada names"), "{}", messages[0]);
-        assert!(
-            messages[1].contains("Software Developer"),
-            "{}",
-            messages[1]
-        );
+        assert!(messages[1].contains("Product Manager"), "{}", messages[1]);
     }
 
     #[test]

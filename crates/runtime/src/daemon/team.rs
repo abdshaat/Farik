@@ -1585,9 +1585,6 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["agents"] if message.starts_with("A team needs an active Product Manager") => {
             "needs_product_manager"
         }
-        ["agents"] if message.starts_with("A team needs an active Software Developer") => {
-            "needs_developer"
-        }
         ["agents"] if message.starts_with("an agent id names") => "repeated_id",
         ["agents"] if message.ends_with(WORKED) => "worked",
         ["agents", _, "display_name"] => "name",
@@ -3897,7 +3894,8 @@ pub(super) mod tests {
                 team["agents"][1]["role"] = json!("architect");
                 team["agents"][2]["role"] = json!("architect");
             }),
-            ["/agents needs_developer"]
+            Vec::<String>::new(),
+            "a team with no Developer is a valid one (ADR 0055)"
         );
         assert_eq!(
             codes(&|team| {
@@ -4040,13 +4038,14 @@ pub(super) mod tests {
             "avatar": "extra-1", "status": "active",
         });
 
-        // Another role in the only Developer's place leaves the team with none: nothing changes.
+        // Another role in the only Product Manager's place leaves the team with none: nothing
+        // changes.
         let mut wrong = newcomer.clone();
         wrong["role"] = json!("architect");
         let reply = rpc(
             &harness.daemon,
             "agent.replace",
-            &json!({ "agent_id": "dev-a", "newcomer": wrong }),
+            &json!({ "agent_id": "pm", "newcomer": wrong }),
         );
         assert_eq!(reply["error"]["code"], -32005, "{reply}");
         assert_eq!(reply["error"]["data"]["errors"][0]["path"], "/agents");

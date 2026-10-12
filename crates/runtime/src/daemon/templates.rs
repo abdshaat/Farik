@@ -17,7 +17,7 @@ use super::team::{
 };
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, NOT_FOUND, REFUSED};
 use crate::sprints::sprint_work;
-use crate::templates::{TemplateError, Templates};
+use crate::templates::{TemplateError, TemplateListing, Templates, builtin, builtins};
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
@@ -48,6 +48,7 @@ fn failure(error: &TemplateError) -> Failure {
     match error {
         TemplateError::Exists { .. } => refusal("template_exists", "/name", &message),
         TemplateError::Name => refusal("template_name", "/name", &message),
+        TemplateError::Builtin { .. } => refusal("template_builtin", "/name", &message),
         TemplateError::Unreadable { .. } => refusal("template_unreadable", "/slug", &message),
         TemplateError::NotFound { .. } => Failure::new(NOT_FOUND, message),
         TemplateError::Io { .. } => Failure::new(INTERNAL_ERROR, message),
@@ -59,7 +60,11 @@ fn templates_of(state: &DaemonState) -> Result<&Templates, Failure> {
     web_of(state)?
         .templates
         .as_ref()
-        .ok_or_else(|| refusal("no_state_folder", "/", NO_STATE_FOLDER))
+        .ok_or_else(no_state_folder)
+}
+
+fn no_state_folder() -> Failure {
+    refusal("no_state_folder", "/", NO_STATE_FOLDER)
 }
 
 /// The queries of this module, whose params the schema already passed.
@@ -69,11 +74,21 @@ pub(super) fn query(
     name: &str,
     params: &Value,
 ) -> Result<Value, Failure> {
-    let templates = templates_of(state)?;
+    let templates = web_of(state)?.templates.as_ref();
     if name == "templates.list" {
-        let listing = templates.list().map_err(|error| failure(&error))?;
+        let listing = match templates {
+            Some(templates) => templates.list().map_err(|error| failure(&error))?,
+            None => TemplateListing {
+                templates: Vec::new(),
+                unreadable: Vec::new(),
+            },
+        };
         return Ok(json!({
-            "folder": templates.dir(),
+            "folder": templates.map(Templates::dir),
+            "builtin": builtins()
+                .iter()
+                .map(|(slug, template)| json!({ "slug": slug, "template": template }))
+                .collect::<Vec<_>>(),
             "templates": listing
                 .templates
                 .iter()
@@ -94,18 +109,23 @@ fn slug_of(params: &Value) -> &str {
     params["slug"].as_str().unwrap_or_default()
 }
 
-/// The team as it is, what the template saved as `slug` makes of it, the template's name, and its
-/// file's digest. An agent has worked when the log has an event of its. When `digest` is given, a
-/// file with another digest is refused: it changed since the preview that answered that one.
+/// The team as it is, what the template `slug` names makes of it (a ready-made team first, then a
+/// saved one), the template's name, and its digest. An agent has worked when the log has an event
+/// of its. When `digest` is given, a file with another digest is refused: it changed since the
+/// preview that answered that one.
 fn applying(
     deps: &ToolDeps,
-    templates: &Templates,
+    templates: Option<&Templates>,
     slug: &str,
     digest: Option<&str>,
 ) -> Result<(Team, TemplateApplied, String, String), Failure> {
-    let (template, read) = templates
-        .read_digested(slug)
-        .map_err(|error| failure(&error))?;
+    let (template, read) = match builtin(slug) {
+        Some(found) => found,
+        None => templates
+            .ok_or_else(no_state_folder)?
+            .read_digested(slug)
+            .map_err(|error| failure(&error))?,
+    };
     if digest.is_some_and(|digest| digest != read) {
         return Err(refusal("template_changed", "/digest", TEMPLATE_CHANGED));
     }
@@ -186,7 +206,7 @@ fn answer(
 fn apply(
     deps: &ToolDeps,
     state: &DaemonState,
-    templates: &Templates,
+    templates: Option<&Templates>,
     slug: &str,
     digest: &str,
 ) -> Result<Value, Failure> {
@@ -225,7 +245,7 @@ async fn pause_before_dropping_google_ads<'a>(
 ) -> Option<tokio::sync::MutexGuard<'a, ()>> {
     let (held, holder, params) = (Arc::clone(deps), Arc::clone(state), params.clone());
     let taken = off_the_worker(move || {
-        let templates = templates_of(&holder)?;
+        let templates = web_of(&holder)?.templates.as_ref();
         let digest = params["digest"].as_str().unwrap_or_default();
         let (before, applied, ..) = applying(&held, templates, slug_of(&params), Some(digest))?;
         Ok(if applied.errors.is_empty() {
@@ -248,7 +268,6 @@ pub(super) async fn call(
     let Some(deps) = state.deps().cloned() else {
         return Err(Failure::new(NO_PROJECT, super::NO_PROJECT));
     };
-    templates_of(state)?;
     let applies = method == "template.apply";
     // Held until the team is written, so no agent's enable runs between the pause and the write.
     let _ads = if applies {
@@ -259,10 +278,10 @@ pub(super) async fn call(
     let waker = Arc::clone(state);
     let (state, method, params) = (Arc::clone(state), method.to_string(), params.clone());
     let answered = off_the_worker(move || {
-        let templates = templates_of(&state)?;
         let slug = slug_of(&params);
         match method.as_str() {
             "template.save" => {
+                let templates = templates_of(&state)?;
                 let team = deps.files.read_team().map_err(|e| internal(&e))?;
                 let name = params["name"].as_str().unwrap_or_default();
                 let template = template_from_team(&team, name, deps.clock.now())
@@ -274,6 +293,7 @@ pub(super) async fn call(
                 Ok(json!({ "slug": slug }))
             }
             "template.rename" => {
+                let templates = templates_of(&state)?;
                 let name = params["name"].as_str().unwrap_or_default();
                 let slug = templates
                     .rename(slug, name)
@@ -281,13 +301,14 @@ pub(super) async fn call(
                 Ok(json!({ "slug": slug }))
             }
             "template.delete" => {
+                let templates = templates_of(&state)?;
                 templates.delete(slug).map_err(|error| failure(&error))?;
                 Ok(json!({}))
             }
             _ => apply(
                 &deps,
                 &state,
-                templates,
+                web_of(&state)?.templates.as_ref(),
                 slug,
                 params["digest"].as_str().unwrap_or_default(),
             ),
@@ -360,6 +381,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
         served(&harness, Some(folder.clone()));
         (harness, folder)
+    }
+
+    /// The project team of the refused-result tests: two Product Managers, `mira` paused and `pat`
+    /// active, and the Marketing Specialist `kai`. A template that keeps `mira` and drops `pat`
+    /// leaves no active Product Manager.
+    fn mira_paused_and_pat(wire: &mut Value) {
+        let mut mira = an_agent_wire("mira", "product_manager");
+        mira["status"] = json!("paused");
+        wire["agents"] = json!([
+            mira,
+            an_agent_wire("pat", "product_manager"),
+            an_agent_wire("kai", "marketing_specialist")
+        ]);
+    }
+
+    /// "Duo": Mira, the Product Manager `mira`, and Theo, a new Developer.
+    fn duo() -> Value {
+        json!({
+            "version": 1,
+            "name": "Duo",
+            "saved_at": "2026-09-30T12:00:00Z",
+            "agents": [
+                { "id": "mira", "display_name": "Mira", "role": "product_manager" },
+                { "id": "theo", "display_name": "Theo", "role": "software_developer" }
+            ],
+            "policy": {
+                "permissions": { "run_commands": true, "push": false },
+                "judgment": { "required": "never" },
+                "integration": "manual"
+            },
+            "budgets": {}
+        })
     }
 
     /// A digest no template file has.
@@ -440,10 +493,12 @@ mod tests {
                 "templatesListResult",
             )
         };
+        let empty = list();
         assert_eq!(
-            list(),
-            json!({ "folder": folder.to_str(), "templates": [], "unreadable": [] })
+            [&empty["folder"], &empty["templates"], &empty["unreadable"]],
+            [&json!(folder.to_str()), &json!([]), &json!([])]
         );
+        assert_eq!(empty["builtin"].as_array().map(Vec::len), Some(3));
         let saved = call(
             &harness.daemon,
             "template.save",
@@ -984,9 +1039,7 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_in_plain_words() {
-        let (harness, folder) = templated("templates-refused", |wire| {
-            wire["agents"][2]["status"] = json!("paused");
-        });
+        let (harness, folder) = templated("templates-refused", mira_paused_and_pat);
         saved(&folder, &pair());
         std::fs::write(folder.join("broken.yaml"), "{").expect("written");
         assert_eq!(
@@ -1034,27 +1087,24 @@ mod tests {
             None
         );
 
-        // The paused match: dev-b, paused, is kept as the only Developer while dev-a, who
-        // worked, is retired.
-        worked(&harness, "dev-a");
-        let mut paused = pair();
-        paused["name"] = json!("Paused");
-        paused["agents"] = json!([
-            { "id": "pm", "display_name": "Mira", "role": "product_manager" },
-            { "id": "dev-b", "display_name": "Bo", "role": "software_developer" }
-        ]);
-        saved(&folder, &paused);
+        // The paused match: mira, paused, is kept while pat, who worked, is retired, so no
+        // Product Manager is active.
+        worked(&harness, "pat");
+        saved(&folder, &duo());
         let (team, events) = (team_file(&harness), seq_count(&harness));
-        let shown = preview(&harness, "paused");
-        assert_eq!(shown["errors"][0]["code"], "needs_developer", "{shown}");
+        let shown = preview(&harness, "duo");
+        assert_eq!(
+            shown["errors"][0]["code"], "needs_product_manager",
+            "{shown}"
+        );
         assert_eq!(shown["errors"][0]["path"], "/agents");
         assert_eq!(
             refusal(
                 &harness,
                 "template.apply",
-                &json!({ "slug": "paused", "digest": digest(&harness, "paused") })
+                &json!({ "slug": "duo", "digest": digest(&harness, "duo") })
             ),
-            (-32005, json!("needs_developer"), json!("/agents"))
+            (-32005, json!("needs_product_manager"), json!("/agents"))
         );
         assert_eq!(team_file(&harness), team, "nothing is written");
         assert_eq!(seq_count(&harness), events, "nothing is recorded");
@@ -1062,7 +1112,6 @@ mod tests {
         let bare = Harness::new("templates-no-folder", |_| {});
         served(&bare, None);
         for (method, params) in [
-            ("query", json!({ "name": "templates.list", "params": {} })),
             (
                 "query",
                 json!({ "name": "template.preview", "params": { "slug": "pair" } }),
@@ -1086,17 +1135,18 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn checks_again_when_applying_a_preview_gone_stale() {
-        let (harness, folder) = templated("templates-stale", |_| {});
-        let mut duo = pair();
-        duo["agents"].as_array_mut().expect("agents").pop();
-        saved(&folder, &duo);
-        worked(&harness, "dev-b");
-        let shown = preview(&harness, "pair");
+        let (harness, folder) = templated("templates-stale", |wire| {
+            mira_paused_and_pat(wire);
+            wire["agents"][0]["status"] = json!("active");
+        });
+        saved(&folder, &duo());
+        worked(&harness, "pat");
+        let shown = preview(&harness, "duo");
         assert_eq!(shown["errors"], json!([]));
-        // Since the preview, Ada (dev-a), whom Pair now keeps as its only Developer, was paused:
-        // applying now would retire dev-b and leave no active Developer.
+        // Since the preview, Mira, whom Duo keeps as its only Product Manager, was paused:
+        // applying now would retire pat and leave no active Product Manager.
         let mut wire = team_file(&harness);
-        wire["agents"][1]["status"] = json!("paused");
+        wire["agents"][0]["status"] = json!("paused");
         harness
             .project
             .deps
@@ -1108,9 +1158,9 @@ mod tests {
             refusal(
                 &harness,
                 "template.apply",
-                &json!({ "slug": "pair", "digest": shown["digest"] })
+                &json!({ "slug": "duo", "digest": shown["digest"] })
             ),
-            (-32005, json!("needs_developer"), json!("/agents"))
+            (-32005, json!("needs_product_manager"), json!("/agents"))
         );
         assert_eq!(team_file(&harness), wire, "nothing is written");
         assert_eq!(seq_count(&harness), events);
@@ -1168,26 +1218,27 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn works_the_result_out_again_under_the_lock() {
-        let (harness, folder) = templated("templates-under-lock", |_| {});
-        let mut duo = pair();
-        duo["agents"].as_array_mut().expect("agents").pop();
-        saved(&folder, &duo);
-        worked(&harness, "dev-b");
-        let digest = digest(&harness, "pair");
+        let (harness, folder) = templated("templates-under-lock", |wire| {
+            mira_paused_and_pat(wire);
+            wire["agents"][0]["status"] = json!("active");
+        });
+        saved(&folder, &duo());
+        worked(&harness, "pat");
+        let digest = digest(&harness, "duo");
         let writing = harness.daemon.team_writes();
         let daemon = Arc::clone(&harness.daemon);
         let asking = std::thread::spawn(move || {
             rpc(
                 &daemon,
                 "template.apply",
-                &json!({ "slug": "pair", "digest": digest }),
+                &json!({ "slug": "duo", "digest": digest }),
             )
         });
         std::thread::sleep(std::time::Duration::from_millis(300));
-        // While another write holds the team, it pauses Ada (dev-a), whom Pair keeps as its only
-        // Developer: worked out against this team, applying retires dev-b and leaves none active.
+        // While another write holds the team, it pauses Mira, whom Duo keeps as its only Product
+        // Manager: worked out against this team, applying retires pat and leaves none active.
         let mut wire = team_file(&harness);
-        wire["agents"][1]["status"] = json!("paused");
+        wire["agents"][0]["status"] = json!("paused");
         harness
             .project
             .deps
@@ -1200,7 +1251,7 @@ mod tests {
         assert_eq!(reply["error"]["code"], -32005, "{reply}");
         assert_eq!(
             reply["error"]["data"]["errors"][0]["code"],
-            "needs_developer"
+            "needs_product_manager"
         );
         assert_eq!(team_file(&harness), wire, "nothing is written");
         assert_eq!(seq_count(&harness), events);
@@ -1272,6 +1323,161 @@ mod tests {
             drop(writing);
             let reply = asking.join().expect("the write ends");
             assert!(reply.get("result").is_some(), "{method}: {reply}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_the_builtins_with_the_saved_and_without_a_folder() {
+        let (harness, folder) = templated("templates-builtin-list", |_| {});
+        saved(&folder, &pair());
+        let list = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "templates.list",
+                &json!({}),
+                "templatesListResult",
+            )
+        };
+        let listed = list(&harness);
+        let slugs = |key: &str| -> Vec<Value> {
+            listed[key]
+                .as_array()
+                .expect("an array")
+                .iter()
+                .map(|row| row["slug"].clone())
+                .collect()
+        };
+        assert_eq!(
+            slugs("builtin"),
+            ["software-product", "online-store", "financial-analysis"]
+        );
+        assert_eq!(slugs("templates"), ["pair"]);
+        assert_eq!(listed["folder"], json!(folder.to_str()));
+        assert_eq!(listed["builtin"][1]["template"]["name"], "Online store");
+
+        let bare = Harness::new("templates-builtin-list-bare", |_| {});
+        served(&bare, None);
+        let listed = list(&bare);
+        assert_eq!(listed["folder"], Value::Null);
+        assert_eq!(listed["builtin"].as_array().map(Vec::len), Some(3));
+        assert_eq!(listed["templates"], json!([]));
+        assert_eq!(listed["unreadable"], json!([]));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn previews_and_applies_a_builtin() {
+        let (harness, folder) = templated("templates-builtin-apply", |_| {});
+        // A different team saved under the built-in's file name never shadows the built-in.
+        saved(&folder, &pair());
+        std::fs::copy(
+            folder.join("pair.yaml"),
+            folder.join("financial-analysis.yaml"),
+        )
+        .expect("copied");
+        let (_, expected) = crate::templates::builtin("financial-analysis").expect("a built-in");
+        let shown = preview(&harness, "financial-analysis");
+        assert_eq!(shown["digest"], json!(expected));
+        assert_eq!(shown["errors"], json!([]), "{shown}");
+        let roles: Vec<(&Value, &Value)> = shown["team"]["agents"]
+            .as_array()
+            .expect("agents")
+            .iter()
+            .filter(|agent| agent["status"] != "retired")
+            .map(|agent| (&agent["display_name"], &agent["role"]))
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                (&json!("Mira"), &json!("product_manager")),
+                (&json!("Noor"), &json!("finance_specialist")),
+                (&json!("Ivo"), &json!("finance_specialist")),
+                (&json!("Lena"), &json!("finance_specialist")),
+            ]
+        );
+        let before = seq_count(&harness);
+        let applied = call(
+            &harness.daemon,
+            "template.apply",
+            &json!({ "slug": "financial-analysis", "digest": expected }),
+            "templateAppliedResult",
+        );
+        assert_eq!(applied, shown);
+        assert_eq!(team_file(&harness), shown["team"]);
+        let after: Vec<Value> = harness.project.events(&[])[before..]
+            .iter()
+            .map(event_to_value)
+            .collect();
+        let last = after.last().expect("an event");
+        assert_eq!(last["kind"], "team.updated");
+        assert_eq!(last["body"]["template"], "Financial analysis");
+
+        // With no state folder a built-in still works.
+        let bare = Harness::new("templates-builtin-apply-bare", |_| {});
+        served(&bare, None);
+        let shown = preview(&bare, "financial-analysis");
+        assert_eq!(shown["digest"], json!(expected));
+        let applied = call(
+            &bare.daemon,
+            "template.apply",
+            &json!({ "slug": "financial-analysis", "digest": expected }),
+            "templateAppliedResult",
+        );
+        assert_eq!(applied, shown);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_builtin_name_as_template_builtin() {
+        let (harness, folder) = templated("templates-builtin-name", |_| {});
+        let taken = (-32005, json!("template_builtin"), json!("/name"));
+        assert_eq!(
+            refusal(
+                &harness,
+                "template.save",
+                &json!({ "name": "online store" })
+            ),
+            taken
+        );
+        saved(&folder, &pair());
+        assert_eq!(
+            refusal(
+                &harness,
+                "template.rename",
+                &json!({ "slug": "pair", "name": "online store" })
+            ),
+            taken
+        );
+        let reply = rpc(
+            &harness.daemon,
+            "template.save",
+            &json!({ "name": "online store" }),
+        );
+        assert_eq!(
+            reply["error"]["data"]["errors"][0]["message"],
+            "Catervas comes with a team called Online store. Choose another name."
+        );
+        assert!(!folder.join("online-store.yaml").exists());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_saved_slug_without_a_folder_is_still_refused() {
+        let bare = Harness::new("templates-no-folder-saved", |_| {});
+        served(&bare, None);
+        for (method, params) in [
+            (
+                "query",
+                json!({ "name": "template.preview", "params": { "slug": "mine" } }),
+            ),
+            ("template.save", json!({ "name": "Mine" })),
+        ] {
+            assert_eq!(
+                refusal(&bare, method, &params),
+                (-32005, json!("no_state_folder"), json!("/")),
+                "{method}"
+            );
         }
     }
 }

@@ -57,7 +57,7 @@ name the folder it needs, such as docs/adr/** or src/**/*.rs.
 Assign a ready task to an agent of its assignee role with room under the team's WIP limit, using
 `catervas_assign_task`. A task with a `lane` goes to its lane's builder, named in your message: the
 governor refuses anyone else (`lane_taken`). The first task of a lane goes to any agent of its role
-with room, who then builds the lane. Nobody reviews their own work. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks. When nobody has room or no agent of the role is active, leave the task
+with room, who then builds the lane. Nobody reviews their own work, except a Product Manager with no Architect or Scrum Master on its team, whose own docs tasks it reviews in a fresh session. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks. When nobody has room or no agent of the role is active, leave the task
 ready and say why in your note; do not force an assignment past the limit.
 
 ## 5. Escalation hygiene

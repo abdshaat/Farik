@@ -5,7 +5,7 @@ use catervas_core::branch::task_branch;
 use catervas_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use catervas_core::governor::done::CriterionResult;
 use catervas_core::marketing::network_name;
-use catervas_core::team::{Agent, task_private_folder};
+use catervas_core::team::{Agent, Team, task_private_folder};
 use catervas_protocol::event::{
     BlockerWire, BudgetExhaustedBodyScope, CatervasEvent, EventBody, EventKind,
     HumanAcceptedBodySubject, NoteWrittenBodyKind, Thread,
@@ -466,10 +466,25 @@ fn decision_block(
 /// review it.
 pub(super) fn plan_message(
     contract: &TaskContract,
+    team: &Team,
     assignees: &[String],
     reviewers: &[String],
     lane_builder: Option<&str>,
 ) -> String {
+    // A team may hold several agents of one role, such as three Finance Specialists, so each is
+    // named with its persona, which says its desk.
+    let named = |ids: &[String]| -> Vec<String> {
+        ids.iter()
+            .map(|id| {
+                let persona = team
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id.as_str() == id)
+                    .and_then(|agent| agent.persona.as_deref().map(String::as_str));
+                persona.map_or_else(|| id.clone(), |persona| format!("{id} ({persona})"))
+            })
+            .collect()
+    };
     let lane = match (contract.lane, &contract.parent) {
         (Some(lane), Some(epic)) => match lane_builder {
             Some(builder) => format!(
@@ -484,15 +499,23 @@ pub(super) fn plan_message(
         },
         _ => String::new(),
     };
+    let own_docs = if contract.assignee_role == contract.reviewer_role
+        && contract.assignee_role.reviews_its_own()
+    {
+        ", but a Product Manager may review its own docs task, in a fresh session, when the team \
+         has no other Product Manager"
+    } else {
+        ""
+    };
     format!(
         "Assign {task} with `catervas_assign_task`, naming its assignee and its reviewer. The agents \
          of its assignee role, {assignee_role}, with room for it: {assignees}. The agents of its \
-         reviewer role, {reviewer_role}: {reviewers}. The reviewer is never the assignee.{lane}",
+         reviewer role, {reviewer_role}: {reviewers}. The reviewer is never the assignee{own_docs}.{lane}",
         task = contract.id.as_str(),
         assignee_role = contract.assignee_role,
         reviewer_role = contract.reviewer_role,
-        assignees = listed(assignees),
-        reviewers = listed(reviewers),
+        assignees = listed(&named(assignees)),
+        reviewers = listed(&named(reviewers)),
     )
 }
 
@@ -1378,6 +1401,63 @@ mod tests {
         validate_contract(&a_contract_wire()).expect("the fixture is a contract")
     }
 
+    #[test]
+    fn names_each_desk_beside_its_id() {
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
+        let agent = |id: &str, role: &str, persona: Option<&str>| {
+            let mut agent = catervas_core::team::fixtures::an_agent_wire(id, role);
+            if let Some(persona) = persona {
+                agent["persona"] = json!(persona);
+            }
+            agent
+        };
+        wire["agents"] = json!([
+            agent(
+                "mira",
+                "product_manager",
+                Some("Asks the questions that decide what to build")
+            ),
+            agent(
+                "noor",
+                "finance_specialist",
+                Some("Portfolio desk: what you hold")
+            ),
+            agent(
+                "ivo",
+                "finance_specialist",
+                Some("Risk desk: what could go wrong")
+            ),
+            agent(
+                "lena",
+                "finance_specialist",
+                Some("Opportunity desk: what could be gained")
+            ),
+            agent("sam", "finance_specialist", None)
+        ]);
+        let team = catervas_core::team::validate_team(&wire).expect("a team");
+        let ids = |ids: &[&str]| ids.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let message = plan_message(
+            &contract(),
+            &team,
+            &ids(&["noor", "ivo", "lena", "sam"]),
+            &ids(&["mira"]),
+            None,
+        );
+        for desk in [
+            "noor (Portfolio desk: what you hold)",
+            "ivo (Risk desk: what could go wrong)",
+            "lena (Opportunity desk: what could be gained)",
+            "mira (Asks the questions that decide what to build)",
+        ] {
+            assert!(message.contains(desk), "{desk} in {message}");
+        }
+        assert!(message.contains("sam"), "{message}");
+        assert!(
+            !message.contains("sam ("),
+            "no persona, no brackets: {message}"
+        );
+    }
+
     fn an_epic() -> TaskContract {
         TaskContract {
             kind: TaskKind::Epic,
@@ -1457,31 +1537,58 @@ mod tests {
     }
 
     #[test]
+    fn says_a_product_manager_may_review_its_own_docs() {
+        let team =
+            catervas_core::team::validate_team(&catervas_core::team::fixtures::a_team_wire())
+                .expect("a team");
+        let people = (["mira".to_string()], ["mira".to_string()]);
+        let mut docs = contract();
+        docs.assignee_role = Role::ProductManager;
+        docs.reviewer_role = Role::ProductManager;
+        let message = plan_message(&docs, &team, &people.0, &people.1, None);
+        assert!(
+            message.ends_with(
+                "The reviewer is never the assignee, but a Product Manager may review its own docs task, in a fresh session, when the team has no other Product Manager."
+            ),
+            "{message}"
+        );
+        let other = plan_message(&contract(), &team, &people.0, &people.1, None);
+        assert!(
+            other.ends_with("The reviewer is never the assignee."),
+            "{other}"
+        );
+    }
+
+    #[test]
     fn names_a_lanes_builder() {
+        // None of these ids is on the team, so each is named by its id alone.
+        let team =
+            catervas_core::team::validate_team(&catervas_core::team::fixtures::a_team_wire())
+                .expect("a team");
         let people = (
             ["dev-a".to_string(), "dev-b".to_string()],
             ["arch".to_string()],
         );
-        let unlaned = plan_message(&contract(), &people.0, &people.1, None);
+        let unlaned = plan_message(&contract(), &team, &people.0, &people.1, None);
         assert!(!unlaned.contains("lane"), "{unlaned}");
         assert!(
             unlaned.ends_with("The reviewer is never the assignee."),
             "{unlaned}"
         );
         assert_eq!(
-            plan_message(&contract(), &people.0, &people.1, Some("dev-a")),
+            plan_message(&contract(), &team, &people.0, &people.1, Some("dev-a")),
             unlaned
         );
         let mut laned = contract();
         laned.parent = Some("CTV-1".parse().expect("a task id"));
         laned.lane = std::num::NonZeroU64::new(2);
-        let taken = plan_message(&laned, &people.0, &people.1, Some("dev-a"));
+        let taken = plan_message(&laned, &team, &people.0, &people.1, Some("dev-a"));
         assert!(taken.starts_with(&unlaned), "{taken}");
         assert!(
             taken.ends_with("It is in lane 2 of CTV-1, which dev-a builds."),
             "{taken}"
         );
-        let first = plan_message(&laned, &people.0, &people.1, None);
+        let first = plan_message(&laned, &team, &people.0, &people.1, None);
         assert!(
             first.ends_with(
                 "It is the first of lane 2 of CTV-1 to be assigned; whoever you assign builds that lane's other tasks too."
