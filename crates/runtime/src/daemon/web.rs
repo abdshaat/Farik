@@ -1090,7 +1090,7 @@ fn task_wire(task: &TaskProjection, team: &Team, open: Option<&str>) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::fmt::Write as _;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -2948,7 +2948,7 @@ mod tests {
     // Setup mode: a daemon with no project, answering the wizard through a fake host.
 
     /// A setup host that records what it was asked and hands out paths under `home`.
-    struct FakeHost {
+    pub(in crate::daemon) struct FakeHost {
         home: PathBuf,
         path: String,
         calls: std::sync::Mutex<Vec<Value>>,
@@ -3010,7 +3010,10 @@ mod tests {
     }
 
     /// A daemon in setup mode over `home`, whose programs are looked for on `path`.
-    fn in_setup(home: &std::path::Path, path: &str) -> (Arc<DaemonState>, Arc<FakeHost>) {
+    pub(in crate::daemon) fn in_setup(
+        home: &std::path::Path,
+        path: &str,
+    ) -> (Arc<DaemonState>, Arc<FakeHost>) {
         let host = Arc::new(FakeHost {
             home: home.to_path_buf(),
             path: path.to_string(),

@@ -497,6 +497,8 @@ fn plain_file(base: &std::path::Path, path: &str) -> Option<String> {
             return None;
         }
     }
+    // ponytail: the file is opened after the links were checked, so a link swapped in between
+    // is followed; the frame is sandboxed and has no network, and no dependency gives O_NOFOLLOW.
     let regular = std::fs::symlink_metadata(&at).ok()?.is_file();
     regular.then(|| std::fs::read_to_string(&at).ok()).flatten()
 }
@@ -1519,6 +1521,7 @@ mod tests {
         assert_eq!(header("x-dns-prefetch-control"), "off");
         assert_eq!(header("cache-control"), "no-store");
         assert!(body.contains("<h1>the overview</h1>"), "{body}");
+        assert_eq!(body.matches(super::FIT).count(), 1, "{body}");
     }
 
     #[test]
@@ -1581,12 +1584,27 @@ mod tests {
         let branch = harness.project.branch("CTV-2");
         git(&harness, &["checkout", "-b", &branch]);
         write(&harness, &spec, "<h1>the task's spec</h1>\n");
+        write(&harness, "docs/other.html", "<h1>other</h1>\n");
         commit(&harness, "the spec");
         git(&harness, &["checkout", "main"]);
         let cookie = browse(&harness);
         let (status, body) = served(&harness, &cookie, &spec, "&task=CTV-2").await;
         assert_eq!(status, 200);
         assert!(body.contains("<h1>the task's spec</h1>"), "{body}");
+        // The branch wins over the worktree.
+        let worktree_spec = harness
+            .project
+            .repo
+            .path
+            .join(".catervas/local/worktrees/CTV-2")
+            .join(&spec);
+        std::fs::create_dir_all(worktree_spec.parent().expect("a folder")).expect("a folder");
+        std::fs::write(&worktree_spec, "<h1>the worktree's spec</h1>\n").expect("written");
+        let (_, body) = served(&harness, &cookie, &spec, "&task=CTV-2").await;
+        assert!(body.contains("the task's spec"), "{body}");
+        // Only documents under docs/catervas/ are served, with a task too.
+        let other = served(&harness, &cookie, "docs/other.html", "&task=CTV-2").await;
+        assert_eq!(other, (404, String::new()));
         // Main does not hold it.
         assert_eq!(served(&harness, &cookie, &spec, "").await.0, 404);
 
@@ -1611,6 +1629,14 @@ mod tests {
         std::os::unix::fs::symlink(&outside, root.join("CTV-4/docs")).expect("a link");
         let through = served(&harness, &cookie, &plan, "&task=CTV-4").await;
         assert_eq!(through, (404, String::new()));
+        // A path that climbs out of the worktree gives nothing, written or encoded.
+        for climb in [
+            "docs/catervas/../../../../../../outside/catervas/product/plan.html",
+            "docs%2Fcatervas%2F%2e%2e%2F%2e%2e%2F%2e%2e%2F%2e%2e%2F%2e%2e%2F%2e%2e%2Foutside%2Fcatervas%2Fproduct%2Fplan.html",
+        ] {
+            let up = served(&harness, &cookie, climb, "&task=CTV-3").await;
+            assert_eq!(up, (404, String::new()), "{climb}");
+        }
         // And a link as the file itself.
         let linked = format!("{PRODUCT}/linked.html");
         std::os::unix::fs::symlink(&file, root.join("CTV-3").join(&linked)).expect("a link");
@@ -1649,5 +1675,34 @@ mod tests {
             let (status, _, body) = raw(&harness.daemon, &query, HOST, Some(&cookie)).await;
             assert_eq!((status.as_u16(), body.as_str()), (404, ""), "{query}");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answers_404_with_no_project() {
+        use tower::ServiceExt;
+        let home = std::env::temp_dir().join(format!("catervas-raw-setup-{}", std::process::id()));
+        let (state, _host) = crate::daemon::web::tests::in_setup(&home, "");
+        let web = state.web().expect("the browser routes are on");
+        let secret = web.sessions.issue(web.clock.now()).expect("a session");
+        let request = axum::http::Request::get(
+            "/documents/raw?path=docs/catervas/architecture/overview.html",
+        )
+        .header(axum::http::header::HOST, HOST)
+        .header(
+            axum::http::header::COOKIE,
+            format!("catervas_session={secret}"),
+        )
+        .body(axum::body::Body::empty())
+        .expect("a request");
+        let answer =
+            crate::daemon::router(state, "token", tokio_util::sync::CancellationToken::new())
+                .oneshot(request)
+                .await
+                .expect("the router answers");
+        let status = answer.status().as_u16();
+        let body = axum::body::to_bytes(answer.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        assert_eq!((status, body.len()), (404, 0));
     }
 }
