@@ -1,6 +1,6 @@
 # Standalone: the chat list and the chat scroll apart, newest first
 
-Status: ready
+Status: done
 Branch: `fix/chats-separate-panes`
 Spec: `docs/SPEC.md` F8 (line 890, the Chats page; F7's channel is shown in it), section 8's web UI; `docs/design/web-ui.md` (the Channel row, line 127)
 Depends on: none (`main` at `6e976fc`)
@@ -169,3 +169,13 @@ cargo xtask check
 ```
 
 Then the founder opens Chats with a long Team chat, lands on its newest message, scrolls up to read older ones, and sees the list stay where it was.
+
+## Landing review
+
+A fresh Opus 5.5 session, 2026-10-12: lands after fixes (recorded on pull request #43). Every decision carried out; two additions the plan did not name kept, as the height chain needs them (`.narrow > .open { grid-row: 2 }`, the `.fill` grid rows). Mutants, one at a time: RED for the prepend's kept place, `mine`, the follow at the bottom, the top edge, every paging guard, the alert and the button's place, the jump's focus, clearing and scroll; OneToOne's `more` from the first answer only, its `before_seq`, the earlier page merged, its failure said; Channel's fold at 1440, its place and state, the phone's hidden hints, `gone` inside the box; Shell's fill and `useMedia`'s query. Survivors, each since held by a test or removed: the first-render branch (dead, removed in `cf643e7`, Decision amended), the bottom edge as `< 48` or `<= 0` and `behind` cleared on any scroll (`42bfa82`), a one-to-one's paging not cleared after an earlier page (`09f236e`), `mine` always false in a one-to-one (`88363c0`), `/channelx` filling the window (`ac6345b`). Findings: critical, a meeting link's thread thrown back to the newest by the follow before the scroll event (`fce2ffa`, the feed re-measures when the page moved the view); minor, opening the folded meetings changed the box's height without a render (`945c95f`, the fold's state kept in Channel). Out of scope, from before this step: the side panel's `onOpen` not resetting `gone` and `paging`.
+
+Verification on `945c95f`, as run in this container:
+- `pnpm check`: exit 0; apps/web 623 passed, packages/ui 65, packages/brand 35, packages/protocol-client 16.
+- `pnpm --filter @catervas/web e2e` (Playwright pointed at the installed Chromium through `PLAYWRIGHT_BROWSERS_PATH`): 17 passed, `chats-scroll`, `chats` and `channel` among them; 2 failed, `design.spec.ts` and `designer.spec.ts`, both at `docker run … alpine:3.22`, which Docker Hub refused with `429 Too Many Requests`; neither touches the chats.
+- `cargo xtask check`, under a child reaper: `xtask check: ok`. Without it, three `claude_process` tests fail ("the program's child outlived …"), the container's missing reaper; all 26 pass under it.
+
