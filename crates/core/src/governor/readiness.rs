@@ -2302,6 +2302,11 @@ mod tests {
         let context = a_project_folder_context(&["app", "infra"]);
         let docs = a_task_for(Role::Architect, &["docs/**"]);
         assert_eq!(failed_repo_rules(&docs, &context), []);
+        // Not a document path, and still no repo asked of a role that changes no code.
+        assert_eq!(
+            failed_repo_rules(&a_task_for(Role::Architect, &["src/**"]), &context),
+            []
+        );
         let named = in_repo(docs, "app");
         assert_eq!(failed_repo_rules(&named, &context), [R::RepoNotAllowed]);
         assert_eq!(
