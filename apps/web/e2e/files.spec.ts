@@ -188,3 +188,38 @@ test("the folder list stays in view beside a long document, reading and editing"
 		await serve.stop();
 	}
 });
+
+test("a long file name wraps inside the folder list instead of scrolling it sideways", async ({
+	page,
+}) => {
+	const serve = await startServe({
+		team: "pm-architect-developer",
+		transcripts: [],
+	});
+	commitFiles(
+		serve.project,
+		{
+			[ROADMAP]: "# Roadmap\n",
+			"docs/catervas/product/averyveryverylongdocumentnamewithoutanyspacesatallforwrapping.md":
+				"# Long\n",
+		},
+		"docs: a long file name",
+	);
+	try {
+		await page.goto(serve.url);
+		await page.setViewportSize({ width: 1440, height: 800 });
+		await page
+			.getByRole("navigation", { name: "Main" })
+			.getByRole("link", { name: "Files" })
+			.click();
+		const tree = page.getByRole("navigation", { name: "Files" });
+		await expect(
+			tree.getByRole("link", { name: /averyveryverylong/i }),
+		).toBeVisible();
+		expect(await tree.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
+			true,
+		);
+	} finally {
+		await serve.stop();
+	}
+});

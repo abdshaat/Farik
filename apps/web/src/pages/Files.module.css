@@ -146,6 +146,7 @@ details[open] > summary.fold::before {
 	padding: 0 var(--catervas-space-3) 0 83px;
 	color: var(--catervas-color-ink);
 	text-decoration: none;
+	overflow-wrap: anywhere;
 }
 
 .docs a:hover {
