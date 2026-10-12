@@ -1120,20 +1120,23 @@ mod tests {
         }
     }
 
-    /// A project folder over the member `app`, whose `main` holds `flag.txt` as `broken` (and the
-    /// test `tests/new.sh` when `test_on_main`), with CTV-1, a task of `app`, in `verifying`: its
+    /// A project folder over the member `app`, whose `trunk` (its own integration branch, not the
+    /// team's `main`) holds `flag.txt` as `broken` (and the test `tests/new.sh` when
+    /// `test_on_trunk`), with CTV-1, a task of `app`, in `verifying`: its
     /// branch fixes the flag and adds the test, which a task of the member passes only if the
     /// flag is fixed. Its one criterion is the test command, as the member's `app-the-tests-pass`
     /// expands, requiring a new test.
-    fn a_member_task_to_verify(name: &str, test_on_main: bool) -> (Harness, Vec<TempRepo>) {
+    fn a_member_task_to_verify(name: &str, test_on_trunk: bool) -> (Harness, Vec<TempRepo>) {
         let (harness, members) = Harness::project_folder(name, &["app"]);
         let app = &members[0];
         app.write("flag.txt", "broken\n");
         app.write("tests/other.sh", "exit 0\n");
-        if test_on_main {
+        if test_on_trunk {
             app.write("tests/new.sh", "[ \"$(cat flag.txt)\" = fixed ]\n");
         }
         app.commit("the flag and its tests");
+        // The member's integration branch is its own, not the team's `main`.
+        app.git(&["branch", "-m", "main", "trunk"]);
         harness.file("CTV-1", "ready", |wire| {
             wire["repo"] = json!("app");
             wire["allowed_paths"] = json!(["flag.txt", "tests/**"]);
@@ -1153,7 +1156,7 @@ mod tests {
             .moved("CTV-1", "assigned", "in_progress", &people);
         let worktree = harness.worktree("CTV-1");
         app.adapter()
-            .create_worktree(&worktree, &harness.branch("CTV-1"), "main")
+            .create_worktree(&worktree, &harness.branch("CTV-1"), "trunk")
             .expect("the member makes the task's worktree");
         std::fs::write(worktree.join("flag.txt"), "fixed\n").expect("written");
         std::fs::create_dir_all(worktree.join("tests")).expect("made");
@@ -1162,7 +1165,7 @@ mod tests {
             "[ \"$(cat flag.txt)\" = fixed ]\n",
         )
         .expect("written");
-        let paths = if test_on_main {
+        let paths = if test_on_trunk {
             vec!["flag.txt".to_string()]
         } else {
             vec!["flag.txt".to_string(), "tests/new.sh".to_string()]
@@ -1203,7 +1206,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn runs_a_members_check_on_its_branch() {
         // The check runs at the member's root in the sandbox made for the task's worktree, and
-        // `new_tests_required` is judged against the member's `main`, not the project folder's.
+        // `new_tests_required` is judged against the member's `trunk`, not the project folder's.
         let (harness, members) = a_member_task_to_verify("verify-member-check", false);
         let (started, _) = ticked(&harness, vec![review_writes_note()], 1).await;
         let (passed, evidence) = recorded_run(&harness);
@@ -1233,7 +1236,7 @@ mod tests {
             "and the base worktree is removed again"
         );
 
-        // The same test already on the member's main is not a new one.
+        // The same test already on the member's trunk is not a new one.
         let (already, _members) = a_member_task_to_verify("verify-member-check-old", true);
         ticked(&already, vec![review_writes_note()], 1).await;
         let (passed, evidence) = recorded_run(&already);
