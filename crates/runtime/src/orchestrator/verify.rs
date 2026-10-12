@@ -90,6 +90,7 @@ pub(super) async fn verifying(
     let ran = match run_what_catervas_runs(orchestrator, team, &contract, &history, since).await? {
         CatervasRan::Criteria(ran) => ran,
         CatervasRan::Unrunnable(why) => return escalate(deps, team, row, &why),
+        CatervasRan::MemberMissing => return Ok(None),
     };
     let context = context(deps, team, &row.task_id)?;
     if let Some(handled) = design_review_first(
@@ -144,6 +145,9 @@ enum CatervasRan {
     Criteria(usize),
     /// One could not be run, for a reason that is not the work's, in these words.
     Unrunnable(String),
+    /// The task's member is not where the project left it: nothing was run, and the task waits
+    /// until the member is located.
+    MemberMissing,
 }
 
 /// Runs, one at a time, each `command`, `test`, or `artifact` criterion with no governor's result
@@ -180,8 +184,11 @@ async fn run_what_catervas_runs(
     }
     orchestrator.forget_sandbox(&contract.id);
     // The task's branch and its base are its repository's: the member's, in a project folder.
-    let repository = task_repository_of(deps, team, contract)
-        .map_err(|error| repository_refused(&contract.id, &error))?;
+    let repository = match task_repository_of(deps, team, contract) {
+        Ok(repository) => repository,
+        Err(TaskRepositoryError::Missing { .. }) => return Ok(CatervasRan::MemberMissing),
+        Err(error) => return Err(repository_refused(&contract.id, &error)),
+    };
     let base = repository.integration_branch.clone();
     for criterion in &pending {
         let mut alone = contract.clone();
@@ -1235,6 +1242,27 @@ mod tests {
             evidence.lines().any(|one| one == "adds tests: no"),
             "{evidence}"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_missing_member_before_running_its_checks() {
+        // A member that is not where the project left it passes the task over, as every other rule
+        // that resolves its repository does: no run, no escalation, and the tick goes on.
+        let (harness, members) = a_member_task_to_verify("verify-member-missing", false);
+        let away = members[0].path.with_extension("away");
+        let _ = std::fs::remove_dir_all(&away);
+        std::fs::rename(&members[0].path, &away).expect("the member is moved away");
+
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 2).await;
+
+        assert!(started.is_empty(), "{}", started.len());
+        assert!(harness.events(&[EventKind::CriterionRecorded]).is_empty());
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        std::fs::rename(&away, &members[0].path).expect("the member is moved back");
+        ticked(&harness, vec![review_writes_note()], 1).await;
+        let (passed, evidence) = recorded_run(&harness);
+        assert!(passed, "located again, its checks run: {evidence}");
     }
 
     #[tokio::test]
