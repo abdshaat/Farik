@@ -1268,6 +1268,21 @@ mod tests {
         assert!(!Path::new("/elsewhere").exists());
         assert!(!home().join(new_parent("deep")).exists());
 
+        // A link inside home that leads out of it is followed, and refused.
+        let top = parent.split('/').next().expect("a top folder").to_string();
+        let out = home().join(&top).join("out");
+        std::fs::create_dir_all(home().join(&top)).expect("the top folder");
+        std::os::unix::fs::symlink("/proc", &out).expect("a link out of home");
+        let through = refused(&host, &format!("{top}/out/x"), "shop", &both);
+        std::fs::remove_file(&out).expect("the link is removed");
+        forget(&parent);
+        assert_eq!(through, "that folder is outside your home folder");
+
+        assert_eq!(
+            refused(&host, &parent, "shop", &vec![app_member.clone(); 17]),
+            "a project holds at most 16 repositories"
+        );
+
         assert_eq!(
             refused(&host, &parent, "shop", std::slice::from_ref(&app_member)),
             "a project of several repositories needs at least two"
