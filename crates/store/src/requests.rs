@@ -961,6 +961,10 @@ pub fn contract_write(refusal: &ContractWriteRefusal) -> String {
             listed(fields),
             is_or_are(fields)
         ),
+        ContractWriteRefusal::RepoFixed { repo } => format!(
+            "repo is fixed once set: this task stays in {repo}; cancel it and file another to \
+             change repositories"
+        ),
     }
 }
 
@@ -1159,6 +1163,18 @@ mod tests {
         .iter()
         .map(|text| text.as_str().unwrap_or_default().to_string())
         .collect()
+    }
+
+    #[test]
+    fn says_a_repo_is_fixed_once_set() {
+        let refusal = catervas_core::governor::gates::ContractWriteRefusal::RepoFixed {
+            repo: "app".to_string(),
+        };
+        assert_eq!(
+            super::contract_write(&refusal),
+            "repo is fixed once set: this task stays in app; cancel it and file another to \
+             change repositories"
+        );
     }
 
     #[test]

@@ -921,6 +921,12 @@ pub enum ContractWriteRefusal {
         /// The names it did not recognise.
         fields: Vec<String>,
     },
+    /// The write would change the repository a task names after one was set: the task's expanded
+    /// criteria come from that repository (ADR 0057), so it is cancelled and another filed.
+    RepoFixed {
+        /// The repository the task stays in.
+        repo: String,
+    },
 }
 
 /// The fields that still change once a contract is frozen (`docs/SPEC.md` section 5.11): the
@@ -963,7 +969,7 @@ pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 /// assignee writing the tasks under it, and by the human. Written out rather than left as
 /// whatever is not in the other sets, so that a field added to the schema is refused until
 /// somebody says who writes it.
-pub const FIELDS_OF_THE_CONTENT: [&str; 18] = [
+pub const FIELDS_OF_THE_CONTENT: [&str; 19] = [
     "title",
     "intent",
     "summary",
@@ -982,6 +988,7 @@ pub const FIELDS_OF_THE_CONTENT: [&str; 18] = [
     "ui_change",
     "plan",
     "lane",
+    "repo",
 ];
 
 /// The fields the note tools write, which stay open whatever the contract's status: its notes,
@@ -1108,6 +1115,28 @@ pub fn check_contract_write(
     Ok(ContractWriteOutcome::Allowed)
 }
 
+/// Whether a write keeps the repository a task names: a `repo` that was set stays what it was,
+/// and one that was not may be set (ADR 0057). Asked of every writer that changes a contract's
+/// content, after `check_contract_write` allows the write, with the contract as it was and as it
+/// would be.
+///
+/// # Errors
+///
+/// `RepoFixed` when `before` names a repository and `after` names another or none.
+pub fn check_repo_write(
+    before: &TaskContract,
+    after: &TaskContract,
+) -> Result<(), ContractWriteRefusal> {
+    match &before.repo {
+        Some(repo) if after.repo.as_ref().map(|r| r.as_str()) != Some(repo.as_str()) => {
+            Err(ContractWriteRefusal::RepoFixed {
+                repo: repo.as_str().to_string(),
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
 /// The changed fields that are not in the given set, in the order they were given and without
 /// repeats: a refusal that names one field twice reads as two problems where there is one.
 fn beyond(changed_fields: &[String], open: &[&str]) -> Vec<String> {
@@ -1149,8 +1178,8 @@ mod tests {
         FIELDS_THE_STORE_OWNS, FolderWork, ParentEpic, Rejection, SprintHold, WorkState,
         check_assignment, check_blocker_resolved, check_blocker_written, check_child_creation,
         check_children_done, check_contract_write, check_criteria_recorded, check_human_triage,
-        check_rejection_reasons, fits_the_open_sprint, in_the_backlog, in_the_open_sprint,
-        waits_for_a_sprint,
+        check_rejection_reasons, check_repo_write, fits_the_open_sprint, in_the_backlog,
+        in_the_open_sprint, waits_for_a_sprint,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
@@ -2617,6 +2646,60 @@ mod tests {
                 fields: fields.to_vec()
             })
         );
+    }
+
+    #[test]
+    fn the_product_manager_writes_a_repo() {
+        let product_manager = ContractWriteActor {
+            kind: TransitionActor::ProductManager,
+            agent_id: Some("pm-1".to_string()),
+        };
+        let fields = ["repo".to_string()];
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Refining,
+                false,
+                &product_manager,
+                &fields
+            ),
+            Ok(ContractWriteOutcome::Allowed)
+        );
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Ready,
+                false,
+                &product_manager,
+                &fields
+            ),
+            Err(ContractWriteRefusal::ContractFrozen {
+                fields: fields.to_vec()
+            })
+        );
+    }
+
+    #[test]
+    fn keeps_a_repo_once_set() {
+        let in_repo = |repo: Option<&str>| {
+            let mut wire = crate::contract::fixtures::a_contract_wire();
+            if let Some(repo) = repo {
+                wire["repo"] = json!(repo);
+            }
+            crate::contract::validate_contract(&wire).expect("valid")
+        };
+        let (none, app, infra) = (in_repo(None), in_repo(Some("app")), in_repo(Some("infra")));
+        for (before, after) in [(&none, &app), (&app, &app), (&none, &none)] {
+            assert_eq!(check_repo_write(before, after), Ok(()));
+        }
+        for after in [&infra, &none] {
+            assert_eq!(
+                check_repo_write(&app, after),
+                Err(ContractWriteRefusal::RepoFixed {
+                    repo: "app".to_string()
+                })
+            );
+        }
     }
 
     #[test]

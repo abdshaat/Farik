@@ -142,7 +142,7 @@ Files: the schema (`repo` beside `lane`, `:178`); `contract.rs` (the paths' doc 
 - `the_product_manager_writes_a_repo` (`gates.rs`, beside `the_product_manager_writes_a_plan_and_a_lane`, `:2592`): `repo` changed by the Product Manager in `refining` is allowed, and in `ready` is `ContractFrozen`. `gives_every_field_of_the_schema_to_exactly_one_owner` passes with `repo` in the content. RED: `repo` is `UnknownFields`.
 - `keeps_a_repo_once_set`: `None` → `app`, `app` → `app` and `None` → `None` are `Ok`; `app` → `infra` and `app` → `None` are `RepoFixed { repo: "app" }`. Its code in `refusal.rs` is `repo_fixed` with the Decisions' sentence. RED.
 
-- [ ] `feat(core): a task names the repository it changes`
+- [x] `feat(core): a task names the repository it changes`
 
 ### Task 2: Readiness knows the repositories
 
