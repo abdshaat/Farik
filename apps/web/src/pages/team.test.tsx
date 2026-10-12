@@ -460,6 +460,18 @@ describe("team page", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("shows_the_agents_picture_beside_its_title", async () => {
+		const { container } = await opened("/team/mira");
+		const title = await screen.findByRole("heading", {
+			level: 1,
+			name: "Mira, your Product Manager",
+		});
+		expect(title.previousElementSibling?.getAttribute("src")).toBe(
+			AVATAR_URLS["product-manager"],
+		);
+		await expectNoAxeViolations(container);
+	});
+
 	it("offers_save_only_once_something_changed", async () => {
 		await opened("/team/theo");
 		const save = (await screen.findByRole("button", {

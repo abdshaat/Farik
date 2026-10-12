@@ -1,6 +1,7 @@
-import { Avatar, type AvatarKey, Button, TextArea } from "@catervas/ui";
+import { Button, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
 import type { TaskStatus } from "../app/words.ts";
+import { AgentPicture } from "../components/AgentPicture.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
@@ -8,6 +9,7 @@ import styles from "./DocumentChanges.module.css";
 import type { Integration } from "./DocumentChanges.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import card from "./ProductPlanCard.module.css";
+import type { Agent } from "./setup/TeamSetup.tsx";
 
 /** `product_plan.state`, in camelCase. */
 export type ProductPlanState = {
@@ -65,13 +67,13 @@ export function projectName(name: string): string {
 export function ProductPlanCard({
 	state,
 	name,
-	avatar,
+	agent,
 	integration,
 	again,
 }: {
 	state: ProductPlanState;
 	name: string;
-	avatar?: AvatarKey | undefined;
+	agent?: Agent | undefined;
 	integration: Integration;
 	again: () => void;
 }) {
@@ -107,7 +109,7 @@ export function ProductPlanCard({
 	return (
 		<section className={styles.card} aria-labelledby={`${id}-title`}>
 			<div className={styles.head}>
-				{avatar && <Avatar avatarKey={avatar} name={name} size={48} />}
+				<AgentPicture agent={agent} size={48} />
 				<div className={styles.headText}>
 					<strong id={`${id}-title`}>{t("planToApprove")}</strong>
 					<p className={styles.muted}>

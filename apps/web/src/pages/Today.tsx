@@ -1,17 +1,12 @@
 import mark from "@catervas/brand/assets/logo-mark-1254.png";
-import {
-	Avatar,
-	type AvatarKey,
-	Button,
-	RoleTag,
-	uiStrings,
-} from "@catervas/ui";
+import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { codeOf } from "../app/words.ts";
+import { AgentPicture } from "../components/AgentPicture.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
@@ -322,11 +317,7 @@ export function Today() {
 												pm?.displayName ??
 												""
 											}
-											avatar={
-												(agent(item.agentId) ?? pm)?.avatar as
-													| AvatarKey
-													| undefined
-											}
+											agent={agent(item.agentId) ?? pm}
 											integration={team?.team.policy.integration as Integration}
 											again={askPlanAgain}
 										/>
@@ -401,7 +392,7 @@ export function Today() {
 												card={card}
 												integration={planChanges.integration}
 												name={one?.displayName ?? card.agentId}
-												avatar={one?.avatar as AvatarKey | undefined}
+												agent={one}
 												again={askPlanChangesAgain}
 											/>
 										</li>
@@ -539,11 +530,7 @@ function MovedCard({
 		picture = <img src={mark} alt="" width={48} height={48} />;
 	} else {
 		name = agent?.displayName ?? one.by;
-		if (agent?.avatar) {
-			picture = (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name="" size={48} />
-			);
-		}
+		picture = <AgentPicture agent={agent} size={48} />;
 	}
 	return (
 		<li>
@@ -572,9 +559,7 @@ function AgentEntry({
 	const name = agent?.displayName ?? one.agentId;
 	return (
 		<li className={styles.agent}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={48} />
-			)}
+			<AgentPicture agent={agent} size={48} />
 			<span className={styles.who}>
 				<strong>{name}</strong> {agent && <RoleTag role={agent.role} />}
 			</span>
@@ -658,9 +643,7 @@ function WaitingRow({
 	const titleId = `waiting-${item.kind}-${item.taskId ?? `folder-${item.folderChange}`}`;
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>
 					{t(kind.title, { title: item.title, agent: name })}
@@ -717,13 +700,10 @@ function MarketingPlanRow({
 	item: Waiting;
 	agent: Agent | undefined;
 }) {
-	const name = agent?.displayName ?? item.agentId ?? "";
 	const titleId = `waiting-plan-${item.plan}`;
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>
 					{t("waitingMarketingPlan", { title: item.title })}
@@ -769,9 +749,7 @@ function PostRequestRow({
 		});
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>
 					{t("waitingPost", {
@@ -841,9 +819,7 @@ function SiteRequestRow({
 	};
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>
 					{asks}
@@ -934,9 +910,7 @@ function PipelineRow({
 	const ids = (part: string) => `${titleId}-${part}`;
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>{t("pipelineLine", { name, source })}</strong>
 				<span>
@@ -1054,9 +1028,7 @@ function ToolApprovalRow({
 	};
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>
 					{t("waitingToolApproval", {
