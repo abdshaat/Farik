@@ -83,7 +83,7 @@ impl MemberPathRefusal {
 ///
 /// The first of these a member's folder breaks: it is not there, it is outside home once its links
 /// are followed, it is home itself, it is not a git repository, it is inside one and not at its
-/// top, or it has a team.
+/// top (a repository whose top is home or above it counts as none), or it has a team.
 pub fn member_root(home: &Path, path: &str) -> Result<PathBuf, MemberPathRefusal> {
     let folder = std::fs::canonicalize(home.join(path)).map_err(|_| MemberPathRefusal::NotThere)?;
     let home = std::fs::canonicalize(home).map_err(|_| MemberPathRefusal::OutsideHome)?;
@@ -103,7 +103,12 @@ pub fn member_root(home: &Path, path: &str) -> Result<PathBuf, MemberPathRefusal
         .and_then(|top| std::fs::canonicalize(top).ok())
         .ok_or(MemberPathRefusal::NotARepository)?;
     if top != folder {
-        return Err(MemberPathRefusal::NotTheTop { top });
+        // A top folder that is home or above it is not one to point at: the folder is not a
+        // repository of its own, so no refusal names home or a folder outside it.
+        if top != home && top.starts_with(&home) {
+            return Err(MemberPathRefusal::NotTheTop { top });
+        }
+        return Err(MemberPathRefusal::NotARepository);
     }
     if folder.join(".catervas/team.yaml").exists() {
         return Err(MemberPathRefusal::HasTeam);

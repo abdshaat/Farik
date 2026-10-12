@@ -63,6 +63,21 @@ fn finds_a_members_root() {
     );
     assert_eq!(root("team"), Err(MemberPathRefusal::HasTeam));
 
+    // A home folder kept in git: a plain folder under it is not a repository, since the one it is
+    // inside has home itself as its top and no refusal may point at home. A repository inside it
+    // still answers with its own top folder.
+    git_in(&home.path, &["init", "-b", "main"]);
+    assert_eq!(
+        member_root(&home.path, "notes"),
+        Err(MemberPathRefusal::NotARepository)
+    );
+    assert_eq!(
+        member_root(&home.path, "app/src"),
+        Err(MemberPathRefusal::NotTheTop {
+            top: home.path.join("app")
+        })
+    );
+
     let top = home.path.join("app");
     let rows = [
         (
