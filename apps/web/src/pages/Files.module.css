@@ -310,3 +310,10 @@ details[open] > summary.fold::before {
 	color: var(--catervas-color-ink-muted);
 	font-size: var(--catervas-type-small-size);
 }
+
+.ask {
+	display: grid;
+	justify-items: start;
+	gap: var(--catervas-space-2);
+	margin-top: var(--catervas-space-4);
+}

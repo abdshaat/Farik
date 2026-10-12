@@ -3,7 +3,7 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { sentCommand } from "../test/gate.ts";
-import { todayWithPlan } from "../test/productPlan.ts";
+import { IN_REVIEW, todayWithPlan } from "../test/productPlan.ts";
 import { bodyOf, refusedBy } from "../test/schema.ts";
 import { projectName, writtenWhen } from "./ProductPlanCard.tsx";
 
@@ -53,6 +53,31 @@ describe("the product plan on Today", () => {
 			within(region).getByRole("textbox", { name: /Notes for Mira/ }),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("the_product_plan_card_frames_html", async () => {
+		const at = (n: string) => `docs/catervas/product/${n}.html`;
+		const { container } = await todayWithPlan({
+			state: {
+				...IN_REVIEW,
+				documents: [
+					{ path: at("spec"), text: "<h1>Secret spec</h1>" },
+					{ path: at("roadmap"), text: "<h1>Secret roadmap</h1>" },
+				],
+			},
+		});
+		const region = await card();
+		const frames = Array.from(region.querySelectorAll("iframe"));
+		expect(frames.map((f) => f.getAttribute("src"))).toEqual([
+			`/documents/raw?path=${encodeURIComponent(at("spec"))}&task=CTV-2`,
+			`/documents/raw?path=${encodeURIComponent(at("roadmap"))}&task=CTV-2`,
+		]);
+		expect(frames.map((f) => f.getAttribute("title"))).toEqual([
+			"Product description",
+			"Roadmap",
+		]);
+		expect(frames.every((f) => f.getAttribute("sandbox") === "")).toBe(true);
+		expect(container.innerHTML).not.toContain("Secret");
 	});
 
 	it("approve_accepts_the_result", async () => {

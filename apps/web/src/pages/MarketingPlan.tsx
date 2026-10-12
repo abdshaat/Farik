@@ -2,6 +2,7 @@ import { Avatar, type AvatarKey, Button, Dialog, TextArea } from "@catervas/ui";
 import { Fragment, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
+import { DocumentFrame } from "../components/DocumentFrame.tsx";
 import { t } from "../strings/t.ts";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { Failed } from "./Failed.tsx";
@@ -77,6 +78,7 @@ export type Plan = {
 	title: string;
 	summary: string;
 	text: string;
+	format?: "markdown" | "html";
 	state: State;
 	startsOn: string;
 	endsOn: string;
@@ -533,8 +535,17 @@ export function MarketingPlan() {
 							<p className={styles.muted}>
 								{t("marketingWholeHint", { name })}
 							</p>
-							{/* What the agent wrote, as text: React shows it as typed, never as markup. */}
-							<pre className={own.text}>{plan.text}</pre>
+							{plan.format === "html" ? (
+								// The agent's page is shown only in a sandboxed frame, never in this page's DOM.
+								<DocumentFrame
+									path={`docs/catervas/marketing/plans/${plan.plan}.html`}
+									task={plan.taskId}
+									title={plan.title}
+								/>
+							) : (
+								// What the agent wrote, as text: React shows it as typed, never as markup.
+								<pre className={own.text}>{plan.text}</pre>
+							)}
 						</section>
 					)}
 				</div>

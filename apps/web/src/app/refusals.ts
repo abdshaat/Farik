@@ -148,6 +148,9 @@ const WORDS: Record<string, keyof typeof en> = {
 	catervafication_new_project: "refuseCatervaficationNewProject",
 	catervafication_no_product_manager: "refuseCatervaficationNoPm",
 	catervafication_no_writers: "refuseCatervaficationNoWriters",
+	not_editable: "refuseNotEditable",
+	no_owner: "refuseNoOwner",
+	no_task_taker: "refuseNoTaskTaker",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */

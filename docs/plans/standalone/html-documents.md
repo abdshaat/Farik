@@ -432,7 +432,7 @@ Tests in `DocumentFrame.test.tsx`, `pages/Files.test.tsx`, `ProductPlanCard.test
   - the page's `scrollWidth <= clientWidth`;
   - the frame's document cannot run a script (a `<script>` setting `document.title` leaves it unchanged).
 
-- [ ] `feat(web): show HTML documents in a sandboxed frame`
+- [x] `feat(web): show HTML documents in a sandboxed frame`
 
 ### Task 12: the setting and the rewrite in Settings
 

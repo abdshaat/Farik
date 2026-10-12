@@ -213,6 +213,25 @@ describe("marketing plan page", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("an_html_marketing_plan_is_framed", async () => {
+		const html = { ...PLAN, format: "html", text: "<h1>Secret plan</h1>" };
+		const { container } = await opened(html);
+		await screen.findByRole("heading", { level: 1, name: TITLE });
+		const frame = container.querySelector("iframe") as HTMLIFrameElement;
+		expect(frame.getAttribute("src")).toBe(
+			`/documents/raw?path=${encodeURIComponent("docs/catervas/marketing/plans/MP-3.html")}&task=${PLAN.task_id}`,
+		);
+		expect(frame.getAttribute("sandbox")).toBe("");
+		expect(container.querySelector("pre")).toBeNull();
+		expect(container.innerHTML).not.toContain("Secret plan");
+		cleanup();
+
+		const md = await opened({ ...PLAN, format: "markdown" });
+		await screen.findByRole("heading", { level: 1, name: TITLE });
+		expect(md.container.querySelector("iframe")).toBeNull();
+		expect(md.container.querySelector("pre")?.textContent).toBe(TEXT);
+	});
+
 	it("keeps_the_decision_bar_above_the_phones_tab_bar", () => {
 		// jsdom has no layout, so the rule is read from the style sheets: the shell's narrow layout
 		// says how tall its sticky tab bar is, and the page's own sticky bar rests above it.

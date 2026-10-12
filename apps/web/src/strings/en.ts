@@ -2570,6 +2570,16 @@ export const en = {
 	filesText: "{name} text",
 	filesSave: "Save",
 	filesCancel: "Cancel",
+	docOpenFull: "Open full page",
+	docAskLabel: "What should change?",
+	docAskSend: "Send to {owner}",
+	docAskSent: "Sent. {owner} has it as {task}.",
+	docEditSource: "Edit source",
+	refuseNotEditable: "This document can’t be changed from here.",
+	refuseNoOwner:
+		"No one on your team owns this folder right now. Resume or add its role first.",
+	refuseNoTaskTaker:
+		"The Scrum Master keeps this document up to date at its retro.",
 	filesSaveAuto: "Saving keeps your change at once.",
 	filesSavePullRequest:
 		"Saving puts your change in a pull request; it is in your project once that is merged.",

@@ -1,0 +1,14 @@
+.open {
+	display: inline-block;
+	margin-bottom: var(--catervas-space-2);
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+}
+
+.frame {
+	display: block;
+	width: 100%;
+	height: calc(100dvh - 12rem);
+	min-height: 60vh;
+	border: 0;
+}

@@ -1,12 +1,14 @@
 import { Avatar, type AvatarKey, Button, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
 import type { TaskStatus } from "../app/words.ts";
+import { DocumentFrame } from "../components/DocumentFrame.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentChanges.module.css";
 import type { Integration } from "./DocumentChanges.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
+import { docKey, isHtml } from "./files.ts";
 import card from "./ProductPlanCard.module.css";
 
 /** `product_plan.state`, in camelCase. */
@@ -18,8 +20,8 @@ export type ProductPlanState = {
 };
 
 const NAMES: Record<string, keyof typeof en> = {
-	"docs/catervas/product/spec.md": "docNameSpec",
-	"docs/catervas/product/roadmap.md": "docNameRoadmap",
+	"product/spec": "docNameSpec",
+	"product/roadmap": "docNameRoadmap",
 };
 
 /** What approving does, said under the buttons; under `auto_merge` nothing needs saying. */
@@ -120,13 +122,21 @@ export function ProductPlanCard({
 				</div>
 			</div>
 			{state.documents.map((one) => {
-				const named = NAMES[one.path];
+				const named = NAMES[docKey(one.path)];
 				return (
 					<div key={one.path} className={styles.document}>
 						<p className={styles.docName}>{named ? t(named) : one.path}</p>
-						<div className={card.read}>
-							<Markdown text={one.text} />
-						</div>
+						{isHtml(one.path) ? (
+							<DocumentFrame
+								path={one.path}
+								task={task.taskId}
+								title={named ? t(named) : one.path}
+							/>
+						) : (
+							<div className={card.read}>
+								<Markdown text={one.text} />
+							</div>
+						)}
 					</div>
 				);
 			})}

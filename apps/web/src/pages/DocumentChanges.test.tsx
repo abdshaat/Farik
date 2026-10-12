@@ -12,6 +12,7 @@ import { CARD, docs, todayWithDocs } from "../test/folderDocs.ts";
 import { sentCommand } from "../test/gate.ts";
 import { showsWhatItHides } from "../test/hidden.ts";
 import { bodyOf, refusedBy } from "../test/schema.ts";
+import styles from "./DocumentChanges.module.css";
 
 /** What a list item reads: its words, without the marks that are hidden from a reader. */
 const reads = (item: HTMLElement) => {
@@ -61,6 +62,33 @@ describe("the product plan's changes on Today", () => {
 		}
 		showsWhatItHides(region);
 		await expectNoAxeViolations(container);
+	});
+
+	it("html_changes_read_as_words", async () => {
+		const html = {
+			...CARD,
+			documents: [
+				{
+					proposal: 9,
+					path: "docs/catervas/product/spec.html",
+					lines: [
+						{ change: "same", text: "<h2>Risks</h2>" },
+						{ change: "added", text: "<li>Ship <b>v2</b> &amp; more</li>" },
+					],
+				},
+			],
+		};
+		await todayWithDocs({ docs: docs([html]) });
+		const region = await card();
+		const list = within(region).getByRole("list", {
+			name: "Product description",
+		});
+		const [risks, ship] = within(list).getAllByRole("listitem");
+		expect(reads(ship as HTMLElement)).toBe("Added: Ship v2 & more");
+		expect(reads(risks as HTMLElement)).toBe("Risks");
+		expect((risks as HTMLElement).className).toContain(styles.heading);
+		expect((ship as HTMLElement).className).not.toContain(styles.heading);
+		expect(region.querySelector("b")).toBeNull();
 	});
 
 	it("approve_sends_every_proposal_of_the_card", async () => {
