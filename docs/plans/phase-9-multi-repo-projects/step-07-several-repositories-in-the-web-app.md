@@ -10,8 +10,8 @@ Depends on these steps of this phase, planned and ready, not yet executed:
 - step 06: `catervafication.get`'s `offered_repos`, `catervafication_start { repo }`
 
 Nothing of 07b or 08.
-Mockups: drawn 2026-10-12, the setup board redrawn the same day on the founder's word ("I want the user to be able to create a project with one or more projects. Recommend the user that catervas works best when the repos are interconnected."), on the canvas page "Multi-repo projects" (`docs/design/mockups/SetupRepos.dc.html`, `SettingsRepositories.dc.html`, `TodayRepos.dc.html`, `BoardRepos.dc.html`, `FilesRepos.dc.html`); waiting on the founder's approval (ADR 0032). This plan is reviewed for readiness after it.
-Readiness confirmed by: (pending; one round, after the mockups' approval)
+Mockups: drawn 2026-10-12, the setup board redrawn the same day on the founder's word ("I want the user to be able to create a project with one or more projects. Recommend the user that catervas works best when the repos are interconnected."), on the canvas page "Multi-repo projects" (`docs/design/mockups/SetupRepos.dc.html`, `SettingsRepositories.dc.html`, `TodayRepos.dc.html`, `BoardRepos.dc.html`, `FilesRepos.dc.html`); approved by the founder on 2026-10-12 ("Approve", ADR 0032), the setup board's one repository making a one-repo project as drawn.
+Readiness confirmed by: (pending; one round)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 36fcf33.
 

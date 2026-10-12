@@ -10,8 +10,8 @@ Depends on these steps of this phase, planned (01 to 06 ready, 07 drafted), not 
 - step 07: `Repositories.tsx`'s one-repo view, `FolderBrowser` in a dialog, `repoNameOf`
 
 Nothing of step 08.
-Mockups: `docs/design/mockups/AddSecondRepository.dc.html` on the canvas page "Multi-repo projects", drawn 2026-10-12 (c179d5b); waiting on the founder's approval (ADR 0032). This plan is reviewed for readiness after it.
-Readiness confirmed by: (pending; one round, after the mockups' approval)
+Mockups: `docs/design/mockups/AddSecondRepository.dc.html` on the canvas page "Multi-repo projects", drawn 2026-10-12 (c179d5b); approved by the founder on 2026-10-12 ("Approve", ADR 0032), with what it draws: the old files left on `catervas/moved-out` for the owner to merge, and the move waiting while work is in progress.
+Readiness confirmed by: (pending; one round)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at c179d5b.
 
