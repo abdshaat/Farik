@@ -30,6 +30,18 @@ each place's twice, and one line of text. */
 	min-height: 100vh;
 }
 
+/* The chats fill the window, so that the list and the open chat scroll inside it and the window
+does not: the content is a column whose last child takes the height the banners leave. */
+.fill {
+	height: 100dvh;
+	min-height: 0;
+	grid-template-rows: minmax(0, 1fr);
+}
+
+.narrow.fill {
+	grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
 .rail {
 	position: sticky;
 	top: 0;
@@ -213,6 +225,12 @@ It holds the calm green under reduced motion. */
 	align-content: start;
 	min-width: 0;
 	padding: var(--catervas-space-5) var(--catervas-space-4);
+}
+
+.fill .content {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
 }
 
 .banner {

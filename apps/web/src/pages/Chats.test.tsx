@@ -8,6 +8,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import shell from "../shell/Shell.module.css";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { sentCommand } from "../test/gate.ts";
@@ -185,6 +186,19 @@ describe("chats", () => {
 		expect(links[4]?.textContent).toContain(
 			"Kai has left the team. Kept to read.",
 		);
+	});
+
+	it("fills_the_window_on_the_chats", async () => {
+		const rootOf = async () =>
+			(await screen.findByRole("main")).parentElement as HTMLElement;
+		for (const path of ["/channel", "/channel/mira"]) {
+			await chats(path);
+			expect((await rootOf()).classList).toContain(shell.fill);
+			cleanup();
+		}
+		const { socket } = await renderApp("/board");
+		await answerStatus(socket as FakeSocket, false);
+		expect((await rootOf()).classList).not.toContain(shell.fill);
 	});
 
 	it("opens_a_one_to_one", async () => {

@@ -100,7 +100,7 @@ Tests (`Chats.test.tsx`, importing `Shell.module.css` as `shell`):
 - `fills_the_window_on_the_chats` — at `/channel` and at `/channel/mira`, the shell's root (the `main` element's parent) has `shell.fill`; at `/board`, it does not.
 - `lists_the_chats` (unchanged) and every other test of the file still pass.
 
-- [ ] `fix(web): give the chats the window, the list and the chat side by side`
+- [x] `fix(web): give the chats the window, the list and the chat side by side`
 
 ### Task 3: the channel in the feed, newest first
 

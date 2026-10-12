@@ -2,22 +2,37 @@
 .wide {
 	display: grid;
 	grid-template-columns: 300px minmax(0, 1fr);
+	grid-template-rows: minmax(0, 1fr);
 	gap: var(--catervas-space-6);
-	align-items: start;
+	flex: 1 1 0;
+	min-height: 0;
 }
 
 .narrow {
 	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
 	gap: var(--catervas-space-4);
+	flex: 1 1 0;
+	min-height: 0;
 }
 
 .open {
+	display: flex;
+	flex-direction: column;
 	min-width: 0;
+	min-height: 0;
+}
+
+/* Alone (the faces wait for the team), the chat still takes the row that gives it the height. */
+.narrow > .open {
+	grid-row: 2;
 }
 
 .list {
 	display: grid;
 	align-content: start;
+	min-height: 0;
+	overflow-y: auto;
 	border-right: 1px solid var(--catervas-color-rule);
 }
 
