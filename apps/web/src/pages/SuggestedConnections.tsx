@@ -1,5 +1,5 @@
 import { Button, InfoTip } from "@catervas/ui";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { daemonSaid } from "../app/refusals.ts";
@@ -49,6 +49,7 @@ export function SuggestedConnections(props: {
 	const [gone, setGone] = useState<Pair[]>([]);
 	const [open, setOpen] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
+	const heading = useRef<HTMLHeadingElement>(null);
 	const all = suggestedConnections(props.team, props.kits, [
 		...props.hidden,
 		...gone,
@@ -60,6 +61,8 @@ export function SuggestedConnections(props: {
 	const notNow = async (pair: Pair) => {
 		if (!client) return;
 		setGone((g) => [...g, pair]);
+		// The button that had focus goes with its row; the heading stays mounted.
+		heading.current?.focus();
 		try {
 			await client.call("connector_suggestion.hide", pair);
 			setRefusal(undefined);
@@ -71,7 +74,9 @@ export function SuggestedConnections(props: {
 
 	return (
 		<section className={styles.section} aria-labelledby="suggestions-heading">
-			<h2 id="suggestions-heading">{t("suggestionsTitle")}</h2>
+			<h2 id="suggestions-heading" ref={heading} tabIndex={-1}>
+				{t("suggestionsTitle")}
+			</h2>
 			<ul
 				id="suggestions-list"
 				className={styles.rows}
@@ -92,22 +97,24 @@ export function SuggestedConnections(props: {
 									<InfoTip id={`${id}-info`}>{service.why}</InfoTip>
 								</span>
 							</div>
-							<Link
-								className={styles.action}
-								to={`/team/${agent.id}?connect=${service.name}`}
-								aria-describedby={id}
-							>
-								{t("suggestionsConnect")}
-							</Link>
-							<Button
-								kind="quiet"
-								disabled={!client}
-								onClick={() =>
-									notNow({ agent: agent.id, server: service.name })
-								}
-							>
-								{t("suggestionsNotNow")}
-							</Button>
+							<div className={styles.decide}>
+								<Link
+									className={styles.action}
+									to={`/team/${agent.id}?connect=${service.name}`}
+									aria-describedby={id}
+								>
+									{t("suggestionsConnect")}
+								</Link>
+								<Button
+									kind="quiet"
+									disabled={!client}
+									onClick={() =>
+										notNow({ agent: agent.id, server: service.name })
+									}
+								>
+									{t("suggestionsNotNow")}
+								</Button>
+							</div>
 						</li>
 					);
 				})}

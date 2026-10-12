@@ -2276,7 +2276,11 @@ describe("suggested connections", () => {
 		).getAllByRole("listitem");
 
 	it("suggests_a_kit_service_an_active_agent_lacks", async () => {
-		await today({ team: only(mira), kits: [pmKit(KIT_NOTION)] });
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION)],
+			hiddenSuggestions: [{ agent: "ada", server: "notion" }],
+		});
 		const [row] = items() as [HTMLElement];
 		expect(items()).toHaveLength(1);
 		expect(
@@ -2287,11 +2291,12 @@ describe("suggested connections", () => {
 			"Mira · Notion is where your team keeps docs, notes and plans.",
 		);
 		expect(within(row).getByText(KIT_NOTION.why)).toBeTruthy();
-		expect(
-			within(row)
-				.getByRole("link", { name: en.suggestionsConnect })
-				.getAttribute("href"),
-		).toBe("/team/mira?connect=notion");
+		const connect = within(row).getByRole("link", {
+			name: en.suggestionsConnect,
+		});
+		expect(connect.getAttribute("href")).toBe("/team/mira?connect=notion");
+		const describedBy = connect.getAttribute("aria-describedby") ?? "";
+		expect(document.getElementById(describedBy)?.textContent).toBe("Notion");
 		expect(within(row).queryByRole("img", { name: "Mira" })).toBeNull();
 	});
 
@@ -2355,9 +2360,15 @@ describe("suggested connections", () => {
 	it("not_now_puts_the_row_back_when_refused", async () => {
 		const { s } = await today({
 			team: only(mira),
-			kits: [pmKit(KIT_NOTION)],
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
 		});
-		fireEvent.click(screen.getByRole("button", { name: en.suggestionsNotNow }));
+		const notNow = () =>
+			fireEvent.click(
+				screen.getAllByRole("button", {
+					name: en.suggestionsNotNow,
+				})[0] as HTMLElement,
+			);
+		notNow();
 		const sent = await waitFor(() => {
 			const f = s.calls("connector_suggestion.hide")[0];
 			if (!f) throw new Error("not sent");
@@ -2368,11 +2379,33 @@ describe("suggested connections", () => {
 			-32005,
 			"suggestion_not_offered: mira is not offered notion",
 		);
-		expect(items()).toHaveLength(1);
+		expect(items()).toHaveLength(2);
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			en.refuseCommand,
 		);
 		expect(document.body.textContent).not.toContain("suggestion_not_offered");
+		notNow();
+		await waitFor(() => {
+			if (s.calls("connector_suggestion.hide").length < 2)
+				throw new Error("not sent");
+		});
+		await s.reply(s.calls("connector_suggestion.hide")[1] as never, {});
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	it("not_now_keeps_focus_in_the_section", async () => {
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+		});
+		fireEvent.click(
+			within(items()[0] as HTMLElement).getByRole("button", {
+				name: en.suggestionsNotNow,
+			}),
+		);
+		expect(document.activeElement).toBe(
+			screen.getByRole("heading", { name: en.suggestionsTitle }),
+		);
 	});
 
 	it("shows_four_then_all", async () => {
@@ -2398,8 +2431,8 @@ describe("suggested connections", () => {
 		await today({
 			team: only(mira, ada),
 			kits: [
-				pmKit(KIT_LINEAR, KIT_NOTION),
 				{ role: "architect", connectors: [KIT_NOTION, KIT_LINEAR] },
+				pmKit(KIT_LINEAR, KIT_NOTION),
 			],
 		});
 		expect(
