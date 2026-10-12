@@ -130,7 +130,7 @@ Files: modified `apps/web/src/pages/AgentEdit.tsx`; tested by `apps/web/src/page
 
 ### Task 6: the record
 
-Files: modified `docs/SPEC.md` (the header's revision 0.88 note; 6.7 a paragraph "Suggested connections on Today (added in 0.88; standalone plan `suggested-connections`)" after "Service logos and info buttons", saying what is suggested and left out, the file, the command and its refusal, `hidden_suggestions`, `?connect=`; F9 one sentence naming the command and the field), `docs/design/suggested-connections.md` (status: built), this plan (status and ticks).
+Files: modified `docs/SPEC.md` (the header's revision 0.90 note; 6.7 a paragraph "Suggested connections on Today (added in 0.90; standalone plan `suggested-connections`)" after "Service logos and info buttons", saying what is suggested and left out, the file, the command and its refusal, `hidden_suggestions`, `?connect=`; F9 one sentence naming the command and the field), `docs/design/suggested-connections.md` (status: built), this plan (status and ticks).
 
 - [x] `docs(spec): suggested connections on Today, revision 0.90`
 
