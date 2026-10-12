@@ -1,6 +1,6 @@
 # Phase 8, step 06b: The interview and the plan in the web app
 
-Status: done (executed and landing-reviewed 2026-10-11; lands after fixes b6710b27 … f1a22582; spec 0.97; its four checkboxes were ticked together in d083867d, not in their tasks' commits; the band line links to the Product Manager's chat, as the approved mockup draws it)
+Status: done (executed and landing-reviewed 2026-10-11; lands after fixes b6710b27 … f1a22582; spec 0.99; its four checkboxes were ticked together in d083867d, not in their tasks' commits; the band line links to the Product Manager's chat, as the approved mockup draws it)
 Branch: `phase/8-catervas-folders` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.1, 4.2, 4.3; F3, F8
 Depends on: step 06 of this phase (planned, not yet executed: `product_plan.state`, `heard` in `chat.messages`, `product_plan_draft`, `Transitions::awaits_the_product_plan`, `is_the_product_plan`); step 03b (planned, not yet executed: the owner's `acceptance` row for the product plan task, and the strings `docNameSpec`, `docNameRoadmap`, `docChangesNotes`, `docChangesNotesHint`, `docChangesNeedNotes`, `docChangesApprove`, `docChangesSendBack`); step 04b (planned, not yet executed: `Markdown`, `apps/web/src/components/Markdown.tsx`); phase 6's Chats and Today (merged in #19).

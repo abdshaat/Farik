@@ -1,6 +1,6 @@
 # Phase 8, step 07b: The Catervafication on screen, and the sprint review's refreshes
 
-Status: done (executed and landing-reviewed 2026-10-11; lands after fixes 99f5ae87 … 7df54b76; spec 0.99; an escalated integration does not hold the refreshes, and a refresh whose agent sleeps or has spent its day makes the retro wait, both accepted by the controller at landing)
+Status: done (executed and landing-reviewed 2026-10-11; lands after fixes 99f5ae87 … 7df54b76; spec 0.101; an escalated integration does not hold the refreshes, and a refresh whose agent sleeps or has spent its day makes the retro wait, both accepted by the controller at landing)
 Branch: `phase/8-catervas-folders` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.1, 4.2, 5.9, 5.17
 Depends on: step 07 of this phase (planned, not yet executed: `catervafication_start`, `catervafication.get`, `catervafication.started`); step 03 (planned, not yet executed: `catervas_write_folder_doc` offered in `CEREMONY_TOOLS` to a ceremony session of a role with a folder, proposals at the review alone, `folder_doc.written`); step 03b (the "What moved" lines' form; it leaves this step the line "Ada brought the architecture notes up to date with sprint 4"); step 04b (planned, not yet executed: `apps/web/src/pages/Files.tsx`); phase 6's setup and Today (merged in #19); task ids `CTV-<n>` (merged on main, 0f2229b7).
