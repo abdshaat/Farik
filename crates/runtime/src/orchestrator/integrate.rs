@@ -24,7 +24,8 @@ use catervas_store::{
 
 use super::verify::{GOVERNOR, append, append_stamped};
 use super::{
-    IntegrationOutcome, Orchestrator, OrchestratorError, ScanRefresh, TickReport, worktree,
+    IntegrationOutcome, Orchestrator, OrchestratorError, ScanRefresh, TickReport,
+    task_repository_of, worktree,
 };
 use crate::channel::post_system;
 use crate::forge::{Forge, PullRequestState};
@@ -1114,9 +1115,33 @@ pub(super) fn remove_workspace(
         }
         _ => {}
     }
-    remove_worktree(&deps.tools.git, &base)?;
-    remove_worktree(&deps.tools.git, &own)?;
+    // The member's own git removes a member task's worktrees; the project folder's removes any
+    // other's, and also what a repository that cannot be found leaves as plain folders.
+    if let Some(member) = member_of(orchestrator, task_id) {
+        for path in [&base, &own] {
+            if remove_worktree(&member, path).is_err() {
+                // A member that moved answers that the worktree is not its own.
+                remove_folder(path)?;
+            }
+        }
+        // The folders are gone either way, so a failure here is not tried again; the stale
+        // registration is pruned by the next finished task in the member (5.15).
+        let _ = member.prune_worktrees();
+    } else {
+        remove_worktree(&deps.tools.git, &base)?;
+        remove_worktree(&deps.tools.git, &own)?;
+    }
     Ok(true)
+}
+
+/// The member the task works in, when its contract, the team and `repos.yaml` say one that is
+/// there. Whatever else it is, the task's worktrees are cleaned up as the project folder's.
+fn member_of(orchestrator: &Orchestrator, task_id: &TaskId) -> Option<Git> {
+    let deps = &orchestrator.deps;
+    let contract = deps.tools.files.read_contract(task_id).ok()?;
+    let team = deps.tools.files.read_team().ok()?;
+    let found = task_repository_of(deps, &team, &contract).ok()?;
+    found.repo.map(|_| found.git)
 }
 
 /// Removes the worktree at `path`, whether git has it registered or it is a directory git no
@@ -1131,6 +1156,11 @@ fn remove_worktree(git: &Git, path: &Path) -> Result<(), OrchestratorError> {
         }
         other => other?,
     }
+    remove_folder(path)
+}
+
+/// Removes the folder at `path` and what is in it; one that is not there is removed already.
+fn remove_folder(path: &Path) -> Result<(), OrchestratorError> {
     match std::fs::remove_dir_all(path) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
             Err(OrchestratorError::Files(FilesError::Io {
@@ -3204,5 +3234,139 @@ mod tests {
             })
         );
         assert!(harness.events(&[EventKind::ProjectScanned]).is_empty());
+    }
+
+    /// `id` filed in `app`, `in_progress` with its worktree made by `app`, then cancelled.
+    fn cancelled_in_app(harness: &Harness, app: &TempRepo, id: &str) {
+        harness.assigned_in(id, "dev-a", "dev-b", "app");
+        harness.project.moved(
+            id,
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        app.adapter()
+            .create_worktree(&harness.worktree(id), &harness.branch(id), "main")
+            .expect("app makes the worktree");
+        harness.project.moved(
+            id,
+            "in_progress",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+    }
+
+    /// What `git worktree list` says in `app`.
+    fn worktrees_of(app: &TempRepo) -> String {
+        app.git_output(&["worktree", "list", "--porcelain"])
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removes_a_member_tasks_worktrees_with_its_git() {
+        let (harness, members) = in_members("int-member-cleanup", "manual");
+        let app = &members[0];
+        harness.accepted_in("CTV-1", &app.path, Some("app"));
+        let base = harness.worktree("CTV-1-base");
+        app.adapter()
+            .create_detached_worktree(&base, "main")
+            .expect("the base worktree is made");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator
+            .integrate(&task("CTV-1"))
+            .await
+            .expect("the human integrates it");
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{report:?}"
+        );
+        assert!(!harness.worktree("CTV-1").exists());
+        assert!(!base.exists());
+        let listed = worktrees_of(app);
+        assert!(!listed.contains("CTV-1"), "{listed}");
+        // The branch is kept, and nothing registered holds it.
+        app.git(&["checkout", "feature/CTV-1"]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removes_the_folders_of_a_task_whose_repository_is_gone() {
+        let (harness, members) = in_members("int-member-cleanup-gone", "manual");
+        let app = &members[0];
+        cancelled_in_app(&harness, app, "CTV-1");
+        cancelled_in_app(&harness, app, "CTV-2");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        // The member is not where repos.yaml says: its folders go as plain folders.
+        let moved = std::path::PathBuf::from(format!("{}-moved", app.path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&app.path, &moved).expect("the member is moved away");
+        let report = orchestrator
+            .tick_within(&crate::orchestrator::TickScope {
+                task_id: Some(task("CTV-2")),
+                rules: crate::orchestrator::TickRules::All,
+            })
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-2"),
+            "{report:?}"
+        );
+        assert!(!harness.worktree("CTV-2").exists());
+        std::fs::rename(&moved, &app.path).expect("the member is moved back");
+
+        // The member is not one any more.
+        let removed = crate::daemon::fixtures::answered(
+            &harness.daemon,
+            "repo.remove",
+            &json!({ "name": "app" }),
+        )
+        .await;
+        assert!(removed.get("error").is_none(), "{removed}");
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{report:?}"
+        );
+        assert!(!harness.worktree("CTV-1").exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removes_the_folders_of_a_moved_and_located_member() {
+        let (harness, members) = in_members("int-member-cleanup-moved", "manual");
+        let app = &members[0];
+        cancelled_in_app(&harness, app, "CTV-1");
+        let moved = std::path::PathBuf::from(format!("{}-moved", app.path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&app.path, &moved).expect("the member is moved away");
+        // Located again, as the file says, without the worktree being told where its repository is.
+        harness
+            .project
+            .deps
+            .files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": moved.display().to_string() },
+                    { "name": "infra", "path": members[1].path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{report:?}"
+        );
+        assert!(!harness.worktree("CTV-1").exists());
+        let listed = git_output_in(&moved, &["worktree", "list", "--porcelain"]);
+        assert!(!listed.contains("CTV-1"), "{listed}");
+        let _ = std::fs::remove_dir_all(&moved);
     }
 }

@@ -140,7 +140,7 @@ Files: `integrate.rs` (`remove_workspace`); `git.rs` (`prune_worktrees`) and `te
 - `removes_the_folders_of_a_task_whose_repository_is_gone` (a guard: it passes before the change, and fails if the fallback is replaced by `?`): `CTV-1` cancelled with its worktree still there, then `repo.remove app` (no work holds it). The next tick removes both folders and reports it, with no error. Also, with `app` moved away and `CTV-2` cancelled in it, the tick removes its folders the same way.
 - `removes_the_folders_of_a_moved_and_located_member`: `app` moved and located, then `CTV-1` cancelled. The tick removes its folders, though `app`'s git refuses the worktree as not its own, and `git -C app worktree list` no longer lists `CTV-1`. RED: it stays listed as `prunable`.
 
-- [ ] `feat(runtime): remove a member task's worktrees with its member's git`
+- [x] `feat(runtime): remove a member task's worktrees with its member's git`
 
 ### Task 3b: A located member's worktrees work again
 

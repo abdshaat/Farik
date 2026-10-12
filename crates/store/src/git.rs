@@ -246,6 +246,18 @@ impl Git {
         Ok(())
     }
 
+    /// Forgets the worktrees whose folders are gone, so that no stale registration keeps their
+    /// branches from being checked out here.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when git refuses.
+    pub fn prune_worktrees(&self) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.at_root(&["worktree", "prune"])?;
+        Ok(())
+    }
+
     /// Makes a worktree at `path` with `at` checked out and no branch: a place to look at a commit
     /// that nothing will commit to, such as the base a task's new tests are run against (5.4).
     ///

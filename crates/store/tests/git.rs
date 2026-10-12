@@ -1534,3 +1534,24 @@ fn knows_a_local_branch() {
         "that repository has no branch named nope"
     );
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prunes_stale_worktrees() {
+    // A worktree whose folder was deleted from under git stays registered, and keeps its branch
+    // from being checked out anywhere else, until the repository is told to forget it.
+    let repository = TempRepo::new("prune-worktrees");
+    let git = repository.adapter();
+    let worktree = repository.path.join(".catervas/local/worktrees/CTV-1");
+    git.create_worktree(&worktree, "catervas/CTV-1", "main")
+        .expect("the worktree is made");
+    std::fs::remove_dir_all(&worktree).expect("the folder is deleted");
+    let listed = repository.git_output(&["worktree", "list", "--porcelain"]);
+    assert!(listed.contains("prunable"), "{listed}");
+
+    git.prune_worktrees().expect("the stale worktree is pruned");
+
+    let listed = repository.git_output(&["worktree", "list", "--porcelain"]);
+    assert!(!listed.contains("CTV-1"), "{listed}");
+    repository.git(&["checkout", "catervas/CTV-1"]);
+}
