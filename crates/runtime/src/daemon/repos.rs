@@ -4,6 +4,7 @@
 use std::fmt::Display;
 use std::path::Path;
 
+use catervas_core::contract::{TaskKind, TaskStatus};
 use catervas_core::repos::{Repo, Repos, check_member};
 use catervas_protocol::event::EventBody;
 use catervas_protocol::generated::event::CriteriaUpdatedBody;
@@ -225,6 +226,33 @@ fn add(deps: &ToolDeps, home: Option<&Path>, params: &Value) -> Result<Value, Fa
     Ok(json!({}))
 }
 
+/// The ids of the tasks that name the member `name` and are neither cancelled nor accepted and
+/// integrated, in board order. A contract that cannot be read is not guessed at.
+fn tasks_working_in(deps: &ToolDeps, name: &str) -> Result<Vec<String>, Failure> {
+    deps.projections.catch_up().map_err(|e| internal(&e))?;
+    let mut holding = Vec::new();
+    for row in deps.projections.board().map_err(|e| internal(&e))? {
+        // An epic names no repository.
+        let finished = row.status == TaskStatus::Cancelled
+            || (row.status == TaskStatus::Accepted && !row.awaiting_integration);
+        if row.kind != TaskKind::Task || finished {
+            continue;
+        }
+        let contract = deps
+            .files
+            .read_contract(&row.task_id)
+            .map_err(|e| internal(&e))?;
+        if contract
+            .repo
+            .as_ref()
+            .is_some_and(|repo| repo.as_str() == name)
+        {
+            holding.push(row.task_id.as_str().to_string());
+        }
+    }
+    Ok(holding)
+}
+
 /// `repo.remove`.
 fn remove(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let name = params["name"].as_str().unwrap_or_default();
@@ -233,6 +261,18 @@ fn remove(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     else {
         return Err(no_such_member(name));
     };
+    let holding = tasks_working_in(deps, name)?;
+    if !holding.is_empty() {
+        return Err(refusal(
+            "repo_in_use",
+            "/name",
+            &format!(
+                "{} of the project's tasks still work in {name}: {}; finish or cancel them first",
+                holding.len(),
+                holding.join(", ")
+            ),
+        ));
+    }
     if repos.repos.len() == 1 {
         return Err(refusal(
             "last_repo",
@@ -966,5 +1006,85 @@ mod tests {
         assert_eq!(located, json!({}));
         git_in(&worktree, &["status"]);
         let _ = std::fs::remove_dir_all(&away);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_remove_a_member_with_work() {
+        let folder = folder("in-use");
+        let project = &folder.project;
+        let in_app = |task: &str| {
+            project.filed_with(task, "in_progress", "task", None, |wire| {
+                wire["repo"] = json!("app");
+            });
+        };
+        in_app("CTV-1");
+        // Accepted and integrated: its work is in the member's branch, and holds nothing.
+        in_app("CTV-2");
+        project.moved(
+            "CTV-2",
+            "in_progress",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm" }),
+        );
+        project.record(
+            "CTV-2",
+            "task.integrated",
+            &json!({ "sha": "abc", "into": "main", "integrated_by": "human" }),
+        );
+        let before = repos_yaml(&folder);
+        let events = project.event_count();
+        let remove = || rpc(&folder.state, "repo.remove", &json!({ "name": "app" }));
+
+        let held = remove();
+
+        assert_eq!(
+            refusal(&held),
+            (
+                -32005,
+                "repo_in_use".to_string(),
+                "/name".to_string(),
+                "1 of the project's tasks still work in app: CTV-1; finish or cancel them first"
+                    .to_string()
+            ),
+            "{held}"
+        );
+        assert_eq!(repos_yaml(&folder), before);
+        assert_eq!(project.event_count(), events);
+
+        // A task cancelled no longer holds it; one whose contract cannot be read is not guessed at.
+        project.moved(
+            "CTV-1",
+            "in_progress",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        in_app("CTV-3");
+        std::fs::write(
+            project.repo.path.join(".catervas/contracts/CTV-3.yaml"),
+            "id: [not a contract\n",
+        )
+        .expect("the contract is spoiled");
+        let events = project.event_count();
+        let unreadable = remove();
+        assert_eq!(unreadable["error"]["code"], -32603, "{unreadable}");
+        assert!(
+            unreadable["error"]["message"]
+                .as_str()
+                .is_some_and(|said| said.contains("CTV-3")),
+            "{unreadable}"
+        );
+        assert_eq!(repos_yaml(&folder), before);
+        assert_eq!(project.event_count(), events);
+
+        project.moved(
+            "CTV-3",
+            "in_progress",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        let removed = remove();
+        assert!(removed.get("error").is_none(), "{removed}");
+        assert_ne!(repos_yaml(&folder), before);
     }
 }

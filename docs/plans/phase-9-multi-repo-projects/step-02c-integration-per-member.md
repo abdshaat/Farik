@@ -159,7 +159,7 @@ Files: `daemon/repos.rs` (`repo.remove`).
 
 - `refuses_to_remove_a_member_with_work`: with `CTV-1` (`repo: app`) `in_progress`, `repo.remove { name: "app" }` is refused `repo_in_use` at `/name` with the Decisions' sentence naming `CTV-1`, nothing written or recorded. Once `CTV-1` is cancelled, the removal goes through. A `CTV-2` naming `app` that is accepted and integrated does not hold it. With `CTV-3`'s contract file made unreadable, the answer is `INTERNAL_ERROR` and nothing is removed. RED.
 
-- [ ] `feat(runtime): keep a member that still has work`
+- [x] `feat(runtime): keep a member that still has work`
 
 ### Task 5: Spec
 
