@@ -4,7 +4,7 @@ Status: draft
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 11; the flows it exercises are 4.1, 4.2, 4.4, 4.5, 5.3, 5.6, 5.14, 5.16 and 5.17
 Depends on: steps 01 to 07b of this phase. A start gate applies: Task 1 does not begin until 07b has landed and the full check passes on the phase branch's head, whose sha is recorded.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on seven blockers (the scan page, the repositories' checks, nothing to refuse in E, D's count and sprint, F's open choices, the record, the founder's own presses); folded below. Round 2: pending.
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on seven blockers (the scan page, the repositories' checks, nothing to refuse in E, D's count and sprint, F's open choices, the record, the founder's own presses); folded below. Round 2: not ready on the checks' page (only setup's "Show advanced" shows them), a test reading outside its repository, and F5's paths after `env.sh`; folded. Round 3: pending.
 
 Signatures, not bodies; around 300 lines at most (ADR 0008). This step writes no product code. It is a runbook, like phase 8's step 08, and keeps its two roles:
 - **[A]** is the controller session preparing, fixing and recording.
@@ -31,7 +31,7 @@ Out of scope: Windows, where no repository is a read root in this phase (step 03
 - **The run folder** is `~/catervas-p9-check/`, as phase 8's `~/catervas-p8-check/`: its own `bin/catervas`, an `env.sh` that makes it the home folder, and the repositories. An existing one is moved aside whole, never deleted.
 - **The repositories are [A]'s proposal** (the founder, 2026-10-12: "use the proposa[l]"), all in the run folder, each with no `origin`, so nothing is pushed anywhere:
   - **`OpenMontage`**, a copy of the founder's own (`git clone --no-hardlinks ~/OpenMontage`), as phase 8 used. Before cloning, [A] checks that `git -C ~/OpenMontage ls-files .catervas` prints nothing (a committed `team.yaml` would be refused as `has_team`), and records OpenMontage's entry point (its server if it has one, else its main command), which the other two name.
-  - **`montage-infra`**, written by [A] in Task 1, `git init -b main`, one commit: `compose.yaml` running OpenMontage's entry point with a storage volume and a `MONTAGE_BUCKET` setting; `infra/storage.tf`, a Terraform bucket whose name `compose.yaml` passes in; `.github/workflows/deploy.yml` building OpenMontage's image; and a Node check, since the scan finds Node checks by a lockfile and `scripts.test` and Python only by `poetry.lock` or `uv.lock` (`crates/store/src/scan.rs`): `package.json` with `"test": "node --test"`, a committed `package-lock.json` with no dependencies, and `test/compose.test.mjs`, which reads `compose.yaml` as text (the safe box has no YAML library) and checks that each service names a path that exists in `../OpenMontage` or a setting `storage.tf` defines.
+  - **`montage-infra`**, written by [A] in Task 1, `git init -b main`, one commit: `compose.yaml` running OpenMontage's entry point with a storage volume and a `MONTAGE_BUCKET` setting; `infra/storage.tf`, a Terraform bucket whose name `compose.yaml` passes in; `.github/workflows/deploy.yml` building OpenMontage's image; and a Node check, since the scan finds Node checks by a lockfile and `scripts.test` and Python only by `poetry.lock` or `uv.lock` (`crates/store/src/scan.rs`): `package.json` with `"test": "node --test"`, a committed `package-lock.json` with no dependencies, and `test/compose.test.mjs`, which reads `compose.yaml`, `storage.tf` and `deploy.yml` as text (the safe box has no YAML library) and checks that every `${VAR}` in `compose.yaml` is defined in `storage.tf` or has a default, and that the build context `deploy.yml` names exists in the repository. Checks run in the safe box with only the task's own repository at `/workspace`, so no test reads a path outside its own repository; Task 1 confirms it.
   - **`montage-web`**, written by [A] in Task 1 the same way: `index.html` and `app.js` calling OpenMontage's entry point at `MONTAGE_URL`, and the same Node check shape over `app.js` (`package.json`, `package-lock.json`, `test/app.test.mjs`).
   - **`solo/OpenMontage`**, a second clean copy of OpenMontage, and **`solo/montage-infra`**, a second copy of `montage-infra` (`git clone --no-hardlinks` of [A]'s, `origin` removed), for section F only.
 - **OpenMontage has no scanned checks** (phase 8's finding) and the safe box has no pytest. A task that fails only because a check needs a package the safe box lacks is a finding; the founder sends it back with "Test it with Python's standard library only." (phase 8's sentence).
@@ -42,7 +42,7 @@ Out of scope: Windows, where no repository is a read root in this phase (step 03
 - **The AI account** is the founder's own Claude subscription key, pasted on the setup's account screen and kept in the keychain; [A] never sees it. The founder makes it in a separate terminal without `env.sh`, or pastes one they have; "Catervas already has your key" is also a pass.
 - **Costs:** a daily limit of $25 on the setup's spending screen (phase 8's). Reaching it pauses everyone and Today says so: not a failure. The founder raises it on the Costs page or waits for the next day; the record lists each raise.
 - **The integration policy** stays the default, which in these copies merges locally in each repository, since none has a remote.
-- **"What we found" for several repositories is not built.** The setup's scan page shows the project folder's own facts (a README, no checks), and each repository's checks are seen in Advanced › Checks by their commands (step 02b). B2 checks that; the page's words are recorded as a finding for a later step, not a failure.
+- **"What we found" for several repositories is not built.** The setup's scan page shows the project folder's own facts (a README, no checks). Each repository's scanned checks are seen only on setup's last screen, behind "Show advanced", under "Checks for every piece of work" (`SetupAdvanced.tsx`), as "Found in your project. Runs: npm run test" (the scan's `{toolchain} run {script}`). B1 checks that. Three findings are recorded for a later step, not failures: the scan page's words, a check's row not naming its repository, and no page after setup showing the checks (so `montage-web`'s is never seen).
 - **Agent judgement is a finding, not a failure:** the plan's order and compatibility note, a Developer reading the other repository, and the system documents' content are the agents' work; a miss there is a finding.
 - **Each step's result** is pass, fail, finding or skipped, as phase 8's step 08 defines them. A failure is fixed on the phase branch before sign-off as phase 8's Decisions say (a test that fails for it, its own `fix(<scope>): …` commit, a fresh landing review, `bin/catervas` rebuilt and its sha256 recorded, the step run again). A failure that needs a product decision goes to the founder first.
 - **The screens' words** are the approved mockups' (`SetupRepos`, `SettingsRepositories`, `TodayRepos`, `BoardRepos`, `FilesRepos`, `AddSecondRepository` in `docs/design/mockups/`) and steps 07 and 07b's "Words". Where the built words differ only in wording that keeps the meaning, that is a pass and a note.
@@ -73,14 +73,13 @@ Task 1's commands. Then [A] hands the founder this runbook from B on, `~/caterva
 
 ### B. A project of several repositories [F]
 
-1. **Set up.** The AI account; the computer check (Claude Code, git, Docker and the safe box Ready; press "Prepare it" once); "Yes, one or more repositories", "Add a repository" for `OpenMontage`, then for `montage-infra`. Pass if: from the second, "Name the project" and the notes folder appear, the page recommends repositories that work together, and the names default to `openmontage` and `montage-infra`. Name the project `montage`, keep both names and `~/Catervas/montage`, Continue; the team as in Decisions; commands Yes, sending No; a daily limit of 25. Pass if: setup ends on "Your team is ready".
-2. **The checks.** Settings › Advanced › Checks. Pass if: `montage-infra`'s check is there, found as `npm test` (or the command the scan names). The scan page's "No checks found" for the project folder is a finding (Decisions).
-3. **The repositories.** Settings › Repositories. Pass if: both rows read "Found", with their folders and "its usual branch".
-4. **The Catervafication.** On "Your team is ready", **Start**. Pass if: the Board shows "Catervafy the project" in a sprint, then Mira's "Write the product plan from the project", and for each repository Ada's "Document <name>'s architecture" and a Developer's "Document how <name> is built", each tagged "notes".
-5. **The product plan.** Mira's task comes to "Waiting on you": open it, **Accept**. Pass if: Files › Product shows Product description and Roadmap.
-6. **Marketing.** Kai's marketing plan comes to Today after the product plan is added: **Approve** it. Pass if: it did not start before.
-7. **The system map.** Once both architecture tasks are accepted, the Board shows Ada's "Map how the repositories connect". Accept each task as Today asks. Pass if: Files' picker reads "Project", "openmontage", "montage-infra"; each repository's Architecture and Engineering folders hold its documents; and Project › Architecture › System map draws both repositories and at least one link, each link naming the file it was read from (its content is agent judgement).
-8. **The sprint ends.** Accept "Catervafy the project" when Today asks. Pass if: the sprint ends.
+1. **Set up.** The AI account; the computer check (Claude Code, git, Docker and the safe box Ready; press "Prepare it" once); "Yes, one or more repositories", "Add a repository" for `OpenMontage`, then for `montage-infra`. Pass if: from the second, "Name the project" and the notes folder appear, the page recommends repositories that work together, and the names default to `openmontage` and `montage-infra`. Name the project `montage`, keep both names and `~/Catervas/montage`, Continue; the team as in Decisions; commands Yes, sending No; a daily limit of 25. On the last screen, before "Start the team", press "Show advanced". Pass if: "Checks for every piece of work" holds a row "Found in your project. Runs: npm run test" (from `montage-infra`; OpenMontage has none), and setup ends on "Your team is ready".
+2. **The repositories.** Settings › Repositories. Pass if: both rows read "Found", with their folders and "its usual branch".
+3. **The Catervafication.** On "Your team is ready", **Start**. Pass if: the Board shows "Catervafy the project" in a sprint, then Mira's "Write the product plan from the project", and for each repository Ada's "Document <name>'s architecture" and a Developer's "Document how <name> is built", each tagged "notes".
+4. **The product plan.** Mira's task comes to "Waiting on you": open it, **Accept**. Pass if: Files › Product shows Product description and Roadmap.
+5. **Marketing.** Kai's marketing plan comes to Today after the product plan is added: **Approve** it. Pass if: it did not start before.
+6. **The system map.** Once both architecture tasks are accepted, the Board shows Ada's "Map how the repositories connect". Accept each task as Today asks. Pass if: Files' picker reads "Project", "openmontage", "montage-infra"; each repository's Architecture and Engineering folders hold its documents; and Project › Architecture › System map draws both repositories and at least one link, each link naming the file it was read from (its content is agent judgement).
+7. **The sprint ends.** Accept "Catervafy the project" when Today asks. Pass if: the sprint ends.
 
 ### C. A feature across the repositories [F]
 
@@ -94,9 +93,9 @@ Task 1's commands. Then [A] hands the founder this runbook from B on, `~/caterva
 ### D. A third repository [F]
 
 1. **Add it.** Settings › Repositories › Add a repository, `montage-web`, name kept, branch empty. Pass if: it joins the table as "Found", and Today offers "montage-web joined your project" with Ada's and a Developer's lines.
-2. **Document it.** **Start** on that card, then start a sprint from Today or the Board (its limit empty): "Catervafy montage-web" waits in the Backlog until a sprint plans it. Pass if: the sprint holds "Document montage-web's architecture", "Document how montage-web is built" and, after the first, "Bring the system map up to date with montage-web". Accept each as Today asks.
-3. **Work in it.** Paste `feature.txt`'s second request; approve its plan; start a sprint. Pass if: its task is tagged `montage-web`.
-4. **Move it.** While that task is on the Board and not yet added, [A] gives the line and [F] runs it in a second terminal: `mv ~/catervas-p9-check/montage-web ~/catervas-p9-check/montage-web-moved`. Pass if: Today says "Can't find montage-web. It was at ~/montage-web. …" and Settings shows "Can't find it"; the task does not move while it is missing.
+2. **Document it.** **Start** on that card; if the Board shows "Catervafy montage-web" in the Backlog, start a sprint from Today or the Board (its limit empty). Pass if: the sprint holds "Document montage-web's architecture", "Document how montage-web is built" and, after the first, "Bring the system map up to date with montage-web". Accept each as Today asks.
+3. **Work in it.** Paste `feature.txt`'s second request; approve its plan; start a sprint. Pass if: its task is tagged `montage-web`. Do not accept this task until E2.
+4. **Move it.** While that task is on the Board and not yet added, [A] gives the line and [F] runs it in a second terminal, without `env.sh`: `mv ~/catervas-p9-check/montage-web ~/catervas-p9-check/montage-web-moved`. Pass if: Today says "Can't find montage-web. It was at ~/montage-web. …" and Settings shows "Can't find it"; the task does not move while it is missing.
 5. **Locate it.** Locate… (on Today or Settings), `montage-web-moved`. Pass if: both notices go, and the task carries on.
 
 ### E. Removing a repository [F]
@@ -113,9 +112,9 @@ Task 1's commands. Then [A] hands the founder this runbook from B on, `~/caterva
 5. **The old repository opens the project folder.** Ctrl-C, then:
 
        source ~/catervas-p9-check/env.sh
-       cd ~/catervas-p9-check/solo/OpenMontage && catervas serve
+       cd ~/solo/OpenMontage && catervas serve      # env.sh made the run folder home
 
-   Pass if: it opens the project folder (Settings › Repositories lists both). Ctrl-C, then `git -C ~/catervas-p9-check/solo/OpenMontage merge catervas/moved-out`, then the two lines of A. Pass if: Today's reminder is gone.
+   Pass if: it opens the project folder (Settings › Repositories lists both). Ctrl-C, then, in the same terminal, `git -C ~/solo/OpenMontage merge catervas/moved-out`, then the two lines of A. Pass if: Today's reminder is gone.
 
 ## Tasks
 
@@ -135,7 +134,8 @@ git -C ~/OpenMontage status --short && git -C ~/OpenMontage ls-files .catervas  
 git clone --no-hardlinks ~/OpenMontage ~/catervas-p9-check/OpenMontage
 git clone --no-hardlinks ~/OpenMontage ~/catervas-p9-check/solo/OpenMontage
 # montage-infra and montage-web written as Decisions say, each git init -b main and one commit,
-# their npm test run once with node 24 and passing; then:
+# their npm test run once with node 24 and passing, also from a copy of each alone in an empty folder
+# (so no test reads outside its own repository); then:
 git clone --no-hardlinks ~/catervas-p9-check/montage-infra ~/catervas-p9-check/solo/montage-infra
 for r in OpenMontage solo/OpenMontage solo/montage-infra; do git -C ~/catervas-p9-check/$r remote remove origin; done
 for r in OpenMontage montage-infra montage-web solo/OpenMontage solo/montage-infra; do git -C ~/catervas-p9-check/$r remote -v; git -C ~/catervas-p9-check/$r rev-parse HEAD; done   # no remote; each commit recorded
