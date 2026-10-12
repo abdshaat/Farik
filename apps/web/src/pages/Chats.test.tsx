@@ -216,9 +216,13 @@ describe("chats", () => {
 			expect((await rootOf()).classList).toContain(shell.fill);
 			cleanup();
 		}
-		const { socket } = await renderApp("/board");
-		await answerStatus(socket as FakeSocket, false);
-		expect((await rootOf()).classList).not.toContain(shell.fill);
+		// Another path that only begins with the same letters is not the chats.
+		for (const path of ["/board", "/channelx"]) {
+			const { socket } = await renderApp(path);
+			await answerStatus(socket as FakeSocket, false);
+			expect((await rootOf()).classList).not.toContain(shell.fill);
+			cleanup();
+		}
 	});
 
 	it("opens_a_one_to_one", async () => {
