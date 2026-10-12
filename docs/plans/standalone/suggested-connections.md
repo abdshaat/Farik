@@ -117,7 +117,7 @@ Files: modified `packages/protocol-client/src/client.ts`, `apps/web/src/pages/Te
 - `orders_by_team_then_kit` — two agents, each with two services, team order Mira then Ada and kit order as given: the four rows read Mira's two in kit order, then Ada's two.
 - `suggestions_have_no_accessibility_violations` — `expectNoAxeViolations(container)` with the section shown.
 
-- [ ] `feat(web): suggest the kit services the team's agents lack on Today`
+- [x] `feat(web): suggest the kit services the team's agents lack on Today`
 
 ### Task 5: Connect lands on the dialog
 
