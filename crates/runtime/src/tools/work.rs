@@ -319,6 +319,9 @@ pub(super) fn write_note(call: &Call<'_>, input: WriteNoteInput) -> Result<Value
     if kind == NoteWrittenBodyKind::Completion && allowed && is_reviewer && call.in_review() {
         return Err(Refusal::CompletionInReview.into());
     }
+    if kind == NoteWrittenBodyKind::Review && allowed && is_assignee && !call.in_review() {
+        return Err(Refusal::ReviewInImplement.into());
+    }
     if !allowed {
         return Err(Refusal::NotTheNotesWriter {
             agent_id: call.agent_id().to_string(),
@@ -732,6 +735,23 @@ mod tests {
             "completion_in_review: a review session writes a review note; the completion note is written in the implement session"
         );
         note(Implement).expect("the implement session writes its completion note");
+
+        // The review note is the fresh session's: the session that did the work cannot write it.
+        let review = |purpose, agent| {
+            project.call_in(
+                purpose,
+                agent,
+                Some("CTV-1"),
+                "catervas_write_note",
+                json!({ "kind": "review", "text": summary }),
+            )
+        };
+        let reason = refused_with(review(Implement, "pm"), "review_in_implement");
+        assert_eq!(
+            reason,
+            "review_in_implement: the review note is written in a fresh review session, not the session that did the work"
+        );
+        review(Verify, "pm").expect("the review session writes its review note");
     }
 
     #[test]

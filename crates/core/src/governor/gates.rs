@@ -1454,9 +1454,12 @@ mod tests {
         let mut developers = a_contract();
         developers.assignee_role = Role::SoftwareDeveloper;
         developers.reviewer_role = Role::Architect;
+        // The input's roles say Product Manager both ways; the contract's roles decide.
         let mut input = an_assignment();
         input.assignee_id = "mira".to_string();
+        input.assignee_role = Role::ProductManager;
         input.reviewer_id = "mira".to_string();
+        input.reviewer_role = Role::ProductManager;
         assert!(
             reasons(check_assignment(&developers, &input))
                 .iter()
