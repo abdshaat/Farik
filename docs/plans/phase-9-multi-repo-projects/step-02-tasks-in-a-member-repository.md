@@ -127,9 +127,10 @@ pub(crate) fn task_repository(&self, contract: &TaskContract) -> Result<TaskRepo
 // test fixtures
 pub(crate) fn TestProject::project_folder(name: &str, team: &Team, members: &[&str]) -> (TestProject, Vec<TempRepo>);
 pub(crate) fn Harness::project_folder(name: &str, members: &[&str]) -> (Harness, Vec<TempRepo>);
+pub(crate) fn Harness::project_folder_with(name: &str, members: &[&str], change: impl FnOnce(&mut Value)) -> (Harness, Vec<TempRepo>);
 ```
 
-`TestProject::project_folder` makes the `TestProject` as `new` does, one `TempRepo` per name, and writes `repos.yaml` naming each by its name, at its canonicalised path, with no `integration_branch`. `Harness::project_folder` does the same for an orchestrator harness. Neither touches the members beyond `TempRepo::new`.
+`TestProject::project_folder` makes the `TestProject` as `new` does, one `TempRepo` per name, and writes `repos.yaml` naming each by its name, at its canonicalised path, with no `integration_branch`. `Harness::project_folder` does the same for an orchestrator harness, with `Harness::new`'s team of three (pm, dev-a, dev-b). `Harness::project_folder_with` takes a change to the team's wire, as `Harness::new`'s callers make one (`with_the_suggested_six`, `with_a_scrum_master_and_an_architect`, a policy), for a test that needs other roles; `project_folder` calls it with no change. Added here, after the cross-plan pass of 2026-10-12, so that steps 02b, 02c and 04 consume it. Neither touches the members beyond `TempRepo::new`.
 
 ## Tasks
 
@@ -184,7 +185,7 @@ Files: `store/src/repos.rs` (the two functions, `TaskRepository`, its error); `r
 Files: `tools/fixtures.rs`, `orchestrator/fixtures.rs` (the two fixtures); `transitions.rs` (`readiness_parts`' `repos`, `work()` through `task_repository`, the errors' mapping); `rules.rs` (`assigned` `:1750-1754`, `resume` `:1645-1648`). Tests are integration tests on `Harness::project_folder("x", &["app", "infra"])`.
 
 - `assigns_a_task_in_its_member` (`rules.rs`): a Developer's ready task with `repo: app`, assigned and ticked, has `.catervas/local/worktrees/CTV-1` in the project folder. `git rev-parse --git-common-dir` there is `app`'s `.git`. `app` has branch `feature/CTV-1` from its `main`, and the project folder has no such branch. The task is `in_progress`. RED: the worktree is the project folder's.
-- `a_docs_task_stays_in_the_project_folder` (`rules.rs`): an Architect's task with no `repo`, assigned and ticked, has its worktree on the project folder's `docs/CTV-1`. RED: guards the `None` path.
+- `a_docs_task_stays_in_the_project_folder` (`rules.rs`, on `Harness::project_folder_with("x", &["app", "infra"], with_the_suggested_six)`): an Architect's task with no `repo`, assigned and ticked, has its worktree on the project folder's `docs/CTV-1`. RED: guards the `None` path.
 - `waits_while_its_member_is_missing` (`rules.rs`): with `app` moved away, the assigned task stays `assigned` across two ticks with no worktree and no event. Once `repos.yaml` names the new path, the next tick makes the worktree in `app`. RED.
 - `reads_the_work_from_the_member` (`transitions.rs`): after a commit of `src/a.rs` in the task's worktree, the Definition of Done's evidence has `commits: 1`, `worktree_clean: true` and `changed_paths: [src/a.rs]`, and `allowed_paths: [src/**]` passes. RED: git refuses the worktree as another repository's.
 - `resumes_from_the_member` (`rules.rs`): the resume of that task names the commit's summary. RED.

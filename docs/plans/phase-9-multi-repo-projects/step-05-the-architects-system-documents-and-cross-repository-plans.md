@@ -107,7 +107,7 @@ Consumes:
 - `Git::file_at`, `integration_branch`
 - step 01's `read_repos` and `ProjectFiles::is_project_folder`
 - `untrusted` (`prompt.rs`)
-- `Harness::project_folder_with` (step 04)
+- `Harness::project_folder_with` (step 02)
 
 Produces:
 

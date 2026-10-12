@@ -7,7 +7,8 @@ Depends on these steps of this phase, planned, not yet executed:
 - step 01: `read_repos`, `repo_present`, `repo.add`
 - step 02: "a builder's task with no `repo` keeps to the document paths", `RepoRequired`
 - step 03: read roots, so a project-folder task reads its members
-- step 04: member folders, `member_folder`, `folder_owned`'s member folders, `Harness::project_folder_with`
+- step 02: `Harness::project_folder_with`
+- step 04: member folders, `member_folder`, `folder_owned`'s member folders
 - step 05: `mapping-the-system`, the three system documents
 
 Nothing of steps 02b, 02c, 07 or 08.
@@ -114,7 +115,7 @@ docs/SPEC.md                                       modifies (Task 5)
 
 Consumes:
 - step 01's `read_repos` and `repo_present`
-- step 04's `member_folder` and `Harness::project_folder_with`
+- step 04's `member_folder`, step 02's `Harness::project_folder_with`
 - step 05's system documents
 - `catervafication_roles`, `row`, `task_contract`, `epic_contract`, `start`, `file_due`, `FileDue`, `catervafication_of`, `started`
 - `file_catervafication_epic`, `Filing`

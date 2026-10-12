@@ -5,10 +5,11 @@ Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their 
 Spec: `docs/SPEC.md` 4.5, 5.3, 5.14, 5.17, 8.5; F5
 Depends on steps 01 and 02 of this phase, planned and ready, not yet executed:
 - from step 01: `read_repos`, `Repos`, `repo.remove` in `daemon/repos.rs` and its lock, `EVERY_KIND` at 114
-- from step 02: `ReadinessContext.repos`, `TestProject::project_folder`, `Harness::project_folder`
+- from step 02: `ReadinessContext.repos`, `TestProject::project_folder`, `Harness::project_folder`, `Harness::project_folder_with`
+- from step 03: `rules_section`'s new argument tuple and `PromptInput.members`, which this step extends
 - ADR 0057 with its amendment ("where a task works": a builder's task with no `repo` writes the project folder's documents)
 
-Nothing of steps 02b, 02c, 03 or 05 to 08.
+Nothing of steps 02b, 02c or 05 to 08.
 Mockups: none; the Files page's picker is step 07's.
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12 (one round): ready, no blocking finding; S1–S6 and N1–N7 folded below.
 
@@ -74,7 +75,6 @@ crates/store/src/folder_docs.rs, crates/store/src/projections.rs   modifies, tes
 crates/runtime/src/tools/folders.rs                modifies, tests: write_folder_doc's members, land's next, remove_folder (Task 3)
 crates/runtime/src/orchestrator/integrate.rs       modifies, tests: folder changes merged at once in a project folder (Task 3)
 crates/runtime/src/prompt.rs, orchestrator/session.rs   modifies, tests: PromptInput.member_names, folders_line's members (Task 3)
-crates/runtime/src/orchestrator/fixtures.rs        modifies: Harness::project_folder_with (Task 3)
 crates/runtime/src/daemon/gates.rs                 modifies: integration_rows in a project folder (Task 3)
 crates/runtime/src/daemon/documents.rs, docs/schemas/rpc.schema.json, apps/web/src/pages/files.ts   modifies, tests: the tree's repo, read and save of member folders, integration (Task 4)
 crates/runtime/src/daemon/repos.rs                 modifies, tests: repo.remove removes the member's folder (Task 4)
@@ -108,8 +108,6 @@ pub fn commit_removal(&self, branch: &str, from: &str, folder: &str, message: &s
 // catervas_runtime::tools::folders
 pub(crate) fn remove_folder(deps: &ToolDeps, team: &Team, folder: &str, name: &str) -> Result<Option<Landed>, LandRefusal>;
 // catervas_runtime::prompt::PromptInput gains `pub member_names: &'a [String]`
-// orchestrator fixtures
-pub(crate) fn Harness::project_folder_with(name: &str, members: &[&str], change: impl FnOnce(&mut Value)) -> (Harness, Vec<TempRepo>);
 // event: folder_doc.removed { path, change, sha }
 // rpc: filesTreeResult folder rows gain `repo: string|null`
 ```
@@ -152,7 +150,7 @@ Files: `git.rs` (`commit_removal`); `tests/git.rs`; the event's files; `folder_d
 
 ### Task 3: The project folder's folder changes land at once
 
-Files: `tools/folders.rs` (`write_folder_doc`'s members, `land`'s sentence, `remove_folder`); `integrate.rs` (the route, `awaiting_folder_changes`); `prompt.rs` and `orchestrator/session.rs` (the folders line's members). Tests are integration tests on `Harness::project_folder_with("x", &["app"], ..)`, which takes a change to the team's wire as `Harness::new`'s callers make one: here `with_the_designer`'s six and the policy each test names.
+Files: `tools/folders.rs` (`write_folder_doc`'s members, `land`'s sentence, `remove_folder`); `integrate.rs` (the route, `awaiting_folder_changes`); `prompt.rs` and `orchestrator/session.rs` (the folders line's members). Tests are integration tests on step 02's `Harness::project_folder_with("x", &["app"], ..)`, which takes a change to the team's wire as `Harness::new`'s callers make one: here `with_the_designer`'s six and the policy each test names.
 
 - `writes_a_members_document_in_a_ceremony` (`tools/folders.rs`): the Architect's `write_folder_doc` at sprint review of `docs/catervas/repos/app/architecture/features.md` lands `docs/folder-1` and records `folder_doc.written`. Its answer's `next` is `auto_merge`'s sentence though the team's policy is `pull_request`. RED: `Outside`.
 - `merges_a_folder_change_at_once_in_a_project_folder` (`integrate.rs`): under `manual`, and again under `pull_request`, the next tick merges `docs/folder-1` into the project folder's `main` with no push and no `gh` call, and records `folder_change.integrated`. `integration_rows` answers `[]` and `proposals_list`'s `integration` is `auto_merge`. In a one-repo `Harness` under `manual` the tick leaves it waiting, as today. RED.
