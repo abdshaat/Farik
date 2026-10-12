@@ -2,148 +2,207 @@
 
 Status: draft
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
-Spec: `docs/SPEC.md` 5.6, 6.5, 8.2, 8.3; F3
+Spec: `docs/SPEC.md` 5.6, 5.12, 6.5, 8.2, 8.3; F3
 Depends on steps 01 and 02 of this phase, planned and ready, not yet executed:
 - from step 01: `read_repos`, `Repos`, `Repo`, `repo_present`
 - from step 02: the contract's `repo`, `Harness::project_folder`, `TestProject::project_folder`
 
 Nothing of steps 02b, 02c or 04 to 08.
 Mockups: none.
-Readiness confirmed by: (pending; one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (which member is the task's own) and B2 (what bounds a search in a read root), both decided below; S1–S9 and N1–N6 folded, the plan rewritten. Round 2: (pending).
 
-Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 47fdf28.
+Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 9e3f662.
 
 ## Goal
 
-In a project folder, every agent session but the Marketing Specialist's may read every member and the project folder, wherever its own working folder is:
+In a project folder, every agent session but the Marketing Specialist's, and but a task in a private folder, may read every other member and the project folder's documents, wherever its own working folder is:
 - the Developer's task in `app` reads `infra`'s code and the Architect's documents
 - the Architect's planning session at the project root reads every member
 
-Writing is unchanged: a session writes only inside its own working folder, under its task's `allowed_paths`. A task's sandbox also mounts every other present member read-only at `/repos/<name>`, so a command can read a sibling. The session prompt lists the members, says where each is on the computer and in the sandbox, and names the task's own.
+Writing is unchanged: a session writes only inside its own working folder, under its task's `allowed_paths`. Searches into a root are bounded so that nothing protected is reached: secrets, git's internals, and the project folder's `.catervas/local/`. A task's sandbox also mounts every other present member read-only at `/repos/<name>`, so a command can read a sibling. The session prompt lists the members and says where each is.
 
-The Marketing Specialist keeps phase 8's limit. A one-repo project is unchanged.
+A one-repo project is unchanged.
 
 Out of scope:
 - each member's purpose in the prompt, read from `system.md` (step 05)
 - the preview container's mounts
-- members added while a task's sandbox is running, which are mounted only when the sandbox is next made
+- members added while a task's sandbox runs, which are mounted only when the sandbox is next made
 
 ## Decisions
 
-- **Read roots.** `SessionRegistration` (`crates/runtime/src/daemon.rs:106`) gains `read_roots: Vec<ReadRoot>`. Each root is a canonical folder a session may read outside its `cwd`. `run_session` (`orchestrator/session.rs:165-183`) fills it, for a session whose `read_access(role)` (`crates/core/src/folders.rs:403`) is `ReadAccess::Open`, in a project folder:
-  - every present member except the one whose folder holds `cwd`, by name, at its canonical path
-  - the project folder, named `project`, when `cwd` is not the project root
+### Which folders a session reads
 
-  The Marketing Specialist, a one-repo project, and a member that is not present get none. Rejected: one read root for the whole home folder, which would open every other repository on the computer.
-- **The hook reads them, for reads only.** In `judge_call` (`crates/runtime/src/daemon/hooks.rs:319`), beside `in_skill_folder` (`:345`), a built-in `Read`, `Grep`, `Glob` or `LS` whose path, resolved as `workspace_paths` resolves it (`:884-891`, through `resolve`, `:920`), lies outside `cwd` and inside a read root is judged against that root (`in_read_root`):
-  - its path is made relative to the root
-  - it is checked against the protected paths: the team's `protected_paths`, the default `.env`, `.env.*`, `**/*.pem`, `**/*.key` and `.catervas/local/**` (`team_rules.rs:7`), read relative to the root. A refusal is today's `protected_path` with the root's name, e.g. "infra: .env is protected".
-  - it passes `evaluate_tool_call` as a read, which `allowed_paths` never holds (`permissions.rs:394-401`)
-  - `judge_reads` (`:417`) is not reached for it, since only `Open` sessions have roots
+- **`read_roots(files, contract, cwd, role) -> Vec<ReadRoot>`**: the canonical folders a session may read outside its `cwd`. The roots are none, as phase 8 has them, when:
+  - the project is one repository
+  - `read_access(role)` (`crates/core/src/folders.rs:403`) is not `Open`: the Marketing Specialist
+  - the contract is a task in a private folder (`task_private_folder`), since "the folder is all it reaches" (`hooks.rs:1708`) stays true for the Finance and Procurement Specialists
+  - `repos.yaml` cannot be read: reads fail closed and the session still starts
 
-  Any other tool, and any write, outside `cwd` stays `path_outside_workspace` (`:930`). A `Glob` pattern that is absolute, has `..` or starts with `~` stays refused (`:864-871`): a `Glob` of a member names it in `path`, with a relative pattern.
-  - Rejected: widening `workspace_paths` itself, which every write also passes through.
-- **Claude is told the roots.** `SessionSpec` (`crates/runtime/src/session.rs:99`) gains `read_roots: Vec<PathBuf>`. `claude_args` (`claude.rs:636`) appends `--add-dir <path>` for each, after `--plugin-dir`'s place (`:689`), so that Claude Code's own directory check does not stand in front of the hook's answer. The `Read(<protected>)` deny rules in `settings_json` (`:880-902`) stay as they are, relative to `cwd`; the hook guards the roots' protected paths.
-- **The sandbox mounts the other members read-only.** `SandboxFactory::create` (`sandbox.rs:81`) gains `reads: &[(String, PathBuf)]`, the session's read roots without `project`:
-  - **Docker** (`sandbox/docker.rs:52-102`) adds one `--mount type=bind,src=<path>,dst=/repos/<name>,readonly` for each, after the worktree's. A path with a comma is refused as the worktree's is (`:61`).
-  - **`HostSandbox`** ignores them: it isolates nothing, and the absolute paths are in the prompt.
-  - **`create_base`** (`:99`) mounts none, since a base run checks the task's own tests.
-  - **The caller** `orchestrator.rs:671` passes the task's read roots, computed as `run_session` computes them, from a shared `read_roots(files, cwd, role)`.
-  - Rejected: mounting the project folder too. Its documents are read by the agent, not by a command.
-- **The prompt says where the repositories are.** `PromptInput` (`crates/runtime/src/prompt.rs:20`) gains `members: &'a [MemberLine]`. `rules_section` (`:448`) appends, after the stale line (`:479`), when it is not empty:
+  Otherwise the roots are every present member except the contract's own `repo`, by name, in `repos.yaml` order, then the project folder, named `project`, unless the canonical `cwd` is the project root.
+  - The task's own member is known from its contract, not from `cwd`. A worktree always sits under the project folder (step 02), so no member ever holds `cwd`.
+  - Rejected: a root for the whole home folder.
+- **Where the type lives.** `pub struct ReadRoot { pub name: String, pub path: PathBuf }`, documented, in `crates/runtime/src/daemon.rs`, beside `SessionRegistration`, which gains `pub read_roots: Vec<ReadRoot>`. `read_roots` is in `orchestrator/session.rs` and re-exported `pub(crate) use session::read_roots;` from `orchestrator.rs`, since `mod session` is private (`orchestrator.rs:49`). `run_session` (`orchestrator/session.rs:165-183`) fills the registration, and `sandbox_for` (`orchestrator.rs:641-680`) reads the task's contract to compute the sandbox's.
 
-  `- repositories: <name> (<path>; /repos/<name> in your sandbox), …. Your task works in <repo>.`
+### The hook reads them, and bounds a search
 
-  - "in your sandbox" appears only for a member the sandbox mounts.
-  - The last sentence is "Your task works in the project's own folder." for a task with no `repo`, and is left out for a session with no task.
-  - The next sentence is "Read any of them; change only your own task's files."
-  - `session_spec_without` (`orchestrator/session.rs:1138-1160`) fills it from `read_repos`, in `repos.yaml` order, the present members only. A missing member is named `<name> (not found)`.
-  - The Marketing Specialist's sessions, and a one-repo project's, get no line.
+- **Order.** In `judge_call` (`crates/runtime/src/daemon/hooks.rs:319`), the new `in_read_root` branch runs beside `in_skill_folder` (`:345`), for `Read`, `Grep`, `Glob` and `LS` only. Their paths are taken as `workspace_paths` takes them (`:863-905`): `file_path` for `Read`, `path` for the others, `LS` included (`in_skill_folder` does not read `LS`, `:570-574`). They are resolved with `resolve` (`:920`), which canonicalises, so a link is judged by where it points.
+  1. A path inside `cwd` is the existing path's: the branch does not take it, whatever root also holds it, since `cwd` lies under the `project` root.
+  2. A path outside `cwd` inside a read root is the branch's.
+  3. Anything else, and every other tool or write outside `cwd`, stays `path_outside_workspace` (`:930`).
+- **The protected paths per root.** The team's `protected_paths` (the defaults at `team_rules.rs:7` and the team's own), plus `.git/**`, read relative to the root. A member's `.git/config` can hold a token in a remote's address, and no session needs git's internals through `Read`.
+- **A single path.** `Read` of a file, and `LS` of a folder, is made relative to its root. It is refused when `check_protected_paths` (`paths.rs:69`) holds the root-relative path, with `path_protected: <name>: <relative path> is protected, and no tool reads or writes it (5.12)`, the code being `refusal.rs:364`'s. The root's name is only in the message: `evaluate_tool_call` (`permissions.rs:383`) is given the root-relative path, so `.env` still matches its glob.
+- **A search** (`Grep`, `Glob`) in a root is refused, with the same code and "<name>: searching <relative dir or 'its top'> could reach protected files", when its root-relative directory:
+  - is empty, the root's top, where `.env`, `.git` and `.catervas/local` sit
+  - or holds, or is held by, the literal folder part of any protected glob, before its first wildcard: `.catervas/local` for `.catervas/local/**`, `.git` for `.git/**`. This is tested with `reaches_the_folder(<dir>/**, <folder part>)` (`paths.rs:141`) in either direction.
+
+  A protected glob with no literal folder part (`**/*.pem`, `**/*.key`) is guarded by layer two.
+- **Layer two: Claude Code's own deny rules.** `settings_json` (`claude.rs:880`) gains, for each read root and each protected glob, `Read(//<root path without its leading />/<glob>)`, Claude Code's absolute form, which Claude Code holds its search tools to as well (`claude.rs:878-879`). `claude_args` (`:636`) therefore builds the settings with `spec.read_roots` and the protected globs in hand. A glob its `Read` rule cannot express is refused as today (`:866-875`).
+
+### Claude, the sandbox and the prompt
+
+- **Claude is told the roots.** `SessionSpec` (`crates/runtime/src/session.rs:99`) gains `read_roots: Vec<PathBuf>`. `claude_args` appends `--add-dir <path>` for each, where `--plugin-dir` is added (`:689`).
+  - The flag is an assumption the code has not used before: that Claude Code accepts `--add-dir` with `-p` under `--setting-sources ""`, and that it lets a hook-allowed `Read` outside `cwd` through. Task 2 checks it live.
+  - Claude Code may also offer skills found in an added folder's `.claude/skills/`. The hook's `catervas:` check (`hooks.rs`) still refuses calling one.
+- **The sandbox mounts the other members read-only.** `SandboxFactory::create` (`sandbox.rs:81`) gains `reads: &[(String, PathBuf)]`: the task's read roots without `project`.
+  - **Docker** (`sandbox/docker.rs:52-102`) adds `--mount type=bind,src=<path>,dst=/repos/<name>,readonly` for each, after the worktree's. A read path with a comma is refused with the worktree's error (`:61`). The arguments are built by a new pure `run_args(name, worktree, reads, network, user, labels, image) -> Result<Vec<String>, SandboxError>`, which `start` uses, so the mounts are unit-tested.
+  - **`HostSandbox`** ignores them, since it isolates nothing.
+  - **`create_base`** (the trait's, `sandbox.rs:99`; Docker's, `docker.rs:201`) mounts none.
+  - Rejected: mounting the project folder too, whose documents the agent reads, not a command.
+- **The prompt.** `PromptInput` (`crates/runtime/src/prompt.rs:20`) gains `members: &'a [MemberLine]` and `own_repo: Option<OwnRepo>`. `rules_section` (`:448`) becomes `rules_section(rules, role, (active_roles, stale_twins, members, own_repo))`, and appends after the stale line (`:479`), when `members` is not empty:
+
+  `- repositories: <entries joined ", ">. <own sentence>Read the others; change only your own task's files.`
+
+  - Each entry is `<name> (<path>)`, with `; /repos/<name> in your sandbox` before the `)` when `mounted`.
+  - The task's own member is `<name> (your task's repository)`, with no path.
+  - A missing member is `<name> (not found)`.
+  - `<own sentence>` is `Your task works in <repo>. ` for a member, `Your task works in the project's own folder. ` for a task with no `repo`, and nothing for a session with no task.
+  - `session_spec_without` (`orchestrator/session.rs:1138-1160`) fills it from `read_repos`, in `repos.yaml` order, all members.
+  - `mounted` is true only for a session with a task and a sandbox, under Docker (the project's sandbox setting is not `none`).
+  - The line is left out where `read_roots` would give none (the Marketing Specialist, a private-folder task, a one-repo project, an unreadable `repos.yaml`).
 
 ## File map
 
 ```
-crates/core/src/folders.rs                         none: ReadAccess is consumed as it is
-crates/runtime/src/daemon.rs                       modifies: SessionRegistration.read_roots (Task 1)
-crates/runtime/src/daemon/hooks.rs                 modifies, tests: in_read_root in judge_call (Task 1)
-crates/runtime/src/session.rs, crates/runtime/src/claude.rs   modifies, tests: SessionSpec.read_roots, --add-dir (Task 2)
-crates/runtime/src/sandbox.rs, sandbox/docker.rs, sandbox/host.rs   modifies, tests: create's reads, the readonly mounts (Task 3)
-crates/runtime/src/orchestrator.rs                 modifies: sandbox_for passes the reads (Task 3)
-crates/runtime/src/prompt.rs                       modifies, tests: PromptInput.members, the line (Task 4)
-crates/runtime/src/orchestrator/session.rs         modifies, tests: ReadRoot, read_roots(), run_session's roots (Task 1); the spec's roots (Task 2); the members line filled (Task 4)
-docs/SPEC.md                                       modifies (Task 5)
+crates/runtime/src/daemon.rs                        modifies: ReadRoot, SessionRegistration.read_roots (Task 1)
+crates/runtime/src/orchestrator/session.rs, orchestrator.rs   modifies, tests: read_roots and its re-export, run_session's roots (Task 1); the spec's roots (Task 2); the members line (Task 4)
+crates/runtime/src/daemon/hooks.rs                  modifies, tests: in_read_root, its bounds (Task 1)
+every SessionRegistration literal: daemon.rs, daemon/hooks.rs, daemon/mcp.rs, daemon/fixtures.rs, daemon/ads_calls/fixtures.rs, orchestrator/human.rs, orchestrator/rules.rs, crates/cli/tests/{connector_run,serving,live_claude,hook}.rs   modifies: read_roots: vec![] (Task 1)
+crates/runtime/src/session.rs, crates/runtime/src/claude.rs   modifies, tests: SessionSpec.read_roots, --add-dir, the deny rules per root (Task 2)
+every SessionSpec literal: recorded/fixtures.rs:29, sessions.rs:162, claude.rs:1025, tests/claude_process.rs:108, crates/cli/tests/live_claude.rs:262   modifies (Task 2)
+crates/cli/tests/live_claude.rs                     tests: a live read of a root (Task 2)
+crates/runtime/src/sandbox.rs, sandbox/docker.rs, sandbox/host.rs   modifies, tests: create's reads, run_args, the mounts (Task 3)
+every SandboxFactory and create call: orchestrator/fixtures.rs:1099 (CountingSandboxFactory, which records reads), :1142, :1221, :1279; tests/new_tests.rs:75, :104; host.rs:339, :365; tests/docker_sandbox.rs:270, :311   modifies (Task 3)
+crates/runtime/src/prompt.rs                        modifies, tests: MemberLine, OwnRepo, rules_section, Inputs::full (:663) (Task 4)
+docs/SPEC.md                                        modifies (Task 5)
 ```
-
-`ReadRoot` and `read_roots` live in `crates/runtime/src/orchestrator/session.rs`, beside `run_session`, `pub(crate)` so that `orchestrator.rs` and the hook's tests reach them.
 
 ## Interfaces
 
 Consumes:
 - step 01's `read_repos`, `repo_present`
 - step 02's `Harness::project_folder` and the contract's `repo`
-- `ReadAccess`, `read_access` (`folders.rs:393`, `:403`)
-- `SessionRegistration`, `register_session` (`daemon.rs:106`, `:674`)
-- `judge_call`, `workspace_paths`, `resolve`, `in_skill_folder`, `outside` (`hooks.rs:319`, `:863`, `:920`, `:565`, `:930`)
-- `check_protected_paths` (`paths.rs:69`), `DEFAULT_PROTECTED_PATHS`
-- `SessionSpec`, `claude_args`
-- `SandboxFactory`, `DockerSandbox::create`, `HostSandboxFactory`
-- `PromptInput`, `rules_section`, `Inputs::full` (`prompt.rs:662`)
+- `ReadAccess`, `read_access`, `task_private_folder`
+- `SessionRegistration`, `register_session`
+- `judge_call`, `workspace_paths`, `resolve`, `in_skill_folder`, `outside`
+- `check_protected_paths`, `reaches_the_folder`, `DEFAULT_PROTECTED_PATHS`, `evaluate_tool_call`
+- `SessionSpec`, `claude_args`, `settings_json`
+- `SandboxFactory`, `DockerSandbox`, `HostSandboxFactory`, `CountingSandboxFactory`
+- `PromptInput`, `rules_section`, `Inputs::full`
+- `TestDaemon::new` (`daemon/fixtures.rs:46`)
 
 Produces:
 
 ```rust
-// catervas_runtime (orchestrator/session.rs)
-pub(crate) struct ReadRoot { pub name: String, pub path: PathBuf }
-pub(crate) fn read_roots(files: &ProjectFiles, cwd: &Path, role: Role) -> Vec<ReadRoot>;
-// SessionRegistration gains `pub read_roots: Vec<ReadRoot>`; SessionSpec gains `pub read_roots: Vec<PathBuf>`
+// catervas_runtime::daemon
+pub struct ReadRoot { pub name: String, pub path: PathBuf }
+// SessionRegistration gains `pub read_roots: Vec<ReadRoot>`
+// catervas_runtime::orchestrator (re-exported from session.rs)
+pub(crate) fn read_roots(files: &ProjectFiles, contract: Option<&TaskContract>, cwd: &Path, role: Role) -> Vec<ReadRoot>;
+// SessionSpec gains `pub read_roots: Vec<PathBuf>`
 // SandboxFactory::create gains `reads: &[(String, PathBuf)]`
-pub struct MemberLine { pub name: String, pub path: Option<String>, pub mounted: bool }   // path None: not found
-// catervas_runtime::prompt: MemberLine and OwnRepo above; PromptInput gains `pub members: &'a [MemberLine]` and `pub own_repo: Option<OwnRepo>` (None: a session with no task)
+pub(crate) fn run_args(name: &str, worktree: &Path, reads: &[(String, PathBuf)], network: bool, user: &str, labels: &[(String, String)], image: &str) -> Result<Vec<String>, SandboxError>;   // sandbox/docker.rs
+// catervas_runtime::prompt
+pub struct MemberLine { pub name: String, pub path: Option<String>, pub mounted: bool, pub own: bool }   // path None: not found
 pub enum OwnRepo { Member(String), ProjectFolder }
+// PromptInput gains `pub members: &'a [MemberLine]`, `pub own_repo: Option<OwnRepo>` (None: no task)
 ```
 
 ## Tasks
 
-### Task 1: A session reads the other repositories
+### Task 1: A session reads the other repositories, and no secret
 
-Files: `orchestrator/session.rs` (`ReadRoot`, `read_roots`, the registration's field); `daemon.rs` (the field); `hooks.rs` (`in_read_root`, its place in `judge_call`). Hook tests as the existing `path_outside_workspace` test (`hooks.rs:1943-1977`), on a `TestDaemon` whose project is a project folder with members `app` and `infra`, a session registered with `cwd` the task's worktree in `app` and `read_roots` `infra` and `project`.
+Files: `daemon.rs`; `orchestrator/session.rs` and `orchestrator.rs`; `hooks.rs`; every `SessionRegistration` literal. The hook's tests use `TestDaemon::new` plus two `TempRepo`s, `infra` and `third`, and a project-folder path, a session registered with `cwd` the task's worktree under the project folder and `read_roots` `infra` and `project`. In `infra`, `src/main.rs`, `.env`, `src/key.pem` and `.git/` are present.
 
-- `a_session_reads_the_other_members`: `Read` of `<infra>/src/main.rs` passes. `Grep` with `path: <infra>` and `Glob` with `path: <project>/docs/catervas`, pattern `**/*.md`, pass. `Read` of `<infra>/.env` is refused with `protected_path` naming `infra`, and of `<project>/.catervas/local/catervas.db` likewise naming `project`. RED: `path_outside_workspace`.
-- `a_session_writes_only_its_own`: `Write` and `Edit` of `<infra>/src/main.rs`, and `Read` of a file in a third repository that is no root, are each `path_outside_workspace`. An absolute `Glob` pattern under `<infra>` is refused as today. RED: guards the read-only branch.
-- `the_marketing_specialist_reads_no_member` (`orchestrator/session.rs`): `read_roots` for the Marketing Specialist in a project folder is empty. For the Architect at the project root it is `app` and `infra`. For a Developer in `app`'s worktree it is `infra` and `project`. With `infra` moved away it is `project` alone. In a one-repo project it is empty for every role. RED.
+- `a_session_reads_the_other_members`:
+  - `Read` of `<infra>/src/main.rs` passes
+  - `Grep` with `path: <infra>/src`, `LS` of `<infra>/src`, and `Glob` with `path: <project>/docs/catervas` and pattern `**/*.md` each pass
+  - `Read` of a file in the session's own worktree passes through the existing branch, unchanged
+
+  RED: `path_outside_workspace`.
+- `a_session_reaches_nothing_protected_in_a_root`. Each of these is refused, with its message naming the root:
+  - `Read` of `<infra>/.env`, `<infra>/.git/config` and `<project>/.catervas/local/catervas.db`, each with `path_protected`
+  - `Grep` with `path: <infra>`, and with `path: <project>` (the top)
+  - `Grep` with `path: <project>/.catervas` (it holds `.catervas/local`)
+  - `LS` of `<infra>/.git`
+
+  RED.
+- `a_session_writes_only_its_own`. Each stays `path_outside_workspace`:
+  - `Write` and `Edit` of `<infra>/src/main.rs`
+  - `Read` in `third`, which is no root
+  - an absolute `Glob` pattern under `<infra>`, refused as today
+
+  RED: guards the read-only branch.
+- `knows_which_folders_a_session_reads` (`orchestrator/session.rs`, `TestProject::project_folder` with `app` and `infra`):
+  - the Architect with no contract, `cwd` the project root: `[app, infra]`
+  - a Developer's task with `repo: app`, `cwd` its worktree: `[infra, project]`
+  - a docs task with no `repo`: `[app, infra, project]`
+  - the Marketing Specialist: `[]`
+  - a Finance Specialist's private-folder task: `[]`
+  - with `infra` moved away, the Developer's: `[project]`
+  - with `repos.yaml` made unreadable: `[]`
+  - in a one-repo project: `[]` for every role
+
+  RED.
 
 - [ ] `feat(runtime): let a session read the project's other repositories`
 
-### Task 2: Claude is told the other folders
+### Task 2: Claude is told the other folders and their protected files
 
-Files: `session.rs` (`SessionSpec.read_roots`); `claude.rs` (`claude_args`); `orchestrator/session.rs` (filling the spec).
+Files: `session.rs`; `claude.rs`; every `SessionSpec` literal; `crates/cli/tests/live_claude.rs`.
 
-- `adds_each_read_root_as_a_directory` (`claude.rs`): a spec with two read roots gives `--add-dir <a>` and `--add-dir <b>`, in order, after the plugin directory's place; a spec with none gives no `--add-dir`. RED.
+- `adds_each_read_root_as_a_directory` (`claude.rs`): a spec with roots `/r/a` and `/r/b` gives `--add-dir /r/a` and `--add-dir /r/b`, in order, where `--plugin-dir` goes; none gives no `--add-dir`. RED.
+- `denies_each_roots_protected_files` (`claude.rs`): with protected `[.env, .git/**]` and root `/r/a`, the settings' deny list holds `Read(.env)`, `Read(.git/**)`, `Read(//r/a/.env)` and `Read(//r/a/.git/**)`: Claude Code's absolute form, `//` followed by the path without its leading `/`. RED.
+- `a_live_session_reads_a_root` (`live_claude.rs`, ignored as the file's other live tests are): a session given a root reads a file in it, and is refused `<root>/.env`. RED.
 
 - [ ] `feat(runtime): tell Claude Code which other folders a session reads`
 
 ### Task 3: The sandbox mounts the other members read-only
 
-Files: `sandbox.rs` (the argument); `sandbox/docker.rs` (the mounts); `sandbox/host.rs` (ignored); `orchestrator.rs:671` (passing them); every `SandboxFactory` fake in tests (the argument added).
+Files: `sandbox.rs`; `sandbox/docker.rs` (`run_args`, used by `start`); `sandbox/host.rs`; `orchestrator.rs:671`; every factory and `create` call listed in the file map. `CountingSandboxFactory` records each call's `reads`.
 
-- `mounts_each_other_member_read_only` (`sandbox/docker.rs`, the existing docker-argument tests' way): `create` with reads `[(infra, /home/me/infra)]` runs `docker run` with `--mount type=bind,src=/home/me/infra,dst=/repos/infra,readonly` after the worktree's mount. A read path with a comma is refused with the worktree's error. RED.
-- `a_tasks_sandbox_holds_its_siblings` (`orchestrator.rs`, `Harness::project_folder` with the fake factory recording its calls): the sandbox made for a task in `app` is given `[(infra, <infra>)]`, and for a docs task in the project folder `[(app, ..), (infra, ..)]`. RED.
+- `mounts_each_other_member_read_only` (`docker.rs`): `run_args` with reads `[(infra, /home/me/infra)]` holds `--mount type=bind,src=/home/me/infra,dst=/repos/infra,readonly` after the worktree's `--mount`. A read path with a comma is the worktree's comma error. With no reads, the arguments equal today's. RED.
+- `a_tasks_sandbox_holds_its_siblings` (`orchestrator.rs`, `Harness::project_folder` with `app` and `infra`): the sandbox made for a task with `repo: app` is given `[(infra, <infra>)]`, and for a docs task in the project folder `[(app, ..), (infra, ..)]`. RED.
 
 - [ ] `feat(runtime): mount a task's sibling repositories read-only`
 
 ### Task 4: The prompt names the repositories
 
-Files: `prompt.rs` (`MemberLine`, `OwnRepo`, the line; `Inputs::full` and the literal at `:680` passing `&[]` and `None`); `orchestrator/session.rs` (`:1138-1160`).
+Files: `prompt.rs`; `orchestrator/session.rs` (`:1138-1160`).
 
-- `the_team_rules_name_the_repositories` (`prompt.rs`): with members `app` (mounted: false), `infra` (mounted: true, path `/home/me/infra`) and `web` (path `None`), and `own_repo: Member("app")`, the Team rules end, after the stale line's place, with exactly: `- repositories: app (/home/me/app), infra (/home/me/infra; /repos/infra in your sandbox), web (not found). Your task works in app. Read any of them; change only your own task's files.` With `ProjectFolder` the second sentence is `Your task works in the project's own folder.`. With no members there is no line. RED.
-- `a_developers_prompt_names_its_repositories` (`orchestrator/session.rs`, `Harness::project_folder`): the implement session's prompt of a task with `repo: app` holds the line with `app` and `infra`, `infra` mounted. The Marketing Specialist's triage prompt holds none. RED.
+- `the_team_rules_name_the_repositories` (`prompt.rs`), with members `app` (own), `infra` (path `/home/me/infra`, mounted) and `web` (path `None`), and `own_repo: Member("app")`, the Team rules end, after the stale line's place, with exactly:
+
+  `- repositories: app (your task's repository), infra (/home/me/infra; /repos/infra in your sandbox), web (not found). Your task works in app. Read the others; change only your own task's files.`
+
+  With `own_repo: None` and no `own`, the sentence `Your task works in …` is left out. With no members there is no line. RED.
+- `a_developers_prompt_names_its_repositories` (`orchestrator/session.rs`, `Harness::project_folder`): the implement session's prompt of a task with `repo: app` holds the line with `app` as its own and `infra` mounted. Under no-sandbox mode `infra` has no `/repos/infra`. The Marketing Specialist's triage prompt holds no line. RED.
 
 - [ ] `feat(runtime): tell each session where the project's repositories are`
 
 ### Task 5: Spec
 
 `docs/SPEC.md`, at the next revision:
-- 5.6: read roots, the hook's read-only branch, the protected paths read per root, `--add-dir`
+- 5.6: read roots and who gets them; the hook's read-only branch; a search's bounds; `--add-dir`
+- 5.12: `.git/**` protected in a read root; the deny rules per root
 - 6.5: the Marketing Specialist reads no member
 - 8.2: the repositories line in the Team rules
 - 8.3: the sandbox's read-only `/repos/<name>` mounts
