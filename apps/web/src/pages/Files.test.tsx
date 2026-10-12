@@ -127,6 +127,7 @@ const read = (more: Record<string, unknown> = {}) => ({
 	stale: false,
 	rederiving: false,
 	editable: true,
+	askable: true,
 	waiting: null,
 	...more,
 });
@@ -367,6 +368,7 @@ describe("Files", () => {
 				document: version(OVERVIEW, "Text", MIRA_FIVE_DAYS),
 				twin: null,
 				editable: false,
+				askable: false,
 			}),
 		});
 		await screen.findByRole("heading", { name: "Overview" });

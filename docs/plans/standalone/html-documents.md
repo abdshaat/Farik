@@ -296,7 +296,7 @@ Files: `crates/runtime/src/daemon/documents.rs` (`is_markdown` becomes `is_docum
 - `saves_the_owners_edit_of_an_html_document` — `files.save` of `roadmap.html` lands as a folder change; once integrated, `files.read` answers `stale: true`.
 - `askable_where_editable_but_delivery` — `askable` is true for `architecture/overview.html`, and false for `delivery/cadence.md`; `files.read` of `spec.agent.html` is not found, as today.
 
-- [ ] `feat(runtime): the Files page lists and saves HTML documents`
+- [x] `feat(runtime): the Files page lists and saves HTML documents`
 
 ### Task 8: the document route
 

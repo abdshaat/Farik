@@ -37,6 +37,7 @@ export type FileRead = {
 	stale: boolean;
 	rederiving: boolean;
 	editable: boolean;
+	askable: boolean;
 	waiting: { change: number; branch: string } | null;
 };
 

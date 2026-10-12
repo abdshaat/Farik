@@ -70,7 +70,7 @@ fn edit_refusal(why: OwnerEditRefusal) -> Failure {
         ),
         OwnerEditRefusal::NotADocument => (
             "/path",
-            "Only a document that ends in .md can be saved here.",
+            "Only a document that ends in .md or .html can be saved here.",
         ),
         OwnerEditRefusal::AgentTwin => (
             "/path",
@@ -197,11 +197,11 @@ fn is_file(entry: &TreeEntry) -> bool {
     matches!(entry.mode.as_str(), "100644" | "100755")
 }
 
-fn is_markdown(path: &str) -> bool {
-    path.strip_suffix(".md").is_some()
+fn is_document(path: &str) -> bool {
+    catervas_core::folders::DocumentFormat::of(path).is_some()
 }
 
-/// The folders of the roles with an active agent, in the table's order, each with its `.md` files
+/// The folders of the roles with an active agent, in the table's order, each with its `.md` and `.html` files
 /// at any depth except the twin of a document that is present, which rides on its document.
 fn folders(team: &Team, entries: &[TreeEntry]) -> Vec<Folder> {
     let files: Vec<&str> = entries
@@ -218,7 +218,7 @@ fn folders(team: &Team, entries: &[TreeEntry]) -> Vec<Folder> {
             let inside = format!("{folder}/");
             let mut documents: Vec<Document> = files
                 .iter()
-                .filter(|path| path.starts_with(&inside) && is_markdown(path))
+                .filter(|path| path.starts_with(&inside) && is_document(path))
                 .filter(|path| {
                     !human_of_twin(path).is_some_and(|human| files.contains(&human.as_str()))
                 })
@@ -413,12 +413,14 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
             .any(|row| !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)),
         None => false,
     };
+    let editable = check_owner_edit(&path, 0).is_ok();
     Ok(json!({
         "document": shown,
         "twin": twin,
         "stale": stale,
         "rederiving": rederiving,
-        "editable": check_owner_edit(&path, 0).is_ok(),
+        "editable": editable,
+        "askable": editable && !path.starts_with("docs/catervas/delivery/"),
         "waiting": waiting.map(|(change, held)| json!({ "change": change, "branch": held })),
     }))
 }
@@ -817,6 +819,107 @@ mod tests {
         let escalated = read_path(&harness, ROADMAP);
         assert_eq!(escalated["waiting"], Value::Null);
         assert_eq!(escalated["document"]["text"], "the owner's roadmap\n");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_html_documents_with_their_agent_versions() {
+        let harness = project("files-html-tree", "pull_request");
+        write(&harness, &format!("{PRODUCT}/spec.html"), "<h1>spec</h1>\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/spec.agent.html"),
+            "<h1>agents</h1>\n",
+        );
+        write(&harness, &format!("{PRODUCT}/overview.md"), "overview\n");
+        write(&harness, &format!("{PRODUCT}/notes.txt"), "notes\n");
+        commit(&harness, "the documents");
+        let listed = tree(&harness.daemon);
+        let found: Vec<(&str, Value)> = listed["folders"][0]["documents"]
+            .as_array()
+            .expect("documents")
+            .iter()
+            .map(|d| (d["path"].as_str().expect("path"), d["twin"].clone()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    "docs/catervas/product/spec.html",
+                    json!("docs/catervas/product/spec.agent.html")
+                ),
+                ("docs/catervas/product/overview.md", Value::Null),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn saves_the_owners_edit_of_an_html_document() {
+        let harness = project("files-html-save", "auto_merge");
+        let path = format!("{PRODUCT}/roadmap.html");
+        write(&harness, &path, "<h1>roadmap</h1>\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/roadmap.agent.html"),
+            "<h1>agents</h1>\n",
+        );
+        commit(&harness, "the documents");
+        let saved = save(
+            &harness,
+            &path,
+            "<h1>new roadmap</h1>\n",
+            &blob(&harness, &path),
+        );
+        assert_eq!(
+            saved["result"],
+            json!({ "change": 1, "branch": "docs/folder-1" }),
+            "{saved}"
+        );
+        assert_eq!(
+            git_output(&harness, &["show", &format!("docs/folder-1:{path}")]),
+            "<h1>new roadmap</h1>"
+        );
+        ticks(&harness);
+        let read = read(&harness.daemon, &path);
+        assert_eq!(read["document"]["text"], "<h1>new roadmap</h1>\n");
+        assert_eq!(read["stale"], true, "{read}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn askable_where_editable_but_delivery() {
+        let harness = Harness::new("files-askable", |wire| {
+            with_the_designer(wire);
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+            );
+        });
+        write(
+            &harness,
+            "docs/catervas/architecture/overview.html",
+            "<h1>o</h1>\n",
+        );
+        write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        write(&harness, &format!("{PRODUCT}/spec.html"), "<h1>spec</h1>\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/spec.agent.html"),
+            "<h1>agents</h1>\n",
+        );
+        commit(&harness, "the documents");
+        let overview = read_path(&harness, "docs/catervas/architecture/overview.html");
+        assert_eq!(overview["askable"], true, "{overview}");
+        assert_eq!(overview["editable"], true);
+        let cadence = read_path(&harness, "docs/catervas/delivery/cadence.md");
+        assert_eq!(cadence["editable"], true, "{cadence}");
+        assert_eq!(cadence["askable"], false);
+        let reply = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "files.read", "params": { "path": format!("{PRODUCT}/spec.agent.html") } }),
+        );
+        assert_eq!(reply["error"]["code"], -32002, "{reply}");
     }
 
     #[test]

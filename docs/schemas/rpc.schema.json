@@ -2605,7 +2605,7 @@
     },
     "filesSaveRequest": {
       "title": "Files Save Request",
-      "description": "The owner's edit of a document of a role's folder (docs/SPEC.md 5.17): base is the blob files.read answered for the document, so that an edit made on a version the team has since changed is refused. The text is committed on a branch of its own as a folder change, which the team's integration policy adds to the project as it does an accepted task's branch. Refused with -32005 and data.errors, each with path (a JSON pointer: /path, /text or /base), message and code, in this order: outside_folders, not_markdown, agent_twin, marketing_plan (/path), too_large (/text, over 262144 bytes), then file_changed (/base: the integration branch has no file there, or its blob is not base), file_busy (/path: the project's checkout has an uncommitted change to it), is_a_link (/path) and change_waiting (/path: an earlier change of the document is not added yet). Saved text the file already holds answers null for both and records nothing.",
+      "description": "The owner's edit of a document of a role's folder (docs/SPEC.md 5.17): base is the blob files.read answered for the document, so that an edit made on a version the team has since changed is refused. The text is committed on a branch of its own as a folder change, which the team's integration policy adds to the project as it does an accepted task's branch. Refused with -32005 and data.errors, each with path (a JSON pointer: /path, /text or /base), message and code, in this order: outside_folders, not_a_document, agent_twin, marketing_plan (/path), too_large (/text, over 262144 bytes), then file_changed (/base: the integration branch has no file there, or its blob is not base), file_busy (/path: the project's checkout has an uncommitted change to it), is_a_link (/path) and change_waiting (/path: an earlier change of the document is not added yet). Saved text the file already holds answers null for both and records nothing.",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -2647,7 +2647,7 @@
       }
     },
     "filesTreeResult": {
-      "description": "integration is the team's policy, which the page's words follow. folders has one folder for each role that owns one and has an active agent, in the order of the Team rules: folder is its path, name its last segment as words, role the role that owns it, agent_id that role's first active agent, and documents its .md files at any depth, in the order of the known documents and then by path, each with path, name (the Files page's name for it; a plan's carries its title, which is the agent's own words and untrusted text) and twin, the path of its .agent.md twin when it has one that is a file, else null. A twin of a document that is present is not listed on its own; a link is not listed.",
+      "description": "integration is the team's policy, which the page's words follow. folders has one folder for each role that owns one and has an active agent, in the order of the Team rules: folder is its path, name its last segment as words, role the role that owns it, agent_id that role's first active agent, and documents its .md and .html files at any depth, in the order of the known documents and then by path, each with path, name (the Files page's name for it; a plan's carries its title, which is the agent's own words and untrusted text) and twin, the path of its .agent.md twin when it has one that is a file, else null. A twin of a document that is present is not listed on its own; a link is not listed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["integration", "folders"],
@@ -2722,16 +2722,17 @@
       }
     },
     "filesReadResult": {
-      "description": "document and its twin (null when it has none that is a file) as the integration branch holds them, except that while the owner's own saved change to the document waits to be added (waiting: its folder change and branch) they are read from that branch, with by_you true. stale: the twin is behind the document (read from git; an owner's change not yet added makes nothing stale). rederiving: a task that brings the twin up to date is neither accepted nor cancelled. editable: false for a marketing plan, which changes through a new version on its page.",
+      "description": "document and its twin (null when it has none that is a file) as the integration branch holds them, except that while the owner's own saved change to the document waits to be added (waiting: its folder change and branch) they are read from that branch, with by_you true. stale: the twin is behind the document (read from git; an owner's change not yet added makes nothing stale). rederiving: a task that brings the twin up to date is neither accepted nor cancelled. editable: false for a marketing plan, which changes through a new version on its page. askable: false for a document under docs/catervas/delivery/, which the Scrum Master alone writes, otherwise equal to editable.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["document", "twin", "stale", "rederiving", "editable", "waiting"],
+      "required": ["document", "twin", "stale", "rederiving", "editable", "askable", "waiting"],
       "properties": {
         "document": { "$ref": "#/$defs/fileVersion" },
         "twin": { "oneOf": [{ "$ref": "#/$defs/fileVersion" }, { "type": "null" }] },
         "stale": { "type": "boolean" },
         "rederiving": { "type": "boolean" },
         "editable": { "type": "boolean" },
+        "askable": { "type": "boolean" },
         "waiting": {
           "type": ["object", "null"],
           "additionalProperties": false,
