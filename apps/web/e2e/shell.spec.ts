@@ -14,7 +14,8 @@ test("on a phone a page's sticky bar rests above the places bar, never under it"
 
 		// A page sticks its own bar above `--catervas-shell-bar-height`: here a bar of 100 px at the
 		// end of a page 3000 px long, scrolled to its middle, as the marketing plan's decision bar is.
-		await page.evaluate(() => {
+		// The scroll is from where that page starts, below Today's own sections, however tall they are.
+		const start = await page.evaluate(() => {
 			const long = document.createElement("div");
 			long.style.height = "3000px";
 			const spacer = document.createElement("div");
@@ -25,11 +26,13 @@ test("on a phone a page's sticky bar rests above the places bar, never under it"
 				"position:sticky;bottom:var(--catervas-shell-bar-height, 0);height:100px";
 			long.append(spacer, bar);
 			document.querySelector("main")?.append(long);
-			window.scrollTo(0, 1200);
+			const top = long.getBoundingClientRect().top + window.scrollY;
+			window.scrollTo(0, top + 1200);
+			return top;
 		});
 		await expect
 			.poll(() => page.evaluate(() => window.scrollY))
-			.toBeGreaterThan(1000);
+			.toBeGreaterThan(start + 1000);
 		const bar = await page.locator("#probe-bar").boundingBox();
 		const tabs = await places.boundingBox();
 		if (!bar || !tabs) throw new Error("a bar has no box");
