@@ -1052,6 +1052,7 @@ pub fn criteria_json(library: &CriteriaLibrary) -> Value {
                 "name": one.name.as_str(),
                 "text": one.text.as_str(),
                 "source": one.source.as_ref().map(ToString::to_string),
+                "repo": one.repo.as_ref().map(|repo| repo.as_str()),
                 "method": criterion_method(&one.verification),
                 "how": criterion_how(&one.verification),
             }))
@@ -1707,5 +1708,20 @@ mod tests {
                 EventKind::ContractUnlocked
             ]
         );
+    }
+
+    #[test]
+    fn lists_a_criterions_member() {
+        let library = catervas_core::criteria::validate_criteria(&json!({ "criteria": [
+            { "name": "app-the-tests-pass", "text": "The tests pass in app.",
+              "source": "project_scan", "repo": "app",
+              "verification": { "method": "test", "command": "npm test" } },
+            { "name": "my-check", "text": "A person wrote this one.",
+              "verification": { "method": "human", "question": "Is it right?" } },
+        ]}))
+        .expect("a library");
+        let listed = super::criteria_json(&library);
+        assert_eq!(listed["criteria"][0]["repo"], json!("app"));
+        assert_eq!(listed["criteria"][1].get("repo"), Some(&Value::Null));
     }
 }

@@ -168,7 +168,7 @@ Files: `scan.rs` (the Interfaces' items); `lib.rs` (their re-exports); `tests/pr
   - RED.
 - `lists_a_criterions_member`: `criteria_json` of `app-the-tests-pass` has `repo: "app"`, and of a human's entry with none `repo: null`. `catervas criteria list` prints each row as `{:<22} {:<9} {:<12} {:<12} {}`, `repo` after `source` and empty when absent. RED.
 
-- [ ] `feat(store): scan each member of a project folder`
+- [x] `feat(store): scan each member of a project folder`
 
 ### Task 4: When the members are scanned
 

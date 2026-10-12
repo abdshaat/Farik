@@ -58,6 +58,7 @@ pub use projections::{
 };
 pub use reconcile::{Drift, ReconcileError, reconcile};
 pub use scan::{
-    AppStart, ProjectScan, ScanError, ScanFacts, material, names_of, project_document,
+    AppStart, CATERVAS_ACTOR, LIBRARY_CAP, MembersScan, MembersScanError, ProjectScan, ScanError,
+    ScanFacts, material, names_of, project_document, renamed, rescan_members, reseeded,
     scan_project, seeded_library,
 };

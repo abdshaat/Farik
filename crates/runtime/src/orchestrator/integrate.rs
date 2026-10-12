@@ -411,7 +411,12 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
     let previous = tools.files.read_project_scan().ok();
     tools
         .files
-        .write_project_scan(&project_document(&scan, &library, previous.as_deref()))
+        .write_project_scan(&project_document(
+            &scan.read_back,
+            &library,
+            &[],
+            previous.as_deref(),
+        ))
         .map_err(|error| error.to_string())?;
     if kept.as_ref() != Some(&library) {
         tools

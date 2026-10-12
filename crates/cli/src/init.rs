@@ -59,8 +59,9 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
         .write_criteria(&library)
         .map_err(|error| error.to_string())?;
     let previous = files.read_project_scan().ok();
+    let document = project_document(&scan.read_back, &library, &[], previous.as_deref());
     files
-        .write_project_scan(&project_document(&scan, &library, previous.as_deref()))
+        .write_project_scan(&document)
         .map_err(|error| error.to_string())?;
 
     let log =
