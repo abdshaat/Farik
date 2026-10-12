@@ -10,7 +10,7 @@ use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::governor::done::{CriterionResult, RunBy};
 use crate::governor::task_status::is_terminal;
 use crate::governor::transition_table::TransitionActor;
-use crate::team::{private_folder, task_private_folder};
+use crate::team::{changes_code, private_folder, task_private_folder};
 use crate::text::{distinct, listed};
 
 /// What a gate says: nothing when it passes, or every reason it does not, in the order the rules
@@ -1122,13 +1122,20 @@ pub fn check_contract_write(
 ///
 /// # Errors
 ///
-/// `RepoFixed` when `before` names a repository and `after` names another or none.
+/// `RepoFixed` when `before` names a repository and `after` names another or none, except that
+/// clearing it is allowed when `after` is an epic or its assignee's role changes no code.
 pub fn check_repo_write(
     before: &TaskContract,
     after: &TaskContract,
 ) -> Result<(), ContractWriteRefusal> {
+    // Readiness refuses a `repo` on an epic and on a role that changes no code, so there it may
+    // be cleared: the task could never be ready otherwise.
+    let repo_is_left_out = after.kind == Kind::Epic || !changes_code(after.assignee_role);
     match &before.repo {
-        Some(repo) if after.repo.as_ref().map(|r| r.as_str()) != Some(repo.as_str()) => {
+        Some(repo)
+            if after.repo.as_ref().map(|r| r.as_str()) != Some(repo.as_str())
+                && !(after.repo.is_none() && repo_is_left_out) =>
+        {
             Err(ContractWriteRefusal::RepoFixed {
                 repo: repo.as_str().to_string(),
             })
@@ -2700,6 +2707,28 @@ mod tests {
                 })
             );
         }
+        // Clearing it is allowed where readiness would refuse a repo anyway: an epic, and a
+        // role that changes no code.
+        let cleared = |kind: &str, role: &str| {
+            let mut wire = crate::contract::fixtures::a_contract_wire();
+            wire["kind"] = json!(kind);
+            wire["assignee_role"] = json!(role);
+            crate::contract::validate_contract(&wire).expect("valid")
+        };
+        assert_eq!(
+            check_repo_write(&app, &cleared("epic", "software_developer")),
+            Ok(())
+        );
+        assert_eq!(
+            check_repo_write(&app, &cleared("task", "architect")),
+            Ok(())
+        );
+        assert_eq!(
+            check_repo_write(&app, &cleared("task", "software_developer")),
+            Err(ContractWriteRefusal::RepoFixed {
+                repo: "app".to_string()
+            })
+        );
     }
 
     #[test]
