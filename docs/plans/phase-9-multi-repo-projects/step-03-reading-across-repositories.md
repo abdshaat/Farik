@@ -1,6 +1,6 @@
 # Phase 9, step 03: Reading across repositories
 
-Status: draft
+Status: ready (readiness review 2026-10-12, three rounds, findings folded)
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.6, 5.12, 6.5, 8.2, 8.3; F3
 Depends on steps 01 and 02 of this phase, planned and ready, not yet executed:
@@ -9,7 +9,7 @@ Depends on steps 01 and 02 of this phase, planned and ready, not yet executed:
 
 Nothing of steps 02b, 02c or 04 to 08.
 Mockups: none.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (which member is the task's own) and B2 (what bounds a search in a read root), both decided below; S1–S9 and N1–N6 folded, the plan rewritten. Round 2 (the same reviewer): B1 and B2 decided; new B3 (the absolute deny rule for `.catervas/local/**` covering every task's own worktree) and B4 (a root path Claude Code's settings cannot hold), both decided below, with S1–S3. Round 3: (pending).
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (which member is the task's own) and B2 (what bounds a search in a read root), both decided below; S1–S9 and N1–N6 folded, the plan rewritten. Round 2 (the same reviewer): B1 and B2 decided; new B3 (the absolute deny rule for `.catervas/local/**` covering every task's own worktree) and B4 (a root path Claude Code's settings cannot hold), both decided below, with S1–S3. Round 3 (confirming B3 and B4): ready; its S1 and N1 folded.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 9e3f662.
 
@@ -58,7 +58,7 @@ Out of scope:
 
   A protected glob with no literal folder part (`**/*.pem`, `**/*.key`) is guarded by layer two.
 - **Layer two: Claude Code's own deny rules.** `settings_json` (`claude.rs:880`) gains, for each read root and each of its protected globs (the team's and `.git/**`, which `settings_json` adds per root itself), `Read(//<root path without its leading />/<glob>)`. That is Claude Code's absolute form, and Claude Code holds its search tools to it as well (`claude.rs:878-879`).
-  - **A rule is left out when its literal folder holds `cwd`.** The literal folder is the root's path joined with the glob's part before its first wildcard. So the `project` root gives no `Read(//<project>/.catervas/local/**)`, which would cover every task's own worktree (`<project>/.catervas/local/worktrees/CTV-<n>`). Claude Code checks its deny rules whatever the hook answers, so such a rule would refuse the session its own files. Layer one guards `.catervas/local` and `.git` in a root.
+  - **A rule is left out when the glob has a literal folder part and the folder it names holds `cwd`.** The literal folder part is the glob's segments before the first segment holding a wildcard; for a file glob, its segments but the last. So `.catervas/local/**` has `.catervas/local`, while `.env`, `.env.*`, `**/*.pem` and `**/*.key` have none and their rules are always kept. Inside `cwd` the relative `Read(**/*.pem)` already refuses the same files. So the `project` root gives no `Read(//<project>/.catervas/local/**)`, which would cover every task's own worktree (`<project>/.catervas/local/worktrees/CTV-<n>`). Claude Code checks its deny rules whatever the hook answers, so such a rule would refuse the session its own files. Layer one guards `.catervas/local` and `.git` in a root.
   - `claude_args` (`:636`) builds the settings with `spec.read_roots`, `spec.cwd` and the protected globs in hand. A glob its `Read` rule cannot express is refused as today (`:866-875`).
 
 ### Claude, the sandbox and the prompt
@@ -177,7 +177,7 @@ Files: `daemon.rs`; `orchestrator/session.rs` and `orchestrator.rs`; `hooks.rs`;
 Files: `session.rs`; `claude.rs`; every `SessionSpec` literal; `crates/cli/tests/live_claude.rs`.
 
 - `adds_each_read_root_as_a_directory` (`claude.rs`): a spec with roots `/r/a` and `/r/b` gives `--add-dir /r/a` and `--add-dir /r/b`, in order, where `--plugin-dir` goes; none gives no `--add-dir`. RED.
-- `denies_each_roots_protected_files` (`claude.rs`): with the team's protected `[.env, .catervas/local/**, **/*.pem]`, root `/r/a` and `cwd` `/p/.catervas/local/worktrees/CTV-1`, the deny list holds the relative `Read(.env)`, `Read(.catervas/local/**)` and `Read(**/*.pem)`, and for the root `Read(//r/a/.env)`, `Read(//r/a/.catervas/local/**)`, `Read(//r/a/**/*.pem)` and `Read(//r/a/.git/**)`. With root `/p` and the same `cwd`, there is no `Read(//p/.catervas/local/**)`, and `Read(//p/.env)` is there. RED.
+- `denies_each_roots_protected_files` (`claude.rs`): with the team's protected `[.env, .catervas/local/**, **/*.pem]`, root `/r/a` and `cwd` `/p/.catervas/local/worktrees/CTV-1`, the deny list holds the relative `Read(.env)`, `Read(.catervas/local/**)` and `Read(**/*.pem)`, and for the root `Read(//r/a/.env)`, `Read(//r/a/.catervas/local/**)`, `Read(//r/a/**/*.pem)` and `Read(//r/a/.git/**)`. With root `/p` and the same `cwd`, there is no `Read(//p/.catervas/local/**)`, and `Read(//p/.env)` and `Read(//p/**/*.pem)` are there. RED.
 - `a_live_session_reads_a_root` (`live_claude.rs`, ignored as the file's other live tests are): a session whose `cwd` is a worktree under a project folder's `.catervas/local/worktrees/`, given the project folder and a member as roots, reads a file in the member and a file in its own worktree, and is refused `<member>/.env`. RED.
 
 - [ ] `feat(runtime): tell Claude Code which other folders a session reads`
