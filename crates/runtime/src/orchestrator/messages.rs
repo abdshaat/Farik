@@ -499,10 +499,18 @@ pub(super) fn plan_message(
         },
         _ => String::new(),
     };
+    let own_docs = if contract.assignee_role == contract.reviewer_role
+        && contract.assignee_role.reviews_its_own()
+    {
+        ", but a Product Manager may review its own docs task, in a fresh session, when the team \
+         has no other Product Manager"
+    } else {
+        ""
+    };
     format!(
         "Assign {task} with `catervas_assign_task`, naming its assignee and its reviewer. The agents \
          of its assignee role, {assignee_role}, with room for it: {assignees}. The agents of its \
-         reviewer role, {reviewer_role}: {reviewers}. The reviewer is never the assignee.{lane}",
+         reviewer role, {reviewer_role}: {reviewers}. The reviewer is never the assignee{own_docs}.{lane}",
         task = contract.id.as_str(),
         assignee_role = contract.assignee_role,
         reviewer_role = contract.reviewer_role,
@@ -1526,6 +1534,29 @@ mod tests {
         for held in ["CTV-2 (accepted): Write the plan", "`lane`", "`plan`"] {
             assert!(message.contains(held), "{held}: {message}");
         }
+    }
+
+    #[test]
+    fn says_a_product_manager_may_review_its_own_docs() {
+        let team =
+            catervas_core::team::validate_team(&catervas_core::team::fixtures::a_team_wire())
+                .expect("a team");
+        let people = (["mira".to_string()], ["mira".to_string()]);
+        let mut docs = contract();
+        docs.assignee_role = Role::ProductManager;
+        docs.reviewer_role = Role::ProductManager;
+        let message = plan_message(&docs, &team, &people.0, &people.1, None);
+        assert!(
+            message.ends_with(
+                "The reviewer is never the assignee, but a Product Manager may review its own docs task, in a fresh session, when the team has no other Product Manager."
+            ),
+            "{message}"
+        );
+        let other = plan_message(&contract(), &team, &people.0, &people.1, None);
+        assert!(
+            other.ends_with("The reviewer is never the assignee."),
+            "{other}"
+        );
     }
 
     #[test]

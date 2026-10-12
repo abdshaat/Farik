@@ -3042,6 +3042,32 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_lone_product_manager_reviews_its_own_product_plan() {
+        // No active Architect or Scrum Master: the Product Manager reviews its own plan.
+        let unreviewed = Harness::new("human-plan-no-reviewer", |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+        });
+        unreviewed.started();
+        let report = handled(&an_orchestrator(&unreviewed), Command::ProductPlanDraft).await;
+        assert_eq!(
+            report.said,
+            "Mira drafts the product plan as CTV-1. It comes to you on Today to approve."
+        );
+        assert_eq!(product_plan_tasks(&unreviewed), ["CTV-1"]);
+        let contract = unreviewed
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-1"))
+            .expect("the contract");
+        assert_eq!(
+            contract.reviewer_role,
+            catervas_core::contract::Role::ProductManager
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn refuses_a_draft_out_of_place() {
         // No project.started: not a new project.
         let old = Harness::new("human-plan-old", |_| {});
@@ -3082,18 +3108,6 @@ mod tests {
                 if reason == "product_plan_no_writer: the team has no active Product Manager to write it"
         ));
         assert!(product_plan_tasks(&unwritten).is_empty());
-
-        // No active Architect or Scrum Master.
-        let unreviewed = Harness::new("human-plan-no-reviewer", |wire| {
-            wire["agents"][0]["display_name"] = json!("Mira");
-        });
-        unreviewed.started();
-        let refusal = refused(&an_orchestrator(&unreviewed), Command::ProductPlanDraft).await;
-        assert_eq!(
-            refusal,
-            "product_plan_no_reviewer: an Architect or a Scrum Master checks the product plan before you read it, and the team has no active one; add one on the Team page"
-        );
-        assert!(product_plan_tasks(&unreviewed).is_empty());
 
         // Two drafts at once file one, and a draft is open until it is cancelled.
         let harness = a_new_project("human-plan-open", |_| {});
@@ -3279,14 +3293,48 @@ mod tests {
                 if reason == "catervafication_no_product_manager: the team has no active Product Manager to move the epic into its plan; resume one first"
         ));
         nothing_recorded(&paused);
+    }
 
-        // A Product Manager and two Developers: no one can write and have their notes checked.
-        let writers = Harness::new("human-catervafication-writers", |_| {});
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_lone_product_manager_catervafies() {
+        // A Product Manager and two Developers: no Architect or Scrum Master, so the Product
+        // Manager reviews its own task and the Developers each other's.
+        let harness = Harness::new("human-catervafication-writers", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, Command::CatervaficationStart).await;
+        for _ in 0..5 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        let mut reviewers = Vec::new();
+        for event in harness.events(&[EventKind::TaskCreated]) {
+            let Some(id) = event.envelope.ids.task_id else {
+                continue;
+            };
+            if id == task("CTV-1") {
+                continue;
+            }
+            let contract = harness
+                .project
+                .deps
+                .files
+                .read_contract(&id)
+                .expect("the contract");
+            reviewers.push((contract.assignee_role, contract.reviewer_role));
+        }
         assert_eq!(
-            refused(&an_orchestrator(&writers), Command::CatervaficationStart).await,
-            "catervafication_no_writers: no one on your team can both write and have their notes checked; add an Architect or a Scrum Master"
+            reviewers,
+            [
+                (
+                    catervas_core::contract::Role::ProductManager,
+                    catervas_core::contract::Role::ProductManager
+                ),
+                (
+                    catervas_core::contract::Role::SoftwareDeveloper,
+                    catervas_core::contract::Role::SoftwareDeveloper
+                ),
+            ]
         );
-        nothing_recorded(&writers);
     }
 
     #[test]

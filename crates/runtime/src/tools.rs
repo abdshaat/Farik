@@ -622,6 +622,11 @@ impl Call<'_> {
         Role::from(self.agent.role)
     }
 
+    /// Whether this is a review session, the reviewer's run of the task.
+    fn in_review(&self) -> bool {
+        self.context.purpose == SessionPurpose::Verify
+    }
+
     /// The session's task, or `no_task`.
     fn task(&self) -> Result<&TaskId, ToolError> {
         self.context

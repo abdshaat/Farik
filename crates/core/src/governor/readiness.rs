@@ -39,7 +39,8 @@ pub enum ReadinessRule {
     /// The budget does not exceed the remaining sprint budget.
     BudgetWithinSprint,
     /// Someone other than the assignee can review: the human, for an epic only; otherwise one
-    /// active agent of the reviewer role, or two when it is the assignee's role.
+    /// active agent of the reviewer role, or two when it is the assignee's role (one, for a role
+    /// that reviews its own task in a fresh session: the Product Manager).
     ReviewerAvailable,
     /// At least one active agent holds the assignee's role (a human assignee is exempt: the
     /// reviewer rule refuses one).
@@ -405,7 +406,9 @@ fn reviewer_available(
                 .to_string(),
         ));
     }
-    let needed = if contract.reviewer_role == contract.assignee_role {
+    let needed = if contract.reviewer_role == contract.assignee_role
+        && !contract.reviewer_role.reviews_its_own()
+    {
         2
     } else {
         1
@@ -1379,6 +1382,28 @@ mod tests {
     }
 
     #[test]
+    fn lets_a_lone_product_manager_review_its_own_docs() {
+        let mut contract = a_contract();
+        contract.assignee_role = Role::ProductManager;
+        contract.reviewer_role = Role::ProductManager;
+        contract.allowed_paths = vec!["docs/catervas/product/plan.md".to_string()];
+        let mut context = a_ready_context();
+        context.active_agents_by_role.clear();
+        context
+            .active_agents_by_role
+            .insert(Role::ProductManager, 1);
+        context
+            .active_agents_by_role
+            .insert(Role::SoftwareDeveloper, 1);
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+        context.active_agents_by_role.remove(&Role::ProductManager);
+        assert_eq!(
+            failed_rules(&contract, &context),
+            [R::ReviewerAvailable, R::AssigneeAvailable]
+        );
+    }
+
+    #[test]
     fn refuses_a_scope_whose_out_of_scope_items_are_blank() {
         let mut contract = a_contract();
         contract.scope.out_of_scope = vec![" ".to_string()];
@@ -1608,11 +1633,11 @@ mod tests {
             }
         };
         let others = "docs/catervas/product/ (Product Manager), docs/catervas/engineering/ \
-                      (Software Developer), docs/catervas/delivery/ (Scrum Master), \
-                      docs/catervas/marketing/ (Marketing Specialist); name narrower paths, or \
+                      (Software Developer), docs/catervas/design/ (UI/UX Designer), \
+                      docs/catervas/delivery/ (Scrum Master), docs/catervas/marketing/ (Marketing Specialist); name narrower paths, or \
                       give the task to the folder's owner";
-        // `a_ready_context()` has one active Product Manager, Scrum Master, Architect, Developer
-        // and Marketing Specialist.
+        // `a_ready_context()` has one active agent of every launch role, a UI/UX Designer among
+        // them.
         let architects = a_task_for(Role::Architect, &["docs/adr/**", "docs/**"]);
         assert_eq!(failed(&architects, &a_ready_context()), [R::FolderOwned]);
         assert_eq!(
@@ -2218,7 +2243,8 @@ mod tests {
 
     #[test]
     fn refuses_a_lane_beyond_the_builders() {
-        let (_, context) = a_task_under(an_in_progress_parent());
+        let (_, mut context) = a_task_under(an_in_progress_parent());
+        context.active_agents_by_role.remove(&Role::UiUxDesigner);
         let parent = || Some("CTV-3".parse().expect("a task id"));
         let mut contract = in_lane(2);
         contract.parent = parent();
@@ -2241,7 +2267,7 @@ mod tests {
             .remove(&Role::SoftwareDeveloper);
         assert_eq!(
             failed_rules(&first, &without_a_developer),
-            [R::LaneBeyondBuilders]
+            [R::AssigneeAvailable, R::LaneBeyondBuilders]
         );
         // A lane is read only on a task with a parent.
         assert_eq!(evaluate_readiness(&in_lane(2), &a_ready_context()), Ok(()));

@@ -4604,11 +4604,12 @@ pub(super) mod tests {
         new.started();
         assert_eq!(offer(&new)["offered"], false);
 
-        // A team that cannot both write and have its notes checked is offered nothing.
+        // A Product Manager is enough to be offered: with no Architect or Scrum Master it reviews
+        // its own task, and the two Developers review each other's.
         let no_writers = driven_by(Harness::new("gates-catervafication-none", |_| {}));
         assert_eq!(
             offer(&no_writers),
-            json!({ "offered": false, "roles": ["software_developer"] })
+            json!({ "offered": true, "roles": ["product_manager", "software_developer"] })
         );
     }
 
