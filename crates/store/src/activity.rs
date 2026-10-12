@@ -315,6 +315,8 @@ fn at_work(
 pub struct Moved {
     /// When.
     pub at: DateTime<Utc>,
+    /// Who made the move: `human`, `catervas`, or another actor id as the log holds it.
+    pub by: String,
     /// What, in a sentence.
     pub line: String,
 }
@@ -326,6 +328,10 @@ pub struct Moved {
 /// # Errors
 ///
 /// What the store refused.
+#[allow(
+    clippy::too_many_lines,
+    reason = "each kind of move, with who made it, side by side"
+)]
 pub fn moved_since(
     log: &EventLog,
     projections: &Projections,
@@ -347,6 +353,12 @@ pub fn moved_since(
         "human" => "You".to_string(),
         "governor" | "catervas" => "Catervas".to_string(),
         id => name_of(team, id),
+    };
+    // Who, as the log names them, with Catervas's governor (and an envelope with no agent) as
+    // `catervas`.
+    let by = |id: &str| match id {
+        "governor" | "catervas" | "" => "catervas".to_string(),
+        id => id.to_string(),
     };
     let mut moved: Vec<(u64, Moved)> = events
         .iter()
@@ -370,29 +382,46 @@ pub fn moved_since(
                 };
                 format!("“{title}”")
             };
-            let line = match &event.body {
+            let (made_by, line) = match &event.body {
                 EventBody::TaskTransitioned(body) => {
                     let to = TaskStatus::from_str(&body.to.to_string()).ok()?;
-                    format!(
-                        "{} moved {} to {}",
-                        who(&body.requested_by),
-                        title(),
-                        status_in_words(to)
+                    (
+                        by(&body.requested_by),
+                        format!(
+                            "{} moved {} to {}",
+                            who(&body.requested_by),
+                            title(),
+                            status_in_words(to)
+                        ),
                     )
                 }
-                EventBody::TaskIntegrated(_) => format!("{} was added to the project", title()),
-                EventBody::HumanAccepted(_) => format!("You accepted {}", title()),
-                EventBody::AgentSlept(body) => format!(
-                    "{} reached its usage limit and will pick up again at {}",
-                    who(event.envelope.ids.agent_id.as_deref().unwrap_or_default()),
-                    body.until.format("%H:%M")
+                EventBody::TaskIntegrated(_) => (
+                    "catervas".to_string(),
+                    format!("{} was added to the project", title()),
                 ),
-                EventBody::MessagePosted(body) if body.kind == MessageKind::Ceremony => format!(
-                    "{} posted the {}",
-                    who(&body.author),
-                    body.thread
-                        .map(|thread| thread.to_string())
-                        .unwrap_or_default()
+                EventBody::HumanAccepted(_) => {
+                    ("human".to_string(), format!("You accepted {}", title()))
+                }
+                EventBody::AgentSlept(body) => {
+                    let agent = event.envelope.ids.agent_id.as_deref().unwrap_or_default();
+                    (
+                        by(agent),
+                        format!(
+                            "{} reached its usage limit and will pick up again at {}",
+                            who(agent),
+                            body.until.format("%H:%M")
+                        ),
+                    )
+                }
+                EventBody::MessagePosted(body) if body.kind == MessageKind::Ceremony => (
+                    by(&body.author),
+                    format!(
+                        "{} posted the {}",
+                        who(&body.author),
+                        body.thread
+                            .map(|thread| thread.to_string())
+                            .unwrap_or_default()
+                    ),
                 ),
                 _ => return None,
             };
@@ -400,6 +429,7 @@ pub fn moved_since(
                 event.envelope.seq,
                 Moved {
                     at: event.envelope.recorded_at,
+                    by: made_by,
                     line,
                 },
             ))
@@ -414,6 +444,7 @@ pub fn moved_since(
                     moved.seq,
                     Moved {
                         at: moved.recorded_at,
+                        by: post_by(moved),
                         line: post_line(moved, &who),
                     },
                 )
@@ -422,7 +453,16 @@ pub fn moved_since(
     moved.extend(
         ad_moves(log, &who, since)?
             .into_iter()
-            .map(|(seq, at, line)| (seq, Moved { at, line })),
+            .map(|(seq, at, line)| {
+                (
+                    seq,
+                    Moved {
+                        at,
+                        by: "catervas".to_string(),
+                        line,
+                    },
+                )
+            }),
     );
     moved.extend(proposal_moves(log, &who, since)?);
     moved.extend(architecture_moves(log, team, &who, since)?);
@@ -618,6 +658,21 @@ fn ad_moves(
         ));
     }
     Ok(lines)
+}
+
+/// Who made a post's move: the agent that wrote it, the owner who allowed, stopped or did not
+/// allow it, and Catervas for the rest (it tells of Buffer and of its own hand-over).
+fn post_by(moved: &PostMove) -> String {
+    match moved.kind {
+        PostMoveKind::Wrote => moved.agent_id.clone(),
+        PostMoveKind::Allowed | PostMoveKind::Stopped | PostMoveKind::Declined => {
+            "human".to_string()
+        }
+        PostMoveKind::Sent
+        | PostMoveKind::Failed
+        | PostMoveKind::Missed
+        | PostMoveKind::PlanEnded => "catervas".to_string(),
+    }
 }
 
 /// What happened to a post, in a sentence: "Kai wrote the Instagram post for 13:00." The time is
@@ -1206,6 +1261,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "each kind of move and who made it, side by side"
+    )]
     fn says_what_moved_since() {
         let board = Board::new("moved-since");
         let team = five();
@@ -1287,26 +1346,65 @@ mod tests {
             json!({ "author": "linus", "kind": "ambient", "text": "Hello.", "mentions": [] }),
         );
 
+        // A move Catervas's governor made, and a nap whose envelope names no agent.
+        board.moved(
+            at(10, 8),
+            "CTV-1",
+            ("rejected", "in_progress"),
+            "governor",
+            (Some("linus"), Some("grace")),
+        );
+        board.put(
+            at(10, 8),
+            None,
+            None,
+            "agent.slept",
+            json!({ "until": at(15, 0).to_rfc3339(), "detail": "usage limit" }),
+        );
+
         let moved =
             moved_since(&board.log, &board.projections, &team, at(10, 0)).expect("the store reads");
-        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str)> = moved
+        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str, &str)> = moved
             .iter()
-            .map(|one| (one.at, one.line.as_str()))
+            .map(|one| (one.at, one.by.as_str(), one.line.as_str()))
             .collect();
         assert_eq!(
             lines,
             vec![
-                (at(10, 1), "Linus moved “Add a login form” to In progress"),
-                (at(10, 2), "You moved “Add a login form” to Being reworked"),
-                (at(10, 3), "You accepted “Add a login form”"),
-                (at(10, 4), "“Add a login form” was added to the project"),
+                (
+                    at(10, 1),
+                    "linus",
+                    "Linus moved “Add a login form” to In progress"
+                ),
+                (
+                    at(10, 2),
+                    "human",
+                    "You moved “Add a login form” to Being reworked"
+                ),
+                (at(10, 3), "human", "You accepted “Add a login form”"),
+                (
+                    at(10, 4),
+                    "catervas",
+                    "“Add a login form” was added to the project"
+                ),
                 (
                     at(10, 5),
+                    "grace",
                     "Grace reached its usage limit and will pick up again at 14:30"
                 ),
-                (at(10, 6), "Mira posted the standup"),
-                (at(10, 6), "You accepted “More photos...”"),
-                (at(10, 6), "CTV-9 was added to the project"),
+                (at(10, 6), "mira", "Mira posted the standup"),
+                (at(10, 6), "human", "You accepted “More photos...”"),
+                (at(10, 6), "catervas", "CTV-9 was added to the project"),
+                (
+                    at(10, 8),
+                    "catervas",
+                    "Catervas moved “Add a login form” to In progress"
+                ),
+                (
+                    at(10, 8),
+                    "catervas",
+                    " reached its usage limit and will pick up again at 15:00"
+                ),
             ]
         );
     }
@@ -1463,45 +1561,63 @@ mod tests {
         let moved =
             moved_since(&board.log, &board.projections, &team, at(10, 0)).expect("the store reads");
 
-        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str)> = moved
+        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str, &str)> = moved
             .iter()
-            .map(|one| (one.at, one.line.as_str()))
+            .map(|one| (one.at, one.by.as_str(), one.line.as_str()))
             .collect();
         assert_eq!(
             lines,
             vec![
-                (at(10, 1), "Kai wrote the Instagram post for 13:00."),
+                (at(10, 1), "kai", "Kai wrote the Instagram post for 13:00."),
                 (
                     at(10, 2),
+                    "catervas",
                     "Catervas handed the Instagram post for 13:00 to Buffer."
                 ),
-                (at(10, 3), "Kai wrote the X post for Sat 31 Oct at 09:00."),
+                (
+                    at(10, 3),
+                    "kai",
+                    "Kai wrote the X post for Sat 31 Oct at 09:00."
+                ),
                 (
                     at(10, 4),
+                    "catervas",
                     "Buffer did not take the X post for Sat 31 Oct at 09:00."
                 ),
-                (at(10, 5), "Kai wrote the TikTok post for 15:00."),
-                (at(10, 6), "The TikTok post for 15:00 did not go out."),
+                (at(10, 5), "kai", "Kai wrote the TikTok post for 15:00."),
+                (
+                    at(10, 6),
+                    "catervas",
+                    "The TikTok post for 15:00 did not go out."
+                ),
                 (
                     at(10, 7),
+                    "kai",
                     "Kai wrote the LinkedIn post for Tue 29 Sep at 10:30."
                 ),
                 (
                     at(10, 8),
+                    "human",
                     "You stopped the LinkedIn post for Tue 29 Sep at 10:30."
                 ),
-                (at(10, 10), "You allowed Kai's Threads post for 17:00."),
+                (
+                    at(10, 10),
+                    "human",
+                    "You allowed Kai's Threads post for 17:00."
+                ),
                 (
                     at(10, 11),
+                    "catervas",
                     "Catervas stopped the Threads post for 17:00: its plan ended."
                 ),
-                (at(10, 12), "Ada moved “Spring posts” to Planning"),
+                (at(10, 12), "ada", "Ada moved “Spring posts” to Planning"),
                 (
                     at(10, 13),
+                    "human",
                     "You did not allow Kai's Bluesky post for 18:00."
                 ),
-                (at(10, 14), "Kai wrote the Facebook post for 19:00."),
-                (at(23, 30), "Kai wrote the Mastodon post for 01:00."),
+                (at(10, 14), "kai", "Kai wrote the Facebook post for 19:00."),
+                (at(23, 30), "kai", "Kai wrote the Mastodon post for 01:00."),
             ]
         );
     }
@@ -1614,46 +1730,54 @@ mod tests {
         let moved =
             moved_since(&board.log, &board.projections, &team, at(10, 0)).expect("the store reads");
 
-        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str)> = moved
+        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str, &str)> = moved
             .iter()
-            .map(|one| (one.at, one.line.as_str()))
+            .map(|one| (one.at, one.by.as_str(), one.line.as_str()))
             .collect();
         assert_eq!(
             lines,
             vec![
                 (
                     at(10, 1),
+                    "catervas",
                     "Catervas paused Autumn at Corner Bakery's ads at their budget."
                 ),
                 (
                     at(10, 2),
+                    "catervas",
                     "Catervas paused Autumn at Corner Bakery's campaign Bakery near me at its budget."
                 ),
                 (
                     at(10, 3),
+                    "catervas",
                     "Catervas could not pause Autumn at Corner Bakery's campaign Bakery near me at its \
                      budget."
                 ),
                 (
                     at(10, 4),
+                    "catervas",
                     "Catervas could not pause Autumn at Corner Bakery's ads at their budget."
                 ),
                 (
                     at(10, 5),
+                    "catervas",
                     "Catervas paused Autumn at Corner Bakery's campaign Bakery near me: the plan ended."
                 ),
                 (
                     at(10, 6),
+                    "catervas",
                     "Catervas paused Autumn at Corner Bakery's campaign Bakery near me: Google Ads was \
                      removed."
                 ),
                 (
                     at(10, 7),
+                    "catervas",
                     "Catervas paused Autumn at Corner Bakery's campaign Bakery near me: it reached its \
                      budget."
                 ),
                 (
                     at(10, 8),
+                    "catervas",
                     "Catervas paused Autumn at Corner Bakery's campaign gone: the plan ended."
                 ),
             ]

@@ -118,7 +118,7 @@ The screens map to phase 6's steps as follows:
 | Screen | Step | What it shows |
 |---|---|---|
 | Welcome and first-run wizard | 05, 06 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Catervas asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the six characters with their suggested names, the UI/UX Designer among them (`designer-chats-templates.md`). Phase 8 step 02 (now phase 7 step 09) adds the Finance Specialist to it as an optional sixth (ADR 0019). |
-| Today | 08 | The team band, the request box, "Waiting on you", and "What moved". |
+| Today | 08 | The team band, the request box, "Waiting on you", and "What moved" (cards, newest first, with Show more). |
 | A human gate: approve a plan, or accept work | 08 | The agent's summary as a short letter signed by the agent's avatar. Then "What Catervas checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
 | A question from an agent | 08 | The question with its avatar, the choices the agent offered, and a free-text answer. |
 | Help needed (an escalation) | 08 | What happened in plain words, what the agent tried, and the user's options. |
