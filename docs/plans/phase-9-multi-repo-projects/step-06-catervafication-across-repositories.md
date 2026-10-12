@@ -13,7 +13,7 @@ Depends on these steps of this phase, planned, not yet executed:
 
 Nothing of steps 02b, 02c, 07 or 08.
 Mockups: none; the offer's screens are step 07's.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (the epic's budget), B2 (a project-wide start against a member's own, and a member missing at Start) and B3 (the system row's dependencies), all decided below; S1–S8 and N1–N7 folded, the plan rewritten. Round 2 (the same reviewer, confirming): ready; its nits N1–N7 folded.
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (the epic's budget), B2 (a project-wide start against a member's own, and a member missing at Start) and B3 (the system row's dependencies), all decided below; S1–S8 and N1–N7 folded, the plan rewritten. Round 2 (the same reviewer, confirming): ready; its nits N1–N7 folded. Step 07b changes two of its decisions after a move, in 07b's Task 4: `covered_repos` counts a `Repository`-scope start as covering `project.converted`'s `first_repo`, and a member's own Catervafication files the project-wide system row when no `system.md` is on the integration branch.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at a66f5d3.
 
