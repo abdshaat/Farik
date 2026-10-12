@@ -1,6 +1,6 @@
 # Phase 9, step 05: The Architect's system documents and cross-repository plans
 
-Status: draft
+Status: ready (readiness review 2026-10-12, two rounds, findings folded)
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.3, 5.16, 5.17, 6.1, 6.3, 8.2; F5
 Depends on these steps of this phase, planned and ready or in review, not yet executed:
@@ -11,7 +11,7 @@ Depends on these steps of this phase, planned and ready or in review, not yet ex
 
 Nothing of steps 02b, 02c, 06 to 08.
 Mockups: none.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (agent-written purposes in the Team rules, against ADR 0011), decided below by route (a), and B2 (the refresh test's team); S1–S6 and N1–N8 folded. Round 2: (pending).
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (agent-written purposes in the Team rules, against ADR 0011), decided below by route (a), and B2 (the refresh test's team); S1–S6 and N1–N8 folded. Round 2 (the same reviewer, confirming): ready; its S1 and N1 folded.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 6e5b303.
 
@@ -45,7 +45,7 @@ Out of scope: the Catervafication's first writing of the three documents (06).
   - All three are agent-only documents, not human documents: the owner reads them on the Files page and may edit them, and their writer is the Architect, through docs tasks and `catervas_write_folder_doc` (phase 8).
 - **Names on the Files page.** `DOCUMENT_NAMES` (`crates/core/src/folders.rs:225`) gains `docs/catervas/architecture/system.md` "System map", `…/interfaces.md` "Interfaces" and `…/deployment.md` "Deployment", in that order, after "Overview". It goes to 15.
 - **The purposes are untrusted.** `system.md` is written by the Architect from what it read in the repositories, so its text is untrusted under ADR 0011, which wraps what an agent or a repository file wrote and leaves only the user's own words, the Team rules among them, unwrapped (`prompt.rs:222-239`). So the purposes are not put into step 03's repositories line, which stays as step 03 has it.
-  - They are a block `untrusted("system_map", <lines>, 4 * KIB)` in `The project`, after `project_scan` (`prompt.rs:226`), one line per member: `<name>: <purpose>`. `assemble_system_prompt`'s `bodies` goes from 11 to 12.
+  - They are a block `untrusted("system_map", <lines>, 4 * KIB)` in `The project`, after `project_scan` (`prompt.rs:226`), one line per member: `<name>: <purpose>`. `The project`'s body (`prompt.rs:224-226`) is the `project_scan` block, then the `system_map` block, each optional, joined by a blank line; the section appears when either is there. The sections stay eleven (`bodies`, `prompt.rs:220`, zipped with `PROMPT_SECTIONS`, `:63`), as ADR 0011 has them.
   - `PromptInput` gains `system_map: Option<&'a str>`, the block's text, `None` when there are no purposes.
   - Rejected: the purposes in the Team rules with ADR 0011 amended. The line's sanitising keeps it from breaking, but it does not make agent text the user's.
 - **Reading the purposes.** Core's `member_purposes(system_md: &str) -> Vec<(String, String)>` reads `## Repositories`' lines of the form above, in their order.
@@ -126,7 +126,7 @@ pub(super) fn architecture_refresh_message(sprint_id: &str, integrated: &[Sprint
 
 ### Task 1: The system map's purposes reach every session
 
-Files: `folders.rs`; `prompt.rs`; `orchestrator/session.rs`.
+Files: `folders.rs`; `prompt.rs` (the block; `Inputs::full`, `:663`, sets `system_map: None`); `orchestrator/session.rs` (`:1138`).
 
 - `reads_each_members_purpose`: a `system.md` whose `## Repositories` holds `` - `app`: The web shop (React). ``, `` - `infra`: AWS; Terraform. ``, `` - `app`: again ``, `` - `empty`:   ``, a line `- web is new`, and a `## Map` after, gives `[(app, "The web shop (React)."), (infra, "AWS; Terraform.")]`. A 200-character purpose is cut to 120 characters with no trailing space. Text with no `## Repositories` gives `[]`. RED.
 - `names_the_system_documents`: `document_name` of `docs/catervas/architecture/system.md` is "System map", of `interfaces.md` "Interfaces", of `deployment.md` "Deployment", ordered after "Overview". RED.
