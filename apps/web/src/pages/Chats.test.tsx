@@ -778,7 +778,12 @@ describe("chats", () => {
 		});
 		const link = await screen.findByRole("link", { name: "CTV-7" });
 		expect(link.getAttribute("href")).toBe("/tasks/CTV-7");
-		fireEvent.click(link);
+		expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+		expect(fireEvent.click(link, { button: 1 })).toBe(true);
+		expect(
+			screen.getByRole("heading", { name: "Talking with Mira" }),
+		).toBeTruthy();
+		expect(fireEvent.click(link)).toBe(false);
 		await waitFor(() =>
 			expect(
 				s
@@ -796,10 +801,24 @@ describe("chats", () => {
 		).toBeNull();
 	});
 
+	it("leaves other links to the browser", async () => {
+		media.set(WIDE, true);
+		await chats("/channel/mira", {
+			messages: [chat("mira", "[site](https://example.com/a)")],
+		});
+		const link = await screen.findByRole("link", { name: "site" });
+		expect(fireEvent.click(link)).toBe(true);
+		expect(
+			screen.getByRole("heading", { name: "Talking with Mira" }),
+		).toBeTruthy();
+	});
+
 	it("leaves task ids in code and links alone", async () => {
 		media.set(WIDE, true);
 		await chats("/channel/mira", {
-			messages: [chat("mira", "`CTV-7` and [CTV-8](/tasks/CTV-8)")],
+			messages: [
+				chat("mira", "`CTV-7` and [CTV-8](/tasks/CTV-8)\n\n```\nCTV-9\n```"),
+			],
 		});
 		const code = await screen.findByText("CTV-7");
 		expect(code.tagName).toBe("CODE");
@@ -807,6 +826,8 @@ describe("chats", () => {
 		const links = screen.getAllByRole("link", { name: "CTV-8" });
 		expect(links).toHaveLength(1);
 		expect(links[0]?.getAttribute("href")).toBe("/tasks/CTV-8");
+		expect(document.querySelector("pre code")?.textContent).toBe("CTV-9\n");
+		expect(screen.queryByRole("link", { name: "CTV-9" })).toBeNull();
 	});
 
 	it("renders_agent_text_as_text", async () => {
