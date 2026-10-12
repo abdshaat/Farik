@@ -9,7 +9,7 @@ use std::sync::{Mutex, PoisonError};
 
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use catervas_core::criteria::{CriteriaLibrary, TemplateVerification};
-use catervas_core::folders::DocumentFormat;
+use catervas_core::folders::{DocumentFormat, artifact_marks};
 use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteRefusal, FIELDS_FIXED_AT_CREATION,
     FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES, FIELDS_THE_STORE_OWNS,
@@ -566,10 +566,7 @@ pub fn rewrite_request(
         .enumerate()
         .map(|(index, path)| {
             let page = html(path);
-            let mut must = vec!["<h1"];
-            if page.ends_with("architecture/overview.html") {
-                must.push("<svg");
-            }
+            let must = artifact_marks(&page, DocumentFormat::Html);
             json!({
                 "id": format!("C{}", index + 1),
                 "text": format!("{page} exists and holds {}.", must.join(" and ")),

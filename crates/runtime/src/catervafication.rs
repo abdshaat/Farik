@@ -4,7 +4,7 @@
 use std::fmt;
 
 use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
-use catervas_core::folders::{DocumentFormat, role_folder, with_format};
+use catervas_core::folders::{DocumentFormat, artifact_marks, role_folder, with_format};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
@@ -257,14 +257,11 @@ pub(crate) fn task_contract(
         .enumerate()
         .map(|(index, path)| {
             // A heading, and for the architecture's overview a diagram.
-            let (heading, diagram, kind) = match format {
-                DocumentFormat::Markdown => ("# ", "```mermaid", "a Markdown heading"),
-                DocumentFormat::Html => ("<h1", "<svg", "an HTML heading"),
+            let kind = match format {
+                DocumentFormat::Markdown => "a Markdown heading",
+                DocumentFormat::Html => "an HTML heading",
             };
-            let mut must = vec![heading];
-            if path.ends_with(&with_format("architecture/overview", format)) {
-                must.push(diagram);
-            }
+            let must = artifact_marks(path, format);
             json!({
                 "id": format!("C{}", index + 1),
                 "text": format!("{path} exists and holds {kind}."),

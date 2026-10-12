@@ -64,9 +64,17 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
     let removed = removals(&worktree, &input.removed)?;
     // A deletion is not undone by a refused verification, so the contract's paths are checked now.
     let (contract, _) = call.contract(task)?;
-    let allowed: Vec<String> = contract.allowed_paths.iter().map(ToString::to_string).collect();
+    let allowed: Vec<String> = contract
+        .allowed_paths
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     if let Err(PathRefusal::Violations(violations)) = check_allowed_paths(&removed, &allowed) {
-        let path = violations.into_iter().next().map(|v| v.path).unwrap_or_default();
+        let path = violations
+            .into_iter()
+            .next()
+            .map(|v| v.path)
+            .unwrap_or_default();
         return Err(Refusal::Tool(ToolRefusal::PathOutsideAllowed { path }).into());
     }
     for path in &removed {
@@ -638,8 +646,11 @@ mod tests {
     fn commits_a_removed_path() {
         let (project, worktree) =
             a_docs_task_holding_a_spec("tools-git-removed", &["docs/catervas/product/**"]);
-        std::fs::write(worktree.join("docs/catervas/product/spec.html"), "<h1>Spec</h1>\n")
-            .expect("a file");
+        std::fs::write(
+            worktree.join("docs/catervas/product/spec.html"),
+            "<h1>Spec</h1>\n",
+        )
+        .expect("a file");
         project
             .call(
                 "pm",
@@ -655,7 +666,13 @@ mod tests {
         assert!(!worktree.join("docs/catervas/product/spec.md").exists());
         let tree = catervas_store::git::fixtures::git_output_in(
             &worktree,
-            &["ls-tree", "-r", "--name-only", "HEAD", "docs/catervas/product"],
+            &[
+                "ls-tree",
+                "-r",
+                "--name-only",
+                "HEAD",
+                "docs/catervas/product",
+            ],
         );
         assert_eq!(tree.trim(), "docs/catervas/product/spec.html");
 
@@ -678,7 +695,10 @@ mod tests {
                 json!({ "message": "m", "paths": [], "removed": ["docs/catervas/product"] }),
             )
             .expect_err("a directory");
-        assert!(format!("{directory:?}").contains("path_is_a_directory"), "{directory:?}");
+        assert!(
+            format!("{directory:?}").contains("path_is_a_directory"),
+            "{directory:?}"
+        );
     }
 
     #[test]
@@ -700,7 +720,10 @@ mod tests {
             )
             .expect_err("a removal through a link");
         assert!(format!("{refused:?}").contains("linked"), "{refused:?}");
-        assert!(outside.join("keep.md").exists(), "nothing outside is deleted");
+        assert!(
+            outside.join("keep.md").exists(),
+            "nothing outside is deleted"
+        );
     }
 
     #[test]

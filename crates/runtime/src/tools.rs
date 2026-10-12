@@ -799,7 +799,10 @@ mod tests {
             &json!({ "message": "m", "paths": ["a"], "removed": ["x"] }),
         );
         assert_eq!(touched, ["a", "x"]);
-        let only = super::paths_of("catervas_git_commit", &json!({ "paths": [], "removed": ["x"] }));
+        let only = super::paths_of(
+            "catervas_git_commit",
+            &json!({ "paths": [], "removed": ["x"] }),
+        );
         assert_eq!(only, ["x"]);
     }
 

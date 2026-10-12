@@ -307,6 +307,21 @@ pub fn check_document_format(
     })
 }
 
+/// What an artifact check requires of a document: a heading, and for the architecture's overview a
+/// diagram (an inline SVG, or a Mermaid block).
+#[must_use]
+pub fn artifact_marks(path: &str, format: DocumentFormat) -> Vec<&'static str> {
+    let (heading, diagram) = match format {
+        DocumentFormat::Markdown => ("# ", "```mermaid"),
+        DocumentFormat::Html => ("<h1", "<svg"),
+    };
+    let mut marks = vec![heading];
+    if path.ends_with(&with_format("architecture/overview", format)) {
+        marks.push(diagram);
+    }
+    marks
+}
+
 /// The Team rules' line about the format of documents (`docs/design/html-documents.md`).
 #[must_use]
 pub fn format_line(format: DocumentFormat) -> String {
@@ -627,14 +642,14 @@ fn document_lines(text: &str) -> Vec<&str> {
 }
 
 /// Whether a line is a heading: it starts with `#`, or, trimmed, with `<h1` to `<h6` and then `>`
-/// or a space.
+/// or a space or tab.
 fn is_heading(line: &str) -> bool {
     let bytes = line.trim_start().as_bytes();
     line.starts_with('#')
         || (bytes.len() > 3
             && bytes.starts_with(b"<h")
             && (b'1'..=b'6').contains(&bytes[2])
-            && (bytes[3] == b'>' || bytes[3] == b' '))
+            && matches!(bytes[3], b'>' | b' ' | b'\t'))
 }
 
 /// The lines of two versions of a document that are worth showing: every changed line, the
@@ -765,7 +780,10 @@ mod tests {
         is_plan_of, pair_changed_alone, plan_stem, product_plan_approved, read_access, role_folder,
         stem_of, with_format,
     };
-    use super::{LineChange, ShownLine, changed_lines, may_change_an_owner_document};
+    use super::{
+        LineChange, ShownLine, artifact_marks, changed_lines, is_heading,
+        may_change_an_owner_document,
+    };
     use super::{
         Named, OwnerEditRefusal, check_owner_edit, document_name, document_order, named_in_subject,
         plain_name, stale_line, twin_is_stale,
@@ -1641,6 +1659,33 @@ mod tests {
         assert!(is_plan_of(&plans("CTV-3.html"), "CTV-3"));
         assert!(is_plan_of(&plans("CTV-3.md"), "CTV-3"));
         assert!(!is_plan_of(&plans("CTV-30.md"), "CTV-3"));
+    }
+
+    #[test]
+    fn artifact_marks_ask_for_a_heading_and_the_overviews_diagram() {
+        use DocumentFormat::{Html, Markdown};
+        assert_eq!(
+            artifact_marks("docs/catervas/product/spec.html", Html),
+            ["<h1"]
+        );
+        assert_eq!(
+            artifact_marks("docs/catervas/product/spec.md", Markdown),
+            ["# "]
+        );
+        assert_eq!(
+            artifact_marks("docs/catervas/architecture/overview.html", Html),
+            ["<h1", "<svg"]
+        );
+        assert_eq!(
+            artifact_marks("docs/catervas/architecture/overview.md", Markdown),
+            ["# ", "```mermaid"]
+        );
+    }
+
+    #[test]
+    fn a_heading_may_be_followed_by_a_tab() {
+        assert!(is_heading("<h2\tclass=x>"));
+        assert!(!is_heading("<h2x>"));
     }
 
     #[test]
