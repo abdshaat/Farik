@@ -39,6 +39,8 @@ A one-repo project becomes a multi-repo one when the owner adds a second reposit
 
 ## Tasks across repositories
 
+Checks, branches and epics per repository are ADR 0057's amendment of 2026-10-12.
+
 - A task contract gains `repo`, the member's name.
   - In a multi-repo project every task whose work is code names a `repo`: the Developer's and the UI/UX Designer's tasks.
   - A docs task names none and works in the project folder.
@@ -135,7 +137,9 @@ Tasks that are not done keep their ids and gain the first member's `repo`. Serve
 | Step | Name | Delivers |
 |---|---|---|
 | 01 | The project folder and its members | `RepoName` and the members' rules in `catervas-core`; `repos.yaml` and its schema; creating a project folder (`git init`, no remote); serve and `catervas init` opening a project folder; `repo.added`, `repo.removed`, `repo.moved`, `repo_missing`; ADR 0053's switch accepting a project folder |
-| 02 | Tasks in a member repository | the contract's `repo`; `repo_unknown`, `repo_required` and `repo_not_allowed`; worktrees and branches from the task's repository; ids across every repository; the Definition of Done's diff from the member; integration per member under one lock; dependencies across repositories |
+| 02 | Tasks in a member repository | the contract's `repo`, fixed once set (`repo_fixed`); `repo_unknown`, `repo_required` and `repo_not_allowed`; worktrees and branches from the task's repository; one id counter past every repository's task branches; the Definition of Done's diff, the git tools, `diff_of` and `task.diff` from the member |
+| 02b | Checks and scans per member | the library's entries with `repo`; each member's scan, its read-back and its entries; `criterion_of_another_repo`; `epic_command_in_project_folder`; verification and `check_new_tests` in the member; the preview |
+| 02c | Integration per member | merge, push, fetch and pull requests in the member, under one lock; the member's integration branch; its rescan; its worktrees removed; dependencies across repositories; `repo_in_use` |
 | 03 | Reading across repositories | read paths for every member; the sandbox's read-only mounts at `/repos/<name>`; the members in the session prompt; the Marketing Specialist's limit in the project folder |
 | 04 | Documents in the project folder | the role folders and `repos/<name>/` in the project folder; folder changes merged locally there; `folder_owned` under `repos/`; the Files page's server grouping by project and member |
 | 05 | The Architect's system documents and cross-repository plans | `system.md`, `interfaces.md` and `deployment.md` in the Architect's kit skills; plans whose tasks name repositories, ordered provider before consumer; `lanes_overlap` per repository; the refresh at the sprint review |

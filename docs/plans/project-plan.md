@@ -590,6 +590,7 @@ Decisions for this phase (the founder, 2026-10-12; ADR 0057):
   - the Architect's system map, interfaces, deployment view and cross-repository plans
 - Made (the founder, 2026-10-12): "New phase after folders". This phase follows Catervas folders, which it builds on, and comes before Catervas Cloud. The phases from 9 on move down by one (revision 44).
 - Made (ADR 0057): a one-repo project is unchanged, its documents committed in its repository (ADR 0051).
+- Made (ADR 0057's amendment, 2026-10-12, while planning step 01; open to the founder's change): one criteria library whose entries may name a member, each member scanned; a contract's criteria from its own repository and its `repo` fixed once set; no command criterion on an epic in a project folder; each member's own integration branch. Step 02 is split into 02, 02b and 02c.
 - Made (ADR 0032): the steps with screens (07, 07b) are mocked up, and the mockups approved by the founder, before they are built.
 - Open: each step's plan, written and reviewed for readiness when this phase is next to be planned.
 
@@ -598,7 +599,9 @@ Steps:
 | Step | Name | Spec | Delivers |
 |---|---|---|---|
 | 01 | The project folder and its members | 3, 4.1, 8.4, 8.5 | `RepoName` and the members' rules in `catervas-core`; `.catervas/repos.yaml` and `docs/schemas/repos.schema.json`; creating a project folder (`git init`, no remote); serve and `catervas init` opening a project folder; `repo.added`, `repo.removed`, `repo.moved` and `repo_missing`; ADR 0053's switch accepting a project folder |
-| 02 | Tasks in a member repository | 5.2, 5.3, 5.4, 5.14, 8.4 | the contract's `repo`; readiness `repo_unknown`, `repo_required` and `repo_not_allowed`; worktrees and branches from the task's repository; one id counter past every repository's task branches; the Definition of Done's diff from the member; integration per member under one lock; dependencies across repositories |
+| 02 | Tasks in a member repository | 5.2, 5.3, 5.4, 5.11, 8.4 | the contract's `repo`, fixed once set (`repo_fixed`); readiness `repo_unknown`, `repo_required` and `repo_not_allowed`; worktrees and branches from the task's repository; one id counter past every repository's task branches; the Definition of Done's diff, the git tools, `diff_of` and `task.diff` from the member |
+| 02b | Checks and scans per member | 5.4, 5.13, 8.3 | ADR 0057's amendment: library entries naming a member; each member's scan, read-back and entries; `criterion_of_another_repo`; `epic_command_in_project_folder`; verification, `check_new_tests` and the preview in the member |
+| 02c | Integration per member | 5.2, 5.14 | merge, push, fetch and pull requests in the member under one lock; the member's integration branch; its rescan; its worktrees removed; dependencies across repositories; `repo_in_use` |
 | 03 | Reading across repositories | 5.6, 6.5, 8.2, 8.3 | every member a read path of every session; the sandbox's read-only mounts at `/repos/<name>`; the members in the session prompt; the Marketing Specialist's read limit in the project folder |
 | 04 | Documents in the project folder | 5.17, 8.5 | the role folders and `repos/<name>/` in the project folder; its folder changes merged locally at once; `folder_owned` under `repos/`; the Files page's server grouping by project and member |
 | 05 | The Architect's system documents and cross-repository plans | 5.16, 6.1, 6.3 | `architecture/system.md`, `interfaces.md` and `deployment.md` in the Architect's kit skills; plans whose tasks name their repositories, ordered provider before consumer; `lanes_overlap` within one repository; the refresh at the sprint review |

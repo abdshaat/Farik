@@ -47,3 +47,19 @@ This is phase 9, Multi-repo projects, right after Catervas folders. Catervas Clo
 - Every rule that reads "the repository" (worktrees, branches, the task id counter, the Definition of Done's diff, integration, read paths, the sandbox's mounts) must name which repository. That is phase 9's work.
 - Turning a one-repo project into a multi-repo one removes `.catervas/` and `docs/catervas/` from that repository in a commit. The dialog says so in words before the owner confirms.
 - `docs/SPEC.md` (3, 4.1, 4.4, 4.5, 5.3, 5.4, 5.6, 5.14, 5.16, 5.17, 6.3, 8.3, 8.4, 8.5) changes with the steps that build each part.
+
+## Amendment, 2026-10-12: checks, branches and epics per repository
+
+Decided while planning phase 9 (step 01's review, the same day), after the design left them open. They are open to the founder's change in review.
+
+Context: a task's checks come from the team's criteria library, `.catervas/team/criteria.yaml`, seeded by the scan of the project's one repository and expanded into a contract on each write that names a criterion. A project folder's own scan finds only a README, so its library would hold no command, and the scan's refresh after each integration would keep it that way.
+
+Decision:
+- **One criteria library per project, with entries that may name a member.** A library entry gains an optional `repo`, a member's name. Each member is scanned, and its found criteria join the project folder's library named `<repo>-<name>` (`app-test`), with `repo` set. An entry with no `repo` (the human's, unless they give one) suits a task in any repository. The library's cap of 100 entries holds across all members. Rejected: a library file per member, which every reader of `criteria.yaml` would have to learn.
+- **A project folder's scan is its members'.** `project.scanned`'s read-back joins each member's own, in `repos.yaml` order (`app: TypeScript, pnpm, tests in vitest; infra: Terraform, 2 modules`), and its detected criteria are the members' entries. The scan runs when the project folder is made, when a member is added or located, and after a task integrates into a member, when it replaces that member's scanned entries alone. A docs integration in the project folder rescans nothing.
+- **A contract's criteria come from its own repository.** A library entry with a `repo` is expanded only into a contract whose `repo` names that member (`criterion_of_another_repo`). Once set, a contract's `repo` never changes (`repo_fixed`), so its expanded criteria stay that member's.
+- **An epic runs no command in a project folder.** An epic's mechanical criteria run at the integration branch's head (ADR 0013). An epic in a project folder spans repositories and has no one head, so an epic there takes no command criterion (`epic_command_in_project_folder`); its review and artifact criteria are unchanged, and its tasks carry the commands.
+- **Integration branches.** The team's `policy.integration_branch` names the project folder's own. Each member's is its `repos.yaml` entry, else that member's default branch.
+- **Merging into a member** moves that member's own checkout, as merging moves a one-repo project's checkout today (5.14). The step 07 screens say so.
+
+Consequences: the rules page lists each entry with its member; a member's scan is one more cost of adding it; a human's criterion with no `repo` may name a command that only some members have, which the task's own run then shows. Phase 9's step 02 is split in three: 02 the contract's `repo` and the task's own repository, 02b checks and scans per member, 02c integration per member.
