@@ -1135,6 +1135,30 @@ describe("team page", () => {
 		});
 	});
 
+	it("puts_back_the_default_document_format", async () => {
+		const markdown = {
+			...TEAM,
+			policy: { ...TEAM.policy, document_format: "markdown" },
+		};
+		const { s, part } = await settings(markdown, "/settings/work");
+		const documents = part(en.rulesDocuments);
+		const toggle = within(documents).getByRole("switch", {
+			name: en.documentsHtml,
+		});
+		expect(toggle.getAttribute("aria-checked")).toBe("false");
+		fireEvent.click(
+			within(documents).getByRole("button", { name: en.putBack }),
+		);
+		expect(toggle.getAttribute("aria-checked")).toBe("true");
+		await validated(s, []);
+		const save = within(documents).getByRole("button", {
+			name: en.agentSave,
+		}) as HTMLButtonElement;
+		await waitFor(() => expect(save.disabled).toBe(false));
+		fireEvent.click(save);
+		expect((await saved(s)).policy).toMatchObject({ document_format: "html" });
+	});
+
 	describe("the rewrite", () => {
 		const doc = (path: string) => ({ path, name: path, twin: null });
 		const treeOf = (...paths: string[]) => ({
@@ -1214,6 +1238,58 @@ describe("team page", () => {
 			expect(rewrite(en.documentsRewrite)).toBeNull();
 		});
 
+		it("offers_the_rewrite_for_a_twin_or_a_note_beside_the_plans", async () => {
+			for (const tree of [
+				{
+					...treeOf(),
+					folders: [
+						{
+							...treeOf().folders[0],
+							documents: [
+								{
+									path: "docs/catervas/architecture/spec.html",
+									name: "spec",
+									twin: "docs/catervas/architecture/spec.agent.md",
+								},
+							],
+						},
+					],
+				},
+				treeOf("docs/catervas/marketing/plans/MP-1-notes.md"),
+			]) {
+				const { s, part } = await settings(HTML, "/settings/work");
+				await answerQuery(s, "files.tree", tree);
+				expect(
+					await within(part(en.rulesDocuments)).findByRole("button", {
+						name: en.documentsRewrite,
+					}),
+				).toBeTruthy();
+				cleanup();
+			}
+		});
+
+		it("sends_one_rewrite_while_one_is_pending", async () => {
+			const { s, part } = await settings(HTML, "/settings/work");
+			await answerQuery(
+				s,
+				"files.tree",
+				treeOf("docs/catervas/architecture/overview.md"),
+			);
+			const documents = part(en.rulesDocuments);
+			const button = await within(documents).findByRole("button", {
+				name: en.documentsRewrite,
+			});
+			fireEvent.click(button);
+			const frame = await sent(s, "files.rewrite");
+			fireEvent.click(button);
+			expect(s.calls("files.rewrite")).toHaveLength(1);
+			expect((button as HTMLButtonElement).disabled).toBe(true);
+			await s.reply(frame, { tasks: [] });
+			expect(
+				await within(documents).findByText(en.documentsRewriteStarted),
+			).toBeTruthy();
+		});
+
 		it("says_why_a_rewrite_was_refused", async () => {
 			const { s, part } = await settings(HTML, "/settings/work");
 			await answerQuery(
@@ -1222,22 +1298,32 @@ describe("team page", () => {
 				treeOf("docs/catervas/architecture/overview.md"),
 			);
 			const documents = part(en.rulesDocuments);
-			fireEvent.click(
-				await within(documents).findByRole("button", {
-					name: en.documentsRewrite,
-				}),
-			);
-			await s.fail(await sent(s, "files.rewrite"), -32005, "refused", {
-				errors: [
-					{ path: "", message: "still rewriting", code: "rewrite_open" },
-				],
-			});
-			expect(
-				await within(documents).findByText(en.refuseRewriteOpen),
-			).toBeTruthy();
-			expect(
-				within(documents).queryByText(en.documentsRewriteStarted),
-			).toBeNull();
+			const refusals = [
+				["not_html", en.refuseNotHtml],
+				["rewrite_open", en.refuseRewriteOpen],
+				["nothing_to_rewrite", en.refuseNothingToRewrite],
+			] as const;
+			for (const [index, [code, words]] of refusals.entries()) {
+				fireEvent.click(
+					await within(documents).findByRole("button", {
+						name: en.documentsRewrite,
+					}),
+				);
+				await s.fail(
+					await waitFor(() => {
+						const frame = s.calls("files.rewrite")[index];
+						if (!frame) throw new Error("no files.rewrite was sent");
+						return frame;
+					}),
+					-32005,
+					"refused",
+					{ errors: [{ path: "", message: "no", code }] },
+				);
+				expect(await within(documents).findByText(words)).toBeTruthy();
+				expect(
+					within(documents).queryByText(en.documentsRewriteStarted),
+				).toBeNull();
+			}
 		});
 	});
 

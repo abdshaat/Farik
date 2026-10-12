@@ -267,7 +267,8 @@ export function Planning(part: Part) {
 
 /** A Markdown document the rewrite would take: a marketing plan stays as it was approved. */
 const rewritable = (path: string) =>
-	path.endsWith(".md") && !/\/marketing\/plans\/MP-\d+/.test(path);
+	path.endsWith(".md") &&
+	!/\/marketing\/plans\/MP-[1-9]\d*(\.agent)?\.md$/.test(path);
 
 /** "Documents": the format new ones are written in, and the rewrite of the Markdown that remains. */
 export function Documents(part: Part) {
@@ -289,6 +290,7 @@ export function Documents(part: Part) {
 					},
 				};
 	const { foot } = useChange(part, next);
+	const [pending, setPending] = useState(false);
 	const [state, setState] = useState<
 		{ started: boolean } | { refused: string }
 	>();
@@ -296,12 +298,15 @@ export function Documents(part: Part) {
 		f.documents.some((d) => [d.path, d.twin].some((p) => p && rewritable(p))),
 	);
 	const rewrite = async () => {
+		if (!client) return;
+		setPending(true);
 		try {
-			await client?.call("files.rewrite", {});
+			await client.call("files.rewrite", {});
 			setState({ started: true });
 		} catch (e) {
 			setState({ refused: saidAll(e) });
 		}
+		setPending(false);
 	};
 	return (
 		<Part id="rules-documents" title={t("rulesDocuments")}>
@@ -321,7 +326,9 @@ export function Documents(part: Part) {
 			{foot}
 			{was && markdown && (
 				<div>
-					<Button onClick={rewrite}>{t("documentsRewrite")}</Button>
+					<Button busy={pending} onClick={rewrite}>
+						{t("documentsRewrite")}
+					</Button>
 					<InfoTip id="documents-rewrite-info">
 						<Bullets text={t("documentsRewriteNote")} />
 					</InfoTip>
