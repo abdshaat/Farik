@@ -439,7 +439,7 @@ fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, target: &IntegrationTarg
     }
     // `scan_project` reads the working tree at the root, which holds what landed only when it is
     // the integration branch that is checked out there.
-    match tools.git.current_branch() {
+    match target.git.current_branch() {
         Ok(branch) if branch == into => {}
         Ok(branch) => {
             return ScanRefresh::Skipped {
@@ -452,7 +452,7 @@ fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, target: &IntegrationTarg
             };
         }
     }
-    rescan(tools, task_id).unwrap_or_else(|error| ScanRefresh::Failed { error })
+    rescan(tools, task_id, &target.git).unwrap_or_else(|error| ScanRefresh::Failed { error })
 }
 
 /// The scan of the member `repo` a task landed in, when its checkout is on the integration branch,
@@ -497,8 +497,8 @@ fn rescan_member(tools: &ToolDeps, repo: &str) -> Result<ScanRefresh, String> {
 }
 
 /// The refresh itself, once the checkout is known to hold what landed.
-fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
-    let scan = scan_project(&tools.git, tools.clock.now()).map_err(|error| error.to_string())?;
+fn rescan(tools: &ToolDeps, task_id: &TaskId, git: &Git) -> Result<ScanRefresh, String> {
+    let scan = scan_project(git, tools.clock.now()).map_err(|error| error.to_string())?;
     let found = names_of(&scan.detected_criteria);
     let last = tools
         .log
