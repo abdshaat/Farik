@@ -195,6 +195,7 @@ export const en = {
 		"The team stops working on {name}. Its work there is kept, and it is all there if you come back.",
 	changeProjectYes: "Change project",
 	movingFrom: "Moving your team from {name}",
+	projectKeep: "Keep {name}",
 	stayOn: "Stay on {name}",
 	replaceTeam:
 		"{target} already has a Catervas team. It will be replaced by yours, starting fresh; your code is not touched.",
@@ -261,29 +262,28 @@ export const en = {
 	roleFinance: "Finance Specialist",
 	roleProcurement: "Procurement Specialist",
 	mayTitle: "What may your team do on its own?",
-	mayLead:
-		"Two things can cause real harm, so Catervas asks you about them directly. Nothing runs until you answer both.",
+	mayLead: "You can change these later in Settings.",
 	mayCommands: "May the team run commands on this computer?",
 	mayCommandsNote:
-		"Running the tests and trying the app needs this. Commands run in a sealed box, away from your other files.",
+		"Needed to run the tests and try the app.\nCommands run in a sealed box, away from your other files.",
 	mayCommandsYes: "Yes, the Developer and Architect may",
-	mayCommandsYesNote:
-		"Recommended. Without it nobody can check that the code works.",
+	mayCommandsYesNote: "Recommended.",
 	mayCommandsNo: "No, nobody may",
-	mayCommandsNoNote: "The team can plan and write, but cannot test anything.",
+	mayCommandsNoNote: "The team cannot test anything.",
 	mayStillChecks:
 		"Catervas still runs every check itself; the agents cannot run commands.",
 	mayPush: "May the Developer send its work to your online repository?",
 	mayPushNoteOne:
-		"Only {name}, the Developer, ever sends code, and only to its own fix or feature branch. Catervas sends the other agents’ documents itself. Nothing reaches your main branch without you.",
+		"Only {name}, the Developer, sends code, and only to its own branches.\nNothing reaches your main branch without you.",
 	mayPushNoteMany:
-		"Only the Developers ever send code, and only to their own fix or feature branches. Catervas sends the other agents’ documents itself. Nothing reaches your main branch without you.",
+		"Only the Developers send code, and only to their own branches.\nNothing reaches your main branch without you.",
 	mayPushYes: "Yes, on its own branches",
 	mayPushYesNote: "Useful if you review work on GitHub.",
 	mayPushNo: "No, keep everything on this computer",
-	mayPushNoNote: "The safer choice. You can change it later in Team.",
+	mayPushNoNote: "The safer choice.",
 	mayAlready: "What each agent may do already",
-	mayAnswerBoth: "Answer both questions to continue.",
+	mayAlreadyShow: "Show what each agent may do",
+	mayAlreadyHide: "Hide what each agent may do",
 	spendTitle: "Do you want a daily spending limit?",
 	spendLead:
 		"Each agent uses an AI model, and each piece of work costs a little. You can set a limit, or leave it open and watch costs on the Costs page.",
@@ -296,6 +296,8 @@ export const en = {
 		"When the team reaches the limit, everyone pauses and you get a message. They carry on the next day, or sooner if you raise the limit.",
 	spendAmount: "Limit per day, in US dollars",
 	spendAmountWrong: "Enter an amount above zero, such as 10.",
+	spendExample: "For example",
+	spendExampleStop: "At {limit}, everyone pauses and you get a message.",
 	spendFixed:
 		"Some limits are always on, whatever you choose. No agent works on one thing for more than 30 minutes at a time, and a piece of work sent back three times comes to you.",
 	firstDay:
@@ -317,8 +319,6 @@ export const en = {
 		"Rules for the whole team, the checks every piece of work must pass, and how plans are judged are already set to safe choices.",
 	startTeam: "Start the team",
 	advancedHide: "Hide advanced settings",
-	advancedLead:
-		"These are already set to safe choices. Change them only if you want to. You can come back to them any time in Settings.",
 	rulesTitle: "Team rules",
 	rulesLead: "Rules every agent follows, and that no agent can change.",
 	editAsText: "Edit as text",
@@ -459,6 +459,12 @@ export const en = {
 	requestSend: "Send to the team",
 	requestTooShort:
 		"Say a little more about what you want the team to do: at least 20 characters.",
+	suggestionsTitle: "Suggested connections",
+	suggestionsConnect: "Connect",
+	suggestionsNotNow: "Not now",
+	suggestionsShowAll: "Show all {count}",
+	suggestionsShowFewer: "Show fewer",
+	suggestionsLine: "{agent} · {about}",
 	waitingTitle: "Waiting on you ({count})",
 	waitingList: "Waiting on you",
 	waitingNone: "Nothing waits on you.",
@@ -1144,15 +1150,17 @@ export const en = {
 	previewSetupTitle: "{designer} needs to know how to open your app",
 	previewSetupLead:
 		"{designer} opens your app in a browser to check its screens.\nTell Catervas the commands that start it.\nNot sure? Leave these empty and add them in Settings later. {designer} waits until you do.",
+	previewFound: "{designer} opens your app with “{start}”.",
+	previewChange: "Change how it starts",
 	previewPrepare: "Get it ready (optional)",
 	previewPrepareHint:
 		"A command that installs what your app needs and builds it, such as “npm install”.\nYou can leave it empty.\nIt may use the internet, for up to 15 minutes.",
 	previewStart: "Start it",
 	previewStartHint:
 		"The command that starts your app, such as “npm start”.\nThe internet is off while your app runs.",
-	previewPort: "Port",
+	previewPort: "Port (optional)",
 	previewPortHint:
-		"The number your app answers on, like a door number.\nYour app often shows it when it starts: in “localhost:3000” it is 3000.\nIt must be a number from 1024 to 65535.",
+		"Leave it empty: Catervas finds it when your app starts.\nSet it only if your app answers on more than one.\nIt must be a number from 1024 to 65535.",
 	previewPath: "First page",
 	previewPathHint:
 		"The page {designer} opens first.\nLeave it as “/” for your app’s home page.",
@@ -1160,7 +1168,7 @@ export const en = {
 		"Catervas runs these commands inside Docker’s sandbox, a safe box kept apart from the rest of your computer.\nNot sure what to type? Ask whoever set up your app, or look in its README file.",
 	refusePreviewPort: "Use a number from 1024 to 65535.",
 	refusePreview:
-		"Catervas cannot use these. Starting your app needs a command and a port, each command is at most 500 characters, and the first page starts with /.",
+		"Catervas cannot use these. Starting your app needs a command, each command is at most 500 characters, and the first page starts with /.",
 	teamNeedsSandbox: "Needs Docker’s sandbox",
 	teamNeedsSandboxNote:
 		"{designer} opens your app in a browser, and only inside Docker’s sandbox, a safe box that keeps it away from the rest of your computer. Catervas did not find Docker here.",

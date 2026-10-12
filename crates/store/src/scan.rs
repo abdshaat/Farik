@@ -29,6 +29,18 @@ pub struct ProjectScan {
     pub detected_criteria: Vec<CriterionTemplate>,
     /// What `read_back` was built from, for a screen that shows it in rows.
     pub facts: ScanFacts,
+    /// How the project's app is likely started, when its `package.json` says so (ADR 0054).
+    pub app_start: Option<AppStart>,
+}
+
+/// The commands the scan suggests for a preview: `prepare` installs, `start` runs one of the
+/// project's own `package.json` scripts. Nothing is run and nothing is guessed from a name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppStart {
+    /// Installs what the project needs.
+    pub prepare: String,
+    /// Starts the app.
+    pub start: String,
 }
 
 /// What one scan found, before any of it is put into one line. It mirrors the scan's `Reading`.
@@ -187,6 +199,7 @@ pub fn scan_project(git: &Git, now: DateTime<Utc>) -> Result<ProjectScan, ScanEr
         read_back: facts.read_back(),
         facts,
         detected_criteria: reading.criteria()?,
+        app_start: reading.app_start(),
     })
 }
 
@@ -585,6 +598,22 @@ impl Reading {
         self.facts(tracked, commit, now).read_back()
     }
 
+    /// How the app is likely started: for a project run through a package manager, the first of
+    /// its `dev`, `start` and `preview` scripts.
+    fn app_start(&self) -> Option<AppStart> {
+        let toolchain = self.toolchain?;
+        if !matches!(toolchain.commands, Commands::Scripts) {
+            return None;
+        }
+        let script = ["dev", "start", "preview"]
+            .into_iter()
+            .find(|script| self.scripts.iter().any(|have| have == script))?;
+        Some(AppStart {
+            prepare: format!("{} install", toolchain.name),
+            start: format!("{} run {script}", toolchain.name),
+        })
+    }
+
     /// The criteria this project's own commands make available.
     fn criteria(&self) -> Result<Vec<CriterionTemplate>, ScanError> {
         let Some(toolchain) = self.toolchain else {
@@ -802,8 +831,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        Reading, ScanError, ScanFacts, TOOLCHAINS, cargo_workspace, how_long_ago, language_of,
-        material, packages_in, scripts_in, seeded_library, tests_in,
+        AppStart, Reading, ScanError, ScanFacts, TOOLCHAINS, cargo_workspace, how_long_ago,
+        language_of, material, packages_in, scripts_in, seeded_library, tests_in,
     };
 
     fn at(text: &str) -> DateTime<Utc> {
@@ -1183,6 +1212,55 @@ mod tests {
             reading.criteria().expect("no criteria is not a refusal"),
             []
         );
+    }
+
+    /// A reading of a project on `toolchain` (none for `None`) whose manifest has `scripts`.
+    fn reading_with(toolchain_name: Option<&str>, scripts: &[&str]) -> Reading {
+        Reading {
+            language: None,
+            toolchain: toolchain_name.map(toolchain),
+            is_workspace: false,
+            packages: 0,
+            tests: None,
+            scripts: strings(scripts),
+        }
+    }
+
+    fn start(prepare: &str, start: &str) -> AppStart {
+        AppStart {
+            prepare: prepare.to_string(),
+            start: start.to_string(),
+        }
+    }
+
+    #[test]
+    fn suggests_the_dev_script_to_start_the_app() {
+        let reading = reading_with(Some("pnpm"), &["dev", "start", "test"]);
+        assert_eq!(
+            reading.app_start(),
+            Some(start("pnpm install", "pnpm run dev"))
+        );
+    }
+
+    #[test]
+    fn suggests_start_then_preview() {
+        let both = reading_with(Some("npm"), &["start", "preview"]);
+        assert_eq!(
+            both.app_start(),
+            Some(start("npm install", "npm run start"))
+        );
+        let preview = reading_with(Some("npm"), &["preview"]);
+        assert_eq!(
+            preview.app_start(),
+            Some(start("npm install", "npm run preview"))
+        );
+    }
+
+    #[test]
+    fn suggests_nothing_without_a_script_or_on_cargo() {
+        assert_eq!(reading_with(Some("npm"), &["test"]).app_start(), None);
+        assert_eq!(reading_with(Some("cargo"), &["dev"]).app_start(), None);
+        assert_eq!(reading_with(None, &["dev"]).app_start(), None);
     }
 
     #[test]

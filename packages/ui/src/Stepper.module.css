@@ -31,3 +31,18 @@
 	clip-path: inset(50%);
 	white-space: nowrap;
 }
+
+.link {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.link:focus-visible {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: 2px;
+}

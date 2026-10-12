@@ -56,6 +56,7 @@ import {
 } from "./ProductPlanCard.tsx";
 import { RenewalsSection } from "./Renewals.tsx";
 import { SellerMailSections } from "./SellerMail.tsx";
+import { SuggestedConnections } from "./SuggestedConnections.tsx";
 import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
 import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
@@ -173,10 +174,11 @@ const isAds = (kind: Waiting["kind"]): kind is AdsAsk["kind"] =>
 
 /** The home page: the team, the request box, what waits on the human, and what moved. */
 export function Today() {
-	const { data: team } = useQuery<{ team: Team; kits?: RoleKit[] }>(
-		"team.get",
-		{},
-	);
+	const { data: team } = useQuery<{
+		team: Team;
+		kits?: RoleKit[];
+		hiddenSuggestions?: { agent: string; server: string }[];
+	}>("team.get", {});
 	// What agents made on other services, for a call that waits past its allowance.
 	const allowances = useAllowances();
 	const { data: activity } = useQuery<{ activity: Activity[] }>(
@@ -408,6 +410,13 @@ export function Today() {
 						</ul>
 					)}
 				</section>
+			)}
+			{team && (
+				<SuggestedConnections
+					team={team.team}
+					kits={team.kits ?? []}
+					hidden={team.hiddenSuggestions ?? []}
+				/>
 			)}
 			<SellerMailSections
 				agents={agents}

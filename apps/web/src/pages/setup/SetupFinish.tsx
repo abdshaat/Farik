@@ -1,6 +1,9 @@
-import { Button, Choice, Switch } from "@catervas/ui";
+import { Button, Choice } from "@catervas/ui";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { ShowAdvanced } from "../../components/ShowAdvanced.tsx";
 import { t } from "../../strings/t.ts";
+import { AdvancedSettings } from "./SetupAdvanced.tsx";
 import styles from "./setup.module.css";
 import { PutBack, useDefaults, useSetup, useStart } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
@@ -55,6 +58,7 @@ export function SetupFinish() {
 	const { draft, change } = useSetup();
 	const { start, busy, refused } = useStart();
 	const defaults = useDefaults();
+	const [advanced, setAdvanced] = useState(false);
 	const integrate = (integration: string) =>
 		change({
 			...draft,
@@ -86,12 +90,18 @@ export function SetupFinish() {
 				</section>
 			)}
 			<p className={styles.note}>{t("finishSafe")}</p>
-			<Switch
-				id="advanced"
-				label={t("advancedSwitch")}
-				checked={false}
-				onChange={() => navigate("/setup/advanced")}
-			/>
+			<span>
+				<ShowAdvanced
+					open={advanced}
+					onToggle={() => setAdvanced(!advanced)}
+					controls="finish-advanced"
+				/>
+			</span>
+			{advanced && (
+				<div id="finish-advanced">
+					<AdvancedSettings />
+				</div>
+			)}
 			{refused && (
 				<p role="alert" className={styles.alert}>
 					{refused}

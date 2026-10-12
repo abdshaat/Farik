@@ -124,7 +124,7 @@ fn serving() -> Preview {
     Preview {
         prepare: Some("cp busybox site/.httpd".to_owned()),
         start: format!("./busybox httpd -f -p {PORT} -h site"),
-        port: PORT,
+        port: Some(PORT),
         path: "/".to_owned(),
     }
 }
@@ -267,6 +267,10 @@ struct BridgePreview {
 impl RunningPreview for BridgePreview {
     fn origin(&self) -> String {
         format!("http://localhost:{PORT}")
+    }
+
+    fn port(&self) -> u16 {
+        PORT
     }
 
     fn container(&self) -> String {
@@ -542,6 +546,31 @@ fn stop_leaves_no_container() {
     assert_eq!(containers_named(&preview_name), 0);
     assert_eq!(containers_named(&browser_name), 0);
     drop(browser);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+#[ignore = "needs docker"]
+fn finds_the_port_it_was_not_told() {
+    let root = worktree("finds-port");
+    let project = project("finds-port");
+    let _cleanup = Cleanup(project.clone());
+    let factory = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image);
+    let preview = factory
+        .start(
+            &project,
+            &task(),
+            &root,
+            &Preview {
+                port: None,
+                ..serving()
+            },
+            "tree",
+        )
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    assert_eq!(preview.port(), PORT);
+    assert_eq!(preview.origin(), format!("http://localhost:{PORT}"));
+    preview.stop("the test ended").expect("stopped");
     let _ = std::fs::remove_dir_all(&root);
 }
 

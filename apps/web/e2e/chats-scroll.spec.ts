@@ -67,7 +67,8 @@ test("the chats open at the newest message, each pane scrolling on its own, and 
 		// 3. The user's own post is followed; an agent's reply, while reading old ones, is offered.
 		const asked = "@theo can you look at the menu page?";
 		catervas(serve.project, ["say", asked]);
-		await expect(page.getByText(asked)).toBeInViewport({ ratio: 1 });
+		// The chats list's Team row previews it too ("You: …"); the post is the one in the chat.
+		await expect(team.getByText(asked)).toBeInViewport({ ratio: 1 });
 		await expect(
 			page.getByRole("button", { name: "New messages" }),
 		).toHaveCount(0);

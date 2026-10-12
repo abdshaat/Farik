@@ -1,7 +1,6 @@
 import { toCamel, toSnake } from "@catervas/protocol-client";
 import { Button, Choice, Switch, TextArea, TextField } from "@catervas/ui";
 import { type ReactNode, useRef, useState } from "react";
-import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
@@ -20,9 +19,7 @@ import {
 	teamOf,
 	useDefaults,
 	useSetup,
-	useStart,
 } from "./TeamSetup.tsx";
-import { Wizard } from "./Wizard.tsx";
 
 type Holder = NonNullable<Judges["auto"]>;
 
@@ -185,12 +182,10 @@ export function PlanCheck({
 	);
 }
 
-/** The Advanced area of setup: team rules, the checks, and how plans are checked. */
-export function SetupAdvanced() {
+/** The advanced settings of setup, opened in place on the last screen: team rules, the checks, and how plans are checked. */
+export function AdvancedSettings() {
 	const { client } = useConnection();
-	const navigate = useNavigate();
 	const { draft, change } = useSetup();
-	const { start, busy, refused } = useStart();
 	const defaults = useDefaults();
 	const team = teamOf(draft);
 	// Every change is checked as it is made (spec 10); the daemon's refusal shows here.
@@ -270,13 +265,7 @@ export function SetupAdvanced() {
 	};
 
 	return (
-		<Wizard step={7} title={t("advanced")} lead={t("advancedLead")}>
-			<span>
-				<Button onClick={() => navigate("/setup/finish")}>
-					{t("advancedHide")}
-				</Button>
-			</span>
-
+		<>
 			<section className={styles.card} aria-labelledby="rules">
 				<span className={styles.split}>
 					<h2 id="rules" className={styles.heading}>
@@ -436,24 +425,11 @@ export function SetupAdvanced() {
 					}
 				/>
 			</section>
-			{(elsewhere.length > 0 || refused) && (
+			{elsewhere.length > 0 && (
 				<p role="alert" className={styles.alert}>
-					{[...elsewhere.map((e) => said(e.code)), refused]
-						.filter(Boolean)
-						.join(" ")}
+					{elsewhere.map((e) => said(e.code)).join(" ")}
 				</p>
 			)}
-			<div className={styles.foot}>
-				<Button onClick={() => navigate("/setup/finish")}>{t("back")}</Button>
-				<Button
-					kind="primary"
-					busy={busy}
-					disabled={errors.length > 0}
-					onClick={start}
-				>
-					{t("startTeam")}
-				</Button>
-			</div>
-		</Wizard>
+		</>
 	);
 }

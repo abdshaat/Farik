@@ -23,6 +23,7 @@ import {
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
 import { CARD, docs as folderDocs } from "../test/folderDocs.ts";
 import { sentCommand } from "../test/gate.ts";
+import { KIT_ADS, KIT_LINEAR, KIT_NOTION } from "../test/kits.ts";
 import {
 	TEAM as MARKETING_TEAM,
 	PLAN,
@@ -113,11 +114,19 @@ async function today(fields: {
 	docs?: unknown;
 	plan?: unknown;
 	catervafication?: unknown;
+	kits?: unknown[];
+	hiddenSuggestions?: unknown[];
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
-	await answerQuery(s, "team.get", { team: fields.team ?? TEAM });
+	await answerQuery(s, "team.get", {
+		team: fields.team ?? TEAM,
+		...(fields.kits && { kits: fields.kits }),
+		...(fields.hiddenSuggestions && {
+			hidden_suggestions: fields.hiddenSuggestions,
+		}),
+	});
 	await answerQuery(s, "team.activity", fields.activity ?? ACTIVITY);
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
 	await answerQuery(s, "moved.since", { moved: fields.moved ?? [] });
@@ -2523,6 +2532,206 @@ describe("a data pipeline waiting on the owner", () => {
 		const script = await rowOf("Ulіne");
 		expect(within(script).getByText(en.siteRequestScriptWhat)).toBeTruthy();
 		expect(within(paid).queryByText(en.siteRequestScriptWhat)).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+});
+
+describe("suggested connections", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	const only = (...agents: ReturnType<typeof agent>[]) => ({
+		...TEAM,
+		agents,
+	});
+	const mira = agent("mira", "Mira", "product_manager", "product-manager");
+	const ada = agent("ada", "Ada", "architect", "architect");
+	const theo = agent("theo", "Theo", "software_developer", "developer");
+	const pmKit = (...connectors: unknown[]) => ({
+		role: "product_manager",
+		connectors,
+	});
+	const items = () =>
+		within(
+			screen.getByRole("list", { name: en.suggestionsTitle }),
+		).getAllByRole("listitem");
+
+	it("suggests_a_kit_service_an_active_agent_lacks", async () => {
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION)],
+			hiddenSuggestions: [{ agent: "ada", server: "notion" }],
+		});
+		const [row] = items() as [HTMLElement];
+		expect(items()).toHaveLength(1);
+		expect(
+			screen.getByRole("heading", { name: en.suggestionsTitle }),
+		).toBeTruthy();
+		expect(row.textContent).toContain("Notion");
+		expect(row.textContent).toContain(
+			"Mira · Notion is where your team keeps docs, notes and plans.",
+		);
+		expect(within(row).getByText(KIT_NOTION.why)).toBeTruthy();
+		const connect = within(row).getByRole("link", {
+			name: en.suggestionsConnect,
+		});
+		expect(connect.getAttribute("href")).toBe("/team/mira?connect=notion");
+		const describedBy = connect.getAttribute("aria-describedby") ?? "";
+		expect(document.getElementById(describedBy)?.textContent).toBe("Notion");
+		expect(within(row).queryByRole("img", { name: "Mira" })).toBeNull();
+	});
+
+	it("does_not_suggest_what_is_held_at_launch_hidden_or_a_paused_agents", async () => {
+		const held = {
+			...mira,
+			mcp_servers: [{ name: "linear", source: "kit" }],
+		};
+		await today({
+			team: only(
+				held,
+				{
+					...agent("kai", "Kai", "marketing_specialist", "marketing"),
+					status: "paused",
+				},
+				{
+					...agent("finn", "Finn", "finance_specialist", "finance"),
+					status: "retired",
+				},
+			),
+			kits: [
+				pmKit(KIT_LINEAR, KIT_NOTION, KIT_ADS),
+				{ role: "marketing_specialist", connectors: [KIT_NOTION] },
+				{ role: "finance_specialist", connectors: [KIT_NOTION] },
+			],
+			hiddenSuggestions: [{ agent: "mira", server: "notion" }],
+		});
+		await screen.findByRole("heading", { name: /Waiting on you/ });
+		expect(
+			screen.queryByRole("heading", { name: en.suggestionsTitle }),
+		).toBeNull();
+	});
+
+	it("not_now_hides_the_row_and_sends_the_command", async () => {
+		const { s } = await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+		});
+		expect(items()).toHaveLength(2);
+		fireEvent.click(
+			within(items()[0] as HTMLElement).getByRole("button", {
+				name: en.suggestionsNotNow,
+			}),
+		);
+		expect(items()).toHaveLength(1);
+		expect((items()[0] as HTMLElement).textContent).toContain("Linear");
+		const sent = await waitFor(() => {
+			const f = s.calls("connector_suggestion.hide")[0];
+			if (!f) throw new Error("not sent");
+			return f;
+		});
+		expect(sent.params).toEqual({ agent: "mira", server: "notion" });
+		expect(refusedBy("connectorSuggestionHideRequest", sent.params)).toEqual(
+			[],
+		);
+		await s.reply(sent, {});
+		expect(items()).toHaveLength(1);
+		expect((items()[0] as HTMLElement).textContent).toContain("Linear");
+	});
+
+	it("not_now_puts_the_row_back_when_refused", async () => {
+		const { s } = await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+		});
+		const notNow = () =>
+			fireEvent.click(
+				screen.getAllByRole("button", {
+					name: en.suggestionsNotNow,
+				})[0] as HTMLElement,
+			);
+		notNow();
+		const sent = await waitFor(() => {
+			const f = s.calls("connector_suggestion.hide")[0];
+			if (!f) throw new Error("not sent");
+			return f;
+		});
+		await s.fail(
+			sent,
+			-32005,
+			"suggestion_not_offered: mira is not offered notion",
+		);
+		expect(items()).toHaveLength(2);
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.refuseCommand,
+		);
+		expect(document.body.textContent).not.toContain("suggestion_not_offered");
+		notNow();
+		await waitFor(() => {
+			if (s.calls("connector_suggestion.hide").length < 2)
+				throw new Error("not sent");
+		});
+		await s.reply(s.calls("connector_suggestion.hide")[1] as never, {});
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	it("not_now_keeps_focus_in_the_section", async () => {
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+		});
+		fireEvent.click(
+			within(items()[0] as HTMLElement).getByRole("button", {
+				name: en.suggestionsNotNow,
+			}),
+		);
+		expect(document.activeElement).toBe(
+			screen.getByRole("heading", { name: en.suggestionsTitle }),
+		);
+	});
+
+	it("shows_four_then_all", async () => {
+		await today({
+			team: only(mira, ada, theo),
+			kits: [
+				pmKit(KIT_NOTION, KIT_LINEAR),
+				{ role: "architect", connectors: [KIT_NOTION, KIT_LINEAR] },
+				{ role: "software_developer", connectors: [KIT_NOTION, KIT_LINEAR] },
+			],
+		});
+		expect(items()).toHaveLength(4);
+		const all = screen.getByRole("button", { name: "Show all 6" });
+		expect(all.getAttribute("aria-expanded")).toBe("false");
+		expect(all.getAttribute("aria-controls")).toBe("suggestions-list");
+		fireEvent.click(all);
+		expect(items()).toHaveLength(6);
+		const fewer = screen.getByRole("button", { name: en.suggestionsShowFewer });
+		expect(fewer.getAttribute("aria-expanded")).toBe("true");
+	});
+
+	it("orders_by_team_then_kit", async () => {
+		await today({
+			team: only(mira, ada),
+			kits: [
+				{ role: "architect", connectors: [KIT_NOTION, KIT_LINEAR] },
+				pmKit(KIT_LINEAR, KIT_NOTION),
+			],
+		});
+		expect(
+			items().map((row) => row.querySelector("strong")?.textContent),
+		).toEqual(["Linear", "Notion", "Notion", "Linear"]);
+		expect(items().map((row) => row.textContent?.includes("Mira"))).toEqual([
+			true,
+			true,
+			false,
+			false,
+		]);
+	});
+
+	it("suggestions_have_no_accessibility_violations", async () => {
+		const { container } = await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+		});
+		await screen.findByRole("heading", { name: en.suggestionsTitle });
 		await expectNoAxeViolations(container);
 	});
 });

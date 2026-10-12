@@ -89,6 +89,7 @@ export function SetupTeam() {
 	const scratch = draft.start === "scratch";
 	const [errors, setErrors] = useState<Checked["errors"]>([]);
 	const [busy, setBusy] = useState(false);
+	const [editing, setEditing] = useState(() => !draft.preview.start.trim());
 	const on = draft.members.filter((m) => m.on);
 	// From scratch, the Product Manager and one more have to be ticked and named before going on;
 	// a role offered under "More roles" is named by the daemon's check when it is ticked.
@@ -250,27 +251,60 @@ export function SetupTeam() {
 						className={styles.memberCard}
 						aria-labelledby={`preview-${index}`}
 					>
-						<div className={pages.titled}>
-							<h2 id={`preview-${index}`}>
-								{t("previewSetupTitle", { designer: agent.displayName })}
-							</h2>
-							<InfoTip id={`preview-${index}-more-info`}>
-								<Bullets text={t("previewMore")} />
-							</InfoTip>
-						</div>
-						<Bullets
-							text={t("previewSetupLead", { designer: agent.displayName })}
-						/>
-						<PreviewFields
-							id={`preview-${index}`}
-							form={draft.preview}
-							designer={agent.displayName}
-							errors={errors}
-							onChange={(preview) => {
-								setErrors(errors.filter((e) => !e.path.startsWith("/preview")));
-								change({ ...draft, preview });
-							}}
-						/>
+						{editing || errors.some((e) => e.path.startsWith("/preview")) ? (
+							<>
+								<div className={pages.titled}>
+									<h2 id={`preview-${index}`}>
+										{t("previewSetupTitle", { designer: agent.displayName })}
+									</h2>
+									<InfoTip id={`preview-${index}-more-info`}>
+										<Bullets text={t("previewMore")} />
+									</InfoTip>
+								</div>
+								<Bullets
+									text={t("previewSetupLead", { designer: agent.displayName })}
+								/>
+								<div id={`preview-${index}-fields`}>
+									<PreviewFields
+										id={`preview-${index}`}
+										form={draft.preview}
+										designer={agent.displayName}
+										errors={errors}
+										onChange={(preview) => {
+											setErrors(
+												errors.filter((e) => !e.path.startsWith("/preview")),
+											);
+											change({ ...draft, preview });
+										}}
+									/>
+								</div>
+							</>
+						) : (
+							<>
+								<h2 id={`preview-${index}`}>{t("previewTitle")}</h2>
+								<p>
+									{t("previewFound", {
+										designer: agent.displayName,
+										start: draft.preview.start.trim(),
+									})}
+								</p>
+								<Button
+									kind="quiet"
+									expanded={false}
+									controls={`preview-${index}-fields`}
+									onClick={() => {
+										setEditing(true);
+										requestAnimationFrame(() =>
+											document
+												.getElementById(`preview-${index}-start`)
+												?.focus(),
+										);
+									}}
+								>
+									{t("previewChange")}
+								</Button>
+							</>
+						)}
 					</section>
 				)}
 			</li>

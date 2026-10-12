@@ -208,6 +208,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_suggestion_hide_request() {
+        let frame = request(
+            1,
+            "connector_suggestion.hide",
+            &json!({ "agent": "dev-a", "server": "fixture" }),
+        );
+        rpc_request_from_value(&frame).unwrap_or_else(|e| panic!("{frame} refused: {e:?}"));
+    }
+
+    #[test]
+    fn refuses_bad_suggestion_hide_requests() {
+        for params in [
+            json!({ "agent": "dev-a" }),
+            json!({ "agent": "dev-a", "server": "fixture", "x": 1 }),
+            json!({ "agent": 1, "server": "fixture" }),
+        ] {
+            let frame = request(1, "connector_suggestion.hide", &params);
+            assert!(rpc_request_from_value(&frame).is_err(), "{frame} was read");
+        }
+    }
+
+    #[test]
     fn refuses_bad_change_project_requests() {
         for frame in [
             request(1, "project.leave", &json!({ "x": 1 })),
