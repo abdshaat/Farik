@@ -143,15 +143,19 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
         SessionPurpose::Chat,
         "This session answers the user in your one-to-one chat: the newest of their messages in \
          `From the human`, with the chat before it. Answer once with `catervas_chat_reply`, in your \
-         persona's voice. You can read the project and change nothing. When work is needed, put a \
-         request in your reply, a title and what it asks for, for the user to send. Then end the \
-         session.",
+         persona's voice, in Markdown: a summary of one or two sentences, then the points as a \
+         bulleted list, then a one-line conclusion; a greeting or a one-line answer needs no list. \
+         Never write a file's or a folder's path: name it in plain words, as the user knows it. \
+         When a table or a diagram says it better, put it in the reply: Markdown tables and \
+         `mermaid` diagrams are shown formatted. You can read the project and change nothing. When \
+         work is needed, put a request in your reply, a title and what it asks for, for the user to \
+         send. Then end the session.",
     ),
 ];
 
 /// The `This session` section of a new project's Product Manager's chat session while the owner's
 /// product plan is not approved (`docs/SPEC.md` 4.3), in place of the chat's.
-pub const INTERVIEW_INSTRUCTION: &str = "This session is your interview of the owner about their new project, in your one-to-one chat. `From the human` holds what they wrote when they started it, then the chat so far. Nothing is planned until the owner approves the product plan you write from it. Find out, one question at a time, who the customers are, the problem they have, what the product must do, what is out for now, any constraints, and how the owner will know it works; ask only what the chat has not answered, in your persona's voice, short and in plain words. When you know enough, or the owner asks you to, sum up: put the summary in `heard` (constraints under `must` or `not_now`, as they fit) and say in your text that they can correct it or have you draft the plan. Put no request in your reply: nothing is planned before the plan. Answer once with `catervas_chat_reply`, then end the session.";
+pub const INTERVIEW_INSTRUCTION: &str = "This session is your interview of the owner about their new project, in your one-to-one chat. `From the human` holds what they wrote when they started it, then the chat so far. Nothing is planned until the owner approves the product plan you write from it. Find out, one question at a time, who the customers are, the problem they have, what the product must do, what is out for now, any constraints, and how the owner will know it works; ask only what the chat has not answered, in your persona's voice, short and in plain words. When you know enough, or the owner asks you to, sum up: put the summary in `heard` (constraints under `must` or `not_now`, as they fit) and say in your text that they can correct it or have you draft the plan. Put no request in your reply: nothing is planned before the plan. Never write a file's or a folder's path: name it in plain words, as the user knows it. Answer once with `catervas_chat_reply`, then end the session.";
 
 /// The `This session` section of each ceremony (5.9), by its thread: what it posts, and the tool
 /// it ends with. The channel is read by all, so each tells the agent to mention no one.
@@ -593,8 +597,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        CLOSING_INSTRUCTIONS, PROMPT_SECTIONS, PromptInput, assemble_system_prompt, tier_name,
-        untrusted_block,
+        CLOSING_INSTRUCTIONS, INTERVIEW_INSTRUCTION, PROMPT_SECTIONS, PromptInput,
+        assemble_system_prompt, tier_name, untrusted_block,
     };
     use crate::session::SessionPurpose;
     use crate::tools::{CatervasTool, tool_descriptors};
@@ -1326,6 +1330,27 @@ mod tests {
                     .expect("an entry")
             );
         }
+    }
+
+    #[test]
+    fn chat_closing_asks_for_a_summary_points_and_a_conclusion() {
+        let text = CLOSING_INSTRUCTIONS
+            .iter()
+            .find(|(named, _)| *named == SessionPurpose::Chat)
+            .map(|(_, text)| *text)
+            .expect("an entry");
+        let at = |needle: &str| {
+            text.find(needle)
+                .unwrap_or_else(|| panic!("{needle} missing: {text}"))
+        };
+        assert!(at("in Markdown") < at("a summary of one or two sentences"));
+        assert!(at("a summary of one or two sentences") < at("a bulleted list"));
+        assert!(at("a bulleted list") < at("a one-line conclusion"));
+        assert!(text.contains("Never write a file's or a folder's path"));
+        assert!(text.contains("Markdown tables and") && text.contains("mermaid"));
+        let sentence = "Never write a file's or a folder's path: name it in plain words, as the user knows it.";
+        assert!(text.contains(sentence));
+        assert!(INTERVIEW_INSTRUCTION.contains(sentence));
     }
 
     #[test]

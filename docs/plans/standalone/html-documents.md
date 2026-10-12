@@ -2,7 +2,7 @@
 
 Status: ready
 Branch: `feat/html-documents` (work outside a phase, its own pull request to `main`, #47)
-Spec: `docs/SPEC.md` 4.5, 5.12 and 5.17 (and the kit lines of 6.x), revision 0.107; ADR 0058
+Spec: `docs/SPEC.md` 4.5, 5.12 and 5.17 (and the kit lines of 6.x), revision 0.108; ADR 0058
 Depends on: `origin/main` at `9e3d4f3c` (#46 merged; phase 8 in #34)
 Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-12 (one round against `docs/standards/workflow.md` stage 2: NOT READY on three unmade decisions, which the founder's design left open and the planner decided within it: no "Ask for a change" on the Scrum Master's documents, a rewrite of zero tasks, an HTML marketing plan read framed before approval; recorded in the design and here. Its other twenty-one findings are folded into this revision. A second round the same day found the three made: READY, with eight minor findings folded in.)
 
@@ -461,7 +461,7 @@ Tests in `apps/web/src/pages/settings/settings.test.tsx`, whose Work heading lis
 ### Task 13: the spec
 
 Files: `docs/SPEC.md`:
-- the revision 0.107 line;
+- the revision 0.108 line;
 - 4.5: the frame, the fit, Open full page, Ask for a change, Edit source, and the framed marketing plan;
 - 5.12: `document_format`;
 - 5.17: either format, the format rule, the route, the methods and the event, the rewrite, the retro's delivery line;
@@ -469,7 +469,7 @@ Files: `docs/SPEC.md`:
 
 `docs/design/catervas-folders.md`: a line under its status pointing to `html-documents.md`.
 
-- [x] `docs(spec): the team's documents in HTML (0.107)`
+- [x] `docs(spec): the team's documents in HTML (0.108)`
 
 ## Verification
 

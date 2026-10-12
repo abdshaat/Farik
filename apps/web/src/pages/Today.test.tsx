@@ -40,6 +40,7 @@ import {
 	todayWithOrders,
 	WRITTEN_ROW,
 } from "../test/orders.ts";
+import { picturesOpenTheirAgents } from "../test/pictures.ts";
 import {
 	DATA_ROW,
 	ODD_ADDRESS_ROW,
@@ -172,7 +173,31 @@ describe("today", () => {
 		expect(
 			screen.getByText("Sprint 2 is running: 4 of 7 tasks done"),
 		).toBeTruthy();
+		picturesOpenTheirAgents(band, TEAM.agents);
 		await expectNoAxeViolations(container);
+	});
+
+	it("opens_an_agents_page_from_its_picture_in_the_channel_preview", async () => {
+		const { s } = await today({});
+		await answerQuery(s, "channel.messages", {
+			messages: [
+				{
+					seq: 1,
+					at: "2026-09-28T09:02:00Z",
+					author: "ada",
+					kind: "chat",
+					text: "The review is done.",
+					mentions: [],
+					thread: null,
+					in_reply_to: null,
+				},
+			],
+		});
+		const preview = await screen.findByRole("region", {
+			name: en.channelPreview,
+		});
+		await within(preview).findByText("The review is done.");
+		picturesOpenTheirAgents(preview, TEAM.agents);
 	});
 
 	it("sends_a_request_to_the_team", async () => {
@@ -315,7 +340,12 @@ describe("today", () => {
 				"You approved it; it waits for you to add it",
 			),
 		).toBeTruthy();
-		expect(within(folder as HTMLElement).queryByRole("link")).toBeNull();
+		// No task's page: the only link is the agent's picture.
+		expect(
+			within(folder as HTMLElement)
+				.queryAllByRole("link")
+				.map((link) => link.getAttribute("href")),
+		).toEqual(["/team/mira"]);
 		const add = within(folder as HTMLElement).getByRole("button", {
 			name: "Add",
 		});
@@ -424,6 +454,7 @@ describe("today", () => {
 		const region = await screen.findByRole("region", {
 			name: en.docChangesTitle,
 		});
+		picturesOpenTheirAgents(region, TEAM.agents);
 		const asked = items.findIndex((one) => one.contains(region));
 		expect(asked).toBeGreaterThan(
 			items.findIndex((one) => one.textContent?.includes("question line")),
@@ -487,11 +518,12 @@ describe("today", () => {
 			await screen.findByRole("heading", { name: "Waiting on you (3)" }),
 		).toBeTruthy();
 		const list = screen.getByRole("list", { name: en.waitingList });
-		expect(
+		picturesOpenTheirAgents(
 			await within(list).findByRole("region", {
 				name: "Your product plan to approve",
 			}),
-		).toBeTruthy();
+			TEAM.agents,
+		);
 		// The plan's task has no row of its own besides the card; the question keeps its row.
 		expect(within(list).getByText("Mira has a question")).toBeTruthy();
 		// Another acceptance stays the generic row beside the one plan card.
@@ -610,6 +642,7 @@ describe("today", () => {
 			const link = within(one).getByRole("link", { name: word });
 			expect(link.getAttribute("href")).toBe(route);
 		});
+		picturesOpenTheirAgents(list, TEAM.agents);
 		// The acceptance row says the checks passed, when every one did.
 		await answerQuery(s, "task.checks", {
 			checks: [1, 2, 3].map((n) => ({
@@ -887,10 +920,8 @@ describe("today", () => {
 				"Theo finished the checkout page and asked Ada to review it.",
 			),
 		).toBeTruthy();
-		// An agent's card: the picture (named by nothing extra), the name, the role tag, the time.
-		// (An image with empty alt has no role, so it is found by its tag.)
-		const picture = (newest as HTMLElement).querySelector("img");
-		expect(picture?.getAttribute("alt")).toBe("");
+		// An agent's card: the picture, which opens the agent's page, the name, the role tag, the time.
+		picturesOpenTheirAgents(newest as HTMLElement, TEAM.agents);
 		expect(
 			within(newest as HTMLElement).getByText("Theo", { selector: "strong" }),
 		).toBeTruthy();
@@ -1266,8 +1297,10 @@ describe("today's posts", () => {
 			screen.getByRole("list", { name: en.waitingList }),
 		).getAllByRole("listitem");
 		expect([...going, ...over, ...asking]).toHaveLength(4 + 4 + 1);
-		for (const row of [...going, ...over, ...asking])
+		for (const row of [...going, ...over, ...asking]) {
 			expect(within(row).getByRole("img", { name: "Kai" })).toBeTruthy();
+			picturesOpenTheirAgents(row, MARKETING_TEAM.agents);
+		}
 	});
 
 	it("what_catervas_cannot_show_opens_in_a_new_tab", async () => {
@@ -1325,7 +1358,12 @@ describe("today's posts", () => {
 
 		const [row] = await goingOut();
 		expect(row?.textContent).toContain("Halloween sugar cookies");
-		expect(within(row as HTMLElement).queryAllByRole("link")).toHaveLength(1);
+		// Besides the agent's picture, which opens its page, one link.
+		expect(
+			within(row as HTMLElement)
+				.queryAllByRole("link")
+				.filter((link) => !link.getAttribute("href")?.startsWith("/team/")),
+		).toHaveLength(1);
 		expect(
 			within(row as HTMLElement).queryByRole("link", {
 				name: "Watch the clip",
@@ -1481,7 +1519,7 @@ describe("a site the Procurement Specialist asks to read", () => {
 			within(plain as HTMLElement)
 				.getAllByRole("link")
 				.map((link) => link.getAttribute("href")),
-		).toEqual(["/tasks/CTV-31"]);
+		).toEqual(["/team/ivo", "/tasks/CTV-31"]);
 		expect(container.querySelector("a[href*='pieboxpros']")).toBeNull();
 		expect(
 			within(plain as HTMLElement).getByText(/The task waits until you decide/),

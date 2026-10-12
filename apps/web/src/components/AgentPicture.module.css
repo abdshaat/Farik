@@ -1,0 +1,8 @@
+/* The picture keeps its own size and sits at the top of its row or card: the link adds no line
+height, never shrinks, and never stretches across a grid. */
+.link {
+	display: inline-flex;
+	flex: none;
+	align-self: start;
+	justify-self: start;
+}
