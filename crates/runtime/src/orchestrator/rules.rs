@@ -3174,6 +3174,25 @@ mod tests {
     async fn assigns_a_task_in_its_member() {
         let (harness, members) = Harness::project_folder("orch-member-start", &["app", "infra"]);
         harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        // `app` integrates into `release`, a branch that is ahead of its `main`.
+        let app = &members[0];
+        app.git(&["checkout", "-b", "release"]);
+        app.write("r.txt", "one\n");
+        app.commit("add r.txt");
+        app.git(&["checkout", "main"]);
+        harness
+            .project
+            .deps
+            .files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": app.path.display().to_string(),
+                      "integration_branch": "release" },
+                    { "name": "infra", "path": members[1].path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -3181,15 +3200,14 @@ mod tests {
         assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let worktree = harness.worktree("CTV-1");
         assert!(worktree.is_dir());
-        let app = &members[0];
         assert_eq!(
             common_dir_of(&worktree),
             std::fs::canonicalize(app.path.join(".git")).expect("app's .git")
         );
         assert_eq!(
             git_output_in(&app.path, &["rev-parse", "feature/CTV-1"]),
-            git_output_in(&app.path, &["rev-parse", "main"]),
-            "the branch starts at app's main"
+            git_output_in(&app.path, &["rev-parse", "release"]),
+            "the branch starts at app's integration branch, not its main"
         );
         assert_eq!(
             git_output_in(
