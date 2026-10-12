@@ -1,8 +1,8 @@
 # Standalone: suggested connections on Today
 
-Status: ready
+Status: done
 Branch: `feat/suggested-connectors` (work outside a phase, its own pull request to `main`)
-Spec: `docs/SPEC.md` 6.7 (role kits; "Suggested connections on Today", added in 0.88), F9
+Spec: `docs/SPEC.md` 6.7 (role kits; "Suggested connections on Today", added in 0.90), F9
 Depends on: `origin/main` at `15d67ec2` (#35 merged; phase 7 in #22, the change-project plan in #32)
 Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-11 (one round, READY, against `docs/standards/workflow.md` stage 2; its fourteen findings are folded into this revision)
 
@@ -26,7 +26,7 @@ Signatures, not bodies; test names and what each asserts, not test code (ADR 000
 - The row's visible text: `<strong id="suggestion-<agent>-<service>">{title}</strong>` then `{agent name} · {about}` then `<InfoTip id="suggestion-<agent>-<service>-info">{why}</InfoTip>`, mirroring `KitRow` (`AgentEdit.tsx:886`). Strings: `suggestionsTitle` "Suggested connections" (the heading and the list's `aria-label`), `suggestionsConnect` "Connect", `suggestionsNotNow` "Not now", `suggestionsShowAll` "Show all {count}", `suggestionsShowFewer` "Show fewer", `suggestionsLine` "{agent} · {about}", in `apps/web/src/strings/en.ts`; none exists today. The section sits between the Waiting section and `<SellerMailSections>` (`Today.tsx:323-325`). The Connect link's accessible name is `suggestionsConnect` with `aria-describedby` on the row's title, as `WaitingRow` does.
 - Four rows show at first (`SUGGESTIONS_SHOWN = 4`); the toggle is a `Button` with `expanded` (its `aria-expanded`) and `controls` naming the list. Chose four over all: the kits hold up to seven services per role, and Today is quiet below the band (`docs/design/web-ui.md`).
 - Not now removes the row at once (the page's own state) and sends `connector_suggestion.hide`; a refusal or failure puts the row back and shows the message under the list in `muted`. No optimistic hide survives a failed call.
-- No ADR: no spec decision is reversed, and the new file follows ADR 0053's precedent. `docs/SPEC.md` 6.7 gains a paragraph and F9 a sentence, revision 0.88 (0.84 to 0.87 are claimed by open branches: `fix/settings-fewer-words` 0.86, `feat/setup-friction` and `feat/predefined-teams` 0.87; whoever merges second renumbers).
+- No ADR: no spec decision is reversed, and the new file follows ADR 0053's precedent. `docs/SPEC.md` 6.7 gains a paragraph and F9 a sentence, revision 0.90 (main reached 0.88 with `today-moved-cards` while this branch was open, and `feat/predefined-teams` holds 0.89).
 
 ## File map
 
@@ -107,7 +107,7 @@ Files: modified `docs/schemas/rpc.schema.json` (`teamGetResult.hidden_suggestion
 
 ### Task 4: the section on Today
 
-Files: modified `packages/protocol-client/src/client.ts`, `apps/web/src/pages/Team.tsx` (the result type), `apps/web/src/pages/Today.tsx`, `apps/web/src/strings/en.ts`; created `apps/web/src/pages/SuggestedConnections.tsx`; tested by `apps/web/src/pages/Today.test.tsx` (its `today()` helper gains `kits?` and `hiddenSuggestions?` fields answered inside `team.get`). Fixtures: `KIT_NOTION`, `KIT_LINEAR` and `KIT_ADS` move from `connectors.test.tsx` to a new `apps/web/src/test/kits.ts` (exported as they are; `connectors.test.tsx` imports them), and `Today.test.tsx` gains an agent fixture with `mcp_servers: [{ name: "linear", source: "kit" }]`. Consumes Task 2's wire.
+Files: modified `packages/protocol-client/src/client.ts`, `apps/web/src/pages/Today.tsx`, `apps/web/src/strings/en.ts`; created `apps/web/src/pages/SuggestedConnections.tsx`; tested by `apps/web/src/pages/Today.test.tsx` (its `today()` helper gains `kits?` and `hiddenSuggestions?` fields answered inside `team.get`). Fixtures: `KIT_NOTION`, `KIT_LINEAR` and `KIT_ADS` move from `connectors.test.tsx` to a new `apps/web/src/test/kits.ts` (exported as they are; `connectors.test.tsx` imports them), and `Today.test.tsx` gains an agent fixture with `mcp_servers: [{ name: "linear", source: "kit" }]`. Consumes Task 2's wire.
 
 - `suggests_a_kit_service_an_active_agent_lacks` — Mira (Product Manager, no `mcp_servers`) with kits `[{ role: product_manager, connectors: [KIT_NOTION] }]`: a list named "Suggested connections" has one item whose text holds "Notion" and "Mira · Notion is where your team keeps docs, notes and plans.", whose info button reveals KIT_NOTION's `why`, and whose link "Connect" has `href` `/team/mira?connect=notion`; the item has no avatar image.
 - `does_not_suggest_what_is_held_at_launch_hidden_or_a_paused_agents` — Mira holds `linear`, kits offer `[KIT_LINEAR, KIT_NOTION, KIT_ADS]`, `hidden_suggestions: [{ agent: "mira", server: "notion" }]`, a paused Marketing Specialist Kai and a retired Finance Specialist Finn, with kits `{ role: "marketing_specialist", connectors: [KIT_NOTION] }` and `{ role: "finance_specialist", connectors: [KIT_NOTION] }`: the section is absent (no heading "Suggested connections").
@@ -132,7 +132,7 @@ Files: modified `apps/web/src/pages/AgentEdit.tsx`; tested by `apps/web/src/page
 
 Files: modified `docs/SPEC.md` (the header's revision 0.88 note; 6.7 a paragraph "Suggested connections on Today (added in 0.88; standalone plan `suggested-connections`)" after "Service logos and info buttons", saying what is suggested and left out, the file, the command and its refusal, `hidden_suggestions`, `?connect=`; F9 one sentence naming the command and the field), `docs/design/suggested-connections.md` (status: built), this plan (status and ticks).
 
-- [ ] `docs(spec): suggested connections on Today, revision 0.88`
+- [x] `docs(spec): suggested connections on Today, revision 0.90`
 
 ## Verification
 

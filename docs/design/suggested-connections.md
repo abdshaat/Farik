@@ -1,6 +1,6 @@
 # Suggested connections
 
-Status: drafted 2026-10-11 in a Claude Code session from the founder's request ("Suggested connectors based on the user's project. For example, if the marketing agent needs Buffer to start posting on social media, the user will see a list of suggested connectors on the main page alongside who needs it"). The founder was not present for the brainstorm; the decisions marked **assumed** are the session's reading and stand until the founder rules otherwise.
+Status: built on 2026-10-11 on `feat/suggested-connectors`; drafted the same day in a Claude Code session from the founder's request ("Suggested connectors based on the user's project. For example, if the marketing agent needs Buffer to start posting on social media, the user will see a list of suggested connectors on the main page alongside who needs it"). The founder was not present for the brainstorm; the decisions marked **assumed** are the session's reading and stand until the founder rules otherwise.
 
 ## Why
 
