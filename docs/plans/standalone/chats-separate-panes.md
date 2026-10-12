@@ -147,7 +147,7 @@ One test, `the chats open at the newest message, each pane scrolling on its own,
 3. `catervas say "@theo can you look at the menu page?"` (the user's own post, author `human`): it is in the viewport, the view having followed it, and no "New messages" shows. Then, in one `evaluate`, the region "Team" is scrolled to 0 (every page is read by now, so nothing more is asked). Theo's reply, "the login form is done and its tests are next.", arrives (timeout 15 s): the button "New messages" is visible and the reply is not in the viewport; pressed: the reply is in the viewport. (Amended during execution: a `catervas say` line is the user's own, which the view always follows, so the plan's first step 3 could never show the button; the executor stopped on it, as it should.)
 4. `narrow(page)` (360 by 780), `/channel` again: Theo's reply and the box labelled "Message the team" (`channelPostPhone`, its label visually hidden) are in the viewport, and `document.documentElement.scrollHeight <= innerHeight`.
 
-- [ ] `test(web): open the chats at the newest message in a real browser`
+- [x] `test(web): open the chats at the newest message in a real browser`
 
 ### Task 6: the spec and the design say so
 
