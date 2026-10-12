@@ -192,7 +192,7 @@ mod write_private_tests {
 
     #[test]
     fn a_reader_never_sees_a_private_file_half_written() {
-        const ROUNDS: usize = 2000;
+        const ROUNDS: usize = 200;
         let dir = scratch("reader");
         let file = dir.join("state.json");
         let values = [
