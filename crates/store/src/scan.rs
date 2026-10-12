@@ -1767,6 +1767,14 @@ mod tests {
                 .map(|index| entry(&format!("mine-{index}"), "human", None))
                 .collect(),
         };
+        // The cap is the schema's `maxItems`: change one and this test names the other.
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/schemas/criteria.schema.json"))
+                .expect("the criteria schema parses");
+        assert_eq!(
+            schema["properties"]["criteria"]["maxItems"],
+            json!(LIBRARY_CAP)
+        );
         let found = [entry(
             "app-the-linter-is-clean",
             "project_scan",
