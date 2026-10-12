@@ -9,7 +9,7 @@ Depends on steps 01 and 02 of this phase, planned and ready, not yet executed:
 
 Nothing of steps 02b, 02c or 04 to 08.
 Mockups: none.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (which member is the task's own) and B2 (what bounds a search in a read root), both decided below; S1–S9 and N1–N6 folded, the plan rewritten. Round 2: (pending).
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (which member is the task's own) and B2 (what bounds a search in a read root), both decided below; S1–S9 and N1–N6 folded, the plan rewritten. Round 2 (the same reviewer): B1 and B2 decided; new B3 (the absolute deny rule for `.catervas/local/**` covering every task's own worktree) and B4 (a root path Claude Code's settings cannot hold), both decided below, with S1–S3. Round 3: (pending).
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 9e3f662.
 
@@ -39,6 +39,7 @@ Out of scope:
   - `repos.yaml` cannot be read: reads fail closed and the session still starts
 
   Otherwise the roots are every present member except the contract's own `repo`, by name, in `repos.yaml` order, then the project folder, named `project`, unless the canonical `cwd` is the project root.
+  - **A root whose path cannot be written into a rule is left out**, failing closed: a path holding `(`, `)`, `\`, a control character (as `refuse_an_unexpressible_glob`, `claude.rs:862-876`, refuses a glob), or a glob character `*`, `?`, `[`, `]`, `{`, `}`. In `-p` mode Claude Code ignores a settings value it cannot parse, hooks and all (`claude.rs:858-861`), and a glob character would change what the rule matches. On Windows, whose paths hold `\`, no member is a root in this step.
   - The task's own member is known from its contract, not from `cwd`. A worktree always sits under the project folder (step 02), so no member ever holds `cwd`.
   - Rejected: a root for the whole home folder.
 - **Where the type lives.** `pub struct ReadRoot { pub name: String, pub path: PathBuf }`, documented, in `crates/runtime/src/daemon.rs`, beside `SessionRegistration`, which gains `pub read_roots: Vec<ReadRoot>`. `read_roots` is in `orchestrator/session.rs` and re-exported `pub(crate) use session::read_roots;` from `orchestrator.rs`, since `mod session` is private (`orchestrator.rs:49`). `run_session` (`orchestrator/session.rs:165-183`) fills the registration, and `sandbox_for` (`orchestrator.rs:641-680`) reads the task's contract to compute the sandbox's.
@@ -50,13 +51,15 @@ Out of scope:
   2. A path outside `cwd` inside a read root is the branch's.
   3. Anything else, and every other tool or write outside `cwd`, stays `path_outside_workspace` (`:930`).
 - **The protected paths per root.** The team's `protected_paths` (the defaults at `team_rules.rs:7` and the team's own), plus `.git/**`, read relative to the root. A member's `.git/config` can hold a token in a remote's address, and no session needs git's internals through `Read`.
-- **A single path.** `Read` of a file, and `LS` of a folder, is made relative to its root. It is refused when `check_protected_paths` (`paths.rs:69`) holds the root-relative path, with `path_protected: <name>: <relative path> is protected, and no tool reads or writes it (5.12)`, the code being `refusal.rs:364`'s. The root's name is only in the message: `evaluate_tool_call` (`permissions.rs:383`) is given the root-relative path, so `.env` still matches its glob.
+- **A single path.** `Read` of a file, and `LS` of a folder, is made relative to its root. An `LS` of the root's top, whose relative path is empty, is refused with the search's "its top" wording below. It is refused when `check_protected_paths` (`paths.rs:69`) holds the root-relative path, with `path_protected: <name>: <relative path> is protected, and no tool reads or writes it (5.12)`, the code being `refusal.rs:364`'s. The root's name is only in the message: `evaluate_tool_call` (`permissions.rs:383`) is given the root-relative path, so `.env` still matches its glob.
 - **A search** (`Grep`, `Glob`) in a root is refused, with the same code and "<name>: searching <relative dir or 'its top'> could reach protected files", when its root-relative directory:
   - is empty, the root's top, where `.env`, `.git` and `.catervas/local` sit
   - or holds, or is held by, the literal folder part of any protected glob, before its first wildcard: `.catervas/local` for `.catervas/local/**`, `.git` for `.git/**`. This is tested with `reaches_the_folder(<dir>/**, <folder part>)` (`paths.rs:141`) in either direction.
 
   A protected glob with no literal folder part (`**/*.pem`, `**/*.key`) is guarded by layer two.
-- **Layer two: Claude Code's own deny rules.** `settings_json` (`claude.rs:880`) gains, for each read root and each protected glob, `Read(//<root path without its leading />/<glob>)`, Claude Code's absolute form, which Claude Code holds its search tools to as well (`claude.rs:878-879`). `claude_args` (`:636`) therefore builds the settings with `spec.read_roots` and the protected globs in hand. A glob its `Read` rule cannot express is refused as today (`:866-875`).
+- **Layer two: Claude Code's own deny rules.** `settings_json` (`claude.rs:880`) gains, for each read root and each of its protected globs (the team's and `.git/**`, which `settings_json` adds per root itself), `Read(//<root path without its leading />/<glob>)`. That is Claude Code's absolute form, and Claude Code holds its search tools to it as well (`claude.rs:878-879`).
+  - **A rule is left out when its literal folder holds `cwd`.** The literal folder is the root's path joined with the glob's part before its first wildcard. So the `project` root gives no `Read(//<project>/.catervas/local/**)`, which would cover every task's own worktree (`<project>/.catervas/local/worktrees/CTV-<n>`). Claude Code checks its deny rules whatever the hook answers, so such a rule would refuse the session its own files. Layer one guards `.catervas/local` and `.git` in a root.
+  - `claude_args` (`:636`) builds the settings with `spec.read_roots`, `spec.cwd` and the protected globs in hand. A glob its `Read` rule cannot express is refused as today (`:866-875`).
 
 ### Claude, the sandbox and the prompt
 
@@ -77,7 +80,8 @@ Out of scope:
   - A missing member is `<name> (not found)`.
   - `<own sentence>` is `Your task works in <repo>. ` for a member, `Your task works in the project's own folder. ` for a task with no `repo`, and nothing for a session with no task.
   - `session_spec_without` (`orchestrator/session.rs:1138-1160`) fills it from `read_repos`, in `repos.yaml` order, all members.
-  - `mounted` is true only for a session with a task and a sandbox, under Docker (the project's sandbox setting is not `none`).
+  - `mounted` is true only for a session with a task and a sandbox, under Docker: `ProjectFiles::read_settings()`'s `LocalSettings.sandbox` is not `Sandbox::None` (written by `cli/src/setup.rs:109-115`).
+  - A member whose path was left out of the roots (above) is `<name> (not readable here)`, and its `MemberLine.readable` is false.
   - The line is left out where `read_roots` would give none (the Marketing Specialist, a private-folder task, a one-repo project, an unreadable `repos.yaml`).
 
 ## File map
@@ -109,6 +113,7 @@ Consumes:
 - `SandboxFactory`, `DockerSandbox`, `HostSandboxFactory`, `CountingSandboxFactory`
 - `PromptInput`, `rules_section`, `Inputs::full`
 - `TestDaemon::new` (`daemon/fixtures.rs:46`)
+- `ProjectFiles::read_settings`, `LocalSettings`, `Sandbox`
 
 Produces:
 
@@ -122,7 +127,7 @@ pub(crate) fn read_roots(files: &ProjectFiles, contract: Option<&TaskContract>, 
 // SandboxFactory::create gains `reads: &[(String, PathBuf)]`
 pub(crate) fn run_args(name: &str, worktree: &Path, reads: &[(String, PathBuf)], network: bool, user: &str, labels: &[(String, String)], image: &str) -> Result<Vec<String>, SandboxError>;   // sandbox/docker.rs
 // catervas_runtime::prompt
-pub struct MemberLine { pub name: String, pub path: Option<String>, pub mounted: bool, pub own: bool }   // path None: not found
+pub struct MemberLine { pub name: String, pub path: Option<String>, pub mounted: bool, pub own: bool, pub readable: bool }   // path None: not found
 pub enum OwnRepo { Member(String), ProjectFolder }
 // PromptInput gains `pub members: &'a [MemberLine]`, `pub own_repo: Option<OwnRepo>` (None: no task)
 ```
@@ -143,7 +148,7 @@ Files: `daemon.rs`; `orchestrator/session.rs` and `orchestrator.rs`; `hooks.rs`;
   - `Read` of `<infra>/.env`, `<infra>/.git/config` and `<project>/.catervas/local/catervas.db`, each with `path_protected`
   - `Grep` with `path: <infra>`, and with `path: <project>` (the top)
   - `Grep` with `path: <project>/.catervas` (it holds `.catervas/local`)
-  - `LS` of `<infra>/.git`
+  - `LS` of `<infra>/.git`, and `LS` of `<infra>` (its top)
 
   RED.
 - `a_session_writes_only_its_own`. Each stays `path_outside_workspace`:
@@ -161,6 +166,7 @@ Files: `daemon.rs`; `orchestrator/session.rs` and `orchestrator.rs`; `hooks.rs`;
   - with `infra` moved away, the Developer's: `[project]`
   - with `repos.yaml` made unreadable: `[]`
   - in a one-repo project: `[]` for every role
+  - with `infra` at a path holding `(`, or `*`, the Developer's: `[project]`
 
   RED.
 
@@ -171,8 +177,8 @@ Files: `daemon.rs`; `orchestrator/session.rs` and `orchestrator.rs`; `hooks.rs`;
 Files: `session.rs`; `claude.rs`; every `SessionSpec` literal; `crates/cli/tests/live_claude.rs`.
 
 - `adds_each_read_root_as_a_directory` (`claude.rs`): a spec with roots `/r/a` and `/r/b` gives `--add-dir /r/a` and `--add-dir /r/b`, in order, where `--plugin-dir` goes; none gives no `--add-dir`. RED.
-- `denies_each_roots_protected_files` (`claude.rs`): with protected `[.env, .git/**]` and root `/r/a`, the settings' deny list holds `Read(.env)`, `Read(.git/**)`, `Read(//r/a/.env)` and `Read(//r/a/.git/**)`: Claude Code's absolute form, `//` followed by the path without its leading `/`. RED.
-- `a_live_session_reads_a_root` (`live_claude.rs`, ignored as the file's other live tests are): a session given a root reads a file in it, and is refused `<root>/.env`. RED.
+- `denies_each_roots_protected_files` (`claude.rs`): with the team's protected `[.env, .catervas/local/**, **/*.pem]`, root `/r/a` and `cwd` `/p/.catervas/local/worktrees/CTV-1`, the deny list holds the relative `Read(.env)`, `Read(.catervas/local/**)` and `Read(**/*.pem)`, and for the root `Read(//r/a/.env)`, `Read(//r/a/.catervas/local/**)`, `Read(//r/a/**/*.pem)` and `Read(//r/a/.git/**)`. With root `/p` and the same `cwd`, there is no `Read(//p/.catervas/local/**)`, and `Read(//p/.env)` is there. RED.
+- `a_live_session_reads_a_root` (`live_claude.rs`, ignored as the file's other live tests are): a session whose `cwd` is a worktree under a project folder's `.catervas/local/worktrees/`, given the project folder and a member as roots, reads a file in the member and a file in its own worktree, and is refused `<member>/.env`. RED.
 
 - [ ] `feat(runtime): tell Claude Code which other folders a session reads`
 
