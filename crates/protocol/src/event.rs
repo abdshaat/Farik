@@ -2194,6 +2194,15 @@ mod tests {
     }
 
     #[test]
+    fn folder_doc_paths_take_html() {
+        let mut wire = an_event_wire(EventKind::FolderDocWritten);
+        wire["body"]["path"] = json!("docs/catervas/product/overview.html");
+        assert!(event_from_value(&wire).is_ok());
+        wire["body"]["path"] = json!("docs/catervas/product/overview.txt");
+        assert!(!refusal(&wire).is_empty());
+    }
+
+    #[test]
     fn folder_doc_bodies_hold_their_bounds() {
         let kinds = [
             EventKind::FolderDocWritten,

@@ -227,7 +227,7 @@ Tests in `tools/folders.rs`'s `mod tests` and `crates/protocol`'s event tests:
 - `proposes_an_html_spec_with_its_agent_version` — in an HTML team with no spec, the proposal's approval writes `spec.html` and `spec.agent.html`.
 - `folder_doc_paths_take_html` (protocol) — `folder_doc.written` with `…/overview.html` reads; one with `…/overview.txt` is refused.
 
-- [ ] `feat(runtime): catervas_write_folder_doc writes the team's format`
+- [x] `feat(runtime): catervas_write_folder_doc writes the team's format`
 
 ### Task 5: fixed documents found in either format
 

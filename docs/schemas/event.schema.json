@@ -1720,7 +1720,7 @@
     "folderDocPath": {
       "type": "string",
       "maxLength": 512,
-      "pattern": "^docs/catervas/[^/]+/.+\\.md$",
+      "pattern": "^docs/catervas/[^/]+/.+\\.(md|html)$",
       "description": "A document under a role's folder (docs/SPEC.md 5.17), repository-relative."
     },
     "folderDocText": { "type": "string", "minLength": 1, "maxLength": 262144 },

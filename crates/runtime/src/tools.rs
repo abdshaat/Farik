@@ -262,7 +262,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<folders::WriteFolderDocInput>(
             "catervas_write_folder_doc",
             Read,
-            "At a sprint planning, review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. The product's spec.md and roadmap.md are proposed to the owner at the sprint review, with agent_text (their .agent.md version) and summary (what changed and why, for the owner), and wait for the owner's approval.",
+            "At a sprint planning, review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. Name a document with its extension: write a new one in the format the Team rules say, and a document that is already there in the format it has. The product's spec and roadmap are proposed to the owner at the sprint review, with agent_text (their agent version) and summary (what changed and why, for the owner), and wait for the owner's approval.",
         ),
         tool::<channel::PostMessageInput>(
             "catervas_post_message",

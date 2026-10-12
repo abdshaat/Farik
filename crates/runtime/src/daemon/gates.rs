@@ -3194,7 +3194,7 @@ pub(super) mod tests {
                 }),
                 json!({
                     "kind": "integration", "folder_change": 2, "agent_id": "sm",
-                    "title": "delivery/cadence.md by Sol",
+                    "title": "Sprint rhythm by Sol",
                     "line": "Sol wrote it; it waits for you to add it"
                 }),
             ]
