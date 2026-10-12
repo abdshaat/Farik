@@ -114,7 +114,7 @@
           "description": "The format the team writes new documents in. Left out, applying the template keeps the project's answer."
         }
       },
-      "description": "Three of the four answers setup asks: what the agents may do, the plan check, and what happens to accepted work; and whether the team plans in sprints."
+      "description": "Three of the four answers setup asks: what the agents may do, the plan check, and what happens to accepted work; whether the team plans in sprints; and the format its documents are written in."
     },
     "templateBudgets": {
       "type": "object",

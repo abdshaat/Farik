@@ -1075,15 +1075,11 @@ mod tests {
         let template = template_of(&wire);
         assert_eq!(template["policy"]["document_format"], json!("markdown"));
 
-        let project = a_full_team_wire();
-        let mut with = template_with(&[
-            joining("ada", "Ada", "product_manager"),
-            joining("linus", "Linus", "software_developer"),
-        ]);
-        with["policy"]["document_format"] = json!("markdown");
+        let mut project = a_full_team_wire();
         assert_eq!(
-            applied(&project, &with, &[]).team.document_format(),
-            DocumentFormat::Markdown
+            applied(&project, &template, &[]).team.document_format(),
+            DocumentFormat::Markdown,
+            "the template made from a Markdown team makes a Markdown team"
         );
         let without = template_with(&[
             joining("ada", "Ada", "product_manager"),
@@ -1092,6 +1088,12 @@ mod tests {
         assert_eq!(
             applied(&project, &without, &[]).team.policy.document_format,
             None
+        );
+        project["policy"]["document_format"] = json!("markdown");
+        assert_eq!(
+            applied(&project, &without, &[]).team.document_format(),
+            DocumentFormat::Markdown,
+            "a template without the key keeps the project's answer"
         );
     }
 

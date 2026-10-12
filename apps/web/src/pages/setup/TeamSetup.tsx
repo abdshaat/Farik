@@ -212,8 +212,13 @@ function teamDraftOf(
 		start,
 	};
 	if ((start === "saved" || start === "builtin") && template) {
-		const { permissions, judgment, integration, planInSprints } =
-			template.policy;
+		const {
+			permissions,
+			judgment,
+			integration,
+			planInSprints,
+			documentFormat,
+		} = template.policy;
 		const { dailyUsd: _, ...budgets } = proposed.team.budgets;
 		return {
 			...base,
@@ -227,6 +232,7 @@ function teamDraftOf(
 					integration,
 					// A saved team without the answer plans in sprints, as any new team.
 					...(planInSprints !== undefined && { planInSprints }),
+					...(documentFormat !== undefined && { documentFormat }),
 				},
 				budgets:
 					template.budgets.dailyUsd === undefined
