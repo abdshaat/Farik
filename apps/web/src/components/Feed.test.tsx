@@ -126,10 +126,13 @@ describe("Feed", () => {
 		feed.change({ rows: rowsOf(11) }, { scrollHeight: 2100 });
 		expect(offer()).not.toBeNull();
 
-		scrollTo(feed.box(), 1600);
+		// 2100 - 1551 - 500 is 49: one pixel more than counts as the bottom.
+		scrollTo(feed.box(), 1551);
+		expect(offer()).not.toBeNull();
+		scrollTo(feed.box(), 1552);
 		expect(offer()).toBeNull();
 
-		// One pixel past the 48 that count as the bottom.
+		// Back up by that pixel, the user has left the bottom again.
 		scrollTo(feed.box(), 1551);
 		expect(offer()).toBeNull();
 		feed.change({ rows: rowsOf(12) }, { scrollHeight: 2200 });
