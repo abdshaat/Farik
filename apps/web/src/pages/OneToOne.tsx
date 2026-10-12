@@ -7,12 +7,13 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useEvents, useQuery } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
 import { Feed } from "../components/Feed.tsx";
+import { Markdown } from "../components/Markdown.tsx";
 import { sendOnEnter } from "../components/MentionBox.tsx";
 import { renderMessageText } from "../components/MessageText.tsx";
 import { useWide } from "../shell/Shell.tsx";
@@ -62,6 +63,15 @@ export const authorName = (author: string, agents: Agent[]) =>
 	author === "human"
 		? t("channelYou")
 		: (agents.find((a) => a.id === author)?.displayName ?? author);
+
+/** A task id in an agent's reply becomes a link to its task; code and existing links stay as written. */
+// ponytail: `~~~` fences and indented code are not skipped; a full Markdown parse if that ever bites.
+function linkTasks(text: string): string {
+	return text.replace(
+		/(```[\s\S]*?```|`[^`\n]*`|\[[^\]]*\]\([^)]*\))|\bCTV-[0-9]{1,6}\b/g,
+		(all, keep) => (keep ? all : `[${all}](/tasks/${all})`),
+	);
+}
 
 const PAGE = 100;
 /** The most a chat message holds, in characters, as the runtime counts them (chat.rs). */
@@ -323,6 +333,7 @@ function Row({
 	/** What the owner can do about this reply: it sits inside "What I heard", else under the text. */
 	action?: ReactNode;
 }) {
+	const navigate = useNavigate();
 	const mine = message.author === "human";
 	const agent = agents.find((a) => a.id === message.author);
 	return (
@@ -348,9 +359,35 @@ function Row({
 						{when(message.at)}
 					</time>
 				</p>
-				<p className={`${channel.text} ${styles.lines}`}>
-					{renderMessageText(message.text, agents, [])}
-				</p>
+				{mine ? (
+					<p className={`${channel.text} ${styles.lines}`}>
+						{renderMessageText(message.text, agents, [])}
+					</p>
+				) : (
+					// biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: the links inside are the interactive elements and keep their keyboard behaviour
+					<div
+						className={channel.text}
+						onClick={(event) => {
+							if (
+								event.button !== 0 ||
+								event.ctrlKey ||
+								event.metaKey ||
+								event.shiftKey ||
+								event.altKey
+							)
+								return;
+							const href = (event.target as Element)
+								.closest("a")
+								?.getAttribute("href");
+							if (href && /^\/tasks\/CTV-[0-9]{1,6}$/.test(href)) {
+								event.preventDefault();
+								navigate(href);
+							}
+						}}
+					>
+						<Markdown text={linkTasks(message.text)} />
+					</div>
+				)}
 				{message.heard ? <Heard heard={message.heard}>{action}</Heard> : action}
 				{message.request && (
 					<ProposalBox

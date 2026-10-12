@@ -74,7 +74,7 @@ Order: write `renders an agent's reply as Markdown`, watch it fail, render agent
 - `renders a table` (`Markdown.test.tsx`) — `"| a | b |\n|---|---|\n| 1 | 2 |"` shows a `table` with two `columnheader`s.
 - the existing `renders_agent_text_as_text` stays green (markdown-it escapes it); `passes_axe_on_the_chats`'s open chat gets one more message, `chat("mira", "Short answer.\n\n- **One**\n- Two\n\nCTV-12 is next.")`, and stays green; every other existing test stays green.
 
-- [ ] `fix(web): show an agent's chat reply as Markdown`
+- [x] `fix(web): show an agent's chat reply as Markdown`
 
 ### Task 3: the spec
 
