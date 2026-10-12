@@ -127,4 +127,10 @@ fn says_whether_a_member_is_present() {
     std::fs::create_dir_all(&app).expect("a plain folder at its path");
     assert!(!repo_present(&app));
     assert!(!repo_present(Path::new("/nowhere/at/all")));
+
+    // A plain folder inside another repository is not a repository's top folder.
+    let outer = home.repository("outer");
+    std::fs::create_dir_all(outer.join("inner")).expect("a plain folder inside it");
+    assert!(repo_present(&outer));
+    assert!(!repo_present(&outer.join("inner")));
 }
