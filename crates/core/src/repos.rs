@@ -356,6 +356,19 @@ mod tests {
             "/home/me/app/web is inside /home/me/app, another of the project's repositories"
         );
 
+        let holding = with_entries(&[
+            entry("app", "/home/me/app/web"),
+            entry("infra", "/home/me/app"),
+        ]);
+        assert_eq!(
+            refusals(&holding),
+            [(
+                "/repos/1/path".to_string(),
+                "/home/me/app/web is inside /home/me/app, another of the project's repositories"
+                    .to_string()
+            )]
+        );
+
         let near = with_entries(&[
             entry("app", "/home/me/app"),
             entry("apples", "/home/me/apples"),
@@ -470,6 +483,7 @@ mod tests {
     fn is_within_by_segment() {
         assert!(is_within("/a/b", "/a"));
         assert!(is_within("/a", "/a"));
+        assert!(is_within("/a/", "/a"));
         assert!(!is_within("/ab", "/a"));
         assert!(is_within("C:\\a\\b", "C:\\a"));
     }
