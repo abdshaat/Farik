@@ -52,6 +52,21 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     )
 });
 
+/// The ready-made teams Catervas comes with, as `(slug, template yaml)` in the order a person is
+/// offered them. Each is a team template (`docs/schemas/team-template.schema.json`) embedded like a
+/// role's files; the runtime parses and checks them where it reads a person's saved templates.
+pub const BUILTIN_TEAMS: [(&str, &str); 3] = [
+    (
+        "software-product",
+        include_str!("../teams/software-product.yaml"),
+    ),
+    ("online-store", include_str!("../teams/online-store.yaml")),
+    (
+        "financial-analysis",
+        include_str!("../teams/financial-analysis.yaml"),
+    ),
+];
+
 /// One skill a role ships with, in the Agent Skills format: the frontmatter's `name` and
 /// `description`, and the text after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,7 +390,8 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        RoleDefinition, RoleError, SCHEMA_JSON, load_kit, load_role, parse_role, yaml_options,
+        BUILTIN_TEAMS, RoleDefinition, RoleError, SCHEMA_JSON, load_kit, load_role, parse_role,
+        yaml_options,
     };
 
     const PM_YAML: &str = include_str!("../roles/product_manager/role.yaml");
@@ -602,6 +618,71 @@ mod tests {
         assert!(!definition.skills[0].description.trim().is_empty());
         assert!(!definition.skills[0].body.trim().is_empty());
         assert!(definition.system_prompt.contains("untrusted"));
+    }
+
+    #[test]
+    fn ships_three_teams_with_their_slugs() {
+        let named: Vec<(&str, String)> = BUILTIN_TEAMS
+            .iter()
+            .map(|(slug, yaml)| {
+                let value: Value = serde_saphyr::from_str_with_options(yaml, yaml_options())
+                    .expect("a team file is YAML");
+                (*slug, value["name"].as_str().expect("a name").to_string())
+            })
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("software-product", "Software product".to_string()),
+                ("online-store", "Online store".to_string()),
+                ("financial-analysis", "Financial analysis".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn holds_every_shipped_team_to_the_template_schema() {
+        for (slug, yaml) in BUILTIN_TEAMS {
+            let value: Value = serde_saphyr::from_str_with_options(yaml, yaml_options())
+                .unwrap_or_else(|error| panic!("{slug} is YAML: {error}"));
+            if let Err(errors) = catervas_core::team::validate_template(&value) {
+                panic!("{slug} breaks the template schema: {errors:?}");
+            }
+        }
+        let analysis: Value =
+            serde_saphyr::from_str_with_options(BUILTIN_TEAMS[2].1, yaml_options()).expect("YAML");
+        let roles: Vec<&str> = analysis["agents"]
+            .as_array()
+            .expect("agents")
+            .iter()
+            .map(|agent| agent["role"].as_str().expect("a role"))
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                "product_manager",
+                "finance_specialist",
+                "finance_specialist",
+                "finance_specialist"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_finance_specialist_keeps_its_guards() {
+        let definition = loaded(Role::FinanceSpecialist);
+        assert!(
+            definition
+                .mandate
+                .contains("what it owns, spends, earns and has at stake")
+        );
+        assert!(
+            definition
+                .mandate
+                .contains("not a tax filing, statutory accounts or financial advice")
+        );
+        assert!(definition.mandate.contains("Every number names its source"));
+        assert!(definition.system_prompt.contains("has at stake"));
     }
 
     #[test]
@@ -1417,12 +1498,17 @@ mod tests {
             (
                 Role::ProductManager,
                 "writing-task-contracts",
-                "A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.",
+                "A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself, reviewed in a fresh session that knows nothing of the work, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.",
+            ),
+            (
+                Role::ProductManager,
+                "writing-task-contracts",
+                "Nobody reviews their own work but you, in a fresh session, for your own docs tasks (below).",
             ),
             (
                 Role::ScrumMaster,
                 "keeping-work-flowing",
-                "Nobody reviews their own work. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks.",
+                "Nobody reviews their own work, except a Product Manager with no Architect or Scrum Master on its team, whose own docs tasks it reviews in a fresh session. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks.",
             ),
         ] {
             let definition = loaded(role);

@@ -852,6 +852,20 @@ const READ_SELLER_REPLIES_TOOL: &str = "catervas_read_seller_replies";
 /// The tool that writes a document of the caller's folder at a sprint planning, review or retro.
 const WRITE_FOLDER_DOC_TOOL: &str = "catervas_write_folder_doc";
 
+/// The tool that replaces the agent's notebook.
+const WRITE_MEMORY_TOOL: &str = "catervas_write_memory";
+
+/// Whether `ask` is a review session whose agent is the task's assignee (a Product Manager
+/// reviewing its own docs task, or accepting one): a fresh session that knows nothing of the work
+/// but what the reviewer is shown, so it is given no memory, no word from the human and no
+/// notebook tool (a note written from an empty notebook would replace the real one).
+fn reviews_its_own_task(ask: &SessionAsk<'_>) -> bool {
+    ask.purpose == SessionPurpose::Verify
+        && ask
+            .contract
+            .is_some_and(|contract| contract.assignee.as_deref() == Some(ask.agent.id.as_str()))
+}
+
 /// The Catervas tools `ask`'s session is offered, before its tiers are applied.
 fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<CatervasTool> {
     // The page check is the Designer's, in a session that has the preview open (step 12).
@@ -872,6 +886,7 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                 || !writes_the_project(tool.name, tool.tier)
         })
         .filter(|tool| checks_pages || tool.name != CHECK_PAGE_TOOL)
+        .filter(|tool| tool.name != WRITE_MEMORY_TOOL || !reviews_its_own_task(ask))
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
         // A marketing plan is proposed by the Marketing Specialist, working on a task (ADR 0042).
@@ -1005,6 +1020,9 @@ fn human_of(
     ask: &SessionAsk<'_>,
     interviewing: bool,
 ) -> Result<Option<String>, OrchestratorError> {
+    if reviews_its_own_task(ask) {
+        return Ok(None);
+    }
     Ok(match ask.contract {
         Some(contract) => {
             let history = deps.tools.log.read(&EventQuery {
@@ -1081,7 +1099,11 @@ fn session_spec_without(
     };
     // A project that was never scanned, or whose scan cannot be read, is given none.
     let project_scan = files.read_project_scan().ok();
-    let memory = files.read_memory(&ask.agent.id)?;
+    let memory = if reviews_its_own_task(ask) {
+        String::new()
+    } else {
+        files.read_memory(&ask.agent.id)?
+    };
     let criteria = files.read_criteria()?;
     let tiers: BTreeSet<PermissionTier> =
         ask.agent.tiers(&team.permissions()).into_iter().collect();
@@ -3194,6 +3216,113 @@ mod tests {
         for line in ["FILLER-4", "Noted, I will look.", "NEWEST-LINE"] {
             assert!(!implement.contains(line), "{line} in {implement}");
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_review_of_ones_own_task_starts_fresh() {
+        let harness = Harness::new("session-self-review", |_| {});
+        harness.file("CTV-1", "verifying", |wire| {
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["assignee"] = json!("pm");
+            wire["reviewer"] = json!("pm");
+        });
+        harness.file("CTV-2", "verifying", |wire| {
+            wire["assignee"] = json!("dev-a");
+            wire["reviewer"] = json!("pm");
+        });
+        let question = harness.project.record(
+            "CTV-1",
+            "question.asked",
+            &json!({ "question": "Which way?", "asked_by": "pm" }),
+        );
+        harness.project.record(
+            "CTV-1",
+            "question.answered",
+            &json!({
+                "question_id": question.envelope.seq,
+                "answer": "Answer for CTV-1.",
+                "answered_by": "human"
+            }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        deps.tools
+            .files
+            .write_memory(
+                &"pm".parse().expect("an agent id"),
+                "MIRA-REMEMBERS-THE-DRAFT",
+            )
+            .expect("the memory is written");
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = agent(&team, "pm");
+        let read = |task: &str| {
+            deps.tools
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the contract")
+        };
+        let (own, others) = (read("CTV-1"), read("CTV-2"));
+        let writes_memory = |spec: &crate::session::SessionSpec| {
+            spec.catervas_tools
+                .iter()
+                .any(|tool| tool == "catervas_write_memory")
+        };
+
+        let review = session_spec(
+            deps,
+            &team,
+            &asked(deps, pm, SessionPurpose::Verify, Some(&own)),
+        )
+        .expect("the spec");
+        assert!(
+            !review.system_prompt.contains("MIRA-REMEMBERS-THE-DRAFT"),
+            "{}",
+            review.system_prompt
+        );
+        assert!(
+            review.system_prompt.contains("0 of "),
+            "{}",
+            review.system_prompt
+        );
+        assert!(
+            !review.system_prompt.contains("## From the human"),
+            "{}",
+            review.system_prompt
+        );
+        assert!(!writes_memory(&review), "{:?}", review.catervas_tools);
+
+        let work = session_spec(
+            deps,
+            &team,
+            &asked(deps, pm, SessionPurpose::Implement, Some(&own)),
+        )
+        .expect("the spec");
+        assert!(
+            work.system_prompt.contains("MIRA-REMEMBERS-THE-DRAFT"),
+            "{}",
+            work.system_prompt
+        );
+        assert!(
+            work.system_prompt.contains("Answer for CTV-1."),
+            "{}",
+            work.system_prompt
+        );
+
+        // A reviewer who is not the assignee keeps its memory and its notebook tool.
+        let other = session_spec(
+            deps,
+            &team,
+            &asked(deps, pm, SessionPurpose::Verify, Some(&others)),
+        )
+        .expect("the spec");
+        assert!(
+            other.system_prompt.contains("MIRA-REMEMBERS-THE-DRAFT"),
+            "{}",
+            other.system_prompt
+        );
+        assert!(writes_memory(&other), "{:?}", other.catervas_tools);
     }
 
     #[test]

@@ -32,6 +32,9 @@ pub fn a_ready_context() -> ReadinessContext {
             (Role::Architect, 1),
             (Role::SoftwareDeveloper, 1),
             (Role::MarketingSpecialist, 1),
+            (Role::FinanceSpecialist, 1),
+            (Role::ProcurementSpecialist, 1),
+            (Role::UiUxDesigner, 1),
         ]
         .into_iter()
         .collect(),

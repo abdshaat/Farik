@@ -3488,6 +3488,43 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_product_manager_assigns_its_own_docs_task_to_itself() {
+        let team = a_team(|wire| {
+            wire["agents"] = json!([
+                an_agent_wire("mira", "product_manager"),
+                an_agent_wire("kai", "marketing_specialist"),
+            ]);
+        });
+        let project = Project::new("assign-own-docs", team, at(12));
+        project.file("CTV-1", |wire| {
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+        project.created("CTV-1", "ready");
+        let outcome = project.ask(
+            &a_request(
+                "CTV-1",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("mira"),
+            ),
+            &assigning("mira", "mira"),
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let row = project
+            .projections
+            .task(&"CTV-1".parse().expect("a task id"))
+            .expect("the board reads")
+            .expect("on the board");
+        assert_eq!(row.assignee_id.as_deref(), Some("mira"));
+        assert_eq!(row.reviewer_id.as_deref(), Some("mira"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn assigns_a_developer_without_asking_whether_the_designer_has_its_browser() {
         // `UnaskedPreviews` panics when asked whether a preview can run: the answer is the
         // Designer's alone, and asking Docker for it would hold up the lock every transition's

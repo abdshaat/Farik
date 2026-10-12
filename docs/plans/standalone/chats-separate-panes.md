@@ -24,7 +24,7 @@ The founder, 2026-10-12: "The chat structure is not UX friendly. When I enter th
 - On a phone (`!useWide()`) a box keeps one row: Channel's "Enter sends" line and "To ask for work…" hint, and OneToOne's label and "Enter sends" line, take `channel.hidden` (visually hidden, still each box's description or label; Channel's label already does). Wide, nothing changes.
 - A one-to-one pages back as the channel does: `more` is set from the first answer only (`messages.length === PAGE`), not from each later re-ask of the newest page (`round`); "Show earlier messages" and the top ask `chat.messages { agentId, beforeSeq: <oldest seq>, limit: 100 }`, merged by `bySeq`, `more` from its length; a failure shows `channelEarlierFailed`. Rejected: no paging (a chat past 100 messages would hide its start for good).
 - Thresholds: 48 px for both the top and the bottom (one row's room; a hand that stops short still counts).
-- Spec revision 0.103 (2026-10-12; the next free number when `main` has moved at merge time), a header sentence at `docs/SPEC.md:3` and F8's sentence "on a phone the list is one row of faces above the open chat" extended with what Goal says, its words final in Task 5. `docs/design/web-ui.md`'s Channel row gains one sentence.
+- Spec revision 0.104 (2026-10-12; 0.103 when planned, renumbered at merge because `main`'s predefined teams took 0.103), a header sentence at `docs/SPEC.md:3` and F8's sentence "on a phone the list is one row of faces above the open chat" extended with what Goal says, its words final in Task 5. `docs/design/web-ui.md`'s Channel row gains one sentence.
 
 ## File map
 
@@ -151,7 +151,7 @@ One test, `the chats open at the newest message, each pane scrolling on its own,
 
 ### Task 6: the spec and the design say so
 
-Files: `docs/SPEC.md` (0.103 header sentence; F8), `docs/design/web-ui.md` (Channel row). F8's new words, after "above the open chat": "The page fills the window and the list and the open chat scroll apart: the chat keeps its title at its top and its box at its bottom (on a phone the box's hints are read by screen readers alone). A chat opens at its newest message and follows new ones while the user is at its bottom; otherwise it stays where it is and shows \"New messages\", which goes to the newest, and the user's own message always goes there. Reaching the top reads the page before, as \"Show earlier messages\" above the first message does, the channel's and a one-to-one's alike, keeping what the user sees in place; a failed read stops until the button is pressed. Below 1440 pixels wide the Team chat's meetings fold under its intro (added in 0.103)."
+Files: `docs/SPEC.md` (0.104 header sentence; F8), `docs/design/web-ui.md` (Channel row). F8's new words, after "above the open chat": "The page fills the window and the list and the open chat scroll apart: the chat keeps its title at its top and its box at its bottom (on a phone the box's hints are read by screen readers alone). A chat opens at its newest message and follows new ones while the user is at its bottom; otherwise it stays where it is and shows \"New messages\", which goes to the newest, and the user's own message always goes there. Reaching the top reads the page before, as \"Show earlier messages\" above the first message does, the channel's and a one-to-one's alike, keeping what the user sees in place; a failed read stops until the button is pressed. Below 1440 pixels wide the Team chat's meetings fold under its intro (added in 0.103)."
 
 Tests: none (docs).
 

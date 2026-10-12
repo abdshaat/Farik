@@ -263,6 +263,20 @@ impl TestProject {
         run(&self.context(agent, task), name, input)
     }
 
+    /// Calls one tool as `agent` on `task` from a session for `purpose`, with no executor.
+    pub(crate) fn call_in(
+        &self,
+        purpose: SessionPurpose,
+        agent: &str,
+        task: Option<&str>,
+        name: &str,
+        input: Value,
+    ) -> Result<Value, ToolError> {
+        let mut context = self.context(agent, task);
+        context.purpose = purpose;
+        run(&context, name, input)
+    }
+
     /// Calls one tool as `agent` on `task` with `executor`.
     pub(crate) fn call_with(
         &self,

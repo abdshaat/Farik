@@ -628,9 +628,13 @@ mod tests {
             ]
         );
 
-        // A Product Manager and one Developer: nobody to check anyone's notes.
+        // A Product Manager and one Developer: the Product Manager's task alone, which it reviews
+        // itself in a fresh session; one Developer cannot review its own.
         let two = a_team(&[("pm", "product_manager"), ("dev", "software_developer")]);
-        assert!(roles(&two, Project::Existing, true).is_empty());
+        assert_eq!(
+            roles(&two, Project::Existing, true),
+            [(ProductManager, ProductManager)]
+        );
 
         // A Designer whose browser is not ready gets no task; no one else's row changes.
         assert_eq!(
@@ -646,8 +650,8 @@ mod tests {
             ]
         );
 
-        // With no Product Manager row (no Architect, no Scrum Master, two Developers), the
-        // Marketing Specialist's goes too.
+        // With no Architect and no Scrum Master the Product Manager reviews its own task, so the
+        // Marketing Specialist's, which it reviews, is filed too, beside the two Developers'.
         let no_writers = a_team(&[
             ("pm", "product_manager"),
             ("dev-a", "software_developer"),
@@ -655,8 +659,14 @@ mod tests {
             ("kai", "marketing_specialist"),
         ]);
         let rows = roles(&no_writers, Project::Existing, true);
-        assert_eq!(rows, [(SoftwareDeveloper, SoftwareDeveloper)]);
-        assert!(rows.iter().all(|(role, _)| *role != MarketingSpecialist));
+        assert_eq!(
+            rows,
+            [
+                (ProductManager, ProductManager),
+                (SoftwareDeveloper, SoftwareDeveloper),
+                (MarketingSpecialist, ProductManager)
+            ]
+        );
     }
 
     /// A template as the store files it: with an id and the status its place in the test asks for.

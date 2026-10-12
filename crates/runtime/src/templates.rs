@@ -36,6 +36,11 @@ pub enum TemplateError {
         /// Its slug.
         slug: String,
     },
+    /// The name is a ready-made team's, which a saved team may not take.
+    Builtin {
+        /// The ready-made team's name.
+        name: String,
+    },
     /// The operating system refused.
     Io {
         /// What it said.
@@ -56,6 +61,10 @@ impl fmt::Display for TemplateError {
             ),
             Self::NotFound { slug } => write!(formatter, "There is no saved team {slug}."),
             Self::Unreadable { slug } => write!(formatter, "The saved team {slug} cannot be read."),
+            Self::Builtin { name } => write!(
+                formatter,
+                "Catervas comes with a team called {name}. Choose another name."
+            ),
             Self::Io { detail } => write!(formatter, "Saved teams could not be used: {detail}"),
         }
     }
@@ -123,6 +132,10 @@ impl Templates {
             if !is_slug(slug) {
                 continue;
             }
+            if is_builtin(slug) {
+                listing.unreadable.push(slug.to_string());
+                continue;
+            }
             match self.read(slug) {
                 Ok(template) => listing.templates.push((slug.to_string(), template)),
                 Err(TemplateError::Unreadable { slug }) => listing.unreadable.push(slug),
@@ -178,6 +191,7 @@ impl Templates {
     /// `Io` when the folder or the file cannot be written.
     pub fn save(&self, template: &TeamTemplate, replace: bool) -> Result<String, TemplateError> {
         let slug = template_slug(&template.name).ok_or(TemplateError::Name)?;
+        refuse_builtin(&slug)?;
         if !replace {
             self.refuse_taken(&slug, &template.name)?;
         }
@@ -196,6 +210,7 @@ impl Templates {
         wire["name"] = name.trim().into();
         let renamed = validate_template(&wire).map_err(TemplateError::from)?;
         let new_slug = template_slug(&renamed.name).ok_or(TemplateError::Name)?;
+        refuse_builtin(&new_slug)?;
         if new_slug != slug {
             self.refuse_taken(&new_slug, &renamed.name)?;
         }
@@ -268,6 +283,55 @@ impl Templates {
     }
 }
 
+/// Every ready-made team, in the order the page lists them. They ship with Catervas and are
+/// checked by a test, so one that fails to parse is a bug in the build.
+#[must_use]
+pub fn builtins() -> Vec<(String, TeamTemplate)> {
+    catervas_roles::BUILTIN_TEAMS
+        .iter()
+        .map(|(slug, text)| {
+            let (template, _) = parse_builtin(text);
+            ((*slug).to_string(), template)
+        })
+        .collect()
+}
+
+/// The ready-made team `slug` names, and the sha256 of its embedded text in lowercase hex.
+#[must_use]
+pub fn builtin(slug: &str) -> Option<(TeamTemplate, String)> {
+    let (_, text) = catervas_roles::BUILTIN_TEAMS
+        .iter()
+        .find(|(known, _)| *known == slug)?;
+    Some(parse_builtin(text))
+}
+
+/// Whether `slug` is a ready-made team's.
+#[must_use]
+pub fn is_builtin(slug: &str) -> bool {
+    catervas_roles::BUILTIN_TEAMS
+        .iter()
+        .any(|(known, _)| *known == slug)
+}
+
+fn parse_builtin(text: &str) -> (TeamTemplate, String) {
+    let value = yaml_value(text, "a ready-made team").expect("every ready-made team is YAML");
+    let template = validate_template(&value).expect("every ready-made team is a valid template");
+    (
+        template,
+        crate::daemon::hex(&Sha256::digest(text.as_bytes())),
+    )
+}
+
+/// `Builtin`, naming the ready-made team, when `slug` is one's.
+fn refuse_builtin(slug: &str) -> Result<(), TemplateError> {
+    match builtin(slug) {
+        Some((template, _)) => Err(TemplateError::Builtin {
+            name: template.name.to_string(),
+        }),
+        None => Ok(()),
+    }
+}
+
 /// Whether `text` is a slug `template_slug` could have made: itself, slugged.
 fn is_slug(text: &str) -> bool {
     template_slug(text).as_deref() == Some(text)
@@ -287,7 +351,7 @@ mod tests {
     use catervas_core::team::fixtures::a_template_wire;
     use catervas_core::team::{TeamTemplate, validate_template};
 
-    use super::{TemplateError, Templates};
+    use super::{TemplateError, Templates, builtin, builtins, is_builtin};
 
     fn scratch(test: &str) -> PathBuf {
         let dir =
@@ -506,5 +570,57 @@ mod tests {
         assert_eq!(templates.read("trio"), Err(missing("trio")));
         assert_eq!(templates.rename("trio", "x"), Err(missing("trio")));
         assert_eq!(templates.delete("trio"), Err(missing("trio")));
+    }
+
+    #[test]
+    fn parses_every_builtin_with_a_stable_digest() {
+        use sha2::{Digest as _, Sha256};
+        let all = builtins();
+        let slugs: Vec<&str> = all.iter().map(|(slug, _)| slug.as_str()).collect();
+        assert_eq!(
+            slugs,
+            ["software-product", "online-store", "financial-analysis"]
+        );
+        let (store, digest) = builtin("online-store").expect("a built-in");
+        assert_eq!(store.name.as_str(), "Online store");
+        let text = catervas_roles::BUILTIN_TEAMS[1].1;
+        assert_eq!(digest.len(), 64);
+        assert_eq!(digest, crate::daemon::hex(&Sha256::digest(text.as_bytes())));
+        assert!(builtin("mine").is_none());
+        assert!(is_builtin("financial-analysis") && is_builtin("software-product"));
+        assert!(!is_builtin("mine") && !is_builtin(""));
+    }
+
+    #[test]
+    fn refuses_saving_or_renaming_to_a_builtins_name() {
+        let dir = scratch("builtin-name").join("templates");
+        let templates = Templates::new(dir.clone());
+        let taken = Err(TemplateError::Builtin {
+            name: "Online store".to_string(),
+        });
+        for replace in [true, false] {
+            assert_eq!(templates.save(&named("Online Store"), replace), taken);
+        }
+        assert!(!dir.exists(), "nothing is written");
+        templates.save(&named("Mine"), false).expect("saved");
+        assert_eq!(
+            templates.rename("mine", "financial analysis"),
+            Err(TemplateError::Builtin {
+                name: "Financial analysis".to_string()
+            })
+        );
+        assert!(dir.join("mine.yaml").exists());
+        assert!(!dir.join("financial-analysis.yaml").exists());
+    }
+
+    #[test]
+    fn lists_a_file_under_a_builtins_slug_as_unreadable() {
+        let dir = scratch("builtin-file").join("templates");
+        std::fs::create_dir_all(&dir).expect("made");
+        let text = crate::templates::template_yaml(&named("Online store")).expect("yaml");
+        std::fs::write(dir.join("online-store.yaml"), text).expect("written");
+        let listing = Templates::new(dir).list().expect("listed");
+        assert!(listing.templates.is_empty());
+        assert_eq!(listing.unreadable, vec!["online-store".to_string()]);
     }
 }

@@ -86,6 +86,12 @@ pub(crate) enum Refusal {
     },
     /// This note is another's to write.
     NotTheNotesWriter { agent_id: String, kind: String },
+    /// A completion note from a review session: a Product Manager reviewing its own docs task
+    /// writes a review note there, and its completion note in the implement session.
+    CompletionInReview,
+    /// A review note from the session that did the work, by an agent that is also the task's
+    /// reviewer: the review is a fresh session's.
+    ReviewInImplement,
     /// A completion or review note that does not open with a summary for the user (5.4).
     SummaryMissing,
     /// `evaluate_command` refused.
@@ -268,6 +274,16 @@ impl Refusal {
             Self::NotTheNotesWriter { agent_id, kind } => {
                 ("not_the_notes_writer", notes_writer(agent_id, kind))
             }
+            Self::ReviewInImplement => (
+                "review_in_implement",
+                "the review note is written in a fresh review session, not the session that did the work"
+                    .to_string(),
+            ),
+            Self::CompletionInReview => (
+                "completion_in_review",
+                "a review session writes a review note; the completion note is written in the implement session"
+                    .to_string(),
+            ),
         };
         format!("{kind}: {detail}")
     }
