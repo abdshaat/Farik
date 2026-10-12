@@ -1,6 +1,6 @@
 # Phase 9, step 07b: A one-repo project gains a second repository
 
-Status: draft
+Status: ready (readiness review 2026-10-12, three rounds, findings folded)
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.4, 8.4, 8.5; F1
 Depends on these steps of this phase, planned (01 to 06 ready, 07 drafted), not yet executed:
@@ -14,7 +14,7 @@ Depends on these steps of this phase, planned (01 to 06 ready, 07 drafted), not 
 
 Nothing of step 08.
 Mockups: `docs/design/mockups/AddSecondRepository.dc.html` on the canvas page "Multi-repo projects", drawn 2026-10-12 (c179d5b); approved by the founder on 2026-10-12 ("Approve", ADR 0032), with what it draws: the old files left on `catervas/moved-out` for the owner to merge, and the move waiting while work is in progress.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12. Round 1: not ready on B1 to B7 (the blockers overtaken, rejected and escalated work, document-only tasks, a crash part-way, undecided codes, a wrong expected code, the failure path); folded. Round 2: B1 to B7 resolved; not ready on N1 (a worktree left registered after a failed step 8) and N2 (`holds_project_folder`, not `inside_project_folder`); folded with its nits. Round 3: pending.
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12. Round 1: not ready on B1 to B7 (the blockers overtaken, rejected and escalated work, document-only tasks, a crash part-way, undecided codes, a wrong expected code, the failure path); folded. Round 2: B1 to B7 resolved; not ready on N1 (a worktree left registered after a failed step 8) and N2 (`holds_project_folder`, not `inside_project_folder`); folded with its nits. Round 3: ready, its nit on an empty folder folded.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at c179d5b.
 
@@ -63,7 +63,7 @@ Out of scope: moving a project folder back to one repository; a second conversio
 | # | Step | Undo |
 |---|---|---|
 | 0 | `convert_blockers` again, now that nothing drives; anything there fails the move with `work_in_progress`'s sentence | – |
-| 1 | `mkdir -p` the parent; `mkdir` the project folder; write `.catervas/local/converting` holding the old root; `git init -b main`, the README, "Start the project" (as step 01's `create_folder`) | remove the project folder whole |
+| 1 | `mkdir -p` the parent; `mkdir` the project folder, unless it is there and empty; write `.catervas/local/converting` holding the old root; `git init -b main`, the README, "Start the project" (as step 01's `create_folder`) | remove the project folder whole (an empty one the owner had included: it held nothing) |
 | 2 | copy `.catervas/` from the old root, links never followed, leaving out `local/worktrees/`, `local/run.lock`, `local/daemon.json`, `local/integration.lock`, `local/setup-pending`, `local/moved-to`, `local/converting`; `catervas.db` with its `-wal` and `-shm` when there, after the driver has finished and dropped every handle on the log (SQLite replays the WAL on open). The Procurement mailbox's files are under `local/`, so `carry_mailbox` is not called. | (1's) |
 | 3 | `copy_keys` (`runtime/src/connectors.rs:524`) from the old root's id to the project folder's; no `keys-copied.json` notice | `secrets.delete` each `SecretAt` it returned |
 | 4 | move the documents (below) and commit "Move the team's documents from <first_name>" | (1's) |
