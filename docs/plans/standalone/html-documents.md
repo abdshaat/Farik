@@ -205,7 +205,7 @@ Files: `crates/store/src/git.rs` (`commit_files`, `first_link`, `uncommitted`, `
 - `takes_back_a_removal_when_the_commit_fails` — when a commit hook exits 1, `b.md` is restored at the root and the branch is gone.
 - `land_refuses_removing_a_file_a_change_holds` — `Waiting`.
 
-- [ ] `feat(store): a folder change removes files as well as writing them`
+- [x] `feat(store): a folder change removes files as well as writing them`
 
 ### Task 4: the write tool holds the format
 

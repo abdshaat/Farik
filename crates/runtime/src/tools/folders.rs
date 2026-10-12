@@ -127,20 +127,25 @@ fn next_by(policy: Integration, branch: &str, into: &str) -> String {
 ///
 /// # Errors
 ///
-/// `Waiting` for a file an earlier change holds that is neither integrated nor escalated, `Link`,
+/// `Waiting` for a file or removed path an earlier change holds that is neither integrated nor escalated, `Link`,
 /// `Busy`, and `Git` when git or the log failed. `Ok(None)` when every file already says its text on
 /// the integration branch, which makes nothing.
 pub(crate) fn land(
     deps: &ToolDeps,
     team: &Team,
     files: &[(String, String)],
+    removed: &[String],
     message: &str,
     author: Option<&str>,
 ) -> Result<Option<Landed>, LandRefusal> {
     let words = |error: &dyn std::fmt::Display| LandRefusal::Git(error.to_string());
     let into = integration_branch(team, &deps.git).map_err(|error| words(&error))?;
     let docs = folder_docs(&deps.log).map_err(|error| words(&error))?;
-    for (path, _) in files {
+    // ponytail: `folder_doc.written` names only the written path. A write of the removed file
+    // while its removal waits conflicts at integration and is escalated there, not refused here;
+    // record `removed` in the event if that happens.
+    let touched = files.iter().map(|(path, _)| path).chain(removed);
+    for path in touched {
         if let Some(held) = docs
             .changes
             .iter()
@@ -168,7 +173,7 @@ pub(crate) fn land(
     };
     match deps
         .git
-        .commit_files(&branch, &into, files, message, author)
+        .commit_files(&branch, &into, files, removed, message, author)
         .map_err(|error| words(&error))?
     {
         CommitOutcome::Committed { sha } => Ok(Some(Landed {
@@ -413,7 +418,7 @@ pub(super) fn write_folder_doc(
     let files = [(path.clone(), checked.text.to_string())];
     let message = folder_doc_message(checked.folder, &[path], &name, false);
     let author = folder_doc_author(&name, call.agent_id());
-    let landed = match land(deps, &call.team, &files, &message, Some(&author)) {
+    let landed = match land(deps, &call.team, &files, &[], &message, Some(&author)) {
         Ok(Some(landed)) => landed,
         Ok(None) => {
             return Err(refused(
@@ -916,6 +921,32 @@ mod tests {
         assert_eq!(code(&refused), "folder_doc_waiting");
         assert_eq!(branches(&waiting), "docs/folder-1");
         assert_eq!(waiting.events(&[EventKind::FolderDocWritten]).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn land_refuses_removing_a_file_a_change_holds() {
+        let project = self::project("folder-doc-removal-waiting", "auto_merge", true, false);
+        write(&ceremony(&project, "sm", Thread::Retro), CADENCE, "a\n").expect("change 1");
+        let deps = &project.deps;
+        let team = deps.files.read_team().expect("the team reads");
+        let refused = super::land(
+            deps,
+            &team,
+            &[(
+                "docs/catervas/delivery/cadence.html".to_string(),
+                "<p>a</p>\n".to_string(),
+            )],
+            &[CADENCE.to_string()],
+            "docs(delivery): cadence as html",
+            None,
+        )
+        .expect_err("change 1 holds the removed file");
+        assert!(
+            matches!(refused, super::LandRefusal::Waiting { change: 1, .. }),
+            "{refused:?}"
+        );
+        assert_eq!(branches(&project), "docs/folder-1");
     }
 
     #[test]

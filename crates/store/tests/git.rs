@@ -1023,6 +1023,7 @@ fn commits_named_files_on_a_new_branch_and_nothing_else() {
             "docs/folder-1",
             "main",
             &file(CADENCE, "a\n"),
+            &[],
             "docs(delivery): cadence.md by Sol",
             Some(SOL),
         )
@@ -1081,6 +1082,7 @@ fn commits_from_the_branch_named_whatever_is_checked_out() {
             "docs/folder-1",
             "main",
             &file(CADENCE, "a\n"),
+            &[],
             "docs: x",
             None,
         )
@@ -1111,6 +1113,7 @@ fn refuses_a_file_changed_outside() {
             "docs/folder-1",
             "main",
             &file(CADENCE, "a\n"),
+            &[],
             "docs: x",
             None,
         )
@@ -1129,6 +1132,7 @@ fn refuses_a_file_changed_outside() {
             "docs/folder-1",
             "main",
             &file(other, "a\n"),
+            &[],
             "docs: x",
             None,
         )
@@ -1158,6 +1162,7 @@ fn refuses_to_write_through_a_link() {
             "docs/folder-1",
             "main",
             &file(CADENCE, "a\n"),
+            &[],
             "docs: x",
             None,
         )
@@ -1178,6 +1183,7 @@ fn refuses_to_write_through_a_link() {
             "docs/folder-1",
             "main",
             &file(CADENCE, "a\n"),
+            &[],
             "docs: x",
             None,
         )
@@ -1205,6 +1211,7 @@ fn makes_nothing_the_branch_already_says() {
             "docs/folder-1",
             "main",
             &file(CADENCE, "a\n"),
+            &[],
             "docs: x",
             None,
         )
@@ -1243,7 +1250,7 @@ fn cleans_up_a_commit_that_fails() {
         (new.to_string(), "new\n".to_string()),
     ];
 
-    let answer = git.commit_files("docs/folder-1", "main", &files, "docs: x", None);
+    let answer = git.commit_files("docs/folder-1", "main", &files, &[], "docs: x", None);
     assert!(
         matches!(answer, Err(GitError::CommandFailed { .. })),
         "{answer:?}"
@@ -1265,7 +1272,7 @@ fn cleans_up_a_commit_that_fails() {
     );
 
     repository.git(&["checkout", "--detach"]);
-    let answer = git.commit_files("docs/folder-2", "main", &files, "docs: x", None);
+    let answer = git.commit_files("docs/folder-2", "main", &files, &[], "docs: x", None);
     assert!(
         matches!(answer, Err(GitError::CommandFailed { .. })),
         "{answer:?}"
@@ -1285,6 +1292,125 @@ fn cleans_up_a_commit_that_fails() {
         repository.git_output(&["branch", "--list", "docs/folder-2"]),
         ""
     );
+}
+
+const OLD: &str = "docs/catervas/delivery/b.md";
+const NEW: &str = "docs/catervas/delivery/b.html";
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_a_removal_with_the_writes() {
+    let repository = TempRepo::new("commit-files-removal");
+    repository.write(OLD, "old\n");
+    repository.commit("the markdown document");
+    let outcome = repository
+        .adapter()
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(NEW, "<p>new</p>\n"),
+            &[OLD.to_string()],
+            "docs: b as html",
+            None,
+        )
+        .expect("the commit is made");
+    assert!(
+        matches!(outcome, CommitOutcome::Committed { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        repository.git_output(&["rev-list", "--count", "main..docs/folder-1"]),
+        "1"
+    );
+    let tree = repository.git_output(&["ls-tree", "-r", "--name-only", "docs/folder-1"]);
+    assert!(tree.contains(NEW) && !tree.contains(OLD), "{tree}");
+    assert_eq!(repository.git_output(&["branch", "--show-current"]), "main");
+    assert!(repository.path.join(OLD).exists(), "main still holds it");
+    assert!(!repository.path.join(NEW).exists());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn a_removal_of_a_missing_file_alone_is_unchanged() {
+    let repository = TempRepo::new("commit-files-removal-unchanged");
+    repository.write(NEW, "<p>new</p>\n");
+    repository.commit("the html document");
+    let answer = repository
+        .adapter()
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(NEW, "<p>new</p>\n"),
+            &[OLD.to_string()],
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(answer, CommitOutcome::Unchanged);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn a_removal_of_a_busy_file_is_busy() {
+    let repository = TempRepo::new("commit-files-removal-busy");
+    repository.write(OLD, "old\n");
+    repository.commit("the markdown document");
+    repository.write(OLD, "the owner's edit\n");
+    let answer = repository
+        .adapter()
+        .commit_files(
+            "docs/folder-1",
+            "main",
+            &file(NEW, "<p>new</p>\n"),
+            &[OLD.to_string()],
+            "docs: x",
+            None,
+        )
+        .expect("the answer is a value");
+    assert_eq!(answer, CommitOutcome::Busy(vec![OLD.to_string()]));
+    assert_eq!(
+        std::fs::read_to_string(repository.path.join(OLD)).expect("kept"),
+        "the owner's edit\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn takes_back_a_removal_when_the_commit_fails() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repository = TempRepo::new("commit-files-removal-cleanup");
+    repository.write(OLD, "old\n");
+    repository.commit("the markdown document");
+    let hooks = repository.path.join(".git/refusing-hooks");
+    std::fs::create_dir_all(&hooks).expect("a hooks directory");
+    let hook = hooks.join("pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").expect("a hook");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    repository.git(&["config", "core.hooksPath", hooks.to_str().expect("text")]);
+    let answer = repository.adapter().commit_files(
+        "docs/folder-1",
+        "main",
+        &file(NEW, "<p>new</p>\n"),
+        &[OLD.to_string()],
+        "docs: x",
+        None,
+    );
+    assert!(
+        matches!(answer, Err(GitError::CommandFailed { .. })),
+        "{answer:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repository.path.join(OLD)).expect("restored"),
+        "old\n"
+    );
+    assert!(!repository.path.join(NEW).exists());
+    assert_eq!(
+        repository.git_output(&["branch", "--list", "docs/folder-1"]),
+        ""
+    );
+    assert_eq!(repository.git_output(&["status", "--porcelain"]), "");
 }
 
 const PRODUCT: &str = "docs/catervas/product";

@@ -2131,7 +2131,7 @@ fn folder_doc_decide(
     if !said.is_empty() {
         body["note"] = json!(said);
     }
-    let said_back = match land(tools, &team, &files, &message, Some(&author)) {
+    let said_back = match land(tools, &team, &files, &[], &message, Some(&author)) {
         Ok(Some(landed)) => {
             body["change"] = json!(landed.change);
             body["sha"] = json!(landed.sha);

@@ -125,6 +125,7 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         deps,
         &team,
         &[(path.clone(), text.to_string())],
+        &[],
         &message,
         None,
     ) {
@@ -539,6 +540,7 @@ mod tests {
             deps,
             &team,
             &[(path.to_string(), text.to_string())],
+            &[],
             "docs(product): edit roadmap.md",
             Some("You <you@catervas.invalid>"),
         )

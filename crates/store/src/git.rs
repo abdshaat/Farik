@@ -674,13 +674,14 @@ impl Git {
     }
 
     /// Makes the branch `branch` at `from` with one commit that writes `files` (`(path, text)`,
-    /// repository-relative), in the root's checkout as `merge` does, and puts the branch that was
+    /// repository-relative) and removes `removed`, in the root's checkout as `merge` does, and puts the branch that was
     /// checked out back (`docs/SPEC.md` 5.14).
     ///
     /// In order: `Linked` when a file, or a directory between the root and it, is a symbolic link;
-    /// `Busy` when `git status` names any of the files; `Unchanged` when every file's text equals
-    /// the file at `from`. Otherwise `git checkout -b`, each file written, `git add`, and
-    /// `git commit --only` over the files, so nothing else the owner staged is committed. The
+    /// `Busy` when `git status` names any of the files or removed paths; `Unchanged` when every
+    /// file's text equals the file at `from` and every removed path is absent there. Otherwise
+    /// `git checkout -b`, each file written and each removed path deleted, `git add`, and
+    /// `git commit --only` over them, so nothing else the owner staged is committed. The
     /// commit's author is `author` (`Name <email>`) when given, and its committer the person git
     /// knows there. **Like `merge`, it moves HEAD, and nothing here keeps two callers apart.** A
     /// failure after the branch was made takes everything back: the files restored or removed and
@@ -696,15 +697,20 @@ impl Git {
         branch: &str,
         from: &str,
         files: &[(String, String)],
+        removed: &[String],
         message: &str,
         author: Option<&str>,
     ) -> Result<CommitOutcome, GitError> {
         self.require_repository()?;
         let was_on = self.current_branch()?;
-        if let Some(link) = self.first_link(files) {
+        let paths: Vec<&str> = files
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .chain(removed.iter().map(String::as_str))
+            .collect();
+        if let Some(link) = self.first_link(&paths) {
             return Ok(CommitOutcome::Linked(link));
         }
-        let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
         let busy = self.uncommitted(&paths)?;
         if !busy.is_empty() {
             return Ok(CommitOutcome::Busy(busy));
@@ -712,11 +718,14 @@ impl Git {
         if files
             .iter()
             .all(|(path, text)| self.file_at(from, path).is_ok_and(|held| held == *text))
+            && removed.iter().all(|path| self.file_at(from, path).is_err())
         {
             return Ok(CommitOutcome::Unchanged);
         }
         self.at_root(&["checkout", "-b", branch, from])?;
-        let sha = match self.commit_files_on_the_new_branch(files, &paths, message, author) {
+        let sha = match self
+            .commit_files_on_the_new_branch(files, removed, &paths, from, message, author)
+        {
             Ok(sha) => sha,
             Err(failure) => {
                 self.take_back(from, files, &paths);
@@ -731,8 +740,8 @@ impl Git {
     }
 
     /// The first symbolic link on the way to a file, root first, or the file itself.
-    fn first_link(&self, files: &[(String, String)]) -> Option<String> {
-        for (path, _) in files {
+    fn first_link(&self, paths: &[&str]) -> Option<String> {
+        for path in paths {
             let mut so_far = String::new();
             for segment in path.split('/') {
                 if !so_far.is_empty() {
@@ -767,11 +776,14 @@ impl Git {
             .collect())
     }
 
-    /// Writes, stages and commits `files` on the branch just made.
+    /// Writes `files`, deletes `removed`, stages and commits them on the branch just made. A
+    /// removed path that `from` does not hold is nothing to stage, and is left out of the commit.
     fn commit_files_on_the_new_branch(
         &self,
         files: &[(String, String)],
+        removed: &[String],
         paths: &[&str],
+        from: &str,
         message: &str,
         author: Option<&str>,
     ) -> Result<String, GitError> {
@@ -786,8 +798,26 @@ impl Git {
                 stderr: error.to_string(),
             })?;
         }
+        for path in removed {
+            match std::fs::remove_file(self.root.join(path)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(GitError::CommandFailed {
+                        command: format!("remove {path}"),
+                        stderr: error.to_string(),
+                    });
+                }
+                _ => {}
+            }
+        }
+        let staged: Vec<&str> = paths
+            .iter()
+            .copied()
+            .filter(|path| {
+                files.iter().any(|(written, _)| written == path) || self.file_at(from, path).is_ok()
+            })
+            .collect();
         let mut add = vec!["--literal-pathspecs", "add", "--"];
-        add.extend_from_slice(paths);
+        add.extend_from_slice(&staged);
         self.at_root(&add)?;
         let author_option = author.map(|author| format!("--author={author}"));
         let mut commit = vec!["--literal-pathspecs", "commit", "--only", "-m", message];
@@ -795,7 +825,7 @@ impl Git {
             commit.push(option);
         }
         commit.push("--");
-        commit.extend_from_slice(paths);
+        commit.extend_from_slice(&staged);
         self.at_root(&as_someone(&self.root, &commit))?;
         self.at_root(&["rev-parse", "HEAD"])
     }

@@ -655,6 +655,7 @@ impl Harness {
             deps,
             &team,
             &[(path.to_string(), text.to_string())],
+            &[],
             "docs(delivery): cadence.md by Sol",
             Some("Sol (Catervas) <catervas@localhost>"),
         )
