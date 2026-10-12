@@ -245,7 +245,7 @@ Files: `discover.rs` (`discover`, the lines and the JSON); `state.rs` (`claude_d
 - `prints_paths_as_text` (guard, ignored): a session whose `cwd` is a gone `<home>/a\u{1b}[2Jb` is printed under "no longer on this computer" as `~/a\u001b[2Jb`.
 - `writes_tokens_short`: the token formatter gives `950`, `2k` for 2000, `12.3k`, `310k`, `1.2M` for 1 215 000, `41.2M`. RED.
 
-- [ ] `feat(cli): say what catervas found in the claude code history`
+- [x] `feat(cli): say what catervas found in the claude code history`
 
 ### Task 7: Spec
 
