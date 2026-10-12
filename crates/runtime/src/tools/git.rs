@@ -12,7 +12,6 @@ use serde_json::{Value, json};
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 use crate::channel::post_system;
-use crate::transitions::integration_branch;
 
 /// The remote a task branch is pushed to.
 const REMOTE: &str = "origin";
@@ -29,10 +28,12 @@ pub(crate) struct CommitInput {
 
 /// `catervas_git_status`: what is uncommitted in the task's worktree, and whether nothing is.
 pub(super) fn status(call: &Call<'_>) -> Result<Value, ToolError> {
+    let task = call.task()?;
+    let (contract, _) = call.contract(task)?;
     let status = call
-        .deps()
+        .task_repository(&contract)?
         .git
-        .status(&worktree(call, call.task()?))
+        .status(&worktree(call, task))
         .map_err(failed)?;
     Ok(json!({ "clean": status.is_empty(), "status": status }))
 }
@@ -40,9 +41,12 @@ pub(super) fn status(call: &Call<'_>) -> Result<Value, ToolError> {
 /// `catervas_git_diff`: what the task branch changed since the integration branch, as a patch.
 pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
     let task = call.task()?;
-    let git = &call.deps().git;
-    let base = integration_branch(&call.team, git).map_err(failed)?;
-    let diff = git.diff(&base, &branch(call, task)?).map_err(failed)?;
+    let (contract, _) = call.contract(task)?;
+    let repository = call.task_repository(&contract)?;
+    let diff = repository
+        .git
+        .diff(&repository.integration_branch, &task_branch(&contract))
+        .map_err(failed)?;
     Ok(json!({ "diff": diff }))
 }
 
@@ -57,7 +61,12 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
         return Err(Refusal::PathIsADirectory { path: path.clone() }.into());
     }
     let deps = call.deps();
-    match deps.git.commit(&worktree, &input.message, &input.paths) {
+    let (contract, _) = call.contract(task)?;
+    let repository = call.task_repository(&contract)?;
+    match repository
+        .git
+        .commit(&worktree, &input.message, &input.paths)
+    {
         Ok(sha) => Ok(json!({ "sha": sha })),
         Err(error) => {
             // The agent is told in the tool's answer, which it may ignore; a task whose work is
@@ -79,8 +88,10 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
 /// `refs/heads/<branch>`, as integration does, so that a tag of the same name cannot make the push
 /// ambiguous.
 pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
-    let branch = branch(call, assignees_task(call)?)?;
-    call.deps()
+    let task = assignees_task(call)?;
+    let (contract, _) = call.contract(task)?;
+    let branch = task_branch(&contract);
+    call.task_repository(&contract)?
         .git
         .push(REMOTE, &format!("refs/heads/{branch}"))
         .map_err(failed)?;
@@ -110,12 +121,6 @@ pub(super) fn worktree(call: &Call<'_>, task: &TaskId) -> PathBuf {
         .root()
         .join(".catervas/local/worktrees")
         .join(task.as_str())
-}
-
-/// The task's branch, the one its contract names (5.14).
-fn branch(call: &Call<'_>, task: &TaskId) -> Result<String, ToolError> {
-    let (contract, _) = call.contract(task)?;
-    Ok(task_branch(&contract))
 }
 
 #[cfg(test)]
@@ -174,6 +179,76 @@ mod tests {
                 .contains("b/src/login/form.ts"),
             "{diff}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_git_tools_act_on_the_member() {
+        use catervas_store::git::fixtures::{git_in, git_output_in};
+        let (project, members) = TestProject::project_folder(
+            "tools-git-member",
+            &a_team_of_three(|wire| wire["agents"][1]["grants"] = json!(["git_remote"])),
+            &["app", "infra"],
+        );
+        let app = &members[0];
+        let origin = app.path.with_extension("origin.git");
+        let _ = std::fs::remove_dir_all(&origin);
+        std::fs::create_dir_all(&origin).expect("a directory for the remote");
+        git_in(&origin, &["init", "--bare", "-b", "main"]);
+        app.git(&["remote", "add", "origin", origin.to_str().expect("a path")]);
+        project.filed_with("CTV-1", "assigned", "task", None, |wire| {
+            wire["repo"] = json!("app");
+            wire["allowed_paths"] = json!(["src/**"]);
+        });
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
+        app.adapter()
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
+            .expect("the member makes the task's worktree");
+        std::fs::create_dir_all(worktree.join("src")).expect("a directory");
+        std::fs::write(worktree.join("src/a.rs"), "fn a() {}\n").expect("a file");
+
+        let status = project
+            .call("dev-a", Some("CTV-1"), "catervas_git_status", json!({}))
+            .expect("the status reads");
+        assert_eq!(status["clean"], false, "{status}");
+        let committed = project
+            .call(
+                "dev-a",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({ "message": "add a", "paths": ["src/a.rs"] }),
+            )
+            .expect("the assignee commits");
+        let head = git_output_in(&worktree, &["rev-parse", "HEAD"]);
+        assert_eq!(committed["sha"], head);
+        assert_eq!(
+            git_output_in(&app.path, &["rev-parse", "feature/CTV-1"]),
+            head
+        );
+        let diff = project
+            .call("dev-a", Some("CTV-1"), "catervas_git_diff", json!({}))
+            .expect("the diff reads");
+        assert!(
+            diff["diff"]
+                .as_str()
+                .expect("a patch")
+                .contains("b/src/a.rs"),
+            "{diff}"
+        );
+        project
+            .call("dev-a", Some("CTV-1"), "catervas_git_push", json!({}))
+            .expect("the assignee pushes to the member's origin");
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", "feature/CTV-1"]),
+            head
+        );
+        let _ = std::fs::remove_dir_all(&origin);
     }
 
     #[test]

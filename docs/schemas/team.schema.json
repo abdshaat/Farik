@@ -53,8 +53,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "start",
-        "port"
+        "start"
       ],
       "properties": {
         "prepare": {
@@ -73,7 +72,7 @@
           "type": "integer",
           "minimum": 1024,
           "maximum": 65535,
-          "description": "The port the app serves on inside its container."
+          "description": "The port the app serves on inside its container. Left out, Catervas finds the port the app listens on when it starts (ADR 0054)."
         },
         "path": {
           "type": "string",

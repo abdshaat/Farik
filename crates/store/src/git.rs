@@ -433,6 +433,32 @@ impl Git {
         Ok(())
     }
 
+    /// Whether the repository has a local branch of this name. A revision expression such as
+    /// `main~0` or `main@{0}` is not a branch's name, though git resolves it, so it is none.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, or `NotInstalled` when git cannot be run.
+    pub fn has_local_branch(&self, name: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        match self.check_branch_name(name) {
+            Ok(()) => {}
+            Err(GitError::CommandFailed { .. }) => return Ok(false),
+            Err(other) => return Err(other),
+        }
+        match self.at_root(&[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ]) {
+            Ok(_) => Ok(true),
+            // `--quiet` makes git say nothing and exit 1 for a name it does not know.
+            Err(GitError::CommandFailed { .. }) => Ok(false),
+            Err(other) => Err(other),
+        }
+    }
+
     /// Refuses a name git would not take for a branch, such as `main:other` or `-f`, so that
     /// nothing a team file says reaches a refspec or an option. A name git takes but reads as
     /// another is refused too: `@` is `HEAD`, and git prints the branch `@{-1}` stands for rather

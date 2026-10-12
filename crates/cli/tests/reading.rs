@@ -723,6 +723,45 @@ fn shows_a_tasks_diff_before_and_after_integration() {
 #[cfg(unix)]
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_the_members_diff() {
+    use catervas_core::contract::validate_contract;
+    use catervas_core::repos::validate_repos;
+    use catervas_store::files::ProjectFiles;
+    use serde_json::json;
+
+    // CTV-1 changes `app`, a member of this project folder: its branch is app's, not the folder's.
+    let project = a_project_with_a_task("read-show-member-diff");
+    let app = TempRepo::new("read-show-member-diff-app");
+    app.git(&["checkout", "-q", "-b", "feature/CTV-1"]);
+    app.write("member.txt", "in app\n");
+    app.commit("Add member.txt");
+    app.git(&["checkout", "-q", "main"]);
+    let files = ProjectFiles::open(project.path.clone());
+    files
+        .write_repos(
+            &validate_repos(&json!({ "repos": [
+                { "name": "app", "path": app.path.display().to_string() },
+            ] }))
+            .expect("repos"),
+        )
+        .expect("repos.yaml is written");
+    let id = "CTV-1".parse().expect("a task id");
+    let mut wire = serde_json::to_value(files.read_contract(&id).expect("the contract"))
+        .expect("a contract serialises");
+    wire["repo"] = json!("app");
+    files
+        .write_contract(&validate_contract(&wire).expect("a contract that names its repo"))
+        .expect("the contract is written");
+
+    let ran = run_in(&project.path, &["task", "show", "CTV-1", "--diff"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("+++ b/member.txt"), "{}", ran.out);
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn shows_no_diff_for_a_task_in_a_private_folder() {
     // A Finance Specialist's task has no branch (6.6), and its files are not printed.
     let repository = TempRepo::new("read-show-folder");

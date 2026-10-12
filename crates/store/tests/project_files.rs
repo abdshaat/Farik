@@ -645,10 +645,11 @@ fn keeps_the_user_note_across_a_rescan() {
         read_back: "Rust, cargo, no commits yet".to_string(),
         detected_criteria: Vec::new(),
         facts: catervas_store::ScanFacts::default(),
+        app_start: None,
     };
     let library = validate_criteria(&a_criteria_library_wire()).expect("a library");
     files
-        .write_project_scan(&project_document(&scan, &library, None))
+        .write_project_scan(&project_document(&scan.read_back, &library, &[], None))
         .expect("written");
     let day = NaiveDate::from_ymd_opt(2026, 9, 29).expect("a date");
     files
@@ -664,7 +665,7 @@ fn keeps_the_user_note_across_a_rescan() {
         read_back: "Rust, cargo, last commit today".to_string(),
         ..scan
     };
-    let after = project_document(&again, &library, Some(&before));
+    let after = project_document(&again.read_back, &library, &[], Some(&before));
     assert!(after.contains("last commit today"), "{after}");
     assert!(!after.contains("no commits yet"), "{after}");
     assert!(

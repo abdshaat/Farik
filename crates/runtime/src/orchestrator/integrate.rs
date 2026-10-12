@@ -361,6 +361,11 @@ fn integrations_of(tools: &ToolDeps, subject: &Subject) -> Result<usize, Orchest
 /// criterion library when what the scan reads changed. It never fails the integration: whatever
 /// goes wrong is the answer's words, not an error.
 fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, into: &str) -> ScanRefresh {
+    // A project folder's own scan never runs: its criteria are its members', and a scan of the
+    // folder would wipe them. It reports nothing, so no integration says the scan was skipped.
+    if tools.files.is_project_folder() {
+        return ScanRefresh::Unchanged;
+    }
     // `scan_project` reads the working tree at the root, which holds what landed only when it is
     // the integration branch that is checked out there.
     match tools.git.current_branch() {
@@ -411,7 +416,12 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
     let previous = tools.files.read_project_scan().ok();
     tools
         .files
-        .write_project_scan(&project_document(&scan, &library, previous.as_deref()))
+        .write_project_scan(&project_document(
+            &scan.read_back,
+            &library,
+            &[],
+            previous.as_deref(),
+        ))
         .map_err(|error| error.to_string())?;
     if kept.as_ref() != Some(&library) {
         tools
@@ -1282,6 +1292,70 @@ mod tests {
         assert_eq!(
             integrated[0].integrated_by,
             TaskIntegratedBodyIntegratedBy::Human
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn never_rescans_a_project_folder_itself() {
+        // The Architect's documents land in the project folder, whose own scan never runs: its
+        // members' checks stay in the library, and the integration reports nothing about a scan.
+        let (harness, _members) = Harness::project_folder_with(
+            "int-folder-docs",
+            &["app"],
+            crate::tools::fixtures::with_the_suggested_six,
+        );
+        let library = catervas_core::criteria::validate_criteria(&json!({ "criteria": [
+            { "name": "app-the-tests-pass", "text": "Every test passes in app.",
+              "source": "project_scan", "repo": "app",
+              "verification": { "method": "test", "command": "npm run test" } },
+        ]}))
+        .expect("a library");
+        harness
+            .project
+            .deps
+            .files
+            .write_criteria(&library)
+            .expect("the library is written");
+        harness.verifying_with("CTV-1", true, true, |wire| {
+            wire["assignee_role"] = json!("architect");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!(["docs/**", "done.txt"]);
+        });
+        harness.project.moved(
+            "CTV-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "ada", "reviewer": "pm" }),
+        );
+        harness
+            .project
+            .deps
+            .git
+            .remove_worktree(&harness.worktree("CTV-1"))
+            .expect("the task's worktree is removed");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
+
+        let head = at_root(&harness, &["rev-parse", "main"]);
+        assert_eq!(
+            merged,
+            Ok(IntegrationOutcome::Merged {
+                sha: head,
+                scan: ScanRefresh::Unchanged
+            })
+        );
+        let kept = harness
+            .project
+            .deps
+            .files
+            .read_criteria()
+            .expect("the library reads");
+        assert_eq!(kept, library, "the members' checks are not wiped");
+        assert!(
+            harness.events(&[EventKind::ProjectScanned]).is_empty(),
+            "the project folder is not scanned"
         );
     }
 

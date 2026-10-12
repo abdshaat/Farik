@@ -4,9 +4,12 @@ import { uiStrings } from "./strings.ts";
 export function Stepper({
 	steps,
 	current,
+	onPick,
 }: {
 	steps: string[];
 	current: number;
+	/** Given, each step before the current one is a link back to it. */
+	onPick?: (index: number) => void;
 }) {
 	return (
 		<ol className={styles.steps}>
@@ -19,7 +22,17 @@ export function Stepper({
 					<span className={styles.number} aria-hidden="true">
 						{i + 1}
 					</span>{" "}
-					{label}
+					{onPick && i < current ? (
+						<button
+							type="button"
+							className={styles.link}
+							onClick={() => onPick(i)}
+						>
+							{label}
+						</button>
+					) : (
+						label
+					)}
 					{i === current ? (
 						<span className={styles.hidden}>
 							{" "}

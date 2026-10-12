@@ -22,7 +22,8 @@ use catervas_protocol::command::{Command, CommandReply};
 use catervas_protocol::event::{EventBody, new_event};
 use catervas_protocol::generated::event::{CriteriaUpdatedBody, TeamUpdatedBody};
 use catervas_roles::{Kit, KitConnector, load_role};
-use catervas_store::{EventQuery, names_of, scan_project};
+use catervas_store::repos::repo_present;
+use catervas_store::{EventQuery, Git, names_of, scan_project};
 use serde_json::{Value, json};
 
 use super::signed_in::Binding;
@@ -38,7 +39,7 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 18] = [
+pub(super) const METHODS: [&str; 19] = [
     "team.save",
     "agent.replace",
     "team.start",
@@ -57,6 +58,7 @@ pub(super) const METHODS: [&str; 18] = [
     "procurement_mailbox.check",
     "project.leave",
     "keys_copied.dismiss",
+    "connector_suggestion.hide",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
@@ -104,6 +106,12 @@ pub(super) fn query(
             answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(catervas_core::team::MAX_AGENTS);
             answer["sandboxed"] = json!(deps.transitions.sandboxed());
+            answer["hidden_suggestions"] = json!(
+                crate::connectors::hidden_suggestions(deps.files.root())
+                    .into_iter()
+                    .map(|(agent, server)| json!({ "agent": agent, "server": server }))
+                    .collect::<Vec<_>>()
+            );
             Ok(answer)
         }
         "team.propose" => propose(deps),
@@ -1355,6 +1363,14 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     team["agents"] = serde_json::to_value(agents).map_err(|e| internal(&e))?;
     // Setup only ever makes a new team, and a new team plans in sprints (ADR 0028).
     team["policy"]["plan_in_sprints"] = json!(true);
+    // A team with no preview is proposed the one the scan found, if it found one (ADR 0054); a scan
+    // that fails proposes none.
+    let found = scan_project(&deps.git, deps.clock.now())
+        .ok()
+        .and_then(|scan| scan.app_start);
+    if let (true, Some(app)) = (team.get("preview").is_none_or(Value::is_null), found) {
+        team["preview"] = json!({ "prepare": app.prepare, "start": app.start, "path": "/" });
+    }
     let criteria = serde_json::to_value(deps.files.read_criteria().map_err(|e| internal(&e))?)
         .map_err(|e| internal(&e))?;
     Ok(json!({ "team": team, "criteria": criteria, "unavailable": unavailable }))
@@ -1497,20 +1513,63 @@ fn scanned(deps: &ToolDeps) -> Result<Value, Failure> {
             )
         })
         .collect();
-    let facts = &scan.facts;
     Ok(json!({
-        "facts": {
-            "language": facts.language,
-            "toolchain": facts.toolchain,
-            "workspace": facts.workspace,
-            "packages": facts.packages,
-            "tests_in": facts.tests_in,
-            "tracked_files": facts.tracked_files,
-            "last_commit": facts.last_commit,
-        },
+        "facts": facts_json(&scan.facts),
         "checks": scan.detected_criteria.iter().map(|one| one.text.to_string()).collect::<Vec<_>>(),
+        "app_start": scan.app_start.as_ref().map(|app| json!({
+            "prepare": app.prepare,
+            "start": app.start,
+        })),
         "kept_private": kept_private,
+        "repos": members_scanned(deps)?,
     }))
+}
+
+/// What one scan found, as the rows the browser shows.
+fn facts_json(facts: &catervas_store::ScanFacts) -> Value {
+    json!({
+        "language": facts.language,
+        "toolchain": facts.toolchain,
+        "workspace": facts.workspace,
+        "packages": facts.packages,
+        "tests_in": facts.tests_in,
+        "tracked_files": facts.tracked_files,
+        "last_commit": facts.last_commit,
+    })
+}
+
+/// Each member of a project folder scanned on its own, in `repos.yaml` order, or null for a
+/// project of one repository. A member that is not there, or whose scan fails, has no facts and
+/// no checks, and says why.
+fn members_scanned(deps: &ToolDeps) -> Result<Value, Failure> {
+    let Some(repos) = deps.files.read_repos().map_err(|e| internal(&e))? else {
+        return Ok(Value::Null);
+    };
+    let rows: Vec<Value> = repos
+        .repos
+        .iter()
+        .map(|member| {
+            let (name, path) = (member.name.as_str(), Path::new(member.path.as_str()));
+            let scanned = if repo_present(path) {
+                scan_project(&Git::open(path.to_path_buf()), deps.clock.now())
+                    .map_err(|error| error.to_string())
+            } else {
+                Err("not found".to_string())
+            };
+            match scanned {
+                Ok(scan) => json!({
+                    "name": name,
+                    "facts": facts_json(&scan.facts),
+                    "checks": scan.detected_criteria.iter().map(|one| one.text.to_string()).collect::<Vec<_>>(),
+                    "error": null,
+                }),
+                Err(error) => json!({
+                    "name": name, "facts": null, "checks": [], "error": error,
+                }),
+            }
+        })
+        .collect();
+    Ok(Value::Array(rows))
 }
 
 /// Adds the paths under `dir`, as `prefix` and each name, to `found`, in name order and folders
@@ -1864,6 +1923,28 @@ pub(super) async fn call(
                 Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(internal(&error)),
                 _ => Ok(json!({})),
             }
+        }
+        "connector_suggestion.hide" => {
+            let agent = params["agent"].as_str().unwrap_or_default();
+            let server = params["server"].as_str().unwrap_or_default();
+            let team = deps.files.read_team().map_err(|e| internal(&e))?;
+            let offered = match team.agents.iter().find(|a| a.id.as_str() == agent) {
+                Some(found) => (deps.kits)(Role::from(found.role))
+                    .map_err(|e| internal(&e))?
+                    .connectors
+                    .iter()
+                    .any(|c| matches!(c, KitConnector::Server { entry, .. } if entry.name.as_str() == server)),
+                None => false,
+            };
+            if !offered {
+                return Err(Failure::new(
+                    REFUSED,
+                    format!("suggestion_not_offered: {agent} is not offered {server}"),
+                ));
+            }
+            crate::connectors::hide_suggestion(deps.files.root(), agent, server)
+                .map_err(|e| internal(&e))?;
+            Ok(json!({}))
         }
         "project.note" => off_the_worker(move || {
             deps.files
@@ -4693,6 +4774,159 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_each_members_scan() {
+        let (harness, members) = Harness::project_folder("project-scan-members", &["app", "infra"]);
+        let (app, infra) = (&members[0], &members[1]);
+        app.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+        app.write(
+            "package.json",
+            "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\"}}\n",
+        );
+        app.write("src/index.ts", "export const one = 1;\n");
+        app.commit("an app");
+        infra.write("Cargo.lock", "version = 4\n");
+        infra.write("Cargo.toml", "[package]\nname = \"infra\"\n");
+        infra.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+        infra.commit("an infra");
+        let scan = || {
+            query(
+                &harness.daemon,
+                "project.scan",
+                &json!({}),
+                "projectScanResult",
+            )
+        };
+
+        let scanned = scan();
+        let facts_of = |repository: &catervas_store::git::fixtures::TempRepo| {
+            let found = catervas_store::scan_project(&repository.adapter(), at()).expect("scans");
+            (
+                json!({
+                    "language": found.facts.language,
+                    "toolchain": found.facts.toolchain,
+                    "workspace": found.facts.workspace,
+                    "packages": found.facts.packages,
+                    "tests_in": found.facts.tests_in,
+                    "tracked_files": found.facts.tracked_files,
+                    "last_commit": found.facts.last_commit,
+                }),
+                found
+                    .detected_criteria
+                    .iter()
+                    .map(|one| one.text.to_string())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let (app_facts, app_checks) = facts_of(app);
+        let (infra_facts, infra_checks) = facts_of(infra);
+        assert_eq!(
+            scanned["repos"],
+            json!([
+                { "name": "app", "facts": app_facts, "checks": app_checks, "error": null },
+                { "name": "infra", "facts": infra_facts, "checks": infra_checks, "error": null },
+            ])
+        );
+        assert_ne!(app_checks, infra_checks);
+
+        // A member that is away has no facts and says why; the other is still read.
+        let away = infra.path.with_extension("away");
+        let _ = std::fs::remove_dir_all(&away);
+        std::fs::rename(&infra.path, &away).expect("infra is moved away");
+        let scanned = scan();
+        assert_eq!(
+            scanned["repos"][1],
+            json!({ "name": "infra", "facts": null, "checks": [], "error": "not found" })
+        );
+        assert_eq!(scanned["repos"][0]["error"], Value::Null);
+        std::fs::rename(&away, &infra.path).expect("infra is moved back");
+
+        // A project of one repository answers null.
+        let one = driven("project-scan-one");
+        let scanned = query(&one.daemon, "project.scan", &json!({}), "projectScanResult");
+        assert_eq!(scanned["repos"], Value::Null);
+    }
+
+    /// A pnpm project committed to `harness`'s repository, with `scripts` in its `package.json`.
+    fn a_pnpm_project(harness: &Harness, scripts: &Value) {
+        let repo = &harness.project.repo;
+        repo.write("pnpm-lock.yaml", "lockfileVersion: 9\n");
+        repo.write(
+            "package.json",
+            &json!({ "name": "shop", "scripts": scripts }).to_string(),
+        );
+        repo.commit("A shop");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn scan_answers_how_to_start_the_app() {
+        let with = driven("project-scan-app-start");
+        a_pnpm_project(&with, &json!({ "dev": "vite", "test": "vitest" }));
+        let scanned = query(
+            &with.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        assert_eq!(
+            scanned["app_start"],
+            json!({ "prepare": "pnpm install", "start": "pnpm run dev" })
+        );
+        let without = driven("project-scan-no-app-start");
+        a_pnpm_project(&without, &json!({ "test": "vitest" }));
+        let scanned = query(
+            &without.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        assert_eq!(scanned["app_start"], Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn proposes_the_preview_the_scan_found() {
+        let propose = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "team.propose",
+                &json!({}),
+                "teamProposeResult",
+            )["team"]["preview"]
+                .clone()
+        };
+        let found = driven("team-propose-preview");
+        a_pnpm_project(&found, &json!({ "dev": "vite" }));
+        assert_eq!(
+            propose(&found),
+            json!({ "prepare": "pnpm install", "start": "pnpm run dev", "path": "/" })
+        );
+
+        // A team that already has a preview keeps its own.
+        let own = Harness::new("team-propose-own-preview", |wire| {
+            wire["preview"] = json!({ "start": "make serve", "port": 4401 });
+        });
+        a_pnpm_project(&own, &json!({ "dev": "vite" }));
+        assert_eq!(
+            propose(&own),
+            json!({ "start": "make serve", "port": 4401, "path": "/" })
+        );
+
+        // A project with no suggestion proposes none.
+        let none = driven("team-propose-no-preview");
+        a_pnpm_project(&none, &json!({ "test": "vitest" }));
+        assert_eq!(propose(&none), Value::Null);
+
+        // A scan that fails (a tracked package.json gone from disk) proposes no preview, and the
+        // proposal still answers.
+        let broken = driven("team-propose-scan-fails");
+        a_pnpm_project(&broken, &json!({ "dev": "vite" }));
+        std::fs::remove_file(broken.project.repo.path.join("package.json")).expect("removed");
+        assert_eq!(propose(&broken), Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn leaves_catervas_own_folder_out_of_kept_private() {
         let harness = driven("project-scan-own");
         let local = harness.project.repo.path.join(".catervas/local/x");
@@ -5159,6 +5393,71 @@ pub(super) mod tests {
         }
         let architect = catervas_roles::load_kit(Role::Architect).expect("the Architect's kit");
         assert!(!super::at_launch(&kit_entry_of(&architect, "osv"), &[]));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_lists_hidden_suggestions() {
+        let (harness, _) = keeping_a_kit("hidden-suggestions");
+        let hidden = |harness: &Harness| {
+            query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["hidden_suggestions"]
+                .clone()
+        };
+        assert_eq!(hidden(&harness), json!([]));
+        let seen = harness.project.events(&[]).len();
+        let said = call(
+            &harness.daemon,
+            "connector_suggestion.hide",
+            &json!({ "agent": "dev-a", "server": "fixture" }),
+            "emptyResult",
+        );
+        assert_eq!(said, json!({}));
+        assert_eq!(
+            hidden(&harness),
+            json!([{ "agent": "dev-a", "server": "fixture" }])
+        );
+        assert!(
+            harness
+                .project
+                .deps
+                .files
+                .root()
+                .join(crate::connectors::CONNECTOR_SUGGESTIONS)
+                .exists()
+        );
+        assert_eq!(harness.project.events(&[]).len(), seen);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn suggestion_hide_refuses_what_the_team_does_not_offer() {
+        let (harness, _) = keeping_a_kit("hidden-refused");
+        for (agent, server) in [("ghost", "fixture"), ("dev-a", "nothing")] {
+            let reply = rpc(
+                &harness.daemon,
+                "connector_suggestion.hide",
+                &json!({ "agent": agent, "server": server }),
+            );
+            assert_eq!(reply["error"]["code"], -32005, "{reply}");
+            let message = reply["error"]["message"].as_str().expect("a message");
+            assert!(
+                message.starts_with("suggestion_not_offered: ")
+                    && message.contains(agent)
+                    && message.contains(server),
+                "{message}"
+            );
+        }
+        assert!(
+            !harness
+                .project
+                .deps
+                .files
+                .root()
+                .join(crate::connectors::CONNECTOR_SUGGESTIONS)
+                .exists()
+        );
+        let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        assert_eq!(got["hidden_suggestions"], json!([]));
     }
 
     #[test]

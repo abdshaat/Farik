@@ -52,6 +52,11 @@ pub enum PreviewError {
         /// What went wrong.
         detail: String,
     },
+    /// The member repository the task changes is not where the project left it.
+    RepositoryMissing {
+        /// The member's name.
+        repo: String,
+    },
 }
 
 impl fmt::Display for PreviewError {
@@ -65,6 +70,7 @@ impl fmt::Display for PreviewError {
             Self::DockerUnavailable { detail } => {
                 write!(formatter, "Docker could not run the preview: {detail}")
             }
+            Self::RepositoryMissing { repo } => write!(formatter, "{repo} cannot be found"),
         }
     }
 }
@@ -90,6 +96,8 @@ impl std::error::Error for CheckError {}
 pub trait RunningPreview: Send + Sync {
     /// Where the browser finds it: `http://localhost:<port>`.
     fn origin(&self) -> String;
+    /// The port it answers on: the one the team set, else the one found when it started.
+    fn port(&self) -> u16;
     /// The container whose network namespace the browser joins.
     fn container(&self) -> String;
     /// The labels the preview's containers carry, `catervas.project=<id>` and `catervas.task=<id>`.
@@ -668,7 +676,9 @@ pub(crate) mod fixtures {
             crate::locked(&self.prepared).push(preview.prepare.clone());
             match &self.fails {
                 Some(error) => Err(error.clone()),
-                None => Ok(Box::new(NamedPreview { port: preview.port })),
+                None => Ok(Box::new(NamedPreview {
+                    port: preview.port.unwrap_or(5173),
+                })),
             }
         }
     }
@@ -875,6 +885,10 @@ pub(crate) mod fixtures {
             "http://localhost:4400".to_string()
         }
 
+        fn port(&self) -> u16 {
+            4400
+        }
+
         fn container(&self) -> String {
             "catervas-preview-p-ctv-1".to_string()
         }
@@ -929,6 +943,10 @@ pub(crate) mod fixtures {
     impl RunningPreview for NamedPreview {
         fn origin(&self) -> String {
             format!("http://localhost:{}", self.port)
+        }
+
+        fn port(&self) -> u16 {
+            self.port
         }
 
         fn container(&self) -> String {

@@ -13,7 +13,7 @@ use catervas_core::contract::TaskId;
 use catervas_protocol::clock::{Clock, IdSource, MovableClock, SequentialIds};
 use catervas_protocol::event::{CatervasEvent, EventKind, NewEvent, event_from_value};
 use catervas_store::TaskProjection;
-use catervas_store::git::fixtures::{git_in, git_output_in};
+use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
 use catervas_store::requests::file_request;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -49,11 +49,19 @@ impl Harness {
     /// The project, with `change` applied to the team's wire after the WIP limit is set to one,
     /// and nothing on the board.
     pub(crate) fn new(name: &str, change: impl FnOnce(&mut Value)) -> Self {
-        let team = a_team_of_three(|wire| {
+        Self::over(TestProject::new(name, &Self::team(change)), name)
+    }
+
+    /// The team of three, with the WIP limit set to one and `change` applied to its wire.
+    fn team(change: impl FnOnce(&mut Value)) -> catervas_core::team::Team {
+        a_team_of_three(|wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(1);
             change(wire);
-        });
-        let project = TestProject::new(name, &team);
+        })
+    }
+
+    /// The harness over `project`, with the daemon that is not served.
+    fn over(project: TestProject, name: &str) -> Self {
         let daemon = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
         // The user's state folder, beside the repository and outside it, as `~/.config/catervas` is.
         daemon.set_state_dir(std::path::PathBuf::from(format!(
@@ -67,6 +75,23 @@ impl Harness {
             gh,
             previews: Arc::new(NoPreviews),
         }
+    }
+
+    /// `new` for a project folder whose member repositories are `members`, each a repository of
+    /// its own; the members are returned so that the test keeps them alive.
+    pub(crate) fn project_folder(name: &str, members: &[&str]) -> (Self, Vec<TempRepo>) {
+        Self::project_folder_with(name, members, |_| {})
+    }
+
+    /// `project_folder` with `change` applied to the team's wire as `new` applies it, for a test
+    /// that needs other roles or a policy.
+    pub(crate) fn project_folder_with(
+        name: &str,
+        members: &[&str],
+        change: impl FnOnce(&mut Value),
+    ) -> (Self, Vec<TempRepo>) {
+        let (project, repos) = TestProject::project_folder(name, &Self::team(change), members);
+        (Self::over(project, name), repos)
     }
 
     /// A recorded adapter playing `transcripts`, whose Catervas tool calls this harness's daemon
@@ -404,6 +429,20 @@ impl Harness {
     /// Files `task` `ready` and moves it to `assigned` to `assignee`, reviewed by `reviewer`.
     pub(crate) fn assigned(&self, task: &str, assignee: &str, reviewer: &str) {
         self.ready(task);
+        self.project.moved(
+            task,
+            "ready",
+            "assigned",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": assignee, "reviewer": reviewer }),
+        );
+    }
+
+    /// `assigned`, the task naming the member repository `repo` and `src/**` as its path.
+    pub(crate) fn assigned_in(&self, task: &str, assignee: &str, reviewer: &str, repo: &str) {
+        self.file(task, "ready", |wire| {
+            wire["repo"] = json!(repo);
+            wire["allowed_paths"] = json!(["src/**"]);
+        });
         self.project.moved(
             task,
             "ready",

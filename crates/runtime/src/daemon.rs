@@ -54,6 +54,7 @@ mod gates;
 mod hooks;
 mod mcp;
 pub(crate) mod own_calls;
+mod repos;
 mod setup;
 mod signed_in;
 mod team;
@@ -67,7 +68,7 @@ pub(crate) use hooks::APPROVAL_NEEDED;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };
-pub use setup::{SetupError, SetupHost};
+pub use setup::{MemberRequest, SetupError, SetupHost};
 pub(crate) use signed_in::{Fresh, refreshed_entry};
 pub use team::SETUP_PENDING;
 pub use team::{custom_entry, kit_entry, labelled, matches_kit, plan_tools_of};
@@ -207,6 +208,9 @@ pub struct DaemonState {
     connectors_kept: Arc<Mutex<BTreeMap<String, Kept>>>,
     /// The user's state folder, where each stdio connector runs (ADR 0030), once it is set.
     state_dir: OnceLock<std::path::PathBuf>,
+    /// The user's home folder, where a member repository's path is relative to (ADR 0057), once it
+    /// is set.
+    home: OnceLock<std::path::PathBuf>,
     /// The certificates a mailbox connection trusts: the platform's, unless a test names its own.
     #[cfg(test)]
     mail_trust: OnceLock<crate::mailbox::Trust>,
@@ -317,6 +321,7 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            home: OnceLock::new(),
             #[cfg(test)]
             mail_trust: OnceLock::new(),
             registered_apps: OnceLock::new(),
@@ -347,6 +352,7 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            home: OnceLock::new(),
             #[cfg(test)]
             mail_trust: OnceLock::new(),
             registered_apps: OnceLock::new(),
@@ -379,6 +385,17 @@ impl DaemonState {
     /// Answers `true`, or `false` when one was already set, which is kept.
     pub fn set_state_dir(&self, directory: std::path::PathBuf) -> bool {
         self.state_dir.set(directory).is_ok()
+    }
+
+    /// Reads a member repository's path as relative to `home` from now on. Answers `true`, or
+    /// `false` when one was already set, which is kept.
+    pub fn set_home(&self, home: std::path::PathBuf) -> bool {
+        self.home.set(home).is_ok()
+    }
+
+    /// The user's home folder, once it is set.
+    pub(crate) fn home(&self) -> Option<&std::path::Path> {
+        self.home.get().map(std::path::PathBuf::as_path)
     }
 
     /// Signs in with the apps of `apps` from now on, in place of `REGISTERED_APPS`: a test's table,

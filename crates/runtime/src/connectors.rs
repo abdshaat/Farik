@@ -601,6 +601,61 @@ pub fn keys_copied(root: &std::path::Path) -> Option<(String, usize)> {
     (count > 0).then_some((from, count))
 }
 
+/// Where the connections the user said Not now to are kept, under the project's root: this
+/// computer's own preference, so it is not in the team file that travels with the repository.
+pub const CONNECTOR_SUGGESTIONS: &str = ".catervas/local/connector-suggestions.json";
+
+/// Adds the agent's server to `root`'s [`CONNECTOR_SUGGESTIONS`], once, so Today stops suggesting
+/// it; makes the folder and writes the file private. A file that cannot be read is replaced.
+///
+/// # Errors
+///
+/// The file could not be written.
+pub fn hide_suggestion(
+    root: &std::path::Path,
+    agent_id: &str,
+    server: &str,
+) -> std::io::Result<()> {
+    let mut hidden = hidden_suggestions(root);
+    let pair = (agent_id.to_string(), server.to_string());
+    if !hidden.contains(&pair) {
+        hidden.push(pair);
+    }
+    let file = root.join(CONNECTOR_SUGGESTIONS);
+    if let Some(folder) = file.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    let hidden: Vec<serde_json::Value> = hidden
+        .iter()
+        .map(|(agent_id, server)| serde_json::json!({ "agent_id": agent_id, "server": server }))
+        .collect();
+    let note = serde_json::json!({ "hidden": hidden });
+    crate::write_private(&file, note.to_string().as_bytes())
+}
+
+/// Every (agent id, server) that [`hide_suggestion`] noted in `root`, in the file's order; empty
+/// when there is no file or it cannot be read.
+#[must_use]
+pub fn hidden_suggestions(root: &std::path::Path) -> Vec<(String, String)> {
+    let Some(note) = std::fs::read(root.join(CONNECTOR_SUGGESTIONS))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+    else {
+        return Vec::new();
+    };
+    note.get("hidden")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|pair| {
+            Some((
+                pair.get("agent_id")?.as_str()?.to_string(),
+                pair.get("server")?.as_str()?.to_string(),
+            ))
+        })
+        .collect()
+}
+
 /// Why a server's tools could not be listed, or its launch not described.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectorError {
@@ -1979,5 +2034,52 @@ mod tests {
         assert_eq!(keys_copied(&root), None);
         std::fs::write(root.join(KEYS_COPIED), r#"{"from":"/x","keys":[]}"#).expect("written");
         assert_eq!(keys_copied(&root), None);
+    }
+
+    #[test]
+    fn hide_suggestion_writes_the_pair_once() {
+        let root = scratch("hide-once");
+        hide_suggestion(&root, "dev-a", "fixture").expect("hidden");
+        hide_suggestion(&root, "dev-a", "fixture").expect("hidden again");
+        let file: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.join(CONNECTOR_SUGGESTIONS)).expect("reads"),
+        )
+        .expect("json");
+        assert_eq!(
+            file,
+            serde_json::json!({ "hidden": [ { "agent_id": "dev-a", "server": "fixture" } ] })
+        );
+        assert_eq!(
+            hidden_suggestions(&root),
+            vec![("dev-a".to_string(), "fixture".to_string())]
+        );
+    }
+
+    #[test]
+    fn hide_suggestion_keeps_earlier_pairs_in_order() {
+        let root = scratch("hide-order");
+        hide_suggestion(&root, "dev-a", "fixture").expect("hidden");
+        hide_suggestion(&root, "kai", "buffer").expect("hidden");
+        assert_eq!(
+            hidden_suggestions(&root),
+            vec![
+                ("dev-a".to_string(), "fixture".to_string()),
+                ("kai".to_string(), "buffer".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn hidden_suggestions_is_empty_without_a_readable_file() {
+        let root = scratch("hide-unreadable");
+        assert!(hidden_suggestions(&root).is_empty());
+        std::fs::create_dir_all(root.join(".catervas/local")).expect("a root");
+        std::fs::write(root.join(CONNECTOR_SUGGESTIONS), "not json").expect("written");
+        assert!(hidden_suggestions(&root).is_empty());
+        hide_suggestion(&root, "dev-a", "fixture").expect("replaces it");
+        assert_eq!(
+            hidden_suggestions(&root),
+            vec![("dev-a".to_string(), "fixture".to_string())]
+        );
     }
 }

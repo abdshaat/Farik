@@ -51,6 +51,7 @@ pub use catervas_store::git::integration_branch;
 use catervas_store::git::product_plan_on;
 use catervas_store::git::stale_twins;
 use catervas_store::product_plan::{is_the_product_plan, new_project};
+use catervas_store::repos::{TaskRepositoryError, task_repository};
 
 /// Where the integration lock lives, under the project root.
 pub(crate) const INTEGRATION_LOCK: &str = ".catervas/local/integration.lock";
@@ -215,6 +216,16 @@ impl From<GitError> for TransitionError {
     fn from(error: GitError) -> Self {
         Self::Git {
             detail: error.to_string(),
+        }
+    }
+}
+
+impl From<TaskRepositoryError> for TransitionError {
+    fn from(error: TaskRepositoryError) -> Self {
+        let detail = error.to_string();
+        match error {
+            TaskRepositoryError::Git(_) => Self::Git { detail },
+            _ => Self::Files { detail },
         }
     }
 }
@@ -755,6 +766,13 @@ impl Transitions {
             human_approves: asks_every_contract(team) || requires_human_acceptance(contract),
             awaits_the_product_plan: self.awaits_the_product_plan(team)?,
             is_the_product_plan: is_the_product_plan(history),
+            repos: self.files.read_repos()?.map(|listed| {
+                listed
+                    .repos
+                    .iter()
+                    .map(|member| member.name.as_str().to_string())
+                    .collect()
+            }),
         };
 
         Ok((budget, open_sprint, sprint_left, readiness))
@@ -782,15 +800,30 @@ impl Transitions {
         if !worktree.is_dir() {
             return Ok((WorkState::default(), Vec::new()));
         }
-        let base = integration_branch(team, &self.git)?;
+        // A member that is gone reads as no worktree, so that a cancel, an escalation or a hold
+        // still goes through and `verifying` is refused for the commits it cannot see.
+        let repository = match task_repository(
+            &self.files,
+            team,
+            &self.git,
+            contract.repo.as_ref().map(|repo| repo.as_str()),
+        ) {
+            Ok(repository) => repository,
+            Err(TaskRepositoryError::Missing { .. }) => {
+                return Ok((WorkState::default(), Vec::new()));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let base = &repository.integration_branch;
+        let git = &repository.git;
         let branch = task_branch(contract);
         let work = WorkState {
-            commits: self.git.commit_count(&base, &branch)?,
-            worktree_clean: self.git.is_clean(&worktree)?,
+            commits: git.commit_count(base, &branch)?,
+            worktree_clean: git.is_clean(&worktree)?,
             // A task with a worktree does not work in a private folder.
             folder: None,
         };
-        Ok((work, self.git.changed_paths(&base, &branch)?))
+        Ok((work, git.changed_paths(base, &branch)?))
     }
 
     /// What a task in the private `folder` has done there (6.6): the workbooks it `named`, which of
@@ -1669,6 +1702,7 @@ mod tests {
     use super::{
         TransitionAsk, TransitionOutcome, Transitions, refusal_details, reviewed_by_the_human,
     };
+    use crate::orchestrator::fixtures::Harness;
 
     fn at(hour: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 9, 22, hour, 0, 0)
@@ -2718,6 +2752,137 @@ mod tests {
         assert_eq!(context.work.commits, 0);
         assert!(!context.work.worktree_clean);
         assert!(context.done.changed_paths.is_empty());
+    }
+
+    /// A project folder with members `app` and `infra`, and `CTV-1` in `app`, `in_progress` under
+    /// `dev-a`, with its worktree made by `app`.
+    fn a_task_working_in_app(name: &str) -> (Harness, Vec<TempRepo>) {
+        let (harness, members) = Harness::project_folder(name, &["app", "infra"]);
+        harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        harness.project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        members[0]
+            .adapter()
+            .create_worktree(&harness.worktree("CTV-1"), &harness.branch("CTV-1"), "main")
+            .expect("the worktree is made by the member");
+        (harness, members)
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_work_from_the_member() {
+        let (harness, _members) = a_task_working_in_app("member-work");
+        let worktree = harness.worktree("CTV-1");
+        std::fs::create_dir_all(worktree.join("src")).expect("a directory");
+        std::fs::write(worktree.join("src/a.rs"), "fn a() {}\n").expect("written");
+        git_in(&worktree, &["add", "-A"]);
+        git_in(&worktree, &["commit", "-m", "the function"]);
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+
+        let context = deps
+            .transitions
+            .context(
+                &a_request(
+                    "CTV-1",
+                    TaskStatus::Verifying,
+                    TransitionActor::Assignee,
+                    Some("dev-a"),
+                ),
+                &TransitionAsk::default(),
+                &team,
+            )
+            .expect("the context reads");
+
+        assert_eq!(context.work.commits, 1);
+        assert!(context.work.worktree_clean);
+        assert_eq!(context.done.changed_paths, vec!["src/a.rs".to_string()]);
+        assert!(
+            catervas_core::governor::paths::check_allowed_paths(
+                &context.done.changed_paths,
+                &context.contract.allowed_paths
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_missing_member_blocks_no_cancel() {
+        let (harness, members) = a_task_working_in_app("member-missing");
+        let moved = std::path::PathBuf::from(format!("{}-moved", members[0].path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&members[0].path, &moved).expect("the member is moved away");
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+
+        let verifying = deps.transitions.request(
+            &a_request(
+                "CTV-1",
+                TaskStatus::Verifying,
+                TransitionActor::Assignee,
+                Some("dev-a"),
+            ),
+            &TransitionAsk::default(),
+            &team,
+        );
+        let cancelled = deps.transitions.request(
+            &a_request("CTV-1", TaskStatus::Cancelled, TransitionActor::Human, None),
+            &TransitionAsk::default(),
+            &team,
+        );
+        std::fs::rename(&moved, &members[0].path).expect("the member is moved back");
+
+        let Ok(TransitionOutcome::Refused(refusals)) = verifying else {
+            panic!("verifying is refused, not an error: {verifying:?}");
+        };
+        assert!(
+            format!("{refusals:?}").contains("commit"),
+            "refused for no commits: {refusals:?}"
+        );
+        assert!(
+            matches!(cancelled, Ok(TransitionOutcome::Moved(_))),
+            "{cancelled:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_builders_task_with_no_repo() {
+        let (harness, _members) = Harness::project_folder("member-readiness", &["app", "infra"]);
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        let rules_failed = |task: &str, repo: Option<&str>| -> Vec<ReadinessRule> {
+            harness.file(task, "refining", |wire| {
+                wire["allowed_paths"] = json!(["src/**"]);
+                if let Some(repo) = repo {
+                    wire["repo"] = json!(repo);
+                }
+            });
+            let contract = deps
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the contract");
+            let context = deps
+                .transitions
+                .readiness_context(&team, &contract)
+                .expect("the context reads");
+            evaluate_readiness(&contract, &context)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .map(|failure| failure.rule)
+                .collect()
+        };
+
+        assert!(rules_failed("CTV-1", None).contains(&ReadinessRule::RepoRequired));
+        let named = rules_failed("CTV-2", Some("app"));
+        assert!(!named.contains(&ReadinessRule::RepoRequired), "{named:?}");
+        assert!(!named.contains(&ReadinessRule::RepoUnknown), "{named:?}");
     }
 
     #[test]

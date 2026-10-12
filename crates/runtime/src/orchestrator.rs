@@ -17,6 +17,7 @@ use catervas_protocol::command::{Command, CommandReply, ReplyKind};
 use catervas_roles::{KitError, RoleError};
 use catervas_store::baseline::{folder_in, make_private_directory};
 use catervas_store::files::FilesError;
+use catervas_store::repos::{TaskRepository, TaskRepositoryError, task_repository};
 use catervas_store::{GitError, StoreError};
 use chrono::{DateTime, Utc};
 
@@ -760,6 +761,27 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
         .root()
         .join(".catervas/local/worktrees")
         .join(task_id.as_str())
+}
+
+/// The repository `contract` works in: the project folder's own, or the member it names.
+fn task_repository_of(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    contract: &TaskContract,
+) -> Result<TaskRepository, TaskRepositoryError> {
+    task_repository(
+        &deps.tools.files,
+        team,
+        &deps.tools.git,
+        contract.repo.as_ref().map(|repo| repo.as_str()),
+    )
+}
+
+/// A task's repository that cannot be had, as the refusal that carries its sentence.
+fn repository_refused(task_id: &TaskId, error: &TaskRepositoryError) -> OrchestratorError {
+    OrchestratorError::Refused {
+        reason: format!("task_repository: {}: {error}", task_id.as_str()),
+    }
 }
 
 /// Where a task's sessions work: its private folder, `.catervas/local/finance` for a Finance

@@ -533,6 +533,18 @@
 	font-size: inherit;
 }
 
+.example {
+	margin: 0;
+	padding: var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+	color: var(--catervas-color-ink-muted);
+}
+
+.example meter {
+	width: 100%;
+}
+
 /* The offer at the end of setup for an existing project, as in the "Catervafication" mockup. */
 .offer {
 	display: grid;

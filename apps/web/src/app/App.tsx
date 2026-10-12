@@ -29,7 +29,6 @@ import { Spending } from "../pages/settings/Spending.tsx";
 import { Work } from "../pages/settings/Work.tsx";
 import { YourApp } from "../pages/settings/YourApp.tsx";
 import { SetupAccount } from "../pages/setup/SetupAccount.tsx";
-import { SetupAdvanced } from "../pages/setup/SetupAdvanced.tsx";
 import { SetupComputer } from "../pages/setup/SetupComputer.tsx";
 import { SetupFinish } from "../pages/setup/SetupFinish.tsx";
 import { SetupPermissions } from "../pages/setup/SetupPermissions.tsx";
@@ -72,7 +71,10 @@ export function App() {
 				<Route path="/setup/permissions" element={<SetupPermissions />} />
 				<Route path="/setup/spending" element={<SetupSpending />} />
 				<Route path="/setup/finish" element={<SetupFinish />} />
-				<Route path="/setup/advanced" element={<SetupAdvanced />} />
+				<Route
+					path="/setup/advanced"
+					element={<Navigate to="/setup/finish" replace />}
+				/>
 			</Route>
 			<Route element={<Shell />}>
 				<Route index element={<Today />} />
