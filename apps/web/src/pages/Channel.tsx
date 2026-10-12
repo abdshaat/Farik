@@ -5,12 +5,13 @@ import { Link, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useEvents, useQuery } from "../app/store.ts";
 import { isStatus, movedWords, sentence } from "../app/words.ts";
+import { Feed } from "../components/Feed.tsx";
 import { MentionBox } from "../components/MentionBox.tsx";
 import {
 	renderMessageText,
 	type WaitingRow,
 } from "../components/MessageText.tsx";
-import { useWide } from "../shell/Shell.tsx";
+import { useMedia, useWide } from "../shell/Shell.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./Channel.module.css";
 import { MEETINGS, threadAnchor } from "./SprintPage.tsx";
@@ -113,6 +114,8 @@ export function Channel() {
 	const { client } = useConnection();
 	const events = useEvents();
 	const wide = useWide();
+	// From 1440 px the meetings sit beside the chat; below it they fold under its intro.
+	const beside = useMedia("(min-width: 1440px)");
 	const { hash } = useLocation();
 	const { data: team } = useQuery<{ team: Team }>("team.get", {});
 	const { data: waiting } = useQuery<{ waiting: WaitingRow[] }>(
@@ -131,6 +134,9 @@ export function Channel() {
 		more: boolean;
 	}>();
 	const [opened, setOpened] = useState<Record<string, boolean>>({});
+	// The folded meetings' own open state, kept here so that opening them renders the page, and
+	// the feed follows the box's new height.
+	const [fold, setFold] = useState(false);
 
 	useEffect(() => {
 		if (!client) return;
@@ -221,70 +227,80 @@ export function Channel() {
 	const open = (anchor: string, to: boolean) =>
 		setOpened((o) => ({ ...o, [anchor]: to }));
 
+	const newest = messages.at(-1);
+	const meetings = sprint && (
+		<Meetings
+			sprintId={sprint.sprintId}
+			folded={!beside}
+			open={fold}
+			onToggle={setFold}
+			onOpen={(anchor) => {
+				setGone(false);
+				setPaging(undefined);
+				setTarget(anchor);
+			}}
+		/>
+	);
+
 	return (
 		<div className={styles.page}>
 			<div className={styles.main}>
 				<div className={styles.head}>
-					<h1 className={styles.title}>{t("channel")}</h1>
+					<h1 id="channel-title" className={styles.title}>
+						{t("channel")}
+					</h1>
 					<p className={styles.muted}>{t("channelIntro")}</p>
+					{!beside && meetings}
 				</div>
-				{loaded?.more && (
-					<div>
-						<Button onClick={earlier} busy={paging === "busy"}>
-							{t("channelEarlier")}
-						</Button>
-					</div>
-				)}
-				{gone && (
-					<p role="status" className={styles.muted}>
-						{t("channelMeetingGone")}
-					</p>
-				)}
-				{paging === "failed" && (
-					<p role="alert" className={styles.alert}>
-						{t("channelEarlierFailed")}
-					</p>
-				)}
-				<ol className={styles.messages} aria-label={t("channelMessages")}>
-					{group(messages).map((item) =>
-						"message" in item ? (
-							<MessageRow
-								key={item.message.seq}
-								message={item.message}
-								agents={agents}
-								waiting={rows}
-								repliedTo={
-									item.message.inReplyTo === null
-										? undefined
-										: all.get(item.message.inReplyTo)
-								}
-							/>
-						) : (
-							<ThreadBlock
-								key={item.anchor}
-								anchor={item.anchor}
-								thread={item.thread}
-								messages={item.messages}
-								agents={agents}
-								waiting={rows}
-								open={isOpen(item.anchor)}
-								onToggle={() => open(item.anchor, !isOpen(item.anchor))}
-							/>
-						),
-					)}
-				</ol>
+				<Feed
+					labelledBy="channel-title"
+					newest={
+						newest && { seq: newest.seq, mine: newest.author === "human" }
+					}
+					oldest={messages[0]?.seq}
+					more={!!loaded?.more}
+					paging={paging}
+					onEarlier={earlier}
+					notes={
+						gone && (
+							<p role="status" className={styles.muted}>
+								{t("channelMeetingGone")}
+							</p>
+						)
+					}
+				>
+					<ol className={styles.messages} aria-label={t("channelMessages")}>
+						{group(messages).map((item) =>
+							"message" in item ? (
+								<MessageRow
+									key={item.message.seq}
+									message={item.message}
+									agents={agents}
+									waiting={rows}
+									repliedTo={
+										item.message.inReplyTo === null
+											? undefined
+											: all.get(item.message.inReplyTo)
+									}
+								/>
+							) : (
+								<ThreadBlock
+									key={item.anchor}
+									anchor={item.anchor}
+									thread={item.thread}
+									messages={item.messages}
+									agents={agents}
+									waiting={rows}
+									open={isOpen(item.anchor)}
+									onToggle={() => open(item.anchor, !isOpen(item.anchor))}
+								/>
+							),
+						)}
+					</ol>
+				</Feed>
 				<Composer agents={agents} wide={wide} />
 			</div>
-			{sprint && (
-				<Meetings
-					sprintId={sprint.sprintId}
-					onOpen={(anchor) => {
-						setGone(false);
-						setPaging(undefined);
-						setTarget(anchor);
-					}}
-				/>
-			)}
+			{beside && meetings}
 		</div>
 	);
 }
@@ -479,10 +495,10 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 					{t("channelPost")}
 				</Button>
 			</div>
-			<p id="channel-enter" className={styles.muted}>
+			<p id="channel-enter" className={wide ? styles.muted : styles.hidden}>
 				{t("chatsEnterSends")}
 			</p>
-			<p id="channel-hint" className={styles.muted}>
+			<p id="channel-hint" className={wide ? styles.muted : styles.hidden}>
 				{t("channelHintLead")} <Link to="/">{t("channelHintLink")}</Link>{" "}
 				{t("channelHintEnd")}
 			</p>
@@ -498,28 +514,55 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 /** "Meetings in this sprint": a link to each of the open sprint's thread blocks. */
 function Meetings({
 	sprintId,
+	folded,
+	open,
+	onToggle,
 	onOpen,
 }: {
 	sprintId: string;
+	/** Under the chat's intro, closed until opened, instead of a column beside the chat. */
+	folded: boolean;
+	/** Whether the folded meetings are open. */
+	open: boolean;
+	onToggle: (open: boolean) => void;
 	onOpen: (anchor: string) => void;
 }) {
 	const { data } = useQuery<{ meetings: Meeting[] }>("sprint.get", {
 		sprintId,
 	});
+	const links = data?.meetings.map((m) => {
+		const anchor = threadAnchor(m.thread, m.at);
+		return (
+			<a
+				key={anchor}
+				className={styles.meeting}
+				href={`#${anchor}`}
+				onClick={() => onOpen(anchor)}
+			>
+				{t("channelMeetingLink", {
+					thread: threadWord(m.thread),
+					weekday: weekday(m.at),
+				})}
+			</a>
+		);
+	});
 	return (
 		<aside className={styles.side} aria-labelledby="channel-meetings">
-			<h2 id="channel-meetings">{t("channelMeetings")}</h2>
-			{data?.meetings.map((m) => {
-				const anchor = threadAnchor(m.thread, m.at);
-				return (
-					<a key={anchor} href={`#${anchor}`} onClick={() => onOpen(anchor)}>
-						{t("channelMeetingLink", {
-							thread: threadWord(m.thread),
-							weekday: weekday(m.at),
-						})}
-					</a>
-				);
-			})}
+			{folded ? (
+				<details
+					className={styles.fold}
+					open={open}
+					onToggle={(e) => onToggle(e.currentTarget.open)}
+				>
+					<summary id="channel-meetings">{t("channelMeetings")}</summary>
+					{links}
+				</details>
+			) : (
+				<>
+					<h2 id="channel-meetings">{t("channelMeetings")}</h2>
+					{links}
+				</>
+			)}
 		</aside>
 	);
 }
