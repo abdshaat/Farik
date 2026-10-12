@@ -1534,3 +1534,76 @@ fn knows_a_local_branch() {
         "that repository has no branch named nope"
     );
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_a_repositorys_main_worktree() {
+    let repository = TempRepo::new("main-worktree");
+    let root = repository
+        .path
+        .canonicalize()
+        .expect("the repository exists")
+        .to_string_lossy()
+        .into_owned();
+    let inside = repository.path.join("sub/folder");
+    std::fs::create_dir_all(&inside).expect("a subfolder");
+    let linked = repository.path.join(".claude/worktrees/x");
+    repository.git(&["worktree", "add", "-b", "x", &linked.to_string_lossy()]);
+
+    for folder in [repository.path.clone(), inside, linked] {
+        assert_eq!(
+            Git::open(folder).main_worktree().expect("git answers"),
+            Some(root.clone())
+        );
+    }
+    let plain = std::env::temp_dir().join(format!("catervas-plain-{}", std::process::id()));
+    std::fs::create_dir_all(&plain).expect("a plain folder");
+    assert_eq!(
+        Git::open(plain.clone())
+            .main_worktree()
+            .expect("git answers"),
+        None
+    );
+    let _ = std::fs::remove_dir_all(&plain);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_who_committed() {
+    let repository = TempRepo::new("who-committed");
+    repository.git(&["config", "user.email", "me@example.invalid"]);
+    repository.write("mine.txt", "mine\n");
+    repository.commit("a commit of mine");
+    let git = repository.adapter();
+    assert_eq!(
+        git.user_email().expect("git answers"),
+        Some("me@example.invalid".to_string())
+    );
+    assert!(
+        git.has_commit_by("me@example.invalid")
+            .expect("git answers")
+    );
+    assert!(
+        git.has_commit_by("ME@example.invalid")
+            .expect("git answers")
+    );
+    assert!(!git.has_commit_by("e@example.invalid").expect("git answers"));
+    assert!(
+        !git.has_commit_by("other@example.invalid")
+            .expect("git answers")
+    );
+
+    repository.git(&["checkout", "-b", "elsewhere"]);
+    repository.git(&[
+        "-c",
+        "user.email=other@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "somebody else's",
+    ]);
+    assert!(
+        git.has_commit_by("other@example.invalid")
+            .expect("git answers")
+    );
+}

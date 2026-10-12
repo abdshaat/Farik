@@ -480,6 +480,61 @@ impl Git {
         }
     }
 
+    /// The repository's main worktree, the first one `git worktree list` names, so that every
+    /// linked worktree folds into its repository. A bare repository's is its own folder; a folder in
+    /// no repository has none.
+    ///
+    /// # Errors
+    ///
+    /// `NotInstalled` when git cannot be run; `CommandFailed` when git refuses the listing.
+    pub fn main_worktree(&self) -> Result<Option<String>, GitError> {
+        if !self.is_repository() {
+            return Ok(None);
+        }
+        let listed = self.at_root(&["worktree", "list", "--porcelain"])?;
+        Ok(listed
+            .lines()
+            .next()
+            .and_then(|line| line.strip_prefix("worktree "))
+            .map(str::to_string))
+    }
+
+    /// The email git commits as here, the repository's own setting or the global one; none when
+    /// git knows nobody.
+    ///
+    /// # Errors
+    ///
+    /// `NotInstalled` when git cannot be run.
+    pub fn user_email(&self) -> Result<Option<String>, GitError> {
+        match self.at_root(&["config", "--get", "user.email"]) {
+            Ok(email) if !email.is_empty() => Ok(Some(email)),
+            // `config --get` exits 1 for a key that is not set.
+            Ok(_) | Err(GitError::CommandFailed { .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Whether any commit on any ref was authored by `email`, compared without regard to case and
+    /// as a whole address (the `<>` around it matter).
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn has_commit_by(&self, email: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        let author = format!("--author=<{email}>");
+        let found = self.at_root(&[
+            "log",
+            "--all",
+            "-1",
+            "--format=%H",
+            "--fixed-strings",
+            "--regexp-ignore-case",
+            &author,
+        ])?;
+        Ok(!found.is_empty())
+    }
+
     /// How many commits `head` has that `base` does not.
     ///
     /// # Errors
