@@ -140,12 +140,12 @@ Tests (`Chats.test.tsx`):
 
 Files: `apps/web/e2e/chats-scroll.spec.ts`
 
-One test, `the chats open at the newest message, each pane scrolling on its own, and older ones load on scrolling up`, with `test.setTimeout(90_000)` (as `accept.spec.ts` does) and `{ exact: true }` on every "Line n." text: `startServe({ team: "pm-architect-developer", transcripts: [] })`; `catervas(project, ["say", "Line <n>."])` for n 1 to 130 (no `@`, so no agent answers); at 1280 by 800, Chats:
+One test, `the chats open at the newest message, each pane scrolling on its own, and older ones load on scrolling up`, with `test.setTimeout(90_000)` (as `accept.spec.ts` does) and `{ exact: true }` on every "Line n." text: `startServe({ team: "pm-architect-developer", transcripts: ["reply_to_a_mention"], paceMs: 3000 })` (Theo's recorded reply waits three seconds before it plays); `catervas(project, ["say", "Line <n>."])` for n 1 to 130 (no `@`, so no agent answers); at 1280 by 800, Chats:
 
 1. "Line 130." and the box "Post to the team" are in the viewport; `document.documentElement.scrollHeight <= innerHeight`; "Line 30." is not in the page (the first page is 31 to 130).
 2. In one `evaluate` on the region "Team", `scrollTop = 0` is set and "Line 31."'s `getBoundingClientRect().top` returned (the scroll event fires after it); then "Line 30." is attached; "Line 31."'s top, read again, differs from the first by at most 4 px; the chat list's `nav` has `scrollTop` 0 and the same top as before.
-3. Still scrolled up, `catervas say "Line 131."`: the button "New messages" is visible and "Line 131." is not in the viewport; pressed: "Line 131." is in the viewport.
-4. `narrow(page)` (360 by 780), `/channel` again: "Line 131." and the box labelled "Message the team" (`channelPostPhone`, its label visually hidden) are in the viewport, and `document.documentElement.scrollHeight <= innerHeight`.
+3. `catervas say "@theo can you look at the menu page?"` (the user's own post, author `human`): it is in the viewport, the view having followed it, and no "New messages" shows. Then, in one `evaluate`, the region "Team" is scrolled to 0 (every page is read by now, so nothing more is asked). Theo's reply, "the login form is done and its tests are next.", arrives (timeout 15 s): the button "New messages" is visible and the reply is not in the viewport; pressed: the reply is in the viewport. (Amended during execution: a `catervas say` line is the user's own, which the view always follows, so the plan's first step 3 could never show the button; the executor stopped on it, as it should.)
+4. `narrow(page)` (360 by 780), `/channel` again: Theo's reply and the box labelled "Message the team" (`channelPostPhone`, its label visually hidden) are in the viewport, and `document.documentElement.scrollHeight <= innerHeight`.
 
 - [ ] `test(web): open the chats at the newest message in a real browser`
 
