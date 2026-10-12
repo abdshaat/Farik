@@ -232,7 +232,7 @@ Files: `git.rs` (three methods after `check_branch_name`); `claude_history.rs` (
 - `tells_explored_from_yours` (`tests/claude_history.rs`): `shop`, committed as `me@example.invalid`, is yours; `clone`, whose only commit is by `other@example.invalid` with local `user.email` `me@example.invalid`, is `Explored`; a repository with no commit is yours; a plain folder is yours with `is_git` false. RED.
 - `remembers_a_root_after_its_folder_is_gone` (`tests/claude_history.rs`): after a scan finds `shop`, its folder removed and rescanned: `shop`'s sessions, and a gone worktree session under it, are one row `shop` in `found.gone`, none in `projects`. RED.
 
-- [ ] `feat(store): place each claude code session in its project`
+- [x] `feat(store): place each claude code session in its project`
 
 ### Task 6: `catervas discover`
 

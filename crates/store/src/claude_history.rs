@@ -1,16 +1,22 @@
 //! Reading Claude Code's transcripts into the machine index, and placing each session in its project.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use catervas_core::claude_history::{TranscriptLine, once_per_reply, read_line};
+use catervas_core::claude_history::{
+    Folder, KnownRoot, Place, SessionPlace, TranscriptLine, once_per_reply, place_folders,
+    place_session, read_line,
+};
 use chrono::{DateTime, Utc};
+use rusqlite::{Connection, OpenFlags};
 
 use crate::error::StoreError;
-use crate::git::GitError;
-use crate::machine::{FileRead, FileState, MachineIndex, ReplyBatch, SessionBatch};
+use crate::git::{Git, GitError};
+use crate::machine::{
+    FileRead, FileState, MachineIndex, Ownership, Placement, ProjectRow, ReplyBatch, SessionBatch,
+};
 
 /// Where a Catervas project keeps its log, relative to its root.
 pub const PROJECT_LOG: &str = ".catervas/local/catervas.db";
@@ -277,6 +283,170 @@ pub fn read_transcripts(
     summary.sessions = index.session_count()?;
     summary.new_sessions = summary.sessions - before;
     Ok(summary)
+}
+
+/// The ids of the sessions a Catervas project's log names, read without changing anything: the file
+/// is opened read-only and immutable, so SQLite makes no `-wal`, `-shm` or `-journal` file and
+/// migrates nothing. A log that is not there, or cannot be read, names none. `immutable` does not
+/// see frames of a live log not yet checkpointed, so a session recorded since counts as the owner's
+/// until a later scan.
+fn log_session_ids(root: &str) -> BTreeSet<String> {
+    let path = Path::new(root).join(PROJECT_LOG);
+    if !path.is_file() {
+        return BTreeSet::new();
+    }
+    let escaped = path
+        .to_string_lossy()
+        .replace('%', "%25")
+        .replace('?', "%3F")
+        .replace('#', "%23");
+    let uri = format!("file:{escaped}?mode=ro&immutable=1");
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI;
+    let ids = Connection::open_with_flags(uri, flags).and_then(|connection| {
+        let mut statement = connection
+            .prepare("SELECT DISTINCT session_id FROM events WHERE session_id IS NOT NULL")?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<BTreeSet<_>, _>>()
+    });
+    ids.unwrap_or_default()
+}
+
+/// What git could not say is nothing, except that it could not be run at all.
+fn tolerate<T>(answer: Result<Option<T>, GitError>) -> Result<Option<T>, HistoryError> {
+    match answer {
+        Ok(value) => Ok(value),
+        Err(error @ GitError::NotInstalled { .. }) => Err(error.into()),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Whether a repository is somebody else's: it has a commit, git knows the owner's email, and no
+/// commit on any ref was authored by it. With no commit, or no email, Catervas cannot tell and says
+/// it is the owner's.
+fn ownership_of(git: &Git) -> Result<Ownership, HistoryError> {
+    if tolerate(git.head_summary().map(Some))?.flatten().is_none() {
+        return Ok(Ownership::Yours);
+    }
+    let Some(email) = tolerate(git.user_email())? else {
+        return Ok(Ownership::Yours);
+    };
+    match git.has_commit_by(&email) {
+        Ok(false) => Ok(Ownership::Explored),
+        Ok(true) | Err(GitError::NotARepository | GitError::CommandFailed { .. }) => {
+            Ok(Ownership::Yours)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Places every session in its project, recomputed over all of them: folders are deleted and
+/// repositories made between scans. `not_projects` are folders that are never a project (home, the
+/// temporary folder), on top of `TEMPORARY_FOLDERS`.
+///
+/// Writes each session's place and root, and what every root is: a git repository or not, the
+/// owner's or only explored, still on this computer or not.
+///
+/// # Errors
+///
+/// `Git` when the `git` program cannot be run; `Store` when the index refuses.
+pub fn place_sessions(
+    index: &mut MachineIndex,
+    not_projects: &[PathBuf],
+    now: DateTime<Utc>,
+) -> Result<(), HistoryError> {
+    let sessions = index.session_folders()?;
+    let cwds: BTreeSet<&str> = sessions.iter().map(|(_, cwd)| cwd.as_str()).collect();
+    let mut folders = Vec::new();
+    for cwd in &cwds {
+        let real = Path::new(cwd)
+            .canonicalize()
+            .ok()
+            .filter(|real| real.is_dir());
+        let git_root = match &real {
+            Some(real) => tolerate(Git::open(real.clone()).main_worktree())?,
+            None => None,
+        };
+        folders.push(Folder {
+            path: (*cwd).to_string(),
+            real: real.map(|real| real.to_string_lossy().into_owned()),
+            git_root,
+        });
+    }
+    let stored = index.stored_roots()?;
+    let known: Vec<KnownRoot> = stored
+        .iter()
+        .map(|root| KnownRoot {
+            root: root.root.clone(),
+            is_git: root.is_git,
+        })
+        .collect();
+    let blocked: Vec<String> = not_projects
+        .iter()
+        .map(|path| {
+            path.canonicalize()
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    let places = place_folders(&folders, &known, &blocked);
+    let place_of: BTreeMap<&str, &Place> = cwds.iter().copied().zip(places.iter()).collect();
+
+    let mut logs: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for place in &places {
+        if let Place::Project { root } = place
+            && !logs.contains_key(root)
+        {
+            logs.insert(root.clone(), log_session_ids(root));
+        }
+    }
+    let mut placements = Vec::new();
+    let mut roots = BTreeSet::new();
+    for (id, cwd) in &sessions {
+        let located = place_session(id, cwd, place_of[cwd.as_str()], &logs);
+        let root = match &located {
+            SessionPlace::Owner { root } | SessionPlace::Catervas { root } => {
+                roots.insert(root.clone());
+                Some(root.clone())
+            }
+            SessionPlace::Gone { folder } => Some(folder.clone()),
+            SessionPlace::NotAProject => None,
+        };
+        placements.push(Placement {
+            session_id: id.clone(),
+            place: located.as_wire(),
+            root,
+        });
+    }
+
+    let mut projects = Vec::new();
+    for root in roots {
+        let present = Path::new(&root).is_dir();
+        let before = stored.iter().find(|stored| stored.root == root);
+        let (is_git, ownership) = if present {
+            let git = Git::open(PathBuf::from(&root));
+            let is_git = tolerate(git.main_worktree())?.as_deref() == Some(root.as_str());
+            let ownership = if is_git {
+                ownership_of(&git)?
+            } else {
+                Ownership::Yours
+            };
+            (is_git, ownership)
+        } else {
+            before.map_or((false, Ownership::Yours), |stored| {
+                (stored.is_git, stored.ownership)
+            })
+        };
+        projects.push(ProjectRow {
+            root,
+            is_git,
+            ownership,
+            present,
+        });
+    }
+    index.write_placements(&placements, &projects, now)?;
+    Ok(())
 }
 
 #[cfg(test)]
