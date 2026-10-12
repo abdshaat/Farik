@@ -355,7 +355,11 @@ fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandErro
     let contract = file_product_plan_request(
         &tools.files,
         &tools.log,
-        product_plan_request(reviewer, placeholder_budget_usd(&team.rules())),
+        product_plan_request(
+            reviewer,
+            placeholder_budget_usd(&team.rules()),
+            team.document_format(),
+        ),
         (tools.clock.now(), &tools.ids),
     )
     .map_err(failed)?;

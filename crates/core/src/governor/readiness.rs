@@ -2332,6 +2332,26 @@ mod tests {
     }
 
     #[test]
+    fn readiness_lets_a_task_name_its_html_plan() {
+        let (mut contract, context) = a_task_under(an_in_progress_parent());
+        let fails_the_parent_paths = |contract: &TaskContract| {
+            evaluate_readiness(contract, &context)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .any(|failure| failure.rule == R::PathsWithinParent)
+        };
+        let plan = "docs/catervas/architecture/plans/CTV-3.html";
+        contract.plan = Some(plan.parse().expect("an html plan path"));
+        contract.allowed_paths = vec![plan.to_string()];
+        assert!(!fails_the_parent_paths(&contract));
+        let other = "docs/catervas/architecture/plans/CTV-4.html";
+        contract.plan = Some(other.parse().expect("an html plan path"));
+        contract.allowed_paths = vec![other.to_string()];
+        assert!(fails_the_parent_paths(&contract));
+    }
+
+    #[test]
     fn refuses_a_task_whose_budget_exceeds_what_its_parent_has_left() {
         let (contract, context) = a_task_under(ParentState {
             remaining_budget_usd: 4.0,

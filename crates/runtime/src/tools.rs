@@ -8,6 +8,7 @@ use std::fmt;
 use std::sync::{Arc, LazyLock};
 
 use catervas_core::contract::{Role, TaskContract, TaskId};
+use catervas_core::folders::DocumentFormat;
 use catervas_core::governor::permissions::{
     AgentGrants, PermissionTier, SessionConnector, ToolCallContext, ToolCallRequest,
     ToolDescriptor, evaluate_tool_call,
@@ -569,7 +570,9 @@ pub async fn call_tool(
 /// tool asks again with the file's own path); nothing for every other tool. Read leniently, since the input is parsed strictly afterwards.
 pub(crate) fn paths_of(name: &str, input: &Value) -> Vec<String> {
     match name {
-        "catervas_propose_marketing_plan" => vec![marketing::plan_file(0)],
+        "catervas_propose_marketing_plan" => [DocumentFormat::Markdown, DocumentFormat::Html]
+            .map(|format| marketing::plan_file(0, format))
+            .to_vec(),
         "catervas_git_commit" => input
             .get("paths")
             .and_then(Value::as_array)

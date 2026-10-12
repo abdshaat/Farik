@@ -1431,7 +1431,10 @@ async fn read_to_end(
 mod tests {
     use std::sync::Arc;
 
+    use catervas_core::contract::Role;
+    use catervas_core::folders::DocumentFormat;
     use catervas_core::governor::permissions::PermissionTier;
+    use catervas_store::requests::product_plan_request;
     use serde_json::json;
 
     use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
@@ -3578,10 +3581,7 @@ mod tests {
         let plan = catervas_store::requests::file_product_plan_request(
             &deps.files,
             &deps.log,
-            catervas_store::requests::product_plan_request(
-                catervas_core::contract::Role::Architect,
-                5.0,
-            ),
+            product_plan_request(Role::Architect, 5.0, DocumentFormat::Html),
             (deps.clock.now(), &deps.ids),
         )
         .expect("filed");

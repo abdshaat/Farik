@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use catervas_core::folders::DocumentFormat;
 use catervas_core::marketing::{
     Amount, BudgetKind, CapScope, CreatedCampaign, EndReason, Lineage, PlanRecord, PlanSpend,
     PostDetails, PriceKind, is_carried, plans_to_end, price_kind,
@@ -726,6 +727,10 @@ pub fn whole(
         "title": proposal.title,
         "summary": proposal.summary,
         "text": proposal.text,
+        "format": match plan.format {
+            DocumentFormat::Markdown => "markdown",
+            DocumentFormat::Html => "html",
+        },
         "state": state.as_str(),
         "starts_on": proposal.starts_on.to_string(),
         "ends_on": proposal.ends_on.to_string(),

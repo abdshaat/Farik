@@ -265,7 +265,7 @@ Tests in each file's `mod tests`:
 - `plan_numbers_count_both_formats` — with `MP-1.md` there, the next plan in an HTML team is `MP-2.html`.
 - `catervafication_files_html_documents` — an HTML team's Architect task names `overview.html`, with `must_contain ["<h1", "<svg"]` for the overview and `["<h1"]` for the others. A Markdown team keeps `["# ", "```mermaid"]`.
 
-- [ ] `feat(runtime): find each fixed document in either format`
+- [x] `feat(runtime): find each fixed document in either format`
 
 ### Task 6: what agents are told
 

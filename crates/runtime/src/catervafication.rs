@@ -4,7 +4,7 @@
 use std::fmt;
 
 use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
-use catervas_core::folders::role_folder;
+use catervas_core::folders::{DocumentFormat, role_folder, with_format};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
@@ -48,7 +48,8 @@ const NEW: [Role; 3] = [
 const FOLLOW_THE_SKILL: &str = "Follow your skill catervafying-the-repository.";
 const ASKS_WHERE_IT_READ: &str = "Does each document say only what the project, its history or its owner's words show, and name where it read it?";
 const ASKS_FOR_CONTRADICTIONS: &str = "Does any document contradict another, or the code?";
-const ASKS_ABOUT_THE_WORKFLOW: &str = "Does workflow.md say at its top whether it records the project's own process or adopts Catervas's recommended workflow, and does the evidence it names support that choice?";
+/// `{x}` stands for the extension of the team's format.
+const ASKS_ABOUT_THE_WORKFLOW: &str = "Does workflow.{x} say at its top whether it records the project's own process or adopts Catervas's recommended workflow, and does the evidence it names support that choice?";
 const ASKS_ABOUT_THE_PLAN: &str =
     "Was a marketing plan proposed from docs/catervas/product/ alone?";
 
@@ -94,8 +95,9 @@ struct Row {
     title: &'static str,
     intent: &'static str,
     summary: &'static str,
+    /// The documents' names without their extension, `.agent` stems included.
     documents: &'static [&'static str],
-    /// A question the review adds to the two every row asks.
+    /// A question the review adds to the two every row asks; `{x}` stands for the extension.
     question: Option<&'static str>,
 }
 
@@ -105,28 +107,28 @@ fn row(project: Project, role: Role) -> Row {
             title: "Write the product plan from the project",
             intent: "Read the project and write its product plan from what it holds: what the product is, who it is for and what comes next.",
             summary: "The Product Manager writes what your product is and what comes next, as your product plan to approve.",
-            documents: &["spec.md", "spec.agent.md", "roadmap.md", "roadmap.agent.md"],
+            documents: &["spec", "spec.agent", "roadmap", "roadmap.agent"],
             question: None,
         },
         (Project::Existing, Role::Architect) => Row {
             title: "Document how the project is put together",
             intent: "Read the code and write down how the project is put together: an overview with a diagram, its features, its scheduled jobs and its structure.",
             summary: "The Architect writes how your project is put together, with diagrams.",
-            documents: &["overview.md", "features.md", "jobs.md", "structure.md"],
+            documents: &["overview", "features", "jobs", "structure"],
             question: None,
         },
         (Project::Existing, Role::SoftwareDeveloper) => Row {
             title: "Document how the project is built and worked on",
             intent: "Read the project's configuration, tests and history and write down how it is built and worked on: its conventions and its workflow.",
             summary: "The Software Developer writes how your project is built and worked on: its habits and rules.",
-            documents: &["conventions.md", "workflow.md"],
+            documents: &["conventions", "workflow"],
             question: Some(ASKS_ABOUT_THE_WORKFLOW),
         },
         (Project::Existing, Role::UiUxDesigner) => Row {
             title: "Write the project's UI inventory",
             intent: "Read the project's screens and styles and write an inventory of its user interface.",
             summary: "The UI/UX Designer writes an inventory of your project's screens and how they look.",
-            documents: &["ui-inventory.md"],
+            documents: &["ui-inventory"],
             question: None,
         },
         (_, Role::MarketingSpecialist) => Row {
@@ -140,14 +142,14 @@ fn row(project: Project, role: Role) -> Row {
             title: "Write the first architecture from the product spec",
             intent: "Read the approved product plan and write this new project's first architecture: an overview with a diagram and its structure.",
             summary: "The Architect writes how your new project will be put together, from your approved product plan, with diagrams.",
-            documents: &["overview.md", "structure.md"],
+            documents: &["overview", "structure"],
             question: None,
         },
         (Project::New, Role::SoftwareDeveloper) => Row {
             title: "Set the workflow and the stack's conventions",
             intent: "Read the approved product plan and set this new project's workflow and the conventions its stack calls for, and write them down.",
             summary: "The Software Developer sets how your new project will be built and worked on: its habits and rules.",
-            documents: &["workflow.md", "conventions.md"],
+            documents: &["workflow", "conventions"],
             question: Some(ASKS_ABOUT_THE_WORKFLOW),
         },
         // `catervafication_roles` lists no other row.
@@ -222,11 +224,17 @@ pub(crate) fn task_contract(
     reviewer: Role,
     _epic: &TaskId,
     max_cost_usd: f64,
+    format: DocumentFormat,
 ) -> Value {
     let folder = role_folder(role).unwrap_or("docs/catervas");
     let row = row(project, role);
-    let paths: Vec<String> = row
+    let extension = format.extension();
+    let names: Vec<String> = row
         .documents
+        .iter()
+        .map(|stem| with_format(stem, format))
+        .collect();
+    let paths: Vec<String> = names
         .iter()
         .map(|name| format!("{folder}/{name}"))
         .collect();
@@ -240,7 +248,7 @@ pub(crate) fn task_contract(
             paths.clone(),
             format!(
                 "{} exist under {folder}/, each written from what the project holds, as the skill says.",
-                row.documents.join(", ")
+                names.join(", ")
             ),
         )
     };
@@ -248,20 +256,28 @@ pub(crate) fn task_contract(
         .iter()
         .enumerate()
         .map(|(index, path)| {
-            let mut must = vec!["# "];
-            if path.ends_with("architecture/overview.md") {
-                must.push("```mermaid");
+            // A heading, and for the architecture's overview a diagram.
+            let (heading, diagram, kind) = match format {
+                DocumentFormat::Markdown => ("# ", "```mermaid", "a Markdown heading"),
+                DocumentFormat::Html => ("<h1", "<svg", "an HTML heading"),
+            };
+            let mut must = vec![heading];
+            if path.ends_with(&with_format("architecture/overview", format)) {
+                must.push(diagram);
             }
             json!({
                 "id": format!("C{}", index + 1),
-                "text": format!("{path} exists and holds a Markdown heading."),
+                "text": format!("{path} exists and holds {kind}."),
                 "satisfies": ["R1"],
                 "verification": { "method": "artifact", "path": path, "must_contain": must }
             })
         })
         .collect();
+    let question = row
+        .question
+        .map(|question| question.replace("{x}", extension));
     let mut rubric = vec![ASKS_WHERE_IT_READ, ASKS_FOR_CONTRADICTIONS];
-    rubric.extend(row.question);
+    rubric.extend(question.as_deref());
     criteria.push(json!({
         "id": format!("C{}", paths.len() + 1),
         "text": "Everything written says only what the project, its history or its owner's words show.",
@@ -523,7 +539,14 @@ pub(crate) fn file_due(
         let contract = file_request(
             &deps.files,
             &deps.log,
-            task_contract(project, role, reviewer, &epic.task_id, max_cost_usd),
+            task_contract(
+                project,
+                role,
+                reviewer,
+                &epic.task_id,
+                max_cost_usd,
+                team.document_format(),
+            ),
             "catervas",
             Some(&epic.task_id),
             deps.clock.now(),
@@ -710,7 +733,14 @@ mod tests {
             });
             let six = the_suggested_six();
             for (role, reviewer) in catervafication_roles(&six, project, true) {
-                let wire = task_contract(project, role, reviewer, &epic_id, 20.0);
+                let wire = task_contract(
+                    project,
+                    role,
+                    reviewer,
+                    &epic_id,
+                    20.0,
+                    catervas_core::folders::DocumentFormat::Markdown,
+                );
                 let task = validate_contract(&filed(wire, "CTV-2", "draft", Some("CTV-1")))
                     .unwrap_or_else(|errors| panic!("{project:?} {role:?}: {errors:?}"));
                 let folder = catervas_core::folders::role_folder(role).expect("a folder");
@@ -826,7 +856,14 @@ mod tests {
             ),
         ];
         for (project, role, reviewer, title, documents, extra) in rows {
-            let wire = task_contract(project, role, reviewer, &epic, 20.0);
+            let wire = task_contract(
+                project,
+                role,
+                reviewer,
+                &epic,
+                20.0,
+                catervas_core::folders::DocumentFormat::Markdown,
+            );
             let folder = catervas_core::folders::role_folder(role).expect("a folder");
             assert_eq!(wire["title"], title, "{project:?} {role:?}");
             assert!(
@@ -891,8 +928,78 @@ mod tests {
             }
         }
         // The new project's Architect writes the first architecture and no plan.
-        let wire = task_contract(Project::New, Architect, ProductManager, &epic, 20.0);
+        let wire = task_contract(
+            Project::New,
+            Architect,
+            ProductManager,
+            &epic,
+            20.0,
+            catervas_core::folders::DocumentFormat::Markdown,
+        );
         assert!(!wire.to_string().contains("plans/"));
+    }
+
+    #[test]
+    fn catervafication_files_html_documents() {
+        use catervas_core::folders::DocumentFormat;
+        let epic = TaskId::try_from("CTV-1".to_string()).expect("an id");
+        let wire = task_contract(
+            Project::Existing,
+            Role::Architect,
+            Role::ProductManager,
+            &epic,
+            20.0,
+            DocumentFormat::Html,
+        );
+        let folder = catervas_core::folders::role_folder(Role::Architect).expect("a folder");
+        let paths: Vec<String> = ["overview", "features", "jobs", "structure"]
+            .iter()
+            .map(|stem| format!("{folder}/{stem}.html"))
+            .collect();
+        assert_eq!(wire["scope"]["in_scope"], json!(paths));
+        for (index, path) in paths.iter().enumerate() {
+            let verification = criterion(&wire, index);
+            assert_eq!(verification["path"], json!(path));
+            let must = if index == 0 {
+                json!(["<h1", "<svg"])
+            } else {
+                json!(["<h1"])
+            };
+            assert_eq!(verification["must_contain"], must, "{path}");
+        }
+        assert_eq!(
+            wire["requirements"][0]["text"],
+            "overview.html, features.html, jobs.html, structure.html exist under docs/catervas/architecture/, each written from what the project holds, as the skill says."
+        );
+        // The Developer's question names the workflow document as the team writes it.
+        let developer = task_contract(
+            Project::Existing,
+            Role::SoftwareDeveloper,
+            Role::Architect,
+            &epic,
+            20.0,
+            DocumentFormat::Html,
+        );
+        assert!(
+            developer
+                .to_string()
+                .contains("Does workflow.html say at its top"),
+            "{developer}"
+        );
+        assert!(!developer.to_string().contains(".md"), "{developer}");
+        // A Markdown team keeps the heading and the Mermaid block.
+        let markdown = task_contract(
+            Project::Existing,
+            Role::Architect,
+            Role::ProductManager,
+            &epic,
+            20.0,
+            DocumentFormat::Markdown,
+        );
+        assert_eq!(
+            criterion(&markdown, 0)["must_contain"],
+            json!(["# ", "```mermaid"])
+        );
     }
 
     #[test]

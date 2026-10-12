@@ -6,7 +6,7 @@ use std::sync::Arc;
 use catervas_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
-use catervas_core::folders::{DocumentFormat, plan_stem, with_format};
+use catervas_core::folders::{plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy};
 use catervas_core::governor::gates::fits_the_open_sprint;
 use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
@@ -39,8 +39,8 @@ use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, integration_branch, last_move_into, refining_began,
-    refusal_details, result_accepted, the_human_reviews_the_epic,
+    TransitionAsk, TransitionOutcome, held_document, integration_branch, last_move_into,
+    refining_began, refusal_details, result_accepted, the_human_reviews_the_epic,
 };
 
 /// The human, as the reviewer of an epic the Product Manager holds (5.16 item 4).
@@ -507,19 +507,23 @@ fn product_managers_message(
     step: &EpicStep,
     listed: &[(String, String, String)],
 ) -> Result<String, OrchestratorError> {
-    let plan = with_format(&plan_stem(contract.id.as_str()), DocumentFormat::Markdown);
+    let unextended = plan_stem(contract.id.as_str());
     if *step == EpicStep::WriteThePlansTasks {
-        match deps
-            .tools
-            .git
-            .file_at(&integration_branch(team, &deps.tools.git)?, &plan)
-        {
-            Ok(text) => return Ok(plan_tasks_message(contract, &plan, &text, listed)),
+        let git = &deps.tools.git;
+        let branch = integration_branch(team, git)?;
+        // The plan is read in the format it was written in.
+        match held_document(git, &branch, &unextended) {
+            Ok(Some(plan)) => {
+                let text = git.file_at(&branch, &plan)?;
+                return Ok(plan_tasks_message(contract, &plan, &text, listed));
+            }
             // No plan on the integration branch: the epic is broken down again.
-            Err(GitError::CommandFailed { .. }) => {}
+            Ok(None) | Err(GitError::CommandFailed { .. }) => {}
             Err(error) => return Err(error.into()),
         }
     }
+    // A new plan is named in the team's format.
+    let plan = with_format(&unextended, team.document_format());
     let builders = team
         .active_agents()
         .filter(|agent| changes_code(Role::from(agent.role)))
@@ -1472,6 +1476,7 @@ mod tests {
             catervas_store::requests::product_plan_request(
                 catervas_core::contract::Role::Architect,
                 5.0,
+                catervas_core::folders::DocumentFormat::Html,
             ),
             (at(), &deps.ids),
         )
@@ -3314,7 +3319,11 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn files_the_plan_task_with_the_architect() {
-        let harness = Harness::new("epic-plan-task", with_a_scrum_master_and_an_architect);
+        // The plan is named as the team writes it: Markdown here.
+        let harness = Harness::new("epic-plan-task", |wire| {
+            with_a_scrum_master_and_an_architect(wire);
+            wire["policy"]["document_format"] = json!("markdown");
+        });
         a_scrum_masters_epic_in_progress(&harness);
         let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -3346,7 +3355,11 @@ mod tests {
     /// CTV-2 under the Scrum Master's epic CTV-1: the plan task, accepted, with `plan` and its one
     /// allowed path both the epic's plan.
     fn an_accepted_plan_task(harness: &Harness) {
-        let plan = "docs/catervas/architecture/plans/CTV-1.md";
+        an_accepted_plan_task_at(harness, "docs/catervas/architecture/plans/CTV-1.md");
+    }
+
+    /// `an_accepted_plan_task`, the plan at `plan`.
+    fn an_accepted_plan_task_at(harness: &Harness, plan: &str) {
         harness.file_under("CTV-2", "ready", Some("CTV-1"), |wire| {
             wire["plan"] = json!(plan);
             wire["allowed_paths"] = json!([plan]);
@@ -3426,6 +3439,54 @@ mod tests {
                 spec.initial_prompt
             );
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_plan_is_read_in_either_format() {
+        let harness = Harness::new("epic-plan-html", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task_at(&harness, "docs/catervas/architecture/plans/CTV-1.html");
+        std::fs::create_dir_all(
+            harness
+                .project
+                .repo
+                .path
+                .join("docs/catervas/architecture/plans"),
+        )
+        .expect("the plans folder is made");
+        harness.commit_at_root(
+            "docs/catervas/architecture/plans/CTV-1.html",
+            "<h1>Plan for CTV-1: Add done.txt</h1>\n<h2>Lane 1</h2>\n",
+            "docs: plan CTV-1",
+        );
+        if harness
+            .project
+            .deps
+            .projections
+            .board()
+            .expect("the board")
+            .iter()
+            .any(|row| row.task_id == task("CTV-2") && row.awaiting_integration)
+        {
+            integrated(&harness, false);
+        }
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        let spec = started
+            .iter()
+            .find(|spec| spec.task_id == Some(task("CTV-1")))
+            .expect("a session about the epic");
+        assert!(
+            spec.initial_prompt
+                .contains("<untrusted source=\"plan\">\n<h1>Plan for CTV-1: Add done.txt</h1>"),
+            "{}",
+            spec.initial_prompt
+        );
     }
 
     #[tokio::test]
