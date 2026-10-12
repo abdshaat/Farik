@@ -33,7 +33,7 @@ use super::setup::list_folders;
 use super::{
     DaemonError, DaemonState, MemberRequest, SetupError, SetupHost, hex, random_token, same_token,
 };
-use super::{board, documents, gates, team, templates};
+use super::{board, documents, gates, repos, team, templates};
 use crate::claude::CredentialKind;
 use crate::computer::{build_sandbox_image, check_computer, pull_browser_image};
 use crate::credential::CredentialStore;
@@ -683,6 +683,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         && !team::METHODS.contains(&method)
         && !templates::METHODS.contains(&method)
         && !documents::METHODS.contains(&method)
+        && !repos::METHODS.contains(&method)
     {
         return failure(
             &id,
@@ -726,6 +727,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         method if documents::METHODS.contains(&method) => {
             documents::call(state, method, params).await
         }
+        method if repos::METHODS.contains(&method) => repos::call(state, method, params).await,
         "account.connect" if state.host().is_none() => team::connect(state, params).await,
         "query" => {
             // The store and the files are read off the async workers.
@@ -875,6 +877,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         "allowances.list" => board::allowances(state, deps),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         name if documents::QUERIES.contains(&name) => documents::query(deps, name, params),
+        name if repos::QUERIES.contains(&name) => repos::query(deps, name, params),
         name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
         _ => gates::query(state, deps, name, params),
     }

@@ -1374,6 +1374,7 @@ fn serves_a_project_folder() {
     let home = app.path.parent().expect("a parent").to_path_buf();
     let (cwd, state) = setup_folders("setup-folder");
     let parent = format!("catervas-serving-folder-{}", std::process::id());
+    let _ = std::fs::remove_dir_all(home.join(&parent));
     let serving = serving_setup(&cwd, &home, &state);
 
     let (made, closed) = call_then_closed(
@@ -1415,6 +1416,88 @@ fn serves_a_project_folder() {
         "{status}"
     );
     assert!(root.join(".catervas/repos.yaml").is_file());
+    let _ = std::fs::remove_dir_all(home.join(&parent));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_the_members_of_a_served_project_folder() {
+    let app = TempRepo::new("setup-members-app");
+    let infra = TempRepo::new("setup-members-infra");
+    let web = TempRepo::new("setup-members-web");
+    let home = app.path.parent().expect("a parent").to_path_buf();
+    let (cwd, state) = setup_folders("setup-members");
+    let parent = format!("catervas-serving-members-{}", std::process::id());
+    let _ = std::fs::remove_dir_all(home.join(&parent));
+    let serving = serving_setup(&cwd, &home, &state);
+
+    let (made, _) = call_then_closed(
+        serving.port,
+        &serving.cookie,
+        "project.create_folder",
+        json!({
+            "parent": parent,
+            "name": "shop",
+            "repos": [
+                { "name": "app", "path": name_of(&app.path) },
+                { "name": "infra", "path": name_of(&infra.path), "integration_branch": "main" },
+            ],
+            "no_sandbox": false,
+        }),
+    );
+    let root = home
+        .join(&parent)
+        .join("shop")
+        .canonicalize()
+        .expect("the project folder is made");
+    assert!(made["error"].is_null(), "{made}");
+    until("the team is driven", || {
+        root.join(".catervas/local/daemon.json").exists()
+    });
+    let members = call(
+        serving.port,
+        &serving.cookie,
+        "query",
+        json!({ "name": "repos.list", "params": {} }),
+    );
+    // The daemon that drives the folder knows home, so a path relative to it is found.
+    let added = call(
+        serving.port,
+        &serving.cookie,
+        "repo.add",
+        json!({ "name": "web", "path": name_of(&web.path) }),
+    );
+    let grown = call(
+        serving.port,
+        &serving.cookie,
+        "query",
+        json!({ "name": "repos.list", "params": {} }),
+    );
+    let stopped = run(&root, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+
+    assert_eq!(added["result"], json!({}), "{added}");
+    assert_eq!(grown["result"]["repos"][2]["name"], "web", "{grown}");
+    assert_eq!(
+        members["result"],
+        json!({ "repos": [
+            {
+                "name": "app",
+                "path": app.path.canonicalize().expect("a path").display().to_string(),
+                "integration_branch": null,
+                "missing": false
+            },
+            {
+                "name": "infra",
+                "path": infra.path.canonicalize().expect("a path").display().to_string(),
+                "integration_branch": "main",
+                "missing": false
+            },
+        ] }),
+        "{members}"
+    );
     let _ = std::fs::remove_dir_all(home.join(&parent));
 }
 

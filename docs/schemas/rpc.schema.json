@@ -76,7 +76,8 @@
         "seller_replies.list",
         "folder_doc_proposals.list",
         "files.tree",
-        "files.read"
+        "files.read",
+        "repos.list"
       ]
     },
     "subscribeRequest": {
@@ -320,6 +321,9 @@
               "$ref": "#/$defs/filesReadQuery"
             },
             {
+              "$ref": "#/$defs/reposListQuery"
+            },
+            {
               "$ref": "#/$defs/purchaseOrdersListQuery"
             },
             {
@@ -537,6 +541,15 @@
         },
         {
           "$ref": "#/$defs/filesSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/repoAddRequest"
+        },
+        {
+          "$ref": "#/$defs/repoRemoveRequest"
+        },
+        {
+          "$ref": "#/$defs/repoLocateRequest"
         },
         {
           "$ref": "#/$defs/teamSaveRequest"
@@ -2718,6 +2731,100 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "reposListQuery": {
+      "title": "Repos List Query",
+      "description": "The member repositories of a project folder (docs/SPEC.md 4.1; ADR 0057), as reposListResult shapes them. A project of one repository has no .catervas/repos.yaml and answers repos null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "repos.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "reposListResult": {
+      "description": "repos is null for a project of one repository, else the members in the order .catervas/repos.yaml lists them: name, path (canonical, absolute), integration_branch as written or null for the repository's default branch, and missing, true when path is not a directory or git's top folder of it is not path itself (a fact read when asked, with no event).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repos"],
+      "properties": {
+        "repos": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "path", "integration_branch", "missing"],
+            "properties": {
+              "name": { "type": "string" },
+              "path": { "type": "string" },
+              "integration_branch": { "type": ["string", "null"] },
+              "missing": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "repoAddRequest": {
+      "title": "Repo Add Request",
+      "description": "Adds a repository to a project folder (docs/SPEC.md 4.1; ADR 0057): path is relative to home. Refused with -32005 and data.errors, each with path (a JSON pointer), message and code: not_a_project_folder (/, no .catervas/repos.yaml), then not_there, outside_home, home_itself, not_a_repository, not_the_top, has_team (/path), repo_name, name_taken (/name), path_taken, nested, inside_project_folder, holds_project_folder (/path), too_many_repos (/name) and no_such_branch (/integration_branch). Writes .catervas/repos.yaml, then records repo.added. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "repo.add" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "path"],
+          "properties": {
+            "name": { "type": "string" },
+            "path": { "type": "string" },
+            "integration_branch": { "type": "string" }
+          }
+        }
+      }
+    },
+    "repoRemoveRequest": {
+      "title": "Repo Remove Request",
+      "description": "Removes a repository from a project folder, touching no file of the repository (docs/SPEC.md 4.1; ADR 0057). -32002 when no member has the name; refused with -32005 and data.errors last_repo (/name) when it is the only member. Writes .catervas/repos.yaml, then records repo.removed. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "repo.remove" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": { "name": { "type": "string" } }
+        }
+      }
+    },
+    "repoLocateRequest": {
+      "title": "Repo Locate Request",
+      "description": "Records where a member repository is now (docs/SPEC.md 4.1; ADR 0057): path is relative to home, and is held to the checks repo.add holds a path to, the member itself left out of the others. It works whether or not the member is missing. -32002 when no member has the name. Writes .catervas/repos.yaml, then records repo.moved. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "repo.locate" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "path"],
+          "properties": {
+            "name": { "type": "string" },
+            "path": { "type": "string" }
           }
         }
       }

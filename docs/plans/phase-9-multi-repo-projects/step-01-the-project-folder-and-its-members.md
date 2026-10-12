@@ -272,7 +272,7 @@ Files: `daemon/repos.rs` (`QUERIES: [&str; 1] = ["repos.list"]`, `METHODS: [&str
 - `changes_the_members_one_at_a_time`: with `integration_lock` held by the test, a `repo.add` on another thread has written nothing 300 ms in, as `waits_for_the_lock_file` (`tools/fixtures.rs:626`) checks, and adds once it is let go. RED: no lock taken.
 - `lists_the_members_of_a_served_project_folder` (`tests/serving.rs`, after Task 4's `serves_a_project_folder`): `repos.list` over the socket answers both members, `missing: false`. RED.
 
-- [ ] `feat(runtime): list, add, remove and locate a project's repositories`
+- [x] `feat(runtime): list, add, remove and locate a project's repositories`
 
 ### Task 6: Spec
 

@@ -34,7 +34,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::daemon_client::{ClientError, DaemonAddress, exchange, read_daemon_file};
 use crate::doctor::unpriced;
 use crate::project::{Project, tool_deps};
-use crate::state::{make_state_dir, state_dir};
+use crate::state::{home_of, make_state_dir, state_dir};
 use crate::{CliIo, Engine, Interrupts};
 
 /// The lock the process driving a project holds, under the gitignored `.catervas/local/`.
@@ -263,6 +263,7 @@ pub(crate) fn connected_daemon(
     if let Some(directory) = state_dir(&io.env) {
         daemon.set_state_dir(directory);
     }
+    daemon.set_home(home_of(io));
     if let Some(program) = &io.own_program {
         daemon.set_own_program(program.clone());
     }
