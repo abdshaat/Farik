@@ -318,7 +318,7 @@ Files: `crates/runtime/src/daemon/documents.rs` (`raw`, `FIT`, `fit_to_screen`);
 - `serves_a_tasks_branch_then_its_worktree` — `&task=CTV-2` serves `spec.html` from the task's branch. A plan written only in the task's worktree is served from there. A worktree path through a symlink gives 404.
 - `refuses_what_it_does_not_serve` — no session gives 401; another `Host` gives 403. Each of these gives 404 with an empty body: `.md`; `../`; a path outside `docs/catervas/`; a missing file; `task=nope`; an unknown task; a daemon with no project.
 
-- [ ] `feat(runtime): serve HTML documents sandboxed and fitted to the screen`
+- [x] `feat(runtime): serve HTML documents sandboxed and fitted to the screen`
 
 ### Task 9: ask for a change
 

@@ -3,6 +3,11 @@
 //! is stale. `web.rs` answers the frames; this module answers what they ask.
 
 use std::fmt::Display;
+use std::sync::Arc;
+
+use axum::extract::{RawQuery, State};
+use axum::http::{HeaderMap, HeaderName, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 
 use catervas_core::contract::TaskStatus;
 use catervas_core::folders::{
@@ -366,6 +371,21 @@ fn version(
     Ok(json!({ "path": path, "text": text, "blob": entry.blob, "last_change": last }))
 }
 
+/// The owner's own change to `path` that is still waiting, and the branch that holds it.
+fn waiting_change(deps: &ToolDeps, docs: &FolderDocs, path: &str) -> Option<(u64, String)> {
+    docs.changes
+        .iter()
+        .rev()
+        .find(|change| {
+            change.edited
+                && !change.integrated
+                && !change.escalated
+                && change.paths.iter().any(|p| p == path)
+        })
+        .map(|change| (change.change, format!("docs/folder-{}", change.change)))
+        .filter(|(_, held)| deps.git.tree(held).is_ok())
+}
+
 /// `files.read`: one document of the tree with its twin.
 fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
     let missing = || Failure::new(NOT_FOUND, format!("there is no document {asked}"));
@@ -377,15 +397,7 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
         .find(|document| document.path == path)
         .ok_or_else(missing)?;
     let docs = folder_docs(&deps.log).map_err(|e| internal(&e))?;
-    let waiting = docs
-        .changes
-        .iter()
-        .rev()
-        .find(|change| {
-            change.edited && !change.integrated && !change.escalated && change.paths.contains(&path)
-        })
-        .map(|change| (change.change, format!("docs/folder-{}", change.change)))
-        .filter(|(_, held)| deps.git.tree(held).is_ok());
+    let waiting = waiting_change(deps, &docs, &path);
     let shown = match &waiting {
         Some((_, held)) => version(deps, &docs, held, &path, true)?,
         None => version(deps, &docs, &branch, &path, false)?,
@@ -423,6 +435,161 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
         "askable": editable && !path.starts_with("docs/catervas/delivery/"),
         "waiting": waiting.map(|(change, held)| json!({ "change": change, "branch": held })),
     }))
+}
+
+/// The policy an HTML document is answered under: no script, no network, its own origin, and
+/// framed by this app alone.
+const POLICY: &str = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; \
+                      font-src data:; frame-ancestors 'self'";
+
+/// What fits a document to the reader's screen; a document's own styles come after it and win.
+const FIT: &str = concat!(
+    r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#,
+    "<style>",
+    "body { margin: 0 auto; padding: 16px; max-width: 72rem; overflow-wrap: anywhere }",
+    "img, svg, video, canvas { max-width: 100%; height: auto }",
+    "table, pre { display: block; max-width: 100%; overflow-x: auto }",
+    "</style>"
+);
+
+/// The end of the first `open` tag (`<head`, `<html`) in `lower`, which is not a longer name.
+fn after_tag(lower: &str, open: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(found) = lower[from..].find(open) {
+        let start = from + found + open.len();
+        if matches!(
+            lower.as_bytes().get(start),
+            Some(b'>' | b'/' | b' ' | b'\t' | b'\n' | b'\r')
+        ) {
+            return lower[start..].find('>').map(|end| start + end + 1);
+        }
+        from = start;
+    }
+    None
+}
+
+/// `document` with `FIT` after its `<head>`, else its `<html>`, else its doctype, else first.
+/// ponytail: the tag is found by text, not by parsing; use a parser if a document defeats it.
+fn fit_to_screen(document: &str) -> String {
+    let lower = document.to_ascii_lowercase();
+    let at = ["<head", "<html"]
+        .iter()
+        .find_map(|open| after_tag(&lower, open))
+        .or_else(|| {
+            lower
+                .find("<!doctype")
+                .and_then(|n| lower[n..].find('>').map(|end| n + end + 1))
+        })
+        .unwrap_or(0);
+    format!("{}{FIT}{}", &document[..at], &document[at..])
+}
+
+/// A regular file with no link on the way down from `base` along `path`, as text.
+fn plain_file(base: &std::path::Path, path: &str) -> Option<String> {
+    let mut at = base.to_path_buf();
+    for segment in path.split('/') {
+        at.push(segment);
+        if std::fs::symlink_metadata(&at)
+            .ok()?
+            .file_type()
+            .is_symlink()
+        {
+            return None;
+        }
+    }
+    let regular = std::fs::symlink_metadata(&at).ok()?.is_file();
+    regular.then(|| std::fs::read_to_string(&at).ok()).flatten()
+}
+
+/// The text of the HTML document `path`, as the Files page reads it, or as `task` holds it.
+fn raw_text(deps: &ToolDeps, path: &str, task: Option<&str>) -> Option<String> {
+    let path = normalise(path)?;
+    if !path.starts_with("docs/catervas/")
+        || catervas_core::folders::DocumentFormat::of(&path)
+            != Some(catervas_core::folders::DocumentFormat::Html)
+    {
+        return None;
+    }
+    let in_branch = |rev: &str, path: &str| {
+        deps.git
+            .tree_entries(rev, path)
+            .ok()?
+            .into_iter()
+            .find(|entry| entry.path == path && is_file(entry))?;
+        deps.git.file_at(rev, path).ok()
+    };
+    if let Some(task) = task {
+        let id: catervas_core::contract::TaskId = task.parse().ok()?;
+        let contract = deps.files.read_contract(&id).ok()?;
+        return in_branch(&catervas_core::branch::task_branch(&contract), &path).or_else(|| {
+            let base = deps
+                .files
+                .root()
+                .join(".catervas/local/worktrees")
+                .join(id.as_str());
+            plain_file(&base, &path)
+        });
+    }
+    // A twin has no waiting change: only the human document does.
+    let held = match catervas_core::folders::human_of_twin(&path) {
+        Some(_) => None,
+        None => folder_docs(&deps.log)
+            .ok()
+            .and_then(|docs| waiting_change(deps, &docs, &path))
+            .map(|(_, held)| held),
+    };
+    let rev = match held {
+        Some(held) => held,
+        None => integration_branch(&deps.files.read_team().ok()?, &deps.git).ok()?,
+    };
+    in_branch(&rev, &path)
+}
+
+/// `GET /documents/raw?path=<path>[&task=<id>]`: an HTML document under its own policy, fitted to
+/// the screen. 403 from another host, 401 without a session, and 404, with no body, for all else.
+pub(super) async fn raw(
+    State(state): State<Arc<DaemonState>>,
+    headers: HeaderMap,
+    RawQuery(query): RawQuery,
+) -> Response {
+    let (Some(web), Some(deps)) = (state.web(), state.deps()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !super::web::own_host(&headers, web) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !super::web::has_session(&headers, web) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let asked = query.unwrap_or_default();
+    let named = |name: &str| {
+        url::form_urlencoded::parse(asked.as_bytes())
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+    };
+    let (Some(path), task) = (named("path"), named("task")) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let deps = Arc::clone(deps);
+    let text = off_the_worker(move || {
+        raw_text(&deps, &path, task.as_deref()).ok_or_else(|| Failure::new(NOT_FOUND, ""))
+    })
+    .await;
+    match text {
+        Ok(text) => (
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CONTENT_SECURITY_POLICY, POLICY),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                (header::REFERRER_POLICY, "no-referrer"),
+                (HeaderName::from_static("x-dns-prefetch-control"), "off"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            fit_to_screen(&text),
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -1242,5 +1409,245 @@ mod tests {
             harness.project.events(&[EventKind::FolderDocEdited]).len(),
             1
         );
+    }
+
+    const PORT: u16 = 49_731;
+    const HOST: &str = "127.0.0.1:49731";
+    const OVERVIEW_HTML: &str = "docs/catervas/architecture/overview.html";
+    const POLICY: &str = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'";
+
+    /// Turns the browser routes on and returns a live session's cookie.
+    fn browse(harness: &Harness) -> String {
+        use crate::daemon::web::{BrowserSessions, ConnectCodes, WebState};
+        use catervas_protocol::clock::FixedClock;
+        use chrono::TimeZone;
+        let now = chrono::Utc
+            .with_ymd_and_hms(2026, 10, 12, 9, 0, 0)
+            .single()
+            .expect("a time");
+        let sessions = BrowserSessions::open(None).expect("the sessions open");
+        let secret = sessions.issue(now).expect("a session");
+        assert!(harness.daemon.set_web(WebState {
+            codes: ConnectCodes::default(),
+            sessions,
+            project_root: harness.project.repo.path.clone(),
+            credential: None,
+            port: PORT,
+            clock: Arc::new(FixedClock::new(now)),
+            take_on_error: std::sync::Mutex::default(),
+            leaving: std::sync::Mutex::default(),
+            stores: Vec::new(),
+            env: std::collections::BTreeMap::new(),
+            in_use: None,
+            templates: None,
+            #[cfg(feature = "e2e")]
+            admit_local_preview: false,
+        }));
+        format!("catervas_session={secret}")
+    }
+
+    /// `GET /documents/raw?<query>`: its status, headers and body.
+    async fn raw(
+        state: &Arc<DaemonState>,
+        query: &str,
+        host: &str,
+        cookie: Option<&str>,
+    ) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
+        use tower::ServiceExt;
+        let mut request = axum::http::Request::get(format!("/documents/raw?{query}"))
+            .header(axum::http::header::HOST, host);
+        if let Some(cookie) = cookie {
+            request = request.header(axum::http::header::COOKIE, cookie);
+        }
+        let answer = crate::daemon::router(
+            Arc::clone(state),
+            "token",
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .oneshot(request.body(axum::body::Body::empty()).expect("a request"))
+        .await
+        .expect("the router answers");
+        let (parts, body) = answer.into_parts();
+        let body = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .expect("a body");
+        (
+            parts.status,
+            parts.headers,
+            String::from_utf8(body.to_vec()).expect("text"),
+        )
+    }
+
+    /// The document `path` asked by a signed-in browser, `extra` after the path in the query.
+    async fn served(harness: &Harness, cookie: &str, path: &str, extra: &str) -> (u16, String) {
+        let (status, _, body) = raw(
+            &harness.daemon,
+            &format!("path={path}{extra}"),
+            HOST,
+            Some(cookie),
+        )
+        .await;
+        (status.as_u16(), body)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_an_html_document_sandboxed() {
+        let harness = project("raw-sandboxed", "manual");
+        write(&harness, OVERVIEW_HTML, "<h1>the overview</h1>\n");
+        commit(&harness, "the overview");
+        let cookie = browse(&harness);
+        // The page reloads the frame with `v`, which the route ignores.
+        let (status, headers, body) = raw(
+            &harness.daemon,
+            &format!("path={OVERVIEW_HTML}&v=abc"),
+            HOST,
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, 200);
+        let header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+        };
+        assert_eq!(header("content-type"), "text/html; charset=utf-8");
+        assert_eq!(header("content-security-policy"), POLICY);
+        assert_eq!(header("x-content-type-options"), "nosniff");
+        assert_eq!(header("referrer-policy"), "no-referrer");
+        assert_eq!(header("x-dns-prefetch-control"), "off");
+        assert_eq!(header("cache-control"), "no-store");
+        assert!(body.contains("<h1>the overview</h1>"), "{body}");
+    }
+
+    #[test]
+    fn fits_the_document_to_the_screen() {
+        for (document, after) in [
+            (
+                "<!DOCTYPE html><html><head lang=\"en\"><title>t</title></head>",
+                "<head lang=\"en\">",
+            ),
+            ("<!doctype html><HTML lang=en><p>x</p>", "<HTML lang=en>"),
+            ("<!DOCTYPE html><p>x</p>", "<!DOCTYPE html>"),
+            ("<p>x</p>", ""),
+        ] {
+            let fitted = super::fit_to_screen(document);
+            assert_eq!(fitted.matches(super::FIT).count(), 1, "{fitted}");
+            assert_eq!(fitted.replacen(super::FIT, "", 1), document);
+            let at = fitted.find(super::FIT).expect("the block");
+            let wanted = document.find(after).map_or(0, |n| n + after.len());
+            assert_eq!(at, wanted, "{fitted}");
+        }
+        assert!(
+            super::FIT.contains(
+                r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#
+            )
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_the_owners_waiting_change_and_the_agent_version() {
+        let harness = project("raw-waiting", "manual");
+        let roadmap = format!("{PRODUCT}/roadmap.html");
+        let twin = format!("{PRODUCT}/roadmap.agent.html");
+        write(&harness, &roadmap, "<h1>roadmap</h1>\n");
+        write(&harness, &twin, "<h1>for agents</h1>\n");
+        commit(&harness, "the documents");
+        let cookie = browse(&harness);
+        let before = served(&harness, &cookie, &roadmap, "").await;
+        assert!(before.1.contains("<h1>roadmap</h1>"), "{before:?}");
+        owner_edit(&harness, &roadmap, "<h1>the owner's roadmap</h1>\n");
+        let (status, body) = served(&harness, &cookie, &roadmap, "").await;
+        assert_eq!(status, 200);
+        assert!(body.contains("<h1>the owner's roadmap</h1>"), "{body}");
+        let (status, body) = served(&harness, &cookie, &twin, "").await;
+        assert_eq!(status, 200);
+        assert!(body.contains("<h1>for agents</h1>"), "{body}");
+        assert!(!body.contains("owner's"), "{body}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_a_tasks_branch_then_its_worktree() {
+        let harness = project("raw-task", "manual");
+        let spec = format!("{PRODUCT}/spec.html");
+        let plan = format!("{PRODUCT}/plan.html");
+        for id in ["CTV-2", "CTV-3", "CTV-4"] {
+            harness.project.filed(id, "in_progress", "task", None);
+        }
+        commit(&harness, "the tasks");
+        let branch = harness.project.branch("CTV-2");
+        git(&harness, &["checkout", "-b", &branch]);
+        write(&harness, &spec, "<h1>the task's spec</h1>\n");
+        commit(&harness, "the spec");
+        git(&harness, &["checkout", "main"]);
+        let cookie = browse(&harness);
+        let (status, body) = served(&harness, &cookie, &spec, "&task=CTV-2").await;
+        assert_eq!(status, 200);
+        assert!(body.contains("<h1>the task's spec</h1>"), "{body}");
+        // Main does not hold it.
+        assert_eq!(served(&harness, &cookie, &spec, "").await.0, 404);
+
+        // A plan only in the worktree.
+        let root = harness.project.repo.path.join(".catervas/local/worktrees");
+        let file = root.join("CTV-3").join(&plan);
+        std::fs::create_dir_all(file.parent().expect("a folder")).expect("a folder");
+        std::fs::write(&file, "<h1>drafted</h1>\n").expect("written");
+        let (status, body) = served(&harness, &cookie, &plan, "&task=CTV-3").await;
+        assert_eq!(status, 200);
+        assert!(body.contains("<h1>drafted</h1>"), "{body}");
+
+        // A link on the way gives nothing.
+        let outside = harness.project.repo.path.join("outside");
+        std::fs::create_dir_all(outside.join("catervas/product")).expect("a folder");
+        std::fs::write(
+            outside.join("catervas/product/plan.html"),
+            "<h1>secret</h1>\n",
+        )
+        .expect("written");
+        std::fs::create_dir_all(root.join("CTV-4")).expect("a folder");
+        std::os::unix::fs::symlink(&outside, root.join("CTV-4/docs")).expect("a link");
+        let through = served(&harness, &cookie, &plan, "&task=CTV-4").await;
+        assert_eq!(through, (404, String::new()));
+        // And a link as the file itself.
+        let linked = format!("{PRODUCT}/linked.html");
+        std::os::unix::fs::symlink(&file, root.join("CTV-3").join(&linked)).expect("a link");
+        let itself = served(&harness, &cookie, &linked, "&task=CTV-3").await;
+        assert_eq!(itself, (404, String::new()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_what_it_does_not_serve() {
+        let harness = project("raw-refused", "manual");
+        write(&harness, OVERVIEW_HTML, "<h1>the overview</h1>\n");
+        write(&harness, OVERVIEW, "the overview\n");
+        write(&harness, "docs/other.html", "<h1>other</h1>\n");
+        commit(&harness, "the documents");
+        let ask = format!("path={OVERVIEW_HTML}");
+        // No browser routes: 404.
+        let (status, _, body) = raw(&harness.daemon, &ask, HOST, None).await;
+        assert_eq!((status.as_u16(), body.as_str()), (404, ""));
+        let cookie = browse(&harness);
+        let (status, _, body) = raw(&harness.daemon, &ask, HOST, None).await;
+        assert_eq!((status.as_u16(), body.as_str()), (401, ""));
+        let (status, _, body) = raw(&harness.daemon, &ask, "evil.example", Some(&cookie)).await;
+        assert_eq!((status.as_u16(), body.as_str()), (403, ""));
+        assert_eq!(served(&harness, &cookie, OVERVIEW_HTML, "").await.0, 200);
+        for query in [
+            format!("path={OVERVIEW}"),
+            "path=docs/catervas/../other.html".to_string(),
+            "path=docs/other.html".to_string(),
+            "path=docs/catervas/architecture/missing.html".to_string(),
+            "path=docs/catervas/architecture".to_string(),
+            String::new(),
+            format!("{ask}&task=nope"),
+            format!("{ask}&task=CTV-99"),
+        ] {
+            let (status, _, body) = raw(&harness.daemon, &query, HOST, Some(&cookie)).await;
+            assert_eq!((status.as_u16(), body.as_str()), (404, ""), "{query}");
+        }
     }
 }

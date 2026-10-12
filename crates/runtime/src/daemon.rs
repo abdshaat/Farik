@@ -1125,6 +1125,7 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
         .route("/connect", get(app::app_from::<E>).post(web::connect))
         .route("/rpc", get(web::rpc))
         .route("/session", get(web::session))
+        .route("/documents/raw", get(documents::raw))
         .route("/disconnect", post(web::disconnect))
         .fallback(get(app::app_from::<E>))
         .layer(Extension(cancel))
