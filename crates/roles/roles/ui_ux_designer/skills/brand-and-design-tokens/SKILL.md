@@ -10,7 +10,7 @@ ones in the code.
 
 ## 1. Find the tokens
 
-Before you plan, read `docs/marketing/brand/brand-kit.md` first when it exists: the Marketing
+Before you plan, read `docs/catervas/marketing/brand/brand-kit.md` first when it exists: the Marketing
 Specialist keeps the business's brand there, and its colours and voice are the ones you take. Then
 find where the project keeps its brand and its design tokens: a tokens file, a
 theme, CSS custom properties, a component library. Read the brand's written rules if it has them.

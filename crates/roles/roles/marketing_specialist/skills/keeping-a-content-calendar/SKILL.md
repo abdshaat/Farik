@@ -6,7 +6,7 @@ description: Use when planning posts, emails, announcements or other pieces of c
 # Keeping a content calendar
 
 A calendar shows what is planned, why, and whose turn it is. Keep it as one table in
-`docs/marketing/`, in plain text, so the user can read and edit it.
+`docs/catervas/marketing/`, in plain text, so the user can read and edit it.
 
 ## 1. One table, six columns
 

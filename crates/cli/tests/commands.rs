@@ -1412,3 +1412,33 @@ fn refuses_a_parent_that_is_not_an_epic_in_progress() {
         "nothing is filed"
     );
 }
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn integrates_a_folder_change_from_the_command_line() {
+    use catervas_protocol::command::Command;
+
+    let repository = project::a_project("cli-integrate-folder");
+    let driver = project::LiveDriver::new(&repository);
+
+    for (argument, command) in [
+        ("folder-3", Command::FolderChangeIntegrate { change: 3 }),
+        (
+            "CTV-1",
+            Command::TaskIntegrate {
+                task_id: "CTV-1".parse().expect("a task id"),
+            },
+        ),
+    ] {
+        let ran = project::run(&repository.path, &["integrate", argument]);
+        assert_eq!(ran.code, 0, "{argument}: {}", ran.err);
+        assert_eq!(driver.commands().last(), Some(&command), "{argument}");
+    }
+    let sent = driver.commands().len();
+    for argument in ["folder-0", "folder-x", "folder-", "Folder-3"] {
+        let ran = project::run(&repository.path, &["integrate", argument]);
+        assert_eq!(ran.code, 1, "{argument}: {}", ran.out);
+        assert_eq!(driver.commands().len(), sent, "{argument} sends nothing");
+    }
+}

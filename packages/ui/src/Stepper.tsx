@@ -25,6 +25,8 @@ export function Stepper({
 							{" "}
 							{uiStrings.stepOf(current + 1, steps.length)}
 						</span>
+					) : i < current ? (
+						<span className={styles.hidden}>{uiStrings.stepDone}</span>
 					) : null}
 				</li>
 			))}

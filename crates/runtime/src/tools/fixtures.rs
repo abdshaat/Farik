@@ -53,6 +53,23 @@ pub(crate) fn with_the_designer(wire: &mut Value) {
     agents.push(an_agent_wire("ada", "architect"));
 }
 
+/// The suggested six (`pm`, `sm`, `ada`, `dev`, `iris`, `kai`): a Product Manager, a Scrum Master,
+/// an Architect, one Software Developer, a UI/UX Designer with its Playwright connector and a
+/// Marketing Specialist, and a preview for the Designer to open.
+pub(crate) fn with_the_suggested_six(wire: &mut Value) {
+    let mut iris = an_agent_wire("iris", "ui_ux_designer");
+    iris["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+    wire["agents"] = json!([
+        an_agent_wire("pm", "product_manager"),
+        an_agent_wire("sm", "scrum_master"),
+        an_agent_wire("ada", "architect"),
+        an_agent_wire("dev", "software_developer"),
+        iris,
+        an_agent_wire("kai", "marketing_specialist"),
+    ]);
+    wire["preview"] = json!({ "start": "make serve", "port": 4401 });
+}
+
 /// Adds the Marketing Specialist `kai` to a team's wire.
 pub(crate) fn with_the_marketing_specialist(wire: &mut Value) {
     wire["agents"]
@@ -587,7 +604,26 @@ pub(crate) fn waits_for_the_lock<Answer: Send>(
     project: &TestProject,
     step: impl FnOnce() -> Answer + Send,
 ) -> Answer {
-    let held = crate::locked(lock);
+    waits_while(crate::locked(lock), project, step)
+}
+
+/// `waits_for_the_lock`, the lock being the integration lock file under `root` (5.14), which the
+/// step takes as an integration, a folder document's write and the owner's decision on one do.
+pub(crate) fn waits_for_the_lock_file<Answer: Send>(
+    root: &Path,
+    project: &TestProject,
+    step: impl FnOnce() -> Answer + Send,
+) -> Answer {
+    let held = crate::transitions::integration_lock(root).expect("the lock file is taken");
+    waits_while(held, project, step)
+}
+
+/// Runs `step` on a thread of its own while this one keeps `held`, then lets it go.
+fn waits_while<Held, Answer: Send>(
+    held: Held,
+    project: &TestProject,
+    step: impl FnOnce() -> Answer + Send,
+) -> Answer {
     let before = project.event_count();
     std::thread::scope(|scope| {
         let running = scope.spawn(step);
@@ -597,6 +633,13 @@ pub(crate) fn waits_for_the_lock<Answer: Send>(
             project.event_count(),
             before,
             "the step records nothing while it waits"
+        );
+        assert_eq!(
+            project
+                .repo
+                .git_output(&["branch", "--list", "docs/folder-*"]),
+            "",
+            "the step makes no branch while it waits"
         );
         drop(held);
         running.join().expect("the step ends")

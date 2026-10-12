@@ -17,7 +17,7 @@ plan's, not yours: when the results say a campaign is wasting it, spend less.
 Read `list_accounts` for the ad account the plan names, its currency and its time zone. Read
 `keyword_ideas` for the words customers search for, how often, and what a click costs; start from
 the words the business already uses. Write what you found, with its day and source, under
-`docs/marketing/research/`.
+`docs/catervas/marketing/research/`.
 
 ## 2. One campaign for each plan campaign
 

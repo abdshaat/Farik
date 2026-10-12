@@ -1432,6 +1432,8 @@ describe("team setup", () => {
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		await waitFor(() => expect(s.calls("team.start")).toHaveLength(2));
 		await s.reply(s.calls("team.start")[1] as never, {});
+		// The offer to document the project has none for this team: it goes on to Today.
+		await answerQuery(s, "catervafication.get", { offered: false, roles: [] });
 		await answerStatus(s, false, 1, { setup_pending: false });
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});

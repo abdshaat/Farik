@@ -21,6 +21,7 @@ import {
 	UNREAD_ROW,
 } from "../test/ads.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
+import { CARD, docs as folderDocs } from "../test/folderDocs.ts";
 import { sentCommand } from "../test/gate.ts";
 import {
 	TEAM as MARKETING_TEAM,
@@ -49,11 +50,18 @@ import {
 } from "../test/pipelines.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import {
+	APPROVED,
+	IN_REVIEW,
+	INTERVIEWING,
+	PRODUCT_PLAN_ROW,
+} from "../test/productPlan.ts";
+import {
 	answerQuery,
 	answerStatus,
 	eventArrives,
 	renderApp,
 } from "../test/render-app.tsx";
+import { bodyOf, refusedBy } from "../test/schema.ts";
 import {
 	SCRIPT_ROW,
 	MARKUP as SITE_MARKUP,
@@ -102,6 +110,9 @@ async function today(fields: {
 	sprint?: unknown;
 	team?: unknown;
 	backlog?: unknown;
+	docs?: unknown;
+	plan?: unknown;
+	catervafication?: unknown;
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -112,6 +123,11 @@ async function today(fields: {
 	await answerQuery(s, "moved.since", { moved: fields.moved ?? [] });
 	await answerQuery(s, "sprint.current", fields.sprint ?? null);
 	if (fields.backlog) await answerQuery(s, "backlog.summary", fields.backlog);
+	if (fields.docs)
+		await answerQuery(s, "folder_doc_proposals.list", fields.docs);
+	if (fields.plan) await answerQuery(s, "product_plan.state", fields.plan);
+	if (fields.catervafication)
+		await answerQuery(s, "catervafication.get", fields.catervafication);
 	return { container, s };
 }
 
@@ -255,6 +271,271 @@ describe("today", () => {
 			return f;
 		});
 		expect(filed.params).toEqual({ text: "Add gift cards to checkout" });
+	});
+
+	it("adds_a_folder_change_from_its_row", async () => {
+		const { s } = await today({
+			waiting: [
+				{
+					kind: "integration",
+					folder_change: 1,
+					agent_id: "mira",
+					title: "Roadmap and Product description from the sprint 4 review",
+					line: "You approved it; it waits for you to add it",
+				},
+				{
+					task_id: "CTV-5",
+					kind: "integration",
+					agent_id: "theo",
+					title: "the photos",
+					line: "Accepted, waiting for you to add it",
+				},
+			],
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const [folder, task] = within(list).getAllByRole(
+			"listitem",
+		) as HTMLElement[];
+		expect(
+			within(folder as HTMLElement).getByText(
+				"Add Roadmap and Product description from the sprint 4 review to your project",
+			),
+		).toBeTruthy();
+		expect(
+			within(folder as HTMLElement).getByText(
+				"You approved it; it waits for you to add it",
+			),
+		).toBeTruthy();
+		expect(within(folder as HTMLElement).queryByRole("link")).toBeNull();
+		const add = within(folder as HTMLElement).getByRole("button", {
+			name: "Add",
+		});
+		// The button is described by the row's title, as a task's link is.
+		const describedBy = add.getAttribute("aria-describedby");
+		expect(describedBy).toBeTruthy();
+		expect(document.getElementById(describedBy as string)?.textContent).toBe(
+			"Add Roadmap and Product description from the sprint 4 review to your project",
+		);
+		fireEvent.click(add);
+		const sent = await sentCommand(s);
+		expect(sent.params).toEqual({
+			command: { command: "folder_change_integrate", body: { change: 1 } },
+		});
+		expect(refusedBy("folderChangeIntegrateBody", bodyOf(sent))).toEqual([]);
+		// A task's row still goes to its page.
+		expect(
+			within(task as HTMLElement)
+				.getByRole("link", { name: "Add" })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-5/accept");
+	});
+
+	it("keeps_a_quiet_card_until_it_starts", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		const { s, container } = await today({
+			waiting: [question],
+			catervafication: { offered: true, roles: ["product_manager"] },
+		});
+		const title = await screen.findByText(
+			"Your team hasn\u2019t documented this project yet",
+		);
+		const start = screen.getByRole("button", { name: "Start" });
+		expect(start.getAttribute("aria-describedby")).toBe(title.id);
+		expect(
+			screen.getByText(
+				"A first sprint where your team reads your project and writes down what it learns, before building anything.",
+			),
+		).toBeTruthy();
+		// It follows the request box, and is no "Waiting on you" item.
+		const request = screen.getByLabelText(en.requestLabel);
+		expect(
+			request.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		const waitingList = screen.getByRole("list", { name: en.waitingList });
+		expect(waitingList.contains(title)).toBe(false);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(start);
+		const command = await sent(s);
+		expect(command.params).toEqual({
+			command: { command: "catervafication_start", body: {} },
+		});
+		expect(refusedBy("emptyBody", bodyOf(command))).toEqual([]);
+		const asked = () =>
+			s.calls("query").filter((f) => f.params.name === "catervafication.get");
+		expect(asked()).toHaveLength(1);
+		// A refusal is said under the card, which stays.
+		await s.reply(command, {
+			error: {
+				kind: "refused",
+				detail: "catervafication_started: the team is already documenting it",
+			},
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"Your team is already documenting this project.",
+		);
+		expect(asked()).toHaveLength(1);
+		fireEvent.click(start);
+		const again = await sent(s, 2);
+		await s.reply(again, { said: "started", events: [9] });
+		await waitFor(() => expect(asked()).toHaveLength(2));
+		await answerQuery(s, "catervafication.get", { offered: false, roles: [] });
+		await waitFor(() =>
+			expect(screen.queryByText(title.textContent ?? "")).toBeNull(),
+		);
+		expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+	});
+
+	it("counts_and_lists_the_document_changes", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		const { s } = await today({
+			waiting: [question],
+			docs: folderDocs([CARD]),
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (2)" }),
+		).toBeTruthy();
+		const list = screen.getByRole("list", { name: en.waitingList });
+		const items = within(list).getAllByRole("listitem") as HTMLElement[];
+		const region = await screen.findByRole("region", {
+			name: en.docChangesTitle,
+		});
+		const asked = items.findIndex((one) => one.contains(region));
+		expect(asked).toBeGreaterThan(
+			items.findIndex((one) => one.textContent?.includes("question line")),
+		);
+		expect(
+			s
+				.calls("query")
+				.some((q) => q.params.name === "folder_doc_proposals.list"),
+		).toBe(true);
+	});
+
+	it("counts_no_card_when_none_waits_and_lists_one_alone", async () => {
+		cleanup();
+		await today({
+			waiting: [
+				{
+					task_id: "CTV-3",
+					kind: "question",
+					agent_id: "mira",
+					title: "the launch post",
+					line: "question line",
+				},
+			],
+			docs: folderDocs([]),
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		cleanup();
+
+		await today({ waiting: [], docs: folderDocs([CARD]) });
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		expect(
+			await screen.findByRole("region", { name: en.docChangesTitle }),
+		).toBeTruthy();
+		expect(screen.queryByText(en.waitingNone)).toBeNull();
+	});
+
+	it("puts_the_plan_in_place_of_its_acceptance_row", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		const other = {
+			task_id: "CTV-5",
+			kind: "acceptance",
+			agent_id: "mira",
+			title: "the weekly report",
+			line: "Accept the result",
+		};
+		await today({
+			waiting: [PRODUCT_PLAN_ROW, question, other],
+			plan: IN_REVIEW,
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (3)" }),
+		).toBeTruthy();
+		const list = screen.getByRole("list", { name: en.waitingList });
+		expect(
+			await within(list).findByRole("region", {
+				name: "Your product plan to approve",
+			}),
+		).toBeTruthy();
+		// The plan's task has no row of its own besides the card; the question keeps its row.
+		expect(within(list).getByText("Mira has a question")).toBeTruthy();
+		// Another acceptance stays the generic row beside the one plan card.
+		expect(within(list).getByText("Accept the weekly report")).toBeTruthy();
+		expect(
+			within(list).getAllByRole("region", {
+				name: "Your product plan to approve",
+			}),
+		).toHaveLength(1);
+		expect(
+			within(list).queryByText("Accept Draft the product plan"),
+		).toBeNull();
+		cleanup();
+
+		// Until both documents are there, the generic row, which still accepts.
+		await today({
+			waiting: [PRODUCT_PLAN_ROW, question],
+			plan: { ...IN_REVIEW, documents: [] },
+		});
+		const generic = await screen.findByRole("list", { name: en.waitingList });
+		expect(
+			await within(generic).findByText("Accept Draft the product plan"),
+		).toBeTruthy();
+		expect(
+			screen.queryByRole("region", { name: "Your product plan to approve" }),
+		).toBeNull();
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (2)" }),
+		).toBeTruthy();
+	});
+
+	it("says_the_team_waits_for_the_plan", async () => {
+		const sprint = { sprint_id: "S2", done: 4, total: 7 };
+		await today({
+			plan: INTERVIEWING,
+			sprint,
+			backlog: { plan_in_sprints: true, count: 2 },
+		});
+		const line = await screen.findByRole("link", {
+			name: "Little Oak Cakes: your team waits for your product plan",
+		});
+		// The mockup draws it as a link: to the Product Manager's chat.
+		expect(line.getAttribute("href")).toBe("/channel/mira");
+		expect(line.closest("p")?.textContent).toBe(line.textContent);
+		expect(screen.queryByText(/Sprint 2 is running/)).toBeNull();
+		expect(screen.queryByText(/wait in the Backlog/)).toBeNull();
+		cleanup();
+
+		await today({ plan: APPROVED, sprint });
+		expect(await screen.findByText(/Sprint 2 is running/)).toBeTruthy();
+		expect(
+			screen.queryByText(/your team waits for your product plan/),
+		).toBeNull();
 	});
 
 	it("lists_what_waits_on_you", async () => {

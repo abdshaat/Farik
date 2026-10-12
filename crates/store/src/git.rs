@@ -5,6 +5,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use catervas_core::folders::{
+    PRODUCT_PLAN, agent_twin, is_human_document, product_plan_approved, twin_is_stale,
+};
 use catervas_core::team::Team;
 
 /// Why a git operation did not happen.
@@ -55,6 +58,30 @@ pub struct HeadSummary {
     pub subject: String,
 }
 
+/// One entry of a tree: a file, a link or a submodule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeEntry {
+    /// Its mode as git writes it: `100644` or `100755` for a file, `120000` for a link.
+    pub mode: String,
+    /// Its object hash.
+    pub blob: String,
+    /// Its path from the repository's root.
+    pub path: String,
+}
+
+/// A commit that changed a path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathCommit {
+    /// The commit's hash.
+    pub sha: String,
+    /// When it was committed, as git's strict ISO 8601.
+    pub committed_at: String,
+    /// The author's name.
+    pub author_name: String,
+    /// Its subject line.
+    pub subject: String,
+}
+
 /// What came of a merge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MergeOutcome {
@@ -66,6 +93,24 @@ pub enum MergeOutcome {
     /// It did not merge, and these paths are why. The tree is left as it was: a conflicted
     /// working tree nobody is watching is worse than a refusal (`docs/SPEC.md` 5.14).
     Conflicts(Vec<String>),
+}
+
+/// What came of `Git::commit_files`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitOutcome {
+    /// The branch was made with one commit holding the files.
+    Committed {
+        /// The commit's hash.
+        sha: String,
+    },
+    /// Every file already says its text at the starting point; nothing was made.
+    Unchanged,
+    /// The root's checkout has a change to these files that is not committed (staged, changed or
+    /// untracked); nothing was made, so that the owner's change is neither carried off nor
+    /// written over.
+    Busy(Vec<String>),
+    /// This path, or a directory on the way to a file, is a symbolic link; nothing was made.
+    Linked(String),
 }
 
 /// One repository, at a path.
@@ -247,6 +292,24 @@ impl Git {
         run_git_untrimmed(&self.root, &["show", "--no-textconv", &object])
     }
 
+    /// Whether `rev` holds a file at `path`.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn has_file(&self, rev: &str, path: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        let listed = self.at_root(&[
+            "--literal-pathspecs",
+            "ls-tree",
+            "--name-only",
+            rev,
+            "--",
+            path,
+        ])?;
+        Ok(!listed.is_empty())
+    }
+
     /// The paths `head` added or modified since it and `base` last agreed; a deleted path is not
     /// one, and a renamed file counts as added.
     ///
@@ -406,6 +469,68 @@ impl Git {
         })
     }
 
+    /// Every entry under `dir` as `rev` has it, at any depth, in git's order; a directory `rev`
+    /// does not hold gives none.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn tree_entries(&self, rev: &str, dir: &str) -> Result<Vec<TreeEntry>, GitError> {
+        self.require_repository()?;
+        let listed =
+            self.at_root(&["--literal-pathspecs", "ls-tree", "-r", "-z", rev, "--", dir])?;
+        Ok(listed
+            .split('\0')
+            .filter_map(|entry| {
+                let (meta, path) = entry.split_once('\t')?;
+                let mut meta = meta.split(' ');
+                let mode = meta.next()?;
+                let blob = meta.nth(1)?;
+                Some(TreeEntry {
+                    mode: mode.to_string(),
+                    blob: blob.to_string(),
+                    path: path.to_string(),
+                })
+            })
+            .collect())
+    }
+
+    /// The last commit of `rev`'s history that changed `path`: with `first_parent`, along the
+    /// first parents alone, so that a merge is the commit that brought the change; without, by
+    /// git's history simplification, so that it is the commit that made it.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn last_commit(
+        &self,
+        rev: &str,
+        path: &str,
+        first_parent: bool,
+    ) -> Result<Option<PathCommit>, GitError> {
+        self.require_repository()?;
+        let mut arguments = vec!["--literal-pathspecs", "log", "-1", "--no-color"];
+        if first_parent {
+            arguments.push("--first-parent");
+        }
+        arguments.extend(["--format=%H%x1f%cI%x1f%an%x1f%s", rev, "--", path]);
+        let line = self.at_root(&arguments)?;
+        let mut fields = line.splitn(4, '\u{1f}');
+        Ok(
+            match (fields.next(), fields.next(), fields.next(), fields.next()) {
+                (Some(sha), Some(at), Some(author), Some(subject)) if !sha.is_empty() => {
+                    Some(PathCommit {
+                        sha: sha.to_string(),
+                        committed_at: at.to_string(),
+                        author_name: author.to_string(),
+                        subject: subject.to_string(),
+                    })
+                }
+                _ => None,
+            },
+        )
+    }
+
     /// Every path `head` changed since it and `base` last agreed.
     ///
     /// Renames are reported as both sides, a removal and an addition, because the governor's
@@ -543,6 +668,158 @@ impl Git {
                 }
                 self.at_root(&["merge", "--abort"])?;
                 Ok(MergeOutcome::Conflicts(conflicts))
+            }
+        }
+    }
+
+    /// Makes the branch `branch` at `from` with one commit that writes `files` (`(path, text)`,
+    /// repository-relative), in the root's checkout as `merge` does, and puts the branch that was
+    /// checked out back (`docs/SPEC.md` 5.14).
+    ///
+    /// In order: `Linked` when a file, or a directory between the root and it, is a symbolic link;
+    /// `Busy` when `git status` names any of the files; `Unchanged` when every file's text equals
+    /// the file at `from`. Otherwise `git checkout -b`, each file written, `git add`, and
+    /// `git commit --only` over the files, so nothing else the owner staged is committed. The
+    /// commit's author is `author` (`Name <email>`) when given, and its committer the person git
+    /// knows there. **Like `merge`, it moves HEAD, and nothing here keeps two callers apart.** A
+    /// failure after the branch was made takes everything back: the files restored or removed and
+    /// unstaged, the earlier branch checked out, `branch` deleted.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the head is detached (refused before anything is done), when `from`
+    /// names nothing, when `branch` exists, or with git's own words when a step after the branch
+    /// was made failed.
+    pub fn commit_files(
+        &self,
+        branch: &str,
+        from: &str,
+        files: &[(String, String)],
+        message: &str,
+        author: Option<&str>,
+    ) -> Result<CommitOutcome, GitError> {
+        self.require_repository()?;
+        let was_on = self.current_branch()?;
+        if let Some(link) = self.first_link(files) {
+            return Ok(CommitOutcome::Linked(link));
+        }
+        let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
+        let busy = self.uncommitted(&paths)?;
+        if !busy.is_empty() {
+            return Ok(CommitOutcome::Busy(busy));
+        }
+        if files
+            .iter()
+            .all(|(path, text)| self.file_at(from, path).is_ok_and(|held| held == *text))
+        {
+            return Ok(CommitOutcome::Unchanged);
+        }
+        self.at_root(&["checkout", "-b", branch, from])?;
+        let sha = match self.commit_files_on_the_new_branch(files, &paths, message, author) {
+            Ok(sha) => sha,
+            Err(failure) => {
+                self.take_back(from, files, &paths);
+                // Best effort: the failure being reported is the one worth keeping.
+                let _ = self.at_root(&["checkout", &was_on]);
+                let _ = self.at_root(&["branch", "-D", branch]);
+                return Err(failure);
+            }
+        };
+        self.at_root(&["checkout", &was_on])?;
+        Ok(CommitOutcome::Committed { sha })
+    }
+
+    /// The first symbolic link on the way to a file, root first, or the file itself.
+    fn first_link(&self, files: &[(String, String)]) -> Option<String> {
+        for (path, _) in files {
+            let mut so_far = String::new();
+            for segment in path.split('/') {
+                if !so_far.is_empty() {
+                    so_far.push('/');
+                }
+                so_far.push_str(segment);
+                match std::fs::symlink_metadata(self.root.join(&so_far)) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => return Some(so_far),
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+        None
+    }
+
+    /// The files among `paths` that have a change in the root's checkout that is not committed.
+    fn uncommitted(&self, paths: &[&str]) -> Result<Vec<String>, GitError> {
+        let mut status = vec![
+            "--literal-pathspecs",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--",
+        ];
+        status.extend_from_slice(paths);
+        let listed = self.at_root(&status)?;
+        Ok(paths_of(&listed)
+            .iter()
+            .filter_map(|entry| entry.get(3..).map(ToString::to_string))
+            .collect())
+    }
+
+    /// Writes, stages and commits `files` on the branch just made.
+    fn commit_files_on_the_new_branch(
+        &self,
+        files: &[(String, String)],
+        paths: &[&str],
+        message: &str,
+        author: Option<&str>,
+    ) -> Result<String, GitError> {
+        for (path, text) in files {
+            let target = self.root.join(path);
+            let written = target
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&target, text));
+            written.map_err(|error| GitError::CommandFailed {
+                command: format!("write {path}"),
+                stderr: error.to_string(),
+            })?;
+        }
+        let mut add = vec!["--literal-pathspecs", "add", "--"];
+        add.extend_from_slice(paths);
+        self.at_root(&add)?;
+        let author_option = author.map(|author| format!("--author={author}"));
+        let mut commit = vec!["--literal-pathspecs", "commit", "--only", "-m", message];
+        if let Some(option) = &author_option {
+            commit.push(option);
+        }
+        commit.push("--");
+        commit.extend_from_slice(paths);
+        self.at_root(&as_someone(&self.root, &commit))?;
+        self.at_root(&["rev-parse", "HEAD"])
+    }
+
+    /// Undoes what `commit_files_on_the_new_branch` did to the files: each is unstaged, and put
+    /// back to the text at `from` or, when `from` had none, removed with the directories made for it.
+    fn take_back(&self, from: &str, files: &[(String, String)], paths: &[&str]) {
+        let mut unstage = vec!["--literal-pathspecs", "reset", "-q", "--"];
+        unstage.extend_from_slice(paths);
+        let _ = self.at_root(&unstage);
+        for path in paths {
+            if self.file_at(from, path).is_ok() {
+                let _ = self.at_root(&["--literal-pathspecs", "checkout", from, "--", path]);
+            } else {
+                let _ = std::fs::remove_file(self.root.join(path));
+            }
+        }
+        // Directories the write made for a file that is gone, deepest first.
+        for (path, _) in files {
+            let mut directory = Path::new(path).parent();
+            while let Some(current) = directory.filter(|d| !d.as_os_str().is_empty()) {
+                if std::fs::remove_dir(self.root.join(current)).is_err() {
+                    break;
+                }
+                directory = current.parent();
             }
         }
     }
@@ -760,6 +1037,66 @@ pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
         }
         None => git.default_branch(),
     }
+}
+
+/// Whether the new project's product plan is on the team's integration branch: both documents of
+/// `PRODUCT_PLAN` are there (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
+///
+/// # Errors
+///
+/// What `integration_branch` refuses; `CommandFailed` for any git error but a missing branch.
+pub fn product_plan_on(git: &Git, team: &Team) -> Result<bool, GitError> {
+    let branch = integration_branch(team, git)?;
+    match git.tree(&branch) {
+        Ok(_) => {}
+        Err(GitError::CommandFailed { .. }) => return Ok(false),
+        Err(other) => return Err(other),
+    }
+    let mut present = Vec::new();
+    for document in PRODUCT_PLAN {
+        if git.has_file(&branch, document)? {
+            present.push(document.to_string());
+        }
+    }
+    Ok(product_plan_approved(&present))
+}
+
+/// The `.agent.md` twins on `branch` that are behind the document for people beside them: the
+/// document's last commit is neither the twin's last nor its ancestor, and one integration did
+/// not bring both (`docs/SPEC.md` 5.17). A pair with a file missing is no pair.
+///
+/// # Errors
+///
+/// `CommandFailed` when `branch` names nothing.
+pub fn stale_twins(git: &Git, branch: &str) -> Result<Vec<String>, GitError> {
+    let entries = git.tree_entries(branch, "docs/catervas")?;
+    let is_file = |path: &str| {
+        entries
+            .iter()
+            .any(|entry| entry.path == path && matches!(entry.mode.as_str(), "100644" | "100755"))
+    };
+    let mut stale = Vec::new();
+    for entry in &entries {
+        let Some(twin) = agent_twin(&entry.path).filter(|_| is_human_document(&entry.path)) else {
+            continue;
+        };
+        if !is_file(&entry.path) || !is_file(&twin) {
+            continue;
+        }
+        let (Some(human_last), Some(twin_last)) = (
+            git.last_commit(branch, &entry.path, false)?,
+            git.last_commit(branch, &twin, false)?,
+        ) else {
+            continue;
+        };
+        let brought_together = git.last_commit(branch, &entry.path, true)?.map(|c| c.sha)
+            == git.last_commit(branch, &twin, true)?.map(|c| c.sha);
+        let behind = git.commit_count(&twin_last.sha, &human_last.sha)?;
+        if !brought_together && twin_is_stale(&human_last.sha, &twin_last.sha, behind) {
+            stale.push(twin);
+        }
+    }
+    Ok(stale)
 }
 
 #[cfg(test)]

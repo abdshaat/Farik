@@ -127,6 +127,7 @@ impl Served {
         state.register_session(SessionRegistration {
             session_id: SESSION.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             cwd: repo.path.clone(),

@@ -3,6 +3,10 @@
 //! contract and the evidence gathered for it.
 
 use crate::contract::{ExitCriterion, TaskContract, TaskStatus, wire_method};
+use crate::folders::{
+    agent_twin, human_of_twin, may_change_an_owner_document,
+    pair_changed_alone as pairs_changed_alone,
+};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::paths::{
@@ -67,6 +71,9 @@ pub struct DoneEvidence {
     pub protected_paths: Vec<String>,
     /// Whether the change needs the Designer's pass, and has it.
     pub design_review: DesignReviewNeed,
+    /// The twins that are behind the document for people beside them (5.17), which the runtime
+    /// fills only when a changed path is a human document's twin. Such a twin may change alone.
+    pub stale_twins: Vec<String>,
 }
 
 /// One rule of the Definition of Done. Failures are reported in this order.
@@ -84,6 +91,9 @@ pub enum DoneRule {
     NoProtectedPathChanged,
     /// The diff touches nothing under `.catervas/`, whose files change only through Catervas's tools.
     NoCatervasPathChanged,
+    /// The diff changes no human document of a role's folder without its `.agent.md` twin, nor the
+    /// twin without the document.
+    PairChangedAlone,
     /// The assignee wrote a completion note.
     CompletionNotePresent,
     /// The reviewer wrote a review note.
@@ -115,13 +125,21 @@ pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
     contract.risk == Risk::High || contract.kind == Kind::Epic
 }
 
+/// Whether the human must accept the finished result: [`requires_human_acceptance`], or a task
+/// (not an epic) that may change the product's `spec.md` or `roadmap.md`, which the owner accepts
+/// (5.4 item 5, 5.7).
+#[must_use]
+pub fn result_needs_the_human(contract: &TaskContract) -> bool {
+    requires_human_acceptance(contract) || may_change_an_owner_document(&contract.allowed_paths)
+}
+
 /// Whether the task's result waits on the human's acceptance (5.4): it is `verifying`, and it is an
-/// epic, risk `high`, or has a `human` criterion. The status is the contract's, which the caller
+/// epic, risk `high`, may change the product plan, or has a `human` criterion. The status is the contract's, which the caller
 /// takes from the board.
 #[must_use]
 pub fn result_awaits_human(contract: &TaskContract) -> bool {
     contract.status == TaskStatus::Verifying
-        && (requires_human_acceptance(contract)
+        && (result_needs_the_human(contract)
             || contract
                 .exit_criteria
                 .iter()
@@ -130,13 +148,14 @@ pub fn result_awaits_human(contract: &TaskContract) -> bool {
 
 type Check = fn(&TaskContract, &DoneEvidence) -> Option<DoneFailure>;
 
-const CHECKS: [Check; 10] = [
+const CHECKS: [Check; 11] = [
     criterion_run_by_reviewer,
     criterion_passed,
     human_criterion_accepted,
     paths_within_allowed,
     no_protected_path_changed,
     no_catervas_path_changed,
+    pair_changed_alone,
     completion_note_present,
     review_note_present,
     design_review_passed,
@@ -361,6 +380,30 @@ fn no_catervas_path_changed(
     ))
 }
 
+/// No human document changes without its agent twin, nor the twin without the document (5.4,
+/// 5.17): the two are one document, written twice. The diff is judged whole, whatever the
+/// allowed paths say.
+fn pair_changed_alone(_: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
+    let alone = pairs_changed_alone(&evidence.changed_paths, &evidence.stale_twins);
+    if alone.is_empty() {
+        return None;
+    }
+    let lacking: Vec<String> = alone
+        .iter()
+        .filter_map(|path| {
+            let partner = agent_twin(path).or_else(|| human_of_twin(path))?;
+            Some(format!("{path} without {partner}"))
+        })
+        .collect();
+    Some(failure(
+        DoneRule::PairChangedAlone,
+        format!(
+            "the diff changes {}; a document for people and its .agent.md twin change together",
+            lacking.join(", ")
+        ),
+    ))
+}
+
 fn is_written(note: Option<&String>) -> bool {
     note.is_some_and(|text| !text.trim().is_empty())
 }
@@ -395,13 +438,15 @@ fn design_review_passed(_: &TaskContract, evidence: &DoneEvidence) -> Option<Don
 }
 
 fn human_accepted(contract: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
-    if !requires_human_acceptance(contract) || evidence.human_accepted {
+    if !result_needs_the_human(contract) || evidence.human_accepted {
         return None;
     }
     let why = if contract.kind == Kind::Epic {
         "an epic"
-    } else {
+    } else if contract.risk == Risk::High {
         "a high risk task"
+    } else {
+        "a task that may change the product's spec or roadmap"
     };
     Some(failure(
         DoneRule::HumanAccepted,
@@ -415,9 +460,9 @@ mod tests {
 
     use super::{
         CriterionResult, DesignReviewNeed, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
-        requires_human_acceptance,
+        requires_human_acceptance, result_awaits_human,
     };
-    use crate::contract::{ExitCriterion, Role, TaskContract, VerificationWire};
+    use crate::contract::{ExitCriterion, Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
     use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
     use crate::governor::readiness::fixtures::a_contract;
@@ -447,6 +492,7 @@ mod tests {
             human_accepted: false,
             protected_paths: DEFAULT_PROTECTED_PATHS.map(str::to_string).to_vec(),
             design_review: DesignReviewNeed::NotNeeded,
+            stale_twins: Vec::new(),
         }
     }
 
@@ -503,6 +549,8 @@ mod tests {
             contract.assignee_role = role;
             contract.allowed_paths = vec!["**".to_string()];
             let mut evidence = an_evidence();
+            // `**` may change the product plan, which the owner accepts (5.4 item 5).
+            evidence.human_accepted = true;
             evidence.changed_paths = vec![
                 "src/login/form.rs".to_string(),
                 ".catervas/decisions/0001-x.md".to_string(),
@@ -729,12 +777,12 @@ mod tests {
     fn refuses_allowed_paths_that_do_not_compile() {
         let mut contract = a_contract();
         contract.allowed_paths = vec!["src/[".to_string()];
+        // A glob that does not compile fails closed: the owner accepts the task (5.4 item 5).
+        let mut evidence = an_evidence();
+        evidence.human_accepted = true;
+        assert_eq!(failed_rules(&contract, &evidence), [R::PathsWithinAllowed]);
         assert_eq!(
-            failed_rules(&contract, &an_evidence()),
-            [R::PathsWithinAllowed]
-        );
-        assert_eq!(
-            message_of(&contract, &an_evidence(), R::PathsWithinAllowed),
+            message_of(&contract, &evidence, R::PathsWithinAllowed),
             "the contract's allowed path src/[ is not a valid glob: unclosed character class; missing ']'"
         );
     }
@@ -835,6 +883,47 @@ mod tests {
     }
 
     #[test]
+    fn the_human_accepts_a_task_that_may_change_the_product_plan() {
+        let mut contract = a_contract();
+        contract.status = TaskStatus::Verifying;
+        contract.allowed_paths = vec!["docs/catervas/product/**".to_string()];
+        let mut evidence = an_evidence();
+        evidence.changed_paths = vec!["docs/catervas/product/notes.md".to_string()];
+        assert!(result_awaits_human(&contract));
+        assert!(!requires_human_acceptance(&contract));
+        assert_eq!(failed_rules(&contract, &evidence), [R::HumanAccepted]);
+        assert_eq!(
+            message_of(&contract, &evidence, R::HumanAccepted),
+            "a task that may change the product's spec or roadmap is accepted by the human, and the human has not accepted"
+        );
+        evidence.human_accepted = true;
+        assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
+
+        contract.allowed_paths = vec!["docs/catervas/product/reports/**".to_string()];
+        let mut evidence = an_evidence();
+        evidence.changed_paths = vec!["docs/catervas/product/reports/q3.md".to_string()];
+        assert!(!result_awaits_human(&contract));
+        assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
+
+        let mut epic = a_contract();
+        epic.status = TaskStatus::Verifying;
+        epic.kind = Kind::Epic;
+        epic.allowed_paths = vec!["docs/catervas/product/**".to_string()];
+        assert!(result_awaits_human(&epic));
+        assert_eq!(
+            message_of(&epic, &an_evidence(), R::HumanAccepted),
+            "an epic is accepted by the human, and the human has not accepted"
+        );
+        let mut risky = a_contract();
+        risky.risk = Risk::High;
+        risky.allowed_paths = vec!["docs/catervas/product/**".to_string()];
+        assert_eq!(
+            message_of(&risky, &an_evidence(), R::HumanAccepted),
+            "a high risk task is accepted by the human, and the human has not accepted"
+        );
+    }
+
+    #[test]
     fn needs_the_human_for_a_high_risk_task_and_for_every_epic() {
         let contract = a_contract();
         assert!(!requires_human_acceptance(&contract));
@@ -862,7 +951,7 @@ mod tests {
 
     #[test]
     fn reports_every_failure_in_rule_order() {
-        // All nine at once, so that the order is one assertion rather than a chain of pairs, and
+        // All ten at once, so that the order is one assertion rather than a chain of pairs, and
         // every list is plural, so that the singular and the plural wording are both pinned.
         let mut contract = a_contract();
         contract.risk = Risk::High;
@@ -892,6 +981,7 @@ mod tests {
             ".env".to_string(),
             "src/login/k.pem".to_string(),
             ".catervas/team.yaml".to_string(),
+            "docs/catervas/product/roadmap.md".to_string(),
         ];
         evidence.completion_note = None;
         evidence.review_note = None;
@@ -904,6 +994,7 @@ mod tests {
                 R::PathsWithinAllowed,
                 R::NoProtectedPathChanged,
                 R::NoCatervasPathChanged,
+                R::PairChangedAlone,
                 R::CompletionNotePresent,
                 R::ReviewNotePresent,
                 R::HumanAccepted
@@ -923,12 +1014,66 @@ mod tests {
         );
         assert_eq!(
             message_of(&contract, &evidence, R::PathsWithinAllowed),
-            "the diff changes README.md, Cargo.toml, .env, .catervas/team.yaml outside the contract's allowed paths src/login/**"
+            "the diff changes README.md, Cargo.toml, .env, .catervas/team.yaml, docs/catervas/product/roadmap.md outside the contract's allowed paths src/login/**"
         );
         assert_eq!(
             message_of(&contract, &evidence, R::NoProtectedPathChanged),
             "the diff changes .env, src/login/k.pem, which the team's protected paths cover"
         );
+    }
+
+    #[test]
+    fn refuses_a_diff_that_changes_one_file_of_a_pair() {
+        let mut contract = a_contract();
+        contract.allowed_paths = vec!["docs/catervas/**".to_string()];
+        let changed = |paths: &[&str]| {
+            let mut evidence = an_evidence();
+            // `docs/catervas/**` may change the product plan, which the owner accepts.
+            evidence.human_accepted = true;
+            evidence.changed_paths = paths.iter().map(|path| (*path).to_string()).collect();
+            evidence
+        };
+        let spec = "docs/catervas/product/spec.md";
+        let spec_twin = "docs/catervas/product/spec.agent.md";
+        let roadmap_twin = "docs/catervas/product/roadmap.agent.md";
+        let evidence = changed(&[spec]);
+        assert_eq!(failed_rules(&contract, &evidence), [R::PairChangedAlone]);
+        assert_eq!(
+            message_of(&contract, &evidence, R::PairChangedAlone),
+            "the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md; a document for people and its .agent.md twin change together"
+        );
+        assert_eq!(
+            message_of(&contract, &changed(&[roadmap_twin]), R::PairChangedAlone),
+            "the diff changes docs/catervas/product/roadmap.agent.md without docs/catervas/product/roadmap.md; a document for people and its .agent.md twin change together"
+        );
+        let plan = "docs/catervas/marketing/plans/MP-2.md";
+        assert_eq!(
+            failed_rules(&contract, &changed(&[plan])),
+            [R::PairChangedAlone]
+        );
+        assert_eq!(
+            message_of(
+                &contract,
+                &changed(&[spec, roadmap_twin]),
+                R::PairChangedAlone
+            ),
+            "the diff changes docs/catervas/product/spec.md without docs/catervas/product/spec.agent.md, docs/catervas/product/roadmap.agent.md without docs/catervas/product/roadmap.md; a document for people and its .agent.md twin change together"
+        );
+        let whole = changed(&[spec, spec_twin, "docs/catervas/architecture/overview.md"]);
+        assert_eq!(evaluate_done(&contract, &whole), Ok(()));
+    }
+
+    #[test]
+    fn passes_a_diff_that_only_brings_a_stale_twin_up_to_date() {
+        let mut contract = a_contract();
+        contract.allowed_paths = vec!["docs/catervas/**".to_string()];
+        let twin = "docs/catervas/product/roadmap.agent.md";
+        let mut evidence = an_evidence();
+        evidence.human_accepted = true;
+        evidence.changed_paths = vec![twin.to_string()];
+        assert_eq!(failed_rules(&contract, &evidence), [R::PairChangedAlone]);
+        evidence.stale_twins = vec![twin.to_string()];
+        assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
     }
 
     #[test]

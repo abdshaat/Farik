@@ -1094,6 +1094,18 @@ export const en = {
 	chatsKeyLink: "Check the key in Settings",
 	chatsNoAnswer: "{name} could not answer. Ask again.",
 	chatsRetired: "{name} has left the team. This chat is kept for you to read.",
+	chatsInterviewIntro:
+		"Before your team builds anything, {name} asks what you want to make. This chat only talks: your product plan is written next, and you approve it before anything is built.",
+	heardTitle: "What I heard",
+	heardCustomers: "Your customers",
+	heardProblem: "The problem",
+	heardMust: "It must",
+	heardNotNow: "Not now",
+	heardWorksWhen: "It works when",
+	draftPlan: "Draft the product plan",
+	draftPlanLine:
+		"I write it as my first task: a product description and a roadmap. It comes to you on Today to approve.",
+	draftPlanSent: "Drafting it as {id}. It comes to you on Today to approve.",
 	channelIntro:
 		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
 	channelMessages: "Messages",
@@ -2459,4 +2471,144 @@ export const en = {
 		"Catervas could not keep the key on this computer. If it asks whether Catervas may use the keychain, choose “Always”, then try again.",
 	refuseSellerMessageClosed:
 		"This message went with an order that was decided without it, so it is not sent.",
+	// The product plan's changes the owner approves on Today (spec 5.7).
+	docChangesTitle: "Product plan changes to approve",
+	docChangesFrom: "From {name}, after the sprint {n} review",
+	docChangesLegend: "Lines marked + are added; lines marked − are removed.",
+	docNameRoadmap: "Roadmap",
+	docNameSpec: "Product description",
+	docChangeAdded: "Added: ",
+	docChangeRemoved: "Removed: ",
+	docChangesTeamOnly: "Only the version for the team changes.",
+	docChangesNotes: "Notes for {name}",
+	docChangesNotesHint: "(needed to send it back)",
+	docChangesApprove: "Approve",
+	docChangesSendBack: "Send back",
+	docChangesNeedNotes: "Write what {name} should change first.",
+	docChangesNothingYet: "Nothing changes until you approve.",
+	docChangesPullRequest:
+		"Nothing changes until you approve. Then Catervas opens a pull request, and the change is in your project once it is merged.",
+	docChangesManual:
+		"Nothing changes until you approve. Then it waits under Waiting on you for you to add it to your project.",
+	planToApprove: "Your product plan to approve",
+	planFrom: "From {name}, written from your chat {when}",
+	planWhenMorning: "this morning",
+	planWhenAfternoon: "this afternoon",
+	planWhenEvening: "this evening",
+	planWhenYesterday: "yesterday",
+	planWhenOn: "on {weekday}",
+	planIntro:
+		"Here is what we will build and in what order. Read both parts, then approve it or send it back with what to change.",
+	planGate:
+		"Nothing else is planned until you approve. Then your team documents the plan in a first sprint.",
+	todayWaitsForPlan: "{project}: your team waits for your product plan",
+	refuseFolderDocDecided: "These changes were decided already.",
+	refuseFolderDocSuperseded: "A newer version of these changes is waiting.",
+	refuseUnknownFolderDoc: "These changes are no longer there.",
+	refuseFolderDocMixed: "These changes come from more than one agent.",
+	refuseFolderDocReasonNeeded: "Write what to change before sending it back.",
+	refuseFolderDocBusy:
+		"One of these files has changes of yours that are not committed. Commit or undo them, then approve.",
+	refuseFolderDocLink:
+		"One of these files is a link, which Catervas does not write through.",
+	refuseFolderDocWaiting:
+		"An earlier change to one of these files is not in your project yet. Approve once it is.",
+	diagram: "Diagram",
+	diagramFailed: "This diagram could not be drawn.",
+	files: "Files",
+	filesLead:
+		"What your team knows about this project, one folder for each role. Each folder is written by its owner.",
+	filesNothingHere: "Nothing here yet",
+	filesNoSuch: "There is no such document.",
+	filesBack: "Back",
+	filesFile: "File",
+	filesCrumb: "{folder} › {name}",
+	filesOwnerFolder: "{owner}’s folder, {folder}",
+	filesEmptyOption: "{folder}: nothing here yet",
+	filesWhichVersion: "Which version",
+	filesForYou: "For you",
+	filesForTeam: "For the team",
+	filesEdit: "Edit",
+	filesWrittenForTeam: "Written for your team. You can read it and change it.",
+	filesTeamReads:
+		"This is how your team reads the {name}. To change it, change the version for you; {owner} keeps this one in step.",
+	filesBringing: "{owner} is bringing this up to date with your change.",
+	filesOlder: "The team’s version is older than yours",
+	filesChanged: "Changed by {who} {when}",
+	filesChangedIn: ", in ",
+	filesYou: "you",
+	filesJustNow: "just now",
+	filesOpen: "Open in Files",
+	filesEditing: "You are changing the version for you.",
+	filesEditOrPreview: "Edit or preview",
+	filesWrite: "Write",
+	filesPreview: "Preview",
+	filesHint:
+		"A line starting with # is a heading, one starting with - is a list item, and **two stars** make words bold.",
+	filesText: "{name} text",
+	filesSave: "Save",
+	filesCancel: "Cancel",
+	filesSaveAuto: "Saving keeps your change at once.",
+	filesSavePullRequest:
+		"Saving puts your change in a pull request; it is in your project once that is merged.",
+	filesSaveManual:
+		"Saving puts your change on a branch for you to add with catervas integrate.",
+	filesThenAuto: "{owner} will update the team’s version.",
+	filesThen: "Then {owner} updates the team’s version.",
+	filesWaitingAuto: "Saved. Catervas adds it to your project in a moment.",
+	filesWaitingPullRequest: "Saved. It goes out with a pull request.",
+	filesWaitingManual:
+		"Saved. It goes out when you run catervas integrate folder-{change}.",
+	filesChangedWhile:
+		"This file changed while you were editing. Your text is still here; copy it, then reload to see the new version.",
+	filesReload: "Reload",
+	refuseFileBusy:
+		"This file was also changed on your computer, outside Catervas. Finish or undo that change, then save here again.",
+	refuseMarketingPlan:
+		"A marketing plan changes through a new version on its page.",
+	refuseChangeWaiting:
+		"An earlier change to this file is not in your project yet. Edit it once it is.",
+	refuseIsALink: "This file is a link, which Catervas does not write through.",
+	refuseNotANewProject:
+		"This project was not started here, so it has no product plan to draft.",
+	refusePlanApproved: "Your product plan is approved already.",
+	refusePlanOpen: "{name} is drafting your product plan already.",
+	refusePlanNoWriter: "Your team has no Product Manager at work to write it.",
+	refusePlanNoReviewer:
+		"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+	refuseTooLarge:
+		"This is too long to save here: a document can be at most about 256 KB.",
+	// The end of setup for a project that already exists (4.1, 5.17).
+	readyTitle: "Your team is ready",
+	readyLead:
+		"{names} have joined {team}. They know what Catervas found in your project; next, they can learn it properly.",
+	readyRecommended: "Recommended",
+	readyOfferTitle: "Start with a Catervafication sprint",
+	readyOfferLead:
+		"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
+	readyPm:
+		"writes what your product is and what comes next, as your product plan to approve.",
+	readyArchitect: "writes how your project is put together, with diagrams.",
+	readyDeveloper:
+		"writes how your project is built and worked on: its habits and rules.",
+	readyDesigner: "writes down every screen your project has.",
+	readyMarketing:
+		"writes your marketing plan, after you approve the product plan.",
+	readyNote:
+		"Your team only adds its notes; nothing else in your project changes.",
+	readyStart: "Start",
+	readyLater: "Later",
+	readyLaterNote: "Later keeps this on Today.",
+	refuseCatervaficationStarted:
+		"Your team is already documenting this project.",
+	refuseCatervaficationNewProject:
+		"A new project's documenting sprint starts by itself once you approve its product plan.",
+	refuseCatervaficationNoPm:
+		"Your Product Manager is paused. Resume them on the Team page, then start.",
+	refuseCatervaficationNoWriters:
+		"No one on your team can both write and have their notes checked. Add an Architect or a Scrum Master on the Team page, then start.",
+	cardTitle: "Your team hasn’t documented this project yet",
+	cardLead:
+		"A first sprint where your team reads your project and writes down what it learns, before building anything.",
+	toldCatervafication: "Catervas filed it to document the project.",
 };

@@ -1,13 +1,12 @@
 ---
 name: keeping-work-flowing
-description: Use when a request needs triage, a refining contract needs its Definition of Ready judgment, an approved epic needs breaking down into tasks, or a ready task needs an assignee.
+description: Use when a request needs triage, a refining contract needs its Definition of Ready judgment, or a ready task needs an assignee.
 ---
 
 # Keeping work flowing
 
 Your job is the flow of work, not the work itself: size requests correctly, judge readiness where
-the governor cannot, break epics into tasks a Developer or an Architect can actually finish, and keep
-everyone within the WIP limit.
+the governor cannot, and keep everyone within the WIP limit.
 
 ## 1. Triage a request
 
@@ -37,26 +36,28 @@ from it, not from a guess.
 Record both answers and your reason with `catervas_record_judgment`, the one tool a judgment session
 gives you.
 
-## 3. Break an approved epic into tasks
+## 3. Tasks at an epic's close-out
 
-Once the user has approved an epic, file its tasks with `catervas_create_task`, `parent` set to the
-epic, each contract complete in one call: its own clear deliverable, exit criteria that would fail
-if the work were wrong, `allowed_paths` within the epic's, and a budget within what the epic has
+When you close out an epic whose reviewer rejected it, or whose human's message asks for more,
+file the tasks that fix it with `catervas_create_task`, `parent` set to the epic, each contract
+complete in one call: its own clear deliverable, exit criteria that would fail if the work were wrong, `allowed_paths` within the epic's, and a budget within what the epic has
 left. Read the epic's contract and any tasks already filed under it (`catervas_read_board`) before
-adding more, so the breakdown does not overlap or leave a gap.
+adding more, so the tasks you add repeat none already filed and leave no gap.
 Give a task the user must approve a `summary` of two or three plain sentences they can decide on,
 and open every completion note with such a summary, then a blank line, then the details.
 Only the Developer and the UI/UX Designer change code: a task for any other role keeps its
 `allowed_paths` inside the team's `document_paths`, and a Developer's or a Designer's task says
 `change: fix` when it repairs a defect.
-While the team has a Marketing Specialist, another role's task names no path that could reach
-docs/marketing/ (not docs/** or docs); name the folder it needs, such as docs/adr/**.
+While a role that owns a folder under docs/catervas/ has an active agent, another role's task
+names no path that could reach that folder (not docs/**, docs/catervas/**, docs, ** or **/*.md);
+name the folder it needs, such as docs/adr/** or src/**/*.rs.
 
 ## 4. Assign within the WIP limit
 
 Assign a ready task to an agent of its assignee role with room under the team's WIP limit, using
-`catervas_assign_task`. Nobody reviews their own work, and the Product Manager and the Scrum Master are
-never a task's assignee. When nobody has room or no agent of the role is active, leave the task
+`catervas_assign_task`. A task with a `lane` goes to its lane's builder, named in your message: the
+governor refuses anyone else (`lane_taken`). The first task of a lane goes to any agent of its role
+with room, who then builds the lane. Nobody reviews their own work. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks. When nobody has room or no agent of the role is active, leave the task
 ready and say why in your note; do not force an assignment past the limit.
 
 ## 5. Escalation hygiene

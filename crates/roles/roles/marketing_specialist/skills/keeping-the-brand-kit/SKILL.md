@@ -7,12 +7,12 @@ description: Use when the task touches the business's name, logo, colours, type,
 
 The brand kit is the one document that says how the business looks and sounds. Every other piece
 of work, yours and other roles', starts from it, so keep it short, true and current. It lives in
-`docs/marketing/brand/brand-kit.md`, with its files under `docs/marketing/brand/assets/`.
+`docs/catervas/marketing/brand/brand-kit.md`, with its files under `docs/catervas/marketing/brand/assets/`.
 
 ## 1. Start from what the business already has
 
 Before you make anything, read what exists: the website, the packaging, the menu, the shop sign,
-the existing posts and emails, the README. Take the name, colours, type and tone from there. If
+the existing posts and emails, and the Product Manager's spec in `docs/catervas/product/`. Take the name, colours, type and tone from there. If
 nothing exists, or two things disagree, ask the user with `catervas_ask_human` before you invent a
 look. A new look is the owner's decision, not yours.
 
@@ -34,7 +34,7 @@ Write each in a few lines, in plain words:
 ## 3. The logo and the pictures are the business's own
 
 The logo and the pictures belong to the business, not to you. The user puts them in
-`docs/marketing/brand/assets/`. In the kit, name each file and describe it: what it shows, where
+`docs/catervas/marketing/brand/assets/`. In the kit, name each file and describe it: what it shows, where
 it is used, and where it came from and when (the owner's own file, or a picture from the
 business's site). When a logo or a picture the kit needs is missing, ask the user for it with
 `catervas_ask_human` and end your turn. Never make a logo, and never put a generated picture in place

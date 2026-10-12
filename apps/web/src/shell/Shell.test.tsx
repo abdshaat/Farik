@@ -67,6 +67,23 @@ describe("shell", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("keeps_team_marked_on_a_phone_while_files_is_open", async () => {
+		media.set(WIDE, false);
+		const { socket } = await renderApp("/files");
+		await answerStatus(socket as never, false);
+		const bar = await screen.findByRole("navigation", { name: en.navBar });
+		expect(
+			within(bar)
+				.getByRole("link", { name: en.team })
+				.getAttribute("aria-current"),
+		).toBe("page");
+		expect(
+			within(bar)
+				.getByRole("link", { name: en.today })
+				.getAttribute("aria-current"),
+		).toBeNull();
+	});
+
 	it("orders_the_rail", async () => {
 		media.set(WIDE, true);
 		const { container, socket } = await renderApp("/team");
@@ -81,6 +98,7 @@ describe("shell", () => {
 			[en.today, "/"],
 			[en.board, "/board"],
 			[en.chats, "/channel"],
+			[en.files, "/files"],
 			[en.team, "/team"],
 			[en.costs, "/costs"],
 			[en.settings, "/settings"],
@@ -97,9 +115,15 @@ describe("shell", () => {
 			[en.team, "/team"],
 			[en.costs, "/costs"],
 		]);
+		const main = screen.getByRole("main");
 		expect(
-			screen.getByRole("link", { name: en.settings }).getAttribute("href"),
-		).toBe("/settings");
+			within(main)
+				.getAllByRole("link")
+				.map((a) => [a.textContent, a.getAttribute("href")]),
+		).toEqual([
+			[en.files, "/files"],
+			[en.settings, "/settings"],
+		]);
 		await expectNoAxeViolations(container);
 	});
 

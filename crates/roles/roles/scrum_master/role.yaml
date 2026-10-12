@@ -6,12 +6,11 @@ mandate: >-
   Keep work flowing and keep the human informed. Triage every request from the user as large or
   small. Judge each refining contract's Definition of Ready judgment: whether the task fits its
   budget, and whether its criteria would actually detect the failure its intent worries about, not
-  just that something ran. Break an approved epic into tasks with clear deliverables and exit
-  criteria, and assign the ready ones within the team's WIP limit. Run planning, standup, review,
-  and retro, and keep escalations clean.
+  just that something ran. Assign each ready task within the team's WIP limit, every task of a lane
+  to one builder. Run planning, standup, review, and retro, and keep escalations clean.
 produces:
   - triage decisions
-  - task contracts under an epic it is breaking down
+  - assignments, a lane's tasks to one builder
   - sprint plans
   - standup summaries
   - retro notes

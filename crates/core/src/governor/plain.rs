@@ -37,8 +37,8 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::DocumentPathsOnly => {
             "Only the developer changes code, and this plan lets someone else change it."
         }
-        ReadinessRule::MarketingPathsOwned => {
-            "Only the Marketing Specialist changes the brand kit and the marketing plans, and this plan lets someone else."
+        ReadinessRule::FolderOwned => {
+            "Only a folder's owner changes the documents in it, and this plan lets someone else."
         }
         ReadinessRule::NoCatervasPaths => "The plan reaches into Catervas's own files.",
         ReadinessRule::PrivateFolderTask => {
@@ -60,6 +60,15 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::BudgetWithinParent => {
             "The plan costs more than is left of the larger piece of work's budget."
         }
+        ReadinessRule::LaneBeyondBuilders => {
+            "The plan splits the work into more parallel parts than your team has builders."
+        }
+        ReadinessRule::LanesOverlap => {
+            "Two parts of this work that run side by side could change the same files."
+        }
+        ReadinessRule::ProductPlanFirst => {
+            "A new project plans nothing until the owner approves its product plan."
+        }
         ReadinessRule::JudgmentRecorded => "The plan has not been checked yet.",
         ReadinessRule::JudgmentAnswers => "The check found the plan not ready.",
     }
@@ -70,7 +79,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 24] = [
+    const EVERY_RULE: [ReadinessRule; 27] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
@@ -84,7 +93,7 @@ mod tests {
         NewTestsRequiredByRule,
         AllowedPathsWithinCeiling,
         DocumentPathsOnly,
-        MarketingPathsOwned,
+        FolderOwned,
         NoCatervasPaths,
         PrivateFolderTask,
         PrivateFolderReviewer,
@@ -93,6 +102,9 @@ mod tests {
         ParentInProgress,
         PathsWithinParent,
         BudgetWithinParent,
+        LaneBeyondBuilders,
+        LanesOverlap,
+        ProductPlanFirst,
         JudgmentRecorded,
         JudgmentAnswers,
     ];
@@ -113,7 +125,7 @@ mod tests {
             | NewTestsRequiredByRule
             | AllowedPathsWithinCeiling
             | DocumentPathsOnly
-            | MarketingPathsOwned
+            | FolderOwned
             | NoCatervasPaths
             | PrivateFolderTask
             | PrivateFolderReviewer
@@ -122,6 +134,9 @@ mod tests {
             | ParentInProgress
             | PathsWithinParent
             | BudgetWithinParent
+            | LaneBeyondBuilders
+            | LanesOverlap
+            | ProductPlanFirst
             | JudgmentRecorded
             | JudgmentAnswers => {}
         }
@@ -136,6 +151,24 @@ mod tests {
             assert!(!plain.contains(role), "{plain}");
         }
         assert!(plain.contains("private folder"), "{plain}");
+    }
+
+    /// The rule holds every role's folder, so its plain words name no role.
+    #[test]
+    fn the_folder_sentence_names_no_role() {
+        let plain = plain_readiness(FolderOwned).to_lowercase();
+        for role in ["marketing", "product manager", "architect"] {
+            assert!(!plain.contains(role), "{plain}");
+        }
+        assert!(plain.contains("folder"), "{plain}");
+    }
+
+    #[test]
+    fn the_product_plan_sentence_is_plain() {
+        assert_eq!(
+            plain_readiness(ProductPlanFirst),
+            "A new project plans nothing until the owner approves its product plan."
+        );
     }
 
     #[test]

@@ -50,19 +50,16 @@ fn makes_the_layout_a_project_starts_with() {
     );
     files.init(&a_team()).expect("a project is made");
 
-    for directory in [
-        "team",
-        "contracts",
-        "agents",
-        "decisions",
-        "product",
-        "local",
-    ] {
+    for directory in ["team", "contracts", "agents", "decisions", "local"] {
         assert!(
             project.root.join(".catervas").join(directory).is_dir(),
             "{directory} is where a person will look for it"
         );
     }
+    assert!(
+        !project.root.join(".catervas").join("product").exists(),
+        "the product's documents are in docs/catervas/product/ now"
+    );
     assert_eq!(
         files
             .read_team()
@@ -406,25 +403,6 @@ fn two_writers_on_one_project_never_publish_a_file_holding_both() {
 }
 
 #[test]
-fn a_document_is_not_destroyed_by_another_ones_writing() {
-    // The two names are both a tool call's to choose, and the one being written used the other as
-    // the file it writes beside -- so writing `notes.md` renamed `notes.md.writing` away.
-    let project = TempProject::new("writing-collision");
-    let files = project.files();
-    files
-        .write_product_doc("notes.md.writing", "mine\n")
-        .expect("a document a person named oddly");
-    files
-        .write_product_doc("notes.md", "another\n")
-        .expect("and another beside it");
-    assert_eq!(
-        files.read_product_doc("notes.md.writing").as_deref(),
-        Ok("mine\n"),
-        "the first document is still there"
-    );
-}
-
-#[test]
 fn refuses_to_write_a_team_that_could_not_be_read_back() {
     // The round trip is the promise: what write_team accepts, read_team returns. A value built in
     // memory that breaks a rule of the file is refused here rather than becoming a file nothing
@@ -721,129 +699,6 @@ fn appends_to_the_retro_file() {
         files.read_retro().expect("it reads back").as_deref(),
         Some(expected)
     );
-}
-
-#[test]
-fn writes_a_product_document_and_refuses_one_that_climbs_out() {
-    let project = TempProject::new("product");
-    let files = project.files();
-    files
-        .write_product_doc("areas/login.md", "# Login\n")
-        .expect("it is written");
-    assert!(
-        project
-            .root
-            .join(".catervas/product/areas/login.md")
-            .is_file()
-    );
-    assert_eq!(
-        files
-            .read_product_doc("areas/login.md")
-            .expect("it reads back"),
-        "# Login\n"
-    );
-
-    let refused = files.write_product_doc("../team.yaml", "not here\n");
-    assert!(
-        matches!(refused, Err(FilesError::Invalid { .. })),
-        "{refused:?}"
-    );
-    assert!(
-        !project.root.join(".catervas/team.yaml").exists(),
-        "and nothing was written where it pointed"
-    );
-}
-
-#[test]
-fn refuses_a_product_document_that_leaves_product_through_a_link() {
-    // The string rule cannot see this one: there is no `..` in `out/loot.md`. A directory under
-    // product/ may be a link pointing anywhere, and the path comes from a tool call.
-    let project = TempProject::new("product-link");
-    let files = project.files();
-    files
-        .write_product_doc("kept.md", "# Kept\n")
-        .expect("a document is written, which makes product/");
-
-    #[cfg(unix)]
-    {
-        let outside = project.root.join("secret");
-        std::fs::create_dir_all(&outside).expect("somewhere outside .catervas/");
-        std::os::unix::fs::symlink(&outside, project.root.join(".catervas/product/out"))
-            .expect("a link out of product/");
-
-        let refused = files.write_product_doc("out/loot.md", "taken\n");
-        let Err(FilesError::Invalid { path, detail }) = refused else {
-            panic!("it leads out of product/: {refused:?}");
-        };
-        assert_eq!(path, ".catervas/product/out/loot.md");
-        assert!(detail.contains("leads out of product/"), "{detail}");
-        assert!(
-            !outside.join("loot.md").exists(),
-            "and nothing was written where it pointed"
-        );
-        assert!(
-            files.read_product_doc("out/loot.md").is_err(),
-            "and reading through it is refused too"
-        );
-    }
-}
-
-#[test]
-fn refuses_a_product_document_that_leaves_product_for_a_name_beginning_the_same() {
-    // `Path::starts_with` is component-wise, and has to be: a textual prefix would let any sibling
-    // of product/ whose name begins with `product` be written to through a link inside it.
-    let project = TempProject::new("product-sibling");
-    let files = project.files();
-    files
-        .write_product_doc("kept.md", "# Kept\n")
-        .expect("a document is written, which makes product/");
-
-    #[cfg(unix)]
-    {
-        let sibling = project.root.join(".catervas/product-secrets");
-        std::fs::create_dir_all(&sibling).expect("a sibling sharing the prefix");
-        std::os::unix::fs::symlink(&sibling, project.root.join(".catervas/product/out"))
-            .expect("a link to it from inside product/");
-        let refused = files.write_product_doc("out/loot.md", "taken\n");
-        assert!(
-            matches!(refused, Err(FilesError::Invalid { .. })),
-            "product-secrets/ is not product/: {refused:?}"
-        );
-        assert!(!sibling.join("loot.md").exists(), "and nothing was written");
-    }
-}
-
-#[test]
-fn refuses_a_product_document_when_it_cannot_tell_where_product_is() {
-    // The boundary fails closed. A root that cannot be resolved means the answer to "is this
-    // inside product/" is unknown, and an unknown boundary is not a boundary.
-    let files = catervas_store::files::ProjectFiles::open(std::path::PathBuf::new());
-    let Err(FilesError::Invalid { path, detail }) = files.read_product_doc("roadmap.md") else {
-        panic!("an unresolvable root is not a missing document");
-    };
-    assert_eq!(path, ".catervas/product/roadmap.md");
-    assert!(detail.contains("project root"), "{detail}");
-}
-
-#[test]
-fn reading_a_product_document_makes_nothing() {
-    // `.catervas/` existing is what makes a directory a Catervas project (spec 3). A read that made it,
-    // to answer where a path lands, would make a project of whatever it was pointed at.
-    let project = TempProject::new("product-read-makes-nothing");
-    let files = project.files();
-    assert!(matches!(
-        files.read_product_doc("roadmap.md"),
-        Err(FilesError::NotFound { .. })
-    ));
-    assert!(
-        !project.root.join(".catervas").exists(),
-        "a read is not an init"
-    );
-    assert!(matches!(
-        files.read_product_doc("../team.yaml"),
-        Err(FilesError::Invalid { .. })
-    ));
-    assert!(!project.root.join(".catervas").exists(), "nor is a refusal");
 }
 
 #[test]

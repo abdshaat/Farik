@@ -100,6 +100,9 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 			"The Developer may send work to its own branches online.",
 		);
 		await pageB.getByRole("button", { name: "Start the team" }).click();
+		// An existing project is offered a Catervafication; "Later" goes on to Today.
+		await expect(pageB).toHaveURL(/\/setup\/ready$/);
+		await pageB.getByRole("button", { name: "Later" }).click();
 		await expect(pageB).toHaveURL(/:\d+\/$/);
 		const yamlB = teamOf(b.project);
 		for (const name of ["Mira", "Ada", "Theo"]) {

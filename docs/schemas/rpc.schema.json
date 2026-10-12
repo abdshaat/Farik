@@ -59,6 +59,8 @@
         "templates.list",
         "template.preview",
         "backlog.summary",
+        "product_plan.state",
+        "catervafication.get",
         "skills.list",
         "skill.get",
         "allowances.list",
@@ -71,7 +73,10 @@
         "renewals.list",
         "procurement_mailbox.get",
         "seller_messages.list",
-        "seller_replies.list"
+        "seller_replies.list",
+        "folder_doc_proposals.list",
+        "files.tree",
+        "files.read"
       ]
     },
     "subscribeRequest": {
@@ -279,6 +284,12 @@
               "$ref": "#/$defs/backlogSummaryQuery"
             },
             {
+              "$ref": "#/$defs/productPlanStateQuery"
+            },
+            {
+              "$ref": "#/$defs/catervaficationGetQuery"
+            },
+            {
               "$ref": "#/$defs/sprintGetQuery"
             },
             {
@@ -298,6 +309,15 @@
             },
             {
               "$ref": "#/$defs/sitesListQuery"
+            },
+            {
+              "$ref": "#/$defs/folderDocProposalsListQuery"
+            },
+            {
+              "$ref": "#/$defs/filesTreeQuery"
+            },
+            {
+              "$ref": "#/$defs/filesReadQuery"
             },
             {
               "$ref": "#/$defs/purchaseOrdersListQuery"
@@ -508,6 +528,9 @@
         },
         {
           "$ref": "#/$defs/contractSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/filesSaveRequest"
         },
         {
           "$ref": "#/$defs/teamSaveRequest"
@@ -2224,6 +2247,20 @@
         }
       }
     },
+    "catervaficationGetQuery": {
+      "title": "Catervafication Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "catervafication.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "backlogSummaryQuery": {
       "title": "Backlog Summary Query",
       "type": "object",
@@ -2235,6 +2272,25 @@
       "properties": {
         "name": {
           "const": "backlog.summary"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "productPlanStateQuery": {
+      "title": "Product Plan State Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "product_plan.state"
         },
         "params": {
           "type": "object",
@@ -2427,6 +2483,203 @@
         }
       }
     },
+    "folderDocProposalsListQuery": {
+      "title": "Folder Doc Proposals List Query",
+      "description": "The product plan's changes waiting for the owner (docs/SPEC.md 5.7), as folderDocProposalsListResult shapes them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "folder_doc_proposals.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "folderDocProposalsListResult": {
+      "description": "The changes to the product plan that wait for the owner (docs/SPEC.md 5.7): integration is the team's policy, which says what approving does, and cards has one card for each sprint review and agent, ordered by its first proposal. A card holds sprint_id, agent_id, summary, its proposals' summaries in order joined by one space, and documents, its proposals in order, each with proposal, its number, path, and lines, the changed lines of the document between the integration branch's file and the proposed text (empty when only its twin changes), each with change, same, added or removed, and text. The summary and the lines are the agent's words and untrusted text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["integration", "cards"],
+      "properties": {
+        "integration": { "type": "string", "enum": ["auto_merge", "pull_request", "manual"] },
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sprint_id", "agent_id", "summary", "documents"],
+            "properties": {
+              "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+              "agent_id": { "type": "string" },
+              "summary": { "type": "string" },
+              "documents": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["proposal", "path", "lines"],
+                  "properties": {
+                    "proposal": { "type": "integer", "minimum": 1 },
+                    "path": { "type": "string" },
+                    "lines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["change", "text"],
+                        "properties": {
+                          "change": { "type": "string", "enum": ["same", "added", "removed"] },
+                          "text": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "filesSaveRequest": {
+      "title": "Files Save Request",
+      "description": "The owner's edit of a document of a role's folder (docs/SPEC.md 5.17): base is the blob files.read answered for the document, so that an edit made on a version the team has since changed is refused. The text is committed on a branch of its own as a folder change, which the team's integration policy adds to the project as it does an accepted task's branch. Refused with -32005 and data.errors, each with path (a JSON pointer: /path, /text or /base), message and code, in this order: outside_folders, not_markdown, agent_twin, marketing_plan (/path), too_large (/text, over 262144 bytes), then file_changed (/base: the integration branch has no file there, or its blob is not base), file_busy (/path: the project's checkout has an uncommitted change to it), is_a_link (/path) and change_waiting (/path: an earlier change of the document is not added yet). Saved text the file already holds answers null for both and records nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "files.save" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "text", "base"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "text": { "type": "string" },
+            "base": { "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$" }
+          }
+        }
+      }
+    },
+    "filesSaveResult": {
+      "description": "The folder change the save made and its branch, both null when the document already said this and nothing was made.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change", "branch"],
+      "properties": {
+        "change": { "type": ["integer", "null"], "minimum": 1 },
+        "branch": { "type": ["string", "null"] }
+      }
+    },
+    "filesTreeQuery": {
+      "title": "Files Tree Query",
+      "description": "The team's folders and their documents, as the integration branch holds them (docs/SPEC.md 5.17), as filesTreeResult shapes them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "files.tree" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "filesTreeResult": {
+      "description": "integration is the team's policy, which the page's words follow. folders has one folder for each role that owns one and has an active agent, in the order of the Team rules: folder is its path, name its last segment as words, role the role that owns it, agent_id that role's first active agent, and documents its .md files at any depth, in the order of the known documents and then by path, each with path, name (the Files page's name for it; a plan's carries its title, which is the agent's own words and untrusted text) and twin, the path of its .agent.md twin when it has one that is a file, else null. A twin of a document that is present is not listed on its own; a link is not listed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["integration", "folders"],
+      "properties": {
+        "integration": { "type": "string", "enum": ["auto_merge", "pull_request", "manual"] },
+        "folders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["folder", "name", "role", "agent_id", "documents"],
+            "properties": {
+              "folder": { "type": "string" },
+              "name": { "type": "string" },
+              "role": { "type": "string" },
+              "agent_id": { "type": "string" },
+              "documents": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["path", "name", "twin"],
+                  "properties": {
+                    "path": { "type": "string" },
+                    "name": { "type": "string" },
+                    "twin": { "type": ["string", "null"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "filesReadQuery": {
+      "title": "Files Read Query",
+      "description": "One document of the tree with its twin, as the integration branch holds them, as filesReadResult shapes it. A path files.tree would not list (a twin that has its document, a link, a file that is not there, a path outside the folders) is -32002.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "files.read" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": { "path": { "type": "string", "minLength": 1, "maxLength": 512 } }
+        }
+      }
+    },
+    "fileVersion": {
+      "description": "One file as a branch holds it: its text (the agents' or the owner's own words, untrusted), blob (its object hash, which files.save takes as base) and last_change, the last commit along the integration branch's first parents that changed it, null when none did: at, when; task_id and agent_id, the task and its assignee when the commit's subject names a task on the board, or the agent that wrote or proposed it when it names a folder change; author, the commit's author name; by_you, whether the owner made it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "text", "blob", "last_change"],
+      "properties": {
+        "path": { "type": "string" },
+        "text": { "type": "string" },
+        "blob": { "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$" },
+        "last_change": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["at", "task_id", "agent_id", "author", "by_you"],
+          "properties": {
+            "at": { "type": "string" },
+            "task_id": { "type": ["string", "null"], "pattern": "^CTV-[0-9]{1,6}$" },
+            "agent_id": { "type": ["string", "null"] },
+            "author": { "type": "string" },
+            "by_you": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "filesReadResult": {
+      "description": "document and its twin (null when it has none that is a file) as the integration branch holds them, except that while the owner's own saved change to the document waits to be added (waiting: its folder change and branch) they are read from that branch, with by_you true. stale: the twin is behind the document (read from git; an owner's change not yet added makes nothing stale). rederiving: a task that brings the twin up to date is neither accepted nor cancelled. editable: false for a marketing plan, which changes through a new version on its page.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document", "twin", "stale", "rederiving", "editable", "waiting"],
+      "properties": {
+        "document": { "$ref": "#/$defs/fileVersion" },
+        "twin": { "oneOf": [{ "$ref": "#/$defs/fileVersion" }, { "type": "null" }] },
+        "stale": { "type": "boolean" },
+        "rederiving": { "type": "boolean" },
+        "editable": { "type": "boolean" },
+        "waiting": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["change", "branch"],
+          "properties": {
+            "change": { "type": "integer", "minimum": 1 },
+            "branch": { "type": "string" }
+          }
+        }
+      }
+    },
     "sitesListQuery": {
       "title": "Sites List Query",
       "type": "object",
@@ -2554,7 +2807,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human: first the marketing plans whose ads Catervas could not keep within their budget or keep paused, one row each, by precedence (marketing_budget: the active plan whose ads reached a budget, titled \"Ads budget reached: <plan>\", with plan, plan_title, ends_on, currency, google_ads, the plan's Google Ads budget, spent, what Google Ads reported spent, read_at, when it was read, reason, Google's or Catervas's words when Catervas could not pause the ads, cap, the budget the row's words are about (a pause Google refused can keep it from being the newest), caps, each budget reached, campaigns, each campaign of the plan with its budget and spend, and raising, the task of a request to raise the budget that is open; marketing_ads_running: a plan whose ads Catervas could not pause, with reason, titled \"Ads still running: <plan>\"; marketing_spend_unread: the active plan whose spend Catervas cannot read, with reason and the last spend and its time, titled \"Can't read the ad spend: <plan>\"; task_id is the task of the plan's proposal and agent_id the agent that proposed it; amounts are decimal strings), then questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), then purchase orders the Procurement Specialist suggested, waiting for the owner (purchase_order, whose title is its task's and whose line is \"<agent name> set up an order from <seller>: <total> <currency>\", each with order, its number, seller, seller_contact, lines (each with item, quantity, unit, unit_price and line_total), currency, period, total, delivery, terms, url, the seller's page exactly as the agent wrote it or empty, host, the site that address names in its ASCII form, absent when url is empty, evaluation, why, at, when it was drafted, and expires_at, when Catervas closes it by itself, which only that kind carries and of which every text is the agent's own and untrusted; an order that was decided or expired is no longer listed and an order holds no task), then data pipeline requests the Product Manager passed to the owner or did not decide, waiting for the owner (data_pipeline, whose title is its task's and whose line is \"<agent name> asks for a data source: <name>\", each with pipeline, its number, name, what, the source would give, url, the source's own page exactly as the agent wrote it, host, the site that address names in its ASCII form, why, cost, one of free, paid and unknown, needs_account, sends_project_data, reason, the Product Manager's reason, absent when Catervas passed the request on after the Product Manager's three tries, at, when the agent asked, and request_text, the text of the request an approval files, which only that kind carries and of which every text but host and the labels is the agent's own and untrusted; a request that was decided is no longer listed, an open one waits on the Product Manager, and a request holds no task), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human: first the marketing plans whose ads Catervas could not keep within their budget or keep paused, one row each, by precedence (marketing_budget: the active plan whose ads reached a budget, titled \"Ads budget reached: <plan>\", with plan, plan_title, ends_on, currency, google_ads, the plan's Google Ads budget, spent, what Google Ads reported spent, read_at, when it was read, reason, Google's or Catervas's words when Catervas could not pause the ads, cap, the budget the row's words are about (a pause Google refused can keep it from being the newest), caps, each budget reached, campaigns, each campaign of the plan with its budget and spend, and raising, the task of a request to raise the budget that is open; marketing_ads_running: a plan whose ads Catervas could not pause, with reason, titled \"Ads still running: <plan>\"; marketing_spend_unread: the active plan whose spend Catervas cannot read, with reason and the last spend and its time, titled \"Can't read the ad spend: <plan>\"; task_id is the task of the plan's proposal and agent_id the agent that proposed it; amounts are decimal strings), then questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), then purchase orders the Procurement Specialist suggested, waiting for the owner (purchase_order, whose title is its task's and whose line is \"<agent name> set up an order from <seller>: <total> <currency>\", each with order, its number, seller, seller_contact, lines (each with item, quantity, unit, unit_price and line_total), currency, period, total, delivery, terms, url, the seller's page exactly as the agent wrote it or empty, host, the site that address names in its ASCII form, absent when url is empty, evaluation, why, at, when it was drafted, and expires_at, when Catervas closes it by itself, which only that kind carries and of which every text is the agent's own and untrusted; an order that was decided or expired is no longer listed and an order holds no task), then data pipeline requests the Product Manager passed to the owner or did not decide, waiting for the owner (data_pipeline, whose title is its task's and whose line is \"<agent name> asks for a data source: <name>\", each with pipeline, its number, name, what, the source would give, url, the source's own page exactly as the agent wrote it, host, the site that address names in its ASCII form, why, cost, one of free, paid and unknown, needs_account, sends_project_data, reason, the Product Manager's reason, absent when Catervas passed the request on after the Product Manager's three tries, at, when the agent asked, and request_text, the text of the request an approval files, which only that kind carries and of which every text but host and the labels is the agent's own and untrusted; a request that was decided is no longer listed, an open one waits on the Product Manager, and a request holds no task), approvals, other escalations, acceptances, and integrations (under manual, a folder change that waits for the owner to add it is one too, with folder_change, its number, and no task_id); then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2567,6 +2820,10 @@
               "task_id": {
                 "type": "string",
                 "pattern": "^CTV-[0-9]{1,6}$"
+              },
+              "folder_change": {
+                "type": "integer",
+                "minimum": 1
               },
               "kind": {
                 "type": "string",
@@ -2771,11 +3028,14 @@
               "raising": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
             },
             "required": [
-              "task_id",
               "kind",
               "agent_id",
               "title",
               "line"
+            ],
+            "anyOf": [
+              { "required": ["task_id"] },
+              { "required": ["folder_change"] }
             ]
           }
         }
@@ -3367,6 +3627,89 @@
       "required": [
         "plan_in_sprints",
         "count"
+      ]
+    },
+    "catervaficationGetResult": {
+      "description": "Whether the team offers to document an existing repository now, and with which roles (docs/SPEC.md 4.1, 5.16, ADR 0051). offered is true while the log holds neither catervafication.started nor project.started and a Start would not be refused for want of a Product Manager and someone to check its notes. roles are the roles that would get a task, in the order they are filed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offered", "roles"],
+      "properties": {
+        "offered": { "type": "boolean" },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["product_manager", "architect", "software_developer", "ui_ux_designer", "marketing_specialist"]
+          }
+        }
+      }
+    },
+    "productPlanStateResult": {
+      "description": "Where a new project's product plan stands (docs/SPEC.md 4.3). new_project is the project's name when it was started from a paragraph, null for any other. approved is true when both documents are on the integration branch, and false with no new project. task is the newest task that drafts the plan and is still open (not cancelled, and not accepted with its integration done), null when there is none. documents holds spec.md then roadmap.md as the task's branch has them, each left out when git has none there, while the task is verifying, and is empty otherwise.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "new_project": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": { "name": { "type": "string" } }
+            }
+          ]
+        },
+        "approved": { "type": "boolean" },
+        "task": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["task_id", "status", "created_at"],
+              "properties": {
+                "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "refining",
+                    "ready",
+                    "assigned",
+                    "in_progress",
+                    "blocked",
+                    "verifying",
+                    "rejected",
+                    "accepted",
+                    "escalated",
+                    "cancelled"
+                  ]
+                },
+                "created_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "text"],
+            "properties": {
+              "path": { "type": "string" },
+              "text": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": [
+        "new_project",
+        "approved",
+        "task",
+        "documents"
       ]
     },
     "sprintsListResult": {
@@ -5901,7 +6244,7 @@
       }
     },
     "chatMessagesResult": {
-      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to and request, null when it has none; sent_as is the request the user sent a reply's proposal as (request.file's from_chat_message), null when not sent. waiting says why the user's newest message has no answer yet, null when the agent answered or nobody wrote; when several reasons apply the first wins: retired, key_refused (the team is paused because the provider refused the key), day_spent (the team's daily budget; the message is kept), asleep with until, answering (a session answers or is about to), no_answer (a session ended without a reply: the user asks again). No event is written for a chat that did not run (ADR 0026).",
+      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to, request and heard (what the Product Manager heard in a new project's interview: customers, problem, must, not_now, works_when), null when it has none; sent_as is the request the user sent a reply's proposal as (request.file's from_chat_message), null when not sent. waiting says why the user's newest message has no answer yet, null when the agent answered or nobody wrote; when several reasons apply the first wins: retired, key_refused (the team is paused because the provider refused the key), day_spent (the team's daily budget; the message is kept), asleep with until, answering (a session answers or is about to), no_answer (a session ended without a reply: the user asks again). No event is written for a chat that did not run (ADR 0026).",
       "type": "object",
       "additionalProperties": false,
       "required": ["messages", "waiting"],
@@ -5928,7 +6271,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["seq", "at", "author", "text", "in_reply_to", "request", "sent_as"],
+            "required": ["seq", "at", "author", "text", "in_reply_to", "request", "heard", "sent_as"],
             "properties": {
               "seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
               "at": { "type": "string", "format": "date-time" },
@@ -5950,6 +6293,23 @@
                     "properties": {
                       "title": { "type": "string" },
                       "text": { "type": "string" }
+                    }
+                  }
+                ]
+              },
+              "heard": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["customers", "problem", "must", "not_now", "works_when"],
+                    "properties": {
+                      "customers": { "type": "string" },
+                      "problem": { "type": "string" },
+                      "must": { "type": "string" },
+                      "not_now": { "type": "string" },
+                      "works_when": { "type": "string" }
                     }
                   }
                 ]

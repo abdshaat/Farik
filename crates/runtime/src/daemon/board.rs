@@ -337,6 +337,7 @@ fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
                 "text": body.text,
                 "in_reply_to": body.in_reply_to,
                 "request": body.request,
+                "heard": body.heard,
                 "sent_as": sent
                     .iter()
                     .find(|(seq, _)| *seq == event.envelope.seq)
@@ -1159,6 +1160,7 @@ mod tests {
             deps.clock.as_ref(),
             &deps.ids,
             crate::chat::NewChatMessage {
+                heard: None,
                 chat: agent.to_string(),
                 author: author.to_string(),
                 text: text.to_string(),
@@ -1182,6 +1184,55 @@ mod tests {
             .iter()
             .map(|message| message["seq"].as_u64().expect("a seq"))
             .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_what_a_reply_heard() {
+        let harness = Harness::new("board-chat-heard", |_| {});
+        let asked = chatted(&harness, "pm", "human", "That is everything.", None);
+        let deps = &harness.project.deps;
+        let reply = crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "pm".to_string(),
+                author: "pm".to_string(),
+                text: "Here is what I heard.".to_string(),
+                in_reply_to: Some(asked),
+                request: None,
+                heard: Some(crate::chat::Heard {
+                    customers: "Birthday bakers.".to_string(),
+                    problem: "No free days shown.".to_string(),
+                    must: "Show free days.\nBy month.".to_string(),
+                    not_now: "Delivery.".to_string(),
+                    works_when: "Ten orders a month.".to_string(),
+                }),
+                session_id: Some("session-1".to_string()),
+            },
+        )
+        .expect("the reply is recorded");
+        let messages = query(
+            &harness.daemon,
+            "chat.messages",
+            &json!({ "agent_id": "pm" }),
+            "chatMessagesResult",
+        )["messages"]
+            .clone();
+        assert_eq!(messages[0]["seq"], asked);
+        assert_eq!(messages[0]["heard"], Value::Null);
+        assert_eq!(messages[1]["seq"], reply);
+        assert_eq!(
+            messages[1]["heard"],
+            json!({
+                "customers": "Birthday bakers.",
+                "problem": "No free days shown.",
+                "must": "Show free days.\nBy month.",
+                "not_now": "Delivery.",
+                "works_when": "Ten orders a month."
+            })
+        );
     }
 
     #[test]
@@ -1255,6 +1306,7 @@ mod tests {
             deps.clock.as_ref(),
             &deps.ids,
             crate::chat::NewChatMessage {
+                heard: None,
                 chat: "dev-a".to_string(),
                 author: "dev-a".to_string(),
                 text: "Two.\nLines kept.".to_string(),
@@ -1306,11 +1358,12 @@ mod tests {
                         "title": "Let customers pay with Apple Pay",
                         "text": "Add Apple Pay at checkout, beside the card form."
                     },
+                    "heard": null,
                     "sent_as": null,
                 },
                 {
                     "seq": three, "at": at_now, "author": "human", "text": "Three.",
-                    "in_reply_to": null, "request": null, "sent_as": null,
+                    "in_reply_to": null, "request": null, "heard": null, "sent_as": null,
                 },
             ])
         );
@@ -1339,6 +1392,7 @@ mod tests {
                 deps.clock.as_ref(),
                 &deps.ids,
                 crate::chat::NewChatMessage {
+                    heard: None,
                     chat: "dev-a".to_string(),
                     author: "dev-a".to_string(),
                     text: text.to_string(),

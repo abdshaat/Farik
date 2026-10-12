@@ -1,4 +1,4 @@
-# The Software Developer's kit: six skills and Context7, which it only reads and signs in to (route 1,
+# The Software Developer's kit: eight skills and Context7, which it only reads and signs in to (route 1,
 # ADR 0035). The entry is the Architect's, whole (ADR 0036), but for `why`; the browser is the
 # built-in Playwright, which the user turns on on the agent's page, not a connector of this kit.
 role: software_developer
@@ -9,6 +9,8 @@ skills:
   - testing-per-stack
   - answering-a-review
   - using-docs-and-the-browser
+  - catervafying-the-repository
+  - catervas-recommended-workflow
 connectors:
   - name: context7
     transport: http

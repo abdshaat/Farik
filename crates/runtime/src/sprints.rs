@@ -11,6 +11,7 @@ use catervas_protocol::event::{
     CatervasEvent, EventBody, EventKind, SessionStartedBodyPurpose, Thread, new_event,
 };
 use catervas_store::files::FilesError;
+use catervas_store::requests::rederive_tasks;
 use catervas_store::{EventLog, EventQuery, SprintProjection, StoreError, TaskProjection};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -305,6 +306,9 @@ fn plan_sprint_racing(
     let board = deps.projections.board()?;
     let team = deps.files.read_team()?;
     let mut planned: Vec<TaskId> = Vec::new();
+    if assigner.is_some() && team.plans_in_sprints() {
+        planned.extend(waiting_rederives(deps, &team, &board, &open, task_ids)?);
+    }
     for task_id in task_ids {
         let id = task_id.as_str();
         let row = board
@@ -387,6 +391,31 @@ fn plan_sprint_racing(
         }))?),
     )?;
     Ok(sprint)
+}
+
+/// The twins' re-derives waiting in the Backlog that the assigner's plan does not name: it takes
+/// them ahead of its own, outside the sprint's budget (`docs/SPEC.md` 3, 5.17).
+fn waiting_rederives(
+    deps: &ToolDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    open: &SprintProjection,
+    named: &[TaskId],
+) -> Result<Vec<TaskId>, SprintError> {
+    let mut waiting: Vec<TaskId> = Vec::new();
+    for (task_id, _) in rederive_tasks(&deps.log)? {
+        let in_the_queue = board
+            .iter()
+            .find(|row| row.task_id == task_id)
+            .is_some_and(|row| {
+                row.sprint.is_none()
+                    && in_the_backlog(&sprint_hold(team, Some(open.sprint_id.as_str()), row))
+            });
+        if in_the_queue && !named.contains(&task_id) && !waiting.contains(&task_id) {
+            waiting.push(task_id);
+        }
+    }
+    Ok(waiting)
 }
 
 /// Refuses a plan by anyone but the assigner: the active Scrum Master, or the active Product
@@ -700,5 +729,90 @@ mod tests {
                 "CTV-1 is in_progress, and only a ready task or an approved epic is planned"
             )
         );
+    }
+
+    /// A team with a Scrum Master `sm`, CTV-1 accepted, a re-derive CTV-2 in the Backlog and a
+    /// ready CTV-3, all under the policy `on`.
+    fn a_backlog_with_a_rederive(name: &str, on: bool) -> TestProject {
+        use catervas_core::contract::Role;
+        use catervas_store::requests::{file_rederive_request, rederive_request};
+
+        let project = TestProject::new(
+            name,
+            &a_team_of_three(|wire| {
+                wire["agents"].as_array_mut().expect("agents").push(
+                    catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+                );
+                wire["policy"]["plan_in_sprints"] = serde_json::json!(on);
+            }),
+        );
+        project.filed("CTV-1", "accepted", "task", None);
+        let deps = &project.deps;
+        let twin = "docs/catervas/product/roadmap.agent.md";
+        file_rederive_request(
+            &deps.files,
+            &deps.log,
+            rederive_request(
+                "docs/catervas/product/roadmap.md",
+                twin,
+                Role::ProductManager,
+                Role::Architect,
+                2.0,
+            ),
+            twin,
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("the re-derive is filed");
+        project.moved("CTV-2", "draft", "ready", &serde_json::json!({}));
+        project.filed("CTV-3", "ready", "task", None);
+        project
+    }
+
+    fn planned(sprint: &catervas_core::sprint::Sprint) -> Vec<&str> {
+        sprint.task_ids.iter().map(|id| id.as_str()).collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn plans_the_waiting_rederives_first() {
+        let sm = || PlannedBy::Assigner("sm".to_string());
+        let project = a_backlog_with_a_rederive("sprints-rederive-first", true);
+        let budget = project.file("CTV-3")["budget"]["max_cost_usd"].as_f64();
+        project.open_sprint("S1", budget, &[]);
+        let sprint = plan_sprint(&project.deps, &[task("CTV-3")], &sm()).expect("S1 is planned");
+        assert_eq!(planned(&sprint), ["CTV-2", "CTV-3"]);
+        assert_eq!(
+            planned(&project.deps.files.read_sprint("S1").expect("S1 reads")),
+            ["CTV-2", "CTV-3"]
+        );
+        let events = project.events(&[catervas_protocol::event::EventKind::SprintPlanned]);
+        let wire = catervas_protocol::event::event_to_value(&events[0]);
+        assert_eq!(
+            wire["body"]["task_ids"],
+            serde_json::json!(["CTV-2", "CTV-3"])
+        );
+        assert_eq!(
+            project.file("CTV-2")["sprint"],
+            serde_json::json!("S1"),
+            "the re-derive's contract names the sprint"
+        );
+
+        // Naming both plans each once.
+        let both = a_backlog_with_a_rederive("sprints-rederive-named", true);
+        both.open_sprint("S1", None, &[]);
+        let sprint =
+            plan_sprint(&both.deps, &[task("CTV-2"), task("CTV-3")], &sm()).expect("planned");
+        assert_eq!(planned(&sprint), ["CTV-2", "CTV-3"]);
+
+        // The governor's plan adds none, and nor does a team off the policy.
+        let governor = a_backlog_with_a_rederive("sprints-rederive-governor", true);
+        governor.open_sprint("S1", None, &[]);
+        let sprint =
+            plan_sprint(&governor.deps, &[task("CTV-3")], &PlannedBy::Governor).expect("planned");
+        assert_eq!(planned(&sprint), ["CTV-3"]);
+        let off = a_backlog_with_a_rederive("sprints-rederive-off", false);
+        off.open_sprint("S1", None, &[]);
+        let sprint = plan_sprint(&off.deps, &[task("CTV-3")], &sm()).expect("planned");
+        assert_eq!(planned(&sprint), ["CTV-3"]);
     }
 }

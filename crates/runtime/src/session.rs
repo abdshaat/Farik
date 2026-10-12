@@ -40,6 +40,13 @@ pub enum SessionPurpose {
     Chat,
 }
 
+/// Whether a session works on a task: only an `implement` session about one does. Every other
+/// session changes nothing in the project, whatever its agent's tiers.
+#[must_use]
+pub(crate) fn works_on_a_task(purpose: SessionPurpose, has_task: bool) -> bool {
+    purpose == SessionPurpose::Implement && has_task
+}
+
 /// How a session reaches an MCP server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpTransport {
@@ -295,7 +302,7 @@ mod tests {
     use catervas_roles::load_role;
     use serde_json::json;
 
-    use super::{RuntimeError, SessionPurpose, session_model};
+    use super::{RuntimeError, SessionPurpose, session_model, works_on_a_task};
 
     fn an_agent(model: Option<serde_json::Value>) -> Agent {
         let mut wire = an_agent_wire("dev-a", "software_developer");
@@ -361,6 +368,29 @@ mod tests {
         let text = error.to_string();
         assert!(text.contains("2.1.200"), "{text}");
         assert!(text.contains("2.1.272"), "{text}");
+    }
+
+    #[test]
+    fn only_an_implement_session_about_a_task_works_on_one() {
+        for purpose in [
+            SessionPurpose::Triage,
+            SessionPurpose::Refine,
+            SessionPurpose::Plan,
+            SessionPurpose::Explore,
+            SessionPurpose::Implement,
+            SessionPurpose::Verify,
+            SessionPurpose::Ceremony,
+            SessionPurpose::Conversation,
+            SessionPurpose::Chat,
+        ] {
+            for has_task in [false, true] {
+                assert_eq!(
+                    works_on_a_task(purpose, has_task),
+                    purpose == SessionPurpose::Implement && has_task,
+                    "{purpose:?} with a task: {has_task}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -2043,11 +2043,17 @@ mod tests {
     #[test]
     fn a_role_s_tiers_are_the_user_s_to_widen_and_to_narrow() {
         // 5.6: a role's tiers are overridable per agent. Ada is a Product Manager, whose defaults
-        // are read and network; she is granted execute and denied network.
+        // are read, network, write_workspace and git_local; she is granted execute and denied
+        // network.
         let team = team(&a_full_team_wire());
         assert_eq!(
             team.agents[0].tiers(&team.permissions()),
-            [PermissionTier::Read, PermissionTier::Execute]
+            [
+                PermissionTier::Read,
+                PermissionTier::WriteWorkspace,
+                PermissionTier::GitLocal,
+                PermissionTier::Execute,
+            ]
         );
         assert_eq!(
             team.agents[1].tiers(&team.permissions()),
@@ -2320,7 +2326,12 @@ mod tests {
         );
         assert_eq!(
             tiers(0),
-            [PermissionTier::Read, PermissionTier::Network],
+            [
+                PermissionTier::Read,
+                PermissionTier::Network,
+                PermissionTier::WriteWorkspace,
+                PermissionTier::GitLocal,
+            ],
             "the Product Manager neither runs commands nor pushes"
         );
 

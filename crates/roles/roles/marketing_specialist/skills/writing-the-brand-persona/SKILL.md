@@ -8,11 +8,11 @@ description: Use when deciding how the brand speaks on social channels.
 The persona is the character the brand plays when it speaks on social media. It sits beside the
 brand kit's voice and never replaces it: `writing-in-the-brands-voice` is the voice of any copy
 (a page, an email, a flyer), and the persona is how that voice behaves in a feed. It lives in
-`docs/marketing/brand/persona.md`.
+`docs/catervas/marketing/brand/persona.md`.
 
 ## 1. Read the brand kit first
 
-Read `docs/marketing/brand/brand-kit.md` before you write a word. The persona keeps the kit's
+Read `docs/catervas/marketing/brand/brand-kit.md` before you write a word. The persona keeps the kit's
 voice: the same three words, the same do and don't. If there is no kit yet, write the kit first.
 
 ## 2. The persona has five parts
