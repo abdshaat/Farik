@@ -192,7 +192,7 @@ Files: `tools/fixtures.rs`, `orchestrator/fixtures.rs` (the two fixtures); `tran
 - `a_missing_member_blocks_no_cancel` (`transitions.rs`): with that task `in_progress` and `app` moved away, the human's cancel is recorded, and `verifying` is refused for no commits. RED: git refuses.
 - `refuses_a_builders_task_with_no_repo` (`transitions.rs`): the readiness of a Developer's task with no `repo` in the project folder fails `RepoRequired`, and of one with `repo: app` passes it. RED.
 
-- [ ] `feat(runtime): work a task in its member repository`
+- [x] `feat(runtime): work a task in its member repository`
 
 ### Task 5: The task's diff and git tools are its member's
 

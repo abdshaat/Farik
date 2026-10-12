@@ -22,6 +22,7 @@ use catervas_protocol::event::{
 use catervas_store::baseline::{copy_baseline, folder_in};
 use catervas_store::marketing::{marketing_plans, social_posts};
 use catervas_store::product_plan::{new_project, product_plan_tasks};
+use catervas_store::repos::TaskRepositoryError;
 use catervas_store::{CostScope, EventQuery, Git, GitError, TaskProjection};
 use chrono::{DateTime, Utc};
 
@@ -39,7 +40,7 @@ use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope,
-    session_dir, worktree,
+    repository_refused, session_dir, task_repository_of, worktree,
 };
 use crate::ceremonies::{
     EndedSprint, budgets_spent_since_planning, ended_sprint, open_escalations, sprint_events,
@@ -1642,9 +1643,13 @@ fn resume(
     let task_id = &contract.id;
     let worktree = worktree(deps, task_id);
     let last_commit = if worktree.is_dir() {
-        let git = &deps.tools.git;
-        let base = integration_branch(team, git)?;
-        if git.commit_count(&base, &task_branch(contract))? > 0 {
+        let repository = task_repository_of(deps, team, contract)
+            .map_err(|error| repository_refused(task_id, &error))?;
+        if repository
+            .git
+            .commit_count(&repository.integration_branch, &task_branch(contract))?
+            > 0
+        {
             Git::open(worktree).head_summary()?
         } else {
             None
@@ -1750,8 +1755,16 @@ fn assigned(
         let worktree = worktree(deps, &row.task_id);
         let branch = task_branch(&contract);
         if !worktree.is_dir() {
-            let git = &deps.tools.git;
-            git.create_worktree(&worktree, &branch, &integration_branch(team, git)?)?;
+            let repository = match task_repository_of(deps, team, &contract) {
+                Ok(repository) => repository,
+                // The member is not where the project left it: the task waits, and the next
+                // tick tries again once it is located (ADR 0057).
+                Err(TaskRepositoryError::Missing { .. }) => return Ok(None),
+                Err(error) => return Err(repository_refused(&row.task_id, &error)),
+            };
+            repository
+                .git
+                .create_worktree(&worktree, &branch, &repository.integration_branch)?;
         }
         format!("in its worktree on {branch}")
     };
@@ -1985,7 +1998,7 @@ mod tests {
     };
     use catervas_protocol::event::{MessageKind, NewEvent, Thread, event_from_value};
     use catervas_store::event_log::fixtures::refuse_appends_of;
-    use catervas_store::git::fixtures::git_output_in;
+    use catervas_store::git::fixtures::{git_in, git_output_in};
     use serde_json::json;
 
     use crate::claude::allowed_builtins;
@@ -3137,6 +3150,155 @@ mod tests {
             other => panic!("expected a move, got {other:?}"),
         }
         assert!(adapter.started().is_empty());
+    }
+
+    /// What `git rev-parse --git-common-dir` says for `worktree`, followed through its links.
+    fn common_dir_of(worktree: &std::path::Path) -> std::path::PathBuf {
+        std::fs::canonicalize(git_output_in(
+            worktree,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        ))
+        .expect("the common directory is there")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_a_task_in_its_member() {
+        let (harness, members) = Harness::project_folder("orch-member-start", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        let worktree = harness.worktree("CTV-1");
+        assert!(worktree.is_dir());
+        let app = &members[0];
+        assert_eq!(
+            common_dir_of(&worktree),
+            std::fs::canonicalize(app.path.join(".git")).expect("app's .git")
+        );
+        assert_eq!(
+            git_output_in(&app.path, &["rev-parse", "feature/CTV-1"]),
+            git_output_in(&app.path, &["rev-parse", "main"]),
+            "the branch starts at app's main"
+        );
+        assert_eq!(
+            git_output_in(
+                &harness.project.repo.path,
+                &["branch", "--list", "feature/CTV-1"]
+            ),
+            ""
+        );
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_docs_task_stays_in_the_project_folder() {
+        let (harness, _members) = Harness::project_folder_with(
+            "orch-member-docs",
+            &["app", "infra"],
+            crate::tools::fixtures::with_the_suggested_six,
+        );
+        harness.file("CTV-1", "ready", |wire| {
+            wire["assignee_role"] = json!("architect");
+            wire["allowed_paths"] = json!(["docs/adr/**"]);
+        });
+        harness.project.moved(
+            "CTV-1",
+            "ready",
+            "assigned",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "ada", "reviewer": "dev" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        let worktree = harness.worktree("CTV-1");
+        assert_eq!(
+            git_output_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            "docs/CTV-1"
+        );
+        assert_eq!(
+            common_dir_of(&worktree),
+            std::fs::canonicalize(harness.project.repo.path.join(".git")).expect("the .git")
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_while_its_member_is_missing() {
+        let (harness, members) = Harness::project_folder("orch-member-gone", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        let moved = std::path::PathBuf::from(format!("{}-moved", members[0].path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&members[0].path, &moved).expect("the member is moved away");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let events = harness.project.event_count();
+
+        for _ in 0..2 {
+            let report = orchestrator.tick().await.expect("the tick runs");
+            assert_eq!(acted_on(&report), None, "{report:?}");
+        }
+
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        assert!(!harness.worktree("CTV-1").exists());
+        assert_eq!(harness.project.event_count(), events);
+
+        // Located again: the next tick makes the worktree in the member, where it now is.
+        let files = &harness.project.deps.files;
+        files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": moved.display().to_string() },
+                    { "name": "infra", "path": members[1].path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        let report = orchestrator.tick().await.expect("the tick runs");
+        let made = common_dir_of(&harness.worktree("CTV-1"));
+        let expected = std::fs::canonicalize(moved.join(".git")).expect("the moved member's .git");
+        let _ = std::fs::remove_dir_all(&moved);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(made, expected);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn resumes_from_the_member() {
+        let (harness, members) = Harness::project_folder("orch-member-resume", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the task starts");
+        let worktree = harness.worktree("CTV-1");
+        std::fs::create_dir_all(worktree.join("src")).expect("a folder");
+        std::fs::write(worktree.join("src/a.rs"), "fn a() {}\n").expect("a file");
+        git_in(&worktree, &["add", "-A"]);
+        git_in(&worktree, &["commit", "-m", "the first function"]);
+
+        let team = harness.project.deps.files.read_team().expect("the team");
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&"CTV-1".parse().expect("a task id"))
+            .expect("the contract");
+        let agent = team
+            .active_agents()
+            .find(|agent| agent.id.as_str() == "dev-a")
+            .expect("dev-a");
+        let resume =
+            super::resume(&orchestrator.deps, &team, &contract, agent).expect("the resume reads");
+
+        let head = resume.last_commit.expect("the commit is named");
+        assert_eq!(head.subject, "the first function");
+        assert_eq!(
+            head.sha,
+            git_output_in(&members[0].path, &["rev-parse", "feature/CTV-1"])
+        );
     }
 
     #[tokio::test]
