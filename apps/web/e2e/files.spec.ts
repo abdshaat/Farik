@@ -180,6 +180,7 @@ test("the folder list stays in view beside a long document, reading and editing"
 			.getByRole("link", { name: "Roadmap" });
 		await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 		await expect(link).toBeInViewport();
+		await page.setViewportSize({ width: 1440, height: 560 });
 		await page.getByRole("button", { name: "Edit" }).click();
 		await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 		await expect(link).toBeInViewport();
