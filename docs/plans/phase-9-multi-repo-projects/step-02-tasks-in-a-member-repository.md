@@ -160,7 +160,7 @@ Files: `readiness.rs` (the rules, the context field, `CHECKS`); `readiness/fixtu
 - `a_docs_task_names_no_repo`: with `repos: [app, infra]`, an Architect's task with `repo: app` fails `RepoNotAllowed` with the third message naming the Architect, and with no `repo` passes. An epic naming `software_developer`, with no `repo`, passes every repo rule; with `repo: app` it fails `RepoNotAllowed` with the epic's message alone. An Architect's task with `repo: web` fails `RepoNotAllowed` and not `RepoUnknown`. RED.
 - `plain_readiness_covers_every_rule` passes with 31. The daemon's readiness totals read 30 and 32. RED: the counts.
 
-- [ ] `feat(core): readiness asks which repository a builder's task changes`
+- [x] `feat(core): readiness asks which repository a builder's task changes`
 
 ### Task 3: The task's repository, resolved
 

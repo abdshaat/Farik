@@ -755,6 +755,7 @@ impl Transitions {
             human_approves: asks_every_contract(team) || requires_human_acceptance(contract),
             awaits_the_product_plan: self.awaits_the_product_plan(team)?,
             is_the_product_plan: is_the_product_plan(history),
+            repos: None,
         };
 
         Ok((budget, open_sprint, sprint_left, readiness))

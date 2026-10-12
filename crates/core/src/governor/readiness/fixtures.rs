@@ -52,5 +52,15 @@ pub fn a_ready_context() -> ReadinessContext {
         human_approves: false,
         awaits_the_product_plan: false,
         is_the_product_plan: false,
+        repos: None,
+    }
+}
+
+/// `a_ready_context` for a project folder whose member repositories are `repos`.
+#[must_use]
+pub fn a_project_folder_context(repos: &[&str]) -> ReadinessContext {
+    ReadinessContext {
+        repos: Some(repos.iter().map(|name| (*name).to_string()).collect()),
+        ..a_ready_context()
     }
 }

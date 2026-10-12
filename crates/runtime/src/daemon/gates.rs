@@ -1266,6 +1266,21 @@ pub(super) mod tests {
     use crate::tools::fixtures::at;
     use catervas_store::git::fixtures::git_in;
 
+    #[test]
+    fn names_the_repo_rules_in_snake_case() {
+        use catervas_core::governor::readiness::{ReadinessFailure, ReadinessRule};
+
+        let named = |rule| {
+            super::rule_name(&ReadinessFailure {
+                rule,
+                message: String::new(),
+            })
+        };
+        assert_eq!(named(ReadinessRule::RepoNotAllowed), "repo_not_allowed");
+        assert_eq!(named(ReadinessRule::RepoRequired), "repo_required");
+        assert_eq!(named(ReadinessRule::RepoUnknown), "repo_unknown");
+    }
+
     /// The reply frame to `method` with `params`, answered on a runtime of its own.
     pub(crate) fn rpc(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
         let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
@@ -3755,7 +3770,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-1", "contract": draft }),
             "contractCheckResult",
         );
-        assert_eq!(checked["total"], 27, "{checked}");
+        assert_eq!(checked["total"], 30, "{checked}");
         let failures = checked["failures"].as_array().expect("failures");
         assert_eq!(failures.len(), 1, "{checked}");
         assert_eq!(failures[0]["rule"], "reviewer_available");
@@ -4356,7 +4371,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-3", "contract": contract }),
             "contractCheckResult",
         );
-        assert_eq!(checked, json!({ "failures": [], "total": 29 }));
+        assert_eq!(checked, json!({ "failures": [], "total": 32 }));
 
         // The activity and what moved answer in their shapes.
         query(

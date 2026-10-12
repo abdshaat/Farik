@@ -45,6 +45,14 @@ pub enum ReadinessRule {
     /// At least one active agent holds the assignee's role (a human assignee is exempt: the
     /// reviewer rule refuses one).
     AssigneeAvailable,
+    /// A `repo` is named where none belongs: in a project of one repository, on an epic, or on a
+    /// task of a role that does not change code (ADR 0057).
+    RepoNotAllowed,
+    /// A task of a role that changes code, in a project folder, names no `repo` although some of
+    /// its allowed paths are not documents.
+    RepoRequired,
+    /// The task's `repo` is not one of the project folder's member repositories.
+    RepoUnknown,
     /// Scope names at least one `out_of_scope` item that is not blank.
     OutOfScopePresent,
     /// Every listed dependency exists and is at least `ready`.
@@ -169,6 +177,9 @@ pub struct ReadinessContext {
     pub awaits_the_product_plan: bool,
     /// Whether this contract is that product plan's own task.
     pub is_the_product_plan: bool,
+    /// The names of the project folder's member repositories (ADR 0057), or `None` for a project
+    /// of one repository.
+    pub repos: Option<Vec<String>>,
 }
 
 /// One rule the contract fails, with a message that says what to change.
@@ -182,7 +193,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 26] = [
+const CHECKS: [Check; 29] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -191,6 +202,9 @@ const CHECKS: [Check; 26] = [
     budget_within_sprint,
     reviewer_available,
     assignee_available,
+    repo_not_allowed,
+    repo_required,
+    repo_unknown,
     out_of_scope_present,
     dependencies_ready,
     required_criteria_present,
@@ -564,6 +578,81 @@ fn new_tests_required_by_rule(
         format!(
             "the team rules require new tests; test criteria {} do not set new_tests_required",
             bad.join(", ")
+        ),
+    ))
+}
+
+/// Why a task's `repo` has no place, when it has none (ADR 0057): the first of a project of one
+/// repository, an epic, and a role whose task works in the project folder's documents.
+fn repo_misplaced(contract: &TaskContract, context: &ReadinessContext) -> Option<String> {
+    contract.repo.as_ref()?;
+    if context.repos.is_none() {
+        Some("this project is one repository, so repo is left out".to_string())
+    } else if contract.kind == Kind::Epic {
+        Some("an epic spans the project's repositories, so repo is left out".to_string())
+    } else if !changes_code(contract.assignee_role) {
+        Some(format!(
+            "the {}'s task works in the project's own folder, so repo is left out",
+            plain_role(contract.assignee_role)
+        ))
+    } else {
+        None
+    }
+}
+
+fn repo_not_allowed(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    repo_misplaced(contract, context).map(|message| failure(ReadinessRule::RepoNotAllowed, message))
+}
+
+fn repo_required(contract: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    let repos = context.repos.as_ref()?;
+    if contract.repo.is_some()
+        || contract.kind != Kind::Task
+        || !changes_code(contract.assignee_role)
+    {
+        return None;
+    }
+    let documents = &context.rules.document_paths;
+    // A document glob that does not compile is `DocumentPathsOnly`'s to report, so that the
+    // refusal names the real cause.
+    if matches!(
+        check_allowed_paths(&[], documents),
+        Err(PathRefusal::Glob(GlobError::Invalid { .. }))
+    ) {
+        return None;
+    }
+    if contract
+        .allowed_paths
+        .iter()
+        .all(|path| is_a_document_path(path, documents))
+    {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::RepoRequired,
+        format!(
+            "this project has several repositories: set repo to the one this task changes ({}), \
+             or keep its allowed paths to the project's documents",
+            repos.join(", ")
+        ),
+    ))
+}
+
+fn repo_unknown(contract: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    let (repos, repo) = context.repos.as_ref().zip(contract.repo.as_ref())?;
+    if repo_misplaced(contract, context).is_some() || repos.iter().any(|name| name == repo.as_str())
+    {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::RepoUnknown,
+        format!(
+            "{} is not one of this project's repositories: {}",
+            repo.as_str(),
+            repos.join(", ")
         ),
     ))
 }
@@ -1107,7 +1196,7 @@ fn judgment_answers(_: &TaskContract, context: &ReadinessContext) -> Option<Read
 mod tests {
     use serde_json::json;
 
-    use super::fixtures::{a_contract, a_ready_context};
+    use super::fixtures::{a_contract, a_project_folder_context, a_ready_context};
     use super::{
         JudgmentAnswer, JudgmentReview, LanedTask, ParentState, ReadinessContext,
         ReadinessRule as R, TeamRules, evaluate_readiness,
@@ -2135,6 +2224,101 @@ mod tests {
         }
         let task = a_task_for(Role::MarketingSpecialist, &["src/**"]);
         assert_eq!(failed_rules(&task, &context), [R::DocumentPathsOnly]);
+    }
+
+    fn in_repo(mut contract: TaskContract, repo: &str) -> TaskContract {
+        let mut wire = serde_json::to_value(&contract).expect("serializes");
+        wire["repo"] = json!(repo);
+        contract = validate_contract(&wire).expect("a contract that names a repo");
+        contract
+    }
+
+    const REPO_RULES: [R; 3] = [R::RepoNotAllowed, R::RepoRequired, R::RepoUnknown];
+
+    fn failed_repo_rules(contract: &TaskContract, context: &ReadinessContext) -> Vec<R> {
+        match evaluate_readiness(contract, context) {
+            Ok(()) => vec![],
+            Err(failures) => failures
+                .iter()
+                .map(|failure| failure.rule)
+                .filter(|rule| REPO_RULES.contains(rule))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_one_repo_project_takes_no_repo() {
+        let named = in_repo(a_contract(), "app");
+        assert_eq!(
+            failed_rules(&named, &a_ready_context()),
+            [R::RepoNotAllowed]
+        );
+        assert_eq!(
+            message_of(&named, &a_ready_context(), R::RepoNotAllowed),
+            "this project is one repository, so repo is left out"
+        );
+        assert_eq!(failed_repo_rules(&a_contract(), &a_ready_context()), []);
+    }
+
+    #[test]
+    fn a_builders_task_names_its_repo() {
+        let context = a_project_folder_context(&["app", "infra"]);
+        let unnamed = a_task_for(Role::SoftwareDeveloper, &["src/**"]);
+        assert_eq!(failed_rules(&unnamed, &context), [R::RepoRequired]);
+        assert_eq!(
+            message_of(&unnamed, &context, R::RepoRequired),
+            "this project has several repositories: set repo to the one this task changes \
+             (app, infra), or keep its allowed paths to the project's documents"
+        );
+        let designer = a_task_for(Role::UiUxDesigner, &["src/**"]);
+        assert_eq!(failed_rules(&designer, &context), [R::RepoRequired]);
+        let unknown = in_repo(unnamed.clone(), "web");
+        assert_eq!(failed_rules(&unknown, &context), [R::RepoUnknown]);
+        assert_eq!(
+            message_of(&unknown, &context, R::RepoUnknown),
+            "web is not one of this project's repositories: app, infra"
+        );
+        assert_eq!(
+            evaluate_readiness(&in_repo(unnamed, "infra"), &context),
+            Ok(())
+        );
+        let documents = a_task_for(
+            Role::SoftwareDeveloper,
+            &["docs/catervas/repos/app/engineering/**"],
+        );
+        assert_eq!(failed_repo_rules(&documents, &context), []);
+    }
+
+    #[test]
+    fn leaves_the_repo_rule_silent_when_a_document_glob_does_not_compile() {
+        let mut context = a_project_folder_context(&["app", "infra"]);
+        context.rules.document_paths = vec!["docs/[**".to_string()];
+        let unnamed = a_task_for(Role::SoftwareDeveloper, &["src/**"]);
+        assert_eq!(failed_repo_rules(&unnamed, &context), []);
+    }
+
+    #[test]
+    fn a_docs_task_names_no_repo() {
+        let context = a_project_folder_context(&["app", "infra"]);
+        let docs = a_task_for(Role::Architect, &["docs/**"]);
+        assert_eq!(failed_repo_rules(&docs, &context), []);
+        let named = in_repo(docs, "app");
+        assert_eq!(failed_repo_rules(&named, &context), [R::RepoNotAllowed]);
+        assert_eq!(
+            message_of(&named, &context, R::RepoNotAllowed),
+            "the Architect's task works in the project's own folder, so repo is left out"
+        );
+        let mut epic = a_task_for(Role::SoftwareDeveloper, &["src/**"]);
+        epic.kind = Kind::Epic;
+        assert_eq!(failed_repo_rules(&epic, &context), []);
+        let named = in_repo(epic, "app");
+        assert_eq!(failed_repo_rules(&named, &context), [R::RepoNotAllowed]);
+        assert_eq!(
+            message_of(&named, &context, R::RepoNotAllowed),
+            "an epic spans the project's repositories, so repo is left out"
+        );
+        let unknown = in_repo(a_task_for(Role::Architect, &["docs/**"]), "web");
+        assert_eq!(failed_repo_rules(&unknown, &context), [R::RepoNotAllowed]);
     }
 
     #[test]
