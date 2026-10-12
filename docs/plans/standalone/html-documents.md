@@ -74,7 +74,7 @@ Signatures, not bodies; test names and what each asserts, not test code (ADR 000
 
 ```
 crates/core/src/folders.rs                   Task 1: format, stems, pairs, the format rule, format_line, headings
-crates/core/src/governor/{readiness,done}.rs Task 1: messages naming .md; Task 5: is_plan_of
+crates/core/src/governor/{readiness,done}.rs Task 1: is_plan_of, messages naming .md
 crates/store/src/git.rs                      Task 1: product_plan_on by stem; Task 3: removals
 crates/store/tests/git.rs                    Task 1, Task 3: tests
 crates/runtime/src/{transitions.rs,orchestrator/fixtures.rs}  Task 1: the renamed lists
@@ -87,6 +87,7 @@ crates/runtime/src/orchestrator/{rules,messages,requests}.rs  Task 5: fixed path
 crates/runtime/src/daemon/gates.rs           Task 5: product_plan.state, marketing_plan.get format
 crates/store/src/requests.rs                 Task 5: product_plan_request; Task 9: filing, change_request; Task 10: rewrite_request, rewrite_tasks
 crates/runtime/src/tools/marketing.rs        Task 5: plan files, html_plan_page
+crates/runtime/src/marketing.rs              Task 5: marketing_plan.get's format
 crates/runtime/src/catervafication.rs        Task 5: rows, criteria, messages
 crates/runtime/src/{prompt.rs,orchestrator/session.rs}  Task 6
 crates/roles/roles/** (six roles), crates/roles/src/lib.rs  Task 6
