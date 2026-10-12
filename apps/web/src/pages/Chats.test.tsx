@@ -278,6 +278,30 @@ describe("chats", () => {
 		expect(region.scrollTop).toBe(2000);
 	});
 
+	it("follows_your_own_message_in_a_one_to_one", async () => {
+		stubBox();
+		const { s } = await chats("/channel/mira", {
+			messages: Array.from({ length: 20 }, (_, i) =>
+				chat("mira", `Line ${i}.`),
+			),
+		});
+		const region = await screen.findByRole("region", {
+			name: "Talking with Mira",
+		});
+		region.scrollTop = 300;
+		fireEvent.scroll(region);
+		live(s, 9000, "chat_message.posted", {
+			chat: "mira",
+			author: "human",
+			text: "Could it?",
+		});
+		await screen.findByText("Could it?");
+		expect(region.scrollTop).toBe(2000);
+		expect(
+			screen.queryByRole("button", { name: en.chatsNewMessages }),
+		).toBeNull();
+	});
+
 	it("pages_back_in_a_one_to_one", async () => {
 		const { s } = await chats("/channel/mira", { messages: fullPage() });
 		const more = await screen.findByRole("button", { name: en.channelEarlier });
