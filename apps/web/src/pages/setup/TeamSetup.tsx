@@ -54,6 +54,8 @@ export type Team = {
 		permissions?: { runCommands?: boolean; push?: boolean };
 		/** Whether work waits for a sprint (step 15); absent means no. */
 		planInSprints?: boolean;
+		/** The format new documents are written in; absent means HTML. */
+		documentFormat?: "html" | "markdown";
 		[key: string]: unknown;
 	};
 	rules: {

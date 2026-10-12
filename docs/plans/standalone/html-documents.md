@@ -193,7 +193,7 @@ Files: `docs/schemas/team.schema.json` (`$defs/policy.document_format`, enum `["
 - `document_format_is_html_unless_markdown` — absent or `"html"` gives `Html`; `"markdown"` gives `Markdown`; `"pdf"` is refused by validation.
 - `templates_carry_the_document_format` — a template from a Markdown team holds `"markdown"` and a team made from it does too; a template without the key leaves the team's absent.
 
-- [ ] `feat(core): policy.document_format, HTML unless set`
+- [x] `feat(core): policy.document_format, HTML unless set`
 
 ### Task 3: a folder change may remove files
 

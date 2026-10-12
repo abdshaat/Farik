@@ -479,6 +479,11 @@
           "type": "boolean",
           "description": "Whether the team plans its work in sprints (ADR 0028): ready tasks wait in the Backlog until a sprint plans them, and no task is assigned outside the open sprint. Left out, false, so a team file written before the key works as it did; setup and catervas init write true."
         },
+        "document_format": {
+          "type": "string",
+          "enum": ["html", "markdown"],
+          "description": "The format the team writes new documents under docs/catervas/ in: html or markdown. A document that exists keeps its format when changed. Left out, html, so every team, an existing one included, writes new documents as HTML."
+        },
         "judgment": {
           "$ref": "#/$defs/judgment"
         },
