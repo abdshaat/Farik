@@ -509,6 +509,7 @@ fn proposal_moves(
                 latest.proposal,
                 Moved {
                     at: latest.at,
+                    by: latest.agent_id.clone(),
                     line,
                 },
             )
@@ -595,7 +596,14 @@ fn architecture_moves(
                     who(agent)
                 )
             };
-            Some((seq, Moved { at, line }))
+            Some((
+                seq,
+                Moved {
+                    at,
+                    by: each.agent.clone(),
+                    line,
+                },
+            ))
         })
         .collect())
 }
@@ -863,17 +871,18 @@ mod tests {
         proposes(&board, at(8, 0), "S4", SPEC);
         proposes(&board, at(10, 1), "S4", ROADMAP);
         proposes(&board, at(10, 2), "S4", ROADMAP);
-        let said = |board: &Board| -> Vec<(chrono::DateTime<chrono::Utc>, String)> {
+        let said = |board: &Board| -> Vec<(chrono::DateTime<chrono::Utc>, String, String)> {
             moved_since(&board.log, &board.projections, &team, at(9, 0))
                 .expect("the store reads")
                 .into_iter()
-                .map(|one| (one.at, one.line))
+                .map(|one| (one.at, one.by, one.line))
                 .collect()
         };
         assert_eq!(
             said(&board),
             [(
                 at(10, 2),
+                "ada".to_string(),
                 "Ada proposed a change to the product plan from the sprint 4 review.".to_string()
             )]
         );
@@ -883,6 +892,7 @@ mod tests {
             said(&board),
             [(
                 at(10, 3),
+                "ada".to_string(),
                 "Ada proposed 2 changes to the product plan from the sprint 4 review.".to_string()
             )]
         );
@@ -965,7 +975,7 @@ mod tests {
         wrote(11, "sm", "session-3", "retro", CADENCE, 4);
         // The Product Manager's review writes its report after sprint 4: not the architecture's.
         wrote(12, "pm", "session-4", "review", REPORT, 5);
-        let said = |integration: &str| -> Vec<(chrono::DateTime<chrono::Utc>, String)> {
+        let said = |integration: &str| -> Vec<(chrono::DateTime<chrono::Utc>, String, String)> {
             moved_since(
                 &board.log,
                 &board.projections,
@@ -974,7 +984,7 @@ mod tests {
             )
             .expect("the store reads")
             .into_iter()
-            .map(|one| (one.at, one.line))
+            .map(|one| (one.at, one.by, one.line))
             .collect()
         };
 
@@ -982,6 +992,7 @@ mod tests {
             said("manual"),
             [(
                 at(10, 3),
+                "ada".to_string(),
                 "Ada brought the architecture notes up to date with sprint 4".to_string()
             )]
         );
@@ -989,6 +1000,7 @@ mod tests {
             said("pull_request"),
             [(
                 at(10, 3),
+                "ada".to_string(),
                 "Ada sent the architecture notes for sprint 4 as a pull request".to_string()
             )]
         );
