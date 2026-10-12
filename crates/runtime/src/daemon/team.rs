@@ -38,7 +38,7 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 18] = [
+pub(super) const METHODS: [&str; 19] = [
     "team.save",
     "agent.replace",
     "team.start",
@@ -57,6 +57,7 @@ pub(super) const METHODS: [&str; 18] = [
     "procurement_mailbox.check",
     "project.leave",
     "keys_copied.dismiss",
+    "connector_suggestion.hide",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
@@ -104,6 +105,12 @@ pub(super) fn query(
             answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(catervas_core::team::MAX_AGENTS);
             answer["sandboxed"] = json!(deps.transitions.sandboxed());
+            answer["hidden_suggestions"] = json!(
+                crate::connectors::hidden_suggestions(deps.files.root())
+                    .into_iter()
+                    .map(|(agent, server)| json!({ "agent": agent, "server": server }))
+                    .collect::<Vec<_>>()
+            );
             Ok(answer)
         }
         "team.propose" => propose(deps),
@@ -1867,6 +1874,28 @@ pub(super) async fn call(
                 Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(internal(&error)),
                 _ => Ok(json!({})),
             }
+        }
+        "connector_suggestion.hide" => {
+            let agent = params["agent"].as_str().unwrap_or_default();
+            let server = params["server"].as_str().unwrap_or_default();
+            let team = deps.files.read_team().map_err(|e| internal(&e))?;
+            let offered = match team.agents.iter().find(|a| a.id.as_str() == agent) {
+                Some(found) => (deps.kits)(Role::from(found.role))
+                    .map_err(|e| internal(&e))?
+                    .connectors
+                    .iter()
+                    .any(|c| matches!(c, KitConnector::Server { entry, .. } if entry.name.as_str() == server)),
+                None => false,
+            };
+            if !offered {
+                return Err(Failure::new(
+                    REFUSED,
+                    format!("suggestion_not_offered: {agent} is not offered {server}"),
+                ));
+            }
+            crate::connectors::hide_suggestion(deps.files.root(), agent, server)
+                .map_err(|e| internal(&e))?;
+            Ok(json!({}))
         }
         "project.note" => off_the_worker(move || {
             deps.files
@@ -5138,6 +5167,71 @@ pub(super) mod tests {
         }
         let architect = catervas_roles::load_kit(Role::Architect).expect("the Architect's kit");
         assert!(!super::at_launch(&kit_entry_of(&architect, "osv"), &[]));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_lists_hidden_suggestions() {
+        let (harness, _) = keeping_a_kit("hidden-suggestions");
+        let hidden = |harness: &Harness| {
+            query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["hidden_suggestions"]
+                .clone()
+        };
+        assert_eq!(hidden(&harness), json!([]));
+        let seen = harness.project.events(&[]).len();
+        let said = call(
+            &harness.daemon,
+            "connector_suggestion.hide",
+            &json!({ "agent": "dev-a", "server": "fixture" }),
+            "emptyResult",
+        );
+        assert_eq!(said, json!({}));
+        assert_eq!(
+            hidden(&harness),
+            json!([{ "agent": "dev-a", "server": "fixture" }])
+        );
+        assert!(
+            harness
+                .project
+                .deps
+                .files
+                .root()
+                .join(crate::connectors::CONNECTOR_SUGGESTIONS)
+                .exists()
+        );
+        assert_eq!(harness.project.events(&[]).len(), seen);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn suggestion_hide_refuses_what_the_team_does_not_offer() {
+        let (harness, _) = keeping_a_kit("hidden-refused");
+        for (agent, server) in [("ghost", "fixture"), ("dev-a", "nothing")] {
+            let reply = rpc(
+                &harness.daemon,
+                "connector_suggestion.hide",
+                &json!({ "agent": agent, "server": server }),
+            );
+            assert_eq!(reply["error"]["code"], -32005, "{reply}");
+            let message = reply["error"]["message"].as_str().expect("a message");
+            assert!(
+                message.starts_with("suggestion_not_offered: ")
+                    && message.contains(agent)
+                    && message.contains(server),
+                "{message}"
+            );
+        }
+        assert!(
+            !harness
+                .project
+                .deps
+                .files
+                .root()
+                .join(crate::connectors::CONNECTOR_SUGGESTIONS)
+                .exists()
+        );
+        let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        assert_eq!(got["hidden_suggestions"], json!([]));
     }
 
     #[test]

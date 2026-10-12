@@ -103,7 +103,7 @@ Files: modified `docs/schemas/rpc.schema.json` (`teamGetResult.hidden_suggestion
 - `team_get_lists_hidden_suggestions` — on `keeping_a_kit("hidden-suggestions")`: `team.get` answers `hidden_suggestions: []`; `connector_suggestion.hide { agent: "dev-a", server: "fixture" }` answers `{}`; `team.get` then answers `[{ "agent": "dev-a", "server": "fixture" }]` and the file exists at `CONNECTOR_SUGGESTIONS` under `deps.files.root()`; no event is appended (the log's length is unchanged).
 - `suggestion_hide_refuses_what_the_team_does_not_offer` — `{ agent: "ghost", server: "fixture" }` and `{ agent: "dev-a", server: "nothing" }` each answer `error.code` -32005 with `error.message` starting `suggestion_not_offered: `, naming the agent and the server; the file does not exist after; `team.get` still answers `[]`.
 
-- [ ] `feat(runtime): hide a suggested connection and answer the hidden ones`
+- [x] `feat(runtime): hide a suggested connection and answer the hidden ones`
 
 ### Task 4: the section on Today
 

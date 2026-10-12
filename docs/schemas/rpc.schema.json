@@ -1003,6 +1003,26 @@
             }
           }
         },
+        "hidden_suggestions": {
+          "type": "array",
+          "description": "The kit services the user said Not now to on Today, kept on this computer; Today leaves each pair out of its suggestions.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "server"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            }
+          }
+        },
         "kits": {
           "type": "array",
           "description": "Each role on the team whose kit has a service to connect by name, with the copy the page shows (ADR 0036). A container connector, which Catervas runs itself, is not listed, and nor is a role with no service.",
@@ -1116,7 +1136,8 @@
         "max_agents",
         "connectors",
         "kits",
-        "sandboxed"
+        "sandboxed",
+        "hidden_suggestions"
       ]
     },
     "serveStatusResult": {
