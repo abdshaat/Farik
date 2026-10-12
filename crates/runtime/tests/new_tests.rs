@@ -43,11 +43,13 @@ fn task() -> TaskId {
 
 fn input<'a>(
     git: &'a Git,
+    base_worktree: &'a Path,
     sandboxes: &'a dyn SandboxFactory,
     task_id: &'a TaskId,
 ) -> NewTestsInput<'a> {
     NewTestsInput {
         git,
+        base_worktree,
         base: "main",
         head: BRANCH,
         sandboxes,
@@ -139,8 +141,9 @@ fn finds_a_new_test_that_fails_on_the_base_branch() {
     let repository = fixture("new-test-fails-on-base");
     add_a_failing_test(&repository);
     let git = repository.adapter();
+    let base = base_worktree(&repository);
     let task_id = task();
-    let check = check_new_tests(COMMAND, &input(&git, &HostSandboxFactory, &task_id))
+    let check = check_new_tests(COMMAND, &input(&git, &base, &HostSandboxFactory, &task_id))
         .expect("the check runs");
     assert!(check.adds_tests);
     assert!(check.fails_on_base);
@@ -155,10 +158,11 @@ fn finds_no_new_test_when_only_code_changed() {
     repository.write("src/x.sh", "echo 2\n");
     repository.commit("change x only");
     let git = repository.adapter();
+    let base = base_worktree(&repository);
     let task_id = task();
     let counting = Counting::default();
     let check =
-        check_new_tests(COMMAND, &input(&git, &counting, &task_id)).expect("the check runs");
+        check_new_tests(COMMAND, &input(&git, &base, &counting, &task_id)).expect("the check runs");
     assert!(!check.adds_tests);
     assert!(check.test_files.is_empty());
     assert_eq!(counting.bases.load(Ordering::SeqCst), 0, "nothing was run");
@@ -173,9 +177,10 @@ fn says_a_new_test_that_passes_on_base_does_not_count() {
     repository.write("tests/new.sh", "exit 0\n");
     repository.commit("change x and add a test that tests nothing");
     let git = repository.adapter();
+    let base = base_worktree(&repository);
     let task_id = task();
     let sandboxes = HostSandboxFactory;
-    let input = input(&git, &sandboxes, &task_id);
+    let input = input(&git, &base, &sandboxes, &task_id);
     let check = check_new_tests(COMMAND, &input).expect("the check runs");
     assert!(check.adds_tests);
     assert!(!check.fails_on_base);
@@ -213,9 +218,10 @@ fn removes_the_base_worktree_whatever_happens() {
     let repository = fixture("base-removed-on-error");
     add_a_failing_test(&repository);
     let git = repository.adapter();
+    let base = base_worktree(&repository);
     let task_id = task();
     assert_eq!(
-        check_new_tests(COMMAND, &input(&git, &NoDocker, &task_id)),
+        check_new_tests(COMMAND, &input(&git, &base, &NoDocker, &task_id)),
         Err(CriterionError::Sandbox(SandboxError::DockerUnavailable))
     );
     assert_base_gone(&repository);
@@ -240,10 +246,93 @@ fn replaces_a_base_worktree_left_by_a_crash() {
         }
         std::fs::write(left.join("stale.txt"), "from the crash\n").expect("a stale file");
         let git = repository.adapter();
+        let base = base_worktree(&repository);
         let task_id = task();
-        let check = check_new_tests(COMMAND, &input(&git, &HostSandboxFactory, &task_id))
+        let check = check_new_tests(COMMAND, &input(&git, &base, &HostSandboxFactory, &task_id))
             .expect("the check runs");
         assert!(check.fails_on_base, "registered: {registered}");
         assert_base_gone(&repository);
     }
+}
+
+/// Host sandboxes, remembering the worktree each base one was made over.
+#[derive(Default)]
+struct Recording {
+    bases: std::sync::Mutex<Vec<PathBuf>>,
+}
+
+impl SandboxFactory for Recording {
+    fn create(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        HostSandboxFactory.create(project_id, task_id, worktree, network)
+    }
+
+    fn create_base(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        assert!(worktree.is_dir(), "the base worktree is there to run in");
+        self.bases
+            .lock()
+            .expect("the list is not poisoned")
+            .push(worktree.to_path_buf());
+        HostSandboxFactory.create_base(project_id, task_id, worktree)
+    }
+
+    fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError> {
+        HostSandboxFactory.remove(project_id, task_id)
+    }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn makes_the_base_worktree_under_the_project_folder() {
+    // A task in a member repository: its branch and its base are the member's, and the base
+    // worktree is made where every worktree of the project is, under the project folder.
+    let member = fixture("base-in-member");
+    add_a_failing_test(&member);
+    let project = std::env::temp_dir().join(format!(
+        "catervas-new-tests-project-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&project);
+    std::fs::create_dir_all(&project).expect("the project folder");
+    let wanted = project.join(".catervas/local/worktrees/CTV-1-base");
+    let git = member.adapter();
+    let task_id = task();
+    let recording = Recording::default();
+
+    let check = check_new_tests(COMMAND, &input(&git, &wanted, &recording, &task_id))
+        .expect("the check runs");
+
+    assert!(check.fails_on_base);
+    assert_eq!(
+        recording
+            .bases
+            .lock()
+            .expect("the list is not poisoned")
+            .as_slice(),
+        std::slice::from_ref(&wanted),
+        "the base run was made over the project folder's worktree"
+    );
+    assert!(!wanted.exists(), "and removed again");
+    assert!(
+        !member.path.join(".catervas").exists(),
+        "nothing of Catervas's goes into the member"
+    );
+    assert!(
+        !member
+            .git_output(&["worktree", "list"])
+            .contains("CTV-1-base"),
+        "and the member keeps no registration of it"
+    );
+    let _ = std::fs::remove_dir_all(&project);
 }

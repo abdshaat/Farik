@@ -192,7 +192,7 @@ Files: `verify.rs` (`run_what_catervas_runs`, `:153-199`); `criteria.rs` (`NewTe
 - `runs_a_members_check_on_its_branch` (`verify.rs`, `Harness::project_folder` with a test command stub): a task with `repo: app` and the expanded `app-the-tests-pass` runs it in the sandbox made for its worktree, and records `criterion.recorded` passed. `new_tests_required` is judged against `app`'s `main`: a test file added on `feature/CTV-1` counts, and the same file already on `main` does not. RED: unknown revision `feature/CTV-1` in the project folder.
 - `makes_the_base_worktree_under_the_project_folder` (`tests/new_tests.rs`, integration): `check_new_tests` for that task makes `<project>/.catervas/local/worktrees/CTV-1-base`, never `<app>/.catervas`, and removes it afterwards. RED.
 
-- [ ] `feat(runtime): run a task's checks in its member`
+- [x] `feat(runtime): run a task's checks in its member`
 
 ### Task 6: Spec
 

@@ -111,8 +111,12 @@ pub struct NewTestsCheck {
 
 /// Where a task's diff is, and how to run its tests against the base branch.
 pub struct NewTestsInput<'a> {
-    /// The project's repository.
+    /// The repository the task's branch is in: the project's, or the member's.
     pub git: &'a Git,
+    /// Where the base worktree is made: `<project>/.catervas/local/worktrees/<id>-base`, under the
+    /// project folder whichever repository `git` is, so that nothing of Catervas's goes into a
+    /// member.
+    pub base_worktree: &'a Path,
     /// The branch the task's branch is judged against.
     pub base: &'a str,
     /// The task's branch.
@@ -243,7 +247,7 @@ pub fn check_artifact_in(
 
 /// Whether the diff from `input.base` to `input.head` adds a test file, and whether `command`
 /// fails with the head's test files on the base branch: in a detached worktree at the merge base,
-/// `<root>/.catervas/local/worktrees/<id>-base` (one left by a crash removed first), in a sandbox
+/// `input.base_worktree` (one left by a crash removed first), in a sandbox
 /// from `create_base`. The sandbox is discarded and the worktree removed on every way out; when
 /// the run and the cleanup both fail, the run's error is the one returned.
 ///
@@ -269,18 +273,14 @@ pub fn check_new_tests(
         });
     }
     let at = input.git.merge_base(input.base, input.head)?;
-    let worktree = input
-        .git
-        .root()
-        .join(".catervas/local/worktrees")
-        .join(format!("{}-base", input.task_id.as_str()));
-    remove_base_worktree(input.git, &worktree)?;
+    let worktree = input.base_worktree;
+    remove_base_worktree(input.git, worktree)?;
     let ran = input
         .git
-        .create_detached_worktree(&worktree, &at)
+        .create_detached_worktree(worktree, &at)
         .map_err(CriterionError::from)
-        .and_then(|()| run_on_base(command, input, &test_files, &worktree));
-    let removed = remove_base_worktree(input.git, &worktree);
+        .and_then(|()| run_on_base(command, input, &test_files, worktree));
+    let removed = remove_base_worktree(input.git, worktree);
     let fails_on_base = ran?;
     removed?;
     Ok(NewTestsCheck {

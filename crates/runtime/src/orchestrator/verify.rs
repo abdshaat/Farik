@@ -43,8 +43,7 @@ use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::tools::design::{ReviewState, design_review};
 use crate::transitions::{
-    TransitionAsk, TransitionError, TransitionOutcome, integration_branch, last_move_into,
-    refusal_details,
+    TransitionAsk, TransitionError, TransitionOutcome, last_move_into, refusal_details,
 };
 
 /// Who records the criteria Catervas runs for the reviewer: Catervas ran them, as `requested_by:
@@ -180,20 +179,28 @@ async fn run_what_catervas_runs(
         return run_in_the_folder(deps, contract, &pending, folder);
     }
     orchestrator.forget_sandbox(&contract.id);
-    let base = integration_branch(team, &deps.tools.git)?;
+    // The task's branch and its base are its repository's: the member's, in a project folder.
+    let repository = task_repository_of(deps, team, contract)
+        .map_err(|error| repository_refused(&contract.id, &error))?;
+    let base = repository.integration_branch.clone();
     for criterion in &pending {
         let mut alone = contract.clone();
         alone.exit_criteria = vec![(*criterion).clone()];
         let sandbox = orchestrator.sandbox_for(&contract.id, team)?;
         let factory = Arc::clone(&deps.sandboxes);
-        let root = deps.tools.git.root().to_path_buf();
+        let root = repository.git.root().to_path_buf();
+        let project = deps.tools.git.root().to_path_buf();
         let project_id = deps.tools.ids.project_id.clone();
         let base = base.clone();
         let outcomes = tokio::task::spawn_blocking(move || {
             let git = Git::open(root);
+            let base_worktree = project
+                .join(".catervas/local/worktrees")
+                .join(format!("{}-base", alone.id.as_str()));
             let head = task_branch(&alone);
             let input = NewTestsInput {
                 git: &git,
+                base_worktree: &base_worktree,
                 base: &base,
                 head: &head,
                 sandboxes: factory.as_ref(),
@@ -839,6 +846,7 @@ mod tests {
     use catervas_core::governor::permissions::PermissionTier;
     use catervas_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
     use catervas_store::GitError;
+    use catervas_store::git::fixtures::TempRepo;
     use serde_json::{Value, json};
 
     use super::fails_the_criterion;
@@ -1103,6 +1111,130 @@ mod tests {
                 spec.initial_prompt
             );
         }
+    }
+
+    /// A project folder over the member `app`, whose `main` holds `flag.txt` as `broken` (and the
+    /// test `tests/new.sh` when `test_on_main`), with CTV-1, a task of `app`, in `verifying`: its
+    /// branch fixes the flag and adds the test, which a task of the member passes only if the
+    /// flag is fixed. Its one criterion is the test command, as the member's `app-the-tests-pass`
+    /// expands, requiring a new test.
+    fn a_member_task_to_verify(name: &str, test_on_main: bool) -> (Harness, Vec<TempRepo>) {
+        let (harness, members) = Harness::project_folder(name, &["app"]);
+        let app = &members[0];
+        app.write("flag.txt", "broken\n");
+        app.write("tests/other.sh", "exit 0\n");
+        if test_on_main {
+            app.write("tests/new.sh", "[ \"$(cat flag.txt)\" = fixed ]\n");
+        }
+        app.commit("the flag and its tests");
+        harness.file("CTV-1", "ready", |wire| {
+            wire["repo"] = json!("app");
+            wire["allowed_paths"] = json!(["flag.txt", "tests/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The tests pass in app, and a new one shows the change.",
+                "satisfies": ["R1"],
+                "verification": {
+                    "method": "test", "command": "sh tests/new.sh", "new_tests_required": true
+                }
+            }]);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-1", "assigned", "in_progress", &people);
+        let worktree = harness.worktree("CTV-1");
+        app.adapter()
+            .create_worktree(&worktree, &harness.branch("CTV-1"), "main")
+            .expect("the member makes the task's worktree");
+        std::fs::write(worktree.join("flag.txt"), "fixed\n").expect("written");
+        std::fs::create_dir_all(worktree.join("tests")).expect("made");
+        std::fs::write(
+            worktree.join("tests/new.sh"),
+            "[ \"$(cat flag.txt)\" = fixed ]\n",
+        )
+        .expect("written");
+        let paths = if test_on_main {
+            vec!["flag.txt".to_string()]
+        } else {
+            vec!["flag.txt".to_string(), "tests/new.sh".to_string()]
+        };
+        app.adapter()
+            .commit(&worktree, "Fix the flag", &paths)
+            .expect("committed on the member's branch");
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Fixed it.\n\nFixed it.", "written_by": "dev-a" }),
+        );
+        harness.project.moved(
+            "CTV-1",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b", "actor": "assignee", "requested_by": "dev-a" }),
+        );
+        (harness, members)
+    }
+
+    fn recorded_run(harness: &Harness) -> (bool, String) {
+        let events = harness.events(&[EventKind::CriterionRecorded]);
+        let [event] = events.as_slice() else {
+            panic!(
+                "one criterion recorded, got {events:?}; escalations {:?}",
+                harness.events(&[EventKind::EscalationRaised])
+            );
+        };
+        let EventBody::CriterionRecorded(body) = &event.body else {
+            panic!("a criterion.recorded");
+        };
+        assert_eq!(body.criterion_id, "C1");
+        (body.passed, body.evidence.clone())
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_a_members_check_on_its_branch() {
+        // The check runs at the member's root in the sandbox made for the task's worktree, and
+        // `new_tests_required` is judged against the member's `main`, not the project folder's.
+        let (harness, members) = a_member_task_to_verify("verify-member-check", false);
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 1).await;
+        let (passed, evidence) = recorded_run(&harness);
+        assert!(passed, "{evidence}");
+        for line in [
+            "adds tests: yes",
+            "fails on base: yes",
+            "test files: tests/new.sh",
+        ] {
+            assert!(
+                evidence.lines().any(|one| one == line),
+                "{line} in {evidence}"
+            );
+        }
+        assert_eq!(who(&started), [("dev-b", SessionPurpose::Verify)]);
+        assert!(
+            !members[0].path.join(".catervas").exists(),
+            "nothing of Catervas's goes into the member"
+        );
+        assert!(
+            !harness
+                .project
+                .repo
+                .path
+                .join(".catervas/local/worktrees/CTV-1-base")
+                .exists(),
+            "and the base worktree is removed again"
+        );
+
+        // The same test already on the member's main is not a new one.
+        let (already, _members) = a_member_task_to_verify("verify-member-check-old", true);
+        ticked(&already, vec![review_writes_note()], 1).await;
+        let (passed, evidence) = recorded_run(&already);
+        assert!(!passed, "{evidence}");
+        assert!(
+            evidence.lines().any(|one| one == "adds tests: no"),
+            "{evidence}"
+        );
     }
 
     #[tokio::test]
