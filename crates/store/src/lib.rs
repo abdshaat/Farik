@@ -5,6 +5,8 @@
 pub mod activity;
 /// The copy of a private folder a task is judged against.
 pub mod baseline;
+/// Reading Claude Code's transcripts into the machine index, and placing each session in its project.
+pub mod claude_history;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// What the store refuses, and why.

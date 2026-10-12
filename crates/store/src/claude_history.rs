@@ -1,0 +1,621 @@
+//! Reading Claude Code's transcripts into the machine index, and placing each session in its project.
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+
+use catervas_core::claude_history::{TranscriptLine, once_per_reply, read_line};
+use chrono::{DateTime, Utc};
+
+use crate::error::StoreError;
+use crate::git::GitError;
+use crate::machine::{FileRead, FileState, MachineIndex, ReplyBatch, SessionBatch};
+
+/// Where a Catervas project keeps its log, relative to its root.
+pub const PROJECT_LOG: &str = ".catervas/local/catervas.db";
+
+/// Why reading or placing the history did not finish.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HistoryError {
+    /// The index or the file system refused.
+    Store(StoreError),
+    /// The `git` program could not be run.
+    Git(GitError),
+}
+
+impl fmt::Display for HistoryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Store(error) => error.fmt(formatter),
+            Self::Git(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for HistoryError {}
+
+impl From<StoreError> for HistoryError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl From<GitError> for HistoryError {
+    fn from(error: GitError) -> Self {
+        Self::Git(error)
+    }
+}
+
+impl From<std::io::Error> for HistoryError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Store(error.into())
+    }
+}
+
+/// What one scan of the transcripts did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReadSummary {
+    /// Transcript files listed and opened.
+    pub files: u64,
+    /// Sessions in the index after the scan.
+    pub sessions: u64,
+    /// Sessions the scan added.
+    pub new_sessions: u64,
+    /// Files refused for being outside Claude Code's transcripts.
+    pub refused: u64,
+}
+
+fn sorted_entries(folder: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    let mut entries = std::fs::read_dir(folder)?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort();
+    Ok(entries)
+}
+
+fn is_transcript_name(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension == "jsonl")
+}
+
+/// The files that may be transcripts: `projects/<folder>/<session>.jsonl` and
+/// `projects/<folder>/<session>/subagents/<agent>.jsonl`, in path order. Nothing else under
+/// `projects/`.
+fn candidates(projects: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    let mut found = Vec::new();
+    for folder in sorted_entries(projects)? {
+        if !folder.is_dir() {
+            continue;
+        }
+        for entry in sorted_entries(&folder)? {
+            if entry.is_dir() {
+                let subagents = entry.join("subagents");
+                if subagents.is_dir() {
+                    found.extend(
+                        sorted_entries(&subagents)?
+                            .into_iter()
+                            .filter(|file| is_transcript_name(file)),
+                    );
+                }
+            } else if is_transcript_name(&entry) {
+                found.push(entry);
+            }
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// What a candidate is, once its link is followed.
+enum Opened {
+    /// A regular file inside `projects/`.
+    Transcript,
+    /// Pointing outside `projects/`, or Claude Code's credentials: never opened.
+    Refused,
+    /// Gone or not a regular file; tried again next scan.
+    Skipped,
+}
+
+fn classify(path: &Path, projects: &Path) -> Opened {
+    let Ok(real) = path.canonicalize() else {
+        return Opened::Skipped;
+    };
+    if !real.starts_with(projects)
+        || real
+            .file_name()
+            .is_some_and(|name| name == ".credentials.json")
+    {
+        return Opened::Refused;
+    }
+    if real.is_file() {
+        Opened::Transcript
+    } else {
+        Opened::Skipped
+    }
+}
+
+/// What reading the new part of one file found.
+#[derive(Default)]
+struct Chunk {
+    read_to: u64,
+    turns: u64,
+    unreadable_lines: u64,
+    sessions: BTreeMap<String, SessionBatch>,
+    titles: BTreeMap<String, String>,
+    replies: BTreeMap<String, ReplyBatch>,
+}
+
+fn read_chunk(bytes: &[u8], mut chunk: Chunk) -> Chunk {
+    // A line still being written has no newline yet; it is read next time.
+    let Some(end) = bytes.iter().rposition(|byte| *byte == b'\n') else {
+        return chunk;
+    };
+    chunk.read_to += (end + 1) as u64;
+    for raw in bytes[..end].split(|byte| *byte == b'\n') {
+        match read_line(&String::from_utf8_lossy(raw)) {
+            TranscriptLine::Turn(turn) => {
+                chunk.turns += 1;
+                if let Some(reply) = turn.reply {
+                    let batch = ReplyBatch {
+                        key: reply.key.clone(),
+                        session_id: turn.session_id.clone(),
+                        model: reply.model,
+                        at: turn.at,
+                        usage: reply.usage,
+                    };
+                    chunk
+                        .replies
+                        .entry(reply.key)
+                        .and_modify(|seen| {
+                            seen.usage = once_per_reply(seen.usage, batch.usage);
+                            seen.at = seen.at.min(batch.at);
+                        })
+                        .or_insert(batch);
+                }
+                let session = chunk
+                    .sessions
+                    .entry(turn.session_id.clone())
+                    .or_insert_with(|| SessionBatch {
+                        session_id: turn.session_id.clone(),
+                        cwd: turn.cwd.clone(),
+                        git_branch: turn.git_branch.clone(),
+                        version: turn.version.clone(),
+                        entrypoint: turn.entrypoint.clone(),
+                        first_at: turn.at,
+                        last_at: turn.at,
+                    });
+                if turn.at < session.first_at {
+                    session.cwd = turn.cwd;
+                    session.git_branch = turn.git_branch;
+                    session.version = turn.version;
+                    session.entrypoint = turn.entrypoint;
+                    session.first_at = turn.at;
+                }
+                session.last_at = session.last_at.max(turn.at);
+            }
+            TranscriptLine::Title { session_id, title } => {
+                chunk.titles.insert(session_id, title);
+            }
+            TranscriptLine::Other => {}
+            TranscriptLine::Unreadable => chunk.unreadable_lines += 1,
+        }
+    }
+    chunk
+}
+
+/// Reads the transcripts under `claude_dir/projects` into the index, each file from where the last
+/// scan stopped. A file Claude Code replaced with a shorter one is read again from its start.
+///
+/// Only `.jsonl` files whose canonical path is inside `projects/` are opened; a link pointing out of
+/// it, and `.credentials.json`, are counted in `refused` and never opened. A folder with no
+/// `projects/` reads nothing.
+///
+/// # Errors
+///
+/// `Store` when the index refuses or the projects folder cannot be listed.
+pub fn read_transcripts(
+    index: &mut MachineIndex,
+    claude_dir: &Path,
+    now: DateTime<Utc>,
+) -> Result<ReadSummary, HistoryError> {
+    let mut summary = ReadSummary::default();
+    let Ok(projects) = claude_dir.join("projects").canonicalize() else {
+        summary.sessions = index.session_count()?;
+        return Ok(summary);
+    };
+    let before = index.session_count()?;
+    for path in candidates(&projects)? {
+        match classify(&path, &projects) {
+            Opened::Skipped => continue,
+            Opened::Refused => {
+                summary.refused += 1;
+                continue;
+            }
+            Opened::Transcript => {}
+        }
+        let key = path.to_string_lossy().into_owned();
+        let state = index.file_state(&key)?;
+        // A file that cannot be opened or read now keeps its offset and is tried next scan.
+        let Ok(mut file) = std::fs::File::open(&path) else {
+            continue;
+        };
+        let Ok(length) = file.metadata().map(|metadata| metadata.len()) else {
+            continue;
+        };
+        let mut chunk = Chunk::default();
+        let mut start = 0;
+        if let Some(state) = state
+            && length >= state.read_to
+        {
+            start = state.read_to;
+            chunk.read_to = state.read_to;
+            chunk.turns = state.turns;
+            chunk.unreadable_lines = state.unreadable_lines;
+        }
+        let mut bytes = Vec::new();
+        if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut bytes).is_err() {
+            continue;
+        }
+        let chunk = read_chunk(&bytes, chunk);
+        summary.files += 1;
+        index.record_file(
+            &FileRead {
+                path: &key,
+                state: FileState {
+                    read_to: chunk.read_to,
+                    turns: chunk.turns,
+                    unreadable_lines: chunk.unreadable_lines,
+                },
+                sessions: chunk.sessions.into_values().collect(),
+                titles: chunk.titles.into_iter().collect(),
+                replies: chunk.replies.into_values().collect(),
+            },
+            now,
+        )?;
+    }
+    summary.sessions = index.session_count()?;
+    summary.new_sessions = summary.sessions - before;
+    Ok(summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use chrono::{DateTime, TimeZone, Utc};
+    use rusqlite::Connection;
+
+    use super::*;
+    use crate::files::fixtures::TempProject;
+    use crate::machine::{MACHINE_DB, open_machine_index};
+    use catervas_core::claude_history::fixtures::{CLAUDE_CODE_2_1_296, a_reply_line, a_turn_line};
+    use catervas_core::pricing::Usage;
+
+    const SESSION: &str = "11111111-1111-4111-8111-111111111111";
+    const OTHER: &str = "00000000-0000-4000-8000-000000000000";
+    const CWD: &str = "/home/me/shop";
+
+    fn now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 10, 12, 12, 0, 0)
+            .single()
+            .expect("a valid time")
+    }
+
+    fn usage(input: u64, output: u64, read: u64, write: u64) -> Usage {
+        Usage {
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: read,
+            cache_write_tokens: write,
+        }
+    }
+
+    /// A temporary Claude folder with `projects/-home-me-shop/`, and the index beside it.
+    struct Setup {
+        temp: TempProject,
+    }
+
+    impl Setup {
+        fn new(name: &str) -> Self {
+            let temp = TempProject::new(name);
+            std::fs::create_dir_all(temp.root.join("claude/projects/-home-me-shop"))
+                .expect("a projects folder");
+            Self { temp }
+        }
+
+        fn claude(&self) -> PathBuf {
+            self.temp.root.join("claude")
+        }
+
+        fn db(&self) -> PathBuf {
+            self.temp.root.join("state").join(MACHINE_DB)
+        }
+
+        fn transcript(&self, name: &str) -> PathBuf {
+            self.claude()
+                .join("projects/-home-me-shop")
+                .join(format!("{name}.jsonl"))
+        }
+
+        fn read(&self) -> ReadSummary {
+            let mut index = open_machine_index(&self.db(), now()).expect("the index opens");
+            read_transcripts(&mut index, &self.claude(), now()).expect("the scan reads")
+        }
+
+        fn rows(&self, sql: &str) -> Vec<String> {
+            query(&self.db(), sql)
+        }
+    }
+
+    fn query(db: &Path, sql: &str) -> Vec<String> {
+        let connection = Connection::open(db).expect("the index file opens");
+        let mut statement = connection.prepare(sql).expect("a statement");
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("a query")
+            .collect::<Result<_, _>>()
+            .expect("rows")
+    }
+
+    fn dump(setup: &Setup) -> Vec<String> {
+        let mut all = Vec::new();
+        for sql in [
+            "SELECT printf('%s|%d|%d|%d', path, read_to, turns, unreadable_lines) FROM transcript_files ORDER BY path",
+            "SELECT printf('%s|%s|%s|%s|%s|%s|%s', session_id, cwd, git_branch, version, entrypoint, title, last_at) FROM sessions ORDER BY session_id",
+            "SELECT printf('%s|%s|%d|%d|%d|%d', reply_key, session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) FROM replies ORDER BY reply_key",
+        ] {
+            all.extend(setup.rows(sql));
+        }
+        all
+    }
+
+    const REPLIES: &str = "SELECT printf('%s|%s|%d|%d|%d|%d', reply_key, session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) FROM replies ORDER BY reply_key";
+
+    #[test]
+    fn reads_a_checked_versions_transcript() {
+        let setup = Setup::new("reads-checked-transcript");
+        std::fs::write(setup.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("a transcript");
+        let summary = setup.read();
+        assert_eq!(
+            summary,
+            ReadSummary {
+                files: 1,
+                sessions: 1,
+                new_sessions: 1,
+                refused: 0
+            }
+        );
+        assert_eq!(
+            setup.rows("SELECT printf('%s|%s|%s|%s|%s|%s|%s', cwd, git_branch, version, entrypoint, title, first_at, last_at) FROM sessions"),
+            vec![
+                "/home/me/shop|main|2.1.296|cli|Fix the checkout total|2026-10-12T09:00:00.000Z|2026-10-12T09:01:10.000Z"
+            ]
+        );
+        assert_eq!(
+            setup.rows(REPLIES),
+            vec![
+                format!("msg_01A|{SESSION}|10|40|1000|200"),
+                format!("req_01B|{SESSION}|5|7|0|0")
+            ]
+        );
+        assert_eq!(
+            setup.rows("SELECT printf('%d|%d', turns, unreadable_lines) FROM transcript_files"),
+            vec!["6|2"]
+        );
+    }
+
+    /// Guard: checked by mutation (store a text field), not watched to fail.
+    #[test]
+    fn keeps_no_conversation_text() {
+        let setup = Setup::new("keeps-no-text");
+        std::fs::write(setup.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("a transcript");
+        setup.read();
+        let bytes = std::fs::read(setup.db()).expect("the index file");
+        let marker = b"NEVER-KEPT-TEXT";
+        assert!(!bytes.windows(marker.len()).any(|window| window == marker));
+    }
+
+    #[test]
+    fn reads_only_what_was_appended() {
+        let setup = Setup::new("reads-appended");
+        let path = setup.transcript(SESSION);
+        std::fs::write(&path, CLAUDE_CODE_2_1_296).expect("a transcript");
+        setup.read();
+        let before = dump(&setup);
+        let again = setup.read();
+        assert_eq!((again.new_sessions, again.sessions), (0, 1));
+        assert_eq!(dump(&setup), before);
+
+        let reply = a_reply_line(
+            SESSION,
+            CWD,
+            "2026-10-12T09:02:00Z",
+            "msg_01C",
+            "claude-opus-5-5",
+            usage(1, 2, 0, 0),
+        );
+        let half = r#"{"type":"user","sessionId":"#;
+        let whole = format!("{CLAUDE_CODE_2_1_296}{reply}\n");
+        std::fs::write(&path, format!("{whole}{half}")).expect("a longer transcript");
+        setup.read();
+        assert_eq!(setup.rows(REPLIES).len(), 3);
+        assert!(setup.rows(REPLIES)[0].starts_with("msg_01A|"));
+        assert_eq!(setup.rows(REPLIES)[1], format!("msg_01C|{SESSION}|1|2|0|0"));
+        assert_eq!(
+            setup.rows("SELECT CAST(read_to AS TEXT) FROM transcript_files"),
+            vec![whole.len().to_string()]
+        );
+
+        let finished = a_turn_line(SESSION, CWD, "2026-10-12T09:03:00Z");
+        std::fs::write(&path, format!("{whole}{finished}\n")).expect("a finished line");
+        setup.read();
+        assert_eq!(
+            setup.rows("SELECT CAST(turns AS TEXT) FROM transcript_files"),
+            vec!["8"]
+        );
+        assert_eq!(
+            setup.rows("SELECT last_at FROM sessions"),
+            vec!["2026-10-12T09:03:00.000Z"]
+        );
+
+        let first = CLAUDE_CODE_2_1_296.lines().next().expect("a first line");
+        std::fs::write(&path, format!("{first}\n")).expect("a replaced transcript");
+        setup.read();
+        assert_eq!(
+            setup.rows("SELECT printf('%d|%d', turns, unreadable_lines) FROM transcript_files"),
+            vec!["1|0"]
+        );
+        assert_eq!(setup.rows(REPLIES).len(), 3);
+        assert_eq!(
+            setup.rows(REPLIES)[0],
+            format!("msg_01A|{SESSION}|10|40|1000|200")
+        );
+    }
+
+    fn resumed(session: &str, shift: bool) -> String {
+        let mut text = a_turn_line(
+            session,
+            CWD,
+            if shift {
+                "2026-10-12T10:00:00Z"
+            } else {
+                "2026-10-12T09:00:00Z"
+            },
+        );
+        text.push('\n');
+        for line in CLAUDE_CODE_2_1_296.lines().skip(2).take(3) {
+            let line = line.replace(SESSION, session);
+            let line = if shift {
+                line.replace("T09:0", "T10:0")
+            } else {
+                line
+            };
+            text.push_str(&line);
+            text.push('\n');
+        }
+        let fresh = a_reply_line(
+            session,
+            CWD,
+            "2026-10-12T10:02:00Z",
+            "msg_02A",
+            "claude-opus-5-5",
+            usage(3, 4, 0, 0),
+        );
+        text.push_str(&fresh);
+        text.push('\n');
+        text
+    }
+
+    #[test]
+    fn counts_a_resumed_session_once() {
+        let setup = Setup::new("counts-resumed-once");
+        std::fs::write(setup.transcript(OTHER), resumed(OTHER, true)).expect("the resumed file");
+        std::fs::write(setup.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("the original");
+        setup.read();
+        assert_eq!(
+            setup.rows(REPLIES),
+            vec![
+                format!("msg_01A|{SESSION}|10|40|1000|200"),
+                format!("msg_02A|{OTHER}|3|4|0|0"),
+                format!("req_01B|{SESSION}|5|7|0|0"),
+            ]
+        );
+
+        let tied = Setup::new("counts-resumed-tied");
+        std::fs::write(tied.transcript(OTHER), resumed(OTHER, false)).expect("the resumed file");
+        std::fs::write(tied.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("the original");
+        tied.read();
+        assert_eq!(
+            tied.rows(REPLIES),
+            vec![
+                format!("msg_01A|{OTHER}|10|40|1000|200"),
+                format!("msg_02A|{OTHER}|3|4|0|0"),
+                format!("req_01B|{OTHER}|5|7|0|0"),
+            ]
+        );
+
+        let subagents = setup
+            .claude()
+            .join(format!("projects/-home-me-shop/{SESSION}/subagents"));
+        std::fs::create_dir_all(&subagents).expect("a subagents folder");
+        let sub = a_reply_line(
+            SESSION,
+            CWD,
+            "2026-10-12T09:05:00Z",
+            "msg_SUB",
+            "claude-opus-5-5",
+            usage(2, 2, 0, 0),
+        );
+        std::fs::write(subagents.join("agent-a.jsonl"), format!("{sub}\n"))
+            .expect("a subagent file");
+        let summary = setup.read();
+        assert_eq!(
+            (summary.files, summary.sessions, summary.new_sessions),
+            (3, 2, 0)
+        );
+        assert!(
+            setup
+                .rows(REPLIES)
+                .contains(&format!("msg_SUB|{SESSION}|2|2|0|0"))
+        );
+    }
+
+    #[test]
+    fn keeps_the_largest_counters_when_a_later_file_repeats_a_reply() {
+        let setup = Setup::new("keeps-largest-counters");
+        std::fs::write(setup.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("the original");
+        setup.read();
+        let partial = CLAUDE_CODE_2_1_296.lines().nth(2).expect("L3");
+        let partial = partial.replace(SESSION, OTHER);
+        std::fs::write(setup.transcript("zzz"), format!("{partial}\n")).expect("a fork");
+        setup.read();
+        assert_eq!(
+            setup.rows(REPLIES)[0],
+            format!("msg_01A|{SESSION}|10|40|1000|200")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_whatever_is_not_a_transcript() {
+        use std::os::unix::fs::symlink;
+
+        let setup = Setup::new("refuses-not-transcripts");
+        let claude = setup.claude();
+        let marker = a_turn_line("s", "/SECRET-MARKER", "2026-10-12T09:00:00Z");
+        std::fs::write(claude.join(".credentials.json"), "SECRET-MARKER").expect("credentials");
+        let outside = setup.temp.root.join("outside.jsonl");
+        std::fs::write(&outside, format!("{marker}\n")).expect("an outside transcript");
+        let folder = claude.join("projects/-x");
+        std::fs::create_dir_all(folder.join("s/tool-results")).expect("folders");
+        symlink(claude.join(".credentials.json"), folder.join("evil.jsonl")).expect("a link");
+        symlink(&outside, folder.join("out.jsonl")).expect("a link");
+        std::fs::create_dir_all(claude.join("jobs/j")).expect("a jobs folder");
+        std::fs::write(claude.join("jobs/j/state.json"), format!("{marker}\n")).expect("a job");
+        std::fs::write(claude.join("history.jsonl"), format!("{marker}\n")).expect("a history");
+        std::fs::write(folder.join("s/tool-results/r.jsonl"), format!("{marker}\n"))
+            .expect("a result");
+
+        let summary = setup.read();
+        assert_eq!(summary.refused, 2);
+        assert_eq!(summary.files, 0);
+        assert!(setup.rows("SELECT path FROM transcript_files").is_empty());
+        let bytes = std::fs::read(setup.db()).expect("the index file");
+        let secret = b"SECRET-MARKER";
+        assert!(!bytes.windows(secret.len()).any(|window| window == secret));
+    }
+
+    #[test]
+    fn counts_what_it_could_not_read() {
+        let setup = Setup::new("counts-unreadable");
+        std::fs::write(setup.transcript(SESSION), "not json\nnot json\nnot json\n")
+            .expect("a file");
+        setup.read();
+        assert_eq!(
+            setup.rows("SELECT printf('%d|%d', turns, unreadable_lines) FROM transcript_files"),
+            vec!["0|3"]
+        );
+        assert!(setup.rows("SELECT session_id FROM sessions").is_empty());
+    }
+}
