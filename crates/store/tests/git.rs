@@ -1555,3 +1555,36 @@ fn prunes_stale_worktrees() {
     assert!(!listed.contains("CTV-1"), "{listed}");
     repository.git(&["checkout", "catervas/CTV-1"]);
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn repairs_worktrees_after_a_move() {
+    // A worktree finds its repository by the path it was made at, so a repository that moves
+    // leaves every worktree outside it unable to run git until it is told where they are.
+    let repository = TempRepo::new("repair-worktrees");
+    let git = repository.adapter();
+    let worktree = repository.path.with_extension("elsewhere");
+    let _ = std::fs::remove_dir_all(&worktree);
+    git.create_worktree(&worktree, "catervas/CTV-1", "main")
+        .expect("the worktree is made");
+    let moved = repository.path.with_extension("moved");
+    let _ = std::fs::remove_dir_all(&moved);
+    std::fs::rename(&repository.path, &moved).expect("the repository is moved");
+    let status = std::process::Command::new("git")
+        .args(["status"])
+        .current_dir(&worktree)
+        .output()
+        .expect("git runs");
+    assert!(
+        !status.status.success(),
+        "the worktree has lost its repository"
+    );
+
+    Git::open(moved.clone())
+        .repair_worktrees()
+        .expect("the worktrees are repaired");
+
+    git_in(&worktree, &["status"]);
+    let _ = std::fs::remove_dir_all(&worktree);
+    std::fs::rename(&moved, &repository.path).expect("the repository is moved back");
+}

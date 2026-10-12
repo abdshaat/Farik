@@ -3368,28 +3368,20 @@ mod tests {
         let report = orchestrator.tick().await.expect("the tick runs");
         assert_eq!(acted_on(&report), Some("CTV-4"), "{report:?}");
 
-        // Located again: each task's next tick works in the member, where it now is.
-        let files = &harness.project.deps.files;
-        files
-            .write_repos(
-                &catervas_core::repos::validate_repos(&json!({ "repos": [
-                    { "name": "app", "path": moved.display().to_string() },
-                    { "name": "infra", "path": members[1].path.display().to_string() },
-                ] }))
-                .expect("repos"),
-            )
-            .expect("repos.yaml is written");
-        // Git keeps a worktree's way back to its repository by path, so a moved repository is told
-        // where its worktrees are.
-        git_in(
-            &moved,
-            &[
-                "worktree",
-                "repair",
-                &harness.worktree("CTV-2").display().to_string(),
-                &harness.worktree("CTV-3").display().to_string(),
-            ],
-        );
+        // Located again: each task's next tick works in the member, where it now is, and the
+        // worktrees of its open tasks have been told where it is.
+        let home = std::fs::canonicalize(std::env::temp_dir()).expect("the temporary directory");
+        assert!(harness.daemon.set_home(home.clone()));
+        let located = crate::daemon::fixtures::answered(
+            &harness.daemon,
+            "repo.locate",
+            &json!({
+                "name": "app",
+                "path": moved.strip_prefix(&home).expect("under home").display().to_string(),
+            }),
+        )
+        .await;
+        assert!(located.get("error").is_none(), "{located}");
         let alone = |task: &str| TickScope {
             task_id: Some(task.parse().expect("an id")),
             rules: TickRules::All,

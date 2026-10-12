@@ -258,6 +258,18 @@ impl Git {
         Ok(())
     }
 
+    /// Tells git where this repository's worktrees are after it moved: every worktree outside it
+    /// finds its repository by the path it was made at, and runs no git until it is repaired.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when git refuses.
+    pub fn repair_worktrees(&self) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.at_root(&["worktree", "repair"])?;
+        Ok(())
+    }
+
     /// Makes a worktree at `path` with `at` checked out and no branch: a place to look at a commit
     /// that nothing will commit to, such as the base a task's new tests are run against (5.4).
     ///

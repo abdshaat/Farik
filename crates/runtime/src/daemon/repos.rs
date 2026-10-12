@@ -295,6 +295,11 @@ fn locate(deps: &ToolDeps, home: Option<&Path>, params: &Value) -> Result<Value,
     deps.files
         .write_repos(&with_entries(&entries)?)
         .map_err(|e| internal(&e))?;
+    // The worktrees of the member's open tasks link to its old folder. A repair that fails does not
+    // undo the move: the folder is recorded, and the daemon's log says what git answered.
+    if let Err(error) = Git::open(Path::new(&path).to_path_buf()).repair_worktrees() {
+        eprintln!("repo.locate: the worktrees of {name} could not be repaired: {error}");
+    }
     let body =
         serde_json::from_value(json!({ "name": name, "path": path })).map_err(|e| internal(&e))?;
     append(deps, EventBody::RepoMoved(body))?;
@@ -311,7 +316,7 @@ mod tests {
     use catervas_core::repos::validate_repos;
     use catervas_core::team::Team;
     use catervas_protocol::event::{EventBody, EventKind};
-    use catervas_store::git::fixtures::TempRepo;
+    use catervas_store::git::fixtures::{TempRepo, git_in};
     use serde_json::{Value, json};
 
     use crate::daemon::DaemonState;
@@ -916,5 +921,50 @@ mod tests {
         assert_eq!(answered["result"], json!({}), "{answered}");
         assert_ne!(repos_yaml(&folder), before);
         assert_eq!(repo_events(&folder).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_located_members_tasks_work_again() {
+        let folder = folder("repairs");
+        folder
+            .project
+            .filed_with("CTV-1", "in_progress", "task", None, |wire| {
+                wire["repo"] = json!("app");
+            });
+        let worktree = folder
+            .project
+            .repo
+            .path
+            .join(".catervas/local/worktrees/CTV-1");
+        folder
+            .app
+            .adapter()
+            .create_worktree(&worktree, &folder.project.branch("CTV-1"), "main")
+            .expect("app makes the worktree");
+        let away = folder.app.path.with_extension("away");
+        let _ = std::fs::remove_dir_all(&away);
+        std::fs::rename(&folder.app.path, &away).expect("the repository is moved away");
+        assert!(
+            !std::process::Command::new("git")
+                .arg("status")
+                .current_dir(&worktree)
+                .output()
+                .expect("git runs")
+                .status
+                .success(),
+            "the worktree has lost its repository"
+        );
+
+        let located = call(
+            &folder.state,
+            "repo.locate",
+            &json!({ "name": "app", "path": named(&away) }),
+            "emptyResult",
+        );
+
+        assert_eq!(located, json!({}));
+        git_in(&worktree, &["status"]);
+        let _ = std::fs::remove_dir_all(&away);
     }
 }

@@ -151,7 +151,7 @@ Files: `git.rs` (`repair_worktrees`) and `tests/git.rs`; `daemon/repos.rs`.
 - `repairs_worktrees_after_a_move` (`tests/git.rs`, ignored as its neighbours): a repository with a worktree outside it is moved; `git -C <worktree> status` fails; after `repair_worktrees` on the moved repository, it succeeds. RED.
 - `a_located_members_tasks_work_again` (`daemon/repos.rs`): `CTV-1` `in_progress` in `app` with its worktree; `app` moved and `repo.locate`d; `git -C <worktree> status` succeeds, and `waits_while_its_member_is_missing`'s `git worktree repair` workaround (step 02's test) is removed, the test still passing. RED: the worktree's `git status` fails after the locate.
 
-- [ ] `fix(runtime): repair a located member's worktrees`
+- [x] `fix(runtime): repair a located member's worktrees`
 
 ### Task 4: A member with work is kept
 
