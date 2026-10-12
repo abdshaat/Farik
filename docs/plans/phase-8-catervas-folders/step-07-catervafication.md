@@ -1,6 +1,6 @@
 # Phase 8, step 07: Catervafication
 
-Status: done (executed and landing-reviewed 2026-10-11; lands after fixes bab2de92 … f42c6f1b; spec 0.100; the epic and its close-out worded for the owner)
+Status: done (executed and landing-reviewed 2026-10-11; lands after fixes bab2de92 … f42c6f1b; spec 0.101; the epic and its close-out worded for the owner)
 Branch: `phase/8-catervas-folders` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 4.1, 5.2, 5.9, 5.16, 5.17, 6.1 to 6.5, 6.8, 8.5; F5, F6
 Depends on: steps 01, 01b, 03, 03b, 04 and 05 of this phase (planned, not yet executed: `ROLE_FOLDERS`, `role_folder`; the Product Manager's docs tasks and `REVIEWER_ROLE_FOR`'s Product Manager row; `catervas_write_folder_doc` in ceremony sessions; the owner's acceptance of a task that may change the product plan; `DOCUMENT_NAMES`; `epic_step` in `in_progress_epic`); step 06 (being planned, not yet executed): only the event kind `project.started` (read through `catervas_store::product_plan::new_project`), `task.created`'s `product_plan` (which names the plan's task) and the fact `product_plan_approved`, asked through its `Transitions::awaits_the_product_plan(team)` at one call site in this plan, so a change of its signature is a one-line edit there; phase 7, the Catervas rename and task ids `CTV-<n>` (merged on main, 0f2229b7). Step 07b, next, builds the screens and the sprint review's refreshes on what this step answers.
