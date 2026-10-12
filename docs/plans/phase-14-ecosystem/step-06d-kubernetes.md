@@ -1,11 +1,11 @@
-# Phase 13, step 06d: Kubernetes, and a key kept as a file
+# Phase 14, step 06d: Kubernetes, and a key kept as a file
 
 Status: draft. Its readiness review runs once step 06c has landed.
-Branch: `phase/13-ecosystem` (the phase branch; steps do not get their own)
+Branch: `phase/14-ecosystem` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 6.9, 8.2, 8.6; F9
 Depends on: step 06c (`Production.image`, `image_for`); step 06 (`call_tool`, `ADAPTERS`, `Connection`); step 05 (the approved `ConnectorFileKey` board); phase 7 step 01 (the launcher, `LaunchSpec`, `POST /connector/launch`, `catervas connect`); phase 7 steps 05 and 05b (the kit format, `spec_sha256`, `ConnectorAdd`, `KitConnect`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
-Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 12d until then (its file was `step-12d-kubernetes.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 13, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 11 step 01; step 13, the kit check, is phase 11 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 10 moved up by one.
+Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 12d until then (its file was `step-12d-kubernetes.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 14, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 12 step 01; step 13, the kit check, is phase 12 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 11 moved up by one.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 06 (see step 06's header).
 
