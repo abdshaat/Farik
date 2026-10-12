@@ -52,6 +52,8 @@ Out of scope: moving a project folder back to one repository; a second conversio
 
 1. **Make the project folder** as `create_folder` does (step 01): `mkdir -p` of the parent, then `git init -b main`, the README, and its commit "Start the project".
 2. **Copy `.catervas/`** from `old_root` to the project folder, links never followed, leaving out `local/worktrees/`, `local/run.lock`, `local/daemon.json`, `local/integration.lock` and `local/setup-pending`. The log, contracts, sprints, team, memory, decisions, local settings and the private folders all move with it.
+   - The copy runs after the driver has ended and every handle on the log is dropped.
+   - The log's `catervas.db` is copied together with its `catervas.db-wal` and `catervas.db-shm` when they are there, so the copy holds every appended event; SQLite replays the WAL when the copy is opened.
 3. **Copy the connector keys and the Procurement mailbox** with carry's `copy_keys` and `carry_mailbox` (`crates/cli/src/carry.rs`), from the old root's project id to the project folder's (`local_project_id`, `connectors.rs:88`). No `keys-copied.json` notice is written: the team and its keys are the same.
 4. **Move the documents**, read from the old repository's integration branch (`Git::tree_entries` and `file_at`), into the project folder's `docs/catervas/`:
    - `product/`, `delivery/`, `marketing/` and `architecture/plans/` to the same paths
@@ -65,6 +67,7 @@ Out of scope: moving a project folder back to one repository; a second conversio
    In the copied `team.yaml`, `policy.integration_branch` is cleared: it now names the project folder's own branch, which is `main` (ADR 0057's amendment).
 6. **Give the builders' open tasks their repository.** Every task whose assignee changes code (`changes_code`) and that is neither cancelled nor integrated gains `repo: <first_name>`. Its contract file is written directly, as a migration, and `contract.written { written_by: "catervas" }` is recorded for it. This bypasses the freeze, since its work has not moved (`draft`, `refining`, `ready` or in the Backlog, by the check above). Rejected: leaving them to `RepoRequired`, which would send every ready builder task back to refining.
 7. **Record, in the copied log:** `repo.added` for each member, then `project.converted { project_folder, first_repo, branch }`.
+7b. **Rescan the checks.** The copied criteria library holds the old repository's scanned entries with no `repo` (step 02b). Left as they are, they would expand into a task in any member. So the move drops every `source: project_scan` entry with no `repo`, keeps the human's entries, and then calls step 02b's `rescan_members(.., None, CATERVAS_ACTOR)`. That writes each member's entries, `<first_name>-<name>` among them, records `project.scanned` and `criteria.updated`, and rewrites `project.md`. A contract that already expanded an old entry keeps it: the command runs in its task's member, the first, where it was found.
 8. **Leave the removal for the owner.**
    - In the old repository, from its integration branch, Catervas makes the branch `catervas/moved-out` (or `catervas/moved-out-<n>`, the first free name) with one commit, "Remove Catervas's files: the team moved to <project folder>". The commit removes every tracked path under `.catervas/` and `docs/catervas/`.
    - It works in a temporary detached worktree under the project folder's `.catervas/local/moving/`, so the owner's checkout is not touched, and removes that worktree afterwards.
@@ -75,6 +78,10 @@ Out of scope: moving a project folder back to one repository; a second conversio
 **A failure** in steps 1 to 7 removes the project folder made so far, leaves the old repository untouched, and goes back to `Mode::Drive(old_root)`, with the sentence in `WebState.take_on_error`. Settings › Repositories shows it, the page saying "Catervas could not add the repository: <sentence>". A failure in steps 8 or 9 keeps the move, and the sentence is shown in the same place once the project folder is driven.
 
 ### After the move
+
+- **Readiness and approvals stand.** The migration's `contract.written` does not send a ready task back. A `ready` task's next move, to `assigned`, is gated by the assignment (`transition_table.rs`: `Ready → Assigned`, `G::Assignment`), not by readiness again. The judgment (`judgment_since_written`, `transitions.rs:1471`) is read only for `refining → ready`. An approval counts from the last move into `refining` (`catervafication.rs` `start`'s comment). A `refining` task's judgment is asked again after the write, as after any write.
+- **An earlier Catervafication covers the first member.** If the one-repo project was Catervafied, its `catervafication.started` has no `repos` and no `repo` (step 06's `Scope::Repository`). After a `project.converted`, step 06's `covered_repos` counts a `Repository`-scope start as covering that event's `first_repo`, and as the project-wide start, so `offered_repos` offers the second member alone. This is a change to step 06's `covered_repos`, made in this step's Task 4.
+- **A member's own Catervafication writes the system map the first time.** When `docs/catervas/architecture/system.md` is not on the project folder's integration branch, step 06's member-scope system row is the project-wide one, "Map how the repositories connect", in place of "Bring the system map up to date with <name>". It depends on that member's architecture task alone. Also changed in this step's Task 4.
 
 - **A moved repository opens its project folder.** Each of these reads `.catervas/local/moved-to` first and uses the folder it names, when that folder is a project folder:
   - `found()` (`serve.rs:122`)
@@ -98,6 +105,8 @@ crates/cli/src/convert.rs, crates/cli/src/lib.rs    creates, modifies, tests: co
 crates/cli/src/serve.rs, crates/cli/tests/serving.rs   modifies, tests: Driven::Converted, the switch (Task 4)
 crates/cli/src/setup.rs, crates/cli/src/project.rs  modifies, tests: moved-to read by found, project.open, open_project (Task 4)
 crates/runtime/src/daemon/repos.rs                  modifies, tests: repos.list's moved_out (Task 4)
+crates/runtime/src/catervafication.rs               modifies, tests: covered_repos after a move, the first system map of a member's own (Task 4)
+crates/runtime/src/orchestrator/rules.rs            tests: a moved ready task assigned (Task 4)
 apps/web/src/pages/settings/{Repositories.tsx,AddSecondRepository.tsx}, apps/web/src/pages/Today.tsx, apps/web/src/app/refusals.ts, apps/web/src/strings/en.ts, tests   modifies, creates (Task 5)
 docs/SPEC.md                                        modifies (Task 6)
 ```
@@ -107,6 +116,7 @@ docs/SPEC.md                                        modifies (Task 6)
 Consumes:
 - step 01's `create_folder`'s making of a project folder (its steps 1 and the README), `member_root`, `check_member`, `write_repos`, `repo.added`
 - step 07's `Repositories`, `FolderBrowser`, `repoNameOf`
+- step 02b's `rescan_members`, `CATERVAS_ACTOR`; step 06's `covered_repos`, `Scope`, the system row
 - `project.leave`'s stop (`team.rs:1845`), `WebState`, `Driven`, `drive`, `found`, `remember`
 - `copy_keys`, `carry_mailbox`, `local_project_id`
 - `Git::tree_entries`, `file_at`, `has_file`, `create_detached_worktree`, `remove_worktree`
@@ -172,6 +182,8 @@ Files: `convert.rs`; `lib.rs`. Tests on two `TempRepo`s under a temp home, the f
   - `CTV-3`'s contract has `repo: bakery` and a `contract.written` by `catervas`; `CTV-4`'s has no `repo`.
   - The log ends with two `repo.added` and `project.converted`.
   - The connector key reads under the project folder's id.
+  - The library has no untagged `project_scan` entry, has `bakery`'s and `web`'s rescanned entries, and keeps the human's entry.
+  - With a `catervas.db-wal` present before the copy, every event appended before the move is in the copied log.
 
   RED.
 - `leaves_the_removal_for_the_owner`:
@@ -187,10 +199,12 @@ Files: `convert.rs`; `lib.rs`. Tests on two `TempRepo`s under a temp home, the f
 
 ### Task 4: The switch, and after it
 
-Files: `serve.rs`; `setup.rs`; `project.rs`; `daemon/repos.rs`; `tests/serving.rs`.
+Files: `serve.rs`; `setup.rs`; `project.rs`; `daemon/repos.rs`; `catervafication.rs`; `rules.rs`'s test; `tests/serving.rs`.
 
 - `adds_a_second_repository_from_the_browser` (`tests/serving.rs`, as `changes_project_from_the_browser`, `:1884`): over the held port, `project.convert` is answered. `serve.status`'s `project_root` then becomes the project folder, `repos.list` answers both members, `tasks.list` still holds `CTV-3` with `repo: "bakery"`, and the port and the browser's session are the same. RED.
 - `opens_a_moved_repository_s_project_folder` (`setup.rs`, `project.rs`, `serve.rs`'s `found`): with `moved-to` naming a project folder, `open_project(old_root)` opens the project folder, `project.open` of the old root takes the project folder on as it is, and `found()` in the old root drives the project folder. A `moved-to` naming a folder that is no project folder is ignored. RED.
+- `a_ready_task_still_goes_to_work` (`orchestrator`, `Harness` over the moved project folder): `CTV-3`, `ready` with its new `repo: bakery`, is assigned on the next tick, and its worktree is made from `bakery`'s integration branch, with no new judgment asked. RED.
+- `covers_the_first_member_after_a_move` (`catervafication.rs`): with a `Repository`-scope `catervafication.started` and then `project.converted { first_repo: bakery }`, `covered_repos` is `{bakery}` and `offered_repos` is `[web]`. `catervafication_start { repo: "web" }` with no `system.md` on `main` files "Map how the repositories connect", depending on `web`'s Architect task. RED.
 - `reminds_of_the_branch_to_merge` (`daemon/repos.rs`): after the move, `repos.list`'s `bakery` row has `moved_out: "catervas/moved-out"`. Once that branch is merged into its integration branch, it is `null`. `web`'s is `null`. RED.
 
 - [ ] `feat(cli): drive the project folder a repository moved into`
