@@ -287,6 +287,14 @@ impl Harness {
         })
     }
 
+    /// A harness on the suggested six (`with_the_suggested_six`) whose previews can run, so that the
+    /// Designer's browser is ready.
+    pub(crate) fn with_the_suggested_six(name: &str) -> Self {
+        let mut harness = Self::new(name, crate::tools::fixtures::with_the_suggested_six);
+        harness.previews = Arc::new(crate::preview::fixtures::FakePreviews::ready());
+        harness
+    }
+
     /// A harness whose team also has two Finance Specialists, `fin` and `fin-2`, each of whom may
     /// hold two tasks.
     pub(crate) fn with_finance(name: &str) -> Self {
@@ -514,6 +522,45 @@ impl Harness {
         git_in(root, &["commit", "-m", message]);
     }
 
+    /// `project.started`, about no task: the project is new, and its product plan is not approved
+    /// until both documents are on the integration branch (`approve_the_product_plan`).
+    pub(crate) fn started(&self) {
+        let wire = json!({
+            "seq": 1,
+            "recorded_at": at().to_rfc3339(),
+            "team_id": "catervas",
+            "project_id": "catervas",
+            "kind": "project.started",
+            "body": {
+                "name": "little-oak-cakes",
+                "description": "A bakery that sells cakes online and bakes to order."
+            },
+        });
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        let deps = &self.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+    }
+
+    /// Both documents of the product plan, committed on the branch checked out at the root.
+    pub(crate) fn approve_the_product_plan(&self) {
+        let root = &self.project.repo.path;
+        for path in catervas_core::folders::PRODUCT_PLAN {
+            let file = root.join(path);
+            std::fs::create_dir_all(file.parent().expect("a folder")).expect("the folder");
+            std::fs::write(file, "# A document\n").expect("the file is written");
+            git_in(root, &["add", "--", path]);
+        }
+        git_in(root, &["commit", "-m", "Approve the product plan"]);
+    }
+
     /// `task` accepted, its worktree gone, with `a.txt`'s first line changed on its branch and
     /// changed differently on `main` afterwards, so that merging it conflicts in `a.txt`.
     pub(crate) fn accepted_in_conflict(&self, task: &str) {
@@ -558,6 +605,11 @@ impl Harness {
     /// Merges `task`'s branch into `origin`'s `main` from a clone of `origin` of its own, as the
     /// human merging its pull request on the forge would, and answers the merge commit.
     pub(crate) fn merge_on_the_forge(&self, origin: &Path, task: &str) -> String {
+        self.merge_branch_on_the_forge(origin, &self.branch(task))
+    }
+
+    /// `merge_on_the_forge` for any branch of the project, a folder change's among them.
+    pub(crate) fn merge_branch_on_the_forge(&self, origin: &Path, branch: &str) -> String {
         let clone = self.project.repo.path.with_extension("forge");
         let _ = std::fs::remove_dir_all(&clone);
         let parent = clone.parent().expect("a parent");
@@ -573,17 +625,14 @@ impl Harness {
         git_in(&clone, &["config", "user.email", "test@catervas.invalid"]);
         git_in(&clone, &["config", "commit.gpgsign", "false"]);
         let root = self.project.repo.path.to_str().expect("a path").to_string();
-        git_in(
-            &clone,
-            &["fetch", &root, &format!("refs/heads/{}", self.branch(task))],
-        );
+        git_in(&clone, &["fetch", &root, &format!("refs/heads/{branch}")]);
         git_in(
             &clone,
             &[
                 "merge",
                 "--no-ff",
                 "-m",
-                &format!("Merge pull request for {task}"),
+                &format!("Merge pull request for {branch}"),
                 "FETCH_HEAD",
             ],
         );
@@ -591,6 +640,30 @@ impl Harness {
         let sha = git_output_in(&clone, &["rev-parse", "HEAD"]);
         let _ = std::fs::remove_dir_all(&clone);
         sha
+    }
+
+    /// Folder change 1 of `path` holding `text`, as the Scrum Master's write at a ceremony leaves
+    /// it: the branch `docs/folder-1` from the integration branch, and `folder_doc.written`.
+    pub(crate) fn folder_change(&self, path: &str, text: &str) -> u64 {
+        let deps = &self.project.deps;
+        let team = deps.files.read_team().expect("the team reads");
+        let landed = crate::tools::folders::land(
+            deps,
+            &team,
+            &[(path.to_string(), text.to_string())],
+            "docs(delivery): cadence.md by Sol",
+            Some("Sol (Catervas) <catervas@localhost>"),
+        )
+        .expect("the change is made")
+        .expect("the files differ");
+        self.project.record_in(
+            Some("sm"),
+            Some("session-1"),
+            "",
+            "folder_doc.written",
+            &json!({ "path": path, "written_by": "sm", "change": landed.change, "sha": landed.sha }),
+        );
+        landed.change
     }
 
     /// `origin` added at a path where there is no repository, so that every push to it fails.

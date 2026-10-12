@@ -37,6 +37,7 @@ export type MethodName =
 	| "browser.pull"
 	| "request.file"
 	| "contract.save"
+	| "files.save"
 	| "team.save"
 	| "agent.replace"
 	| "team.start"

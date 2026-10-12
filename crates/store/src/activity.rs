@@ -6,13 +6,14 @@ use std::str::FromStr as _;
 
 use catervas_core::contract::{Role, TaskId, TaskStatus};
 use catervas_core::marketing::{CapScope, network_name};
-use catervas_core::team::{AgentStatus, Team};
+use catervas_core::team::{AgentStatus, Integration, Team};
 use catervas_protocol::event::{
-    CatervasEvent, EventBody, EventKind, MessageKind, SessionStartedBodyPurpose,
+    CatervasEvent, EventBody, EventKind, MessageKind, SessionStartedBodyPurpose, Thread,
 };
 use chrono::{DateTime, Utc};
 
 use crate::files::ProjectFiles;
+use crate::folder_docs::{FolderDocProposal, ProposalState, folder_docs};
 use crate::marketing::{
     PausedWhy, PostMove, PostMoveKind, budgets_reached, campaigns_paused, marketing_plans,
     post_moves,
@@ -67,6 +68,10 @@ pub struct AgentActivity {
 /// # Errors
 ///
 /// What the store refused.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one pass over the team, each state in its precedence"
+)]
 pub fn activity(
     log: &EventLog,
     projections: &Projections,
@@ -100,6 +105,7 @@ pub fn activity(
         ..EventQuery::default()
     })?;
     let waiting = crate::waiting::waiting(projections, log, files, team)?;
+    let proposals = folder_docs(log)?.proposals;
     let mut all = Vec::new();
     for agent in team
         .agents
@@ -158,6 +164,14 @@ pub fn activity(
             ));
             continue;
         }
+        if proposals
+            .iter()
+            .any(|each| each.state == ProposalState::Pending && each.agent_id == id)
+        {
+            let line = "Waiting on you: product plan changes".to_string();
+            all.push(one(ActivityState::Waiting, line, None, None));
+            continue;
+        }
         if let Some((task, line)) = plan_waiting(&plans, &board, team, id) {
             all.push(one(ActivityState::Idle, line, Some(task), None));
             continue;
@@ -170,6 +184,29 @@ pub fn activity(
         ));
     }
     Ok(all)
+}
+
+/// Rewrites the lines of a new project whose product plan waits for approval: an idle agent
+/// has nothing to do until it is approved, and an agent waiting on the plan's task waits on the
+/// owner for it. A working, resting or paused agent keeps its line.
+pub fn while_the_plan_waits(all: &mut [AgentActivity], team: &Team, plan_task: Option<&TaskId>) {
+    for one in all {
+        match one.state {
+            ActivityState::Idle => {
+                let planner = team
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id.as_str() == one.agent_id)
+                    .is_some_and(|agent| Role::from(agent.role) == Role::ScrumMaster);
+                let what = if planner { "plan" } else { "do" };
+                one.line = format!("Nothing to {what} until your plan is approved");
+            }
+            ActivityState::Waiting if plan_task.is_some() && one.task_id.as_ref() == plan_task => {
+                one.line = "Waiting on you: your product plan".to_string();
+            }
+            _ => {}
+        }
+    }
 }
 
 /// What an agent waiting on the human is doing, in a sentence: for a connector call, a post
@@ -285,7 +322,8 @@ pub struct Moved {
 }
 
 /// What moved after `since`, oldest first: the moves, the integrations, the human's acceptances,
-/// the agents' naps, the ceremonies' posts, and what happened to the social posts.
+/// the agents' naps, the ceremonies' posts, what happened to the social posts, and who proposed
+/// changes to the product plan.
 ///
 /// # Errors
 ///
@@ -426,8 +464,148 @@ pub fn moved_since(
                 )
             }),
     );
+    moved.extend(proposal_moves(log, &who, since)?);
+    moved.extend(architecture_moves(log, team, &who, since)?);
     moved.sort_by_key(|(seq, _)| *seq);
     Ok(moved.into_iter().map(|(_, moved)| moved).collect())
+}
+
+/// Who proposed changes to the product plan since `since`: one line for each agent and sprint
+/// review, with the latest proposal's sequence number and time, and `k` the distinct documents.
+fn proposal_moves(
+    log: &EventLog,
+    who: &impl Fn(&str) -> String,
+    since: DateTime<Utc>,
+) -> Result<Vec<(u64, Moved)>, StoreError> {
+    let docs = folder_docs(log)?;
+    let mut groups: Vec<(&FolderDocProposal, Vec<&str>)> = Vec::new();
+    for each in docs.proposals.iter().filter(|each| each.at > since) {
+        let same = |(first, _): &(&FolderDocProposal, Vec<&str>)| {
+            first.agent_id == each.agent_id && first.sprint_id == each.sprint_id
+        };
+        match groups.iter_mut().find(|group| same(group)) {
+            Some((latest, paths)) => {
+                *latest = each;
+                if !paths.contains(&each.path.as_str()) {
+                    paths.push(&each.path);
+                }
+            }
+            None => groups.push((each, vec![&each.path])),
+        }
+    }
+    Ok(groups
+        .into_iter()
+        .map(|(latest, paths)| {
+            let what = match paths.len() {
+                1 => "a change".to_string(),
+                k => format!("{k} changes"),
+            };
+            let line = format!(
+                "{} proposed {what} to the product plan from the sprint {} review.",
+                who(&latest.agent_id),
+                latest.sprint_id.trim_start_matches('S')
+            );
+            (
+                latest.proposal,
+                Moved {
+                    at: latest.at,
+                    by: latest.agent_id.clone(),
+                    line,
+                },
+            )
+        })
+        .collect())
+}
+
+/// An Architect's `review` session, the sprint it came after, and its latest write: its seq and
+/// time.
+struct ReviewSession {
+    session: String,
+    agent: String,
+    sprint: String,
+    wrote: Option<(u64, DateTime<Utc>)>,
+}
+
+/// Where the Architect brought its notes up to date since `since`: one line for each of its `review`
+/// sessions that wrote a folder document, at its latest write, naming the sprint of the last
+/// `sprint.ended` before the session started. Under the `pull_request` policy the change reaches
+/// the project only when it is merged, and the line says it was sent as a pull request.
+fn architecture_moves(
+    log: &EventLog,
+    team: &Team,
+    who: &impl Fn(&str) -> String,
+    since: DateTime<Utc>,
+) -> Result<Vec<(u64, Moved)>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![
+            EventKind::SprintEnded,
+            EventKind::SessionStarted,
+            EventKind::FolderDocWritten,
+        ],
+        ..EventQuery::default()
+    })?;
+    let is_architect = |agent: &str| {
+        team.agents
+            .iter()
+            .any(|each| each.id.as_str() == agent && Role::from(each.role) == Role::Architect)
+    };
+    let mut last_ended: Option<String> = None;
+    // Each review session of an Architect, with the sprint it came after, and its latest write.
+    let mut sessions: Vec<ReviewSession> = Vec::new();
+    for event in &events {
+        let ids = &event.envelope.ids;
+        match &event.body {
+            EventBody::SprintEnded(body) => last_ended = Some(body.sprint_id.as_str().to_string()),
+            EventBody::SessionStarted(body) if body.thread == Some(Thread::Review) => {
+                if let (Some(agent), Some(session), Some(sprint)) =
+                    (&ids.agent_id, &ids.session_id, &last_ended)
+                    && is_architect(agent)
+                {
+                    sessions.push(ReviewSession {
+                        session: session.clone(),
+                        agent: agent.clone(),
+                        sprint: sprint.clone(),
+                        wrote: None,
+                    });
+                }
+            }
+            EventBody::FolderDocWritten(_) if event.envelope.recorded_at > since => {
+                if let Some(session) = &ids.session_id
+                    && let Some(each) = sessions.iter_mut().find(|each| &each.session == session)
+                {
+                    each.wrote = Some((event.envelope.seq, event.envelope.recorded_at));
+                }
+            }
+            _ => {}
+        }
+    }
+    let by_pull_request = team.policy.integration == Integration::PullRequest;
+    Ok(sessions
+        .into_iter()
+        .filter_map(|each| {
+            let (seq, at) = each.wrote?;
+            let (agent, n) = (&each.agent, each.sprint.trim_start_matches('S'));
+            let line = if by_pull_request {
+                format!(
+                    "{} sent the architecture notes for sprint {n} as a pull request",
+                    who(agent)
+                )
+            } else {
+                format!(
+                    "{} brought the architecture notes up to date with sprint {n}",
+                    who(agent)
+                )
+            };
+            Some((
+                seq,
+                Moved {
+                    at,
+                    by: each.agent.clone(),
+                    line,
+                },
+            ))
+        })
+        .collect())
 }
 
 /// What Catervas did with a marketing plan's ads on its own since `since`, one line each, with the
@@ -566,7 +744,7 @@ mod tests {
     use catervas_core::team::validate_team;
     use serde_json::json;
 
-    use super::{ActivityState, activity, moved_since};
+    use super::{ActivityState, AgentActivity, activity, moved_since, while_the_plan_waits};
     use crate::waiting::fixtures::{Board, at};
 
     /// Ada, Linus, and Grace, with Mira and Theo beside them, Theo paused.
@@ -580,6 +758,252 @@ mod tests {
             { "id": "theo", "display_name": "Theo", "role": "software_developer", "status": "paused" },
         ]);
         validate_team(&wire).expect("the fixture is a team")
+    }
+
+    /// `ada` proposes `path` at the sprint `sprint` review, in her session.
+    fn proposes(board: &Board, when: chrono::DateTime<chrono::Utc>, sprint: &str, path: &str) {
+        board.session(
+            when,
+            None,
+            "ada",
+            "session-1",
+            "folder_doc.proposed",
+            json!({
+                "path": path, "text": "For people.", "agent_text": "For agents.",
+                "summary": "Pie pre-orders are done.", "sprint_id": sprint, "proposed_by": "ada"
+            }),
+        );
+    }
+
+    #[test]
+    fn says_the_team_waits_for_the_plan() {
+        let team = five();
+        let one = |agent: &str, state, line: &str, task: Option<&str>| AgentActivity {
+            agent_id: agent.to_string(),
+            state,
+            line: line.to_string(),
+            task_id: task.map(|task| task.parse().expect("a task id")),
+            until: None,
+            session_id: None,
+            purpose: None,
+        };
+        let plan: catervas_core::contract::TaskId = "CTV-1".parse().expect("a task id");
+        let mut all = vec![
+            one("mira", ActivityState::Idle, "Nothing to do right now", None),
+            one(
+                "linus",
+                ActivityState::Idle,
+                "Nothing to do right now",
+                None,
+            ),
+            one(
+                "ada",
+                ActivityState::Waiting,
+                "Waiting on you: Plan",
+                Some("CTV-1"),
+            ),
+            one(
+                "grace",
+                ActivityState::Waiting,
+                "Waiting on you: Other",
+                Some("CTV-2"),
+            ),
+            one("theo", ActivityState::Paused, "Paused", None),
+        ];
+        while_the_plan_waits(&mut all, &team, Some(&plan));
+        let lines: Vec<&str> = all.iter().map(|one| one.line.as_str()).collect();
+        assert_eq!(
+            lines,
+            [
+                "Nothing to plan until your plan is approved",
+                "Nothing to do until your plan is approved",
+                "Waiting on you: your product plan",
+                "Waiting on you: Other",
+                "Paused",
+            ]
+        );
+        let mut working = vec![one("linus", ActivityState::Working, "Building it", None)];
+        while_the_plan_waits(&mut working, &team, None);
+        assert_eq!(working[0].line, "Building it");
+    }
+
+    const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+    const SPEC: &str = "docs/catervas/product/spec.md";
+
+    #[test]
+    fn an_agent_whose_changes_wait_waits_on_the_owner() {
+        let board = Board::new("activity-folder-doc-waits");
+        let team = five();
+        proposes(&board, at(9, 1), "S4", ROADMAP);
+        let ada = |board: &Board| {
+            activity(
+                &board.log,
+                &board.projections,
+                &board.files,
+                &team,
+                at(12, 0),
+            )
+            .expect("the store reads")
+            .into_iter()
+            .find(|one| one.agent_id == "ada")
+            .expect("Ada")
+        };
+
+        let waiting = ada(&board);
+        assert_eq!(waiting.state, ActivityState::Waiting);
+        assert_eq!(waiting.line, "Waiting on you: product plan changes");
+        assert!(waiting.task_id.is_none());
+
+        board.put(
+            at(9, 2),
+            None,
+            None,
+            "folder_doc.approved",
+            json!({ "proposals": [1] }),
+        );
+        assert_eq!(ada(&board).state, ActivityState::Idle);
+    }
+
+    #[test]
+    fn says_who_proposed_changes_to_the_product_plan() {
+        let board = Board::new("moved-folder-doc-proposed");
+        let team = five();
+        proposes(&board, at(8, 0), "S4", SPEC);
+        proposes(&board, at(10, 1), "S4", ROADMAP);
+        proposes(&board, at(10, 2), "S4", ROADMAP);
+        let said = |board: &Board| -> Vec<(chrono::DateTime<chrono::Utc>, String, String)> {
+            moved_since(&board.log, &board.projections, &team, at(9, 0))
+                .expect("the store reads")
+                .into_iter()
+                .map(|one| (one.at, one.by, one.line))
+                .collect()
+        };
+        assert_eq!(
+            said(&board),
+            [(
+                at(10, 2),
+                "ada".to_string(),
+                "Ada proposed a change to the product plan from the sprint 4 review.".to_string()
+            )]
+        );
+
+        proposes(&board, at(10, 3), "S4", SPEC);
+        assert_eq!(
+            said(&board),
+            [(
+                at(10, 3),
+                "ada".to_string(),
+                "Ada proposed 2 changes to the product plan from the sprint 4 review.".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn says_the_architecture_notes_were_brought_up_to_date() {
+        const FEATURES: &str = "docs/catervas/architecture/features.md";
+        const STRUCTURE: &str = "docs/catervas/architecture/structure.md";
+        const CADENCE: &str = "docs/catervas/delivery/cadence.md";
+        const REPORT: &str = "docs/catervas/product/reports/S4.md";
+        let board = Board::new("moved-architecture-notes");
+        let team_with = |integration: &str| {
+            let mut wire = catervas_core::team::fixtures::a_team_wire();
+            wire["agents"] = json!([
+                { "id": "ada", "display_name": "Ada", "role": "architect", "status": "active" },
+                { "id": "sm", "display_name": "Sam", "role": "scrum_master", "status": "active" },
+                { "id": "pm", "display_name": "Pat", "role": "product_manager", "status": "active" },
+                { "id": "dev", "display_name": "Dee", "role": "software_developer", "status": "active" },
+            ]);
+            wire["policy"]["integration"] = json!(integration);
+            validate_team(&wire).expect("the fixture is a team")
+        };
+        let wrote = |hour, agent: &str, session: &str, thread: &str, path: &str, change: u64| {
+            board.session(
+                at(hour, 0),
+                None,
+                agent,
+                session,
+                "session.started",
+                json!({
+                    "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                    "thread": thread
+                }),
+            );
+            board.session(
+                at(hour, 1),
+                None,
+                agent,
+                session,
+                "folder_doc.written",
+                json!({ "path": path, "written_by": agent, "change": change, "sha": "abc123" }),
+            );
+        };
+        let ended = |hour, sprint: &str| {
+            board.put(
+                at(hour, 0),
+                None,
+                None,
+                "sprint.ended",
+                json!({ "sprint_id": sprint, "ended_by": "human", "left": [] }),
+            );
+        };
+        // Sprint 3's review, before `since`; then sprint 4 ends and its review writes two notes;
+        // the Scrum Master's retro writes the cadence.
+        ended(7, "S3");
+        wrote(8, "ada", "session-1", "review", FEATURES, 1);
+        ended(9, "S4");
+        board.session(
+            at(10, 0),
+            None,
+            "ada",
+            "session-2",
+            "session.started",
+            json!({
+                "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                "thread": "review"
+            }),
+        );
+        for (minute, path, change) in [(1, FEATURES, 2), (3, STRUCTURE, 3)] {
+            board.session(
+                at(10, minute),
+                None,
+                "ada",
+                "session-2",
+                "folder_doc.written",
+                json!({ "path": path, "written_by": "ada", "change": change, "sha": "abc123" }),
+            );
+        }
+        wrote(11, "sm", "session-3", "retro", CADENCE, 4);
+        // The Product Manager's review writes its report after sprint 4: not the architecture's.
+        wrote(12, "pm", "session-4", "review", REPORT, 5);
+        let said = |integration: &str| -> Vec<(chrono::DateTime<chrono::Utc>, String, String)> {
+            moved_since(
+                &board.log,
+                &board.projections,
+                &team_with(integration),
+                at(9, 30),
+            )
+            .expect("the store reads")
+            .into_iter()
+            .map(|one| (one.at, one.by, one.line))
+            .collect()
+        };
+
+        assert_eq!(
+            said("manual"),
+            [(
+                at(10, 3),
+                "ada".to_string(),
+                "Ada brought the architecture notes up to date with sprint 4".to_string()
+            )]
+        );
+        assert_eq!(
+            said("pull_request"),
+            [(
+                at(10, 3),
+                "ada".to_string(),
+                "Ada sent the architecture notes for sprint 4 as a pull request".to_string()
+            )]
+        );
     }
 
     #[test]

@@ -1268,6 +1268,7 @@ mod tests {
             deps.clock.as_ref(),
             &deps.ids,
             crate::chat::NewChatMessage {
+                heard: None,
                 chat: "dev-b".to_string(),
                 author: "human".to_string(),
                 text: "How is it going?".to_string(),

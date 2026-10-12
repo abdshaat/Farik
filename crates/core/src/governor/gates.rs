@@ -126,6 +126,10 @@ pub struct AssignmentInput {
     /// plan's budget (ADR 0042, ADR 0028's exception). It is worked on at once, in no sprint,
     /// under the policy or not, and the sprint's budget does not pay for it.
     pub skips_sprints: bool,
+    /// The agent that builds the task's lane, when the task has a lane and a parent and another
+    /// task of that lane and role is not cancelled and has an active assignee: the one of them
+    /// with the highest id. `None` for the first task of a lane to be assigned.
+    pub lane_builder: Option<String>,
 }
 
 /// A row of the board as the sprint policy reads it (ADR 0028).
@@ -286,7 +290,7 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
                 .to_string(),
         );
     }
-    // An epic the Product Manager broke down is reviewed by the human (5.16 item 4), and the human
+    // An epic the Product Manager holds is reviewed by the human (5.16 item 4), and the human
     // is not an agent: there is no id to name, and nothing for the reviewer to be the assignee of.
     if expected_reviewer != Role::Human {
         if input.reviewer_id.trim().is_empty() {
@@ -301,22 +305,9 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
             ));
         }
     }
-    if input.assignee_open_tasks >= input.wip_limit {
-        reasons.push(if input.wip_limit == 0 {
-            format!(
-                "{} takes no work: its limit is zero",
-                input.assignee_id.trim()
-            )
-        } else {
-            format!(
-                "{} already holds {} unfinished tasks and the limit is {}",
-                input.assignee_id.trim(),
-                input.assignee_open_tasks,
-                input.wip_limit
-            )
-        });
-    }
+    reasons.extend(over_the_limit(input));
     reasons.extend(without_the_folder(input));
+    reasons.extend(lane_taken(contract, input));
     if !in_the_open_sprint(contract.kind, input) {
         let open = input.open_sprint.as_deref().unwrap_or_default();
         reasons.push(if input.plan_in_sprints {
@@ -344,6 +335,25 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     verdict(reasons)
 }
 
+/// Why the assignee can take no more work, if it cannot: the team's limit on work in progress.
+fn over_the_limit(input: &AssignmentInput) -> Option<String> {
+    (input.assignee_open_tasks >= input.wip_limit).then(|| {
+        if input.wip_limit == 0 {
+            format!(
+                "{} takes no work: its limit is zero",
+                input.assignee_id.trim()
+            )
+        } else {
+            format!(
+                "{} already holds {} unfinished tasks and the limit is {}",
+                input.assignee_id.trim(),
+                input.assignee_open_tasks,
+                input.wip_limit
+            )
+        }
+    })
+}
+
 /// Why the task cannot be assigned while another holds the assignee's private folder, if it
 /// cannot (6.6): one piece of work touches the folder at a time.
 fn without_the_folder(input: &AssignmentInput) -> Option<String> {
@@ -352,6 +362,20 @@ fn without_the_folder(input: &AssignmentInput) -> Option<String> {
             "private_folder_busy: another task holds {}, and one piece of work touches it at a \
              time; this one waits until that task is accepted or cancelled",
             private_folder(input.assignee_role).unwrap_or("the assignee's private folder")
+        )
+    })
+}
+
+/// Why a task cannot go to the assignee while its lane has another builder, if it cannot
+/// (ADR 0051): the tasks of one lane are built by one agent, in order.
+fn lane_taken(contract: &TaskContract, input: &AssignmentInput) -> Option<String> {
+    let builder = input.lane_builder.as_deref()?;
+    let (lane, epic) = contract.lane.zip(contract.parent.as_ref())?;
+    (builder.trim() != input.assignee_id.trim()).then(|| {
+        format!(
+            "lane_taken: lane {lane} of {epic} is {builder}'s, who builds its tasks in order; assign {task} to {builder}",
+            epic = epic.as_str(),
+            task = contract.id.as_str()
         )
     })
 }
@@ -597,58 +621,6 @@ pub fn check_children_done(children: &[ChildState]) -> GateResult {
     verdict(reasons)
 }
 
-/// Whether the Product Manager may write a product document for this contract (`docs/SPEC.md`
-/// section 5.16 items 1, 2 and 5): the writer is the Product Manager, the contract is an epic,
-/// the user has approved the contract the epic has now, and the epic is not cancelled.
-///
-/// The approval is passed in rather than read from the status, because the status cannot answer
-/// it: an epic waiting for approval sits in `escalated` (5.16 item 2), and so does one that
-/// failed the Definition of Ready three times and one whose risk needs the human, neither of
-/// which was ever approved. `user_approved` means the user approved **this** contract and the epic
-/// has not been returned to `refining` since: a human edit of a frozen contract sends the epic
-/// back to `refining` (5.11) and the approval it had does not carry over, because 5.16 item 2 asks
-/// for it before the epic leaves `refining` each time. The return is what ends the approval, not
-/// the session it starts, or a document could be written in the window between the two. The
-/// approval therefore answers 5.16 item 1's "not yet `ready`" on its own, and the status is asked
-/// only about `cancelled`: an epic escalated after its approval, for a budget or a permission,
-/// keeps the documents it was approved for.
-///
-/// # Errors
-///
-/// Every rule the write fails.
-pub fn check_product_doc_write(
-    epic_kind: Kind,
-    epic_status: TaskStatus,
-    user_approved: bool,
-    actor_role: Role,
-) -> GateResult {
-    let mut reasons = Vec::new();
-    if actor_role != Role::ProductManager {
-        reasons.push(format!(
-            "role {actor_role} may not write a product document; the Product Manager owns them"
-        ));
-    }
-    if epic_kind != Kind::Epic {
-        reasons.push(
-            "a product document is written for an epic the user approved, and this contract is a task"
-                .to_string(),
-        );
-    }
-    if !user_approved {
-        reasons.push(
-            "the user has not approved the contract this epic has now, and a product document waits for that"
-                .to_string(),
-        );
-    }
-    if epic_status == TaskStatus::Cancelled {
-        reasons.push(
-            "the epic is cancelled, and a product document would describe a decision the team abandoned"
-                .to_string(),
-        );
-    }
-    verdict(reasons)
-}
-
 /// Who is asking to write a contract, and which agent they are.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractWriteActor {
@@ -668,7 +640,8 @@ pub struct ParentEpic {
 }
 
 /// Whether a task may be created under this epic (`docs/SPEC.md` section 5.16 item 3): only its
-/// epic's assignee or the human, and only while the epic is in progress. The Definition of Ready
+/// epic's assignee, the Product Manager, who writes the tasks of every approved epic, or the
+/// human, and only while the epic is in progress. The Definition of Ready
 /// checks the task's paths and budget against the epic's; this checks who and when.
 ///
 /// # Errors
@@ -680,9 +653,13 @@ pub fn check_child_creation(parent: &ParentEpic, actor: &ContractWriteActor) -> 
     let is_the_assignee = !named.is_empty()
         && actor.kind != TransitionActor::Governor
         && actor.agent_id.as_deref().map(str::trim) == Some(named);
-    if actor.kind != TransitionActor::Human && !is_the_assignee {
+    if !matches!(
+        actor.kind,
+        TransitionActor::Human | TransitionActor::ProductManager
+    ) && !is_the_assignee
+    {
         reasons.push(format!(
-            "a task under an epic is written by the epic's assignee, {}, or by the human",
+            "a task under an epic is written by the epic's assignee, {}, by the Product Manager, or by the human",
             if named.is_empty() {
                 "which the runtime did not name"
             } else {
@@ -983,7 +960,7 @@ pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 /// assignee writing the tasks under it, and by the human. Written out rather than left as
 /// whatever is not in the other sets, so that a field added to the schema is refused until
 /// somebody says who writes it.
-pub const FIELDS_OF_THE_CONTENT: [&str; 16] = [
+pub const FIELDS_OF_THE_CONTENT: [&str; 18] = [
     "title",
     "intent",
     "summary",
@@ -1000,6 +977,8 @@ pub const FIELDS_OF_THE_CONTENT: [&str; 16] = [
     "budget",
     "allowed_paths",
     "ui_change",
+    "plan",
+    "lane",
 ];
 
 /// The fields the note tools write, which stay open whatever the contract's status: its notes,
@@ -1167,8 +1146,8 @@ mod tests {
         FIELDS_THE_STORE_OWNS, FolderWork, ParentEpic, Rejection, SprintHold, WorkState,
         check_assignment, check_blocker_resolved, check_blocker_written, check_child_creation,
         check_children_done, check_contract_write, check_criteria_recorded, check_human_triage,
-        check_product_doc_write, check_rejection_reasons, fits_the_open_sprint, in_the_backlog,
-        in_the_open_sprint, waits_for_a_sprint,
+        check_rejection_reasons, fits_the_open_sprint, in_the_backlog, in_the_open_sprint,
+        waits_for_a_sprint,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
@@ -1197,6 +1176,7 @@ mod tests {
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
             skips_sprints: false,
+            lane_builder: None,
         }
     }
 
@@ -1234,6 +1214,29 @@ mod tests {
         );
         input.has_active_scrum_master = false;
         assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+    }
+
+    #[test]
+    fn gives_a_lane_to_its_builder() {
+        let mut contract = a_contract();
+        contract.id = "CTV-5".parse().expect("a task id");
+        contract.parent = Some("CTV-3".parse().expect("a task id"));
+        contract.lane = std::num::NonZeroU64::new(2);
+        let mut input = an_assignment();
+        input.assignee_id = "dev-b".to_string();
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
+        input.lane_builder = Some("dev-a".to_string());
+        assert_eq!(
+            reasons(check_assignment(&contract, &input)),
+            [
+                "lane_taken: lane 2 of CTV-3 is dev-a's, who builds its tasks in order; assign CTV-5 to dev-a"
+            ]
+        );
+        input.assignee_id = "dev-a".to_string();
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
+        // The ids are compared trimmed.
+        input.assignee_id = " dev-a ".to_string();
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
     }
 
     #[test]
@@ -1347,7 +1350,7 @@ mod tests {
 
     #[test]
     fn asks_for_no_reviewer_agent_when_the_human_reviews_the_epic() {
-        // An epic broken down by the Product Manager is reviewed by the human (5.16 item 4), and
+        // An epic the Product Manager holds is reviewed by the human (5.16 item 4), and
         // the human is not an agent: there is no id for the runtime to pass and nothing for the
         // reviewer to be the assignee of.
         let mut epic = a_contract();
@@ -2215,7 +2218,7 @@ mod tests {
         produced.exit_criteria[0].verification = VerificationWire::Variant2 {
             method: json!("artifact"),
             must_contain: Vec::new(),
-            path: "docs/marketing/release-notes.md".to_string(),
+            path: "docs/catervas/marketing/release-notes.md".to_string(),
         };
         assert_eq!(
             reasons(check_criteria_recorded(&produced, &[], &work)),
@@ -2353,123 +2356,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_a_product_document_only_for_the_product_manager_and_an_approved_epic() {
-        assert_eq!(
-            check_product_doc_write(Kind::Epic, TaskStatus::Ready, true, Role::ProductManager),
-            Ok(())
-        );
-        assert_eq!(
-            check_product_doc_write(
-                Kind::Epic,
-                TaskStatus::InProgress,
-                true,
-                Role::ProductManager
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            reasons(check_product_doc_write(
-                Kind::Epic,
-                TaskStatus::Ready,
-                true,
-                Role::SoftwareDeveloper
-            )),
-            [
-                "role software_developer may not write a product document; the Product Manager owns them"
-            ]
-        );
-        for status in [
-            TaskStatus::Assigned,
-            TaskStatus::Verifying,
-            TaskStatus::Accepted,
-        ] {
-            assert_eq!(
-                check_product_doc_write(Kind::Epic, status, true, Role::ProductManager),
-                Ok(()),
-                "{status}"
-            );
-        }
-        // All four rules failing at once report all four, in the order they are written.
-        assert_eq!(
-            reasons(check_product_doc_write(
-                Kind::Task,
-                TaskStatus::Cancelled,
-                false,
-                Role::SoftwareDeveloper
-            )),
-            [
-                "role software_developer may not write a product document; the Product Manager owns them",
-                "a product document is written for an epic the user approved, and this contract is a task",
-                "the user has not approved the contract this epic has now, and a product document waits for that",
-                "the epic is cancelled, and a product document would describe a decision the team abandoned"
-            ]
-        );
-    }
-
-    #[test]
-    fn waits_for_the_approval_itself_and_for_a_status_that_cannot_be_stale() {
-        // An epic waiting for approval sits in `escalated`, and so does one that failed the
-        // Definition of Ready three times and one whose risk needs the human: none of the three
-        // was approved, and the status cannot tell them apart. The approval is its own fact, and
-        // the status is checked as well, because either one alone can be out of date.
-        for status in TASK_STATUSES {
-            assert!(
-                reasons(check_product_doc_write(
-                    Kind::Epic,
-                    status,
-                    false,
-                    Role::ProductManager
-                ))
-                .contains(
-                    &"the user has not approved the contract this epic has now, and a product document waits for that"
-                        .to_string()
-                ),
-                "{status}"
-            );
-        }
-        // An epic escalated after its approval, for a budget or a permission, keeps the documents
-        // it was approved for; only a cancelled one is refused on its status.
-        assert_eq!(
-            check_product_doc_write(
-                Kind::Epic,
-                TaskStatus::Escalated,
-                true,
-                Role::ProductManager
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            reasons(check_product_doc_write(
-                Kind::Epic,
-                TaskStatus::Cancelled,
-                true,
-                Role::ProductManager
-            )),
-            [
-                "the epic is cancelled, and a product document would describe a decision the team abandoned"
-            ]
-        );
-    }
-
-    #[test]
-    fn writes_a_product_document_for_an_epic_and_never_for_a_standalone_task() {
-        // Under the team policy `human_accepts_contracts: all` every contract is accepted by the
-        // human, so the approval alone does not say this one is an epic.
-        assert_eq!(
-            reasons(check_product_doc_write(
-                Kind::Task,
-                TaskStatus::Ready,
-                true,
-                Role::ProductManager
-            )),
-            [
-                "a product document is written for an epic the user approved, and this contract is a task"
-            ]
-        );
-    }
-
-    #[test]
-    fn writes_a_task_under_an_epic_only_as_its_assignee_or_the_human() {
+    fn writes_a_task_under_an_epic_as_its_assignee_the_product_manager_or_the_human() {
         let parent = ParentEpic {
             status: TaskStatus::InProgress,
             assignee_id: "sm-1".to_string(),
@@ -2479,6 +2366,11 @@ mod tests {
             agent_id: Some("sm-1".to_string()),
         };
         assert_eq!(check_child_creation(&parent, &assignee), Ok(()));
+        let product_manager = ContractWriteActor {
+            kind: TransitionActor::ProductManager,
+            agent_id: Some("pm-1".to_string()),
+        };
+        assert_eq!(check_child_creation(&parent, &product_manager), Ok(()));
         let human = ContractWriteActor {
             kind: TransitionActor::Human,
             agent_id: None,
@@ -2492,7 +2384,9 @@ mod tests {
         };
         assert_eq!(
             reasons(check_child_creation(&parent, &governor)),
-            ["a task under an epic is written by the epic's assignee, sm-1, or by the human"]
+            [
+                "a task under an epic is written by the epic's assignee, sm-1, by the Product Manager, or by the human"
+            ]
         );
         let other = ContractWriteActor {
             kind: TransitionActor::Assignee,
@@ -2500,7 +2394,9 @@ mod tests {
         };
         assert_eq!(
             reasons(check_child_creation(&parent, &other)),
-            ["a task under an epic is written by the epic's assignee, sm-1, or by the human"]
+            [
+                "a task under an epic is written by the epic's assignee, sm-1, by the Product Manager, or by the human"
+            ]
         );
         let unnamed = ParentEpic {
             status: TaskStatus::InProgress,
@@ -2513,7 +2409,7 @@ mod tests {
         assert_eq!(
             reasons(check_child_creation(&unnamed, &nobody)),
             [
-                "a task under an epic is written by the epic's assignee, which the runtime did not name, or by the human"
+                "a task under an epic is written by the epic's assignee, which the runtime did not name, by the Product Manager, or by the human"
             ]
         );
         let not_started = ParentEpic {
@@ -2528,7 +2424,7 @@ mod tests {
         assert_eq!(
             reasons(check_child_creation(&not_started, &other)),
             [
-                "a task under an epic is written by the epic's assignee, sm-1, or by the human",
+                "a task under an epic is written by the epic's assignee, sm-1, by the Product Manager, or by the human",
                 "the epic is ready and its tasks are written while it is in progress"
             ]
         );
@@ -2654,6 +2550,37 @@ mod tests {
                 "{status}"
             );
         }
+    }
+
+    #[test]
+    fn the_product_manager_writes_a_plan_and_a_lane() {
+        let product_manager = ContractWriteActor {
+            kind: TransitionActor::ProductManager,
+            agent_id: Some("pm-1".to_string()),
+        };
+        let fields = ["plan".to_string(), "lane".to_string()];
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Refining,
+                false,
+                &product_manager,
+                &fields
+            ),
+            Ok(ContractWriteOutcome::Allowed)
+        );
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Ready,
+                false,
+                &product_manager,
+                &fields
+            ),
+            Err(ContractWriteRefusal::ContractFrozen {
+                fields: fields.to_vec()
+            })
+        );
     }
 
     #[test]

@@ -16,11 +16,52 @@ import {
 	answerStatus,
 	renderApp,
 } from "../../test/render-app.tsx";
-import { refusedBy } from "../../test/schema.ts";
+import { bodyOf, refusedBy } from "../../test/schema.ts";
+import { joinedNames } from "./SetupReady.tsx";
 
 const READY = { state: "ready", version: "2.1.300" };
 const MISSING = { state: "missing" };
 const NO_PROJECT = { project_root: null, credential: null };
+
+const agent = (id: string, name: string, role: string, avatar: string) => ({
+	id,
+	display_name: name,
+	role,
+	avatar,
+	status: "active",
+});
+/** The mockup's team: Mira, Sol, Ada, Theo and Kai. */
+const TEAM = {
+	name: "Corner Bakery orders",
+	agents: [
+		agent("mira", "Mira", "product_manager", "product-manager"),
+		agent("sol", "Sol", "scrum_master", "scrum-master"),
+		agent("ada", "Ada", "architect", "architect"),
+		agent("theo", "Theo", "software_developer", "developer"),
+		agent("kai", "Kai", "marketing_specialist", "marketing-specialist"),
+	],
+	budgets: {},
+	policy: { integration: "auto_merge" },
+	rules: {},
+};
+const OFFER = {
+	offered: true,
+	roles: [
+		"product_manager",
+		"architect",
+		"software_developer",
+		"marketing_specialist",
+	],
+};
+
+/** The offer page at the end of setup, with its two queries answered. */
+async function theOffer(offer: unknown = OFFER) {
+	const rendered = await renderApp("/setup/ready");
+	const s = rendered.socket as FakeSocket;
+	await answerQuery(s, "catervafication.get", offer);
+	await answerQuery(s, "team.get", { team: TEAM });
+	return { ...rendered, s };
+}
 
 function Status() {
 	return <p data-testid="status">{useConnection().status}</p>;
@@ -469,5 +510,156 @@ describe("setup", () => {
 		expect((await screen.findByRole("alert")).textContent).toContain(
 			"the team's driver could not start",
 		);
+	});
+
+	it("offers_the_catervafication_at_the_end_of_setup", async () => {
+		const { container } = await theOffer();
+		expect(
+			await screen.findByRole("heading", {
+				level: 1,
+				name: "Your team is ready",
+			}),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Mira, Sol, Ada, Theo and Kai have joined Corner Bakery orders. They know what Catervas found in your project; next, they can learn it properly.",
+			),
+		).toBeTruthy();
+		const offer = screen.getByRole("region", {
+			name: "Start with a Catervafication sprint",
+		});
+		expect(within(offer).getByText("Recommended")).toBeTruthy();
+		expect(
+			within(offer).getByText(
+				"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
+			),
+		).toBeTruthy();
+		const rows = within(offer).getAllByRole("listitem");
+		expect(rows.map((row) => row.textContent)).toEqual([
+			"Mira PM writes what your product is and what comes next, as your product plan to approve.",
+			"Ada ARCH writes how your project is put together, with diagrams.",
+			"Theo DEV writes how your project is built and worked on: its habits and rules.",
+			"Kai MKT writes your marketing plan, after you approve the product plan.",
+		]);
+		expect(within(offer).queryByText("Sol")).toBeNull();
+		expect(
+			within(offer).getByText(
+				"Your team only adds its notes; nothing else in your project changes.",
+			),
+		).toBeTruthy();
+		expect(within(offer).getByText("Later keeps this on Today.")).toBeTruthy();
+		// Every setup step is behind the owner.
+		const steps = within(
+			screen.getByRole("navigation", { name: en.setupSteps }),
+		).getAllByRole("listitem");
+		expect(steps).toHaveLength(8);
+		for (const step of steps) expect(step.textContent).toContain(", done");
+		await expectNoAxeViolations(container);
+	});
+
+	it("starts_or_leaves_it_for_later", async () => {
+		const first = await theOffer();
+		fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+		const command = await waitFor(() => {
+			const frame = first.s.calls("command")[0];
+			if (!frame) throw new Error("no command was sent");
+			return frame;
+		});
+		expect(command.params).toEqual({
+			command: { command: "catervafication_start", body: {} },
+		});
+		expect(refusedBy("emptyBody", bodyOf(command))).toEqual([]);
+		await first.s.reply(command, { said: "started", events: [9] });
+		await answerStatus(first.s, false);
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
+		cleanup();
+
+		// Later sends nothing.
+		const second = await theOffer();
+		fireEvent.click(await screen.findByRole("button", { name: "Later" }));
+		await answerStatus(second.s, false);
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
+		expect(second.s.calls("command")).toHaveLength(0);
+		cleanup();
+
+		// A refusal is said where the buttons are, and the offer stays.
+		const third = await theOffer();
+		fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+		const refused = await waitFor(() => {
+			const frame = third.s.calls("command")[0];
+			if (!frame) throw new Error("no command was sent");
+			return frame;
+		});
+		await third.s.reply(refused, {
+			error: {
+				kind: "refused",
+				detail:
+					"catervafication_no_product_manager: the team has no active Product Manager",
+			},
+		});
+		const alert = await screen.findByRole("alert");
+		expect(alert.textContent).toBe(
+			"Your Product Manager is paused. Resume them on the Team page, then start.",
+		);
+		// It is under the buttons.
+		expect(
+			alert.compareDocumentPosition(
+				screen.getByRole("button", { name: "Later" }),
+			) & Node.DOCUMENT_POSITION_PRECEDING,
+		).toBeTruthy();
+		expect(
+			screen.getByRole("heading", { name: "Your team is ready" }),
+		).toBeTruthy();
+	});
+
+	it("goes_home_when_nothing_is_offered", async () => {
+		const { s } = await theOffer({ offered: false, roles: [] });
+		await answerStatus(s, false);
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
+		expect(
+			screen.queryByRole("heading", { name: "Your team is ready" }),
+		).toBeNull();
+		expect(s.calls("command")).toHaveLength(0);
+	});
+
+	it("goes_home_when_the_offer_cannot_be_read", async () => {
+		const rendered = await renderApp("/setup/ready");
+		const s = rendered.socket as FakeSocket;
+		const asked = await waitFor(() => {
+			const frame = s
+				.calls("query")
+				.find((f) => f.params.name === "catervafication.get");
+			if (!frame) throw new Error("no catervafication.get was asked");
+			return frame;
+		});
+		await s.fail(asked, -32000, "the offer cannot be read");
+		await answerStatus(s, false);
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
+		expect(s.calls("command")).toHaveLength(0);
+	});
+
+	it("start_the_team_goes_to_the_offer", async () => {
+		const { socket } = await renderApp("/setup/finish");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", {
+			team: { ...TEAM, policy: { integration: "auto_merge" } },
+			criteria: { criteria: [] },
+		});
+		fireEvent.click(await screen.findByRole("button", { name: en.startTeam }));
+		const start = await sent(s, "team.start");
+		await s.reply(start, {});
+		// The offer's own queries are asked: setup does not end at Today.
+		await answerQuery(s, "catervafication.get", OFFER);
+		await answerQuery(s, "team.get", { team: TEAM });
+		expect(
+			await screen.findByRole("heading", { name: "Your team is ready" }),
+		).toBeTruthy();
+	});
+
+	it("joins_names_as_the_lead_does", () => {
+		expect(joinedNames([])).toBe("");
+		expect(joinedNames(["A"])).toBe("A");
+		expect(joinedNames(["A", "B"])).toBe("A and B");
+		expect(joinedNames(["A", "B", "C"])).toBe("A, B and C");
 	});
 });

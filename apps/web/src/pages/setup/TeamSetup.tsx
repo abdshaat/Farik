@@ -296,7 +296,7 @@ export function useSetup(): Setup {
 	return useOutletContext<Setup>();
 }
 
-/** "Start the team": the draft saved, the marker gone, the team resumed; then home. */
+/** "Start the team": the draft saved, the marker gone, the team resumed; then the offer, which goes home when it has none. */
 export function useStart() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
@@ -312,7 +312,7 @@ export function useStart() {
 				team: teamOf(draft),
 				criteria: draft.criteria,
 			});
-			navigate("/", { replace: true });
+			navigate("/setup/ready", { replace: true });
 		} catch (e) {
 			setRefused(saidAll(e));
 			setBusy(false);

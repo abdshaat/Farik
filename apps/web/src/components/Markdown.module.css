@@ -1,0 +1,72 @@
+/* The owner's documents as Markdown, on the approved Files mockups. */
+.text {
+	font-size: 16px;
+	line-height: 24px;
+	overflow-wrap: anywhere;
+}
+
+.text h1,
+.text h2,
+.text h3 {
+	margin: var(--catervas-space-5) 0 var(--catervas-space-2);
+	font-size: 18px;
+	line-height: 24px;
+	font-weight: 600;
+}
+
+.text > :first-child {
+	margin-top: 0;
+}
+
+.text p {
+	margin: 0 0 var(--catervas-space-3);
+}
+
+.text ul,
+.text ol {
+	margin: 0 0 var(--catervas-space-3);
+	padding-left: 22px;
+}
+
+.text li {
+	margin: 0 0 6px;
+}
+
+.text code {
+	font-family: var(--catervas-type-code-family);
+	font-size: 14px;
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: 3px;
+	padding: 0 4px;
+}
+
+.text pre {
+	margin: 0 0 var(--catervas-space-3);
+	padding: var(--catervas-space-3);
+	overflow: auto;
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: 4px;
+}
+
+.text pre code {
+	border: 0;
+	padding: 0;
+}
+
+/* A diagram, drawn as an image and measured in the font it is drawn in. */
+.diagram {
+	margin: var(--catervas-space-1) 0 var(--catervas-space-4);
+	font-family: system-ui, sans-serif;
+}
+
+/* mermaid's neutral theme draws for a light page, so the image keeps one in both themes: the light theme's surface. */
+.diagram img {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	padding: var(--catervas-space-2);
+	background: #fbf6ec;
+	border-radius: 8px;
+}

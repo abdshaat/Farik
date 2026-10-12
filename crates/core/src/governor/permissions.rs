@@ -49,10 +49,10 @@ pub fn default_tiers(role: Role) -> &'static [PermissionTier] {
             T::Network,
             T::GitLocal,
         ],
-        Role::ProductManager | Role::FinanceSpecialist | Role::ProcurementSpecialist => {
-            &[T::Read, T::Network]
+        Role::FinanceSpecialist | Role::ProcurementSpecialist => &[T::Read, T::Network],
+        Role::ProductManager | Role::MarketingSpecialist => {
+            &[T::Read, T::Network, T::WriteWorkspace, T::GitLocal]
         }
-        Role::MarketingSpecialist => &[T::Read, T::Network, T::WriteWorkspace, T::GitLocal],
         Role::ScrumMaster | Role::Human => &[T::Read],
     }
 }
@@ -1127,7 +1127,10 @@ mod tests {
                     T::GitLocal,
                 ],
             ),
-            (Role::ProductManager, vec![T::Read, T::Network]),
+            (
+                Role::ProductManager,
+                vec![T::Read, T::Network, T::WriteWorkspace, T::GitLocal],
+            ),
             (
                 Role::MarketingSpecialist,
                 vec![T::Read, T::Network, T::WriteWorkspace, T::GitLocal],

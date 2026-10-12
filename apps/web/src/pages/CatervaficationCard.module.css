@@ -1,0 +1,32 @@
+/* The quiet card of the "Catervafication" mockup: a dashed box, not a "Waiting on you" row. */
+.card {
+	display: grid;
+	gap: var(--catervas-space-2);
+}
+
+.quiet {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--catervas-space-3) var(--catervas-space-4);
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	border: 1px dashed var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+}
+
+.quiet > div {
+	flex: 1 1 20rem;
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+
+.quiet p {
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+}
+
+.alert {
+	margin: 0;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+}

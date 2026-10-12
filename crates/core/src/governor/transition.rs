@@ -762,6 +762,7 @@ mod tests {
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
             skips_sprints: false,
+            lane_builder: None,
         }
     }
 
@@ -827,6 +828,7 @@ mod tests {
                 human_accepted: false,
                 protected_paths: Vec::new(),
                 design_review: DesignReviewNeed::NotNeeded,
+                stale_twins: Vec::new(),
             },
             rejection: Some(Rejection {
                 failed_criterion_ids: vec!["C1".to_string()],
@@ -1300,8 +1302,7 @@ mod tests {
         // the Definition of Ready three times, was sent back by the human, and now passes is
         // waiting for the approval 5.16 item 2 asks for, not for its readiness failures again. The
         // board would otherwise show it as having failed readiness, the human would resolve it by
-        // moving it rather than approving it, and the approval `check_product_doc_write` needs
-        // would never be recorded.
+        // moving it rather than approving it, and the approval would never be recorded.
         let mut context = a_context();
         context.contract.status = TaskStatus::Refining;
         context.contract.kind = Kind::Epic;

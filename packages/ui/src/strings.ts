@@ -30,6 +30,7 @@ export const uiStrings = {
 	added: "added",
 	removed: "removed",
 	stepOf: (n: number, m: number) => `Step ${n} of ${m}`,
+	stepDone: ", done",
 	required: "required",
 	busy: "Working…",
 	infoLabel: "More about this",

@@ -10,8 +10,17 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
+import { sentCommand } from "../test/gate.ts";
+import { showsWhatItHides } from "../test/hidden.ts";
 import { media } from "../test/media.ts";
-import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import { APPROVED, HEARD, INTERVIEWING } from "../test/productPlan.ts";
+import {
+	answerQuery,
+	answerStatus,
+	eventArrives,
+	renderApp,
+} from "../test/render-app.tsx";
+import { bodyOf, refusedBy } from "../test/schema.ts";
 import own from "./Chats.module.css";
 
 const WIDE = "(min-width: 1024px)";
@@ -73,7 +82,12 @@ const chat = (
 /** The chats at `path`, with the team, the list and the open chat answered. */
 async function chats(
 	path: string,
-	fields: { messages?: unknown[]; waiting?: unknown; list?: unknown } = {},
+	fields: {
+		messages?: unknown[];
+		waiting?: unknown;
+		list?: unknown;
+		plan?: unknown;
+	} = {},
 ) {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
@@ -89,6 +103,7 @@ async function chats(
 			messages: fields.messages ?? [],
 			waiting: fields.waiting ?? null,
 		});
+	if (fields.plan) await answerQuery(s, "product_plan.state", fields.plan);
 	return { container, s };
 }
 
@@ -516,6 +531,260 @@ describe("chats", () => {
 		expect(container.querySelector('img[src="x"]')).toBeNull();
 	});
 
+	const INTRO =
+		"Before your team builds anything, Mira asks what you want to make. This chat only talks: your product plan is written next, and you approve it before anything is built.";
+	const SUMMARY = "Thank you, that’s enough to start. Here is what I heard.";
+	const DRAFT = "Draft the product plan";
+	const stateAsked = (s: FakeSocket) =>
+		s.calls("query").filter((f) => f.params.name === "product_plan.state");
+
+	it("introduces_the_interview", async () => {
+		media.set(WIDE, true);
+		await chats("/channel/mira", { plan: INTERVIEWING });
+		expect(await screen.findByText(INTRO)).toBeTruthy();
+		expect(screen.queryByText(en.chatsIntro.replaceAll("{name}", "Mira"))).toBe(
+			null,
+		);
+		cleanup();
+
+		// Approved, it is any chat's again.
+		const approved = await chats("/channel/mira", { plan: APPROVED });
+		expect(
+			await screen.findByText(en.chatsIntro.replaceAll("{name}", "Mira")),
+		).toBeTruthy();
+		expect(screen.queryByText(INTRO)).toBeNull();
+		expect(stateAsked(approved.s)).toHaveLength(1);
+		cleanup();
+
+		// A phone says it in its short place.
+		media.set(WIDE, false);
+		await chats("/channel/mira", { plan: INTERVIEWING });
+		expect(await screen.findByText(INTRO)).toBeTruthy();
+		expect(
+			screen.queryByText(en.chatsIntroPhone.replace("{name}", "Mira")),
+		).toBe(null);
+		cleanup();
+
+		// The Developer's chat never asks.
+		media.set(WIDE, true);
+		const developer = await chats("/channel/theo");
+		await screen.findByRole("heading", { name: "Talking with Theo" });
+		expect(stateAsked(developer.s)).toHaveLength(0);
+	});
+
+	it("shows_what_mira_heard", async () => {
+		const { s } = await chats("/channel/mira", {
+			messages: [
+				chat("mira", SUMMARY, {
+					heard: {
+						...HEARD,
+						problem: `${HEARD.problem} ‮ Stop.`,
+						not_now: "One\ntwo",
+					},
+				}),
+			],
+			plan: APPROVED,
+		});
+		const region = await screen.findByRole("region", { name: "What I heard" });
+		expect(
+			within(region)
+				.getAllByRole("term")
+				.map((x) => x.textContent),
+		).toEqual([
+			"Your customers",
+			"The problem",
+			"It must",
+			"Not now",
+			"It works when",
+		]);
+		const values = within(region)
+			.getAllByRole("definition")
+			.map((x) => x.textContent);
+		expect(values[0]).toBe(HEARD.customers);
+		expect(values[2]).toBe(HEARD.must);
+		expect(values[3]).toBe("One\ntwo");
+		expect(values[4]).toBe(HEARD.works_when);
+		showsWhatItHides(region);
+		// Shown for any state: the button below follows the state alone.
+		expect(within(region).queryByRole("button")).toBeNull();
+		expect(s.calls("command")).toHaveLength(0);
+	});
+
+	it("drafts_the_plan_from_the_newest_message", async () => {
+		const { s } = await chats("/channel/mira", {
+			messages: [
+				chat("human", "No lost orders."),
+				chat("mira", SUMMARY, { heard: HEARD }),
+			],
+			plan: INTERVIEWING,
+		});
+		const region = await screen.findByRole("region", { name: "What I heard" });
+		const button = within(region).getByRole("button", { name: DRAFT });
+		expect(screen.getAllByRole("button", { name: DRAFT })).toHaveLength(1);
+		expect(
+			within(region).getByText(
+				"I write it as my first task: a product description and a roadmap. It comes to you on Today to approve.",
+			),
+		).toBeTruthy();
+		fireEvent.click(button);
+		const sent = await sentCommand(s);
+		expect(sent.params).toEqual({
+			command: { command: "product_plan_draft", body: {} },
+		});
+		expect(refusedBy("emptyBody", bodyOf(sent))).toEqual([]);
+		await s.reply(sent, { said: "drafting", events: [9] });
+
+		// The filing's event makes the state asked again, and its task is named.
+		await eventArrives(s, 99);
+		await answerQuery(s, "product_plan.state", {
+			...INTERVIEWING,
+			task: {
+				task_id: "CTV-1",
+				status: "draft",
+				created_at: "2026-09-28T09:50:00Z",
+			},
+		});
+		const sentLine = await screen.findByText(
+			"Drafting it as CTV-1. It comes to you on Today to approve.",
+		);
+		expect(sentLine.closest("[role=status]")).toBe(sentLine);
+		expect(screen.queryByRole("button", { name: DRAFT })).toBeNull();
+	});
+
+	it("puts_the_draft_button_on_her_newest_message_only", async () => {
+		await chats("/channel/mira", {
+			messages: [
+				chat("mira", "Who are your customers?"),
+				chat("human", "People nearby."),
+				chat("mira", SUMMARY, { heard: HEARD }),
+				chat("human", "One more thing"),
+			],
+			plan: INTERVIEWING,
+		});
+		const region = await screen.findByRole("region", { name: "What I heard" });
+		const buttons = screen.getAllByRole("button", { name: DRAFT });
+		expect(buttons).toHaveLength(1);
+		expect(region.contains(buttons[0] as HTMLElement)).toBe(true);
+		const last = screen
+			.getByText("One more thing")
+			.closest("li") as HTMLElement;
+		expect(within(last).queryByRole("button")).toBeNull();
+	});
+
+	it("introduces_no_interview_for_an_existing_project", async () => {
+		media.set(WIDE, true);
+		await chats("/channel/mira", {
+			messages: [chat("mira", "Who are your customers?")],
+			plan: { new_project: null, approved: false, task: null, documents: [] },
+		});
+		expect(
+			await screen.findByText(en.chatsIntro.replaceAll("{name}", "Mira")),
+		).toBeTruthy();
+		expect(screen.queryByText(INTRO)).toBeNull();
+		expect(screen.queryByRole("button", { name: DRAFT })).toBeNull();
+	});
+
+	it("shows_what_mira_heard_as_it_arrives", async () => {
+		const { s } = await chats("/channel/mira", { plan: INTERVIEWING });
+		await screen.findByRole("heading", { name: "Talking with Mira" });
+		live(s, 90, "chat_message.posted", {
+			chat: "mira",
+			author: "mira",
+			text: SUMMARY,
+			heard: HEARD,
+		});
+		const region = await screen.findByRole("region", { name: "What I heard" });
+		expect(within(region).getByRole("button", { name: DRAFT })).toBeTruthy();
+	});
+
+	it("puts_the_draft_button_under_a_reply_with_no_summary", async () => {
+		await chats("/channel/mira", {
+			messages: [chat("mira", "Who are your customers?")],
+			plan: INTERVIEWING,
+		});
+		const button = await screen.findByRole("button", { name: DRAFT });
+		expect(screen.queryByRole("region", { name: "What I heard" })).toBeNull();
+		const row = button.closest("li") as HTMLElement;
+		expect(within(row).getByText("Who are your customers?")).toBeTruthy();
+	});
+
+	it("shows_the_task_in_place_of_the_button_and_nothing_once_approved", async () => {
+		const task = {
+			task_id: "CTV-4",
+			status: "refining",
+			created_at: "2026-09-28T09:50:00Z",
+		};
+		await chats("/channel/mira", {
+			messages: [chat("mira", SUMMARY, { heard: HEARD })],
+			plan: { ...INTERVIEWING, task },
+		});
+		expect(
+			await screen.findByText(
+				"Drafting it as CTV-4. It comes to you on Today to approve.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByRole("button", { name: DRAFT })).toBeNull();
+		cleanup();
+
+		await chats("/channel/mira", {
+			messages: [chat("mira", SUMMARY, { heard: HEARD })],
+			plan: APPROVED,
+		});
+		await screen.findByRole("region", { name: "What I heard" });
+		expect(screen.queryByRole("button", { name: DRAFT })).toBeNull();
+		expect(screen.queryByText(/Drafting it as/)).toBeNull();
+	});
+
+	it("a_refused_draft_says_why", async () => {
+		const { s } = await chats("/channel/mira", {
+			messages: [chat("mira", SUMMARY, { heard: HEARD })],
+			plan: INTERVIEWING,
+		});
+		fireEvent.click(await screen.findByRole("button", { name: DRAFT }));
+		await s.reply(await sentCommand(s), {
+			error: {
+				kind: "refused",
+				detail: "product_plan_no_reviewer: no Architect or Scrum Master",
+			},
+		});
+		expect(
+			await screen.findByText(
+				"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+			),
+		).toBeTruthy();
+	});
+
+	it("says_each_refusal_of_the_draft_in_words", async () => {
+		const plan = [
+			[
+				"not_a_new_project",
+				"This project was not started here, so it has no product plan to draft.",
+			],
+			["product_plan_approved", "Your product plan is approved already."],
+			["product_plan_open", "Mira is drafting your product plan already."],
+			[
+				"product_plan_no_writer",
+				"Your team has no Product Manager at work to write it.",
+			],
+			[
+				"product_plan_no_reviewer",
+				"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+			],
+		] as const;
+		for (const [code, words] of plan) {
+			const { s } = await chats("/channel/mira", {
+				messages: [chat("mira", SUMMARY, { heard: HEARD })],
+				plan: INTERVIEWING,
+			});
+			fireEvent.click(await screen.findByRole("button", { name: DRAFT }));
+			await s.reply(await sentCommand(s), {
+				error: { kind: "refused", detail: `${code}: x` },
+			});
+			expect((await screen.findByRole("alert")).textContent).toBe(words);
+			cleanup();
+		}
+	});
+
 	it("passes_axe_on_the_chats", async () => {
 		media.set(WIDE, true);
 		const wide = await chats("/channel");
@@ -528,20 +797,28 @@ describe("chats", () => {
 				chat("human", "Could customers also pay with Apple Pay?"),
 				chat("mira", "Yes.", { request: APPLE }),
 				chat("mira", "Done.", { request: APPLE, sent_as: "CTV-12" }),
+				chat("mira", "Here is what I heard.", { heard: HEARD }),
 			],
 			waiting: { because: "day_spent" },
+			plan: INTERVIEWING,
 		});
 		await screen.findByRole("heading", { name: "Talking with Mira" });
+		await screen.findByRole("button", { name: "Draft the product plan" });
 		await expectNoAxeViolations(open.container);
 		cleanup();
 
 		// A phone: the row of faces above the chat.
 		media.set(WIDE, false);
 		const phone = await chats("/channel/mira", {
-			messages: [chat("mira", "Yes.", { request: APPLE })],
+			messages: [
+				chat("mira", "Yes.", { request: APPLE }),
+				chat("mira", "Here is what I heard.", { heard: HEARD }),
+			],
 			waiting: { because: "answering" },
+			plan: INTERVIEWING,
 		});
 		await screen.findByRole("heading", { name: "Talking with Mira" });
+		await screen.findByRole("button", { name: "Draft the product plan" });
 		await expectNoAxeViolations(phone.container);
 	});
 });

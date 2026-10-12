@@ -6,8 +6,8 @@ use catervas_core::team::Team;
 /// The roles that review a task, in order of preference, by its assignee's role: a Developer's
 /// work to the Architect, then another Developer; a UI/UX Designer's to the Architect, then a
 /// Developer; an Architect's, a Marketing Specialist's, a Finance Specialist's and a Procurement
-/// Specialist's to the Product Manager. The Product Manager's and the Scrum Master's own tasks have
-/// no row until phase 4 decides them.
+/// Specialist's to the Product Manager; the Product Manager's, written in its docs tasks, to the
+/// Architect, then the Scrum Master. The Scrum Master's own tasks have no row.
 pub const REVIEWER_ROLE_FOR: &[(Role, &[Role])] = &[
     (
         Role::SoftwareDeveloper,
@@ -17,6 +17,7 @@ pub const REVIEWER_ROLE_FOR: &[(Role, &[Role])] = &[
         Role::UiUxDesigner,
         &[Role::Architect, Role::SoftwareDeveloper],
     ),
+    (Role::ProductManager, &[Role::Architect, Role::ScrumMaster]),
     (Role::Architect, &[Role::ProductManager]),
     (Role::MarketingSpecialist, &[Role::ProductManager]),
     (Role::FinanceSpecialist, &[Role::ProductManager]),
@@ -154,6 +155,40 @@ mod tests {
     }
 
     #[test]
+    fn the_architect_reviews_the_product_managers_task() {
+        let with_an_architect = a_team(&[
+            ("dev-a", "software_developer", "active"),
+            ("arch", "architect", "active"),
+        ]);
+        assert_eq!(
+            default_reviewer_role(&with_an_architect, TaskKind::Task, Role::ProductManager),
+            Some(Role::Architect)
+        );
+        let with_a_scrum_master = a_team(&[
+            ("dev-a", "software_developer", "active"),
+            ("arch", "architect", "paused"),
+            ("sm", "scrum_master", "active"),
+        ]);
+        assert_eq!(
+            default_reviewer_role(&with_a_scrum_master, TaskKind::Task, Role::ProductManager),
+            Some(Role::ScrumMaster)
+        );
+        let with_neither = a_team(&[
+            ("dev-a", "software_developer", "active"),
+            ("arch", "architect", "paused"),
+            ("sm", "scrum_master", "paused"),
+        ]);
+        assert_eq!(
+            default_reviewer_role(&with_neither, TaskKind::Task, Role::ProductManager),
+            None
+        );
+        assert_eq!(
+            default_reviewer_role(&with_an_architect, TaskKind::Epic, Role::ProductManager),
+            None
+        );
+    }
+
+    #[test]
     fn sends_a_marketing_specialists_task_to_the_product_manager() {
         assert_eq!(
             default_reviewer_role(
@@ -285,10 +320,10 @@ mod tests {
         );
     }
 
-    /// Phase 4 decides who reviews the Product Manager's and the Scrum Master's own tasks; until
-    /// then no team, however fully staffed, gets an answer for them.
+    /// The Scrum Master is never a task's assignee, so no team, however fully staffed, gets an
+    /// answer for its tasks.
     #[test]
-    fn has_no_reviewer_for_the_product_manager_or_the_scrum_master() {
+    fn has_no_reviewer_for_the_scrum_master() {
         // Seven, the team's limit: two of each role the mutated rows could prefer for itself.
         let everyone = a_team(&[
             ("pm-b", "product_manager", "active"),
@@ -298,13 +333,10 @@ mod tests {
             ("dev", "software_developer", "active"),
             ("mark", "marketing_specialist", "active"),
         ]);
-        for assignee in [Role::ProductManager, Role::ScrumMaster] {
-            assert_eq!(
-                default_reviewer_role(&everyone, TaskKind::Task, assignee),
-                None,
-                "{assignee}"
-            );
-        }
+        assert_eq!(
+            default_reviewer_role(&everyone, TaskKind::Task, Role::ScrumMaster),
+            None
+        );
     }
 
     #[test]

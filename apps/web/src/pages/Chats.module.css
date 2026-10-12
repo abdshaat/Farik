@@ -244,3 +244,79 @@
 	align-items: center;
 	gap: var(--catervas-space-3);
 }
+
+/* What the Product Manager heard: a card inside her message. */
+.heard {
+	display: grid;
+	gap: var(--catervas-space-3);
+	box-sizing: border-box;
+	width: 100%;
+	margin-top: var(--catervas-space-2);
+	padding: var(--catervas-space-4);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-raised);
+}
+
+.heardTitle {
+	margin: 0;
+	font-size: var(--catervas-type-body-size);
+	line-height: var(--catervas-type-body-line-height);
+	font-weight: 600;
+}
+
+.heardParts {
+	display: grid;
+	gap: var(--catervas-space-2);
+	margin: 0;
+}
+
+.heardPart {
+	display: grid;
+	grid-template-columns: 150px minmax(0, 1fr);
+	gap: var(--catervas-space-1) var(--catervas-space-4);
+}
+
+.heardPart dt {
+	color: var(--catervas-color-ink-muted);
+}
+
+.heardPart dd {
+	margin: 0;
+}
+
+@media not (min-width: 640px) {
+	.heardPart {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+/* The place under a reply where the owner starts the plan. */
+.draft {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--catervas-space-3);
+}
+
+.draft p {
+	flex: 1 1 16rem;
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+}
+
+.draft p[role="alert"] {
+	flex-basis: 100%;
+	color: inherit;
+}
+
+@media not (min-width: 640px) {
+	.draft > button {
+		flex: 1 1 100%;
+	}
+}
+
+.drafting {
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+}

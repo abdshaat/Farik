@@ -50,5 +50,7 @@ pub fn a_ready_context() -> ReadinessContext {
             reason: "Two files, one form; the test runs the form.".to_string(),
         }),
         human_approves: false,
+        awaits_the_product_plan: false,
+        is_the_product_plan: false,
     }
 }

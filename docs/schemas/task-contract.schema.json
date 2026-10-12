@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://catervas.dev/schemas/task-contract.schema.json",
   "title": "Catervas Task Contract",
-  "description": "The document that makes an epic or a task ready. An epic is a large request from the user, written by the Product Manager after asking the user its questions and approved by the user before it is broken down; a task is one deliverable of an epic, written by the epic's assignee, or a standalone task from a small request, written by the Product Manager. Triage decides which (docs/SPEC.md 5.16). Checked by the governor (structural rules) and the Scrum Master (judgment rules) before any work starts.",
+  "description": "The document that makes an epic or a task ready. An epic is a large request from the user, written by the Product Manager after asking the user its questions and approved by the user before it is broken down; a task is one deliverable of an epic, written by the Product Manager, from the Architect's plan when the team has one, or at close-out by the epic's assignee, or a standalone task from a small request, written by the Product Manager. Triage decides which (docs/SPEC.md 5.16). Checked by the governor (structural rules) and the Scrum Master (judgment rules) before any work starts.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -169,6 +169,17 @@
     "ui_change": {
       "type": "boolean",
       "description": "Whether the task changes the interface in a way no ui_paths glob sees, such as the words in a strings file (ADR 0026). Set by the Product Manager or the Scrum Master. A Software Developer's task that sets it, or whose diff touches the team's ui_paths, is design-reviewed by the UI/UX Designer before its reviewer sees it. Absent reads as false; read only for a task whose assignee_role is software_developer."
+    },
+    "plan": {
+      "type": "string",
+      "pattern": "^docs/catervas/architecture/plans/CTV-[0-9]{1,6}\\.md$",
+      "description": "The implementation plan this task writes or is built from, the Architect's plan for the task's epic. Set by the Product Manager."
+    },
+    "lane": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16,
+      "description": "Which lane of its epic's plan the task belongs to: the tasks one builder does in order. Tasks in different lanes of an epic run side by side. Read only on a task with a parent. Set by the Product Manager."
     },
     "budget": {
       "type": "object",

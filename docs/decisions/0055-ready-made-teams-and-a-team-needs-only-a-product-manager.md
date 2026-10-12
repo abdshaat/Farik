@@ -26,4 +26,4 @@ The Finance Specialist's folder runs one task at a time whoever holds the role (
 - Phase 14 (Business workspaces) step 03, "A team without a Developer", is done early in its team-rule part; its builder question ("does the business build software?") and the repository-less workspace stay there. Step 05, "Business templates", starts from these three; the founder's car flipping, Amazon resale and car rental teams, each with a brief, are still that step's.
 - A project's starter team (`catervas init`) stays a Product Manager and a Software Developer: it is the software default, and a software project is still what `init` makes.
 - `needs_developer` is gone from the daemon's refusal codes and the pages' words; `template_builtin` is new.
-- Spec revision 0.90; the project plan's D18 line and revision 42.
+- Spec revision 0.103; the project plan's D18 line and revision 43.

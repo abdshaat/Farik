@@ -6,7 +6,8 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
-use catervas_core::governor::gates::{Blocker, Rejection};
+use catervas_core::folders::{agent_twin, folder_doc_author, folder_doc_message};
+use catervas_core::governor::gates::{Blocker, DesignerBrowser, Rejection};
 use catervas_core::governor::sites::site_of;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
@@ -20,16 +21,23 @@ use catervas_protocol::event::{
     EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind,
     QuestionAnsweredBody, SiteDecisionBody, new_event,
 };
+use catervas_store::folder_docs::{ProposalState, folder_docs};
 use catervas_store::pipelines::{PipelineState, data_pipelines};
+use catervas_store::product_plan::{drafts_the_plan, new_project, product_plan_tasks};
 use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
-use catervas_store::requests::{RequestError, hold_contract, triage_by_human};
+use catervas_store::requests::{
+    RequestError, file_product_plan_request, hold_contract, placeholder_budget_usd,
+    product_plan_request, triage_by_human,
+};
 use catervas_store::sites::{SiteRequest, site_requests};
 use catervas_store::{EventQuery, TaskProjection};
+use serde_json::json;
 
-use super::requests::HUMAN;
+use super::requests::{HUMAN, product_manager};
 use super::verify::{governor_results, is_mechanical, since_verifying};
 
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
+use crate::catervafication::{self, Project};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
@@ -47,6 +55,7 @@ use crate::skills::{
 };
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
+use crate::tools::folders::{LandRefusal, land};
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, contract_accepted, refusal_details, result_accepted,
     result_awaits_human, review_passed, status_wire,
@@ -122,6 +131,9 @@ pub(super) async fn handle(
             reason,
         } => transition(tools, &task_id, to, &reason),
         Command::TaskIntegrate { task_id } => integrate(orchestrator, &task_id).await,
+        Command::FolderChangeIntegrate { change } => {
+            integrate_folder_change(orchestrator, change).await
+        }
         Command::AgentUpdate { agent_id, status } => {
             // Retiring deletes the agent's keys (ADR 0030), so Catervas could no longer stop its
             // campaigns at their budget: it pauses them first, as removing Google Ads does, and
@@ -152,6 +164,8 @@ pub(super) async fn handle(
         ),
         Command::TeamPause => pause(tools, true),
         Command::TeamResume => pause(tools, false),
+        Command::ProductPlanDraft => draft_product_plan(tools),
+        Command::CatervaficationStart => catervafication_start(tools),
         Command::MessagePost { text } => post_message(tools, text),
         Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
         Command::ConnectorConnect {
@@ -257,6 +271,11 @@ pub(super) async fn handle(
             approve,
             note,
         } => pipeline_decide(tools, pipeline, approve, note),
+        Command::FolderDocDecide {
+            proposals,
+            approve,
+            note,
+        } => folder_doc_decide(tools, &proposals, approve, note),
         Command::RenewalDismiss { renewal } => renewal_dismiss(tools, renewal),
         Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
         Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
@@ -270,6 +289,174 @@ pub(super) async fn handle(
             })
         }
     }
+}
+
+/// Held while a product plan is drafted, so that two presses of the button file one task.
+// ponytail: one lock for the process, as a chat's reply has; the command line makes no new project.
+static DRAFTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The owner's word that the Product Manager drafts a new project's product plan (4.3): the task
+/// is filed as the owner's request, with `product_plan` marking it, and Catervas triages it. Each
+/// refusal is `<code>: <words>`, in this order.
+fn draft_product_plan(tools: &ToolDeps) -> Result<CommandReport, CommandError> {
+    let team = tools.files.read_team().map_err(failed)?;
+    draft_for(tools, &team)
+}
+
+/// `draft_product_plan` for `team`, which a team file's validation keeps from lacking a Product
+/// Manager and which a test may therefore hand in whole.
+fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandError> {
+    let _drafting = DRAFTING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let refused = |reason: String| Err(CommandError::Refused { reason });
+    if new_project(&tools.log).map_err(failed)?.is_none() {
+        return refused(
+            "not_a_new_project: this project was not started in Catervas, so it has no product plan to draft"
+                .to_string(),
+        );
+    }
+    if !tools
+        .transitions
+        .awaits_the_product_plan(team)
+        .map_err(failed)?
+    {
+        return refused("product_plan_approved: the product plan is approved already".to_string());
+    }
+    let drafting: Vec<TaskId> = product_plan_tasks(&tools.log)
+        .map_err(failed)?
+        .into_iter()
+        .map(|(task, _)| task)
+        .collect();
+    let board = tools.projections.board().map_err(failed)?;
+    if let Some(open) = board
+        .iter()
+        .find(|row| drafting.contains(&row.task_id) && drafts_the_plan(row))
+    {
+        return refused(format!(
+            "product_plan_open: {} drafts the product plan already",
+            open.task_id.as_str()
+        ));
+    }
+    let Some(writer) = product_manager(team) else {
+        return refused(
+            "product_plan_no_writer: the team has no active Product Manager to write it"
+                .to_string(),
+        );
+    };
+    let Some(reviewer) =
+        catervas_roles::default_reviewer_role(team, TaskKind::Task, Role::ProductManager)
+    else {
+        return refused(
+            "product_plan_no_reviewer: an Architect or a Scrum Master checks the product plan before you read it, and the team has no active one; add one on the Team page"
+                .to_string(),
+        );
+    };
+    let contract = file_product_plan_request(
+        &tools.files,
+        &tools.log,
+        product_plan_request(reviewer, placeholder_budget_usd(&team.rules())),
+        (tools.clock.now(), &tools.ids),
+    )
+    .map_err(failed)?;
+    tools.projections.catch_up().map_err(failed)?;
+    let events = tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(contract.id.clone()),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .iter()
+        .map(|event| event.envelope.seq)
+        .collect();
+    Ok(CommandReport {
+        said: format!(
+            "{} drafts the product plan as {}. It comes to you on Today to approve.",
+            writer.display_name.as_str(),
+            contract.id.as_str()
+        ),
+        events,
+    })
+}
+
+/// Held while a Catervafication starts, so that two presses of Start file one epic.
+// ponytail: one lock for the process, as the product plan's draft has; the command line does not start one.
+static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The owner's Start of the Catervafication of an existing repository (4.1, 5.16): the epic is filed,
+/// given a sprint of its own and approved by this order. Each refusal is `<code>: <words>`, in this
+/// order, and records nothing.
+fn catervafication_start(tools: &ToolDeps) -> Result<CommandReport, CommandError> {
+    let team = tools.files.read_team().map_err(failed)?;
+    catervafication_start_for(tools, &team)
+}
+
+/// `catervafication_start` for `team`, which a team file's validation keeps from lacking an active
+/// Product Manager and which a test may therefore hand in whole.
+fn catervafication_start_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandError> {
+    let _starting = crate::locked(&STARTING);
+    tools.projections.catch_up().map_err(failed)?;
+    let refused = |reason: &str| {
+        Err(CommandError::Refused {
+            reason: reason.to_string(),
+        })
+    };
+    if let Some(epic) = catervafication::started(&tools.log).map_err(failed)? {
+        return refused(&format!(
+            "catervafication_started: your team is already documenting this project, as {}",
+            epic.as_str()
+        ));
+    }
+    if new_project(&tools.log).map_err(failed)?.is_some() {
+        return refused(
+            "catervafication_new_project: a new project's Catervafication starts by itself once you approve its product plan",
+        );
+    }
+    if product_manager(team).is_none() {
+        return refused(
+            "catervafication_no_product_manager: the team has no active Product Manager to move the epic into its plan; resume one first",
+        );
+    }
+    let ready = tools.transitions.designer_browser(team) == DesignerBrowser::Ready;
+    let roles = catervafication::catervafication_roles(team, Project::Existing, ready);
+    if roles.first().map(|(role, _)| *role) != Some(Role::ProductManager) {
+        return refused(
+            "catervafication_no_writers: no one on your team can both write and have their notes checked; add an Architect or a Scrum Master",
+        );
+    }
+    let before = tools
+        .log
+        .read(&EventQuery {
+            limit: Some(1),
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .first()
+        .map_or(0, |event| event.envelope.seq);
+    let started =
+        catervafication::start(tools, team, Project::Existing, HUMAN, None).map_err(failed)?;
+    let events = tools
+        .log
+        .read(&EventQuery {
+            after_seq: Some(before),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .iter()
+        .map(|event| event.envelope.seq)
+        .collect();
+    let in_sprint = started
+        .sprint
+        .map_or_else(String::new, |sprint| format!(" in {sprint}"));
+    Ok(CommandReport {
+        said: format!(
+            "Your team starts documenting the project{in_sprint}: {}.",
+            started.epic.as_str()
+        ),
+        events,
+    })
 }
 
 /// The human's pause of the whole team, or its resume: recorded once, and refused when the team
@@ -357,6 +544,7 @@ fn post_chat_message(
         tools.clock.as_ref(),
         &tools.ids,
         NewChatMessage {
+            heard: None,
             chat: agent_id.to_string(),
             author: HUMAN.to_string(),
             text,
@@ -1828,6 +2016,196 @@ async fn integrate(
     })
 }
 
+/// The most the owner says in deciding a folder document, in characters.
+const MOST_FOLDER_DOC_NOTE: usize = 600;
+
+/// `folder_doc_decide`: the owner approves the proposals of one card, which makes one folder change
+/// of both files of each, authored for the proposing agent, or sends them back with a reason; either
+/// way as one record, all or nothing, under the integration lock with the log read again first
+/// (docs/SPEC.md 5.7). Refused `folder_doc_proposals`, `folder_doc_note_too_long`,
+/// `folder_doc_reason_needed`, `unknown_folder_doc`, `folder_doc_decided`, `folder_doc_superseded`,
+/// `folder_doc_mixed`, and, for an approval, `folder_doc_busy`, `folder_doc_link` and
+/// `folder_doc_waiting`. Only the owner decides, under `ask` and `auto` alike (ADR 0041).
+#[allow(
+    clippy::too_many_lines,
+    reason = "the checks, then approving or sending back"
+)]
+fn folder_doc_decide(
+    tools: &ToolDeps,
+    proposals: &[u64],
+    approve: bool,
+    note: Option<String>,
+) -> Result<CommandReport, CommandError> {
+    let mut distinct = proposals.to_vec();
+    distinct.sort_unstable();
+    distinct.dedup();
+    if proposals.is_empty() || proposals.len() > 20 || distinct.len() != proposals.len() {
+        return Err(order_refusal(
+            "folder_doc_proposals",
+            "a decision names 1 to 20 proposals, each once",
+        ));
+    }
+    let said = note.map(|text| text.trim().to_string()).unwrap_or_default();
+    if said.chars().count() > MOST_FOLDER_DOC_NOTE {
+        return Err(order_refusal(
+            "folder_doc_note_too_long",
+            format!("a note is at most {MOST_FOLDER_DOC_NOTE} characters"),
+        ));
+    }
+    if !approve && said.is_empty() {
+        return Err(order_refusal(
+            "folder_doc_reason_needed",
+            "say why: the agent reads it at its next sprint review",
+        ));
+    }
+    let _lock = crate::transitions::integration_lock(tools.files.root()).map_err(failed)?;
+    let docs = folder_docs(&tools.log).map_err(failed)?;
+    let mut chosen = Vec::new();
+    for number in proposals {
+        let Some(proposal) = docs.proposals.iter().find(|one| one.proposal == *number) else {
+            return Err(order_refusal(
+                "unknown_folder_doc",
+                format!("there is no proposal {number}"),
+            ));
+        };
+        match proposal.state {
+            ProposalState::Approved | ProposalState::Returned => {
+                return Err(order_refusal(
+                    "folder_doc_decided",
+                    format!("proposal {number} was decided already"),
+                ));
+            }
+            ProposalState::Superseded => {
+                return Err(order_refusal(
+                    "folder_doc_superseded",
+                    format!(
+                        "a newer proposal of {} replaced proposal {number}",
+                        proposal.path
+                    ),
+                ));
+            }
+            ProposalState::Pending => chosen.push(proposal),
+        }
+    }
+    let agent_id = chosen[0].agent_id.clone();
+    if chosen.iter().any(|proposal| proposal.agent_id != agent_id) {
+        return Err(order_refusal(
+            "folder_doc_mixed",
+            "a card is one agent's: decide the proposals of one agent at a time",
+        ));
+    }
+    let numbers: Vec<u64> = proposals.to_vec();
+    if !approve {
+        let body = serde_json::from_value(json!({ "proposals": numbers, "reason": said }))
+            .map_err(failed)?;
+        let seq = append(tools, None, EventBody::FolderDocReturned(body))?;
+        return Ok(CommandReport {
+            said: "Sent back. The agent reads your words at its next sprint review.".to_string(),
+            events: vec![seq],
+        });
+    }
+    let team = tools.files.read_team().map_err(failed)?;
+    let name = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == agent_id)
+        .map_or_else(|| agent_id.clone(), |agent| agent.display_name.to_string());
+    let mut files = Vec::new();
+    let mut documents = Vec::new();
+    for proposal in &chosen {
+        files.push((proposal.path.clone(), proposal.text.clone()));
+        if let Some(twin) = agent_twin(&proposal.path) {
+            files.push((twin, proposal.agent_text.clone()));
+        }
+        documents.push(proposal.path.as_str());
+    }
+    let folder = chosen[0]
+        .path
+        .splitn(4, '/')
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("/");
+    let message = folder_doc_message(&folder, &documents, &name, true);
+    let author = folder_doc_author(&name, &agent_id);
+    let mut body = json!({ "proposals": numbers });
+    if !said.is_empty() {
+        body["note"] = json!(said);
+    }
+    let said_back = match land(tools, &team, &files, &message, Some(&author)) {
+        Ok(Some(landed)) => {
+            body["change"] = json!(landed.change);
+            body["sha"] = json!(landed.sha);
+            landed.next
+        }
+        Ok(None) => "Approved. The files already said it, so nothing was added.".to_string(),
+        Err(refusal) => {
+            return Err(match refusal {
+                LandRefusal::Git(detail) => failed(detail),
+                other => {
+                    let (code, detail) = other
+                        .words()
+                        .unwrap_or(("folder_doc_refused", String::new()));
+                    order_refusal(code, detail)
+                }
+            });
+        }
+    };
+    let body = serde_json::from_value(body).map_err(failed)?;
+    let seq = append(tools, None, EventBody::FolderDocApproved(body))?;
+    Ok(CommandReport {
+        said: said_back,
+        events: vec![seq],
+    })
+}
+
+/// Adds a folder change to the project now, as `integrate` does for an accepted task.
+async fn integrate_folder_change(
+    orchestrator: &Orchestrator,
+    change: u64,
+) -> Result<CommandReport, CommandError> {
+    let tools = &orchestrator.deps.tools;
+    let before = tools
+        .log
+        .read(&EventQuery {
+            limit: Some(1),
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .first()
+        .map_or(0, |event| event.envelope.seq);
+    let name = format!("folder change {change}");
+    let said = match orchestrator.integrate_folder_change(change).await {
+        Ok(IntegrationOutcome::Merged { sha, .. }) => {
+            format!("{name} merged into the integration branch at {sha}")
+        }
+        Ok(IntegrationOutcome::PullRequestOpened { url }) => {
+            format!("{name}: pull request opened at {url}")
+        }
+        Ok(IntegrationOutcome::AwaitingForge) => {
+            format!("{name}'s pull request is open on the forge, waiting for its merge")
+        }
+        Ok(IntegrationOutcome::Escalated { detail, .. }) => {
+            format!("{name} could not be integrated: {detail}")
+        }
+        Err(OrchestratorError::Refused { reason }) => {
+            return Err(CommandError::Refused { reason });
+        }
+        Err(error) => return Err(failed(error)),
+    };
+    let events = tools
+        .log
+        .read(&EventQuery {
+            after_seq: Some(before),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .iter()
+        .map(|event| event.envelope.seq)
+        .collect();
+    Ok(CommandReport { said, events })
+}
+
 /// Changes an agent's status in the team file and records `agent.updated` (F1). A pause or a
 /// retirement stops the agent's registered sessions at once and its sessions elsewhere at their
 /// next tool call, and blocks each of its `in_progress` tasks on its behalf; a return to `active`
@@ -2557,6 +2935,391 @@ mod tests {
 
     fn last(harness: &Harness, kind: EventKind) -> Option<CatervasEvent> {
         harness.events(&[kind]).pop()
+    }
+
+    /// A new project's team: Mira the Product Manager, Ada the Architect, and the Developer
+    /// `dev-a`, with `change` applied to its wire; the owner has been greeted, so that no
+    /// interview waits to open.
+    fn a_new_project(name: &str, change: impl FnOnce(&mut Value)) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            let agents = wire["agents"].as_array_mut().expect("agents");
+            agents.push(catervas_core::team::fixtures::an_agent_wire(
+                "ada",
+                "architect",
+            ));
+            agents[3]["display_name"] = json!("Ada");
+            change(wire);
+        });
+        harness.started();
+        let deps = &harness.project.deps;
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "pm".to_string(),
+                author: "pm".to_string(),
+                text: "Hello! Who are your customers?".to_string(),
+                in_reply_to: None,
+                request: None,
+                heard: None,
+                session_id: None,
+            },
+        )
+        .expect("the greeting is recorded");
+        harness
+    }
+
+    fn product_plan_tasks(harness: &Harness) -> Vec<String> {
+        harness
+            .events(&[EventKind::TaskCreated])
+            .into_iter()
+            .filter(|event| {
+                matches!(&event.body, EventBody::TaskCreated(body) if body.product_plan == Some(true))
+            })
+            .filter_map(|event| event.envelope.ids.task_id)
+            .map(|id| id.to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn drafts_the_product_plan_on_the_owners_word() {
+        let harness = a_new_project("human-product-plan", |wire| {
+            wire["policy"]["plan_in_sprints"] = json!(true);
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sam", "scrum_master"),
+            );
+        });
+        let plan = crate::recorded::fixtures::plan_assigns_ctv_1();
+        let assigns_mira_and_ada = crate::recorded::Transcript::from_jsonl(
+            &plan
+                .lines()
+                .collect::<Vec<_>>()
+                .join("\n")
+                .replace("dev-a", "pm")
+                .replace("dev-b", "ada"),
+        );
+        let adapter = harness.recorded(vec![assigns_mira_and_ada]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = handled(&orchestrator, Command::ProductPlanDraft).await;
+
+        assert_eq!(
+            report.said,
+            "Mira drafts the product plan as CTV-1. It comes to you on Today to approve."
+        );
+        assert_eq!(report.events.len(), 2, "{report:?}");
+        assert_eq!(product_plan_tasks(&harness), ["CTV-1"]);
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-1"))
+            .expect("the contract");
+        assert_eq!(contract.title.as_str(), "Draft the product plan");
+        assert_eq!(
+            contract.reviewer_role,
+            catervas_core::contract::Role::Architect
+        );
+
+        // Rule 10 and rule 9 move it to ready with no refine session; sprints are on and none is
+        // open, and it is not held: the Scrum Master's plan session takes it to assigned.
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(
+            (started[0].agent_id.as_str(), started[0].purpose),
+            ("sam", crate::session::SessionPurpose::Plan)
+        );
+        assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("pm"));
+        assert_eq!(harness.row("CTV-1").reviewer_id.as_deref(), Some("ada"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_draft_out_of_place() {
+        // No project.started: not a new project.
+        let old = Harness::new("human-plan-old", |_| {});
+        let refusal = refused(&an_orchestrator(&old), Command::ProductPlanDraft).await;
+        assert_eq!(
+            refusal,
+            "not_a_new_project: this project was not started in Catervas, so it has no product plan to draft"
+        );
+        assert!(product_plan_tasks(&old).is_empty());
+
+        // Both documents on main: approved already.
+        let approved = a_new_project("human-plan-approved", |_| {});
+        approved.approve_the_product_plan();
+        let refusal = refused(&an_orchestrator(&approved), Command::ProductPlanDraft).await;
+        assert_eq!(
+            refusal,
+            "product_plan_approved: the product plan is approved already"
+        );
+        assert!(product_plan_tasks(&approved).is_empty());
+
+        // No active Product Manager: a team file cannot say so, so the team is handed in whole.
+        let unwritten = a_new_project("human-plan-no-writer", |_| {});
+        let mut wire = serde_json::to_value(
+            unwritten
+                .project
+                .deps
+                .files
+                .read_team()
+                .expect("the team reads"),
+        )
+        .expect("the team is JSON");
+        wire["agents"][0]["status"] = json!("paused");
+        let without_one: catervas_core::team::Team =
+            serde_json::from_value(wire).expect("the team reads back");
+        assert!(matches!(
+            super::draft_for(&unwritten.project.deps, &without_one),
+            Err(CommandError::Refused { reason })
+                if reason == "product_plan_no_writer: the team has no active Product Manager to write it"
+        ));
+        assert!(product_plan_tasks(&unwritten).is_empty());
+
+        // No active Architect or Scrum Master.
+        let unreviewed = Harness::new("human-plan-no-reviewer", |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+        });
+        unreviewed.started();
+        let refusal = refused(&an_orchestrator(&unreviewed), Command::ProductPlanDraft).await;
+        assert_eq!(
+            refusal,
+            "product_plan_no_reviewer: an Architect or a Scrum Master checks the product plan before you read it, and the team has no active one; add one on the Team page"
+        );
+        assert!(product_plan_tasks(&unreviewed).is_empty());
+
+        // Two drafts at once file one, and a draft is open until it is cancelled.
+        let harness = a_new_project("human-plan-open", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        // Raced on two threads past a barrier, so that a check made outside the lock is caught.
+        let start = std::sync::Barrier::new(2);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let racers: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        super::draft_for(&harness.project.deps, &team)
+                    })
+                })
+                .collect();
+            racers
+                .into_iter()
+                .map(|racer| racer.join().expect("the racer ends"))
+                .collect()
+        });
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert!(
+            results.iter().any(|result| matches!(
+                result,
+                Err(CommandError::Refused { reason }) if reason.starts_with("product_plan_open:")
+            )),
+            "{results:?}"
+        );
+        assert_eq!(product_plan_tasks(&harness), ["CTV-1"]);
+        let refusal = refused(&orchestrator, Command::ProductPlanDraft).await;
+        assert_eq!(
+            refusal,
+            "product_plan_open: CTV-1 drafts the product plan already"
+        );
+        harness
+            .project
+            .moved("CTV-1", "draft", "cancelled", &json!({}));
+        handled(&orchestrator, Command::ProductPlanDraft).await;
+        assert_eq!(product_plan_tasks(&harness), ["CTV-1", "CTV-2"]);
+    }
+
+    /// The kinds of these events about `epic`, oldest first.
+    fn about(harness: &Harness, epic: &str, kinds: &[EventKind]) -> Vec<CatervasEvent> {
+        harness
+            .events(kinds)
+            .into_iter()
+            .filter(|event| event.envelope.ids.task_id == Some(task(epic)))
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_catervafication_approved_by_the_owner() {
+        let harness = Harness::with_the_suggested_six("human-catervafication");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = handled(&orchestrator, Command::CatervaficationStart).await;
+
+        assert_eq!(
+            report.said,
+            "Your team starts documenting the project in S1: CTV-1."
+        );
+        // The epic is filed whole, then its sprint is opened and planned, it moves into refining as
+        // the Product Manager asks, and the owner's approval comes after the move.
+        let kinds = [
+            EventKind::TaskCreated,
+            EventKind::RequestTriaged,
+            EventKind::CatervaficationStarted,
+            EventKind::SprintStarted,
+            EventKind::SprintPlanned,
+            EventKind::TaskTransitioned,
+            EventKind::HumanAccepted,
+        ];
+        let seen: Vec<EventKind> = harness
+            .events(&kinds)
+            .iter()
+            .map(|event| event.body.kind())
+            .collect();
+        assert_eq!(seen, kinds);
+        let created = last(&harness, EventKind::TaskCreated).expect("the epic is filed");
+        assert!(
+            matches!(&created.body, EventBody::TaskCreated(body) if body.created_by == "human")
+        );
+        assert_eq!(created.envelope.ids.task_id, Some(task("CTV-1")));
+        let started = last(&harness, EventKind::SprintStarted).expect("a sprint is opened");
+        assert!(matches!(&started.body, EventBody::SprintStarted(body)
+            if body.sprint_id.as_str() == "S1" && body.started_by == "human"));
+        let planned = last(&harness, EventKind::SprintPlanned).expect("the epic is planned");
+        assert!(matches!(&planned.body, EventBody::SprintPlanned(body)
+            if body.planned_by == "governor"
+                && json!(body.task_ids) == json!(["CTV-1"])));
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("the epic moves");
+        assert!(matches!(&moved.body, EventBody::TaskTransitioned(body)
+            if body.to.to_string() == "refining" && body.requested_by == "pm"));
+        let accepted = last(&harness, EventKind::HumanAccepted).expect("the owner approves");
+        assert!(matches!(&accepted.body, EventBody::HumanAccepted(body)
+            if body.subject == HumanAcceptedBodySubject::Contract
+                && body.accepted_by == "human" && body.message.is_none()));
+        assert_eq!(report.events.last(), Some(&accepted.envelope.seq));
+
+        // The next tick readies it with no session and no escalation, and the one after assigns it
+        // to the Scrum Master.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("sm"));
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // With a sprint already open, none is opened or planned, and the epic waits for one.
+        let open = Harness::with_the_suggested_six("human-catervafication-open");
+        open.open_sprint("S1", &[]);
+        let orchestrator = an_orchestrator(&open);
+        let report = handled(&orchestrator, Command::CatervaficationStart).await;
+        assert_eq!(
+            report.said,
+            "Your team starts documenting the project: CTV-1."
+        );
+        assert_eq!(open.events(&[EventKind::SprintStarted]).len(), 1);
+        assert!(about(&open, "CTV-1", &[EventKind::SprintPlanned]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_second_start_and_a_new_projects() {
+        let nothing_recorded = |harness: &Harness| {
+            assert!(
+                harness
+                    .events(&[EventKind::TaskCreated, EventKind::CatervaficationStarted])
+                    .is_empty(),
+                "nothing is recorded"
+            );
+        };
+        let harness = Harness::with_the_suggested_six("human-catervafication-twice");
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, Command::CatervaficationStart).await;
+        assert_eq!(
+            refused(&orchestrator, Command::CatervaficationStart).await,
+            "catervafication_started: your team is already documenting this project, as CTV-1"
+        );
+        assert_eq!(
+            harness.events(&[EventKind::CatervaficationStarted]).len(),
+            1
+        );
+
+        let new = Harness::with_the_suggested_six("human-catervafication-new");
+        new.started();
+        assert_eq!(
+            refused(&an_orchestrator(&new), Command::CatervaficationStart).await,
+            "catervafication_new_project: a new project's Catervafication starts by itself once you approve its product plan"
+        );
+        nothing_recorded(&new);
+
+        // No active Product Manager: a team file cannot say so, so the team is handed in whole.
+        let paused = Harness::with_the_suggested_six("human-catervafication-paused");
+        let mut wire = serde_json::to_value(
+            paused
+                .project
+                .deps
+                .files
+                .read_team()
+                .expect("the team reads"),
+        )
+        .expect("the team is JSON");
+        wire["agents"][0]["status"] = json!("paused");
+        let without_one: catervas_core::team::Team =
+            serde_json::from_value(wire).expect("the team reads back");
+        assert!(matches!(
+            super::catervafication_start_for(&paused.project.deps, &without_one),
+            Err(CommandError::Refused { reason })
+                if reason == "catervafication_no_product_manager: the team has no active Product Manager to move the epic into its plan; resume one first"
+        ));
+        nothing_recorded(&paused);
+
+        // A Product Manager and two Developers: no one can write and have their notes checked.
+        let writers = Harness::new("human-catervafication-writers", |_| {});
+        assert_eq!(
+            refused(&an_orchestrator(&writers), Command::CatervaficationStart).await,
+            "catervafication_no_writers: no one on your team can both write and have their notes checked; add an Architect or a Scrum Master"
+        );
+        nothing_recorded(&writers);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn two_starts_at_once_record_one_epic() {
+        let harness = Harness::with_the_suggested_six("human-catervafication-race");
+        let tools = &harness.project.deps;
+        // Raced on two threads past a barrier, so that a check made outside the lock is caught.
+        let start = std::sync::Barrier::new(2);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let racers: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        super::catervafication_start(tools)
+                    })
+                })
+                .collect();
+            racers
+                .into_iter()
+                .map(|racer| racer.join().expect("the racer ends"))
+                .collect()
+        });
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(
+            harness.events(&[EventKind::CatervaficationStarted]).len(),
+            1
+        );
+        assert_eq!(harness.events(&[EventKind::TaskCreated]).len(), 1);
     }
 
     /// An epic the Product Manager wrote for the human to review, with `criteria`, filed in
@@ -3582,6 +4345,7 @@ mod tests {
                 .register_session(crate::daemon::SessionRegistration {
                     session_id: session.to_string(),
                     web: catervas_core::governor::sites::WebAccess::Open,
+                    reads: catervas_core::folders::ReadAccess::Open,
                     agent_id: agent.to_string(),
                     task_id: None,
                     purpose,
@@ -4231,6 +4995,7 @@ mod tests {
                 deps.clock.as_ref(),
                 &deps.ids,
                 crate::chat::NewChatMessage {
+                    heard: None,
                     chat: "dev-a".to_string(),
                     author: "dev-a".to_string(),
                     text: "Here is a request.".to_string(),
@@ -6422,5 +7187,303 @@ mod tests {
             "{results:?}"
         );
         assert_eq!(harness.events(&[EventKind::RenewalDismissed]).len(), 1);
+    }
+
+    const ROADMAP: &str = "docs/catervas/product/roadmap.md";
+    const SPEC: &str = "docs/catervas/product/spec.md";
+
+    /// A harness whose Product Manager `pm` is Mira, integrating under `policy`.
+    fn mira_integrating(name: &str, policy: &str) -> Harness {
+        let policy = policy.to_string();
+        Harness::new(name, move |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            wire["policy"]["integration"] = json!(policy);
+        })
+    }
+
+    /// `agent`'s proposal of `path` at the sprint review, in its session, and its number.
+    fn proposed_by(harness: &Harness, agent: &str, path: &str, text: &str) -> u64 {
+        harness
+            .project
+            .record_in(
+                Some(agent),
+                Some("session-1"),
+                "",
+                "folder_doc.proposed",
+                &json!({
+                    "path": path, "text": text, "agent_text": format!("{text} (for agents)"),
+                    "summary": "Pie pre-orders are done.", "sprint_id": "S4", "proposed_by": agent
+                }),
+            )
+            .envelope
+            .seq
+    }
+
+    fn folder_decision(proposals: &[u64], approve: bool, note: Option<&str>) -> Command {
+        Command::FolderDocDecide {
+            proposals: proposals.to_vec(),
+            approve,
+            note: note.map(ToString::to_string),
+        }
+    }
+
+    fn branches(harness: &Harness) -> String {
+        harness.project.repo.git_output(&[
+            "branch",
+            "--list",
+            "docs/folder-*",
+            "--format=%(refname:short)",
+        ])
+    }
+
+    fn wire_of(event: &CatervasEvent) -> Value {
+        catervas_protocol::event::event_to_value(event)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn approves_a_card_as_one_folder_change() {
+        let harness = mira_integrating("human-folder-approve", "auto_merge");
+        let roadmap = proposed_by(&harness, "pm", ROADMAP, "Now: pie pre-orders.");
+        let spec = proposed_by(&harness, "pm", SPEC, "A shop for pies.");
+        let orchestrator = an_orchestrator(&harness);
+
+        let report = handled(
+            &orchestrator,
+            folder_decision(&[roadmap, spec], true, Some("Thanks")),
+        )
+        .await;
+
+        let repo = &harness.project.repo;
+        assert_eq!(
+            repo.git_output(&["rev-list", "--count", "main..docs/folder-1"]),
+            "1"
+        );
+        for (path, text) in [
+            (ROADMAP, "Now: pie pre-orders."),
+            (
+                "docs/catervas/product/roadmap.agent.md",
+                "Now: pie pre-orders. (for agents)",
+            ),
+            (SPEC, "A shop for pies."),
+            (
+                "docs/catervas/product/spec.agent.md",
+                "A shop for pies. (for agents)",
+            ),
+        ] {
+            assert_eq!(
+                repo.git_output(&["show", &format!("docs/folder-1:{path}")]),
+                text
+            );
+        }
+        assert_eq!(
+            repo.git_output(&["log", "-1", "--format=%an <%ae>|%s", "docs/folder-1"]),
+            "Mira (Catervas) <catervas@localhost>|docs(product): roadmap.md, spec.md by Mira, approved by the owner"
+        );
+        let approved = harness.events(&[EventKind::FolderDocApproved]);
+        assert_eq!(approved.len(), 1);
+        let ids = &approved[0].envelope.ids;
+        assert!(ids.agent_id.is_none() && ids.session_id.is_none() && ids.task_id.is_none());
+        assert_eq!(
+            wire_of(&approved[0])["body"],
+            json!({
+                "proposals": [roadmap, spec], "change": 1,
+                "sha": repo.git_output(&["rev-parse", "docs/folder-1"]), "note": "Thanks"
+            })
+        );
+        assert_eq!(
+            report.said,
+            "Catervas merges docs/folder-1 into main on its next tick."
+        );
+        assert_eq!(report.events, vec![approved[0].envelope.seq]);
+        let docs = catervas_store::folder_docs::folder_docs(&harness.project.deps.log)
+            .expect("the log folds");
+        assert!(
+            docs.proposals
+                .iter()
+                .all(|p| p.state == catervas_store::folder_docs::ProposalState::Approved)
+        );
+
+        // The next tick integrates change 1, as it does a task's branch.
+        let tick = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(
+                &tick,
+                crate::orchestrator::TickReport::FolderChange { change: 1, .. }
+            ),
+            "{tick:?}"
+        );
+        assert_eq!(
+            repo.git_output(&["show", &format!("main:{SPEC}")]),
+            "A shop for pies."
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_back_with_the_owners_words() {
+        let harness = mira_integrating("human-folder-return", "auto_merge");
+        let roadmap = proposed_by(&harness, "pm", ROADMAP, "Now: pie pre-orders.");
+        let orchestrator = an_orchestrator(&harness);
+
+        let report = handled(
+            &orchestrator,
+            folder_decision(&[roadmap], false, Some("Keep gift cards in Now")),
+        )
+        .await;
+
+        let returned = harness.events(&[EventKind::FolderDocReturned]);
+        assert_eq!(returned.len(), 1);
+        assert_eq!(
+            wire_of(&returned[0])["body"],
+            json!({ "proposals": [roadmap], "reason": "Keep gift cards in Now" })
+        );
+        let ids = &returned[0].envelope.ids;
+        assert!(ids.agent_id.is_none() && ids.session_id.is_none() && ids.task_id.is_none());
+        assert_eq!(report.events, vec![returned[0].envelope.seq]);
+        assert_eq!(branches(&harness), "", "sending back makes nothing");
+
+        let second = proposed_by(&harness, "pm", ROADMAP, "Now: gift cards.");
+        let before = harness.events(&[]).len();
+        for note in [None, Some("  \n")] {
+            let reason = refused(&orchestrator, folder_decision(&[second], false, note)).await;
+            assert!(reason.starts_with("folder_doc_reason_needed: "), "{reason}");
+        }
+        assert_eq!(harness.events(&[]).len(), before);
+    }
+
+    /// `command` is refused under `code`, with nothing recorded and no branch made.
+    async fn expect(orchestrator: &Orchestrator, harness: &Harness, command: Command, code: &str) {
+        let (events, branches_before) = (harness.events(&[]).len(), branches(harness));
+        let reason = refused(orchestrator, command).await;
+        assert!(reason.starts_with(&format!("{code}: ")), "{code}: {reason}");
+        assert_eq!(harness.events(&[]).len(), events, "{code} records nothing");
+        assert_eq!(branches(harness), branches_before, "{code} makes no branch");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_what_cannot_be_decided() {
+        let harness = mira_integrating("human-folder-refuses", "manual");
+        let orchestrator = an_orchestrator(&harness);
+        expect(
+            &orchestrator,
+            &harness,
+            folder_decision(&[999], true, None),
+            "unknown_folder_doc",
+        )
+        .await;
+        // A newer proposal of the path superseded the older.
+        let older = proposed_by(&harness, "pm", ROADMAP, "Now: one.");
+        let newer = proposed_by(&harness, "pm", ROADMAP, "Now: two.");
+        expect(
+            &orchestrator,
+            &harness,
+            folder_decision(&[older], true, None),
+            "folder_doc_superseded",
+        )
+        .await;
+        // A card is one agent's.
+        let theirs = proposed_by(&harness, "arch", SPEC, "A shop.");
+        expect(
+            &orchestrator,
+            &harness,
+            folder_decision(&[newer, theirs], true, None),
+            "folder_doc_mixed",
+        )
+        .await;
+        // A decided proposal is not decided again.
+        handled(
+            &orchestrator,
+            folder_decision(&[newer], false, Some("Not yet")),
+        )
+        .await;
+        expect(
+            &orchestrator,
+            &harness,
+            folder_decision(&[newer], true, None),
+            "folder_doc_decided",
+        )
+        .await;
+        // An approved change not yet integrated holds its files.
+        let third = proposed_by(&harness, "pm", ROADMAP, "Now: three.");
+        handled(&orchestrator, folder_decision(&[third], true, None)).await;
+        let fourth = proposed_by(&harness, "pm", ROADMAP, "Now: four.");
+        expect(
+            &orchestrator,
+            &harness,
+            folder_decision(&[fourth], true, None),
+            "folder_doc_waiting",
+        )
+        .await;
+        // The owner's own change at the root is neither carried off nor written over.
+        harness
+            .project
+            .repo
+            .write("docs/catervas/product/spec.agent.md", "the owner's\n");
+        expect(
+            &orchestrator,
+            &harness,
+            folder_decision(&[theirs], true, None),
+            "folder_doc_busy",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn approves_files_that_already_say_it() {
+        let harness = mira_integrating("human-folder-already", "auto_merge");
+        let root = &harness.project.repo;
+        root.write(ROADMAP, "Now: pie pre-orders.");
+        root.write(
+            "docs/catervas/product/roadmap.agent.md",
+            "Now: pie pre-orders. (for agents)",
+        );
+        root.git(&[
+            "add",
+            "--",
+            ROADMAP,
+            "docs/catervas/product/roadmap.agent.md",
+        ]);
+        root.git(&["commit", "-m", "the roadmap"]);
+        let roadmap = proposed_by(&harness, "pm", ROADMAP, "Now: pie pre-orders.");
+        let orchestrator = an_orchestrator(&harness);
+
+        let report = handled(&orchestrator, folder_decision(&[roadmap], true, None)).await;
+
+        let approved = harness.events(&[EventKind::FolderDocApproved]);
+        assert_eq!(
+            wire_of(&approved[0])["body"],
+            json!({ "proposals": [roadmap] })
+        );
+        assert_eq!(branches(&harness), "");
+        assert!(report.said.contains("already"), "{}", report.said);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn decides_under_the_integration_lock() {
+        let harness = mira_integrating("human-folder-lock", "auto_merge");
+        let roadmap = proposed_by(&harness, "pm", ROADMAP, "Now: pie pre-orders.");
+        let orchestrator = an_orchestrator(&harness);
+        let command = folder_decision(&[roadmap], true, None);
+
+        let answer = crate::tools::fixtures::waits_for_the_lock_file(
+            &harness.project.repo.path,
+            &harness.project,
+            || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("a runtime")
+                    .block_on(orchestrator.handle(command.clone()))
+            },
+        );
+
+        answer.expect("approved once the lock is let go");
+        assert_eq!(harness.events(&[EventKind::FolderDocApproved]).len(), 1);
+        let again = refused(&orchestrator, command).await;
+        assert!(again.starts_with("folder_doc_decided: "), "{again}");
     }
 }

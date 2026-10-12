@@ -1,8 +1,9 @@
 //! A session's system prompt (`docs/SPEC.md` section 8.2, ADR 0011): the same sections in the same
 //! order for every role and purpose.
 
-use catervas_core::contract::TaskContract;
+use catervas_core::contract::{Role, TaskContract};
 use catervas_core::criteria::CriteriaLibrary;
+use catervas_core::folders::{folders_line, stale_line};
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::team::{Agent, TeamPermissions};
@@ -50,6 +51,11 @@ pub struct PromptInput<'a> {
     pub closing: Option<&'a str>,
     /// The connectors the session is given, by name, whose every answer is untrusted (8.6).
     pub connectors: &'a [String],
+    /// The roles the team has an active agent of, for the Team rules' line about folders.
+    pub active_roles: &'a [Role],
+    /// The `.agent.md` twins that are behind the document for people beside them, for the Team
+    /// rules' line about them (`docs/SPEC.md` 5.17).
+    pub stale_twins: &'a [String],
 }
 
 /// The prompt's section titles, each written as a `## ` heading, in the one order every prompt
@@ -141,6 +147,10 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
     ),
 ];
 
+/// The `This session` section of a new project's Product Manager's chat session while the owner's
+/// product plan is not approved (`docs/SPEC.md` 4.3), in place of the chat's.
+pub const INTERVIEW_INSTRUCTION: &str = "This session is your interview of the owner about their new project, in your one-to-one chat. `From the human` holds what they wrote when they started it, then the chat so far. Nothing is planned until the owner approves the product plan you write from it. Find out, one question at a time, who the customers are, the problem they have, what the product must do, what is out for now, any constraints, and how the owner will know it works; ask only what the chat has not answered, in your persona's voice, short and in plain words. When you know enough, or the owner asks you to, sum up: put the summary in `heard` (constraints under `must` or `not_now`, as they fit) and say in your text that they can correct it or have you draft the plan. Put no request in your reply: nothing is planned before the plan. Answer once with `catervas_chat_reply`, then end the session.";
+
 /// The `This session` section of each ceremony (5.9), by its thread: what it posts, and the tool
 /// it ends with. The channel is read by all, so each tells the agent to mention no one.
 pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [
@@ -215,7 +225,11 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
             .project_scan
             .and_then(|scan| untrusted("project_scan", scan, 16 * KIB)),
         Some(memory_section(input)),
-        Some(rules_section(input.rules)),
+        Some(rules_section(
+            input.rules,
+            input.role.id,
+            (input.active_roles, input.stale_twins),
+        )),
         if input.criteria.criteria.is_empty() {
             None
         } else {
@@ -429,8 +443,13 @@ fn you_section(agent: &Agent) -> String {
 }
 
 /// One line per rule, named as `team.yaml` names it; a list rule with nothing in it says nothing,
-/// except `document_paths`, whose empty list means no task but a Developer's can be ready.
-fn rules_section(rules: &TeamRules) -> String {
+/// except `document_paths`, whose empty list means no task but a Developer's can be ready. The
+/// last line names the team's folders, and after it the twins that are stale (`docs/SPEC.md` 5.17).
+fn rules_section(
+    rules: &TeamRules,
+    role: Role,
+    (active_roles, stale_twins): (&[Role], &[String]),
+) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
     };
@@ -456,6 +475,8 @@ fn rules_section(rules: &TeamRules) -> String {
                     .to_string(),
             )
         }),
+        Some(folders_line(role, active_roles)),
+        stale_line(stale_twins),
     ]
     .into_iter()
     .flatten()
@@ -655,6 +676,8 @@ mod tests {
                 human_message: Some("Please start with the login form."),
                 closing: None,
                 connectors: &[],
+                active_roles: &[],
+                stale_twins: &[],
             }
         }
     }
@@ -963,7 +986,11 @@ mod tests {
 
     #[test]
     fn lists_only_the_tools_the_agent_can_call() {
-        let inputs = a_product_manager();
+        let mut inputs = a_product_manager();
+        // As `offered_tools` gives a refine session: none of the tools that change the project.
+        inputs
+            .tools
+            .retain(|tool| !crate::tools::writes_the_project(tool.name, tool.tier));
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         let tools = section(&prompt, "Your tools");
         assert!(tools.contains("`mcp__catervas__<name>`"), "{tools}");
@@ -1080,7 +1107,8 @@ mod tests {
             "- protected_paths: .env, **/*.pem\n\
              - require_new_tests: no\n\
              - max_task_budget_usd: none\n\
-             - document_paths: none (no task but a Software Developer's can be ready)"
+             - document_paths: none (no task but a Software Developer's can be ready)\n\
+             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents."
         );
 
         inputs.rules = TeamRules {
@@ -1102,7 +1130,73 @@ mod tests {
              - require_new_tests: yes\n\
              - max_task_budget_usd: 12.5\n\
              - forbidden_commands: ^rm -rf /\n\
-             - document_paths: docs/**, **/*.md, CHANGELOG.md"
+             - document_paths: docs/**, **/*.md, CHANGELOG.md\n\
+             - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents."
+        );
+    }
+
+    #[test]
+    fn the_team_rules_name_the_active_roles_folders() {
+        let inputs = Inputs::new(Role::Architect, "architect");
+        let active = [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::FinanceSpecialist,
+        ];
+        let prompt = assembled(&PromptInput {
+            active_roles: &active,
+            ..inputs.full(SessionPurpose::Refine)
+        });
+        let rules = section(&prompt, "Team rules");
+        let last = rules.lines().last().expect("a last line");
+        assert!(
+            last.contains("docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/delivery/ (Scrum Master). Yours is docs/catervas/architecture/"),
+            "{last}"
+        );
+        assert!(!last.contains("Finance"), "{last}");
+        let headings = headings(&prompt);
+        let wanted: Vec<&str> = PROMPT_SECTIONS
+            .iter()
+            .copied()
+            .filter(|title| headings.contains(title))
+            .collect();
+        assert_eq!(
+            headings, wanted,
+            "the headings are still PROMPT_SECTIONS, in order"
+        );
+    }
+
+    #[test]
+    fn the_team_rules_say_which_twins_are_stale() {
+        let inputs = Inputs::new(Role::Architect, "architect");
+        let stale = ["docs/catervas/product/roadmap.agent.md".to_string()];
+        let prompt = assembled(&PromptInput {
+            stale_twins: &stale,
+            ..inputs.full(SessionPurpose::Refine)
+        });
+        let rules = section(&prompt, "Team rules");
+        let mut lines = rules.lines().rev();
+        assert_eq!(
+            lines.next(),
+            Some(
+                "- stale twins: docs/catervas/product/roadmap.agent.md. Each is behind the document for people beside it, which the owner changed: read that document as well until the twin is brought up to date."
+            )
+        );
+        assert!(
+            lines
+                .next()
+                .is_some_and(|line| line.starts_with("- folders:"))
+        );
+
+        let prompt = assembled(&inputs.full(SessionPurpose::Refine));
+        let rules = section(&prompt, "Team rules");
+        assert!(
+            rules
+                .lines()
+                .last()
+                .is_some_and(|line| line.starts_with("- folders:")),
+            "{rules}"
         );
     }
 
