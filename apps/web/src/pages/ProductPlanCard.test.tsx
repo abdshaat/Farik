@@ -5,6 +5,7 @@ import { en } from "../strings/en.ts";
 import { sentCommand } from "../test/gate.ts";
 import { IN_REVIEW, todayWithPlan } from "../test/productPlan.ts";
 import { bodyOf, refusedBy } from "../test/schema.ts";
+import cardCss from "./ProductPlanCard.module.css";
 import { projectName, writtenWhen } from "./ProductPlanCard.tsx";
 
 const card = () =>
@@ -78,6 +79,7 @@ describe("the product plan on Today", () => {
 		]);
 		expect(frames.every((f) => f.getAttribute("sandbox") === "")).toBe(true);
 		expect(container.innerHTML).not.toContain("Secret");
+		for (const f of frames) expect(f.className).toContain(cardCss.frame);
 	});
 
 	it("approve_accepts_the_result", async () => {

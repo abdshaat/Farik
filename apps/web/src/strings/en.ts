@@ -2576,6 +2576,7 @@ export const en = {
 	docAskSent: "Sent. {owner} has it as {task}.",
 	docEditSource: "Edit source",
 	refuseNotEditable: "This document can’t be changed from here.",
+	refuseNoWords: "Say what should change.",
 	refuseNoOwner:
 		"No one on your team owns this folder right now. Resume or add its role first.",
 	refuseNoTaskTaker:

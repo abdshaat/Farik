@@ -11,13 +11,13 @@ describe("DocumentFrame", () => {
 		const { container } = render(
 			<DocumentFrame
 				path={PATH}
-				task="CTV-4"
+				task="CTV-4&x=1"
 				version="abc123"
 				title="Overview"
 			/>,
 		);
 		const frame = container.querySelector("iframe") as HTMLIFrameElement;
-		const src = `/documents/raw?path=${encodeURIComponent(PATH)}&task=CTV-4&v=abc123`;
+		const src = `/documents/raw?path=${encodeURIComponent(PATH)}&task=${encodeURIComponent("CTV-4&x=1")}&v=abc123`;
 		expect(frame.getAttribute("src")).toBe(src);
 		expect(frame.hasAttribute("sandbox")).toBe(true);
 		expect(frame.getAttribute("sandbox")).toBe("");
@@ -26,6 +26,13 @@ describe("DocumentFrame", () => {
 		expect(open.getAttribute("href")).toBe(src);
 		expect(open.getAttribute("target")).toBe("_blank");
 		expect(open.getAttribute("rel")).toContain("noopener");
+	});
+
+	it("adds_a_class_to_the_frame", () => {
+		const { container } = render(
+			<DocumentFrame path={PATH} title="Overview" className="mine" />,
+		);
+		expect(container.querySelector("iframe")?.className).toContain("mine");
 	});
 
 	it("leaves_out_the_task_and_version_when_not_given", () => {

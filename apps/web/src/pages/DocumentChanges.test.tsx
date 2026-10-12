@@ -74,6 +74,7 @@ describe("the product plan's changes on Today", () => {
 					lines: [
 						{ change: "same", text: "<h2>Risks</h2>" },
 						{ change: "added", text: "<li>Ship <b>v2</b> &amp; more</li>" },
+						{ change: "added", text: "<p>Use &lt;b&gt; &nbsp;&#60;</p>" },
 					],
 				},
 			],
@@ -83,8 +84,10 @@ describe("the product plan's changes on Today", () => {
 		const list = within(region).getByRole("list", {
 			name: "Product description",
 		});
-		const [risks, ship] = within(list).getAllByRole("listitem");
+		const [risks, ship, escaped] = within(list).getAllByRole("listitem");
 		expect(reads(ship as HTMLElement)).toBe("Added: Ship v2 & more");
+		// Only five entities are decoded, and after the tags are gone.
+		expect(reads(escaped as HTMLElement)).toBe("Added: Use <b> &nbsp;&#60;");
 		expect(reads(risks as HTMLElement)).toBe("Risks");
 		expect((risks as HTMLElement).className).toContain(styles.heading);
 		expect((ship as HTMLElement).className).not.toContain(styles.heading);

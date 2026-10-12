@@ -131,6 +131,7 @@ export function ProductPlanCard({
 								path={one.path}
 								task={task.taskId}
 								title={named ? t(named) : one.path}
+								className={card.frame}
 							/>
 						) : (
 							<div className={card.read}>

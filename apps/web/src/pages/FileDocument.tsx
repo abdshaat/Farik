@@ -113,8 +113,8 @@ export function FileDocument({
 			const sent = (await client.call("files.ask_change", {
 				path,
 				words: words.trim(),
-			})) as { taskId?: string; task_id?: string };
-			setAsked({ ok: true, task: sent.taskId ?? sent.task_id ?? "" });
+			})) as { taskId: string };
+			setAsked({ ok: true, task: sent.taskId });
 			setWords("");
 		} catch (e) {
 			setAsked({ ok: false, said: saidAll(e) });

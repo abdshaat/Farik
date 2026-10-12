@@ -798,6 +798,45 @@ describe("Files: HTML documents and asking for a change", () => {
 		);
 	});
 
+	it("says_each_refusal_of_a_change_in_its_words", async () => {
+		for (const [code, words] of [
+			["no_words", "Say what should change."],
+			["not_editable", "This document can\u2019t be changed from here."],
+			[
+				"no_task_taker",
+				"The Scrum Master keeps this document up to date at its retro.",
+			],
+		] as const) {
+			media.set(WIDE, true);
+			const { s } = await files("/files/product/roadmap.md");
+			await screen.findByRole("heading", { name: "Roadmap" });
+			fireEvent.change(
+				screen.getByRole("textbox", { name: "What should change?" }),
+				{ target: { value: "Add a pricing section" } },
+			);
+			press("Send to Mira");
+			await s.fail(s.calls("files.ask_change")[0] as never, -32005, "refused", {
+				errors: [{ path: "/path", code, message: "raw words" }],
+			});
+			expect((await screen.findByRole("alert")).textContent).toBe(words);
+			cleanup();
+		}
+	});
+
+	it("does_not_send_blank_words", async () => {
+		media.set(WIDE, true);
+		const { s } = await files("/files/product/roadmap.md");
+		await screen.findByRole("heading", { name: "Roadmap" });
+		fireEvent.change(
+			screen.getByRole("textbox", { name: "What should change?" }),
+			{ target: { value: "   " } },
+		);
+		const send = screen.getByRole("button", { name: "Send to Mira" });
+		expect((send as HTMLButtonElement).disabled).toBe(true);
+		fireEvent.click(send);
+		expect(s.calls("files.ask_change")).toEqual([]);
+	});
+
 	it("shows_no_ask_box_when_not_askable", async () => {
 		media.set(WIDE, true);
 		await files("/files/product/roadmap.md", {

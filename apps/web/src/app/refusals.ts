@@ -149,6 +149,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	catervafication_no_product_manager: "refuseCatervaficationNoPm",
 	catervafication_no_writers: "refuseCatervaficationNoWriters",
 	not_editable: "refuseNotEditable",
+	no_words: "refuseNoWords",
 	no_owner: "refuseNoOwner",
 	no_task_taker: "refuseNoTaskTaker",
 };

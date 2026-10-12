@@ -11,11 +11,13 @@ export function DocumentFrame({
 	task,
 	version,
 	title,
+	className,
 }: {
 	path: string;
 	task?: string | undefined;
 	version?: string | undefined;
 	title: string;
+	className?: string | undefined;
 }) {
 	const src = `/documents/raw?path=${encodeURIComponent(path)}${
 		task ? `&task=${encodeURIComponent(task)}` : ""
@@ -25,7 +27,12 @@ export function DocumentFrame({
 			<a className={styles.open} href={src} target="_blank" rel="noopener">
 				{t("docOpenFull")}
 			</a>
-			<iframe className={styles.frame} sandbox="" src={src} title={title} />
+			<iframe
+				className={className ? `${styles.frame} ${className}` : styles.frame}
+				sandbox=""
+				src={src}
+				title={title}
+			/>
 		</div>
 	);
 }
