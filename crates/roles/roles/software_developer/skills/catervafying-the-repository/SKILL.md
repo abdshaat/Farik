@@ -40,7 +40,7 @@ nobody follows is not a rule here; say what the code does, and say when it varie
 The top of `workflow` says whether it records the project's own process or adopts Catervas's
 recommended workflow, and the evidence that supports the choice.
 
-With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of workflow.
+With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of the `workflow` document.
 
 ## 5. Finish
 

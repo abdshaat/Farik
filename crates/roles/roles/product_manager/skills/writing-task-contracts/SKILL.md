@@ -48,7 +48,7 @@ The team's rules and the criterion library are in this prompt; call `catervas_re
 - **Requirements**: numbered `R1`, `R2`, ..., each one thing that must be true afterwards.
 - **Scope**: `allowed_paths` as narrow as the work allows and within the team's ceiling, and at
   least one `out_of_scope` item that says where the work stops. An empty exclusion list predicts
-  scope creep. Name `docs/catervas/product/spec` or `roadmap` in a task's allowed paths,
+  scope creep. Name `docs/catervas/product/spec.*` or `docs/catervas/product/roadmap.*` in a task's allowed paths,
   or a pattern that reaches them, only when the task changes them: such a task waits for the
   owner to accept it.
 - **Only the Developer and the UI/UX Designer change code**: a task for any other role keeps every
@@ -108,7 +108,8 @@ An approved epic's tasks are yours to write. Read the epic and the tasks already
 (`catervas_read_board`) first.
 
 1. With an active Architect, file one task for it with `catervas_create_task`, `parent` the epic,
-   `assignee_role` `architect`, `plan` and `allowed_paths` `docs/catervas/architecture/plans/<epic-id>`,
+   `assignee_role` `architect`, `plan` and `allowed_paths` `docs/catervas/architecture/plans/<epic-id>` followed by the team's
+   extension (`.html` or `.md`, as the Team rules say),
    no `lane`, an `artifact` criterion that the plan exists, and in its requirements how many
    builders (Software Developers and UI/UX Designers) are active.
 2. Once the plan is on the integration branch, file one task per planned task: its `plan`, its

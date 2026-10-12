@@ -2336,7 +2336,7 @@ mod tests {
                     ]);
                 }
                 Role::ProductManager => names(&["its agent version"]),
-                Role::Architect => names(&["a diagram", "`jobs`"]),
+                Role::Architect => names(&["diagram", "`jobs`"]),
                 _ => {}
             }
         }
@@ -2389,7 +2389,7 @@ mod tests {
         let (_, catervafying) = kit_skill(Role::SoftwareDeveloper, "catervafying-the-repository");
         assert!(
             catervafying.contains(
-                "With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of workflow."
+                "With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of the `workflow` document."
             ),
             "{catervafying}"
         );

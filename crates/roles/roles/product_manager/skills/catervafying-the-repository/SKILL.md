@@ -12,7 +12,8 @@ writes down what it knows, in its own folder, before anything is built. Yours is
 ## 1. What the task asks
 
 Write the project's product plan from what the project holds: `spec`, the product description,
-and `roadmap`, the roadmap, each for the owner to read, and their team versions. Touch nothing outside `docs/catervas/product/`.
+and `roadmap`, the roadmap, each for the owner to read, and their team versions. Touch nothing
+outside `docs/catervas/product/`.
 
 ## 2. Read first
 

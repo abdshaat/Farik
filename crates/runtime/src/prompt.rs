@@ -53,7 +53,7 @@ pub struct PromptInput<'a> {
     pub connectors: &'a [String],
     /// The roles the team has an active agent of, for the Team rules' line about folders.
     pub active_roles: &'a [Role],
-    /// The `.agent.md` twins that are behind the document for people beside them, for the Team
+    /// The agent versions that are behind the document for people beside them, for the Team
     /// rules' line about them (`docs/SPEC.md` 5.17).
     pub stale_twins: &'a [String],
     /// The format the team writes new documents in, for the Team rules' line about it.

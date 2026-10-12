@@ -25,7 +25,7 @@ integration files and the documents the repository already has. For a new projec
 ## 3. The four documents
 
 - `overview` says what the system is made of and how the parts talk to each other, with a
-  diagram. Draw it as a diagram, small enough to read.
+  diagram small enough to read.
 - `features` lists what the project does today, one line each, with where it lives.
 - `jobs` lists every scheduled or background job found in the code, the continuous integration
   and the configuration: what runs, when, and where it is defined. Say so when there are none.

@@ -782,7 +782,8 @@ mod tests {
         let flat = PM_SKILL.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
             flat.contains(
-                "Name `docs/catervas/product/spec` or `roadmap` in a task's allowed paths, \
+                "Name `docs/catervas/product/spec.*` or `docs/catervas/product/roadmap.*` in a task's \
+                 allowed paths, \
                  or a pattern that reaches them, only when the task changes them: such a task \
                  waits for the owner to accept it."
             ),
@@ -1558,27 +1559,106 @@ mod tests {
                 let text = std::fs::read_to_string(&file).expect("a text");
                 let mut gone: Vec<&str> = NAMES.to_vec();
                 gone.extend([".agent.md", "MP-<n>.md"]);
-                if role == "architect" {
-                    gone.push("Mermaid");
-                }
                 for needle in gone {
                     assert!(!text.contains(needle), "{} holds {needle}", file.display());
                 }
-                for word in text.split(|c: char| {
-                    c.is_whitespace() || matches!(c, '`' | '"' | '\'' | '(' | ')' | ',' | ';')
-                }) {
-                    let word = word.trim_end_matches(['.', ':']);
+                if role == "architect" {
                     assert!(
-                        !(word.contains("docs/catervas/")
-                            && std::path::Path::new(word)
-                                .extension()
-                                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))),
-                        "{} holds {word}",
+                        !text.to_lowercase().contains("mermaid"),
+                        "{} holds Mermaid",
                         file.display()
                     );
                 }
+                if let Some(word) = path_with_extension(&text) {
+                    panic!("{} holds {word}", file.display());
+                }
             }
         }
+    }
+
+    /// The first word of `text` that is a path ending `.md` (a glob such as `**/*.md` is not).
+    fn path_with_extension(text: &str) -> Option<String> {
+        text.split_whitespace()
+            .filter(|word| !word.contains("/*") && !word.contains("**/"))
+            .map(|word| {
+                let kept =
+                    |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '-' | '_' | '<' | '>');
+                // A sentence's full stop may sit inside a bracket: trim, drop dots, trim again.
+                word.trim_matches(|c| !kept(c))
+                    .trim_end_matches('.')
+                    .trim_matches(|c| !kept(c))
+                    .trim_end_matches('.')
+            })
+            .find(|word| {
+                word.contains('/')
+                    && (word.contains("docs/catervas/") || !word.starts_with("docs/"))
+                    && std::path::Path::new(word)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            })
+            .map(str::to_string)
+    }
+
+    #[test]
+    fn the_path_check_sees_a_path_in_any_dress() {
+        for text in [
+            "**docs/catervas/x.md**",
+            "Write `plans/<epic-id>.md` here",
+            "(docs/catervas/a/b.md).",
+        ] {
+            assert!(path_with_extension(text).is_some(), "{text}");
+        }
+        for text in [
+            "`docs/**, **/*.md`",
+            "CHANGELOG.md",
+            "docs/catervas/product/spec",
+        ] {
+            assert!(path_with_extension(text).is_none(), "{text}");
+        }
+    }
+
+    /// A value an agent copies into a contract holds what Catervas checks: the owner's documents
+    /// as globs that reach either format, a plan with the team's extension.
+    #[test]
+    fn contract_values_keep_their_extension() {
+        assert!(catervas_core::folders::may_change_an_owner_document(&[
+            "docs/catervas/product/spec.*".to_string()
+        ]));
+        let globs = vec!["docs/catervas/product/spec.*".to_string()];
+        for path in [
+            "docs/catervas/product/spec.html",
+            "docs/catervas/product/spec.agent.html",
+        ] {
+            assert!(
+                catervas_core::governor::paths::check_allowed_paths(&[path.to_string()], &globs)
+                    .is_ok(),
+                "{path}"
+            );
+        }
+        let flat = flattened(PM_SKILL);
+        assert!(
+            flat.contains(
+                "`docs/catervas/product/spec.*` or `docs/catervas/product/roadmap.*` in a task's allowed paths"
+            ),
+            "{flat}"
+        );
+        assert!(
+            flat.contains(
+                "`docs/catervas/architecture/plans/<epic-id>` followed by the team's extension (`.html` or `.md`, as the Team rules say)"
+            ),
+            "{flat}"
+        );
+        let cadence = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("roles/scrum_master/skills/catervafying-the-repository/SKILL.md"),
+        )
+        .expect("a skill");
+        assert!(
+            flattened(&cadence).contains(
+                "`docs/catervas/delivery/cadence` followed by the team's extension (`.html` or `.md`, as the Team rules say) with `catervas_write_folder_doc`"
+            ),
+            "{cadence}"
+        );
     }
 
     /// The Marketing Specialist reads two folders (step 02): its prompt says so and where, and

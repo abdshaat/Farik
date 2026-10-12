@@ -17,7 +17,8 @@ the file.
 
 ## 2. What to write
 
-Write `docs/catervas/delivery/cadence` with `catervas_write_folder_doc`: how this team works in
+Write `docs/catervas/delivery/cadence` followed by the team's extension (`.html` or `.md`, as
+the Team rules say) with `catervas_write_folder_doc`: how this team works in
 sprints, in lines an agent can follow.
 
 - How long a sprint runs, and when the team plans, reviews and holds the retro.
