@@ -7,7 +7,7 @@ import { t } from "../../strings/t.ts";
 export type Preview = {
 	prepare?: string;
 	start: string;
-	port: number | string;
+	port?: number | string;
 	path: string;
 };
 /** The four fields as typed. */
@@ -35,7 +35,7 @@ export function previewOf(form: PreviewForm): Preview | undefined {
 		...(prepare && { prepare }),
 		start,
 		// A port that is not a number goes as typed, and the daemon refuses it at its field.
-		port: /^\d+$/.test(port) ? Number(port) : port,
+		...(port && { port: /^\d+$/.test(port) ? Number(port) : port }),
 		path: form.path.trim() || "/",
 	};
 }

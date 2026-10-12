@@ -2,11 +2,15 @@ import { Button, Choice, TextField } from "@catervas/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { t } from "../../strings/t.ts";
+import { dollars as money } from "../Gate.tsx";
 import styles from "./setup.module.css";
 import { PutBack, type Team, useDefaults, useSetup } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Limit = "none" | "daily";
+
+/** The share of the limit the example says the team has spent so far today. */
+const EXAMPLE_SPENT = 0.64;
 
 /**
  * The daily limit's one control, for setup and the Costs page: no limit, or a daily one (the
@@ -55,6 +59,24 @@ export function useDailyLimit(kept: number | undefined) {
 					/>
 				</div>
 			)}
+			{limit === "daily" && !wrong && (
+				<figure className={styles.example}>
+					<figcaption>{t("spendExample")}</figcaption>
+					<p id="limit-example-line">
+						{t("costsTodayOf", {
+							spent: money(dollars * EXAMPLE_SPENT),
+							limit: money(dollars),
+						})}
+					</p>
+					<meter
+						min={0}
+						max={dollars}
+						value={dollars * EXAMPLE_SPENT}
+						aria-labelledby="limit-example-line"
+					/>
+					<p>{t("spendExampleStop", { limit: money(dollars) })}</p>
+				</figure>
+			)}
 			<PutBack
 				onClick={
 					defaults &&
@@ -76,11 +98,16 @@ export function SetupSpending() {
 	const { draft, change } = useSetup();
 	const { wrong, budgets, fields } = useDailyLimit(draft.team.budgets.dailyUsd);
 
+	// What was typed comes back with the screen, unless it is unfinished.
+	const keep = () => {
+		if (!wrong)
+			change({
+				...draft,
+				team: { ...draft.team, budgets: budgets(draft.team.budgets) },
+			});
+	};
 	const onward = () => {
-		change({
-			...draft,
-			team: { ...draft.team, budgets: budgets(draft.team.budgets) },
-		});
+		keep();
 		navigate("/setup/finish");
 	};
 
@@ -90,15 +117,17 @@ export function SetupSpending() {
 			title={t("spendTitle")}
 			lead={t("spendLead")}
 			carried={!!draft.from}
+			onLeave={keep}
 		>
 			{fields}
 			<p className={styles.note}>{t("spendFixed")}</p>
 			<p className={styles.note}>{t("firstDay")}</p>
 			<div className={styles.foot}>
 				<Button
-					onClick={() =>
-						navigate(draft.from ? "/setup/team" : "/setup/permissions")
-					}
+					onClick={() => {
+						keep();
+						navigate(draft.from ? "/setup/team" : "/setup/permissions");
+					}}
 				>
 					{t("back")}
 				</Button>

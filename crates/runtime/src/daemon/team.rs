@@ -1362,6 +1362,14 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     team["agents"] = serde_json::to_value(agents).map_err(|e| internal(&e))?;
     // Setup only ever makes a new team, and a new team plans in sprints (ADR 0028).
     team["policy"]["plan_in_sprints"] = json!(true);
+    // A team with no preview is proposed the one the scan found, if it found one (ADR 0054); a scan
+    // that fails proposes none.
+    let found = scan_project(&deps.git, deps.clock.now())
+        .ok()
+        .and_then(|scan| scan.app_start);
+    if let (true, Some(app)) = (team.get("preview").is_none_or(Value::is_null), found) {
+        team["preview"] = json!({ "prepare": app.prepare, "start": app.start, "path": "/" });
+    }
     let criteria = serde_json::to_value(deps.files.read_criteria().map_err(|e| internal(&e))?)
         .map_err(|e| internal(&e))?;
     Ok(json!({ "team": team, "criteria": criteria, "unavailable": unavailable }))
@@ -1516,6 +1524,10 @@ fn scanned(deps: &ToolDeps) -> Result<Value, Failure> {
             "last_commit": facts.last_commit,
         },
         "checks": scan.detected_criteria.iter().map(|one| one.text.to_string()).collect::<Vec<_>>(),
+        "app_start": scan.app_start.as_ref().map(|app| json!({
+            "prepare": app.prepare,
+            "start": app.start,
+        })),
         "kept_private": kept_private,
     }))
 }
@@ -4718,6 +4730,85 @@ pub(super) mod tests {
             uncapped["kept_private"],
             json!([".env", "**/*.pem", "**/*.key"])
         );
+    }
+
+    /// A pnpm project committed to `harness`'s repository, with `scripts` in its `package.json`.
+    fn a_pnpm_project(harness: &Harness, scripts: &Value) {
+        let repo = &harness.project.repo;
+        repo.write("pnpm-lock.yaml", "lockfileVersion: 9\n");
+        repo.write(
+            "package.json",
+            &json!({ "name": "shop", "scripts": scripts }).to_string(),
+        );
+        repo.commit("A shop");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn scan_answers_how_to_start_the_app() {
+        let with = driven("project-scan-app-start");
+        a_pnpm_project(&with, &json!({ "dev": "vite", "test": "vitest" }));
+        let scanned = query(
+            &with.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        assert_eq!(
+            scanned["app_start"],
+            json!({ "prepare": "pnpm install", "start": "pnpm run dev" })
+        );
+        let without = driven("project-scan-no-app-start");
+        a_pnpm_project(&without, &json!({ "test": "vitest" }));
+        let scanned = query(
+            &without.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        assert_eq!(scanned["app_start"], Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn proposes_the_preview_the_scan_found() {
+        let propose = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "team.propose",
+                &json!({}),
+                "teamProposeResult",
+            )["team"]["preview"]
+                .clone()
+        };
+        let found = driven("team-propose-preview");
+        a_pnpm_project(&found, &json!({ "dev": "vite" }));
+        assert_eq!(
+            propose(&found),
+            json!({ "prepare": "pnpm install", "start": "pnpm run dev", "path": "/" })
+        );
+
+        // A team that already has a preview keeps its own.
+        let own = Harness::new("team-propose-own-preview", |wire| {
+            wire["preview"] = json!({ "start": "make serve", "port": 4401 });
+        });
+        a_pnpm_project(&own, &json!({ "dev": "vite" }));
+        assert_eq!(
+            propose(&own),
+            json!({ "start": "make serve", "port": 4401, "path": "/" })
+        );
+
+        // A project with no suggestion proposes none.
+        let none = driven("team-propose-no-preview");
+        a_pnpm_project(&none, &json!({ "test": "vitest" }));
+        assert_eq!(propose(&none), Value::Null);
+
+        // A scan that fails (a tracked package.json gone from disk) proposes no preview, and the
+        // proposal still answers.
+        let broken = driven("team-propose-scan-fails");
+        a_pnpm_project(&broken, &json!({ "dev": "vite" }));
+        std::fs::remove_file(broken.project.repo.path.join("package.json")).expect("removed");
+        assert_eq!(propose(&broken), Value::Null);
     }
 
     #[test]

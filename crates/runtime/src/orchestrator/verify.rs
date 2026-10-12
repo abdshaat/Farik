@@ -385,9 +385,6 @@ async fn design_review_first(
     }
     let git = &deps.tools.git;
     let diff = git.diff(&integration_branch(team, git)?, &task_branch(contract))?;
-    let page = team.preview().map_or_else(String::new, |preview| {
-        format!("http://localhost:{}{}", preview.port, preview.path)
-    });
     let end = run_session(
         deps,
         team,
@@ -397,7 +394,7 @@ async fn design_review_first(
                 contract,
                 designer,
                 worktree(deps, &row.task_id),
-                design_review_message(contract, &diff, &page),
+                design_review_message(contract, &diff),
             )
         },
     )
@@ -989,6 +986,13 @@ mod tests {
         assert!(
             review.initial_prompt.contains("site/style.css"),
             "the Designer is shown the change: {}",
+            review.initial_prompt
+        );
+        assert!(
+            review
+                .initial_prompt
+                .ends_with("The app's preview is at http://localhost:4401/."),
+            "the design review is told where the preview is: {}",
             review.initial_prompt
         );
         // The Architect's review is not the Designer's: no browser, no page check.
