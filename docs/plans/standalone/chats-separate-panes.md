@@ -116,7 +116,7 @@ Tests (`Channel.test.tsx`):
 - `opens_a_thread_from_the_side_panel` (unchanged, at the default: below 1440).
 - `keeps_the_box_to_one_row_on_a_phone` — `(min-width: 1024px)` false: the paragraphs `#channel-enter` and `#channel-hint` have `styles.hidden` (the file's import of `Channel.module.css`); true: neither has it.
 
-- [ ] `fix(web): open the team chat at its newest message`
+- [x] `fix(web): open the team chat at its newest message`
 
 ### Task 4: the one-to-one in the feed, with earlier pages
 

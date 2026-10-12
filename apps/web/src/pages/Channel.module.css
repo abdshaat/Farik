@@ -2,7 +2,10 @@
 .page {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
+	grid-template-rows: minmax(0, 1fr);
 	gap: var(--catervas-space-6);
+	flex: 1 1 0;
+	min-height: 0;
 }
 
 /* Beside the chat list, the meetings column needs the room of a wider screen. */
@@ -13,10 +16,11 @@
 }
 
 .main {
-	display: grid;
+	display: flex;
+	flex-direction: column;
 	gap: var(--catervas-space-4);
-	align-content: start;
 	min-width: 0;
+	min-height: 0;
 }
 
 .head {
@@ -213,6 +217,35 @@
 	display: grid;
 	gap: var(--catervas-space-3);
 	align-content: start;
+}
+
+/* Beside the chat, the meetings scroll inside their own column. */
+@media (min-width: 1440px) {
+	.side {
+		min-height: 0;
+		overflow-y: auto;
+	}
+}
+
+/* Under the intro, the meetings take the head's whole row. */
+.head .side {
+	flex-basis: 100%;
+}
+
+.fold summary {
+	padding: var(--catervas-space-2) 0;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.fold summary:focus-visible {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: 2px;
+}
+
+.fold .meeting {
+	display: block;
+	padding: var(--catervas-space-1) 0;
 }
 
 .side h2,
