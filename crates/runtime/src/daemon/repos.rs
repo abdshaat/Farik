@@ -390,6 +390,8 @@ mod tests {
         assert_eq!(listed(&folder), wanted(false));
 
         let away = folder.app.path.with_extension("away");
+        // A run that failed before moving it back leaves this behind.
+        let _ = std::fs::remove_dir_all(&away);
         std::fs::rename(&folder.app.path, &away).expect("the repository is moved away");
         assert_eq!(listed(&folder), wanted(true));
         std::fs::rename(&away, &folder.app.path).expect("and back");
