@@ -35,7 +35,9 @@ use super::design::{DECIDE_TOOL, RECORD_DESIGN_REVIEW_TOOL};
 use super::messages::{human_message, preview_address};
 use super::pipeline::DECIDE_PIPELINE_TOOL;
 use super::verify::{append, append_stamped};
-use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
+use super::{
+    OrchestratorDeps, OrchestratorError, TRIAGE_MODEL, repository_refused, task_repository_of,
+};
 use crate::channel::post_system;
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
@@ -289,7 +291,7 @@ async fn give_browser(
     else {
         return Ok(Ok(None));
     };
-    let running = match open_preview(deps, contract, ids, &ask.cwd, &preview).await? {
+    let running = match open_preview(deps, team, contract, ids, &ask.cwd, &preview).await? {
         Ok(running) => running,
         Err(error) => return preview_failed(deps, team, contract, spec, ids, &error).map(Err),
     };
@@ -487,13 +489,18 @@ struct Prepared {
 /// `preview.prepared` and `preview.started` are recorded. A preview that fails is the inner error.
 async fn open_preview(
     deps: &OrchestratorDeps,
+    team: &Team,
     contract: &TaskContract,
     ids: &EventIds,
     worktree: &std::path::Path,
     preview: &Preview,
 ) -> Result<Result<Arc<dyn RunningPreview>, PreviewError>, OrchestratorError> {
     let tools = &deps.tools;
-    let tree = tools.git.tree(&task_branch(contract))?;
+    // The task branch lives in the member the task names, so its tree is read there.
+    let tree = task_repository_of(deps, team, contract)
+        .map_err(|error| repository_refused(&contract.id, &error))?
+        .git
+        .tree(&task_branch(contract))?;
     let cache = tools
         .files
         .root()
@@ -1756,6 +1763,64 @@ mod tests {
             .as_object_mut()
             .expect("a preview")
             .remove("port");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn previews_the_members_branch() {
+        use crate::preview::fixtures::FakePreviews;
+
+        let (mut harness, members) =
+            Harness::project_folder_with("preview-member", &["app", "infra"], browsing);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness.assigned_in("CTV-1", "iris", "ada", "app");
+        harness.project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "iris", "assignee": "iris", "reviewer": "ada" }),
+        );
+        let worktree = harness.worktree("CTV-1");
+        members[0]
+            .adapter()
+            .create_worktree(&worktree, &harness.branch("CTV-1"), "main")
+            .expect("the member makes the worktree");
+        std::fs::write(worktree.join("site.txt"), "one").expect("written");
+        catervas_store::git::fixtures::git_in(&worktree, &["add", "site.txt"]);
+        catervas_store::git::fixtures::git_in(&worktree, &["commit", "-q", "-m", "A page"]);
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness);
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+
+        run_session(deps, &team, exploring(&harness, &team, &contract))
+            .await
+            .expect("the session runs");
+
+        let trees: Vec<String> = harness
+            .events(&[EventKind::PreviewPrepared])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::PreviewPrepared(body) => Some(body.tree.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            trees,
+            [catervas_store::git::fixtures::git_output_in(
+                &members[0].path,
+                &["rev-parse", "feature/CTV-1^{tree}"]
+            )]
+        );
     }
 
     #[tokio::test]

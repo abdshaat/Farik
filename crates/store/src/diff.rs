@@ -7,7 +7,9 @@ use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::event::{CatervasEvent, EventBody};
 
 use crate::baseline::{baseline_of, changes_since_baseline, folder_in};
-use crate::git::{Git, integration_branch};
+use crate::files::ProjectFiles;
+use crate::git::Git;
+use crate::repos::task_repository;
 
 /// A diff and what it touches.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +37,8 @@ pub struct TaskDiff {
 ///
 /// A sentence saying the task has no branch yet, or what git refused.
 pub fn diff_of(
-    git: &Git,
+    files: &ProjectFiles,
+    project: &Git,
     team: &Team,
     contract: &TaskContract,
     history: &[CatervasEvent],
@@ -48,7 +51,7 @@ pub fn diff_of(
     if let Some(folder) = task_private_folder(contract) {
         let files = match accepted_changes(history) {
             Some(files) => files,
-            None => folder_in(git.root(), folder)
+            None => folder_in(project.root(), folder)
                 .and_then(|folder| {
                     if baseline_of(&folder, &contract.id).is_dir() {
                         changes_since_baseline(&folder, &contract.id)
@@ -70,7 +73,9 @@ pub fn diff_of(
         });
     }
     if contract.kind != TaskKind::Epic {
-        return Ok(counted(branch_diff(git, team, contract, history)?));
+        return Ok(counted(branch_diff(
+            files, project, team, contract, history,
+        )?));
     }
     let mut ordered: Vec<&(TaskContract, Vec<CatervasEvent>)> = children
         .iter()
@@ -79,7 +84,7 @@ pub fn diff_of(
     ordered.sort_by_key(|(child, _)| id_number(child));
     let mut joined = String::new();
     for (child, history) in ordered {
-        let diff = branch_diff(git, team, child, history)?;
+        let diff = branch_diff(files, project, team, child, history)?;
         joined.push_str("# ");
         joined.push_str(child.id.as_str());
         joined.push('\n');
@@ -121,11 +126,20 @@ fn integrated(history: &[CatervasEvent]) -> Option<(String, String)> {
 }
 
 fn branch_diff(
-    git: &Git,
+    files: &ProjectFiles,
+    project: &Git,
     team: &Team,
     contract: &TaskContract,
     history: &[CatervasEvent],
 ) -> Result<String, String> {
+    let repository = task_repository(
+        files,
+        team,
+        project,
+        contract.repo.as_ref().map(|repo| repo.as_str()),
+    )
+    .map_err(|error| format!("{}: {error}", contract.id.as_str()))?;
+    let git = &repository.git;
     let branch = task_branch(contract);
     // `merge-base x x` answers `x`'s commit, and refuses a name that names none.
     if git.merge_base(&branch, &branch).is_err() {
@@ -136,10 +150,9 @@ fn branch_diff(
     }
     let words = |error: crate::GitError| error.to_string();
     match integrated(history) {
-        None => {
-            let base = integration_branch(team, git).map_err(words)?;
-            git.diff(&base, &branch).map_err(words)
-        }
+        None => git
+            .diff(&repository.integration_branch, &branch)
+            .map_err(words),
         Some((sha, into)) => {
             let second_parent = format!("{sha}^2");
             if git.merge_base(&second_parent, &second_parent).is_ok() {
@@ -202,6 +215,7 @@ mod tests {
 
     use super::diff_of;
     use crate::baseline::copy_baseline;
+    use crate::files::ProjectFiles;
     use crate::git::fixtures::TempRepo;
 
     const FOLDER: &str = ".catervas/local/finance";
@@ -246,8 +260,16 @@ mod tests {
     }
 
     fn files_of(repo: &TempRepo, history: &[CatervasEvent]) -> Vec<String> {
-        let diff =
-            diff_of(&repo.adapter(), &a_team(), &a_finance_task(), history, &[]).expect("the diff");
+        let files = ProjectFiles::open(repo.path.clone());
+        let diff = diff_of(
+            &files,
+            &repo.adapter(),
+            &a_team(),
+            &a_finance_task(),
+            history,
+            &[],
+        )
+        .expect("the diff");
         assert!(diff.private_folder);
         assert_eq!(diff.diff, "");
         diff.files
@@ -293,6 +315,87 @@ mod tests {
         assert_eq!(
             files_of(&repo, &[its_acceptance(Some(&[]))]),
             Vec::<String>::new()
+        );
+    }
+
+    /// `id`'s task in the member `repo`, under the epic CTV-1.
+    fn a_task_in(id: &str, repo: &str) -> TaskContract {
+        let mut wire = a_contract_wire();
+        wire["id"] = json!(id);
+        wire["parent"] = json!("CTV-1");
+        wire["repo"] = json!(repo);
+        validate_contract(&wire).expect("a contract")
+    }
+
+    /// `branch` of `repository`, with `file` committed on it, and `main` checked out again.
+    fn a_branch_with(repository: &TempRepo, branch: &str, file: &str) {
+        repository.git(&["checkout", "-b", branch]);
+        repository.write(file, "one\n");
+        repository.commit(&format!("add {file}"));
+        repository.git(&["checkout", "main"]);
+    }
+
+    /// `task.integrated` for the commit `sha` of `main`.
+    fn its_integration(sha: &str) -> CatervasEvent {
+        let mut wire = an_event_wire(EventKind::TaskIntegrated);
+        wire["body"] = json!({ "sha": sha, "into": "main", "integrated_by": "governor" });
+        event_from_value(&wire).expect("a schema-valid event")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn diffs_each_task_in_its_repository() {
+        let project = TempRepo::new("diff-members-project");
+        let (app, infra) = (
+            TempRepo::new("diff-members-app"),
+            TempRepo::new("diff-members-infra"),
+        );
+        let files = ProjectFiles::open(project.path.clone());
+        files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": app.path.display().to_string() },
+                    { "name": "infra", "path": infra.path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        a_branch_with(&app, "feature/CTV-2", "a.txt");
+        a_branch_with(&infra, "feature/CTV-3", "b.txt");
+        a_branch_with(&app, "feature/CTV-4", "c.txt");
+        let mut children = Vec::new();
+        for (repository, id, repo) in [(&app, "CTV-2", "app"), (&infra, "CTV-3", "infra")] {
+            repository.git(&["merge", "--no-ff", "-m", "merge", &format!("feature/{id}")]);
+            let sha = repository.git_output(&["rev-parse", "HEAD"]);
+            children.push((a_task_in(id, repo), vec![its_integration(&sha)]));
+        }
+        let mut epic = a_contract_wire();
+        epic["kind"] = json!("epic");
+        let epic = validate_contract(&epic).expect("an epic");
+
+        let diff = diff_of(&files, &project.adapter(), &a_team(), &epic, &[], &children)
+            .expect("the epic's diff");
+
+        let (first, second) = (
+            diff.diff.find("# CTV-2").expect("CTV-2's diff"),
+            diff.diff.find("# CTV-3").expect("CTV-3's diff"),
+        );
+        assert!(first < second, "{}", diff.diff);
+        assert_eq!(diff.files, ["a.txt", "b.txt"]);
+
+        let before = diff_of(
+            &files,
+            &project.adapter(),
+            &a_team(),
+            &a_task_in("CTV-4", "app"),
+            &[],
+            &[],
+        )
+        .expect("the task's diff");
+        assert_eq!(
+            before.files,
+            ["c.txt"],
+            "against app's main, not the project's"
         );
     }
 }

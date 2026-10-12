@@ -7,7 +7,7 @@ use catervas_core::contract::{
 use catervas_core::criteria::expand_criteria;
 use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteOutcome, ParentEpic, check_child_creation,
-    check_contract_write,
+    check_contract_write, check_repo_write,
 };
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_protocol::event::{
@@ -276,6 +276,7 @@ pub(super) fn write_contract(
             .map(|error| format!("{} {}", error.path, error.message))
             .collect(),
     })?;
+    check_repo_write(&contract, &written).map_err(Refusal::ContractWrite)?;
     written.updated_at = Some(call.deps().clock.now());
     call.deps().files.write_contract(&written).map_err(failed)?;
     let event = call.append(
@@ -840,6 +841,42 @@ mod tests {
             "blank_reason",
         );
         assert_eq!(project.event_count(), before);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn every_writer_keeps_a_repo() {
+        let project = a_project("tools-repo-fixed");
+        project.filed_with("CTV-1", "refining", "task", None, |wire| {
+            wire["repo"] = json!("app");
+        });
+        project.filed("CTV-2", "refining", "task", None);
+        let (file, events) = (project.file("CTV-1"), project.event_count());
+
+        refused_with(
+            project.call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_write_contract",
+                json!({ "fields": { "repo": "infra" } }),
+            ),
+            "repo_fixed",
+        );
+        assert_eq!(project.file("CTV-1"), file);
+        assert_eq!(project.event_count(), events);
+
+        // The same name again, and the first time a name is set, are written.
+        for (task, repo) in [("CTV-1", "app"), ("CTV-2", "infra")] {
+            project
+                .call(
+                    "pm",
+                    Some(task),
+                    "catervas_write_contract",
+                    json!({ "fields": { "repo": repo } }),
+                )
+                .expect("the repo is written");
+            assert_eq!(project.file(task)["repo"], repo);
+        }
     }
 
     #[test]

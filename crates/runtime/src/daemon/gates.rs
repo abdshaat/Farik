@@ -14,6 +14,7 @@ use catervas_core::contract::{
 use catervas_core::folders::PRODUCT_PLAN;
 use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteOutcome, DesignerBrowser, check_contract_write,
+    check_repo_write,
 };
 use catervas_core::governor::plain::plain_readiness;
 use catervas_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
@@ -522,6 +523,7 @@ fn task_diff(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, Fa
         }
     }
     let diff = diff_of(
+        &deps.files,
         &deps.git,
         team,
         &contract,
@@ -1147,7 +1149,10 @@ fn judged(deps: &ToolDeps, params: &Value) -> Result<(TaskId, Vec<String>, Value
             }
         }
     }
-    validate_contract(&after).map_err(|errors| Failure::new(REFUSED, schema_words(&errors)))?;
+    let validated =
+        validate_contract(&after).map_err(|errors| Failure::new(REFUSED, schema_words(&errors)))?;
+    check_repo_write(&contract, &validated)
+        .map_err(|refusal| Failure::new(REFUSED, contract_write(&refusal)))?;
     let back = outcome == ContractWriteOutcome::ReturnsToRefining;
     // The human's only way into `refining` from a frozen plan is an escalation's resolve.
     if back && row.status != TaskStatus::Escalated {
@@ -4005,6 +4010,82 @@ pub(super) mod tests {
             .expect("the board reads")
             .expect("a row");
         assert_eq!(row.status, TaskStatus::Escalated);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn task_diff_reads_the_member() {
+        let (harness, members) = Harness::project_folder("gates-diff-member", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        harness.project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let app = members[0].adapter();
+        let worktree = harness.worktree("CTV-1");
+        app.create_worktree(&worktree, &harness.branch("CTV-1"), "main")
+            .expect("the member makes the worktree");
+        std::fs::create_dir_all(worktree.join("src")).expect("a folder");
+        std::fs::write(worktree.join("src/a.rs"), "fn a() {}\n").expect("written");
+        app.commit(&worktree, "Add a", &["src/a.rs".to_string()])
+            .expect("committed");
+
+        let diff = query(
+            &harness.daemon,
+            "task.diff",
+            &json!({ "task_id": "CTV-1" }),
+            "taskDiffResult",
+        );
+
+        assert_eq!(diff["files"], json!(["src/a.rs"]), "{diff}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn every_writer_keeps_a_repo() {
+        let (harness, _members) = Harness::project_folder("gates-save-repo", &["app", "infra"]);
+        harness.file("CTV-1", "refining", |wire| wire["repo"] = json!("app"));
+        harness.file("CTV-2", "refining", |_| {});
+        let (file, events) = (harness.project.file("CTV-1"), harness.project.event_count());
+
+        let mut edited = file.clone();
+        edited["repo"] = json!("infra");
+        let refused = rpc(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "CTV-1", "contract": edited }),
+        );
+        assert_eq!(refused["error"]["code"], -32005, "{refused}");
+        assert!(
+            refused["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.starts_with("repo is fixed once set")),
+            "{refused}"
+        );
+        let mut removed = file.clone();
+        removed.as_object_mut().expect("an object").remove("repo");
+        let refused = rpc(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "CTV-1", "contract": removed }),
+        );
+        assert_eq!(refused["error"]["code"], -32005, "{refused}");
+        assert_eq!(harness.project.file("CTV-1"), file);
+        assert_eq!(harness.project.event_count(), events);
+
+        // The first time it is set, it is written.
+        let mut first = harness.project.file("CTV-2");
+        first["repo"] = json!("infra");
+        let saved = call(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "CTV-2", "contract": first }),
+            "contractSaveResult",
+        );
+        assert_eq!(saved, json!({ "saved": true, "back_to_refining": false }));
+        assert_eq!(harness.project.file("CTV-2")["repo"], "infra");
     }
 
     #[test]

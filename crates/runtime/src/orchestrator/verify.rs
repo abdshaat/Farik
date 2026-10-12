@@ -29,7 +29,10 @@ use super::messages::{
 use super::requests;
 use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
-use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, session_dir, worktree};
+use super::{
+    Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, repository_refused, session_dir,
+    task_repository_of, worktree,
+};
 use crate::criteria::{
     CriterionError, CriterionOutcome, NewTestsInput, check_artifact_in, run_criteria,
 };
@@ -383,8 +386,11 @@ async fn design_review_first(
     {
         return Ok(Some(ran_criteria(row, ran)));
     }
-    let git = &deps.tools.git;
-    let diff = git.diff(&integration_branch(team, git)?, &task_branch(contract))?;
+    let repository = task_repository_of(deps, team, contract)
+        .map_err(|error| repository_refused(&row.task_id, &error))?;
+    let diff = repository
+        .git
+        .diff(&repository.integration_branch, &task_branch(contract))?;
     let end = run_session(
         deps,
         team,
@@ -474,8 +480,11 @@ async fn review(
         files = folder_changes(&folder_in(deps.tools.files.root(), folder)?, &contract.id)?;
         Changes::Folder(&files)
     } else {
-        let git = &deps.tools.git;
-        diff = git.diff(&integration_branch(team, git)?, &task_branch(&contract))?;
+        let repository = task_repository_of(deps, team, &contract)
+            .map_err(|error| repository_refused(&row.task_id, &error))?;
+        diff = repository
+            .git
+            .diff(&repository.integration_branch, &task_branch(&contract))?;
         Changes::Diff(&diff)
     };
     let initial_prompt = review_message(&ReviewBrief {
@@ -1014,6 +1023,77 @@ mod tests {
         assert_eq!(body.checks.len(), 4);
         assert_eq!(harness.events(&[EventKind::ReviewRecorded]).len(), 1);
         assert_eq!(state(&harness), ReviewState::Passed);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_reviewer_sees_the_members_diff() {
+        let (mut harness, members) =
+            Harness::project_folder_with("design-review-member", &["app", "infra"], browsing);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness
+            .project
+            .deps
+            .transitions
+            .set_previews(Arc::clone(&harness.previews));
+        harness.file("CTV-2", "ready", |wire| {
+            wire["reviewer_role"] = json!("architect");
+            wire["repo"] = json!("app");
+            wire["allowed_paths"] = json!(["site/style.css"]);
+            wire["exit_criteria"][0]["text"] = json!("site/style.css exists.");
+            wire["exit_criteria"][0]["verification"]["command"] = json!("test -f site/style.css");
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "ada" });
+        harness.project.moved("CTV-2", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-2", "assigned", "in_progress", &people);
+        let worktree = harness.worktree("CTV-2");
+        members[0]
+            .adapter()
+            .create_worktree(&worktree, &harness.branch("CTV-2"), "main")
+            .expect("the member makes the task's worktree");
+        std::fs::create_dir_all(worktree.join("site")).expect("made");
+        std::fs::write(worktree.join("site/style.css"), "h1 { color: #3b4a5c; }\n")
+            .expect("written");
+        members[0]
+            .adapter()
+            .commit(&worktree, "The change", &["site/style.css".to_string()])
+            .expect("committed");
+        harness.project.record(
+            "CTV-2",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Changed it.\n\nChanged it.", "written_by": "dev-a" }),
+        );
+        harness.project.moved(
+            "CTV-2",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "dev-a", "reviewer": "ada", "actor": "assignee", "requested_by": "dev-a" }),
+        );
+
+        let (started, _) = ticked(
+            &harness,
+            vec![design_review_passes_ctv_2(), review_writes_note()],
+            2,
+        )
+        .await;
+
+        assert_eq!(
+            who(&started),
+            [
+                ("iris", SessionPurpose::Verify),
+                ("ada", SessionPurpose::Verify)
+            ]
+        );
+        for spec in &started {
+            assert!(
+                spec.initial_prompt.contains("h1 { color: #3b4a5c; }"),
+                "{}: {}",
+                spec.agent_id,
+                spec.initial_prompt
+            );
+        }
     }
 
     #[tokio::test]

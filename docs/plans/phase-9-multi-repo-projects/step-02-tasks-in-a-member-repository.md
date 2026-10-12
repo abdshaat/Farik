@@ -206,7 +206,7 @@ Files: `diff.rs` (the new signature, `branch_diff` resolving per contract); `dae
 - `the_reviewer_sees_the_members_diff` (`verify.rs`): the reviewer's session prompt, and the UI/UX Designer's design-review prompt, carry the member's diff of the task. RED.
 - `every_writer_keeps_a_repo` (`tools/contracts.rs`, and in `daemon/gates.rs` for `contract.save`): changing a set `repo` is refused `RepoFixed`, the contract file unchanged and no event recorded. Setting it the first time is written. RED.
 
-- [ ] `feat(runtime): read a task's diff and git from its member`
+- [x] `feat(runtime): read a task's diff and git from its member`
 
 ### Task 6: Spec
 
