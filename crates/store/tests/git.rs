@@ -1519,6 +1519,10 @@ fn knows_a_local_branch() {
     assert_eq!(git.has_local_branch("feature/x"), Ok(false));
     repository.git(&["branch", "feature/x"]);
     assert_eq!(git.has_local_branch("feature/x"), Ok(true));
+    // A revision expression is not a branch's name, though git resolves it.
+    for expression in ["main~0", "main@{0}", "main:", "main^{commit}"] {
+        assert_eq!(git.has_local_branch(expression), Ok(false), "{expression}");
+    }
 
     let refusal = MemberPathRefusal::NoSuchBranch {
         branch: "nope".to_string(),

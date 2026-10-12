@@ -433,13 +433,19 @@ impl Git {
         Ok(())
     }
 
-    /// Whether the repository has a local branch of this name.
+    /// Whether the repository has a local branch of this name. A revision expression such as
+    /// `main~0` or `main@{0}` is not a branch's name, though git resolves it, so it is none.
     ///
     /// # Errors
     ///
     /// `NotARepository`, or `NotInstalled` when git cannot be run.
     pub fn has_local_branch(&self, name: &str) -> Result<bool, GitError> {
         self.require_repository()?;
+        match self.check_branch_name(name) {
+            Ok(()) => {}
+            Err(GitError::CommandFailed { .. }) => return Ok(false),
+            Err(other) => return Err(other),
+        }
         match self.at_root(&[
             "rev-parse",
             "--verify",

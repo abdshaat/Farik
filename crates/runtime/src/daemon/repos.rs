@@ -477,6 +477,14 @@ mod tests {
             "/integration_branch",
             "that repository has no branch named nope",
         );
+        nothing_more(
+            &reply(json!({
+                "name": "other", "path": named(&other.path), "integration_branch": "main~0"
+            })),
+            "no_such_branch",
+            "/integration_branch",
+            "that repository has no branch named main~0",
+        );
         let outer = home().join(format!("catervas-repos-outer-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&outer);
         std::fs::create_dir_all(outer.join("inner")).expect("folders");
