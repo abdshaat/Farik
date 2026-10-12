@@ -195,7 +195,7 @@ Files: `claude_history.rs` (placement). Home `/home/me` in every case, passed in
 - `never_makes_home_or_a_temporary_folder_a_project`: `/home/me` and `/tmp` are `NotAProject`; `/tmp/scratch` and `/home/me/scratch` with no git are each under themselves; a folder whose git root is `/home/me` (home kept in git) is placed as if it had no git; a folder whose git root is `/` likewise; with no home passed, `/home/me` with no git is under itself. RED.
 - `places_catervas_sessions_under_their_project`: `catervas_root_of("/home/me/shop/.catervas/local/worktrees/CTV-3")` is `/home/me/shop`, of `/home/me/shop` is `None`; `place_session` gives `Catervas { root: "/home/me/shop" }` for a `cwd` under `.catervas/local/` whatever its folder's place (gone included), and for session `cat-1` in `/home/me/shop` when `catervas_logs` maps `/home/me/shop` to `{cat-1}`, while `own-1` there is `Owner`; a session in a `Gone` folder is `Gone { folder: <cwd> }`. Each `as_wire` is its table value. RED.
 
-- [ ] `feat(core): fold claude code sessions into projects`
+- [x] `feat(core): fold claude code sessions into projects`
 
 ### Task 3: The machine index
 

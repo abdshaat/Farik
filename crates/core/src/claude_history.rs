@@ -1,5 +1,8 @@
 //! What Claude Code's history says: one transcript line, and where each session belongs.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
@@ -145,6 +148,191 @@ pub fn once_per_reply(seen: Usage, again: Usage) -> Usage {
     }
 }
 
+/// Folders that are never a project, whatever the owner's home is.
+pub const TEMPORARY_FOLDERS: [&str; 3] = ["/", "/tmp", "/var/tmp"];
+
+/// A folder a session worked in, as the store found it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Folder {
+    /// The folder as the transcript names it.
+    pub path: String,
+    /// Its canonical path; `None` when the folder is gone.
+    pub real: Option<String>,
+    /// The main worktree of the repository it is in; `None` when it is in none.
+    pub git_root: Option<String>,
+}
+
+/// A project root an earlier scan found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownRoot {
+    /// The root folder.
+    pub root: String,
+    /// Whether it was a git repository when last checked.
+    pub is_git: bool,
+}
+
+/// Where a folder belongs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Place {
+    /// In the project with this root.
+    Project {
+        /// The project's root folder.
+        root: String,
+    },
+    /// Not on this computer any more, and under no known root.
+    Gone,
+    /// Home or a temporary folder.
+    NotAProject,
+}
+
+fn is_under(path: &str, root: &str) -> bool {
+    Path::new(path).starts_with(root)
+}
+
+/// Places each folder, in order: a not-project folder is `NotAProject`; else its git root; else the
+/// longest known root containing it (only roots with git for a folder that still exists); else
+/// `Gone` for a gone folder; else the outermost folder with no git among `folders` that contains it.
+///
+/// `not_projects` (home, the temporary folder) and `TEMPORARY_FOLDERS` are never a root, and a git
+/// root that holds one is ignored as if there were no git.
+#[must_use]
+pub fn place_folders(
+    folders: &[Folder],
+    known: &[KnownRoot],
+    not_projects: &[String],
+) -> Vec<Place> {
+    let blocked: Vec<&str> = not_projects
+        .iter()
+        .map(String::as_str)
+        .chain(TEMPORARY_FOLDERS)
+        .collect();
+    let location = |folder: &'_ Folder| -> String {
+        folder.real.clone().unwrap_or_else(|| folder.path.clone())
+    };
+    let git_of = |folder: &Folder| -> Option<String> {
+        folder
+            .git_root
+            .clone()
+            .filter(|root| !blocked.iter().any(|blocked| is_under(blocked, root)))
+    };
+    let scan_roots: Vec<String> = folders.iter().filter_map(git_of).collect();
+    folders
+        .iter()
+        .map(|folder| {
+            let here = location(folder);
+            if blocked.contains(&here.as_str()) {
+                return Place::NotAProject;
+            }
+            if let Some(root) = git_of(folder) {
+                return Place::Project { root };
+            }
+            let exists = folder.real.is_some();
+            let longest = known
+                .iter()
+                .filter(|root| root.is_git || !exists)
+                .map(|root| root.root.as_str())
+                .chain(scan_roots.iter().map(String::as_str))
+                .filter(|root| !blocked.contains(root) && is_under(&here, root))
+                .max_by_key(|root| root.len());
+            if let Some(root) = longest {
+                return Place::Project {
+                    root: root.to_string(),
+                };
+            }
+            if !exists {
+                return Place::Gone;
+            }
+            let outermost = folders
+                .iter()
+                .filter(|other| other.real.is_some() && git_of(other).is_none())
+                .map(location)
+                .filter(|other| !blocked.contains(&other.as_str()) && is_under(&here, other))
+                .min_by_key(String::len);
+            Place::Project {
+                root: outermost.unwrap_or(here),
+            }
+        })
+        .collect()
+}
+
+/// The project root a Catervas worktree belongs to: the path before its `.catervas/local/`.
+#[must_use]
+pub fn catervas_root_of(folder: &str) -> Option<String> {
+    Path::new(folder).ancestors().find_map(|ancestor| {
+        let in_local = ancestor.file_name()? == "local";
+        let marker = ancestor.parent()?;
+        if !in_local || marker.file_name()? != ".catervas" {
+            return None;
+        }
+        Some(marker.parent()?.to_string_lossy().into_owned())
+    })
+}
+
+/// Where a session belongs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionPlace {
+    /// The owner's own session in a project.
+    Owner {
+        /// The project's root folder.
+        root: String,
+    },
+    /// A session of Catervas's own agents in a project.
+    Catervas {
+        /// The project's root folder.
+        root: String,
+    },
+    /// A session in a folder no longer on this computer.
+    Gone {
+        /// The folder the session worked in.
+        folder: String,
+    },
+    /// A session in home or a temporary folder.
+    NotAProject,
+}
+
+impl SessionPlace {
+    /// The value of `sessions.place` for this place.
+    #[must_use]
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            Self::Owner { .. } => "owner",
+            Self::Catervas { .. } => "catervas",
+            Self::Gone { .. } => "gone",
+            Self::NotAProject => "not_a_project",
+        }
+    }
+}
+
+/// Places a session: Catervas's when its folder is under `.catervas/local/` or its project's log
+/// names it, else the owner's under its folder's project.
+#[must_use]
+pub fn place_session(
+    session_id: &str,
+    cwd: &str,
+    folder: &Place,
+    catervas_logs: &BTreeMap<String, BTreeSet<String>>,
+) -> SessionPlace {
+    if let Some(root) = catervas_root_of(cwd) {
+        return SessionPlace::Catervas { root };
+    }
+    match folder {
+        Place::Project { root } => {
+            if catervas_logs
+                .get(root)
+                .is_some_and(|ids| ids.contains(session_id))
+            {
+                SessionPlace::Catervas { root: root.clone() }
+            } else {
+                SessionPlace::Owner { root: root.clone() }
+            }
+        }
+        Place::Gone => SessionPlace::Gone {
+            folder: cwd.to_string(),
+        },
+        Place::NotAProject => SessionPlace::NotAProject,
+    }
+}
+
 /// Wire fixtures for tests, in this crate and in others.
 pub mod fixtures;
 
@@ -270,5 +458,179 @@ mod tests {
         assert_eq!(once_per_reply(a, b), b);
         assert_eq!(once_per_reply(b, a), b);
         assert_eq!(once_per_reply(a, a), a);
+    }
+
+    fn folder(path: &str, git_root: Option<&str>) -> Folder {
+        Folder {
+            path: path.to_string(),
+            real: Some(path.to_string()),
+            git_root: git_root.map(str::to_string),
+        }
+    }
+
+    fn gone(path: &str) -> Folder {
+        Folder {
+            path: path.to_string(),
+            real: None,
+            git_root: None,
+        }
+    }
+
+    fn known(root: &str, is_git: bool) -> KnownRoot {
+        KnownRoot {
+            root: root.to_string(),
+            is_git,
+        }
+    }
+
+    fn project(root: &str) -> Place {
+        Place::Project {
+            root: root.to_string(),
+        }
+    }
+
+    fn home() -> Vec<String> {
+        vec!["/home/me".to_string()]
+    }
+
+    #[test]
+    fn places_a_worktree_in_its_repository() {
+        let folders = [
+            folder("/home/me/shop", Some("/home/me/shop")),
+            folder("/home/me/shop/.claude/worktrees/x", Some("/home/me/shop")),
+            folder("/home/me/shop-wt", Some("/home/me/shop")),
+        ];
+        let places = place_folders(&folders, &[], &home());
+        assert_eq!(places, vec![project("/home/me/shop"); 3]);
+    }
+
+    #[test]
+    fn places_a_deleted_worktree_under_its_known_root() {
+        let old = gone("/home/me/shop/.claude/worktrees/old");
+        let places = place_folders(&[old], &[known("/home/me/shop", true)], &home());
+        assert_eq!(places, vec![project("/home/me/shop")]);
+        let places = place_folders(
+            &[gone("/home/me/shopping")],
+            &[known("/home/me/shop", true)],
+            &home(),
+        );
+        assert_eq!(places, vec![Place::Gone]);
+        let places = place_folders(
+            &[gone("/home/me/a/b/c")],
+            &[known("/home/me/a", true), known("/home/me/a/b", true)],
+            &home(),
+        );
+        assert_eq!(places, vec![project("/home/me/a/b")]);
+        let places = place_folders(
+            &[gone("/home/me/n/x")],
+            &[known("/home/me/n", false)],
+            &home(),
+        );
+        assert_eq!(places, vec![project("/home/me/n")]);
+    }
+
+    #[test]
+    fn folds_a_folder_with_no_git_into_its_outermost_session_folder() {
+        let folders = [
+            folder("/home/me/notes/2026/q4", None),
+            folder("/home/me/notes", None),
+            folder("/home/me/notes/2026", None),
+            folder("/home/me/solo", None),
+        ];
+        let expected = vec![
+            project("/home/me/notes"),
+            project("/home/me/notes"),
+            project("/home/me/notes"),
+            project("/home/me/solo"),
+        ];
+        assert_eq!(place_folders(&folders, &[], &home()), expected);
+        let with_known = [known("/home/me/notes/2026", false)];
+        assert_eq!(place_folders(&folders, &with_known, &home()), expected);
+    }
+
+    #[test]
+    fn never_makes_home_or_a_temporary_folder_a_project() {
+        let folders = [
+            folder("/home/me", None),
+            folder("/tmp", None),
+            folder("/tmp/scratch", None),
+            folder("/home/me/scratch", None),
+        ];
+        let places = place_folders(&folders, &[], &home());
+        assert_eq!(
+            places,
+            vec![
+                Place::NotAProject,
+                Place::NotAProject,
+                project("/tmp/scratch"),
+                project("/home/me/scratch"),
+            ]
+        );
+        // A home folder kept in git, and a git root of `/`, are as if there were no git.
+        let kept = [folder("/home/me/docs", Some("/home/me"))];
+        assert_eq!(
+            place_folders(&kept, &[], &home()),
+            vec![project("/home/me/docs")]
+        );
+        let rooted = [folder("/data/x", Some("/"))];
+        assert_eq!(
+            place_folders(&rooted, &[], &home()),
+            vec![project("/data/x")]
+        );
+        let no_home = [folder("/home/me", None)];
+        assert_eq!(place_folders(&no_home, &[], &[]), vec![project("/home/me")]);
+    }
+
+    #[test]
+    fn places_catervas_sessions_under_their_project() {
+        assert_eq!(
+            catervas_root_of("/home/me/shop/.catervas/local/worktrees/CTV-3"),
+            Some("/home/me/shop".to_string())
+        );
+        assert_eq!(catervas_root_of("/home/me/shop"), None);
+        let none = BTreeMap::new();
+        let catervas = SessionPlace::Catervas {
+            root: "/home/me/shop".to_string(),
+        };
+        let cwd = "/home/me/shop/.catervas/local/worktrees/CTV-3";
+        for folder in [project("/home/me/other"), Place::Gone, Place::NotAProject] {
+            assert_eq!(place_session("s", cwd, &folder, &none), catervas);
+        }
+        let logs = BTreeMap::from([(
+            "/home/me/shop".to_string(),
+            BTreeSet::from(["cat-1".to_string()]),
+        )]);
+        let here = project("/home/me/shop");
+        assert_eq!(
+            place_session("cat-1", "/home/me/shop", &here, &logs),
+            catervas
+        );
+        let owner = place_session("own-1", "/home/me/shop", &here, &logs);
+        assert_eq!(
+            owner,
+            SessionPlace::Owner {
+                root: "/home/me/shop".to_string()
+            }
+        );
+        let lost = place_session("s", "/home/me/old", &Place::Gone, &logs);
+        assert_eq!(
+            lost,
+            SessionPlace::Gone {
+                folder: "/home/me/old".to_string()
+            }
+        );
+        assert_eq!(
+            place_session("s", "/home/me", &Place::NotAProject, &logs),
+            SessionPlace::NotAProject
+        );
+        let wires = [
+            (catervas, "catervas"),
+            (owner, "owner"),
+            (lost, "gone"),
+            (SessionPlace::NotAProject, "not_a_project"),
+        ];
+        for (place, wire) in wires {
+            assert_eq!(place.as_wire(), wire);
+        }
     }
 }
