@@ -521,6 +521,9 @@
           "$ref": "#/$defs/keysCopiedDismissRequest"
         },
         {
+          "$ref": "#/$defs/connectorSuggestionHideRequest"
+        },
+        {
           "$ref": "#/$defs/browserPullRequest"
         },
         {
@@ -1023,6 +1026,26 @@
             }
           }
         },
+        "hidden_suggestions": {
+          "type": "array",
+          "description": "The kit services the user said Not now to on Today, kept on this computer; Today leaves each pair out of its suggestions.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "server"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            }
+          }
+        },
         "kits": {
           "type": "array",
           "description": "Each role on the team whose kit has a service to connect by name, with the copy the page shows (ADR 0036). A container connector, which Catervas runs itself, is not listed, and nor is a role with no service.",
@@ -1136,7 +1159,8 @@
         "max_agents",
         "connectors",
         "kits",
-        "sandboxed"
+        "sandboxed",
+        "hidden_suggestions"
       ]
     },
     "serveStatusResult": {
@@ -1635,6 +1659,45 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {}
+        }
+      }
+    },
+    "connectorSuggestionHideRequest": {
+      "title": "Connector Suggestion Hide Request",
+      "description": "Notes that the user said Not now to suggesting the kit service server to the agent (.catervas/local/connector-suggestions.json), once, and records no event. Answers emptyResult. Refused with REFUSED (suggestion_not_offered) when the agent is not in the team or its role's kit has no such service.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector_suggestion.hide"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            }
+          }
         }
       }
     },

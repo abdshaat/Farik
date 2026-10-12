@@ -32,6 +32,7 @@ export type MethodName =
 	| "project.create"
 	| "project.leave"
 	| "keys_copied.dismiss"
+	| "connector_suggestion.hide"
 	| "account.connect"
 	| "sandbox.build"
 	| "browser.pull"

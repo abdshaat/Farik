@@ -459,6 +459,12 @@ export const en = {
 	requestSend: "Send to the team",
 	requestTooShort:
 		"Say a little more about what you want the team to do: at least 20 characters.",
+	suggestionsTitle: "Suggested connections",
+	suggestionsConnect: "Connect",
+	suggestionsNotNow: "Not now",
+	suggestionsShowAll: "Show all {count}",
+	suggestionsShowFewer: "Show fewer",
+	suggestionsLine: "{agent} · {about}",
 	waitingTitle: "Waiting on you ({count})",
 	waitingList: "Waiting on you",
 	waitingNone: "Nothing waits on you.",

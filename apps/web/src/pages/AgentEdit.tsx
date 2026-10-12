@@ -324,18 +324,28 @@ function Editor({
 			</>
 		);
 	};
-	const [adding, setAdding] = useState<{
-		again?: McpServer;
-		ended?: boolean;
-		/** Who ended the sign-in, when Catervas's own app signed it in: the provider, not the address. */
-		endedBy?: string;
-		kit?: KitService;
-	}>();
+	const [search] = useSearchParams();
+	// A suggestion's link, ?connect=<service>, opens that kit service's dialog, if it can be connected here.
+	const [adding, setAdding] = useState<
+		| {
+				again?: McpServer;
+				ended?: boolean;
+				/** Who ended the sign-in, when Catervas's own app signed it in: the provider, not the address. */
+				endedBy?: string;
+				kit?: KitService;
+		  }
+		| undefined
+	>(() => {
+		const wanted = search.get("connect");
+		const kit = offered.find((one) => one.name === wanted);
+		return kit && !kit.atLaunch && !heldFromKit.some((c) => c.name === wanted)
+			? { kit }
+			: undefined;
+	});
 	const [removing, setRemoving] = useState<string>();
 	const [removeRefused, setRemoveRefused] = useState<string>();
 	// "Change how many" opens on a service; the approval dialog's link opens it from outside.
 	const allowances = useAllowances();
-	const [search] = useSearchParams();
 	const [changing, setChanging] = useState<string | undefined>(
 		search.get("allowances") ?? undefined,
 	);
