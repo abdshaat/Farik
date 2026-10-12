@@ -1226,7 +1226,7 @@ pub fn event_from_value(input: &Value) -> Result<CatervasEvent, Vec<ValidationEr
             message: format!("a {} event does not carry this body: {error}", wire.kind),
         }]
     })?;
-    if let Some(fault) = site_fault(&body).or_else(|| repo_added_fault(&body, &input["body"])) {
+    if let Some(fault) = site_fault(&body) {
         return Err(vec![ValidationError {
             path: "/body".to_string(),
             message: format!("a {} event does not carry this body: {fault}", wire.kind),
@@ -1245,17 +1245,6 @@ pub fn event_from_value(input: &Value) -> Result<CatervasEvent, Vec<ValidationEr
         *actor = named.to_string();
     }
     Ok(CatervasEvent { envelope, body })
-}
-
-/// What is wrong with a `repo.added` body: serde reads a missing `integration_branch` as `null`,
-/// and `{ name, path }` alone is a `repo.moved` body, so the key itself is asked for.
-fn repo_added_fault(body: &EventBody, wire: &Value) -> Option<&'static str> {
-    match body {
-        EventBody::RepoAdded(_) if wire.get("integration_branch").is_none() => {
-            Some("an added repository names its integration branch, or null for the default")
-        }
-        _ => None,
-    }
 }
 
 /// What is wrong with a `site.` event's body for its kind, which the schema cannot say because the
