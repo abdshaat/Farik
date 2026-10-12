@@ -47,7 +47,7 @@ Out of scope, each a later step's:
   2. `outside_home`: the path, followed through its links, is not inside home.
   3. `home_itself`: the path is home.
   4. `not_a_repository`: the path is not a git repository.
-  5. `not_the_top`: it is inside one; the refusal names the top folder.
+  5. `not_the_top`: it is inside one whose top folder is strictly inside home; the refusal names the top folder. When the top is home itself or above it (a home folder kept in git), it is `not_a_repository` instead, so that no refusal points at home or outside it (the landing review's question, decided by the planner 2026-10-12).
   6. `has_team`: it has `.catervas/team.yaml`.
 
   Then these come from core, against the project folder and the other members:
