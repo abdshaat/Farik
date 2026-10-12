@@ -219,7 +219,7 @@ Files: `diff.rs` (the new signature, `branch_diff` resolving per contract); `dae
 
 The task-contract schema's description changes in Task 1.
 
-- [ ] `docs(spec): record tasks in a member repository`
+- [x] `docs(spec): record tasks in a member repository`
 
 ## Verification
 
