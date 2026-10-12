@@ -1,11 +1,13 @@
-import { Avatar, type AvatarKey, Button, TextArea } from "@catervas/ui";
+import { Button, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
+import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentChanges.module.css";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
 import { fileRoute } from "./files.ts";
+import type { Agent } from "./setup/TeamSetup.tsx";
 
 /** The team's integration policy, which says what approving does. */
 export type Integration = "auto_merge" | "pull_request" | "manual";
@@ -52,13 +54,13 @@ export function DocumentChanges({
 	card,
 	integration,
 	name,
-	avatar,
+	agent,
 	again,
 }: {
 	card: DocumentChangesCard;
 	integration: Integration;
 	name: string;
-	avatar?: AvatarKey | undefined;
+	agent?: Agent | undefined;
 	again: () => void;
 }) {
 	const id = useId();
@@ -90,7 +92,7 @@ export function DocumentChanges({
 	return (
 		<section className={styles.card} aria-labelledby={`${id}-title`}>
 			<div className={styles.head}>
-				{avatar && <Avatar avatarKey={avatar} name={name} size={48} />}
+				<AgentPicture agent={agent} size={48} />
 				<div className={styles.headText}>
 					<strong id={`${id}-title`}>{t("docChangesTitle")}</strong>
 					<p className={styles.muted}>

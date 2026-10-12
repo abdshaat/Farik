@@ -1,8 +1,9 @@
-import { Avatar, type AvatarKey, Button } from "@catervas/ui";
+import { Button } from "@catervas/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
+import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import { PurchaseOrder } from "./dialogs/PurchaseOrder.tsx";
 import { isScript, ScriptWarning } from "./dialogs/SiteRequest.tsx";
@@ -164,9 +165,7 @@ export function PurchaseOrderRow({
 	];
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>{t("orderLine", { name, seller })}</strong>
 				<span>

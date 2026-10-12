@@ -5,6 +5,7 @@ import { Link, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useEvents, useQuery } from "../app/store.ts";
 import { isStatus, movedWords, sentence } from "../app/words.ts";
+import { AgentPicture } from "../components/AgentPicture.tsx";
 import { Feed } from "../components/Feed.tsx";
 import { MentionBox } from "../components/MentionBox.tsx";
 import {
@@ -579,16 +580,9 @@ export function ChannelPreview({ agents }: { agents: Agent[] }) {
 		<section className={styles.preview} aria-labelledby="channel-preview">
 			<h2 id="channel-preview">{t("channelPreview")}</h2>
 			{last.map((m) => {
-				const agent = agents.find((a) => a.id === m.author);
 				return (
 					<div key={m.seq} className={styles.said}>
-						{agent?.avatar && (
-							<Avatar
-								avatarKey={agent.avatar as AvatarKey}
-								name={agent.displayName}
-								size={32}
-							/>
-						)}
+						<AgentPicture agent={agents.find((a) => a.id === m.author)} />
 						<p>
 							<strong>{nameOf(m.author, agents)}</strong>{" "}
 							{renderMessageText(m.text, agents, [])}
