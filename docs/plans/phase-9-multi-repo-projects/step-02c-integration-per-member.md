@@ -1,6 +1,6 @@
 # Phase 9, step 02c: Integration per member
 
-Status: draft
+Status: ready (readiness review 2026-10-12, two rounds, findings folded)
 Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.2, 5.14, 5.15; F6
 Depends on steps 01, 02 and 02b of this phase, planned and ready or in review, not yet executed:
@@ -11,7 +11,7 @@ Depends on steps 01, 02 and 02b of this phase, planned and ready or in review, n
 
 Nothing of steps 03 to 08.
 Mockups: none.
-Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (`remove_workspace` when the task's repository cannot be resolved), decided below; S1–S5 and N1–N8 folded. Round 2: (pending).
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on B1 (`remove_workspace` when the task's repository cannot be resolved), decided below; S1–S5 and N1–N8 folded. Round 2 (the same reviewer, confirming): ready; its S1, S2 and N1–N4 folded.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at c99ea62.
 
@@ -59,7 +59,7 @@ Out of scope:
 - **Fixtures for members.** `orchestrator/fixtures.rs` gains three helpers, which the existing ones (`with_origin`, `:591`; `merge_branch_on_the_forge`, `:612`; `accepted_with_worktree`, `:435-504`) delegate to with the project's repository:
   - `with_origin_in(repo: &Path) -> PathBuf`
   - `merge_branch_on_the_forge_in(repo: &Path, origin: &Path, branch: &str) -> String`
-  - `accepted_in(task: &str, member: &Path, repo: &str)`: files the task with `repo`, makes its worktree with `Git::open(member)` from `main`, commits `done.txt`, and moves it to `accepted`
+  - `accepted_in(task: &str, member: &Path, repo: Option<&str>)`: files the task with `repo` when given, makes its worktree with `Git::open(member)` from `main`, commits `done.txt`, and moves it to `accepted`
 
 ## File map
 
@@ -102,7 +102,7 @@ pub(crate) fn cwds(&self) -> Vec<PathBuf>;
 
 ### Task 1: A member task integrates in its member
 
-Files: `integrate.rs` (the target, its resolution in `integrate_locked`, the five functions' arguments); `orchestrator/fixtures.rs` (`FakeGh`'s `cwds`); `rules.rs` (a test). Tests are integration tests on `Harness::project_folder("x", &["app", "infra"])`, which returns the harness and the members' `TempRepo`s; each member is given an origin by `with_origin_in`. The task is `CTV-1`, made by `accepted_in("CTV-1", <app>, "app")`.
+Files: `integrate.rs` (the target, its resolution in `integrate_locked`, the five functions' arguments); `orchestrator/fixtures.rs` (`FakeGh`'s `cwds`); `rules.rs` (a test). Tests are integration tests on `Harness::project_folder("x", &["app", "infra"])`, which returns the harness and the members' `TempRepo`s; each member is given an origin by `with_origin_in`. The task is `CTV-1`, made by `accepted_in("CTV-1", <app>, Some("app"))`.
 
 - `merges_into_its_member_and_pushes_it`: under `auto_merge`, the tick:
   - leaves on `app`'s `main` a merge commit `Merge CTV-1: <title>` with two parents
@@ -114,7 +114,7 @@ Files: `integrate.rs` (the target, its resolution in `integrate_locked`, the fiv
   RED: the merge runs in the project folder and escalates.
 - `merges_in_the_member_when_the_human_asks`: under `manual` the tick does nothing, and `catervas integrate CTV-1` (`Orchestrator::integrate`) merges into `app`'s `main` without pushing. RED.
 - `opens_and_follows_the_pull_request_in_the_member`: under `pull_request`, the tick pushes `feature/CTV-1` to `app`'s origin and calls `gh pr create`, with `cwds()` naming `app`'s canonical path. The test merges it with `merge_branch_on_the_forge_in` and the fake answers the pull request merged; the next tick fast-forwards `app`'s `main` from its origin and records `task.integrated`, every `gh` call in `app`. RED.
-- `waits_while_its_member_is_missing`: under `auto_merge`, with `app` moved away, two ticks record nothing and leave `CTV-1` awaiting integration. `catervas integrate CTV-1` then records one `escalation.raised` whose words say `app is not at <path>`. With `app` moved back, and with the escalation answered as the existing tests answer one, the next tick merges it. RED.
+- `waits_while_its_member_is_missing`: under `auto_merge`, with `app` moved away, two ticks record nothing and leave `CTV-1` awaiting integration. With `app` moved back, the next tick merges it, with no escalation recorded. Separately, with `app` moved away again for a second accepted task `CTV-2`, the human's `catervas integrate CTV-2` records one `escalation.raised` whose words say `app is not at <path>`; once `app` is back, `catervas integrate CTV-2` merges it (a resolved escalation does not clear `escalated_since_accepted`, `integrate.rs:875-893`, so ticks leave it to the human). RED.
 - `waits_for_a_dependency_in_another_repository` (`rules.rs`, shaped as `waits_for_an_accepted_dependency_until_it_is_integrated`, `:2781`): `CTV-2` (`repo: infra`, `ready`) depends on `CTV-1`. Under `manual`, while `CTV-1` awaits integration, the tick is `Idle` and `adapter.started()` is empty. After `catervas integrate CTV-1` has merged it into `app`, the next tick acts on `CTV-2` with one session started. RED: `catervas integrate CTV-1` escalates, so `CTV-2` never moves.
 - `still_integrates_a_docs_task_and_a_folder_change_in_the_project_folder` (a guard: it passes before the change and must still pass after it): under `auto_merge`, an Architect's task with no `repo` and a folder change each land on the project folder's `main`, and `app`'s and `infra`'s `main` are untouched. Under `pull_request`, with an origin added to the project folder by `with_origin_in`, every `cwds()` entry is the project root's canonical path.
 
@@ -133,10 +133,10 @@ Files: `integrate.rs` (`refresh_the_scan`).
 
 Files: `integrate.rs` (`remove_workspace`); `git.rs` (`prune_worktrees`) and `tests/git.rs`.
 
-- `prunes_stale_worktrees` (`tests/git.rs`): a worktree whose folder was deleted is listed `prunable`, and after `prune_worktrees` is not listed. RED.
+- `prunes_stale_worktrees` (`tests/git.rs`, with the file's `#[ignore = "needs the git program: cargo xtask check --integration"]`): a worktree whose folder was deleted is listed `prunable`, and after `prune_worktrees` is not listed. RED.
 - `removes_a_member_tasks_worktrees_with_its_git`: after `CTV-1` is integrated, the cleanup tick removes `<project>/.catervas/local/worktrees/CTV-1` and `CTV-1-base`. `git -C app worktree list` no longer lists either, and `app` keeps `feature/CTV-1`, which `git -C app checkout feature/CTV-1` can check out. RED: `git -C app worktree list` still lists `CTV-1` as `prunable`.
-- `removes_the_folders_of_a_task_whose_repository_is_gone`: `CTV-1` cancelled with its worktree still there, then `repo.remove app` (no work holds it). The next tick removes both folders and reports it, with no error. Also, with `app` moved away and `CTV-2` cancelled in it, the tick removes its folders the same way. RED: `UnknownRepo` fails the tick.
-- `removes_the_folders_of_a_moved_and_located_member`: `app` moved and located, then `CTV-1` cancelled. The tick removes its folders, though `app`'s git refuses the worktree as not its own, and prunes `app`. RED.
+- `removes_the_folders_of_a_task_whose_repository_is_gone` (a guard: it passes before the change, and fails if the fallback is replaced by `?`): `CTV-1` cancelled with its worktree still there, then `repo.remove app` (no work holds it). The next tick removes both folders and reports it, with no error. Also, with `app` moved away and `CTV-2` cancelled in it, the tick removes its folders the same way.
+- `removes_the_folders_of_a_moved_and_located_member`: `app` moved and located, then `CTV-1` cancelled. The tick removes its folders, though `app`'s git refuses the worktree as not its own, and `git -C app worktree list` no longer lists `CTV-1`. RED: it stays listed as `prunable`.
 
 - [ ] `feat(runtime): remove a member task's worktrees with its member's git`
 
@@ -154,7 +154,7 @@ Files: `daemon/repos.rs` (`repo.remove`).
 - 5.14: a member task integrated in its member under the one policy and the one lock; its push and its pull request there; the rescan of that member; `task.integrated`'s `into` being the member's branch
 - 5.2: a dependency in another repository
 - 5.15: a task in a missing member waits to integrate; its worktrees removed as folders, and the stale registration until the member is next pruned
-- 4.4, where step 01 records the daemon's `repo.*` methods and their refusals: `repo_in_use`
+- the section that lists the web app's queries and methods, where step 01 records `repo.*` and their refusals: `repo_in_use`
 
 - [ ] `docs(spec): record integration per member`
 
