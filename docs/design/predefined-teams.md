@@ -36,4 +36,4 @@ A starting brief or request per team; a folder per Finance Specialist; business 
 
 Rust: every shipped team file passes `validate_template`; `templates.list` answers the three, with and without a state folder; a built-in previews and applies by slug and digest; a save or rename to a built-in's name is refused `template_builtin`; a team or template without a Developer is accepted and one without a Product Manager is refused; readiness refuses a contract whose assignee role has no active agent and names the role. Web: the fourth start lists the three, fills the rows from one and carries its answers; "Use a saved team" lists the ready-made above the saved; from scratch the Developer's row can be unticked and Continue waits for two named; "Add someone" works on a team without a Developer; the "needs a Developer" words are gone.
 
-Docs: `docs/SPEC.md` 1, 3, 4.1, 4.4, 5.3, 6.6, 6.8, 8.4 and F1 (revision 0.87); ADR 0055; the project plan's D18 and phase 14 (revision 42).
+Docs: `docs/SPEC.md` 1, 3, 4.1, 4.4, 5.3, 6.6, 6.8, 8.4 and F1 (revision 0.89); ADR 0055; the project plan's D18 and phase 14 (revision 42).
