@@ -75,8 +75,7 @@ export function Feed({
 					el.scrollTop -
 					el.clientHeight <=
 				EDGE;
-		if (before.newest === undefined && newest) toNewest(el);
-		else if (before.oldest !== undefined && oldest !== before.oldest) {
+		if (before.oldest !== undefined && oldest !== before.oldest) {
 			el.scrollTop += el.scrollHeight - before.height;
 			measure(el);
 		} else if (newest && newest.seq !== before.newest) {
