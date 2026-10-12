@@ -236,7 +236,7 @@ Files: `event.schema.json` (the three kinds after `catervafication.started`, :17
 - `copies_the_repository_rules_into_the_events` (`event.rs`): the `name` pattern and the `path` bounds of each `repo.*` body equal `repos.schema.json`'s `$defs.repoName` pattern and `$defs.repo`'s `path` bounds. RED.
 - `projects_past_the_repository_events` (`projections.rs`): a log with one of each projects the same board as without them. RED.
 
-- [ ] `feat(protocol): record a project's repositories`
+- [x] `feat(protocol): record a project's repositories`
 
 ### Task 4: Making and opening a project folder
 

@@ -315,6 +315,16 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "sha": "a1b2c3d4"
         }),
         EventKind::CatervaficationStarted => json!({ "project": "existing" }),
+        EventKind::RepoAdded => json!({
+            "name": "shop-api",
+            "path": "/home/me/Projects/shop-api",
+            "integration_branch": "main"
+        }),
+        EventKind::RepoRemoved => json!({ "name": "shop-api" }),
+        EventKind::RepoMoved => json!({
+            "name": "shop-api",
+            "path": "/home/me/Code/shop-api"
+        }),
         EventKind::ProjectStarted => json!({
             "name": "little-oak-cakes",
             "description": "A bakery that sells cakes online and bakes to order."
