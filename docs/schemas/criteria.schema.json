@@ -47,6 +47,12 @@
           ],
           "description": "Where it came from. Left out, the human's: a refresh of the project scan replaces what the scan found and never touches what a person wrote."
         },
+        "repo": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "maxLength": 32,
+          "description": "The member repository of a project folder this criterion checks, named as repos.schema.json's repoName names it (kept equal by a test). Left out, it suits any task. A contract takes only the criteria of its own repository and those with no repo."
+        },
         "verification": {
           "type": "object",
           "required": [

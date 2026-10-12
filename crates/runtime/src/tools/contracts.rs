@@ -246,7 +246,8 @@ pub(super) fn write_contract(
             .map(|one| (one.id, one.name))
             .collect();
         let library = call.deps().files.read_criteria().map_err(failed)?;
-        let expanded = expand_criteria(&refs, &library).map_err(Refusal::Criteria)?;
+        let repo = object.get("repo").and_then(Value::as_str);
+        let expanded = expand_criteria(&refs, &library, repo).map_err(Refusal::Criteria)?;
         let mut criteria = object
             .get("exit_criteria")
             .and_then(Value::as_array)
@@ -499,6 +500,8 @@ pub(crate) fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use catervas_core::criteria::fixtures::a_criteria_library_wire;
+    use catervas_core::criteria::validate_criteria;
     use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, Thread};
     use serde_json::{Value, json};
 
@@ -877,6 +880,73 @@ mod tests {
                 .expect("the repo is written");
             assert_eq!(project.file(task)["repo"], repo);
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_agent_names_its_repo_and_its_criteria_together() {
+        let (project, _members) = TestProject::project_folder(
+            "tools-repo-and-criteria",
+            &a_team_of_three(|_| {}),
+            &["app", "infra"],
+        );
+        let mut library = a_criteria_library_wire();
+        library["criteria"] = json!([
+            {
+                "name": "app-the-tests-pass",
+                "text": "The tests pass in app.",
+                "source": "project_scan",
+                "repo": "app",
+                "verification": { "method": "test", "command": "npm test" }
+            },
+            {
+                "name": "infra-the-tests-pass",
+                "text": "The tests pass in infra.",
+                "source": "project_scan",
+                "repo": "infra",
+                "verification": { "method": "test", "command": "cargo test" }
+            }
+        ]);
+        project
+            .deps
+            .files
+            .write_criteria(&validate_criteria(&library).expect("a library"))
+            .expect("the library is written");
+        project.filed("CTV-1", "refining", "task", None);
+
+        project
+            .call(
+                "pm",
+                Some("CTV-1"),
+                "catervas_write_contract",
+                json!({
+                    "fields": { "repo": "app" },
+                    "criteria": [{ "id": "C2", "name": "app-the-tests-pass" }]
+                }),
+            )
+            .expect("the repo and its own criterion are written together");
+        let file = project.file("CTV-1");
+        assert_eq!(file["repo"], "app");
+        assert_eq!(file["exit_criteria"][1]["text"], "The tests pass in app.");
+
+        let events = project.event_count();
+        let before = project.file("CTV-1");
+        let refused = project.call(
+            "pm",
+            Some("CTV-1"),
+            "catervas_write_contract",
+            json!({ "criteria": [{ "id": "C3", "name": "infra-the-tests-pass" }] }),
+        );
+        let Err(ToolError::Refused { reason }) = refused else {
+            panic!("expected a refusal, got {refused:?}");
+        };
+        assert_eq!(
+            reason,
+            "criterion_not_expanded: criterion infra-the-tests-pass checks infra, and this \
+             contract works in app: set repo first, or use one of its own criteria"
+        );
+        assert_eq!(project.file("CTV-1"), before);
+        assert_eq!(project.event_count(), events);
     }
 
     #[test]

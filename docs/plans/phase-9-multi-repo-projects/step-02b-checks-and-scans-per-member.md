@@ -141,7 +141,7 @@ Files: `criteria.schema.json` (`repo` in `criterionTemplate.properties`); `crite
   - RED.
 - `an_agent_names_its_repo_and_its_criteria_together` (`tools/contracts.rs`, `TestProject::project_folder`, its library written by the test): a `write_contract` that sets `repo: app` and names `app-test` in the same call writes the expanded criterion. A later write naming `infra-lint` is refused `criterion_not_expanded` with `OtherRepo`'s sentence, the file unchanged. RED.
 
-- [ ] `feat(core): a criterion checks only its own repository`
+- [x] `feat(core): a criterion checks only its own repository`
 
 ### Task 2: An epic in a project folder runs no command
 
