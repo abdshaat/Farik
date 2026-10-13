@@ -1,7 +1,7 @@
 # 0058. One test per major function, and no landing review
 
 Date: 2026-10-13
-Status: accepted (the founder, 2026-10-13: "Why does it take so long to review and implement a task? please stop the opus 5.5 review and reduce the testing to 1 test per major functionality."; then "Change the development convention to one major test per major functionality. The tests do not need to be comprehinsive and the implementer stays as sonnet 5.5")
+Status: accepted (the founder, 2026-10-13: "Why does it take so long to review and implement a task? please stop the opus 5.5 review and reduce the testing to 1 test per major functionality.")
 
 ## Context
 
@@ -16,8 +16,7 @@ The reviews found real defects (a revision expression stored as a branch, a miss
 ## Decision
 
 From 2026-10-13, and until the founder changes it:
-- **The development convention is one major test per major functionality.** Each major piece of functionality a step builds gets one test of its main behaviour, still failing first for the right reason before the code (hard rule 1 holds). Tests need not be comprehensive: edge cases, refusals and error paths a plan lists are not each tested. The other tests a plan names are not written. Existing tests stay; none is removed or loosened (hard rule 9 holds). New step plans name one test per major functionality.
-- **Sonnet 5.5 stays the implementer** (ADR 0032).
+- **One test per major function.** For each task of a step plan, the executor writes one test for the task's main behaviour, still failing first for the right reason before the code (hard rule 1 holds). The other tests a plan names are not written. Existing tests stay; none is removed or loosened (hard rule 9 holds).
 - **No landing review.** A step lands when its tasks are committed, the full check passes and the pull request's `check` workflow passes. The Opus landing review with its mutation bar (hard rule 10's second sentence, workflow stage 5) is not run. Step 02c's review, started before this decision, was stopped.
 - **Unchanged:** the readiness reviews of plans, which are already done for phase 9; the full check before each push; the pull request's review by someone who did not write it before it merges (hard rule 10's first sentence); the spec in the same pull request.
 
