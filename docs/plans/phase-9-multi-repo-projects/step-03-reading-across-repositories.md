@@ -213,7 +213,7 @@ Files: `prompt.rs`; `orchestrator/session.rs` (`:1138-1160`).
 - 8.2: the repositories line in the Team rules
 - 8.3: the sandbox's read-only `/repos/<name>` mounts
 
-- [ ] `docs(spec): record reading across repositories`
+- [x] `docs(spec): record reading across repositories`
 
 ## Verification
 
