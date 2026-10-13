@@ -1246,6 +1246,10 @@ fn session_spec_without(
     )?
     .session_limits;
     Ok(SessionSpec {
+        read_roots: read_roots(&deps.tools.files, ask.contract, &ask.cwd, role_id)
+            .into_iter()
+            .map(|root| root.path)
+            .collect(),
         session_id: deps.session_ids.session_id(),
         agent_id: ask.agent.id.to_string(),
         task_id: ask.contract.map(|contract| contract.id.clone()),

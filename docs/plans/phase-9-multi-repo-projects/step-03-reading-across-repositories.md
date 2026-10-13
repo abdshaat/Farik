@@ -180,7 +180,7 @@ Files: `session.rs`; `claude.rs`; every `SessionSpec` literal; `crates/cli/tests
 - `denies_each_roots_protected_files` (`claude.rs`): with the team's protected `[.env, .catervas/local/**, **/*.pem]`, root `/r/a` and `cwd` `/p/.catervas/local/worktrees/CTV-1`, the deny list holds the relative `Read(.env)`, `Read(.catervas/local/**)` and `Read(**/*.pem)`, and for the root `Read(//r/a/.env)`, `Read(//r/a/.catervas/local/**)`, `Read(//r/a/**/*.pem)` and `Read(//r/a/.git/**)`. With root `/p` and the same `cwd`, there is no `Read(//p/.catervas/local/**)`, and `Read(//p/.env)` and `Read(//p/**/*.pem)` are there. RED.
 - `a_live_session_reads_a_root` (`live_claude.rs`, ignored as the file's other live tests are): a session whose `cwd` is a worktree under a project folder's `.catervas/local/worktrees/`, given the project folder and a member as roots, reads a file in the member and a file in its own worktree, and is refused `<member>/.env`. RED.
 
-- [ ] `feat(runtime): tell Claude Code which other folders a session reads`
+- [x] `feat(runtime): tell Claude Code which other folders a session reads`
 
 ### Task 3: The sandbox mounts the other members read-only
 

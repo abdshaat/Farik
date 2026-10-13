@@ -674,7 +674,9 @@ fn judge_in_root(
     relative: &str,
     protected: &[String],
 ) -> Result<(), String> {
-    use catervas_core::governor::paths::{PathRefusal, check_protected_paths, reaches_the_folder};
+    use catervas_core::governor::paths::{
+        PathRefusal, check_protected_paths, literal_folder, reaches_the_folder,
+    };
     use catervas_core::governor::permissions::ToolRefusal;
 
     let search = matches!(tool, "Grep" | "Glob");
@@ -704,20 +706,6 @@ fn judge_in_root(
         Err(PathRefusal::Violations(_)) => Err(could_reach(relative)),
         Err(PathRefusal::Glob(error)) => Err(format!("invalid_glob: {error:?}")),
     }
-}
-
-/// The folder a protected glob names before its first wildcard, `.catervas/local` for
-/// `.catervas/local/**`; for a glob with no wildcard, all its segments but the last.
-fn literal_folder(glob: &str) -> String {
-    let segments: Vec<&str> = glob
-        .split('/')
-        .filter(|segment| !segment.is_empty() && *segment != ".")
-        .collect();
-    let end = segments
-        .iter()
-        .position(|segment| segment.contains(['*', '?', '[', '{']))
-        .unwrap_or(segments.len().saturating_sub(1));
-    segments[..end].join("/")
 }
 
 /// The Designer's plan gate (ADR 0026): before the Product Manager approves its plan, a Designer's

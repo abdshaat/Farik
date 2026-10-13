@@ -261,6 +261,7 @@ impl Project {
 
     fn spec(&self) -> SessionSpec {
         SessionSpec {
+            read_roots: Vec::new(),
             session_id: self.session_id.clone(),
             agent_id: "dev-a".to_string(),
             task_id: None,

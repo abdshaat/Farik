@@ -128,6 +128,10 @@ pub struct SessionSpec {
     pub skills: Vec<SessionSkill>,
     /// The directory it works in.
     pub cwd: PathBuf,
+    /// The other folders it may read, never write (5.6): the project's other repositories and its
+    /// folder. A runtime that can tell its program about them does; the daemon's hook holds the
+    /// session to them whatever the runtime does.
+    pub read_roots: Vec<PathBuf>,
     /// When it is stopped.
     pub limits: SessionLimits,
     /// The first user message.
