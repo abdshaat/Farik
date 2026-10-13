@@ -98,20 +98,26 @@ impl World {
 
     /// `shop`, a repository with one commit by its owner.
     fn make_shop(&self) {
-        let shop = self.home().join("shop");
-        std::fs::create_dir_all(&shop).expect("a shop");
-        git_in(&shop, &["init", "-b", "main"]);
+        self.make_repository("shop", "me@example.invalid");
+    }
+
+    /// A repository whose own `user.email` is the owner's, with one commit by `committer`.
+    fn make_repository(&self, relative: &str, committer: &str) {
+        let path = self.home().join(relative);
+        std::fs::create_dir_all(&path).expect("a folder");
+        git_in(&path, &["init", "-b", "main"]);
         for (key, value) in [
             ("user.email", "me@example.invalid"),
             ("user.name", "Me"),
             ("commit.gpgsign", "false"),
             ("core.hooksPath", "/dev/null"),
         ] {
-            git_in(&shop, &["config", key, value]);
+            git_in(&path, &["config", key, value]);
         }
-        std::fs::write(shop.join("README.md"), "x\n").expect("a file");
-        git_in(&shop, &["add", "-A"]);
-        git_in(&shop, &["commit", "-m", "the first commit"]);
+        std::fs::write(path.join("README.md"), "x\n").expect("a file");
+        git_in(&path, &["add", "-A"]);
+        let setting = format!("user.email={committer}");
+        git_in(&path, &["-c", &setting, "commit", "-m", "the first commit"]);
     }
 }
 
@@ -279,29 +285,8 @@ fn prints_every_section() {
     let shop = home.join("shop");
     let worktree = shop.join(".catervas/local/worktrees/CTV-1");
     std::fs::create_dir_all(&worktree).expect("a Catervas worktree");
+    world.make_repository("clone", "other@example.invalid");
     let clone = home.join("clone");
-    std::fs::create_dir_all(&clone).expect("a clone");
-    git_in(&clone, &["init", "-b", "main"]);
-    for (key, value) in [
-        ("user.email", "me@example.invalid"),
-        ("user.name", "Me"),
-        ("commit.gpgsign", "false"),
-        ("core.hooksPath", "/dev/null"),
-    ] {
-        git_in(&clone, &["config", key, value]);
-    }
-    std::fs::write(clone.join("README.md"), "x\n").expect("a file");
-    git_in(&clone, &["add", "-A"]);
-    git_in(
-        &clone,
-        &[
-            "-c",
-            "user.email=other@example.invalid",
-            "commit",
-            "-m",
-            "somebody else's",
-        ],
-    );
     let sibling = PathBuf::from(format!("{}2/x", home.to_string_lossy()));
     std::fs::create_dir_all(&sibling).expect("a sibling of home");
 
