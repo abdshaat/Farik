@@ -523,7 +523,7 @@ fn rules_section(
                     .to_string(),
             )
         }),
-        Some(folders_line(role, active_roles)),
+        Some(folders_line(role, active_roles, &[])),
         Some(format_line(format)),
         stale_line(stale_twins),
         repositories_line(members, own_repo),

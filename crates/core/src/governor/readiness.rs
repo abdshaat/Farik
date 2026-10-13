@@ -12,7 +12,7 @@ use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
-use crate::folders::{ROLE_FOLDERS, is_plan_of};
+use crate::folders::{MEMBER_FOLDERS, ROLE_FOLDERS, is_plan_of, member_folder};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::team::{
     changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
@@ -818,9 +818,15 @@ fn folder_owned(contract: &TaskContract, context: &ReadinessContext) -> Option<R
     if contract.kind != Kind::Task {
         return None;
     }
-    let owned: Vec<(Role, &str)> = ROLE_FOLDERS
+    let members: &[String] = context.repos.as_deref().unwrap_or_default();
+    let owned: Vec<(Role, String)> = ROLE_FOLDERS
         .iter()
-        .copied()
+        .map(|(owner, folder)| (*owner, (*folder).to_string()))
+        .chain(members.iter().flat_map(|name| {
+            MEMBER_FOLDERS
+                .iter()
+                .filter_map(|(owner, _)| Some((*owner, member_folder(*owner, name)?)))
+        }))
         .filter(|(owner, _)| {
             *owner != contract.assignee_role
                 && context
@@ -1829,6 +1835,36 @@ mod tests {
         let mut epic = a_task_for(Role::Architect, &["docs/**"]);
         epic.kind = Kind::Epic;
         assert!(!failed(&epic, &a_ready_context()).contains(&R::FolderOwned));
+    }
+
+    #[test]
+    fn holds_a_members_folders_for_their_owner() {
+        let context = a_project_folder_context(&["app"]);
+        let held = |task: &TaskContract, context: &ReadinessContext| {
+            evaluate_readiness(task, context)
+                .err()
+                .is_some_and(|failures| {
+                    failures
+                        .iter()
+                        .any(|failure| failure.rule == R::FolderOwned)
+                })
+        };
+        let task = a_task_for(
+            Role::SoftwareDeveloper,
+            &["docs/catervas/repos/app/architecture/**"],
+        );
+        assert!(
+            message_of(&task, &context, R::FolderOwned)
+                .contains("docs/catervas/repos/app/architecture/ (Architect)")
+        );
+        let everything = a_task_for(Role::SoftwareDeveloper, &["docs/catervas/repos/**"]);
+        assert!(held(&everything, &context));
+        let own = a_task_for(
+            Role::SoftwareDeveloper,
+            &["docs/catervas/repos/app/engineering/**"],
+        );
+        assert!(!held(&own, &context));
+        assert!(!held(&task, &a_ready_context()));
     }
 
     /// A task for the Finance Specialist, reviewed by the Product Manager, allowed `paths`, with

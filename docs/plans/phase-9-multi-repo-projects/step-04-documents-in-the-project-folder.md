@@ -133,7 +133,7 @@ Files: `folders.rs` (the items and their tests); `readiness.rs` (`folder_owned`)
   RED.
 - `tells_a_role_its_member_folders`: `folders_line(Architect, [..], &["app", "infra"])` ends with exactly `Each repository has its own architecture/ folder at repos/app/architecture/ and repos/infra/architecture/, which is yours too.`; with three members the list is `a, b and c`; with `&[]` it is today's line exactly. A member folder's `folder_doc_message` is `docs(app-architecture): features.html by Ada`. RED.
 
-- [ ] `feat(core): give each member its own role folders`
+- [x] `feat(core): give each member its own role folders`
 
 ### Task 2: A folder change that removes a folder
 
