@@ -13,7 +13,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 
 ## Hard rules
 
-1. No production code before a failing test. Watch the test fail for the right reason. Code written before its test gets deleted, not adapted. Since ADR 0058 (2026-10-13), one test per major function: each task gets one test for its main behaviour.
+1. No production code before a failing test. Watch the test fail for the right reason. Code written before its test gets deleted, not adapted. Since ADR 0058 (2026-10-13), the convention is one major test per major functionality, not comprehensive.
 2. No completion claim without fresh evidence. Run the check, read the output, paste it. "Should work" is not a status.
 3. Planning is two-level: `docs/plans/project-plan.md` holds phases and steps; each step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, copied from `docs/plans/step-template.md` and passed by one readiness review (`workflow.md` stage 2) before execution. Tick its checkboxes in the same commits.
 4. Commits follow Conventional Commits with a package scope. One task, one commit.
