@@ -167,7 +167,8 @@
         "folder_change.integrated",
         "folder_change.escalated",
         "project.started",
-        "catervafication.started"
+        "catervafication.started",
+        "document_rewrite.started"
       ]
     },
     "eventBodyWire": {
@@ -274,7 +275,8 @@
         { "$ref": "#/$defs/folderChangeIntegratedBody" },
         { "$ref": "#/$defs/folderChangeEscalatedBody" },
         { "$ref": "#/$defs/projectStartedBody" },
-        { "$ref": "#/$defs/catervaficationStartedBody" }
+        { "$ref": "#/$defs/catervaficationStartedBody" },
+        { "$ref": "#/$defs/documentRewriteStartedBody" }
       ]
     },
     "contractSummary": {
@@ -313,8 +315,13 @@
         "rederives": {
           "type": "string",
           "maxLength": 512,
-          "pattern": "^docs/catervas/.+\\.agent\\.md$",
-          "description": "The .agent.md twin this request brings up to date with the owner's change to the document beside it (docs/SPEC.md 5.17); Catervas files it, so created_by is catervas."
+          "pattern": "^docs/catervas/.+\\.agent\\.(md|html)$",
+          "description": "The .agent.md or .agent.html twin this request brings up to date with the owner's change to the document beside it (docs/SPEC.md 5.17); Catervas files it, so created_by is catervas."
+        },
+        "filed_as": {
+          "type": "string",
+          "enum": ["owner_change", "document_rewrite"],
+          "description": "This request is a whole contract Catervas filed for the owner, judged as filed with no refine session (docs/SPEC.md 5.17): owner_change is the owner's ask on the Files page for the role that owns a document to change it; document_rewrite is the task that rewrites a folder's Markdown documents as HTML. Only Catervas writes it."
         }
       }
     },
@@ -1109,7 +1116,7 @@
     },
     "marketingPlanProposedBody": {
       "title": "Marketing Plan Proposed Body",
-      "description": "The Marketing Specialist proposed a marketing plan through catervas_propose_marketing_plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, MP-<n>; text is the plan in full, which Catervas also wrote to docs/catervas/marketing/plans/<plan>.md in the task's worktree; starts_on and ends_on are UTC dates, at most 92 days apart, both counted; budget.google_ads is at most budget.total and the campaigns' budgets add up to at most budget.google_ads; google_ads_account is present exactly when campaigns is not empty; replaces names an approved plan this one supersedes. The envelope names the task, the agent and the session; the task waits on the owner until a marketing_plan.approved or marketing_plan.returned of the plan.",
+      "description": "The Marketing Specialist proposed a marketing plan through catervas_propose_marketing_plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, MP-<n>; text is the plan in full, which Catervas also wrote to docs/catervas/marketing/plans/<plan>.md (or .html, see format) in the task's worktree; starts_on and ends_on are UTC dates, at most 92 days apart, both counted; budget.google_ads is at most budget.total and the campaigns' budgets add up to at most budget.google_ads; google_ads_account is present exactly when campaigns is not empty; replaces names an approved plan this one supersedes. The envelope names the task, the agent and the session; the task waits on the owner until a marketing_plan.approved or marketing_plan.returned of the plan.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "title", "summary", "text", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "measures", "proposed_by"],
@@ -1127,6 +1134,7 @@
         "measures": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "type": "string" } },
         "google_ads_account": { "type": "string", "pattern": "^[0-9]{3}-[0-9]{3}-[0-9]{4}$" },
         "replaces": { "$ref": "#/$defs/marketingPlanId" },
+        "format": { "type": "string", "enum": ["html"], "description": "html when the plan was written as an HTML page (MP-<n>.html and MP-<n>.agent.html); left out for a Markdown plan." },
         "proposed_by": { "type": "string" }
       }
     },
@@ -1720,7 +1728,7 @@
     "folderDocPath": {
       "type": "string",
       "maxLength": 512,
-      "pattern": "^docs/catervas/[^/]+/.+\\.md$",
+      "pattern": "^docs/catervas/[^/]+/.+\\.(md|html)$",
       "description": "A document under a role's folder (docs/SPEC.md 5.17), repository-relative."
     },
     "folderDocText": { "type": "string", "minLength": 1, "maxLength": 262144 },
@@ -1852,6 +1860,21 @@
       "required": ["project"],
       "properties": {
         "project": { "type": "string", "enum": ["existing", "new"] }
+      }
+    },
+    "documentRewriteStartedBody": {
+      "title": "Document Rewrite Started Body",
+      "description": "The owner asked the team to rewrite its Markdown documents as HTML (docs/SPEC.md 5.17): tasks are the rewrite tasks filed, one for each role whose folder held a Markdown document, none when only the Scrum Master's delivery documents did. It names no one; each task.created names the owner's word.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks"],
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 6,
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
+        }
       }
     },
     "connectorTag": {

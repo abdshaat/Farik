@@ -70,3 +70,21 @@
 	background: #fbf6ec;
 	border-radius: 8px;
 }
+
+.text table {
+	display: block;
+	overflow-x: auto;
+	border-collapse: collapse;
+	margin: 0 0 var(--catervas-space-3);
+}
+
+.text th,
+.text td {
+	border: 1px solid var(--catervas-color-rule);
+	padding: 4px 8px;
+	text-align: left;
+}
+
+.text > :last-child {
+	margin-bottom: 0;
+}

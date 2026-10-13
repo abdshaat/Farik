@@ -2,6 +2,8 @@
 
 Status: approved by the founder on 2026-10-09, in conversation (ADR 0051); its mockups, the canvas page "Catervas folders" (version 19, sources in `docs/design/mockups/`), approved by the founder on 2026-10-10 ("Approve as drawn"). It is the design input to phase 8, Catervas folders.
 
+Amended on 2026-10-12 (ADR 0058): documents may now be HTML as well as Markdown; see `docs/design/html-documents.md`.
+
 ## Why
 
 The founder wants every agent to keep its knowledge of the project as documents it owns, not only as memory notes: the Product Manager the product's spec and roadmap, the Architect the architecture with its diagrams and the implementation plans, the Developer the repository's conventions and workflow, the Marketing Specialist its marketing plan built from the product, and the DevOps Engineer its incident response plan and the project's logging conventions. A team that starts on an existing repository documents it first, in a sprint of its own, "Catervafication"; a team that starts from nothing documents nothing until the owner has approved the product plan. The owner reads every document in the web app and may change any of them.

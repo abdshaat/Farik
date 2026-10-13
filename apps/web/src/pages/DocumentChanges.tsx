@@ -1,11 +1,13 @@
-import { Avatar, type AvatarKey, Button, TextArea } from "@catervas/ui";
+import { Button, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
+import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentChanges.module.css";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
-import { fileRoute } from "./files.ts";
+import { docKey, fileRoute, isHtml } from "./files.ts";
+import type { Agent } from "./setup/TeamSetup.tsx";
 
 /** The team's integration policy, which says what approving does. */
 export type Integration = "auto_merge" | "pull_request" | "manual";
@@ -23,8 +25,8 @@ export type DocumentChangesCard = {
 };
 
 const NAMES: Record<string, "docNameRoadmap" | "docNameSpec"> = {
-	"docs/catervas/product/roadmap.md": "docNameRoadmap",
-	"docs/catervas/product/spec.md": "docNameSpec",
+	"product/roadmap": "docNameRoadmap",
+	"product/spec": "docNameSpec",
 };
 
 const NOTES: Record<
@@ -36,8 +38,29 @@ const NOTES: Record<
 	manual: "docChangesManual",
 };
 
-/** A line as the owner reads it: a heading without its `#`s, a bullet without its mark. */
-function plain(text: string): { words: string; heading: boolean } {
+const ENTITIES: Record<string, string> = {
+	"&amp;": "&",
+	"&lt;": "<",
+	"&gt;": ">",
+	"&quot;": '"',
+	"&#39;": "'",
+};
+
+/**
+ * A line as the owner reads it: a heading without its `#`s, a bullet without its mark. An HTML
+ * line has its tags removed and five entities decoded; the result is only ever a text node.
+ */
+function plain(
+	text: string,
+	path: string,
+): { words: string; heading: boolean } {
+	if (isHtml(path)) {
+		const words = text
+			.replace(/<[^>]*>/g, "")
+			.replace(/&(?:amp|lt|gt|quot|#39);/g, (e) => ENTITIES[e] ?? e)
+			.trim();
+		return { words, heading: /^<h[1-6][\s>]/.test(text.trim()) };
+	}
 	const heading = /^#+\s*/.exec(text);
 	if (heading) return { words: text.slice(heading[0].length), heading: true };
 	return { words: text.replace(/^[-*+] /, ""), heading: false };
@@ -52,13 +75,13 @@ export function DocumentChanges({
 	card,
 	integration,
 	name,
-	avatar,
+	agent,
 	again,
 }: {
 	card: DocumentChangesCard;
 	integration: Integration;
 	name: string;
-	avatar?: AvatarKey | undefined;
+	agent?: Agent | undefined;
 	again: () => void;
 }) {
 	const id = useId();
@@ -90,7 +113,7 @@ export function DocumentChanges({
 	return (
 		<section className={styles.card} aria-labelledby={`${id}-title`}>
 			<div className={styles.head}>
-				{avatar && <Avatar avatarKey={avatar} name={name} size={48} />}
+				<AgentPicture agent={agent} size={48} />
 				<div className={styles.headText}>
 					<strong id={`${id}-title`}>{t("docChangesTitle")}</strong>
 					<p className={styles.muted}>
@@ -104,7 +127,7 @@ export function DocumentChanges({
 			</div>
 			<p className={styles.muted}>{t("docChangesLegend")}</p>
 			{card.documents.map((one) => {
-				const named = NAMES[one.path];
+				const named = NAMES[docKey(one.path)];
 				return (
 					<div key={one.proposal} className={styles.document}>
 						<p id={`${id}-doc-${one.proposal}`} className={styles.docName}>
@@ -125,7 +148,10 @@ export function DocumentChanges({
 								aria-labelledby={`${id}-doc-${one.proposal}`}
 							>
 								{one.lines.map((line, at) => {
-									const { words, heading } = plain(visibly(line.text));
+									const { words, heading } = plain(
+										visibly(line.text),
+										one.path,
+									);
 									return (
 										<li
 											// biome-ignore lint/suspicious/noArrayIndexKey: lines repeat, and never move

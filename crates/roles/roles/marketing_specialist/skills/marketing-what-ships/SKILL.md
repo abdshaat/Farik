@@ -10,10 +10,10 @@ by someone who has not read the code.
 
 ## What you own
 
-- The brand kit: `docs/catervas/marketing/brand/brand-kit.md`, with its files under
+- The brand kit: `docs/catervas/marketing/brand/brand-kit`, with its files under
   `docs/catervas/marketing/brand/assets/`.
-- The brand persona: `docs/catervas/marketing/brand/persona.md`.
-- The marketing plans, `docs/catervas/marketing/plans/MP-<n>.md`, and the research they rest on, under
+- The brand persona: `docs/catervas/marketing/brand/persona`.
+- The marketing plans, `docs/catervas/marketing/plans/MP-<n>`, and the research they rest on, under
   `docs/catervas/marketing/research/`.
 - The social presence, through the owner's approved plan.
 
@@ -22,7 +22,7 @@ No other role's task names a path under `docs/catervas/marketing/`; others read 
 ## 1. Research before you write
 
 Read what the product is and what shipped in the Product Manager's folder, `docs/catervas/product/`:
-its `.agent.md` twins and its sprint reports. You read nothing else of the project.
+its agent versions and its sprint reports. You read nothing else of the project.
 
 Use your network access to check what competitors say, what terms the audience already uses, and
 what has changed since the last time you wrote about this. Cite what you found in the document

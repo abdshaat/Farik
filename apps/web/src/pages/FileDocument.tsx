@@ -4,7 +4,9 @@ import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { refusalsOf, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
+import { DocumentFrame } from "../components/DocumentFrame.tsx";
 import { Markdown } from "../components/Markdown.tsx";
+import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./Files.module.css";
 import {
@@ -12,6 +14,7 @@ import {
 	type FilesTree,
 	type FileVersion,
 	type Integration,
+	isHtml,
 	timeAgo,
 } from "./files.ts";
 import type { Agent } from "./setup/TeamSetup.tsx";
@@ -86,6 +89,12 @@ export function FileDocument({
 	const [draft, setDraft] = useState<Draft | null>(null);
 	const [refusal, setRefusal] = useState<string | "changed" | null>(null);
 	const [busy, setBusy] = useState(false);
+	const [advanced, setAdvanced] = useState(false);
+	const [words, setWords] = useState("");
+	const [asking, setAsking] = useState(false);
+	const [asked, setAsked] = useState<
+		{ ok: true; task: string } | { ok: false; said: string } | null
+	>(null);
 	const folder = tree.folders.find((f) =>
 		f.documents.some((d) => d.path === path),
 	);
@@ -95,6 +104,24 @@ export function FileDocument({
 	const owner = agents.find((a) => a.id === folder.agentId);
 	const pair = data.twin !== null;
 	const version = team && data.twin ? data.twin : data.document;
+	const html = isHtml(path);
+
+	const ask = async () => {
+		if (!client || words.trim() === "") return;
+		setAsking(true);
+		try {
+			const sent = (await client.call("files.ask_change", {
+				path,
+				words: words.trim(),
+			})) as { taskId: string };
+			setAsked({ ok: true, task: sent.taskId });
+			setWords("");
+		} catch (e) {
+			setAsked({ ok: false, said: saidAll(e) });
+		} finally {
+			setAsking(false);
+		}
+	};
 
 	const edit = () => {
 		setRefusal(null);
@@ -146,7 +173,8 @@ export function FileDocument({
 
 	const name = document.name;
 	// A document's own first-level heading is its title, so the page shows it once, not twice.
-	const first = /^# +(.+?)(?: +#+)? *\r?\n/.exec(version.text);
+	// An HTML document's text never goes through Markdown; its title is its name.
+	const first = html ? null : /^# +(.+?)(?: +#+)? *\r?\n/.exec(version.text);
 	const title = first?.[1] ?? name;
 	const body = first ? version.text.slice(first[0].length) : version.text;
 	return (
@@ -173,6 +201,14 @@ export function FileDocument({
 						<p className={styles.forTeam}>
 							{t(WAITING[tree.integration], { change: data.waiting.change })}
 						</p>
+					) : html ? (
+						<>
+							<ShowAdvanced
+								open={advanced}
+								onToggle={() => setAdvanced(!advanced)}
+							/>
+							{advanced && <Button onClick={edit}>{t("docEditSource")}</Button>}
+						</>
 					) : (
 						<Button onClick={edit}>{t("filesEdit")}</Button>
 					))}
@@ -191,26 +227,28 @@ export function FileDocument({
 							</p>
 						)
 					)}
-					<fieldset
-						className={styles.version}
-						aria-label={t("filesEditOrPreview")}
-					>
-						<button
-							type="button"
-							aria-pressed={!draft.preview}
-							onClick={() => setDraft({ ...draft, preview: false })}
+					{!html && (
+						<fieldset
+							className={styles.version}
+							aria-label={t("filesEditOrPreview")}
 						>
-							{t("filesWrite")}
-						</button>
-						<button
-							type="button"
-							aria-pressed={draft.preview}
-							onClick={() => setDraft({ ...draft, preview: true })}
-						>
-							{t("filesPreview")}
-						</button>
-					</fieldset>
-					{draft.preview ? (
+							<button
+								type="button"
+								aria-pressed={!draft.preview}
+								onClick={() => setDraft({ ...draft, preview: false })}
+							>
+								{t("filesWrite")}
+							</button>
+							<button
+								type="button"
+								aria-pressed={draft.preview}
+								onClick={() => setDraft({ ...draft, preview: true })}
+							>
+								{t("filesPreview")}
+							</button>
+						</fieldset>
+					)}
+					{draft.preview && !html ? (
 						<Markdown text={draft.text} />
 					) : (
 						<TextArea
@@ -297,7 +335,46 @@ export function FileDocument({
 							})}
 						</p>
 					)}
-					<Markdown text={body} />
+					{html ? (
+						<DocumentFrame
+							path={version.path}
+							version={version.blob}
+							title={name}
+						/>
+					) : (
+						<Markdown text={body} />
+					)}
+					{data.askable && (
+						<div className={styles.ask}>
+							<TextArea
+								id="file-ask"
+								label={t("docAskLabel")}
+								value={words}
+								onChange={setWords}
+								rows={3}
+							/>
+							<Button
+								busy={asking}
+								disabled={words.trim() === ""}
+								onClick={ask}
+							>
+								{t("docAskSend", { owner: owner?.displayName ?? "" })}
+							</Button>
+							{asked?.ok && (
+								<p className={styles.forTeam}>
+									{t("docAskSent", {
+										owner: owner?.displayName ?? "",
+										task: asked.task,
+									})}
+								</p>
+							)}
+							{asked && !asked.ok && (
+								<p role="alert" className={styles.alert}>
+									{asked.said}
+								</p>
+							)}
+						</div>
+					)}
 				</>
 			)}
 		</div>

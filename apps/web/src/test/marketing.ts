@@ -38,6 +38,7 @@ export const PLAN = {
 	title: TITLE,
 	summary: SUMMARY,
 	text: TEXT,
+	format: "markdown",
 	state: "proposed",
 	starts_on: "2026-10-12",
 	ends_on: "2026-11-22",

@@ -1,6 +1,6 @@
 ---
 name: catervas-recommended-workflow
-description: Use when a project has no workflow of its own and you are writing workflow.md, or when asked how Catervas works a change.
+description: Use when a project has no workflow of its own and you are writing the `workflow` document, or when asked how Catervas works a change.
 ---
 
 # Catervas's recommended workflow

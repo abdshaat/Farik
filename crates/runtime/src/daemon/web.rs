@@ -374,6 +374,13 @@ fn session_cookies(headers: &HeaderMap) -> impl Iterator<Item = &str> {
         .filter_map(|pair| pair.trim().strip_prefix("catervas_session="))
 }
 
+/// Whether the request is for the daemon's own host and carries a live session.
+pub(super) fn has_session(headers: &HeaderMap, web: &WebState) -> bool {
+    let now = web.clock.now();
+    own_host(headers, web)
+        && session_cookies(headers).any(|secret| web.sessions.verify(secret, now))
+}
+
 /// `GET /session`: 204 when the request carries a live session, 401 when it does not. The page
 /// asks it before opening `/rpc`, whose refused upgrade gives a browser no status. A same-origin
 /// fetch sends no `Origin`, so one is refused only when it is there and foreign; `Host` must be
@@ -386,8 +393,7 @@ pub(super) async fn session(State(state): State<Arc<DaemonState>>, headers: Head
     if !own_host(&headers, web) || origin.is_some_and(|origin| !own_origin(origin, web)) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let now = web.clock.now();
-    if session_cookies(&headers).any(|secret| web.sessions.verify(secret, now)) {
+    if has_session(&headers, web) {
         StatusCode::NO_CONTENT.into_response()
     } else {
         StatusCode::UNAUTHORIZED.into_response()
@@ -1084,7 +1090,7 @@ fn task_wire(task: &TaskProjection, team: &Team, open: Option<&str>) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::fmt::Write as _;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -2942,7 +2948,7 @@ mod tests {
     // Setup mode: a daemon with no project, answering the wizard through a fake host.
 
     /// A setup host that records what it was asked and hands out paths under `home`.
-    struct FakeHost {
+    pub(in crate::daemon) struct FakeHost {
         home: PathBuf,
         path: String,
         calls: std::sync::Mutex<Vec<Value>>,
@@ -3004,7 +3010,10 @@ mod tests {
     }
 
     /// A daemon in setup mode over `home`, whose programs are looked for on `path`.
-    fn in_setup(home: &std::path::Path, path: &str) -> (Arc<DaemonState>, Arc<FakeHost>) {
+    pub(in crate::daemon) fn in_setup(
+        home: &std::path::Path,
+        path: &str,
+    ) -> (Arc<DaemonState>, Arc<FakeHost>) {
         let host = Arc::new(FakeHost {
             home: home.to_path_buf(),
             path: path.to_string(),

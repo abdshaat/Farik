@@ -7,6 +7,7 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus};
+use catervas_core::folders::with_format;
 use catervas_core::governor::gates::{
     DesignerBrowser, fits_the_open_sprint, in_the_backlog, waits_for_a_sprint,
 };
@@ -20,6 +21,7 @@ use catervas_protocol::event::{
     SessionStartedBodyPurpose, Thread, new_event,
 };
 use catervas_store::baseline::{copy_baseline, folder_in};
+use catervas_store::git::held_document;
 use catervas_store::marketing::{marketing_plans, social_posts};
 use catervas_store::product_plan::{new_project, product_plan_tasks};
 use catervas_store::{CostScope, EventQuery, Git, GitError, TaskProjection};
@@ -28,10 +30,10 @@ use chrono::{DateTime, Utc};
 use super::design::{self, Stage};
 use super::integrate::{awaiting, awaiting_folder_changes, cleanup};
 use super::messages::{
-    Digest, Resume, SprintTask, architecture_refresh_message, ceremony_message, implement_message,
-    mention_message, owners_folder_lines, owners_folder_words, plan_message, planning_message,
-    posts_heard, product_refresh_message, retro_message, sprint_review_message, standup_message,
-    with_the_approved_plan,
+    Digest, ProductFiles, Resume, SprintTask, architecture_refresh_message, ceremony_message,
+    implement_message, mention_message, owners_folder_lines, owners_folder_words, plan_message,
+    planning_message, posts_heard, product_refresh_message, retro_message, sprint_review_message,
+    standup_message, with_the_approved_plan,
 };
 use super::pipeline::decide_pipelines;
 use super::requests;
@@ -461,6 +463,32 @@ fn finished_sprint(
     }))
 }
 
+/// Whether the owner has asked for the documents as HTML (`document_rewrite.started`), the team
+/// writes HTML, and the integration branch's `delivery/` still holds a Markdown document.
+fn delivery_to_rewrite(
+    tools: &crate::tools::ToolDeps,
+    team: &Team,
+) -> Result<bool, OrchestratorError> {
+    use catervas_core::folders::DocumentFormat;
+    if team.document_format() != DocumentFormat::Html {
+        return Ok(false);
+    }
+    let asked = tools.log.read(&EventQuery {
+        kinds: vec![EventKind::DocumentRewriteStarted],
+        limit: Some(1),
+        ..EventQuery::default()
+    })?;
+    if asked.is_empty() {
+        return Ok(false);
+    }
+    let branch = integration_branch(team, &tools.git)?;
+    Ok(tools
+        .git
+        .tree_entries(&branch, "docs/catervas/delivery")?
+        .iter()
+        .any(|entry| DocumentFormat::of(&entry.path) == Some(DocumentFormat::Markdown)))
+}
+
 /// The latest ended sprint's review, then its retro (5.9), under `All` alone in a tick scoped to no
 /// task, while no newer sprint has started (`ended_sprint`): the ceremony runner gets one
 /// `ceremony` session in the `review` thread until the review has run, then one in the `retro`
@@ -471,6 +499,10 @@ fn finished_sprint(
 /// Between them (`due_refresh`), the Product Manager and the Architect each get one `review`
 /// session that refreshes the product plan and the architecture notes. Passed over for a sprint
 /// whose file lists no task, with no runner, or on a spent day.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the review, the retro and the refresh, side by side"
+)]
 async fn review_and_retro(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -513,22 +545,31 @@ async fn review_and_retro(
             let retro = tools.files.read_retro()?;
             // The Scrum Master writes the cadence at the retro of the sprint that documented the
             // project (ADR 0051).
-            let catervafied = Role::from(runner.role) == Role::ScrumMaster
+            let cadence = (Role::from(runner.role) == Role::ScrumMaster
                 && crate::catervafication::started(&tools.log)?.is_some_and(|epic| {
                     file.task_ids.iter().any(|id| id.as_str() == epic.as_str())
-                });
+                }))
+            .then_some(team.document_format());
+            // After the owner's rewrite, it rewrites `delivery/`, which no task reaches.
+            let rewrite_delivery =
+                Role::from(runner.role) == Role::ScrumMaster && delivery_to_rewrite(tools, team)?;
             (
                 runner,
                 Thread::Retro,
-                retro_message(&sprint.sprint_id, &tasks, retro.as_deref(), catervafied),
+                retro_message(
+                    &sprint.sprint_id,
+                    &tasks,
+                    retro.as_deref(),
+                    cadence,
+                    rewrite_delivery,
+                ),
                 RETRO_TOOLS,
                 "retro ceremony",
             )
         }
         Refresh::None => {
             // A Product Manager that runs the review makes its refresh in it.
-            let refresh_in_review = Role::from(runner.role) == Role::ProductManager
-                && on_the_integration_branch(deps, team, PRODUCT_SPEC)?;
+            let refresh_in_review = review_refresh(deps, team, runner, &sprint.sprint_id)?;
             let spent = tools
                 .projections
                 .costs(CostScope::Sprint)?
@@ -540,7 +581,7 @@ async fn review_and_retro(
                 &tasks,
                 file.budget_usd,
                 spent,
-                refresh_in_review,
+                refresh_in_review.as_ref(),
             );
             // What the owner decided of the runner's documents since its last review.
             let heard = owners_folder_words(&tools.log, runner.id.as_str())?;
@@ -606,10 +647,61 @@ fn sprint_tasks(
     Ok(tasks)
 }
 
-/// The product plan's spec, which the Product Manager's refresh keeps true.
-const PRODUCT_SPEC: &str = "docs/catervas/product/spec.md";
+/// The product plan's spec (a stem, either format), which the Product Manager's refresh keeps true.
+const PRODUCT_SPEC: &str = "docs/catervas/product/spec";
+/// The product plan's roadmap, as a stem.
+const PRODUCT_ROADMAP: &str = "docs/catervas/product/roadmap";
+/// The architecture's features notes, as a stem.
+const ARCHITECTURE_FEATURES: &str = "docs/catervas/architecture/features";
+/// The architecture's jobs notes, as a stem.
+const ARCHITECTURE_JOBS: &str = "docs/catervas/architecture/jobs";
 /// The architecture's structure notes, which the Architect's refresh keeps true.
-const ARCHITECTURE_STRUCTURE: &str = "docs/catervas/architecture/structure.md";
+const ARCHITECTURE_STRUCTURE: &str = "docs/catervas/architecture/structure";
+
+/// The product plan's files a Product Manager that runs the review makes its refresh of in it,
+/// when the integration branch holds the spec; none for any other runner.
+fn review_refresh(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    runner: &Agent,
+    sprint_id: &str,
+) -> Result<Option<ProductFiles>, OrchestratorError> {
+    if Role::from(runner.role) == Role::ProductManager
+        && held_on_the_integration_branch(deps, team, PRODUCT_SPEC)?.is_some()
+    {
+        return Ok(Some(product_files(deps, team, sprint_id)?));
+    }
+    Ok(None)
+}
+
+/// The path `stem` has on the integration branch, else the stem in the team's format.
+fn document_on_the_integration_branch(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    stem: &str,
+) -> Result<String, OrchestratorError> {
+    Ok(held_on_the_integration_branch(deps, team, stem)?
+        .unwrap_or_else(|| with_format(stem, team.document_format())))
+}
+
+/// The product plan's files as a refresh names them: the spec and the roadmap where the
+/// integration branch holds them, else in the team's format, and the sprint's report, a new file,
+/// in the team's format.
+fn product_files(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    sprint_id: &str,
+) -> Result<ProductFiles, OrchestratorError> {
+    let format = team.document_format();
+    Ok(ProductFiles {
+        spec: document_on_the_integration_branch(deps, team, PRODUCT_SPEC)?,
+        roadmap: document_on_the_integration_branch(deps, team, PRODUCT_ROADMAP)?,
+        report: with_format(
+            &format!("docs/catervas/product/reports/{sprint_id}"),
+            format,
+        ),
+    })
+}
 
 /// What the sprint review's refreshes ask of the tick (`due_refresh`).
 enum Refresh<'a> {
@@ -621,23 +713,29 @@ enum Refresh<'a> {
     Ask(&'a Agent, String, &'static str),
 }
 
-/// Whether `path` is on the team's integration branch; false when the branch does not exist.
-fn on_the_integration_branch(
+/// The path `stem` has on the team's integration branch, in either format; `None` when the branch
+/// holds no such document or does not exist.
+fn held_on_the_integration_branch(
     deps: &OrchestratorDeps,
     team: &Team,
-    path: &str,
-) -> Result<bool, OrchestratorError> {
+    stem: &str,
+) -> Result<Option<String>, OrchestratorError> {
     let git = &deps.tools.git;
-    match git.has_file(&integration_branch(team, git)?, path) {
-        Err(GitError::CommandFailed { .. }) => Ok(false),
+    match held_document(
+        git,
+        &integration_branch(team, git)?,
+        stem,
+        team.document_format(),
+    ) {
+        Err(GitError::CommandFailed { .. }) => Ok(None),
         other => Ok(other?),
     }
 }
 
 /// The refresh the reviewed `sprint` owes next, once per sprint under the ceremonies' bound
-/// (`reviewed_by`): the Product Manager's, when its `spec.md` is on the integration branch and it
+/// (`reviewed_by`): the Product Manager's, when its `spec` (either format) is on the integration branch and it
 /// has not reviewed (a Product Manager that ran the review has: its review was its refresh); then
-/// the Architect's, when its `structure.md` is and a task of the sprint was integrated after the
+/// the Architect's, when its `structure` (either format) is and a task of the sprint was integrated after the
 /// sprint started, read from the log. Under `auto_merge` they wait while a task of the sprint is
 /// accepted and awaiting its integration, which rule 2 does first, unless its integration was
 /// escalated to the human. Passed over on a spent day or while the agent sleeps, as the review is.
@@ -650,7 +748,7 @@ fn due_refresh<'a>(
     waiting: &mut Waiting,
 ) -> Result<Refresh<'a>, OrchestratorError> {
     let tools = &deps.tools;
-    let owed = |role: Role, path: &str| -> Result<Option<&'a Agent>, OrchestratorError> {
+    let owed = |role: Role, stem: &str| -> Result<Option<&'a Agent>, OrchestratorError> {
         let Some(agent) = team
             .active_agents()
             .find(|agent| Role::from(agent.role) == role)
@@ -660,7 +758,7 @@ fn due_refresh<'a>(
         if sprint.reviewed_by.iter().any(|id| id == agent.id.as_str()) {
             return Ok(None);
         }
-        Ok(on_the_integration_branch(deps, team, path)?.then_some(agent))
+        Ok(held_on_the_integration_branch(deps, team, stem)?.map(|_| agent))
     };
     let product = owed(Role::ProductManager, PRODUCT_SPEC)?;
     let architecture = owed(Role::Architect, ARCHITECTURE_STRUCTURE)?;
@@ -691,7 +789,13 @@ fn due_refresh<'a>(
         let (decisions, pending) = owners_folder_lines(&tools.log, agent.id.as_str())?;
         return Ok(Refresh::Ask(
             agent,
-            product_refresh_message(&sprint.sprint_id, tasks, &decisions, &pending),
+            product_refresh_message(
+                &sprint.sprint_id,
+                tasks,
+                &decisions,
+                &pending,
+                &product_files(deps, team, &sprint.sprint_id)?,
+            ),
             "product refresh session",
         ));
     }
@@ -719,9 +823,14 @@ fn due_refresh<'a>(
     if cannot_be_asked(agent, waiting)? {
         return Ok(Refresh::Wait);
     }
+    let architecture_files = [
+        document_on_the_integration_branch(deps, team, ARCHITECTURE_FEATURES)?,
+        document_on_the_integration_branch(deps, team, ARCHITECTURE_JOBS)?,
+        document_on_the_integration_branch(deps, team, ARCHITECTURE_STRUCTURE)?,
+    ];
     Ok(Refresh::Ask(
         agent,
-        architecture_refresh_message(&sprint.sprint_id, &integrated),
+        architecture_refresh_message(&sprint.sprint_id, &integrated, &architecture_files),
         "architecture refresh session",
     ))
 }
@@ -7728,7 +7837,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn tells_the_scrum_master_to_write_the_cadence_at_the_retro_of_a_catervafication() {
-        let cadence = "docs/catervas/delivery/cadence.md";
+        let cadence = "docs/catervas/delivery/cadence.html";
         let retro_prompt = |name: &str, scrum_master: bool| {
             let harness = Harness::new(name, |wire| {
                 if scrum_master {
@@ -7771,6 +7880,65 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_retro_rewrites_delivery_after_a_rewrite() {
+        let line = "Rewrite the documents in docs/catervas/delivery/ as HTML with \
+                    catervas_write_folder_doc; writing <name>.html removes <name>.md.";
+        let retro_told = |name: &str, scrum_master: bool, rewrite: bool, file: &str| {
+            let harness = Harness::new(name, |wire| {
+                if scrum_master {
+                    with_a_scrum_master(wire);
+                }
+                if name.ends_with("markdown") {
+                    wire["policy"]["document_format"] = json!("markdown");
+                }
+            });
+            harness.accepted("CTV-1");
+            harness.open_sprint("S1", &["CTV-1"]);
+            harness.project.record(
+                "CTV-1",
+                "note.written",
+                &json!({ "kind": "completion", "text": "The login page is done.", "written_by": "dev-a" }),
+            );
+            harness.spent(Some("CTV-1"), "s-1", 1.25);
+            std::fs::create_dir_all(harness.project.repo.path.join("docs/catervas/delivery"))
+                .expect("the folder is made");
+            harness.commit_at_root(file, "cadence\n", "the cadence");
+            if rewrite {
+                harness
+                    .project
+                    .record("", "document_rewrite.started", &json!({ "tasks": [] }));
+            }
+            let adapter = harness.recorded(vec![review(), retro()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            async move {
+                // The project lives as long as the ticks.
+                let _harness = harness;
+                for _ in 0..3 {
+                    orchestrator.tick().await.expect("the tick runs");
+                }
+                let started = adapter.started();
+                assert_eq!(started.len(), 2, "{started:?}");
+                started[1].initial_prompt.contains(line)
+            }
+        };
+        let md = "docs/catervas/delivery/cadence.md";
+        assert!(retro_told("orch-rewrite-retro", true, true, md).await);
+        assert!(!retro_told("orch-rewrite-retro-none", true, false, md).await);
+        assert!(
+            !retro_told(
+                "orch-rewrite-retro-html",
+                true,
+                true,
+                "docs/catervas/delivery/cadence.html"
+            )
+            .await
+        );
+        assert!(!retro_told("orch-rewrite-retro-pm", false, true, md).await);
+        assert!(!retro_told("orch-rewrite-retro-markdown", true, true, md).await);
+    }
+
     /// A new project (`project.started`) whose team has a Product Manager, an Architect, a Developer
     /// and a Marketing Specialist, and whose first request CTV-1 and product plan CTV-2 are accepted
     /// and integrated, the plan accepted by the owner three days ago; its documents are not yet on
@@ -7807,7 +7975,11 @@ mod tests {
         catervas_store::requests::file_product_plan_request(
             &deps.files,
             &deps.log,
-            catervas_store::requests::product_plan_request(Role::Architect, 5.0),
+            catervas_store::requests::product_plan_request(
+                Role::Architect,
+                5.0,
+                catervas_core::folders::DocumentFormat::Html,
+            ),
             (deps.clock.now(), &deps.ids),
         )
         .expect("the product plan is filed");
@@ -8472,7 +8644,11 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn refreshes_the_product_and_the_architecture_after_the_review() {
-        let harness = Harness::new("orch-refresh", with_a_scrum_master_and_an_architect);
+        // The files are named as the team writes them: Markdown here.
+        let harness = Harness::new("orch-refresh", |wire| {
+            with_a_scrum_master_and_an_architect(wire);
+            wire["policy"]["document_format"] = json!("markdown");
+        });
         a_sprint_of_one_task(&harness, true);
         on_main(&harness, SPEC);
         on_main(&harness, STRUCTURE);
@@ -8515,6 +8691,88 @@ mod tests {
                 && !outside_the_untrusted_blocks(&ada.initial_prompt).contains("CTV-1"),
             "{}",
             ada.initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_refresh_is_owed_for_an_html_spec() {
+        let harness = Harness::new(
+            "orch-refresh-html-spec",
+            with_a_scrum_master_and_an_architect,
+        );
+        a_sprint_of_one_task(&harness, true);
+        on_main(&harness, "docs/catervas/product/spec.html");
+        let adapter = harness.recorded(vec![review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..5 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert_eq!(
+            who_held(&harness),
+            vec![
+                ("sm".to_string(), Thread::Review),
+                ("pm".to_string(), Thread::Review),
+                ("sm".to_string(), Thread::Retro),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_review_asks_for_the_files_that_are_there() {
+        // The team writes HTML; the spec on the branch is Markdown and the roadmap is not there.
+        let harness = Harness::new(
+            "orch-refresh-files-there",
+            with_a_scrum_master_and_an_architect,
+        );
+        a_sprint_of_one_task(&harness, true);
+        on_main(&harness, "docs/catervas/product/spec.md");
+        let adapter = harness.recorded(vec![review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..5 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let ask = adapter.started()[1].initial_prompt.clone();
+        assert!(
+            ask.contains(
+                "Propose changes to docs/catervas/product/spec.md and docs/catervas/product/roadmap.html with"
+            ),
+            "{ask}"
+        );
+        assert!(
+            ask.contains("to docs/catervas/product/reports/S1.html with catervas_write_folder_doc"),
+            "{ask}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_architects_refresh_names_its_files() {
+        // The team writes HTML; the structure notes on the branch are Markdown, the rest are new.
+        let harness = Harness::new(
+            "orch-refresh-architect-files",
+            with_a_scrum_master_and_an_architect,
+        );
+        a_sprint_of_one_task(&harness, true);
+        on_main(&harness, STRUCTURE);
+        let adapter = harness.recorded(vec![review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..5 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let ask = adapter.started()[1].initial_prompt.clone();
+        assert!(
+            ask.starts_with(
+                "Bring docs/catervas/architecture/features.html, jobs.html and structure.md up to date with what sprint 1 added to the project."
+            ),
+            "{ask}"
         );
     }
 
@@ -8692,6 +8950,7 @@ mod tests {
     async fn the_product_managers_review_is_its_refresh() {
         // No Scrum Master: the Product Manager runs the review and the retro.
         let harness = Harness::new("orch-refresh-pm-runs", |wire| {
+            wire["policy"]["document_format"] = json!("markdown");
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
@@ -8726,6 +8985,30 @@ mod tests {
             .find("docs/catervas/product/reports/S1.md")
             .expect("the refresh's asks");
         assert!(facts < asks, "{review_of_pm}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_product_managers_review_is_its_refresh_for_an_html_spec() {
+        // No Scrum Master, the default (HTML) team, and the spec is a page on main.
+        let harness = Harness::new("orch-refresh-pm-runs-html", |_| {});
+        a_sprint_of_one_task(&harness, true);
+        on_main(&harness, "docs/catervas/product/spec.html");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let review_of_pm = &adapter.started()[0].initial_prompt;
+        for named in [
+            "Then keep the product plan true to what the sprint did.",
+            "docs/catervas/product/spec.html",
+            "docs/catervas/product/reports/S1.html",
+        ] {
+            assert!(review_of_pm.contains(named), "{named}: {review_of_pm}");
+        }
     }
 
     /// Records `text` in `agent`'s chat as `author`, and answers its seq.

@@ -743,6 +743,93 @@ describe("chats", () => {
 		expect(screen.queryByRole("button", { name: en.chatsSend })).toBeNull();
 	});
 
+	it("renders an agent's reply as Markdown", async () => {
+		media.set(WIDE, true);
+		await chats("/channel/mira", {
+			messages: [
+				chat("mira", "Short answer.\n\n- **One** point\n- Two\n\nThat is all."),
+			],
+		});
+		const messages = await screen.findByRole("list", {
+			name: en.channelMessages,
+		});
+		const row = within(messages).getAllByRole("listitem")[0] as HTMLElement;
+		expect(within(row).getAllByRole("listitem")).toHaveLength(2);
+		expect(within(row).getByText("One").tagName).toBe("STRONG");
+		expect(row.textContent).not.toContain("**");
+		expect(row.textContent).not.toContain("- ");
+	});
+
+	it("keeps the user's own message as text", async () => {
+		media.set(WIDE, true);
+		await chats("/channel/mira", {
+			messages: [chat("human", "- **not** a list")],
+		});
+		const text = await screen.findByText("- **not** a list");
+		expect(text.textContent).toBe("- **not** a list");
+		expect(within(text).queryByRole("list")).toBeNull();
+		expect(text.classList).toContain(own.lines);
+	});
+
+	it("links a task id in an agent's reply", async () => {
+		media.set(WIDE, true);
+		const { s } = await chats("/channel/mira", {
+			messages: [chat("mira", "CTV-7 is in review.")],
+		});
+		const link = await screen.findByRole("link", { name: "CTV-7" });
+		expect(link.getAttribute("href")).toBe("/tasks/CTV-7");
+		expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+		expect(fireEvent.click(link, { button: 1 })).toBe(true);
+		expect(
+			screen.getByRole("heading", { name: "Talking with Mira" }),
+		).toBeTruthy();
+		expect(fireEvent.click(link)).toBe(false);
+		await waitFor(() =>
+			expect(
+				s
+					.calls("query")
+					.some(
+						(f) =>
+							f.params.name === "contract.get" &&
+							JSON.stringify(f.params.params) ===
+								JSON.stringify({ task_id: "CTV-7" }),
+					),
+			).toBe(true),
+		);
+		expect(
+			screen.queryByRole("heading", { name: "Talking with Mira" }),
+		).toBeNull();
+	});
+
+	it("leaves other links to the browser", async () => {
+		media.set(WIDE, true);
+		await chats("/channel/mira", {
+			messages: [chat("mira", "[site](https://example.com/a)")],
+		});
+		const link = await screen.findByRole("link", { name: "site" });
+		expect(fireEvent.click(link)).toBe(true);
+		expect(
+			screen.getByRole("heading", { name: "Talking with Mira" }),
+		).toBeTruthy();
+	});
+
+	it("leaves task ids in code and links alone", async () => {
+		media.set(WIDE, true);
+		await chats("/channel/mira", {
+			messages: [
+				chat("mira", "`CTV-7` and [CTV-8](/tasks/CTV-8)\n\n```\nCTV-9\n```"),
+			],
+		});
+		const code = await screen.findByText("CTV-7");
+		expect(code.tagName).toBe("CODE");
+		expect(code.closest("a")).toBeNull();
+		const links = screen.getAllByRole("link", { name: "CTV-8" });
+		expect(links).toHaveLength(1);
+		expect(links[0]?.getAttribute("href")).toBe("/tasks/CTV-8");
+		expect(document.querySelector("pre code")?.textContent).toBe("CTV-9\n");
+		expect(screen.queryByRole("link", { name: "CTV-9" })).toBeNull();
+	});
+
 	it("renders_agent_text_as_text", async () => {
 		media.set(WIDE, true);
 		const evil = "<img src=x onerror=alert(1)>";
@@ -1034,6 +1121,7 @@ describe("chats", () => {
 				chat("human", "Could customers also pay with Apple Pay?"),
 				chat("mira", "Yes.", { request: APPLE }),
 				chat("mira", "Done.", { request: APPLE, sent_as: "CTV-12" }),
+				chat("mira", "Short answer.\n\n- **One**\n- Two\n\nCTV-12 is next."),
 				chat("mira", "Here is what I heard.", { heard: HEARD }),
 			],
 			waiting: { because: "day_spent" },

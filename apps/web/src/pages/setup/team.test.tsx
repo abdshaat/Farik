@@ -1849,6 +1849,12 @@ describe("team setup", () => {
 		expect(draftOf(wire, "saved", template).team.policy.planInSprints).toBe(
 			true,
 		);
+		expect(
+			draftOf(wire, "saved", {
+				...template,
+				policy: { ...template.policy, documentFormat: "markdown" },
+			}).team.policy.documentFormat,
+		).toBe("markdown");
 	});
 
 	it("starts_the_team", async () => {

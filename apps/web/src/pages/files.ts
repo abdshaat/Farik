@@ -37,6 +37,7 @@ export type FileRead = {
 	stale: boolean;
 	rederiving: boolean;
 	editable: boolean;
+	askable: boolean;
 	waiting: { change: number; branch: string } | null;
 };
 
@@ -67,4 +68,13 @@ export function timeAgo(at: string, now: Date): string {
 	const months = Math.floor(days / 30);
 	if (months < 12) return words.format(-months, "month");
 	return words.format(-Math.max(1, Math.floor(days / 365)), "year");
+}
+
+/** Whether a path is an HTML document, which is only ever shown in a sandboxed frame. */
+export const isHtml = (path: string): boolean => path.endsWith(".html");
+
+/** A document's name without its folder root, extension or `.agent`: `product/spec` for either format. */
+export function docKey(path: string): string {
+	const rest = path.startsWith(ROOT) ? path.slice(ROOT.length) : path;
+	return rest.replace(/(\.agent)?\.(md|html)$/, "");
 }

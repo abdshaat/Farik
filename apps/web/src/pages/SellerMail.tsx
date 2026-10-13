@@ -1,7 +1,8 @@
-import { Avatar, type AvatarKey, Button } from "@catervas/ui";
+import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "../app/store.ts";
+import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import { AskTeam } from "./dialogs/AskTeam.tsx";
 import { SellerMessage, SendFields } from "./dialogs/SellerMessage.tsx";
@@ -136,9 +137,7 @@ function SellerMessageRow({
 	const title = titles.find((one) => one.taskId === item.taskId)?.title;
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>
 					{t(item.purpose === "question" ? "sellerQuestion" : "sellerQuote", {
@@ -265,9 +264,7 @@ function SellerReplyRow({
 	);
 	return (
 		<li className={styles.row}>
-			{agent?.avatar && (
-				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
-			)}
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>
 					{t("replyLine", { seller, subject: visibly(item.sentSubject) })}

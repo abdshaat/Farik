@@ -223,3 +223,47 @@ test("a long file name wraps inside the folder list instead of scrolling it side
 		await serve.stop();
 	}
 });
+
+test("an HTML document fits a phone", async ({ page }) => {
+	const serve = await startServe({
+		team: "pm-architect-developer",
+		transcripts: [],
+	});
+	commitFiles(
+		serve.project,
+		{
+			"docs/catervas/architecture/overview.html": `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Shop overview</title></head><body><h1>Shop overview</h1><p>How the shop fits together.</p><table><tr><td>${"wide ".repeat(60)}</td></tr></table><script>document.title = "ran";</script></body></html>`,
+		},
+		"docs: an HTML overview",
+	);
+	try {
+		await page.goto(serve.url);
+		await expect(
+			page
+				.getByRole("navigation", { name: "Main" })
+				.getByRole("link", { name: "Files" }),
+		).toBeVisible();
+		await page.setViewportSize({ width: 375, height: 812 });
+		await page.goto(
+			`http://127.0.0.1:${serve.port}/files/architecture/overview.html`,
+		);
+		const frame = page.frameLocator("iframe");
+		await expect(
+			frame.getByRole("heading", { name: "Shop overview" }),
+		).toBeVisible();
+		expect(
+			await page.evaluate(
+				() =>
+					document.documentElement.scrollWidth <=
+					document.documentElement.clientWidth,
+			),
+		).toBe(true);
+		// The frame's document cannot run a script: its title is still the one it was written with.
+		const inside = await (
+			await page.locator("iframe").elementHandle()
+		)?.contentFrame();
+		expect(await inside?.title()).toBe("Shop overview");
+	} finally {
+		await serve.stop();
+	}
+});

@@ -55,6 +55,19 @@ pub fn default_reviewer_role(team: &Team, kind: TaskKind, assignee_role: Role) -
     })
 }
 
+/// The reviewer of a task `owner` writes for the owner's own word (a re-derive, an ask to change a
+/// document): [`default_reviewer_role`], else the first role `owner`'s row prefers, staffed or not.
+/// `None` when `owner` has no row.
+#[must_use]
+pub fn reviewer_for(team: &Team, owner: Role) -> Option<Role> {
+    default_reviewer_role(team, TaskKind::Task, owner).or_else(|| {
+        REVIEWER_ROLE_FOR
+            .iter()
+            .find(|(assignee, _)| *assignee == owner)
+            .and_then(|(_, preferred)| preferred.first().copied())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use catervas_core::contract::{Role, TaskKind};
@@ -366,5 +379,31 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn rederive_keeps_its_reviewer() {
+        use super::reviewer_for;
+        // The preferred reviewer when the team can staff one.
+        assert_eq!(
+            reviewer_for(&two_developers_and_an_architect(), Role::SoftwareDeveloper),
+            Some(Role::Architect)
+        );
+        // A team without the preferred reviewer: the first preference all the same.
+        assert_eq!(
+            reviewer_for(&a_lone_developer(), Role::SoftwareDeveloper),
+            Some(Role::Architect)
+        );
+        assert_eq!(
+            reviewer_for(&a_lone_developer(), Role::Architect),
+            Some(Role::ProductManager)
+        );
+        // A second choice the team can staff wins over the first preference.
+        assert_eq!(
+            reviewer_for(&two_developers(), Role::UiUxDesigner),
+            Some(Role::SoftwareDeveloper)
+        );
+        // A role with no row has no reviewer.
+        assert_eq!(reviewer_for(&a_lone_developer(), Role::ScrumMaster), None);
     }
 }

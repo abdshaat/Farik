@@ -33,7 +33,7 @@ pub use kit::{
     SetupCopy, is_catervas_connector, load_kit, parse_fixture_kit, parse_kit, pin_drift,
     quoted_labels, shipped_skill_names,
 };
-pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
+pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role, reviewer_for};
 pub use skill_check::{
     CheckedSkill, SHIPPED_ROLES, SkillRefusal, check_skill, core_skill_names,
     declared_name_and_description, skill_name_ok,
@@ -782,7 +782,8 @@ mod tests {
         let flat = PM_SKILL.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
             flat.contains(
-                "Name `docs/catervas/product/spec.md` or `roadmap.md` in a task's allowed paths, \
+                "Name `docs/catervas/product/spec.*` or `docs/catervas/product/roadmap.*` in a task's \
+                 allowed paths, \
                  or a pattern that reaches them, only when the task changes them: such a task \
                  waits for the owner to accept it."
             ),
@@ -1166,8 +1167,8 @@ mod tests {
             );
         }
         for path in [
-            "docs/catervas/marketing/brand/brand-kit.md",
-            "docs/catervas/marketing/brand/persona.md",
+            "docs/catervas/marketing/brand/brand-kit",
+            "docs/catervas/marketing/brand/persona",
             "docs/catervas/marketing/plans/",
         ] {
             assert!(prompt.contains(path), "the prompt does not name {path}");
@@ -1247,8 +1248,8 @@ mod tests {
         }
         let ships = of("marketing-what-ships").to_lowercase();
         for path in [
-            "docs/catervas/marketing/brand/brand-kit.md",
-            "docs/catervas/marketing/brand/persona.md",
+            "docs/catervas/marketing/brand/brand-kit",
+            "docs/catervas/marketing/brand/persona",
             "docs/catervas/marketing/plans/",
             "docs/catervas/marketing/research/",
         ] {
@@ -1313,7 +1314,7 @@ mod tests {
         assert!(
             skill
                 .body
-                .contains("docs/catervas/marketing/brand/brand-kit.md"),
+                .contains("docs/catervas/marketing/brand/brand-kit"),
             "{}",
             skill.body
         );
@@ -1379,15 +1380,14 @@ mod tests {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
-        for needle in ["agent_text", "MP-<n>.agent.md", "catervas_git_commit"] {
+        for needle in ["agent_text", "its agent version", "catervas_git_commit"] {
             assert!(
                 flat.contains(needle),
                 "the plan skill lost {needle}: {flat}"
             );
         }
         assert!(
-            flat.contains("MP-<n>.md and MP-<n>.agent.md together")
-                || flat.contains("`MP-<n>.md` and `MP-<n>.agent.md` together"),
+            flat.contains("`MP-<n>` and its agent version together"),
             "{flat}"
         );
     }
@@ -1397,12 +1397,7 @@ mod tests {
     #[test]
     fn the_product_manager_keeps_its_folder() {
         let definition = loaded(Role::ProductManager);
-        for needle in [
-            "docs/catervas/product/",
-            "spec.md",
-            "roadmap.md",
-            ".agent.md",
-        ] {
+        for needle in ["docs/catervas/product/", "spec", "roadmap", "agent version"] {
             assert!(
                 definition.system_prompt.contains(needle),
                 "the prompt does not name {needle}"
@@ -1415,7 +1410,7 @@ mod tests {
             .find(|skill| skill.name == "writing-requirements")
             .expect("the requirements skill");
         let requirements = &requirements.session_files["SKILL.md"];
-        for needle in ["spec.md", "spec.agent.md"] {
+        for needle in ["spec", "its agent version"] {
             assert!(requirements.contains(needle), "{requirements}");
         }
         assert!(
@@ -1485,7 +1480,7 @@ mod tests {
             )
         };
         let requirements = skill_text("writing-requirements");
-        for needle in ["docs task", "spec.agent.md"] {
+        for needle in ["docs task", "its agent version"] {
             assert!(requirements.contains(needle), "{needle}: {requirements}");
         }
         for name in ["writing-requirements", "scoping-a-release"] {
@@ -1519,6 +1514,151 @@ mod tests {
                 .expect("the skill");
             assert!(flattened(&skill.body).contains(sentence), "{skill_name}");
         }
+    }
+
+    /// The six folder-owning roles name documents by stem: the team's format line says the
+    /// extension (`docs/design/html-documents.md`).
+    #[test]
+    fn kits_name_documents_without_an_extension() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("a folder") {
+                let path = entry.expect("an entry").path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else {
+                    out.push(path);
+                }
+            }
+        }
+        const NAMES: [&str; 12] = [
+            "spec.md",
+            "roadmap.md",
+            "overview.md",
+            "features.md",
+            "jobs.md",
+            "structure.md",
+            "conventions.md",
+            "workflow.md",
+            "ui-inventory.md",
+            "cadence.md",
+            "brand-kit.md",
+            "persona.md",
+        ];
+        for role in [
+            "product_manager",
+            "architect",
+            "software_developer",
+            "ui_ux_designer",
+            "scrum_master",
+            "marketing_specialist",
+        ] {
+            let mut files = Vec::new();
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("roles");
+            walk(&root.join(role), &mut files);
+            for file in files {
+                let text = std::fs::read_to_string(&file).expect("a text");
+                let mut gone: Vec<&str> = NAMES.to_vec();
+                gone.extend([".agent.md", "MP-<n>.md"]);
+                for needle in gone {
+                    assert!(!text.contains(needle), "{} holds {needle}", file.display());
+                }
+                if role == "architect" {
+                    assert!(
+                        !text.to_lowercase().contains("mermaid"),
+                        "{} holds Mermaid",
+                        file.display()
+                    );
+                }
+                if let Some(word) = path_with_extension(&text) {
+                    panic!("{} holds {word}", file.display());
+                }
+            }
+        }
+    }
+
+    /// The first word of `text` that is a path ending `.md` (a glob such as `**/*.md` is not).
+    fn path_with_extension(text: &str) -> Option<String> {
+        text.split_whitespace()
+            .filter(|word| !word.contains("/*") && !word.contains("**/"))
+            .map(|word| {
+                let kept =
+                    |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '-' | '_' | '<' | '>');
+                // A sentence's full stop may sit inside a bracket: trim, drop dots, trim again.
+                word.trim_matches(|c| !kept(c))
+                    .trim_end_matches('.')
+                    .trim_matches(|c| !kept(c))
+                    .trim_end_matches('.')
+            })
+            .find(|word| {
+                word.contains('/')
+                    && (word.contains("docs/catervas/") || !word.starts_with("docs/"))
+                    && std::path::Path::new(word)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            })
+            .map(str::to_string)
+    }
+
+    #[test]
+    fn the_path_check_sees_a_path_in_any_dress() {
+        for text in [
+            "**docs/catervas/x.md**",
+            "Write `plans/<epic-id>.md` here",
+            "(docs/catervas/a/b.md).",
+        ] {
+            assert!(path_with_extension(text).is_some(), "{text}");
+        }
+        for text in [
+            "`docs/**, **/*.md`",
+            "CHANGELOG.md",
+            "docs/catervas/product/spec",
+        ] {
+            assert!(path_with_extension(text).is_none(), "{text}");
+        }
+    }
+
+    /// A value an agent copies into a contract holds what Catervas checks: the owner's documents
+    /// as globs that reach either format, a plan with the team's extension.
+    #[test]
+    fn contract_values_keep_their_extension() {
+        assert!(catervas_core::folders::may_change_an_owner_document(&[
+            "docs/catervas/product/spec.*".to_string()
+        ]));
+        let globs = vec!["docs/catervas/product/spec.*".to_string()];
+        for path in [
+            "docs/catervas/product/spec.html",
+            "docs/catervas/product/spec.agent.html",
+        ] {
+            assert!(
+                catervas_core::governor::paths::check_allowed_paths(&[path.to_string()], &globs)
+                    .is_ok(),
+                "{path}"
+            );
+        }
+        let flat = flattened(PM_SKILL);
+        assert!(
+            flat.contains(
+                "`docs/catervas/product/spec.*` or `docs/catervas/product/roadmap.*` in a task's allowed paths"
+            ),
+            "{flat}"
+        );
+        assert!(
+            flat.contains(
+                "`docs/catervas/architecture/plans/<epic-id>` followed by the team's extension (`.html` or `.md`, as the Team rules say)"
+            ),
+            "{flat}"
+        );
+        let cadence = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("roles/scrum_master/skills/catervafying-the-repository/SKILL.md"),
+        )
+        .expect("a skill");
+        assert!(
+            flattened(&cadence).contains(
+                "`docs/catervas/delivery/cadence` followed by the team's extension (`.html` or `.md`, as the Team rules say) with `catervas_write_folder_doc`"
+            ),
+            "{cadence}"
+        );
     }
 
     /// The Marketing Specialist reads two folders (step 02): its prompt says so and where, and
