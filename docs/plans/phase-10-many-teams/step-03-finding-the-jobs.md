@@ -223,7 +223,7 @@ Tests:
 - `finds_vercel_render_and_kubernetes_jobs`: Vercel gives three jobs named by path, the third `/api/cron/x` (cut at `?`; `/a#b` is `/a`), leaves out an entry with no `schedule`, and `{}` gives none. Render gives `daily-report` alone. The three Kubernetes documents give `report` alone. RED.
 - `finds_terraform_schedule_expressions`: `TERRAFORM_MAIN_TF` gives exactly the two named jobs with their values. An expression before any block is named `schedule_expression`. RED.
 
-- [ ] `feat(core): find the schedules in a repository's files`
+- [x] `feat(core): find the schedules in a repository's files`
 
 ### Task 3: The computer's schedulers in core
 
