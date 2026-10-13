@@ -19,6 +19,8 @@ pub mod files;
 pub mod folder_docs;
 /// The repository Catervas works in.
 pub mod git;
+/// Finding the owner's jobs in their repositories, on this computer and in Claude Code's records.
+pub mod jobs;
 /// The machine-level index of the owner's Claude Code history, apart from every project's log.
 pub mod machine;
 /// The marketing plans the log holds.
