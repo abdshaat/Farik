@@ -568,6 +568,7 @@ fn told_at_listen<T: Send + 'static>(
                 // The engine is made once the daemon listens; what the governor's door knows
                 // then is what a page asked first would be told.
                 daemon.register_session(SessionRegistration {
+                    read_roots: Vec::new(),
                     session_id: "probe".to_string(),
                     web: catervas_core::governor::sites::WebAccess::Open,
                     reads: catervas_core::folders::ReadAccess::Open,

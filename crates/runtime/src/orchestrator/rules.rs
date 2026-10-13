@@ -9923,6 +9923,7 @@ mod tests {
 
         let session_id = format!("session-{agent}-{purpose:?}");
         harness.daemon.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: session_id.clone(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,

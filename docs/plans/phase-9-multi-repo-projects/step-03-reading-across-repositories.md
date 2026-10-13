@@ -170,7 +170,7 @@ Files: `daemon.rs`; `orchestrator/session.rs` and `orchestrator.rs`; `hooks.rs`;
 
   RED.
 
-- [ ] `feat(runtime): let a session read the project's other repositories`
+- [x] `feat(runtime): let a session read the project's other repositories`
 
 ### Task 2: Claude is told the other folders and their protected files
 

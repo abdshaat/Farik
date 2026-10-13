@@ -169,6 +169,7 @@ impl TestDaemon {
         purpose: SessionPurpose,
     ) {
         self.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: session_id.to_string(),
             web: self.web_of(agent),
             reads: self.reads_of(agent),
@@ -274,6 +275,7 @@ impl TestDaemon {
             kits: Arc::clone(&deps.kits),
         }));
         state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: DEV_SESSION.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
@@ -320,6 +322,7 @@ impl TestDaemon {
             kits: Arc::clone(&deps.kits),
         }));
         state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: "session-proc".to_string(),
             web: self.web_of("proc"),
             reads: self.reads_of("proc"),

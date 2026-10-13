@@ -125,6 +125,7 @@ impl Served {
             kits: Arc::new(catervas_roles::load_kit),
         })));
         state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: SESSION.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,

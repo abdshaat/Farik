@@ -2,13 +2,13 @@
 //! costs it reports, and its end.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
-use catervas_core::folders::{read_access, role_folder};
+use catervas_core::folders::{ReadAccess, read_access, role_folder};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 use catervas_core::governor::sites::{WebAccess, web_access};
@@ -17,7 +17,7 @@ use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::pricing::Usage;
 use catervas_core::team::{
     Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
-    private_folder,
+    private_folder, task_private_folder,
 };
 use catervas_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -26,9 +26,10 @@ use catervas_protocol::event::{
 };
 use catervas_roles::{ConnectorDefinition, builtin_connector, load_role};
 use catervas_store::EventQuery;
+use catervas_store::files::ProjectFiles;
 use catervas_store::git::{integration_branch, stale_twins};
 use catervas_store::product_plan::is_the_product_plan;
-use catervas_store::repos::TaskRepositoryError;
+use catervas_store::repos::{TaskRepositoryError, repo_present};
 use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
@@ -42,7 +43,7 @@ use super::{
 use crate::channel::post_system;
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
-use crate::daemon::{SessionRegistration, builtin_tool_tier};
+use crate::daemon::{ReadRoot, SessionRegistration, builtin_tool_tier};
 use crate::exec::Executor;
 use crate::preview::{
     PLAYWRIGHT, PreviewError, RunningPreview, connector_server, designer_browser, disallowed_tools,
@@ -60,6 +61,67 @@ use crate::sessions::{record_session_ended, record_session_started};
 use crate::skills::{SessionSkills, confirmed_skills, session_skills};
 use crate::tools::{CatervasTool, tool_descriptors, writes_the_project};
 use crate::transitions::TransitionAsk;
+
+/// The folders a session may read outside its `cwd` (5.6): every present member of a project
+/// folder but the task's own repository, by name in `repos.yaml` order, then the project folder,
+/// named `project`, unless `cwd` is it. None for a one-repository project, for a role held to read
+/// paths, for a task in a private folder, and when `repos.yaml` cannot be read: reads fail closed
+/// and the session still starts. A folder whose path cannot be written into a `Read(//<path>/...)`
+/// rule is left out, since Claude Code would ignore the settings that held it.
+pub(crate) fn read_roots(
+    files: &ProjectFiles,
+    contract: Option<&TaskContract>,
+    cwd: &Path,
+    role: Role,
+) -> Vec<ReadRoot> {
+    if read_access(role) != ReadAccess::Open
+        || contract.is_some_and(|contract| task_private_folder(contract).is_some())
+    {
+        return Vec::new();
+    }
+    let Ok(Some(repos)) = files.read_repos() else {
+        return Vec::new();
+    };
+    let own = contract
+        .and_then(|contract| contract.repo.as_ref())
+        .map(|repo| repo.as_str());
+    let mut roots: Vec<ReadRoot> = repos
+        .repos
+        .iter()
+        .filter(|repo| Some(repo.name.as_str()) != own)
+        .filter(|repo| repo_present(Path::new(repo.path.as_str())))
+        .filter_map(|repo| {
+            Some(ReadRoot {
+                name: repo.name.to_string(),
+                path: std::fs::canonicalize(repo.path.as_str()).ok()?,
+            })
+        })
+        .collect();
+    if let Ok(project) = std::fs::canonicalize(files.root())
+        && std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()) != project
+    {
+        roots.push(ReadRoot {
+            name: "project".to_string(),
+            path: project,
+        });
+    }
+    roots.retain(|root| expressible_in_a_rule(&root.path));
+    roots
+}
+
+/// Whether a path can be written into a `Read(//<path>/<glob>)` rule as it is: no parenthesis
+/// or backslash, which Claude Code reads as syntax, no control character, and no glob character,
+/// which would change what the rule matches.
+pub(crate) fn expressible_in_a_rule(path: &Path) -> bool {
+    path.to_str().is_some_and(|text| {
+        !text.chars().any(|character| {
+            matches!(
+                character,
+                '(' | ')' | '\\' | '*' | '?' | '[' | ']' | '{' | '}'
+            ) || character.is_control()
+        })
+    })
+}
 
 /// The one tool a triage session is given.
 pub(super) const TRIAGE_TOOL: &str = "catervas_triage_request";
@@ -166,6 +228,7 @@ pub(super) async fn run_session(
     }
     let (skills, skills_root) = skill_registration(deps, &spec);
     deps.daemon.register_session(SessionRegistration {
+        read_roots: read_roots(&deps.tools.files, ask.contract, &spec.cwd, role),
         session_id: spec.session_id.clone(),
         web: web_access(role),
         reads: read_access(role),
@@ -1653,6 +1716,41 @@ mod tests {
             initial_prompt: "Look at the app.".to_string(),
             pipeline: None,
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn knows_which_folders_a_session_reads() {
+        use super::read_roots;
+        use catervas_core::contract::Role;
+
+        let (harness, members) = Harness::project_folder("read-roots", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "iris", "ada", "app");
+        let files = &harness.project.deps.files;
+        let contract = files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+        let names = |roots: Vec<crate::daemon::ReadRoot>| -> Vec<String> {
+            roots.into_iter().map(|root| root.name).collect()
+        };
+        let root = files.root().to_path_buf();
+
+        // A task in `app` reads `infra` and the project folder, never its own repository.
+        let task = read_roots(
+            files,
+            Some(&contract),
+            &harness.worktree("CTV-1"),
+            Role::SoftwareDeveloper,
+        );
+        assert_eq!(task[0].path, members[1].path.canonicalize().expect("infra"));
+        assert_eq!(names(task), ["infra", "project"]);
+        // The Architect planning at the project root reads every member.
+        assert_eq!(
+            names(read_roots(files, None, &root, Role::Architect)),
+            ["app", "infra"]
+        );
+        // The Marketing Specialist reads no member.
+        assert!(read_roots(files, None, &root, Role::MarketingSpecialist).is_empty());
     }
 
     #[tokio::test]

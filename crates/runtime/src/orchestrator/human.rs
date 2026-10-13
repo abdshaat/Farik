@@ -4391,6 +4391,7 @@ mod tests {
             harness
                 .daemon
                 .register_session(crate::daemon::SessionRegistration {
+                    read_roots: Vec::new(),
                     session_id: session.to_string(),
                     web: catervas_core::governor::sites::WebAccess::Open,
                     reads: catervas_core::folders::ReadAccess::Open,
