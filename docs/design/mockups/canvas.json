@@ -1267,6 +1267,105 @@
       "title": "First run: a project of one or more repositories",
       "page": "repos",
       "is_interactive": true
+    },
+    "ManyFindOffer.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 969,
+      "title": "First run: find your projects, with what is read behind the info button",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyScanning.dc.html": {
+      "x": 1360,
+      "y": 0,
+      "w": 1280,
+      "h": 2187,
+      "title": "Looking through your history: live counts, setup meanwhile, done",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyFound.dc.html": {
+      "x": 2720,
+      "y": 0,
+      "w": 1280,
+      "h": 3047,
+      "title": "Here’s what you work on: Team, Watch or Ignore",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyLinkPair.dc.html": {
+      "x": 4080,
+      "y": 0,
+      "w": 1280,
+      "h": 2547,
+      "title": "Do these work together? One pair, its proof, Maybe related",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyYourTeams.dc.html": {
+      "x": 5440,
+      "y": 0,
+      "w": 1280,
+      "h": 2058,
+      "title": "Your teams: cards, names from Claude, Create",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyAllTeams.dc.html": {
+      "x": 6800,
+      "y": 0,
+      "w": 1280,
+      "h": 2767,
+      "title": "All teams: created paused, a day later, the switcher, journey B",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyWebOnly.dc.html": {
+      "x": 8160,
+      "y": 0,
+      "w": 1280,
+      "h": 5014,
+      "title": "Claude on the web: export, GitHub, services, copy to this computer",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyFixMistake.dc.html": {
+      "x": 9520,
+      "y": 0,
+      "w": 1280,
+      "h": 2667,
+      "title": "Fixing a mistake: doesn’t belong here, This computer, forget",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyReminders.dc.html": {
+      "x": 10880,
+      "y": 0,
+      "w": 1280,
+      "h": 2727,
+      "title": "Needs you today: the reminder, its actions, the notice",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyAnalytics.dc.html": {
+      "x": 12240,
+      "y": 0,
+      "w": 1280,
+      "h": 2058,
+      "title": "Analytics: usage per team, workflow, blockers",
+      "page": "many",
+      "is_interactive": true
+    },
+    "ManyStates.dc.html": {
+      "x": 13600,
+      "y": 0,
+      "w": 1280,
+      "h": 865,
+      "title": "Empty and error states",
+      "page": "many",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -1422,6 +1521,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_many": {
+      "kind": "title1",
+      "maxW": 14880,
+      "page": "many",
+      "text": "Many teams: finding your projects, linking them with proof, several teams, the daily reminder and analytics",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -1565,7 +1673,18 @@
     "TodayRepos.dc.html",
     "BoardRepos.dc.html",
     "FilesRepos.dc.html",
-    "AddSecondRepository.dc.html"
+    "AddSecondRepository.dc.html",
+    "ManyFindOffer.dc.html",
+    "ManyScanning.dc.html",
+    "ManyFound.dc.html",
+    "ManyLinkPair.dc.html",
+    "ManyYourTeams.dc.html",
+    "ManyAllTeams.dc.html",
+    "ManyWebOnly.dc.html",
+    "ManyFixMistake.dc.html",
+    "ManyReminders.dc.html",
+    "ManyAnalytics.dc.html",
+    "ManyStates.dc.html"
   ],
   "pages": [
     {
@@ -1639,6 +1758,10 @@
     {
       "id": "repos",
       "name": "Multi-repo projects"
+    },
+    {
+      "id": "many",
+      "name": "Many teams"
     }
   ],
   "title": "Catervas web UI mockup"

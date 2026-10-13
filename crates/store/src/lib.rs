@@ -5,6 +5,8 @@
 pub mod activity;
 /// The copy of a private folder a task is judged against.
 pub mod baseline;
+/// Reading Claude Code's transcripts into the machine index, and placing each session in its project.
+pub mod claude_history;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// What the store refuses, and why.
@@ -17,6 +19,10 @@ pub mod files;
 pub mod folder_docs;
 /// The repository Catervas works in.
 pub mod git;
+/// Finding the owner's jobs in their repositories, on this computer and in Claude Code's records.
+pub mod jobs;
+/// The machine-level index of the owner's Claude Code history, apart from every project's log.
+pub mod machine;
 /// The marketing plans the log holds.
 pub mod marketing;
 /// The harness metrics, from the projections.

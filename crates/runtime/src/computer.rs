@@ -262,6 +262,18 @@ pub fn on_path(program: &str, env: &BTreeMap<String, String>) -> Option<PathBuf>
     })
 }
 
+/// Runs `program` with `args` on `env`'s `PATH`, as `run` does (cleared environment, no input, ten
+/// seconds, the whole process group killed), for the jobs scan.
+#[must_use]
+pub fn program_output(
+    env: &BTreeMap<String, String>,
+    program: &str,
+    args: &[&str],
+) -> Option<catervas_store::jobs::ProgramAnswer> {
+    run(env, program, args)
+        .map(|(succeeded, stdout)| catervas_store::jobs::ProgramAnswer { succeeded, stdout })
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -323,6 +335,26 @@ mod tests {
         let serialised =
             serde_json::to_value(check_computer(&not_pulled, false)).expect("serialises");
         assert!(serialised.get("designer_browser").is_none(), "{serialised}");
+    }
+
+    #[test]
+    fn answers_a_programs_output() {
+        use catervas_store::jobs::ProgramAnswer;
+
+        let env = programs(
+            "program-output",
+            &[("hi", "echo hi"), ("fails", "echo no; exit 1")],
+        );
+        assert_eq!(
+            super::program_output(&env, "hi", &[]),
+            Some(ProgramAnswer {
+                succeeded: true,
+                stdout: "hi\n".to_string()
+            })
+        );
+        let failed = super::program_output(&env, "fails", &[]).expect("it ran");
+        assert!(!failed.succeeded);
+        assert_eq!(super::program_output(&env, "absent-program", &[]), None);
     }
 
     #[test]

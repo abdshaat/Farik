@@ -1,0 +1,7 @@
+{
+  "crons": [
+    { "path": "/api/cron/digest", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/cleanup", "schedule": "0 0 * * 0" },
+    { "path": "/api/cron/x?key=SECRET-VERCEL", "schedule": "0 * * * *" }
+  ]
+}

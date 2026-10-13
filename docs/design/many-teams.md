@@ -137,6 +137,11 @@ The teams share only the user, the computer, the AI account and an optional spen
 - **Catervas's own sessions** are recognised by the session ids in each team's log and by paths under `.catervas/local/`, and are counted as that team's agent activity, never as a project.
 - **Yours or explored.** A repository with a commit by the owner's git email is theirs; one without is "explored" and starts ignored.
 - **Longer history.** If `cleanupPeriodDays` is unset or under 90, a notice offers to set it to 365 in `~/.claude/settings.json`, showing the change and keeping a backup. Never without the click.
+- **Settled in step 02's plan:**
+  - The temporary folders (`/`, `/tmp`, `/var/tmp`, and `TMPDIR` when set) are not projects, as home is not, and a git root that holds one is ignored as if there were no git.
+  - A folder with no git folds into the outermost session folder with no git that contains it, and only roots with git are known roots for a folder that still exists, so placement never depends on the order of earlier scans. A deleted folder may fall under any known root.
+  - A subagent's replies count under its parent session.
+  - A reply's counters are the largest seen, and the reply belongs to the session that started earliest.
 
 ## 2b. People who use Claude only on the web
 
@@ -201,6 +206,7 @@ A connector is how the owner's Claude reaches another service: Zoho Books, Excel
 - **In each found repository:** GitHub Actions workflows with `on.schedule`, `vercel.json` `crons`, Kubernetes `CronJob` manifests, `render.yaml` services of type cron, Terraform `schedule_expression`. Each job keeps its name, schedule, file and repository.
 - **On the computer:** `crontab -l`, systemd timers (user and system), launchd agents in `~/Library/LaunchAgents`, Windows Task Scheduler (`schtasks /query`). A job is tied to a project when its command names a path inside it; otherwise it is listed under "This computer".
 - **From Claude Code:** session crons from `CronCreate` calls and `scheduled_tasks.json`, each with its 7-day expiry; background jobs and their state; routines entered by hand.
+- **Limits (step 03):** only Task Scheduler tasks tied to a project are listed, since the others are vendors' updaters; a timer a package installed under `/usr/lib` or `/lib` is skipped; a worktree outside its repository's folder ties to nothing; a Terraform schedule is read only when it is a literal string; explored repositories are not scanned, so a cloned upstream's schedules are not the owner's jobs; a Windows in another language has no readable Task Scheduler header.
 - **Their status**, where GitHub is connected: the last run of each scheduled workflow, the latest deployment status on the default branch, and whether GitHub has disabled the workflow (it stops scheduled workflows in a repository with no activity for 60 days). Without GitHub, a job shows its schedule and "Connect GitHub to see its runs".
 
 ## 4. Linking projects: proof before a link

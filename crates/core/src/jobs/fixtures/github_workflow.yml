@@ -1,0 +1,11 @@
+name: nightly-sync
+on:
+  schedule:
+    - cron: "0 3 * * *"
+    - cron: "30 4 * * 1"
+  workflow_dispatch:
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./sync.sh
