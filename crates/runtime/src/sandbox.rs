@@ -2,7 +2,7 @@
 //! at `/workspace`, or, in no-sandbox mode, the host inside the worktree.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use catervas_core::contract::TaskId;
 
@@ -73,7 +73,9 @@ pub trait Sandbox: Executor {
 /// Makes the sandbox a task's commands run in.
 pub trait SandboxFactory: Send + Sync {
     /// A sandbox for `task_id` of `project_id`, rooted at `worktree`, with the network on only
-    /// when `network` is true.
+    /// when `network` is true. `reads` are the project's other repositories, each by name and
+    /// folder, which a container sandbox mounts read-only at `/repos/<name>` so that a command can
+    /// read a sibling (5.6, 8.3); a host sandbox isolates nothing and ignores them.
     ///
     /// # Errors
     ///
@@ -84,6 +86,7 @@ pub trait SandboxFactory: Send + Sync {
         task_id: &TaskId,
         worktree: &Path,
         network: bool,
+        reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError>;
 
     /// A second sandbox for `task_id` of `project_id`, rooted at `worktree` (the task's base

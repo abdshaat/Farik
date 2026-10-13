@@ -189,7 +189,7 @@ Files: `sandbox.rs`; `sandbox/docker.rs` (`run_args`, used by `start`); `sandbox
 - `mounts_each_other_member_read_only` (`docker.rs`): `run_args` with reads `[(infra, /home/me/infra)]` holds `--mount type=bind,src=/home/me/infra,dst=/repos/infra,readonly` after the worktree's `--mount`. A read path with a comma is the worktree's comma error. With no reads, the arguments equal today's. RED.
 - `a_tasks_sandbox_holds_its_siblings` (`orchestrator.rs`, `Harness::project_folder` with `app` and `infra`): the sandbox made for a task with `repo: app` is given `[(infra, <infra>)]`, and for a docs task in the project folder `[(app, ..), (infra, ..)]`. RED.
 
-- [ ] `feat(runtime): mount a task's sibling repositories read-only`
+- [x] `feat(runtime): mount a task's sibling repositories read-only`
 
 ### Task 4: The prompt names the repositories
 

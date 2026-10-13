@@ -1181,11 +1181,15 @@ impl RuntimeAdapter for ExecutorWitness {
     }
 }
 
+/// The repositories a sandbox is told to mount, each by name and folder.
+pub(crate) type Reads = Vec<(String, PathBuf)>;
+
 /// A host sandbox factory that records, for each task, whether each sandbox it made for it had
 /// the network on, and how many times its sandboxes were removed.
 #[derive(Default)]
 pub(crate) struct CountingSandboxFactory {
     created: Mutex<BTreeMap<String, Vec<bool>>>,
+    read: Mutex<BTreeMap<String, Vec<Reads>>>,
     based: Mutex<BTreeMap<String, u32>>,
     removed: Mutex<BTreeMap<String, u32>>,
 }
@@ -1216,6 +1220,16 @@ impl CountingSandboxFactory {
         u32::try_from(self.networks(task).len()).expect("a test makes few sandboxes")
     }
 
+    /// For each sandbox `create` made for `task`, in order, the repositories it was told to mount.
+    pub(crate) fn reads(&self, task: &str) -> Vec<Reads> {
+        self.read
+            .lock()
+            .expect("no test panics holding it")
+            .get(task)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// For each sandbox `create` made for `task`, in order, whether its network was on.
     pub(crate) fn networks(&self, task: &str) -> Vec<bool> {
         self.created
@@ -1234,6 +1248,7 @@ impl SandboxFactory for CountingSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
         network: bool,
+        reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         self.created
             .lock()
@@ -1241,7 +1256,13 @@ impl SandboxFactory for CountingSandboxFactory {
             .entry(task_id.as_str().to_string())
             .or_default()
             .push(network);
-        HostSandboxFactory.create(project_id, task_id, worktree, network)
+        self.read
+            .lock()
+            .expect("no test panics holding it")
+            .entry(task_id.as_str().to_string())
+            .or_default()
+            .push(reads.to_vec());
+        HostSandboxFactory.create(project_id, task_id, worktree, network, reads)
     }
 
     fn create_base(
@@ -1313,10 +1334,11 @@ impl SandboxFactory for BrokenSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
         network: bool,
+        reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         let sandbox = self
             .counting
-            .create(project_id, task_id, worktree, network)?;
+            .create(project_id, task_id, worktree, network, reads)?;
         let broken = self
             .broken
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
@@ -1371,8 +1393,10 @@ impl SandboxFactory for UnremovableSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
         network: bool,
+        reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
-        self.counting.create(project_id, task_id, worktree, network)
+        self.counting
+            .create(project_id, task_id, worktree, network, reads)
     }
 
     fn create_base(
