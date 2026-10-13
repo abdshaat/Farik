@@ -304,15 +304,20 @@ impl SessionPlace {
 }
 
 /// Places a session: Catervas's when its folder is under `.catervas/local/` or its project's log
-/// names it, else the owner's under its folder's project.
+/// names it, else the owner's under its folder's project. Home and the other `not_projects` are
+/// never a project's root, so a `.catervas/local/` straight under one does not make it Catervas's.
 #[must_use]
 pub fn place_session(
     session_id: &str,
     cwd: &str,
     folder: &Place,
     catervas_logs: &BTreeMap<String, BTreeSet<String>>,
+    not_projects: &[String],
 ) -> SessionPlace {
-    if let Some(root) = catervas_root_of(cwd) {
+    if let Some(root) = catervas_root_of(cwd)
+        && !not_projects.contains(&root)
+        && !TEMPORARY_FOLDERS.contains(&root.as_str())
+    {
         return SessionPlace::Catervas { root };
     }
     match folder {
@@ -501,9 +506,11 @@ mod tests {
             folder("/home/me/shop", Some("/home/me/shop")),
             folder("/home/me/shop/.claude/worktrees/x", Some("/home/me/shop")),
             folder("/home/me/shop-wt", Some("/home/me/shop")),
+            // Git could not say (a build folder it ignores), but it is below a repository's root.
+            folder("/home/me/shop/build", None),
         ];
         let places = place_folders(&folders, &[], &home());
-        assert_eq!(places, vec![project("/home/me/shop"); 3]);
+        assert_eq!(places, vec![project("/home/me/shop"); 4]);
     }
 
     #[test]
@@ -529,6 +536,13 @@ mod tests {
             &home(),
         );
         assert_eq!(places, vec![project("/home/me/n")]);
+    }
+
+    #[test]
+    fn never_takes_home_as_a_known_root() {
+        let folders = [folder("/home/me/scratch", None)];
+        let places = place_folders(&folders, &[known("/home/me", true)], &home());
+        assert_eq!(places, vec![project("/home/me/scratch")]);
     }
 
     #[test]
@@ -590,13 +604,15 @@ mod tests {
             Some("/home/me/shop".to_string())
         );
         assert_eq!(catervas_root_of("/home/me/shop"), None);
+        assert_eq!(catervas_root_of("/home/me/shop/local/x"), None);
+        assert_eq!(catervas_root_of("/home/me/shop/.catervas/x/local"), None);
         let none = BTreeMap::new();
         let catervas = SessionPlace::Catervas {
             root: "/home/me/shop".to_string(),
         };
         let cwd = "/home/me/shop/.catervas/local/worktrees/CTV-3";
         for folder in [project("/home/me/other"), Place::Gone, Place::NotAProject] {
-            assert_eq!(place_session("s", cwd, &folder, &none), catervas);
+            assert_eq!(place_session("s", cwd, &folder, &none, &home()), catervas);
         }
         let logs = BTreeMap::from([(
             "/home/me/shop".to_string(),
@@ -604,17 +620,17 @@ mod tests {
         )]);
         let here = project("/home/me/shop");
         assert_eq!(
-            place_session("cat-1", "/home/me/shop", &here, &logs),
+            place_session("cat-1", "/home/me/shop", &here, &logs, &home()),
             catervas
         );
-        let owner = place_session("own-1", "/home/me/shop", &here, &logs);
+        let owner = place_session("own-1", "/home/me/shop", &here, &logs, &home());
         assert_eq!(
             owner,
             SessionPlace::Owner {
                 root: "/home/me/shop".to_string()
             }
         );
-        let lost = place_session("s", "/home/me/old", &Place::Gone, &logs);
+        let lost = place_session("s", "/home/me/old", &Place::Gone, &logs, &home());
         assert_eq!(
             lost,
             SessionPlace::Gone {
@@ -622,8 +638,31 @@ mod tests {
             }
         );
         assert_eq!(
-            place_session("s", "/home/me", &Place::NotAProject, &logs),
+            place_session("s", "/home/me", &Place::NotAProject, &logs, &home()),
             SessionPlace::NotAProject
+        );
+        // Home is never a project root, so a `.catervas/local` folder straight under it is not one.
+        assert_eq!(
+            place_session(
+                "s",
+                "/home/me/.catervas/local/x",
+                &Place::NotAProject,
+                &none,
+                &home()
+            ),
+            SessionPlace::NotAProject
+        );
+        assert_eq!(
+            place_session(
+                "s",
+                "/tmp/.catervas/local/x",
+                &project("/tmp/p"),
+                &none,
+                &home()
+            ),
+            SessionPlace::Owner {
+                root: "/tmp/p".to_string()
+            }
         );
         let wires = [
             (catervas, "catervas"),

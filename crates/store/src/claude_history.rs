@@ -404,7 +404,7 @@ pub fn place_sessions(
     let mut placements = Vec::new();
     let mut roots = BTreeSet::new();
     for (id, cwd) in &sessions {
-        let located = place_session(id, cwd, place_of[cwd.as_str()], &logs);
+        let located = place_session(id, cwd, place_of[cwd.as_str()], &logs, &blocked);
         let root = match &located {
             SessionPlace::Owner { root } | SessionPlace::Catervas { root } => {
                 roots.insert(root.clone());
