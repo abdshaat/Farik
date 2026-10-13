@@ -193,6 +193,11 @@ export function FileDocument({
 					{!draft && !pair && data.editable && (
 						<p className={styles.forTeam}>{t("filesWrittenForTeam")}</p>
 					)}
+					{document.task && (
+						<p className={styles.forTeam}>
+							{t("filesNotMerged", { task: document.task })}
+						</p>
+					)}
 				</div>
 				{!draft &&
 					!team &&

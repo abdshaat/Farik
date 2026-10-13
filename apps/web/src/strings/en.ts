@@ -2602,6 +2602,7 @@ export const en = {
 	filesThen: "Then {owner} updates the team’s version.",
 	filesWaitingAuto: "Saved. Catervas adds it to your project in a moment.",
 	filesWaitingPullRequest: "Saved. It goes out with a pull request.",
+	filesNotMerged: "Not merged yet. It comes from {task}, which waits to merge.",
 	filesWaitingManual:
 		"Saved. It goes out when you run catervas integrate folder-{change}.",
 	filesChangedWhile:

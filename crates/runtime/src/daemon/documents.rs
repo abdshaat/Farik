@@ -219,7 +219,7 @@ fn ask_change(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             "No one on your team owns this folder right now. Resume or add its role first.",
         ));
     }
-    let document = folders(&team, &entries)
+    let document = folders(&team, &entries, &[])
         .into_iter()
         .flat_map(|folder| folder.documents)
         .find(|document| document.path == path)
@@ -290,7 +290,7 @@ fn rewrite(deps: &ToolDeps) -> Result<Value, Failure> {
     }
     let mut delivery_holds_markdown = false;
     let mut wanted = Vec::new();
-    for folder in folders(&team, &entries) {
+    for folder in folders(&team, &entries, &[]) {
         if folder.role == Role::ScrumMaster {
             // It takes no task: its retro rewrites `delivery/`, if it has an active agent.
             delivery_holds_markdown = folder
@@ -378,10 +378,41 @@ pub(super) async fn call(
     Ok(saved)
 }
 
-/// One document of a folder, and its twin when it has one that is a file.
+/// One document of a folder, and its twin when it has one that is a file. `task` is the accepted
+/// task whose branch alone holds it while it waits to merge.
 struct Document {
     path: String,
     twin: Option<String>,
+    task: Option<String>,
+}
+
+/// A task accepted and still waiting to merge, with its branch's entries under the root.
+struct Pending {
+    task: String,
+    branch: String,
+    entries: Vec<TreeEntry>,
+}
+
+/// The tasks accepted and still waiting to merge, in board order; a branch git cannot read is left
+/// out.
+fn pending(deps: &ToolDeps) -> Result<Vec<Pending>, Failure> {
+    Ok(deps
+        .projections
+        .board()
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .filter(|row| row.status == TaskStatus::Accepted && row.awaiting_integration)
+        .filter_map(|row| {
+            let contract = deps.files.read_contract(&row.task_id).ok()?;
+            let branch = catervas_core::branch::task_branch(&contract);
+            let entries = deps.git.tree_entries(&branch, ROOT).ok()?;
+            Some(Pending {
+                task: row.task_id.to_string(),
+                branch,
+                entries,
+            })
+        })
+        .collect())
 }
 
 /// One folder of an active role, with the documents the tree lists in it.
@@ -401,13 +432,23 @@ fn is_document(path: &str) -> bool {
 }
 
 /// The folders of the roles with an active agent, in the table's order, each with its `.md` and `.html` files
-/// at any depth except the twin of a document that is present, which rides on its document.
-fn folders(team: &Team, entries: &[TreeEntry]) -> Vec<Folder> {
-    let files: Vec<&str> = entries
+/// at any depth except the twin of a document that is present, which rides on its document. A
+/// document only a `pending` task's branch holds is listed with that task; the integrated one wins.
+fn folders(team: &Team, entries: &[TreeEntry], pending: &[Pending]) -> Vec<Folder> {
+    let mut held: Vec<(&str, Option<&str>)> = entries
         .iter()
         .filter(|entry| is_file(entry))
-        .map(|entry| entry.path.as_str())
+        .map(|entry| (entry.path.as_str(), None))
         .collect();
+    for waiting in pending {
+        for entry in waiting.entries.iter().filter(|entry| is_file(entry)) {
+            if !held.iter().any(|(path, _)| *path == entry.path) {
+                held.push((entry.path.as_str(), Some(waiting.task.as_str())));
+            }
+        }
+    }
+    let files: Vec<&str> = held.iter().map(|(path, _)| *path).collect();
+    let task_of = |path: &str| held.iter().find(|(p, _)| *p == path).and_then(|(_, t)| *t);
     ROLE_FOLDERS
         .iter()
         .filter_map(|(role, folder)| {
@@ -423,7 +464,10 @@ fn folders(team: &Team, entries: &[TreeEntry]) -> Vec<Folder> {
                 })
                 .map(|path| Document {
                     path: (*path).to_string(),
-                    twin: agent_twin(path).filter(|twin| files.contains(&twin.as_str())),
+                    twin: agent_twin(path)
+                        .filter(|twin| files.contains(&twin.as_str()))
+                        .filter(|twin| task_of(twin) == task_of(path)),
+                    task: task_of(path).map(ToString::to_string),
                 })
                 .collect();
             documents.sort_by_key(|document| document_order(&document.path));
@@ -465,7 +509,7 @@ fn tree(deps: &ToolDeps) -> Result<Value, Failure> {
                     .map(|plan| plan.proposal.title.clone())
             })
     };
-    let listed: Vec<Value> = folders(&team, &entries)
+    let listed: Vec<Value> = folders(&team, &entries, &pending(deps)?)
         .iter()
         .map(|folder| {
             let documents: Vec<Value> = folder
@@ -476,6 +520,7 @@ fn tree(deps: &ToolDeps) -> Result<Value, Failure> {
                         "path": document.path,
                         "name": document_name(&document.path, &title_of),
                         "twin": document.twin,
+                        "task": document.task,
                     })
                 })
                 .collect();
@@ -585,12 +630,29 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
     let missing = || Failure::new(NOT_FOUND, format!("there is no document {asked}"));
     let path = normalise(asked).ok_or_else(missing)?;
     let (team, branch, entries) = listing(deps)?;
-    let document = folders(&team, &entries)
+    let pending = pending(deps)?;
+    let document = folders(&team, &entries, &pending)
         .into_iter()
         .flat_map(|folder| folder.documents)
         .find(|document| document.path == path)
         .ok_or_else(missing)?;
     let docs = folder_docs(&deps.log).map_err(|e| internal(&e))?;
+    // A document waiting to merge is read from its task's branch, and only read.
+    if let Some(waiting) = pending
+        .iter()
+        .find(|waiting| document.task.as_deref() == Some(waiting.task.as_str()))
+    {
+        let on_branch = |path: &str| version(deps, &docs, &waiting.branch, path, false);
+        return Ok(json!({
+            "document": on_branch(&path)?,
+            "twin": document.twin.as_deref().map(on_branch).transpose()?,
+            "stale": false,
+            "rederiving": false,
+            "editable": false,
+            "askable": false,
+            "waiting": null,
+        }));
+    }
     let waiting = waiting_change(deps, &docs, &path);
     let shown = match &waiting {
         Some((_, held)) => version(deps, &docs, held, &path, true)?,
@@ -738,7 +800,13 @@ fn raw_text(deps: &ToolDeps, path: &str, task: Option<&str>) -> Option<String> {
         Some(held) => held,
         None => integration_branch(&deps.files.read_team().ok()?, &deps.git).ok()?,
     };
-    in_branch(&rev, &path)
+    // Else the first task waiting to merge that holds it, as the tree lists it.
+    in_branch(&rev, &path).or_else(|| {
+        pending(deps)
+            .ok()?
+            .iter()
+            .find_map(|waiting| in_branch(&waiting.branch, &path))
+    })
 }
 
 /// `GET /documents/raw?path=<path>[&task=<id>]`: an HTML document under its own policy, fitted to
@@ -1215,6 +1283,37 @@ mod tests {
                 ("docs/catervas/product/overview.md", Value::Null),
             ]
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn shows_a_document_whose_task_waits_to_merge() {
+        let harness = project("files-pending", "pull_request");
+        let spec = format!("{PRODUCT}/spec.html");
+        harness.project.filed("CTV-2", "in_progress", "task", None);
+        commit(&harness, "the task");
+        let branch = harness.branch("CTV-2");
+        git(&harness, &["checkout", "-b", &branch]);
+        write(&harness, &spec, "<h1>the task's spec</h1>\n");
+        commit(&harness, "the spec (CTV-2)");
+        git(&harness, &["checkout", "main"]);
+        harness
+            .project
+            .moved("CTV-2", "in_progress", "accepted", &json!({}));
+        let listed = tree(&harness.daemon);
+        assert_eq!(
+            listed["folders"][0]["documents"],
+            json!([{ "path": spec, "name": "Product description", "twin": null, "task": "CTV-2" }])
+        );
+        let opened = read_path(&harness, &spec);
+        assert_eq!(opened["document"]["text"], "<h1>the task's spec</h1>\n");
+        assert_eq!(opened["editable"], false);
+        let cookie = browse(&harness);
+        let (status, body) = tokio::runtime::Runtime::new()
+            .expect("a runtime")
+            .block_on(served(&harness, &cookie, &spec, ""));
+        assert_eq!(status, 200);
+        assert!(body.contains("the task's spec"), "{body}");
     }
 
     #[test]
