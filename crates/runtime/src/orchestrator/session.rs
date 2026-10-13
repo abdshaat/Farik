@@ -51,7 +51,8 @@ use crate::preview::{
 };
 use crate::prompt::{
     CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, INTERVIEW_INSTRUCTION,
-    JUDGMENT_INSTRUCTION, PIPELINE_DECISION_INSTRUCTION, PromptInput, assemble_system_prompt,
+    JUDGMENT_INSTRUCTION, MemberLine, OwnRepo, PIPELINE_DECISION_INSTRUCTION, PromptInput,
+    assemble_system_prompt,
 };
 use crate::session::{
     EndReason, McpServerConfig, McpTransport, SessionEvent, SessionHandle, SessionPurpose,
@@ -74,12 +75,7 @@ pub(crate) fn read_roots(
     cwd: &Path,
     role: Role,
 ) -> Vec<ReadRoot> {
-    if read_access(role) != ReadAccess::Open
-        || contract.is_some_and(|contract| task_private_folder(contract).is_some())
-    {
-        return Vec::new();
-    }
-    let Ok(Some(repos)) = files.read_repos() else {
+    let Some(repos) = members_read(files, contract, role) else {
         return Vec::new();
     };
     let own = contract
@@ -107,6 +103,80 @@ pub(crate) fn read_roots(
     }
     roots.retain(|root| expressible_in_a_rule(&root.path));
     roots
+}
+
+/// The project's member repositories when a session of `role` on `contract` may read them: none
+/// for a one-repository project, for a role held to read paths, for a task in a private folder,
+/// and when `repos.yaml` cannot be read.
+fn members_read(
+    files: &ProjectFiles,
+    contract: Option<&TaskContract>,
+    role: Role,
+) -> Option<catervas_core::repos::Repos> {
+    if read_access(role) != ReadAccess::Open
+        || contract.is_some_and(|contract| task_private_folder(contract).is_some())
+    {
+        return None;
+    }
+    files.read_repos().ok().flatten()
+}
+
+/// The folders `ask`'s session reads outside its working directory, for Claude Code's `--add-dir`.
+fn read_root_paths(deps: &OrchestratorDeps, ask: &SessionAsk<'_>, role: Role) -> Vec<PathBuf> {
+    read_roots(&deps.tools.files, ask.contract, &ask.cwd, role)
+        .into_iter()
+        .map(|root| root.path)
+        .collect()
+}
+
+/// What the Team rules say of the project's repositories for `ask`'s session (8.2): each member
+/// with where it is, whether the session may read it, and whether a command in its sandbox reads it
+/// at `/repos/<name>`; and where the session's task works. None where `read_roots` gives no roots
+/// for the session's role, its task and the project.
+fn member_lines(
+    deps: &OrchestratorDeps,
+    ask: &SessionAsk<'_>,
+    role: Role,
+) -> (Vec<MemberLine>, Option<OwnRepo>) {
+    let files = &deps.tools.files;
+    let Some(repos) = members_read(files, ask.contract, role) else {
+        return (Vec::new(), None);
+    };
+    let roots = read_roots(files, ask.contract, &ask.cwd, role);
+    let own = ask
+        .contract
+        .and_then(|contract| contract.repo.as_ref())
+        .map(|repo| repo.as_str());
+    // A sandbox mounts the other members when there is a task, and Docker.
+    let sandboxed = ask.contract.is_some()
+        && files.read_settings().unwrap_or_default().sandbox
+            != catervas_store::files::Sandbox::None;
+    let members = repos
+        .repos
+        .iter()
+        .map(|repo| {
+            let found = repo_present(Path::new(repo.path.as_str()))
+                .then(|| std::fs::canonicalize(repo.path.as_str()).ok())
+                .flatten();
+            let is_own = Some(repo.name.as_str()) == own;
+            let readable = is_own
+                || found
+                    .as_ref()
+                    .is_some_and(|path| roots.iter().any(|root| &root.path == path));
+            MemberLine {
+                name: repo.name.to_string(),
+                mounted: sandboxed && readable && !is_own && found.is_some(),
+                path: found.map(|path| path.display().to_string()),
+                own: is_own,
+                readable,
+            }
+        })
+        .collect();
+    let own_repo = ask.contract.map(|contract| match &contract.repo {
+        Some(repo) => OwnRepo::Member(repo.to_string()),
+        None => OwnRepo::ProjectFolder,
+    });
+    (members, own_repo)
 }
 
 /// Whether a path can be written into a `Read(//<path>/<glob>)` rule as it is: no parenthesis
@@ -1213,6 +1283,7 @@ fn session_spec_without(
     let stale_twins = integration_branch(team, &deps.tools.git)
         .and_then(|branch| stale_twins(&deps.tools.git, &branch))
         .unwrap_or_default();
+    let (members, own_repo) = member_lines(deps, ask, role_id);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
@@ -1235,6 +1306,8 @@ fn session_spec_without(
         connectors: &connectors,
         active_roles: &active_roles,
         stale_twins: &stale_twins,
+        members: &members,
+        own_repo,
     })?;
     let limits = budget_state(
         &deps.tools.projections,
@@ -1246,10 +1319,7 @@ fn session_spec_without(
     )?
     .session_limits;
     Ok(SessionSpec {
-        read_roots: read_roots(&deps.tools.files, ask.contract, &ask.cwd, role_id)
-            .into_iter()
-            .map(|root| root.path)
-            .collect(),
+        read_roots: read_root_paths(deps, ask, role_id),
         session_id: deps.session_ids.session_id(),
         agent_id: ask.agent.id.to_string(),
         task_id: ask.contract.map(|contract| contract.id.clone()),
@@ -1720,6 +1790,65 @@ mod tests {
             initial_prompt: "Look at the app.".to_string(),
             pipeline: None,
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_tasks_prompt_names_the_projects_repositories() {
+        use catervas_store::files::{LocalSettings, Sandbox};
+
+        let (harness, members) = Harness::project_folder("prompt-repos", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+        let ask = SessionAsk {
+            agent: agent(&team, "dev-a"),
+            contract: Some(&contract),
+            purpose: SessionPurpose::Implement,
+            cwd: harness.worktree("CTV-1"),
+            executor: None,
+            read_only: false,
+            only_tool: None,
+            tools: None,
+            in_reply_to: None,
+            thread: None,
+            initial_prompt: "Start.".to_string(),
+            pipeline: None,
+        };
+        let infra = members[1].path.canonicalize().expect("infra");
+        let line = |spec: &crate::session::SessionSpec| -> String {
+            spec.system_prompt
+                .lines()
+                .find(|line| line.starts_with("- repositories:"))
+                .unwrap_or_default()
+                .to_string()
+        };
+
+        let spec = session_spec(deps, &team, &ask).expect("the spec");
+        assert_eq!(
+            line(&spec),
+            format!(
+                "- repositories: app (your task's repository), infra ({}; /repos/infra in your sandbox). Your task works in app. Read the others; change only your own task's files.",
+                infra.display()
+            )
+        );
+
+        // With no sandbox there is no `/repos/infra`.
+        deps.tools
+            .files
+            .write_settings(&LocalSettings {
+                sandbox: Sandbox::None,
+            })
+            .expect("the settings");
+        let spec = session_spec(deps, &team, &ask).expect("the spec");
+        assert!(!line(&spec).contains("/repos/"), "{}", line(&spec));
+        assert!(line(&spec).contains(&format!("infra ({})", infra.display())));
     }
 
     #[test]

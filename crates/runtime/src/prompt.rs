@@ -56,6 +56,36 @@ pub struct PromptInput<'a> {
     /// The `.agent.md` twins that are behind the document for people beside them, for the Team
     /// rules' line about them (`docs/SPEC.md` 5.17).
     pub stale_twins: &'a [String],
+    /// The project's repositories when the session may read them (5.6), for the Team rules' line
+    /// about where they are; none for a one-repository project and for a session that reads no
+    /// other repository.
+    pub members: &'a [MemberLine],
+    /// Where the session's task works, when it has one.
+    pub own_repo: Option<OwnRepo>,
+}
+
+/// One repository of the project, as the Team rules' line says it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberLine {
+    /// The member's name.
+    pub name: String,
+    /// Its folder on this computer; `None` when it is not found there.
+    pub path: Option<String>,
+    /// Whether a command in the session's sandbox reads it at `/repos/<name>`.
+    pub mounted: bool,
+    /// Whether it is the repository the session's task works in.
+    pub own: bool,
+    /// Whether the session may read it; false when its path cannot be written into a rule.
+    pub readable: bool,
+}
+
+/// Where the session's task works.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnRepo {
+    /// A member repository, by name.
+    Member(String),
+    /// The project's own folder: a task for documents.
+    ProjectFolder,
 }
 
 /// The prompt's section titles, each written as a `## ` heading, in the one order every prompt
@@ -228,7 +258,12 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
         Some(rules_section(
             input.rules,
             input.role.id,
-            (input.active_roles, input.stale_twins),
+            (
+                input.active_roles,
+                input.stale_twins,
+                input.members,
+                input.own_repo.as_ref(),
+            ),
         )),
         if input.criteria.criteria.is_empty() {
             None
@@ -448,7 +483,12 @@ fn you_section(agent: &Agent) -> String {
 fn rules_section(
     rules: &TeamRules,
     role: Role,
-    (active_roles, stale_twins): (&[Role], &[String]),
+    (active_roles, stale_twins, members, own_repo): (
+        &[Role],
+        &[String],
+        &[MemberLine],
+        Option<&OwnRepo>,
+    ),
 ) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
@@ -477,11 +517,43 @@ fn rules_section(
         }),
         Some(folders_line(role, active_roles)),
         stale_line(stale_twins),
+        repositories_line(members, own_repo),
     ]
     .into_iter()
     .flatten()
     .collect::<Vec<_>>()
     .join("\n")
+}
+
+/// The line that says where the project's repositories are, or nothing when there are none.
+fn repositories_line(members: &[MemberLine], own_repo: Option<&OwnRepo>) -> Option<String> {
+    if members.is_empty() {
+        return None;
+    }
+    let entries: Vec<String> = members
+        .iter()
+        .map(|member| {
+            let name = &member.name;
+            match (&member.path, member.own, member.readable) {
+                (_, true, _) => format!("{name} (your task's repository)"),
+                (None, _, _) => format!("{name} (not found)"),
+                (Some(_), _, false) => format!("{name} (not readable here)"),
+                (Some(path), _, true) if member.mounted => {
+                    format!("{name} ({path}; /repos/{name} in your sandbox)")
+                }
+                (Some(path), _, true) => format!("{name} ({path})"),
+            }
+        })
+        .collect();
+    let task = match own_repo {
+        Some(OwnRepo::Member(repo)) => format!("Your task works in {repo}. "),
+        Some(OwnRepo::ProjectFolder) => "Your task works in the project's own folder. ".to_string(),
+        None => String::new(),
+    };
+    Some(format!(
+        "- repositories: {}. {task}Read the others; change only your own task's files.",
+        entries.join(", ")
+    ))
 }
 
 /// The Catervas tools the agent's tiers allow of those it is offered, the built-ins it may use, and,
@@ -587,8 +659,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        CLOSING_INSTRUCTIONS, PROMPT_SECTIONS, PromptInput, assemble_system_prompt, tier_name,
-        untrusted_block,
+        CLOSING_INSTRUCTIONS, MemberLine, OwnRepo, PROMPT_SECTIONS, PromptInput,
+        assemble_system_prompt, tier_name, untrusted_block,
     };
     use crate::session::SessionPurpose;
     use crate::tools::{CatervasTool, tool_descriptors};
@@ -678,6 +750,8 @@ mod tests {
                 connectors: &[],
                 active_roles: &[],
                 stale_twins: &[],
+                members: &[],
+                own_repo: None,
             }
         }
     }
@@ -1165,6 +1239,37 @@ mod tests {
             headings, wanted,
             "the headings are still PROMPT_SECTIONS, in order"
         );
+    }
+
+    #[test]
+    fn the_team_rules_name_the_repositories() {
+        let inputs = Inputs::new(Role::SoftwareDeveloper, "software_developer");
+        let member = |name: &str, path: Option<&str>, mounted: bool, own: bool| MemberLine {
+            name: name.to_string(),
+            path: path.map(str::to_string),
+            mounted,
+            own,
+            readable: true,
+        };
+        let members = [
+            member("app", Some("/home/me/app"), false, true),
+            member("infra", Some("/home/me/infra"), true, false),
+            member("web", None, false, false),
+        ];
+        let prompt = assembled(&PromptInput {
+            members: &members,
+            own_repo: Some(OwnRepo::Member("app".to_string())),
+            ..inputs.full(SessionPurpose::Implement)
+        });
+        assert_eq!(
+            section(&prompt, "Team rules").lines().last(),
+            Some(
+                "- repositories: app (your task's repository), infra (/home/me/infra; /repos/infra in your sandbox), web (not found). Your task works in app. Read the others; change only your own task's files."
+            )
+        );
+        // With no members there is no line.
+        let prompt = assembled(&inputs.full(SessionPurpose::Implement));
+        assert!(!section(&prompt, "Team rules").contains("- repositories:"));
     }
 
     #[test]

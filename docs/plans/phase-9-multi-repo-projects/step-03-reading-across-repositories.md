@@ -202,7 +202,7 @@ Files: `prompt.rs`; `orchestrator/session.rs` (`:1138-1160`).
   With `own_repo: None` and no `own`, the sentence `Your task works in …` is left out. With no members there is no line. RED.
 - `a_developers_prompt_names_its_repositories` (`orchestrator/session.rs`, `Harness::project_folder`): the implement session's prompt of a task with `repo: app` holds the line with `app` as its own and `infra` mounted. Under no-sandbox mode `infra` has no `/repos/infra`. The Marketing Specialist's triage prompt holds no line. RED.
 
-- [ ] `feat(runtime): tell each session where the project's repositories are`
+- [x] `feat(runtime): tell each session where the project's repositories are`
 
 ### Task 5: Spec
 
