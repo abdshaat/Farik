@@ -16,6 +16,7 @@ use crate::error::StoreError;
 use crate::git::{Git, GitError};
 use crate::machine::{
     FileRead, FileState, MachineIndex, Ownership, Placement, ProjectRow, ReplyBatch, SessionBatch,
+    SessionCronBatch,
 };
 
 /// Where a Catervas project keeps its log, relative to its root.
@@ -152,6 +153,7 @@ struct Chunk {
     sessions: BTreeMap<String, SessionBatch>,
     titles: BTreeMap<String, String>,
     replies: BTreeMap<String, ReplyBatch>,
+    crons: BTreeMap<(String, String), SessionCronBatch>,
 }
 
 fn read_chunk(bytes: &[u8], mut chunk: Chunk) -> Chunk {
@@ -165,12 +167,27 @@ fn read_chunk(bytes: &[u8], mut chunk: Chunk) -> Chunk {
             TranscriptLine::Turn(turn) => {
                 chunk.turns += 1;
                 if let Some(reply) = turn.reply {
+                    for tool in &reply.tools {
+                        if let Some(call) = tool.cron.as_ref().filter(|call| !call.is_durable) {
+                            chunk
+                                .crons
+                                .entry((turn.session_id.clone(), tool.id.clone()))
+                                .or_insert_with(|| SessionCronBatch {
+                                    session_id: turn.session_id.clone(),
+                                    tool_use_id: tool.id.clone(),
+                                    cwd: turn.cwd.clone(),
+                                    cron: call.cron.clone(),
+                                    at: turn.at,
+                                });
+                        }
+                    }
                     let batch = ReplyBatch {
                         key: reply.key.clone(),
                         session_id: turn.session_id.clone(),
                         model: reply.model,
                         at: turn.at,
                         usage: reply.usage,
+                        tools: reply.tools,
                     };
                     chunk
                         .replies
@@ -178,6 +195,11 @@ fn read_chunk(bytes: &[u8], mut chunk: Chunk) -> Chunk {
                         .and_modify(|seen| {
                             seen.usage = once_per_reply(seen.usage, batch.usage);
                             seen.at = seen.at.min(batch.at);
+                            for tool in &batch.tools {
+                                if !seen.tools.iter().any(|known| known.id == tool.id) {
+                                    seen.tools.push(tool.clone());
+                                }
+                            }
                         })
                         .or_insert(batch);
                 }
@@ -278,6 +300,7 @@ pub fn read_transcripts(
                 sessions: chunk.sessions.into_values().collect(),
                 titles: chunk.titles.into_iter().collect(),
                 replies: chunk.replies.into_values().collect(),
+                crons: chunk.crons.into_values().collect(),
             },
             now,
         )?;
@@ -461,7 +484,10 @@ mod tests {
     use super::*;
     use crate::files::fixtures::TempProject;
     use crate::machine::{MACHINE_DB, open_machine_index};
-    use catervas_core::claude_history::fixtures::{CLAUDE_CODE_2_1_296, a_reply_line, a_turn_line};
+    use catervas_core::claude_history::fixtures::{
+        CLAUDE_CODE_2_1_296, CRON_CREATE_LINES, CronCreateLine, a_cron_create_line, a_reply_line,
+        a_turn_line,
+    };
     use catervas_core::pricing::Usage;
 
     const SESSION: &str = "11111111-1111-4111-8111-111111111111";
@@ -884,6 +910,98 @@ mod tests {
         let bytes = std::fs::read(setup.db()).expect("the index file");
         let secret = b"SECRET-MARKER";
         assert!(!bytes.windows(secret.len()).any(|window| window == secret));
+    }
+
+    #[test]
+    fn merges_a_replys_tools_from_every_line() {
+        let tools = |text: &str| -> Vec<Vec<String>> {
+            read_chunk(text.as_bytes(), Chunk::default())
+                .replies
+                .values()
+                .map(|reply| reply.tools.iter().map(|tool| tool.id.clone()).collect())
+                .collect()
+        };
+        let expected = vec![vec!["toolu_01B".to_string(), "toolu_01C".to_string()]];
+        assert_eq!(tools(CRON_CREATE_LINES), expected);
+        assert_eq!(
+            tools(&format!("{CRON_CREATE_LINES}{CRON_CREATE_LINES}")),
+            expected
+        );
+    }
+
+    const JOBS: &str = "SELECT printf('%s|%s|%s|%s|%s|%s|%s|%s|%s|%s', origin, file, name, kind, display_name, schedules, folder, expires_at, state_at, last_seen) FROM jobs ORDER BY origin, file, name";
+
+    fn durable_cron_line() -> String {
+        a_cron_create_line(&CronCreateLine {
+            session_id: SESSION,
+            cwd: CWD,
+            at: "2026-10-12T09:03:00Z",
+            message_id: "msg_01D",
+            tool_use_id: "toolu_01D",
+            cron: "0 0 * * *",
+            recurring: None,
+            durable: Some(true),
+        })
+    }
+
+    #[test]
+    fn reads_session_crons_from_transcripts() {
+        let setup = Setup::new("reads-session-crons");
+        let text = format!(
+            "{CLAUDE_CODE_2_1_296}{CRON_CREATE_LINES}{}\n",
+            durable_cron_line()
+        );
+        std::fs::write(setup.transcript(SESSION), text).expect("a transcript");
+        setup.read();
+        let expected = vec![format!(
+            "claude_session|{SESSION}|toolu_01C|session_cron|Session cron */10 * * * *|[\"*/10 * * * *\"]|/home/me/shop|2026-10-19T09:02:02.000Z|2026-10-12T09:02:02.000Z|2026-10-12T12:00:00.000Z"
+        )];
+        assert_eq!(setup.rows(JOBS), expected);
+        setup.read();
+        assert_eq!(setup.rows(JOBS), expected);
+    }
+
+    #[test]
+    fn reads_a_transcript_again_without_counting_twice() {
+        let setup = Setup::new("reads-again-without-counting-twice");
+        let text = format!(
+            "{CLAUDE_CODE_2_1_296}{CRON_CREATE_LINES}{}\n",
+            durable_cron_line()
+        );
+        std::fs::write(setup.transcript(SESSION), text).expect("a transcript");
+        setup.read();
+        let everything = |setup: &Setup| {
+            let mut all = dump(setup);
+            all.extend(setup.rows(JOBS));
+            all
+        };
+        let before = everything(&setup);
+        let connection = Connection::open(setup.db()).expect("the index file opens");
+        connection
+            .execute(
+                "UPDATE transcript_files SET read_to = 0, turns = 0, unreadable_lines = 0",
+                [],
+            )
+            .expect("migration 2's reset");
+        drop(connection);
+        let again = setup.read();
+        assert_eq!((again.new_sessions, again.sessions), (0, 1));
+        assert_eq!(everything(&setup), before);
+    }
+
+    /// Guard: checked by mutation (store a prompt or a tool's input), not watched to fail.
+    #[test]
+    fn keeps_no_prompt_or_tool_input() {
+        let setup = Setup::new("keeps-no-prompt");
+        let text = format!(
+            "{CLAUDE_CODE_2_1_296}{CRON_CREATE_LINES}{}\n",
+            durable_cron_line()
+        );
+        std::fs::write(setup.transcript(SESSION), text).expect("a transcript");
+        setup.read();
+        let bytes = std::fs::read(setup.db()).expect("the index file");
+        let marker = b"NEVER-KEPT-TEXT";
+        assert!(!bytes.windows(marker.len()).any(|window| window == marker));
     }
 
     #[test]

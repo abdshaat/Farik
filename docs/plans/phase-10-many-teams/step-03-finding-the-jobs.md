@@ -250,7 +250,7 @@ Files: `0002_jobs.sql`; `migrations.rs` (`MACHINE_MIGRATIONS: [Migration; 2]`); 
 - `reads_a_transcript_again_without_counting_twice`: after that read, `transcript_files` is set to (0, 0, 0), as migration 2 does, and the transcript is read again. `new_sessions` is 0. `sessions`, `replies` and `jobs` match row for row, and the file's `turns` and `unreadable_lines` equal their first values. RED.
 - `keeps_no_prompt_or_tool_input` (guard): `machine.db`'s bytes hold no `NEVER-KEPT-TEXT`.
 
-- [ ] `feat(store): keep jobs in the machine index`
+- [x] `feat(store): keep jobs in the machine index`
 
 ### Task 5: The computer's and Claude Code's jobs
 
