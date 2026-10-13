@@ -43,7 +43,7 @@ pub fn rows_from(status: TaskStatus) -> &'static [TransitionRow];
 
 ## Tasks
 
-Each task is the smallest unit that carries its own test cycle and its own commit, written under the red-green-refactor loop in `docs/standards/workflow.md` stage 3. The named tests are the contract the implementation has to satisfy, and what the landing reviewer checks the tests against.
+Each task is the smallest unit that carries its own test cycle and its own commit, written under the red-green-refactor loop in `docs/standards/workflow.md` stage 3. The named tests are the contract the implementation has to satisfy: one per major functionality the task adds, not one per case (ADR 0060).
 
 ### Task 1: <name>
 
