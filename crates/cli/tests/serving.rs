@@ -912,7 +912,7 @@ fn admits_a_local_browser_without_a_code_in_preview_mode() {
     // plan in sprints, so a request filed in it flows without one.
     let team = std::fs::read_to_string(
         std::env::temp_dir()
-            .join(format!("catervas-git-preview-{}-ThreadId(1)", child.id()))
+            .join(format!("catervas-git-preview-{}-ThreadId1", child.id()))
             .join(".catervas/team.yaml"),
     )
     .unwrap_or_default();
