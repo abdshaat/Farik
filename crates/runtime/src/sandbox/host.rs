@@ -375,6 +375,10 @@ mod tests {
         }
         .to_string();
         assert!(image.contains("catervas/sandbox:0.0.0"), "{image}");
+        assert!(
+            image.ends_with("Open the computer check in Setup and choose Prepare it"),
+            "{image}"
+        );
         let docker = SandboxError::DockerUnavailable.to_string();
         assert!(docker.contains("docker"), "{docker}");
         let outside = ExecError::OutsideWorkspace {

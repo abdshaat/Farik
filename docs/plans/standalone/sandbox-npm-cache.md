@@ -1,9 +1,9 @@
 # Standalone: npm can write its cache in the sandbox image
 
-Status: ready
+Status: executed
 Reviewed by: a fresh Opus 5.5 session, 2026-10-12 (one round: ready after fixes, its seven findings folded in below)
 Branch: `fix/sandbox-npm-cache` (work outside a phase, its own pull request to `main`)
-Spec: `docs/SPEC.md` 8.3, the sandbox (revision 0.109)
+Spec: `docs/SPEC.md` 8.3, the sandbox (revision 0.110)
 Depends on: the sandbox image (phase 3 step 15) and the preview (0.33), both on main
 
 ## Goal
@@ -40,12 +40,12 @@ Out of scope: removing the old image after a new one is built (it stays until th
 
 ### Task 2: the image's tag names its Dockerfile
 
-- [ ] `sandbox.rs`: `the_image_tag_names_its_dockerfile` asserts that `SANDBOX_IMAGE` is `catervas/sandbox:<CARGO_PKG_VERSION>-<the first 6 bytes of sha256(include_str!("../sandbox/Dockerfile")) as {:02x} each>`, computing the hex in the test itself (not `crate::daemon::hex`, which is Unix-only), so a build script that hashed the wrong file fails it. Watched failing: the tag is `catervas/sandbox:0.0.0`.
-- [ ] `crates/runtime/build.rs`: hash `sandbox/Dockerfile`, print `cargo:rustc-env=CATERVAS_SANDBOX_DIGEST=<12 hex>` and `cargo:rerun-if-changed=sandbox/Dockerfile`, keeping the web app's watch; its doc comment says both jobs. `Cargo.toml`: `[build-dependencies] sha2.workspace = true`.
-- [ ] `sandbox.rs`: `SANDBOX_IMAGE` is `concat!("catervas/sandbox:", env!("CARGO_PKG_VERSION"), "-", env!("CATERVAS_SANDBOX_DIGEST"))`, its doc comment saying why; the Dockerfile's header comment names the new tag.
-- [ ] The missing-image words of the Decisions: `displays_each_error_in_words` (`sandbox/host.rs`) first asserts that `ImageMissing`'s `Display` ends with "Open the computer check in Setup and choose Prepare it" (watched failing), then `SandboxError::ImageMissing`'s `Display` says it; `preview/docker.rs`'s own "the sandbox image … is not on this machine" says the same, built from that `Display` (`SandboxError::ImageMissing { image }.to_string()`) so the two cannot drift. `refuses_an_image_that_is_not_there` (`tests/docker_sandbox.rs`) asserts the variant and is unchanged.
-- [ ] `docs/plans/project-plan.md`: the interface line naming `SANDBOX_IMAGE: &str = catervas/sandbox:<crate version>` (around line 282) names the new tag, with a note "(changed 2026-10-12, standalone plan `sandbox-npm-cache`)".
-- [ ] Spec revision 0.109 (the next free number when the pull request merges): 8.3 says the image's tag carries the Dockerfile's digest, so a changed image counts as missing until it is prepared again, that the image's `/tmp` holds nothing, so npm, pnpm and cargo write their caches as the user's uid, and that a missing sandbox image, in a task's sandbox or a preview, says to open the computer check in Setup and choose Prepare it, as the browser's does; 4.1's "whether the sandbox image is built" adds "for this Catervas, its tag carrying the Dockerfile's digest"; the revision line at the top.
+- [x] `sandbox.rs`: `the_image_tag_names_its_dockerfile` asserts that `SANDBOX_IMAGE` is `catervas/sandbox:<CARGO_PKG_VERSION>-<the first 6 bytes of sha256(include_str!("../sandbox/Dockerfile")) as {:02x} each>`, computing the hex in the test itself (not `crate::daemon::hex`, which is Unix-only), so a build script that hashed the wrong file fails it. Watched failing: the tag is `catervas/sandbox:0.0.0`.
+- [x] `crates/runtime/build.rs`: hash `sandbox/Dockerfile`, print `cargo:rustc-env=CATERVAS_SANDBOX_DIGEST=<12 hex>` and `cargo:rerun-if-changed=sandbox/Dockerfile`, keeping the web app's watch; its doc comment says both jobs. `Cargo.toml`: `[build-dependencies] sha2.workspace = true`.
+- [x] `sandbox.rs`: `SANDBOX_IMAGE` is `concat!("catervas/sandbox:", env!("CARGO_PKG_VERSION"), "-", env!("CATERVAS_SANDBOX_DIGEST"))`, its doc comment saying why; the Dockerfile's header comment names the new tag.
+- [x] The missing-image words of the Decisions: `displays_each_error_in_words` (`sandbox/host.rs`) first asserts that `ImageMissing`'s `Display` ends with "Open the computer check in Setup and choose Prepare it" (watched failing), then `SandboxError::ImageMissing`'s `Display` says it; `preview/docker.rs`'s own "the sandbox image … is not on this machine" says the same, built from that `Display` (`SandboxError::ImageMissing { image }.to_string()`) so the two cannot drift. `refuses_an_image_that_is_not_there` (`tests/docker_sandbox.rs`) asserts the variant and is unchanged.
+- [x] `docs/plans/project-plan.md`: the interface line naming `SANDBOX_IMAGE: &str = catervas/sandbox:<crate version>` (around line 282) names the new tag, with a note "(changed 2026-10-12, standalone plan `sandbox-npm-cache`)".
+- [x] Spec revision 0.110 (0.109 went to `fix/files-pending-documents`): 8.3 says the image's tag carries the Dockerfile's digest, so a changed image counts as missing until it is prepared again, that the image's `/tmp` holds nothing, so npm, pnpm and cargo write their caches as the user's uid, and that a missing sandbox image, in a task's sandbox or a preview, says to open the computer check in Setup and choose Prepare it, as the browser's does; 4.1's "whether the sandbox image is built" adds "for this Catervas, its tag carrying the Dockerfile's digest"; the revision line at the top.
 
 ## Verification
 

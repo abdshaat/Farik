@@ -15,8 +15,15 @@ pub mod docker;
 #[cfg(unix)]
 pub mod host;
 
-/// The image a task's container runs, tagged with this crate's version.
-pub const SANDBOX_IMAGE: &str = concat!("catervas/sandbox:", env!("CARGO_PKG_VERSION"));
+/// The image a task's container runs, tagged with this crate's version and a digest of its
+/// Dockerfile (`build.rs`), so a changed Dockerfile is a new tag and the old image counts as missing
+/// until the computer check builds the new one.
+pub const SANDBOX_IMAGE: &str = concat!(
+    "catervas/sandbox:",
+    env!("CARGO_PKG_VERSION"),
+    "-",
+    env!("CATERVAS_SANDBOX_DIGEST")
+);
 
 /// Why a sandbox could not be made or discarded.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +52,8 @@ impl fmt::Display for SandboxError {
             Self::ImageMissing { image } => {
                 write!(
                     formatter,
-                    "the sandbox image {image} is not on this machine"
+                    "the sandbox image {image} is not on this machine. \
+                     Open the computer check in Setup and choose Prepare it"
                 )
             }
             Self::ContainerFailed { detail } => {
@@ -110,4 +118,24 @@ pub trait SandboxFactory: Send + Sync {
     ///
     /// `DockerUnavailable` or `ContainerFailed`, for a container sandbox.
     fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use sha2::{Digest as _, Sha256};
+
+    use super::SANDBOX_IMAGE;
+
+    #[test]
+    fn the_image_tag_names_its_dockerfile() {
+        let digest = Sha256::digest(include_str!("../sandbox/Dockerfile").as_bytes());
+        let hex: String = digest[..6]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert_eq!(
+            SANDBOX_IMAGE,
+            format!("catervas/sandbox:{}-{hex}", env!("CARGO_PKG_VERSION"))
+        );
+    }
 }
