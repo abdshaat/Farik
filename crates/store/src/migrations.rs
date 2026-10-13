@@ -109,10 +109,16 @@ pub(crate) fn apply_through(
 
 /// The migrations of the machine-level index (`machine.db`), numbered apart from a project log's so
 /// the two never meet in one folder.
-const MACHINE_MIGRATIONS: [Migration; 1] = [Migration {
-    version: 1,
-    sql: include_str!("migrations/machine/0001_history.sql"),
-}];
+const MACHINE_MIGRATIONS: [Migration; 2] = [
+    Migration {
+        version: 1,
+        sql: include_str!("migrations/machine/0001_history.sql"),
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("migrations/machine/0002_jobs.sql"),
+    },
+];
 
 /// Brings the machine-level index to the shape this version expects.
 ///
@@ -187,4 +193,49 @@ pub fn known_versions() -> Vec<i64> {
         .iter()
         .map(|migration| migration.version)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+
+    use super::*;
+
+    #[test]
+    fn adds_the_jobs_table_and_reads_every_transcript_again() {
+        let now = Utc
+            .with_ymd_and_hms(2026, 10, 12, 12, 0, 0)
+            .single()
+            .expect("a valid time");
+        let mut connection = Connection::open_in_memory().expect("a database");
+        apply_list(&mut connection, &MACHINE_MIGRATIONS, 1, now).expect("version 1");
+        connection
+            .execute(
+                "INSERT INTO transcript_files (path, read_to, turns, unreadable_lines, read_at)
+                 VALUES ('a.jsonl', 500, 6, 2, '2026-10-12T09:00:00.000Z')",
+                [],
+            )
+            .expect("a transcript file");
+        apply_machine(&mut connection, now).expect("version 2");
+        let versions: Vec<i64> = connection
+            .prepare("SELECT version FROM schema_migrations ORDER BY version")
+            .expect("a statement")
+            .query_map([], |row| row.get(0))
+            .expect("a query")
+            .collect::<Result<_, _>>()
+            .expect("rows");
+        assert_eq!(versions, vec![1, 2]);
+        let jobs: i64 = connection
+            .query_row("SELECT count(*) FROM jobs", [], |row| row.get(0))
+            .expect("the jobs table exists");
+        assert_eq!(jobs, 0);
+        let file: (i64, i64, i64) = connection
+            .query_row(
+                "SELECT read_to, turns, unreadable_lines FROM transcript_files",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("the row stays");
+        assert_eq!(file, (0, 0, 0));
+    }
 }

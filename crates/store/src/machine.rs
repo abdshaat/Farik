@@ -4,8 +4,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use catervas_core::claude_history::ToolUse;
+use catervas_core::jobs::{JobKind, SESSION_CRON_DAYS};
 use catervas_core::pricing::Usage;
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Duration as Days, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 
 use crate::error::StoreError;
@@ -86,6 +88,18 @@ pub(crate) struct ReplyBatch {
     pub model: String,
     pub at: DateTime<Utc>,
     pub usage: Usage,
+    /// The tool calls of every line of the reply, once each by tool-use id. Only `CronCreate` calls
+    /// are stored, as session crons; step 03b stores the rest.
+    pub tools: Vec<ToolUse>,
+}
+
+/// A non-durable `CronCreate` call, as the line that carries it reports it.
+pub(crate) struct SessionCronBatch {
+    pub session_id: String,
+    pub tool_use_id: String,
+    pub cwd: String,
+    pub cron: String,
+    pub at: DateTime<Utc>,
 }
 
 /// Everything one file adds to the index, written in one transaction.
@@ -95,6 +109,48 @@ pub(crate) struct FileRead<'a> {
     pub sessions: Vec<SessionBatch>,
     pub titles: Vec<(String, String)>,
     pub replies: Vec<ReplyBatch>,
+    pub crons: Vec<SessionCronBatch>,
+}
+
+/// One recurring job, as `machine.db` keeps it. Its key is `(origin, file, name)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobRow {
+    /// Where it was found: a repository's root, the scheduler's wire value, `claude_session`,
+    /// `claude_tasks:<folder>` or `claude_jobs`.
+    pub origin: String,
+    /// A repository job's file relative to its root; a session cron's session id; else empty.
+    pub file: String,
+    /// The unit, the task's id, the tool use's id or the folder's name.
+    pub name: String,
+    /// Where the job lives.
+    pub kind: JobKind,
+    /// The name shown.
+    pub display_name: String,
+    /// Its schedules as written, never interpreted.
+    pub schedules: Vec<String>,
+    /// The folder it works in, for a session cron, a saved cron and a background job.
+    pub folder: Option<String>,
+    /// The project it belongs to.
+    pub project_root: Option<String>,
+    /// When a session cron or saved cron expires.
+    pub expires_at: Option<DateTime<Utc>>,
+    /// A background job's state.
+    pub state: Option<String>,
+    /// When the state was set: a call's time, a task's creation, a job's last update.
+    pub state_at: Option<DateTime<Utc>>,
+    /// When the row was last confirmed.
+    pub last_seen: DateTime<Utc>,
+}
+
+/// Where jobs are looked for, from the projects and sessions the index holds.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct JobSearch {
+    /// The roots of the owner's git repositories still on this computer.
+    pub repositories: Vec<String>,
+    /// Every root still on this computer, the owner's and explored.
+    pub roots: Vec<String>,
+    /// The folders sessions worked in.
+    pub folders: Vec<String>,
 }
 
 /// Whether the owner made a repository or is only looking at someone else's.
@@ -331,6 +387,33 @@ impl MachineIndex {
                 ),
             )?;
         }
+        for cron in &file.crons {
+            // A session-only cron is gone with its session, and at the latest `SESSION_CRON_DAYS`
+            // after the call. Whether the session still runs cannot be known.
+            let schedules =
+                serde_json::to_string(&[&cron.cron]).map_err(|error| StoreError::Sqlite {
+                    detail: error.to_string(),
+                })?;
+            transaction.execute(
+                "INSERT INTO jobs (origin, file, name, kind, display_name, schedules, folder, expires_at,
+                                   state_at, last_seen)
+                 VALUES ('claude_session', ?1, ?2, 'session_cron', ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT (origin, file, name) DO UPDATE SET
+                     display_name = excluded.display_name, schedules = excluded.schedules,
+                     folder = excluded.folder, expires_at = excluded.expires_at,
+                     state_at = excluded.state_at, last_seen = excluded.last_seen",
+                (
+                    &cron.session_id,
+                    &cron.tool_use_id,
+                    format!("Session cron {}", cron.cron),
+                    schedules,
+                    &cron.cwd,
+                    stamp(cron.at + Days::days(SESSION_CRON_DAYS)),
+                    stamp(cron.at),
+                    stamp(now),
+                ),
+            )?;
+        }
         transaction.execute(
             "INSERT OR REPLACE INTO transcript_files (path, read_to, turns, unreadable_lines, read_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -408,6 +491,159 @@ impl MachineIndex {
         }
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Where jobs are looked for.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn job_search(&self) -> Result<JobSearch, StoreError> {
+        let strings = |sql: &str| -> Result<Vec<String>, StoreError> {
+            let mut statement = self.connection.prepare(sql)?;
+            let rows = statement
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<_, _>>()?;
+            Ok(rows)
+        };
+        Ok(JobSearch {
+            repositories: strings(
+                "SELECT root FROM projects WHERE present = 1 AND is_git = 1 AND ownership = 'yours' ORDER BY root",
+            )?,
+            roots: strings("SELECT root FROM projects WHERE present = 1 ORDER BY root")?,
+            folders: strings(
+                "SELECT DISTINCT cwd FROM sessions WHERE cwd IS NOT NULL AND place IN ('owner', 'catervas') ORDER BY cwd",
+            )?,
+        })
+    }
+
+    /// Replaces the rows of every origin in `answered` with `jobs`, all or none. A source that did
+    /// not answer keeps its rows and their `last_seen`. Session crons are never replaced; their
+    /// `project_root` is set again from `sessions`. A key given twice is one row, its schedules
+    /// joined in order with duplicates dropped.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn replace_found_jobs(
+        &mut self,
+        answered: &[String],
+        jobs: &[JobRow],
+        now: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let mut merged: Vec<JobRow> = Vec::new();
+        for job in jobs {
+            let key = (&job.origin, &job.file, &job.name);
+            if let Some(seen) = merged
+                .iter_mut()
+                .find(|seen| (&seen.origin, &seen.file, &seen.name) == key)
+            {
+                for schedule in &job.schedules {
+                    if !seen.schedules.contains(schedule) {
+                        seen.schedules.push(schedule.clone());
+                    }
+                }
+            } else {
+                merged.push(job.clone());
+            }
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for origin in answered.iter().filter(|origin| *origin != "claude_session") {
+            transaction.execute("DELETE FROM jobs WHERE origin = ?1", (origin,))?;
+        }
+        for job in &merged {
+            let schedules =
+                serde_json::to_string(&job.schedules).map_err(|error| StoreError::Sqlite {
+                    detail: error.to_string(),
+                })?;
+            transaction.execute(
+                "INSERT OR REPLACE INTO jobs (origin, file, name, kind, display_name, schedules, folder,
+                                              project_root, expires_at, state, state_at, last_seen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                (
+                    &job.origin,
+                    &job.file,
+                    &job.name,
+                    job.kind.as_wire(),
+                    &job.display_name,
+                    schedules,
+                    &job.folder,
+                    &job.project_root,
+                    job.expires_at.map(stamp),
+                    &job.state,
+                    job.state_at.map(stamp),
+                    stamp(now),
+                ),
+            )?;
+        }
+        transaction.execute(
+            "UPDATE jobs SET project_root = (
+                 SELECT sessions.project_root FROM sessions
+                 WHERE sessions.session_id = jobs.file AND sessions.place IN ('owner', 'catervas'))
+             WHERE origin = 'claude_session'",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Every job, by kind, then name, then file, except a session cron that expired more than
+    /// `SESSION_CRON_DAYS` before `now`.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read or holds a value that is not one.
+    pub fn found_jobs(&self, now: DateTime<Utc>) -> Result<Vec<JobRow>, StoreError> {
+        let odd = |what: &str| StoreError::Sqlite {
+            detail: format!("the index holds a job with a bad {what}"),
+        };
+        let mut statement = self.connection.prepare(
+            "SELECT origin, file, name, kind, display_name, schedules, folder, project_root,
+                    expires_at, state, state_at, last_seen FROM jobs",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut jobs = Vec::new();
+        while let Some(row) = rows.next()? {
+            let time = |column: usize| -> Result<Option<DateTime<Utc>>, StoreError> {
+                row.get::<_, Option<String>>(column)?
+                    .map(|text| read_time(&text))
+                    .transpose()
+            };
+            let job = JobRow {
+                origin: row.get(0)?,
+                file: row.get(1)?,
+                name: row.get(2)?,
+                kind: JobKind::from_wire(&row.get::<_, String>(3)?).ok_or_else(|| odd("kind"))?,
+                display_name: row.get(4)?,
+                schedules: serde_json::from_str(&row.get::<_, String>(5)?)
+                    .map_err(|_| odd("schedule list"))?,
+                folder: row.get(6)?,
+                project_root: row.get(7)?,
+                expires_at: time(8)?,
+                state: row.get(9)?,
+                state_at: time(10)?,
+                last_seen: read_time(&row.get::<_, String>(11)?)?,
+            };
+            let stale = job.kind == JobKind::SessionCron
+                && job
+                    .expires_at
+                    .is_some_and(|at| at < now - Days::days(SESSION_CRON_DAYS));
+            if !stale {
+                jobs.push(job);
+            }
+        }
+        jobs.sort_by(|a, b| {
+            (a.kind, &a.display_name, &a.file, &a.origin, &a.name).cmp(&(
+                b.kind,
+                &b.display_name,
+                &b.file,
+                &b.origin,
+                &b.name,
+            ))
+        });
+        Ok(jobs)
     }
 
     /// Each session's reply tokens, by model.
@@ -574,10 +810,10 @@ mod tests {
         let temp = TempProject::new("opens-machine-index");
         let path = temp.root.join("state").join(MACHINE_DB);
         let index = open_machine_index(&path, now()).expect("the index opens");
-        assert_eq!(index.applied_migrations().expect("versions"), vec![1]);
+        assert_eq!(index.applied_migrations().expect("versions"), vec![1, 2]);
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
-        assert_eq!(again.applied_migrations().expect("versions"), vec![1]);
+        assert_eq!(again.applied_migrations().expect("versions"), vec![1, 2]);
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
         let mut tables: Vec<String> = connection
@@ -590,12 +826,203 @@ mod tests {
         tables.sort();
         assert_eq!(
             tables,
-            vec!["projects", "replies", "sessions", "transcript_files"]
+            vec![
+                "jobs",
+                "projects",
+                "replies",
+                "sessions",
+                "transcript_files"
+            ]
         );
         assert_eq!(
             crate::migrations::known_versions(),
             (1..=15).collect::<Vec<i64>>()
         );
+    }
+
+    fn later(hours: i64) -> chrono::DateTime<Utc> {
+        now() + chrono::Duration::hours(hours)
+    }
+
+    fn job(origin: &str, file: &str, name: &str, kind: JobKind, schedules: &[&str]) -> JobRow {
+        JobRow {
+            origin: origin.to_string(),
+            file: file.to_string(),
+            name: name.to_string(),
+            kind,
+            display_name: name.to_string(),
+            schedules: schedules.iter().map(ToString::to_string).collect(),
+            folder: None,
+            project_root: None,
+            expires_at: None,
+            state: None,
+            state_at: None,
+            last_seen: now(),
+        }
+    }
+
+    fn seed_session(connection: &Connection, id: &str, place: &str, root: Option<&str>) {
+        connection
+            .execute(
+                "INSERT INTO sessions (session_id, place, project_root) VALUES (?1, ?2, ?3)",
+                (id, place, root),
+            )
+            .expect("a session");
+    }
+
+    fn seed_session_cron(connection: &Connection, session: &str, tool: &str, expires: &str) {
+        connection
+            .execute(
+                "INSERT INTO jobs (origin, file, name, kind, display_name, schedules, expires_at, last_seen)
+                 VALUES ('claude_session', ?1, ?2, 'session_cron', 'Session cron * * * * *', '[\"* * * * *\"]', ?3,
+                         '2026-10-12T09:00:00.000Z')",
+                (session, tool, expires),
+            )
+            .expect("a session cron");
+    }
+
+    fn seen(index: &MachineIndex, origin: &str) -> Vec<(String, String)> {
+        let mut statement = index
+            .connection
+            .prepare("SELECT name, last_seen FROM jobs WHERE origin = ?1 ORDER BY name")
+            .expect("a statement");
+        statement
+            .query_map((origin,), |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("a query")
+            .collect::<Result<_, _>>()
+            .expect("rows")
+    }
+
+    fn answered(origins: &[&str]) -> Vec<String> {
+        origins.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn replaces_only_the_sources_that_answered() {
+        let temp = TempProject::new("replaces-answered-sources");
+        let mut index =
+            open_machine_index(&temp.root.join(MACHINE_DB), now()).expect("the index opens");
+        seed_session(&index.connection, "s1", "owner", Some("/home/me/shop"));
+        seed_session(&index.connection, "s2", "not_a_project", None);
+        seed_session_cron(&index.connection, "s1", "t1", "2026-10-19T09:00:00.000Z");
+        seed_session_cron(&index.connection, "s2", "t2", "2026-10-19T09:00:00.000Z");
+
+        let a = job("crontab", "", "aaaa", JobKind::Crontab, &["0 2 * * *"]);
+        let b = job("claude_jobs", "", "abc", JobKind::BackgroundJob, &[]);
+        index
+            .replace_found_jobs(&answered(&["crontab", "claude_jobs"]), &[a, b], now())
+            .expect("t1");
+        assert_eq!(seen(&index, "claude_jobs").len(), 1);
+
+        let a2 = job("crontab", "", "aaaa", JobKind::Crontab, &["0 3 * * *"]);
+        index
+            .replace_found_jobs(&answered(&["crontab", "claude_jobs"]), &[a2], later(1))
+            .expect("t2");
+        assert!(seen(&index, "claude_jobs").is_empty());
+        let found = index.found_jobs(later(1)).expect("jobs");
+        let crontab: Vec<&JobRow> = found.iter().filter(|j| j.origin == "crontab").collect();
+        assert_eq!(crontab.len(), 1);
+        assert_eq!(crontab[0].schedules, vec!["0 3 * * *".to_string()]);
+        assert_eq!(crontab[0].last_seen, later(1));
+
+        index
+            .replace_found_jobs(&answered(&["claude_jobs"]), &[], later(2))
+            .expect("t3");
+        let kept = index.found_jobs(later(2)).expect("jobs");
+        let kept_crontab: Vec<&JobRow> = kept.iter().filter(|j| j.origin == "crontab").collect();
+        assert_eq!(kept_crontab.len(), 1);
+        assert_eq!(kept_crontab[0].last_seen, later(1));
+
+        assert_eq!(seen(&index, "claude_session").len(), 2);
+        let roots: Vec<Option<String>> = ["s1", "s2"]
+            .iter()
+            .map(|id| {
+                index
+                    .connection
+                    .query_row(
+                        "SELECT project_root FROM jobs WHERE file = ?1",
+                        (id,),
+                        |row| row.get(0),
+                    )
+                    .expect("a root")
+            })
+            .collect();
+        assert_eq!(roots, vec![Some("/home/me/shop".to_string()), None]);
+
+        let k1 = job("crontab", "", "kkkk", JobKind::Crontab, &["x"]);
+        let k2 = job("crontab", "", "kkkk", JobKind::Crontab, &["y", "x"]);
+        index
+            .replace_found_jobs(&answered(&["crontab"]), &[k1, k2], later(3))
+            .expect("t4");
+        let found = index.found_jobs(later(3)).expect("jobs");
+        let k: Vec<&JobRow> = found.iter().filter(|j| j.name == "kkkk").collect();
+        assert_eq!(k.len(), 1);
+        assert_eq!(k[0].schedules, vec!["x".to_string(), "y".to_string()]);
+    }
+
+    #[test]
+    fn lists_jobs_by_kind_and_name() {
+        let temp = TempProject::new("lists-jobs-by-kind");
+        let mut index =
+            open_machine_index(&temp.root.join(MACHINE_DB), now()).expect("the index opens");
+        let mut deploy = job(
+            "/r",
+            "f2.yml",
+            "z",
+            JobKind::GithubActions,
+            &["0 3 * * *", "1 * * * *"],
+        );
+        deploy.project_root = Some("/r".to_string());
+        let rows = [
+            job("crontab", "", "b", JobKind::Crontab, &["@daily"]),
+            job("crontab", "", "a", JobKind::Crontab, &["@hourly"]),
+            deploy,
+            job("/r", "f1.yml", "z", JobKind::GithubActions, &[]),
+            job(
+                "/r",
+                "vercel.json",
+                "/api/x",
+                JobKind::Vercel,
+                &["* * * * *"],
+            ),
+        ];
+        index
+            .replace_found_jobs(&answered(&["crontab", "/r"]), &rows, now())
+            .expect("replaced");
+        seed_session_cron(&index.connection, "s1", "gone", "2026-10-01T09:00:00.000Z");
+        seed_session_cron(
+            &index.connection,
+            "s1",
+            "recent",
+            "2026-10-08T09:00:00.000Z",
+        );
+        let found = index.found_jobs(now()).expect("jobs");
+        let order: Vec<(String, String, String)> = found
+            .iter()
+            .map(|j| (j.kind.as_wire().to_string(), j.name.clone(), j.file.clone()))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                ("github_actions", "z", "f1.yml"),
+                ("github_actions", "z", "f2.yml"),
+                ("vercel", "/api/x", "vercel.json"),
+                ("crontab", "a", ""),
+                ("crontab", "b", ""),
+                ("session_cron", "recent", "s1"),
+            ]
+            .map(|(kind, name, file)| (
+                kind.to_string(),
+                name.to_string(),
+                file.to_string()
+            ))
+        );
+        assert_eq!(
+            found[1].schedules,
+            vec!["0 3 * * *".to_string(), "1 * * * *".to_string()]
+        );
+        assert_eq!(found[1].project_root.as_deref(), Some("/r"));
+        assert_eq!(found[1].last_seen, now());
     }
 
     #[test]
