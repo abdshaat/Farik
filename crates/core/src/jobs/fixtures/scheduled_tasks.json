@@ -1,0 +1,6 @@
+{"tasks":[
+{"id":"a1b2c3d4","cron":"0 9 * * 1-5","prompt":"NEVER-KEPT-TEXT","createdAt":1791795600000,"recurring":true},
+{"id":"e5f6","cron":"30 14 28 2 *","prompt":"NEVER-KEPT-TEXT","createdAt":1791795600000,"recurring":false},
+{"id":"p1","cron":"0 8 * * *","prompt":"NEVER-KEPT-TEXT","createdAt":1791795600000,"recurring":true,"permanent":true},
+{"id":"bad"}
+]}

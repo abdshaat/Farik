@@ -60,6 +60,32 @@ pub struct Reply {
     pub model: String,
     /// What the line reports it used.
     pub usage: Usage,
+    /// The tool calls the line carries, one per `tool_use` block.
+    pub tools: Vec<ToolUse>,
+}
+
+/// One tool call of a reply: its id and name, and of its input only the fields named here. A later
+/// step adds one field for what it needs (03b: whether it touched a spreadsheet file); the input is
+/// never kept whole and no text of it is read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolUse {
+    /// The tool use's id.
+    pub id: String,
+    /// The tool's name.
+    pub name: String,
+    /// A `CronCreate` call's schedule fields; `None` for every other tool.
+    pub cron: Option<CronCall>,
+}
+
+/// The schedule fields of a `CronCreate` call. Its prompt is never read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CronCall {
+    /// The schedule, as written.
+    pub cron: String,
+    /// Whether it repeats; true when the call does not say.
+    pub is_recurring: bool,
+    /// Whether it is saved to `.claude/scheduled_tasks.json`; false when the call does not say.
+    pub is_durable: bool,
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -74,6 +100,31 @@ fn count(usage: &Value, key: &str) -> u64 {
     usage.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
+fn tool_use_of(block: &Value) -> Option<ToolUse> {
+    if text(block, "type")? != "tool_use" {
+        return None;
+    }
+    let (id, name) = (owned(block, "id")?, owned(block, "name")?);
+    let cron = if name == "CronCreate" {
+        block.get("input").and_then(|input| {
+            Some(CronCall {
+                cron: owned(input, "cron")?,
+                is_recurring: input
+                    .get("recurring")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+                is_durable: input
+                    .get("durable")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+        })
+    } else {
+        None
+    };
+    Some(ToolUse { id, name, cron })
+}
+
 fn reply_of(line: &Value) -> Option<Reply> {
     let message = line.get("message")?;
     let model = text(message, "model").filter(|model| *model != "<synthetic>")?;
@@ -81,6 +132,11 @@ fn reply_of(line: &Value) -> Option<Reply> {
     let usage = message.get("usage").cloned().unwrap_or(Value::Null);
     Some(Reply {
         key,
+        tools: message
+            .get("content")
+            .and_then(Value::as_array)
+            .map(|blocks| blocks.iter().filter_map(tool_use_of).collect())
+            .unwrap_or_default(),
         model: model.to_string(),
         usage: Usage {
             input_tokens: count(&usage, "input_tokens"),
@@ -107,7 +163,8 @@ fn turn_of(line: &Value, is_assistant: bool) -> Option<Turn> {
 }
 
 /// Reads one transcript line, keeping only the fields the index needs. Nothing a conversation
-/// said can come out of it: `message.content` and every other field are never read.
+/// said can come out of it: `message.content` is read only for its `tool_use` blocks' type, id and
+/// name, and `CronCreate`'s schedule fields; no text field is ever read.
 #[must_use]
 pub fn read_line(line: &str) -> TranscriptLine {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -407,6 +464,84 @@ mod tests {
             }
             assert_eq!(lines[11], TranscriptLine::Unreadable);
             assert_eq!(lines[12], TranscriptLine::Unreadable);
+        }
+    }
+
+    fn tools_of(line: &str) -> Vec<ToolUse> {
+        turn_of(&read_line(line))
+            .reply
+            .as_ref()
+            .expect("a reply")
+            .tools
+            .clone()
+    }
+
+    #[test]
+    fn reads_the_tool_calls_of_a_reply() {
+        use super::fixtures::{CRON_CREATE_LINES, CronCreateLine, a_cron_create_line};
+        let lines: Vec<&str> = CRON_CREATE_LINES.lines().collect();
+        let keys: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                turn_of(&read_line(line))
+                    .reply
+                    .as_ref()
+                    .expect("a reply")
+                    .key
+                    .clone()
+            })
+            .collect();
+        assert_eq!(keys, ["msg_01C"; 3]);
+        assert_eq!(tools_of(lines[0]), vec![]);
+        assert_eq!(
+            tools_of(lines[1]),
+            vec![ToolUse {
+                id: "toolu_01B".to_string(),
+                name: "Bash".to_string(),
+                cron: None
+            }]
+        );
+        assert_eq!(
+            tools_of(lines[2]),
+            vec![ToolUse {
+                id: "toolu_01C".to_string(),
+                name: "CronCreate".to_string(),
+                cron: Some(CronCall {
+                    cron: "*/10 * * * *".to_string(),
+                    is_recurring: true,
+                    is_durable: false
+                })
+            }]
+        );
+        let call = |recurring, durable| CronCreateLine {
+            session_id: "s",
+            cwd: "/c",
+            at: "2026-10-12T09:00:00Z",
+            message_id: "m1",
+            tool_use_id: "t1",
+            cron: "0 * * * *",
+            recurring,
+            durable,
+        };
+        let flags = |recurring, durable| {
+            tools_of(&a_cron_create_line(&call(recurring, durable)))[0]
+                .cron
+                .clone()
+                .map(|cron| (cron.is_recurring, cron.is_durable))
+        };
+        assert_eq!(flags(Some(false), Some(true)), Some((false, true)));
+        assert_eq!(flags(Some(true), Some(false)), Some((true, false)));
+        let no_cron = r#"{"type":"assistant","sessionId":"s","cwd":"/c","timestamp":"2026-10-12T09:00:00Z","message":{"id":"m1","model":"m","content":[{"type":"tool_use","id":"t1","name":"CronCreate","input":{}}]}}"#;
+        assert_eq!(tools_of(no_cron)[0].cron, None);
+        let no_id = r#"{"type":"assistant","sessionId":"s","cwd":"/c","timestamp":"2026-10-12T09:00:00Z","message":{"id":"m1","model":"m","content":[{"type":"tool_use","name":"Bash"},{"type":"tool_use","id":"t2"}]}}"#;
+        assert_eq!(tools_of(no_id), vec![]);
+        for line in CLAUDE_CODE_2_1_296.lines().map(read_line) {
+            if let TranscriptLine::Turn(Turn {
+                reply: Some(reply), ..
+            }) = line
+            {
+                assert_eq!(reply.tools, vec![]);
+            }
         }
     }
 
