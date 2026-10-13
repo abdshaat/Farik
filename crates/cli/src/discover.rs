@@ -331,9 +331,15 @@ mod tests {
     fn writes_tokens_short() {
         assert_eq!(short(950), "950");
         assert_eq!(short(0), "0");
+        assert_eq!(short(999), "999");
+        assert_eq!(short(1_000), "1k");
+        assert_eq!(short(1_049), "1k");
+        assert_eq!(short(1_050), "1.1k");
         assert_eq!(short(2_000), "2k");
         assert_eq!(short(12_300), "12.3k");
         assert_eq!(short(310_000), "310k");
+        assert_eq!(short(999_949), "999.9k");
+        assert_eq!(short(999_950), "1M");
         assert_eq!(short(1_215_000), "1.2M");
         assert_eq!(short(41_200_000), "41.2M");
     }
