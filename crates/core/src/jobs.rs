@@ -219,6 +219,8 @@ pub fn tie_to_project(paths: &[String], roots: &[String]) -> Option<String> {
 
 /// Wire fixtures for tests, in this crate and in others.
 pub mod fixtures;
+/// The schedules committed in a repository's files.
+pub mod repository;
 
 #[cfg(test)]
 mod tests {
