@@ -160,9 +160,11 @@ Feature flags are not used in the first release. Unfinished work stays on its br
 
 ## Testing rules
 
+One test per major functionality, not one per case; a security guarantee counts as a major functionality and keeps its test (ADR 0060).
+
 Unit tests test one unit through its public interface. They do not reach into private state, and they do not mock what they can construct.
 
-Every transition in the governor's table has at least one test that exercises it and one that exercises its refusal. This is a standing requirement, not a suggestion; the table in `docs/SPEC.md` section 5.2 is the checklist.
+The governor's existing transition tests (one per transition and one per refusal, the table in `docs/SPEC.md` section 5.2) stay; a new transition gets one test.
 
 Tests never depend on wall-clock time, on the network, or on execution order. Time is injected. Anything that talks to a model, in Catervas's case the Claude Code program, is behind an adapter, and the adapter has a recorded-transcript fake for tests.
 

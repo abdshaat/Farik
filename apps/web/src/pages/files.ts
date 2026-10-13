@@ -12,7 +12,13 @@ export type FilesTree = {
 		name: string;
 		role: Role;
 		agentId: string;
-		documents: { path: string; name: string; twin: string | null }[];
+		/** `task`: the accepted task whose branch alone holds it while it waits to merge. */
+		documents: {
+			path: string;
+			name: string;
+			twin: string | null;
+			task?: string | null;
+		}[];
 	}[];
 };
 

@@ -25,10 +25,10 @@ Planning and judging run on Opus 5.5; execution runs on Sonnet 5.5 (ADR 0032).
 
 | Model | Does |
 |---|---|
-| Opus 5.5 | Brainstorm, design, step plans, mockups, readiness reviews (by a session that did not write the plan), the one review of each task and its fix report |
-| Sonnet 5.5 | A plan that has passed its readiness review: the tasks under TDD, the fixes a task's review reports, verification, the recording of the spec, the runbook preparation |
+| Opus 5.5 | Brainstorm, design, step plans, mockups, readiness reviews (by a session that did not write the plan) |
+| Sonnet 5.5 | A plan that has passed its readiness review: the tasks under TDD, verification, the recording of the spec, the runbook preparation |
 
-The reviews stay on Opus because they are the independent check on the executor (hard rule 10). Every hard rule, the pass bars and one task, one commit are unchanged. A decision found missing during execution goes back to the planning role; the executor does not decide it. Each task is reviewed once, and its fixes are not reviewed again (stage 5).
+Since ADR 0060 (2026-10-12) no agent reviews code after it is written: the readiness review of the plan is the only agent review, and the full check and the `check` workflow are the gate. One task, one commit is unchanged. A decision found missing during execution goes back to the planning role; the executor does not decide it.
 
 ## The sequence
 
@@ -68,7 +68,7 @@ That review is one round. A second round happens only when the first finds a dec
 
 Every decision is made. Features, enhancements, names, data shapes, library choices, error behavior: all decided and written down in the plan's Decisions section or in an ADR it links. A decision that affects more than one step is an ADR.
 
-No ambiguity, in what the plan is for: the decisions, the boundaries, the interfaces. Every file path is exact. Every signature is exact. Every named test says what it asserts, specifically enough that two people would write the same assertion. Every command has its expected output. Words like "appropriate", "as needed", "and so on", "TBD", and "similar to" fail review.
+No ambiguity, in what the plan is for: the decisions, the boundaries, the interfaces. Every file path is exact. Every signature is exact. Every named test says what it asserts, specifically enough that two people would write the same assertion. A task names one test per major functionality it adds, not one per case; a security guarantee counts as one (ADR 0060). Every command has its expected output. Words like "appropriate", "as needed", "and so on", "TBD", and "similar to" fail review.
 
 Ambiguity inside an implementation is not this gate's job. A type that does not line up, a call with the wrong arity, a case left unhandled: `cargo check` finds those in seconds and a reader finds them in an hour, if at all. The plan fixes what the compiler cannot know — what was decided and why — and the compiler and a test watched to fail take the rest.
 
@@ -92,7 +92,7 @@ Commit after each task with a message per `code.md`. Tick the task's checkbox in
 
 Code written before its test is deleted. Not kept as reference, not adapted, not consulted. The one exception is explicit permission from the change owner, recorded in the plan.
 
-Tasks may be dispatched to fresh subagents. Each task is reviewed once, after its commit, as stage 5 describes. A subagent's report that it succeeded is not evidence; the reviewer runs the checks.
+Tasks may be dispatched to fresh subagents. A subagent's report that it succeeded is not evidence; the controller reads the pasted check output.
 
 ### 4. Verify
 
@@ -106,13 +106,11 @@ Self-review first, against the plan, before requesting anyone else's time. Read 
 
 Then open the phase's pull request to `main` using the template. One phase is one pull request, opened as a draft when the phase's first step is pushed and marked ready for review when the last step's verification passes. This is not optional and it is not deferred: a pushed phase branch with no pull request is unfinished work that nobody can see. The request explains what changed and, above all, why it was necessary: what problem or spec requirement the phase serves and what would be wrong without it. It also carries links to every step plan in the phase, the spec references, the verification evidence from the final commit, and any ADRs.
 
-A pull request never contains work from two phases. Each task inside a phase is reviewed as it lands: the reviewer reads the task's commits against the step plan on the phase branch and records the review in the pull request thread. The final review of the whole phase confirms that every task has its recorded review and that the check is green. It does not review a task again.
+A pull request never contains work from two phases. The founder reviews the phase's pull request and merges it.
 
-Each task is reviewed once, by Opus 5.5, after its commit (see Who does what), and the reviews of a step's tasks are that step's landing review. This review is where the defects are, and it is not optional: a task whose review did not complete is reviewed before the pull request is marked ready. It reads running code, not a plan, and its acceptance bar is mutation: re-introduce the bug each test claims to catch and confirm the suite notices. A test that passes both with the code and with the code broken is not a test, and a green check does not distinguish them. ADR 0008 records what these reviews found that no plan review could.
+There is no agent review of a task or a step after its code is written (ADR 0060, superseding the per-task review of ADR 0032 and its mutation bar).
 
-The review ends in one fix report to the implementer, detailed enough to carry out without judgement. For each finding it gives the severity, the file and line, what is wrong, the fix, and the test that must fail without the fix. The implementer fixes every finding, watches each named test fail before its fix, and commits the fixes as new commits. That task is then not reviewed again. If a fix needs a decision the report does not make, it goes back to the reviewer as a question.
-
-A step lands when every task in it has been reviewed and its fixes committed, the full check passes locally (`cargo xtask check`), and the `check` GitHub Actions workflow passes on the step's last pushed commit. That workflow runs on pull requests, so the phase's draft pull request must exist (hard rule 11).
+A step lands when every task in it is committed, the full check passes locally (`cargo xtask check`), and the `check` GitHub Actions workflow passes on the step's last pushed commit. That workflow runs on pull requests, so the phase's draft pull request must exist (hard rule 11).
 
 Reviewers report findings by severity: critical (blocks merge: correctness, security, a rule in this document broken), important (must be addressed or explicitly deferred with a reason), and minor (author's call). A critical finding is never resolved by a comment; it is resolved by a commit.
 
@@ -126,7 +124,7 @@ If the work is abandoned, say so on the pull request and close it. Do not leave 
 
 ## Definition of Done for a change
 
-The checklist in `.github/pull_request_template.md`, which mirrors section 5.4 of the spec on purpose. A pull request needs a review from someone other than its author, or, for a solo maintainer, a fresh-session review by an agent that did not write the code.
+The checklist in `.github/pull_request_template.md`, which mirrors section 5.4 of the spec on purpose. A pull request is reviewed and merged by the founder (ADR 0060).
 
 ## Debugging
 
