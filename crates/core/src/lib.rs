@@ -17,6 +17,8 @@ pub mod folders;
 pub mod generated;
 /// The governor: every rule of `docs/SPEC.md` section 5 as pure functions.
 pub mod governor;
+/// The owner's recurring jobs, read from files, schedulers' answers and Claude Code's records.
+pub mod jobs;
 /// The marketing plan the owner approves: its checks and which approved plan is active.
 pub mod marketing;
 /// A purchase order's lines and total.

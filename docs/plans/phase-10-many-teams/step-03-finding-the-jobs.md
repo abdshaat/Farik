@@ -211,7 +211,7 @@ Tests:
 - `reads_no_prompt_or_key` (guard): the `Debug` of everything read above holds no `NEVER-KEPT-TEXT` and no `SECRET`.
 - `ties_a_job_to_the_deepest_project`: with roots `/home/me/a` and `/home/me/a/b`: `["/x", "/home/me/a/b/c.sh"]` gives `/home/me/a/b`; `["/home/me/a"]` gives `/home/me/a`; `["/home/me/ab/x"]` and `[]` give `None`. RED.
 
-- [ ] `feat(core): read tool calls, saved session crons and background jobs`
+- [x] `feat(core): read tool calls, saved session crons and background jobs`
 
 ### Task 2: Schedule files in core
 
