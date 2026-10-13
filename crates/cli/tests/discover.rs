@@ -168,6 +168,7 @@ fn discovers_a_project_from_the_history() {
                 } },
             },
             "catervas": { "sessions": 0, "tokens": {} },
+            "jobs": [],
         })
     );
 }
@@ -356,4 +357,117 @@ fn prints_every_section() {
         home.join("gone-app").to_string_lossy().as_ref()
     );
     assert_eq!(value["not_a_project"]["sessions"], 2);
+}
+
+/// A folder holding a `crontab` program that prints these lines, as the whole `PATH`.
+fn crontab_path(world: &World, lines: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let bin = world.temp.root.join("bin");
+    std::fs::create_dir_all(&bin).expect("a folder");
+    let script = bin.join("crontab");
+    // Only shell built-ins: the `PATH` of this test holds nothing but this script.
+    let quoted: Vec<String> = lines.lines().map(|line| format!("'{line}'")).collect();
+    let body = format!("#!/bin/sh\nprintf '%s\\n' {}\n", quoted.join(" "));
+    std::fs::write(&script, body).expect("a script");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    bin
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn discovers_the_jobs_of_a_project() {
+    let world = World::new("discovers-jobs");
+    world.make_shop();
+    world.write_fixture();
+    let home = world.home();
+    let shop = home.join("shop");
+    std::fs::create_dir_all(shop.join(".github/workflows")).expect("workflows");
+    std::fs::write(
+        shop.join(".github/workflows/nightly.yml"),
+        catervas_core::jobs::fixtures::GITHUB_WORKFLOW,
+    )
+    .expect("a workflow");
+    git_in(&shop, &["add", "-A"]);
+    git_in(&shop, &["commit", "-m", "a workflow"]);
+    std::fs::create_dir_all(shop.join("bin")).expect("bin");
+    std::fs::write(shop.join("bin/sync.sh"), "x").expect("a script");
+    let job = home.join(".claude/jobs/abc12345");
+    std::fs::create_dir_all(&job).expect("a job folder");
+    std::fs::write(
+        job.join("state.json"),
+        catervas_core::jobs::fixtures::BACKGROUND_JOB.replace("/home/me", &home.to_string_lossy()),
+    )
+    .expect("a state");
+    let lines = format!(
+        "0 2 * * * {}/shop/bin/sync.sh --token SECRET-CLI\n0 1 * * * /usr/bin/backup-all",
+        home.to_string_lossy()
+    );
+    let bin = crontab_path(&world, &lines);
+    let config = world.config();
+    let env = [
+        ("HOME", home.as_path()),
+        ("XDG_CONFIG_HOME", config.as_path()),
+        ("PATH", bin.as_path()),
+    ];
+
+    let ran = run(&env, &["discover"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        "reading your Claude Code history on this computer; nothing leaves it\n\
+         read 1 transcript file: 1 session, 1 new\n\
+         skipped 2 lines it couldn't read\n\
+         found 4 jobs\n\
+         projects: 1\n  \
+         shop  ~/shop  last worked 2026-10-12  1 session  1.2k in  47 out\n    \
+         jobs: 3\n      \
+         nightly-sync  GitHub Actions  .github/workflows/nightly.yml  0 3 * * *; 30 4 * * 1\n      \
+         sync.sh  crontab  0 2 * * *\n      \
+         shop-cleanup  background job  blocked  2026-10-11\n\
+         this computer: 1 job\n  \
+         backup-all  crontab  0 1 * * *\n"
+    );
+    let as_json = run(&env, &["discover", "--json"]);
+    let value: Value = serde_json::from_str(&as_json.out).expect("one JSON object");
+    assert_eq!(
+        value["projects"][0]["jobs"][0],
+        json!({
+            "kind": "github_actions", "name": "nightly-sync",
+            "file": ".github/workflows/nightly.yml",
+            "schedules": ["0 3 * * *", "30 4 * * 1"],
+            "expires_at": null, "state": null, "state_at": null,
+            "last_seen": "2026-10-12T12:00:00Z",
+        })
+    );
+    assert_eq!(value["this_computer"][0]["kind"], "crontab");
+    assert_eq!(value["this_computer"][0]["name"], "backup-all");
+    assert_eq!(value["this_computer"][0]["file"], Value::Null);
+    assert_eq!(value["jobs_found"], 4);
+    let bytes = std::fs::read(config.join("catervas").join(MACHINE_DB)).expect("the index");
+    assert!(!bytes.windows(6).any(|window| window == b"SECRET"));
+}
+
+/// Guard: checked by mutation (print a name raw), not watched to fail.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_jobs_as_text() {
+    let world = World::new("prints-jobs-as-text");
+    world.make_shop();
+    world.write_fixture();
+    let bin = crontab_path(&world, "0 1 * * * /usr/bin/a\u{1b}[2Jb");
+    let home = world.home();
+    let config = world.config();
+    let env = [
+        ("HOME", home.as_path()),
+        ("XDG_CONFIG_HOME", config.as_path()),
+        ("PATH", bin.as_path()),
+    ];
+
+    let ran = run(&env, &["discover"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(!ran.out.contains('\u{1b}'), "{:?}", ran.out);
+    assert!(ran.out.contains("a\\u001b[2Jb  crontab"), "{}", ran.out);
 }
