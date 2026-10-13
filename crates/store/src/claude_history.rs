@@ -708,7 +708,9 @@ mod tests {
         std::fs::write(late.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("the original");
         late.read();
         assert_eq!(
-            late.rows("SELECT printf('%s|%s', session_id, at) FROM replies WHERE reply_key = 'msg_01A'"),
+            late.rows(
+                "SELECT printf('%s|%s', session_id, at) FROM replies WHERE reply_key = 'msg_01A'"
+            ),
             vec![format!("{SESSION}|2026-10-12T09:00:05.000Z")]
         );
 
@@ -765,7 +767,11 @@ mod tests {
             a_reply_line(SESSION, CWD, at, key, "claude-opus-5-5", usage)
         };
         let lines = [
-            reply("2026-10-12T09:00:00Z", "big_first", usage(10, 40, 1000, 200)),
+            reply(
+                "2026-10-12T09:00:00Z",
+                "big_first",
+                usage(10, 40, 1000, 200),
+            ),
             reply("2026-10-12T09:00:01Z", "big_first", usage(5, 1, 900, 0)),
             reply("2026-10-12T09:00:02Z", "big_last", usage(5, 1, 900, 0)),
             reply("2026-10-12T09:00:03Z", "big_last", usage(10, 40, 1000, 200)),
@@ -805,9 +811,8 @@ mod tests {
         std::fs::write(setup.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("the original");
         setup.read();
         // The fork repeats the reply with every counter smaller, then another file with every one larger.
-        let repeat = |at: &str, usage| {
-            a_reply_line(OTHER, CWD, at, "msg_01A", "claude-opus-5-5", usage)
-        };
+        let repeat =
+            |at: &str, usage| a_reply_line(OTHER, CWD, at, "msg_01A", "claude-opus-5-5", usage);
         let smaller = repeat("2026-10-12T09:00:30Z", usage(1, 1, 1, 1));
         std::fs::write(setup.transcript("zzz"), format!("{smaller}\n")).expect("a fork");
         setup.read();
@@ -830,11 +835,18 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let setup = Setup::new("opens-canonical");
-        let projects = setup.claude().join("projects").canonicalize().expect("projects");
+        let projects = setup
+            .claude()
+            .join("projects")
+            .canonicalize()
+            .expect("projects");
         std::fs::write(setup.transcript("real"), "x\n").expect("a file");
         symlink(setup.transcript("real"), setup.transcript("link")).expect("a link");
         let real = projects.join("-home-me-shop/real.jsonl");
-        assert_eq!(classify(&setup.transcript("link"), &projects), Opened::Transcript(real));
+        assert_eq!(
+            classify(&setup.transcript("link"), &projects),
+            Opened::Transcript(real)
+        );
     }
 
     #[cfg(unix)]
