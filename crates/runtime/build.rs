@@ -9,6 +9,8 @@
 //! `sandbox/Dockerfile` as 12 lowercase hex digits, which `SANDBOX_IMAGE`'s tag carries, so a changed
 //! Dockerfile is a new image tag (`docs/SPEC.md` 8.3).
 
+use std::fmt::Write as _;
+
 use sha2::{Digest as _, Sha256};
 
 fn main() {
@@ -22,10 +24,10 @@ fn main() {
     let dockerfile = std::fs::read("sandbox/Dockerfile")
         .unwrap_or_else(|error| panic!("cannot read sandbox/Dockerfile: {error}"));
     let digest = Sha256::digest(&dockerfile);
-    let hex: String = digest[..6]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let mut hex = String::new();
+    for byte in &digest[..6] {
+        write!(hex, "{byte:02x}").expect("a String takes a write");
+    }
     println!("cargo:rustc-env=CATERVAS_SANDBOX_DIGEST={hex}");
     println!("cargo:rerun-if-changed=sandbox/Dockerfile");
 }

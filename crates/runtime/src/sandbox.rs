@@ -122,6 +122,8 @@ pub trait SandboxFactory: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use sha2::{Digest as _, Sha256};
 
     use super::SANDBOX_IMAGE;
@@ -129,10 +131,10 @@ mod tests {
     #[test]
     fn the_image_tag_names_its_dockerfile() {
         let digest = Sha256::digest(include_str!("../sandbox/Dockerfile").as_bytes());
-        let hex: String = digest[..6]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let mut hex = String::new();
+        for byte in &digest[..6] {
+            write!(hex, "{byte:02x}").expect("a String takes a write");
+        }
         assert_eq!(
             SANDBOX_IMAGE,
             format!("catervas/sandbox:{}-{hex}", env!("CARGO_PKG_VERSION"))
