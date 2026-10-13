@@ -8,6 +8,7 @@ use std::fmt;
 use std::sync::{Arc, LazyLock};
 
 use catervas_core::contract::{Role, TaskContract, TaskId};
+use catervas_core::folders::DocumentFormat;
 use catervas_core::governor::permissions::{
     AgentGrants, PermissionTier, SessionConnector, ToolCallContext, ToolCallRequest,
     ToolDescriptor, evaluate_tool_call,
@@ -263,7 +264,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<folders::WriteFolderDocInput>(
             "catervas_write_folder_doc",
             Read,
-            "At a sprint planning, review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. The product's spec.md and roadmap.md are proposed to the owner at the sprint review, with agent_text (their .agent.md version) and summary (what changed and why, for the owner), and wait for the owner's approval.",
+            "At a sprint planning, review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. Name a document with its extension: write a new one in the format the Team rules say, and a document that is already there in the format it has. The product's spec and roadmap are proposed to the owner at the sprint review, with agent_text (their agent version) and summary (what changed and why, for the owner), and wait for the owner's approval.",
         ),
         tool::<channel::PostMessageInput>(
             "catervas_post_message",
@@ -570,18 +571,16 @@ pub async fn call_tool(
 /// tool asks again with the file's own path); nothing for every other tool. Read leniently, since the input is parsed strictly afterwards.
 pub(crate) fn paths_of(name: &str, input: &Value) -> Vec<String> {
     match name {
-        "catervas_propose_marketing_plan" => vec![marketing::plan_file(0)],
-        "catervas_git_commit" => input
-            .get("paths")
-            .and_then(Value::as_array)
-            .map(|paths| {
-                paths
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default(),
+        "catervas_propose_marketing_plan" => [DocumentFormat::Markdown, DocumentFormat::Html]
+            .map(|format| marketing::plan_file(0, format))
+            .to_vec(),
+        "catervas_git_commit" => ["paths", "removed"]
+            .iter()
+            .filter_map(|key| input.get(key).and_then(Value::as_array))
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -806,6 +805,20 @@ mod tests {
             let tier = builtin_tool_tier(builtin).expect("a built-in with a tier");
             assert!(!writes_the_project(builtin, tier), "{builtin}");
         }
+    }
+
+    #[test]
+    fn a_commit_touches_the_paths_it_removes() {
+        let touched = super::paths_of(
+            "catervas_git_commit",
+            &json!({ "message": "m", "paths": ["a"], "removed": ["x"] }),
+        );
+        assert_eq!(touched, ["a", "x"]);
+        let only = super::paths_of(
+            "catervas_git_commit",
+            &json!({ "paths": [], "removed": ["x"] }),
+        );
+        assert_eq!(only, ["x"]);
     }
 
     #[test]

@@ -4,10 +4,11 @@
 //! team's integration policy adds it to the project as it does an accepted task's branch; a
 //! document the owner approves is proposed at the sprint review and waits for the owner.
 
-use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
+use catervas_core::contract::{TaskId, TaskStatus};
 use catervas_core::folders::{
-    FolderDocPath, FolderDocPathRefusal, LineChange, ROLE_FOLDERS, agent_twin, changed_lines,
-    check_folder_doc_path, folder_doc_author, folder_doc_message, is_human_document, role_folder,
+    DocumentFormat, FolderDocPath, FolderDocPathRefusal, FormatRefusal, LineChange, ROLE_FOLDERS,
+    agent_twin, changed_lines, check_document_format, check_folder_doc_path, document_name,
+    folder_doc_author, folder_doc_message, is_human_document, role_folder,
 };
 use catervas_core::governor::paths::check_protected_paths;
 use catervas_core::team::{Integration, Team};
@@ -33,15 +34,16 @@ use crate::transitions::{integration_branch, integration_lock};
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteFolderDocInput {
-    /// The document: a `.md` file under your folder, `docs/catervas/<folder>/...`.
+    /// The document: a `.md` or `.html` file under your folder, `docs/catervas/<folder>/...`.
     pub path: String,
-    /// The document, in full: at most 262,144 bytes. For the product's `spec.md` and
-    /// `roadmap.md`, the version for people.
+    /// The document, in full: at most 262,144 bytes. For the product's spec and roadmap, the
+    /// version for people.
     pub text: String,
-    /// Only for `spec.md` and `roadmap.md`: their `.agent.md` version, in full.
+    /// Only for the product's spec and roadmap: their agent version (`.agent.md` or
+    /// `.agent.html`), in full.
     pub agent_text: Option<String>,
-    /// Only for `spec.md` and `roadmap.md`: what changed and why, in 1 to 300 characters, for the
-    /// owner.
+    /// Only for the product's spec and roadmap: what changed and why, in 1 to 300 characters, for
+    /// the owner.
     pub summary: Option<String>,
 }
 
@@ -127,20 +129,25 @@ fn next_by(policy: Integration, branch: &str, into: &str) -> String {
 ///
 /// # Errors
 ///
-/// `Waiting` for a file an earlier change holds that is neither integrated nor escalated, `Link`,
-/// `Busy`, and `Git` when git or the log failed. `Ok(None)` when every file already says its text on
-/// the integration branch, which makes nothing.
+/// `Waiting` for a file or removed path an earlier change holds that is neither integrated nor
+/// escalated, `Link`, `Busy`, and `Git` when git or the log failed. `Ok(None)` when every file
+/// already says its text on the integration branch, which makes nothing.
 pub(crate) fn land(
     deps: &ToolDeps,
     team: &Team,
     files: &[(String, String)],
+    removed: &[String],
     message: &str,
     author: Option<&str>,
 ) -> Result<Option<Landed>, LandRefusal> {
     let words = |error: &dyn std::fmt::Display| LandRefusal::Git(error.to_string());
     let into = integration_branch(team, &deps.git).map_err(|error| words(&error))?;
     let docs = folder_docs(&deps.log).map_err(|error| words(&error))?;
-    for (path, _) in files {
+    // ponytail: `folder_doc.written` names only the written path. A write of the removed file
+    // while its removal waits conflicts at integration and is escalated there, not refused here;
+    // record `removed` in the event if that happens.
+    let touched = files.iter().map(|(path, _)| path).chain(removed);
+    for path in touched {
         if let Some(held) = docs
             .changes
             .iter()
@@ -168,7 +175,7 @@ pub(crate) fn land(
     };
     match deps
         .git
-        .commit_files(&branch, &into, files, message, author)
+        .commit_files(&branch, &into, files, removed, message, author)
         .map_err(|error| words(&error))?
     {
         CommitOutcome::Committed { sha } => Ok(Some(Landed {
@@ -232,14 +239,7 @@ pub(crate) fn file_rederive(
     let (false, Some(owner)) = (waiting, owner) else {
         return Ok(None);
     };
-    let reviewer =
-        catervas_roles::default_reviewer_role(team, TaskKind::Task, owner).or_else(|| {
-            catervas_roles::REVIEWER_ROLE_FOR
-                .iter()
-                .find(|(assignee, _)| *assignee == owner)
-                .and_then(|(_, preferred)| preferred.first().copied())
-        });
-    let Some(reviewer) = reviewer else {
+    let Some(reviewer) = catervas_roles::reviewer_for(team, owner) else {
         return Err(RequestError::Refused {
             reason: format!("no role reviews the tasks of {owner}"),
         });
@@ -261,16 +261,11 @@ pub(crate) fn file_rederive(
     Ok(Some(filed.id))
 }
 
-/// The documents' plain names, joined by " and ": the roadmap and the spec as the owner knows
-/// them, any other by its path within `docs/catervas/`.
+/// The documents' plain names, joined by " and ": each as the Files page names it.
 fn plain_names(paths: &[&str]) -> String {
     paths
         .iter()
-        .map(|path| match *path {
-            "docs/catervas/product/roadmap.md" => "Roadmap",
-            "docs/catervas/product/spec.md" => "Product description",
-            other => other.strip_prefix("docs/catervas/").unwrap_or(other),
-        })
+        .map(|path| document_name(path, &|_: &str| None))
         .collect::<Vec<_>>()
         .join(" and ")
 }
@@ -388,7 +383,9 @@ struct Checked<'a> {
     folder: &'static str,
     path: String,
     text: &'a str,
-    /// For a human document: its `.agent.md` path and text, and the summary for the owner.
+    /// The same document in the other format, which the write replaces.
+    removed: Vec<String>,
+    /// For a human document: its agent version's path and text, and the summary for the owner.
     proposal: Option<(String, &'a str, String)>,
 }
 
@@ -413,7 +410,14 @@ pub(super) fn write_folder_doc(
     let files = [(path.clone(), checked.text.to_string())];
     let message = folder_doc_message(checked.folder, &[path], &name, false);
     let author = folder_doc_author(&name, call.agent_id());
-    let landed = match land(deps, &call.team, &files, &message, Some(&author)) {
+    let landed = match land(
+        deps,
+        &call.team,
+        &files,
+        &checked.removed,
+        &message,
+        Some(&author),
+    ) {
         Ok(Some(landed)) => landed,
         Ok(None) => {
             return Err(refused(
@@ -458,6 +462,30 @@ fn check_input<'a>(
     };
     let (target, twin) = checked_path(call, folder, &input.path)?;
     let path = target.path;
+    let into = integration_branch(&call.team, &call.deps().git).map_err(failed)?;
+    let git = &call.deps().git;
+    // A git error reads as "absent" inside the check, so the first one is kept and fails the call
+    // after it: an unreadable branch must not let a document change format.
+    let unreadable = std::cell::RefCell::new(None);
+    let format_check = check_document_format(&path, call.team.document_format(), &|held: &str| {
+        git.has_file(&into, held).unwrap_or_else(|error| {
+            unreadable.borrow_mut().get_or_insert(error.to_string());
+            false
+        })
+    });
+    if let Some(detail) = unreadable.into_inner() {
+        return Err(ToolError::Failed { detail });
+    }
+    let removed = format_check
+        .map_err(|why| format_refusal(&path, call.team.document_format(), why))?
+        .into_iter()
+        .collect::<Vec<_>>();
+    if check_protected_paths(&removed, &call.team.rules().protected_paths).is_err() {
+        return Err(refused(
+            "folder_doc_path",
+            format!("{} is a path the team protects", removed[0]),
+        ));
+    }
     if target.owner_accepted && call.context.thread != Some(Thread::Review) {
         return Err(refused(
             "folder_doc_at_review",
@@ -484,13 +512,14 @@ fn check_input<'a>(
             folder,
             path,
             text,
+            removed,
             proposal: None,
         });
     };
     let agent_text = input.agent_text.as_deref().ok_or_else(|| {
         refused(
             "folder_doc_agent_text",
-            format!("{path} needs agent_text, its .agent.md version"),
+            format!("{path} needs agent_text, its agent version"),
         )
     })?;
     let agent_text = checked_text("agent_text", agent_text)?;
@@ -510,8 +539,37 @@ fn check_input<'a>(
         folder,
         path,
         text,
+        removed,
         proposal: Some((twin, agent_text, summary.to_string())),
     })
+}
+
+/// The refusal of a path in the wrong format, in the words the agent reads.
+fn format_refusal(path: &str, format: DocumentFormat, why: FormatRefusal) -> ToolError {
+    match why {
+        FormatRefusal::WrongFormat { instead } => {
+            let team = match format {
+                DocumentFormat::Html => "HTML",
+                DocumentFormat::Markdown => "Markdown",
+            };
+            refused(
+                "wrong_format",
+                format!(
+                    "{path} is a new document and this team writes new documents as {team}: write {instead}"
+                ),
+            )
+        }
+        FormatRefusal::OtherFormatExists { existing } => {
+            let rewrite = match format {
+                DocumentFormat::Html => "; its rewrite as HTML reaches the owner through a task",
+                DocumentFormat::Markdown => ".",
+            };
+            refused(
+                "other_format_exists",
+                format!("{existing} is this document: change it there{rewrite}"),
+            )
+        }
+    }
 }
 
 /// Holds the path to the caller's folder and to the team's protected paths.
@@ -526,12 +584,12 @@ fn checked_path(
             "folder_doc_path",
             format!("{named} is not a file below {folder}/"),
         ),
-        FolderDocPathRefusal::NotMarkdown => {
-            refused("folder_doc_path", format!("{named} is not a .md file"))
+        FolderDocPathRefusal::NotADocument => {
+            refused("folder_doc_path", format!("{named} is not a .md or .html file"))
         }
         FolderDocPathRefusal::AgentTwin => refused(
             "folder_doc_path",
-            format!("{named} is an .agent.md version, which is written from agent_text"),
+            format!("{named} is an agent version, which is written from agent_text"),
         ),
         FolderDocPathRefusal::MarketingPlan => refused(
             "folder_doc_marketing_plan",
@@ -625,8 +683,23 @@ mod tests {
     /// A team of `pm`, two Developers, the Scrum Master `sm` ("Sol") and, when asked, the Finance
     /// Specialist `fin`, integrating `policy`.
     fn project(name: &str, policy: &str, scrum_master: bool, finance: bool) -> TestProject {
+        project_in(name, policy, scrum_master, finance, "markdown")
+    }
+
+    /// As `project`, writing new documents in `format` and with the Architect `arch` ("Ada").
+    fn project_in(
+        name: &str,
+        policy: &str,
+        scrum_master: bool,
+        finance: bool,
+        format: &str,
+    ) -> TestProject {
         let team = a_team_of_three(|wire| {
             wire["policy"]["integration"] = json!(policy);
+            wire["policy"]["document_format"] = json!(format);
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "arch", "display_name": "Ada", "role": "architect", "status": "active"
+            }));
             if scrum_master {
                 wire["agents"].as_array_mut().expect("agents").push(json!({
                     "id": "sm", "display_name": "Sol", "role": "scrum_master", "status": "active"
@@ -916,6 +989,268 @@ mod tests {
         assert_eq!(code(&refused), "folder_doc_waiting");
         assert_eq!(branches(&waiting), "docs/folder-1");
         assert_eq!(waiting.events(&[EventKind::FolderDocWritten]).len(), 1);
+    }
+
+    const FEATURES_HTML: &str = "docs/catervas/architecture/features.html";
+    const CADENCE_HTML: &str = "docs/catervas/delivery/cadence.html";
+
+    fn html_project(name: &str) -> TestProject {
+        project_in(name, "auto_merge", true, false, "html")
+    }
+
+    fn reason_of(error: &ToolError) -> &str {
+        match error {
+            ToolError::Refused { reason } => reason,
+            other => panic!("a refusal, not {other:?}"),
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn writes_a_new_document_in_the_teams_format() {
+        let project = html_project("folder-doc-new-html");
+        let context = ceremony(&project, "arch", Thread::Review);
+        let answer = write(&context, FEATURES_HTML, "<p>a</p>\n").expect("written");
+        assert_eq!(answer["path"], FEATURES_HTML);
+        assert_eq!(project.events(&[EventKind::FolderDocWritten]).len(), 1);
+        assert_eq!(
+            project
+                .deps
+                .git
+                .file_at("docs/folder-1", FEATURES_HTML)
+                .expect("on the branch"),
+            "<p>a</p>\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_new_document_in_the_other_format() {
+        let project = html_project("folder-doc-wrong-format");
+        let context = ceremony(&project, "arch", Thread::Review);
+        let refused =
+            write(&context, "docs/catervas/architecture/features.md", "a\n").expect_err("refused");
+        assert_eq!(code(&refused), "wrong_format");
+        assert!(
+            reason_of(&refused).contains(
+                "docs/catervas/architecture/features.md is a new document and this team writes new documents as HTML: write docs/catervas/architecture/features.html"
+            ),
+            "{refused:?}"
+        );
+        assert!(project.events(&[EventKind::FolderDocWritten]).is_empty());
+        assert_eq!(branches(&project), "");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn keeps_an_existing_markdown_document() {
+        let project = html_project("folder-doc-keeps-md");
+        project
+            .repo
+            .write("docs/catervas/architecture/features.md", "old\n");
+        project.repo.commit("a document");
+        let context = ceremony(&project, "arch", Thread::Review);
+        write(&context, "docs/catervas/architecture/features.md", "new\n").expect("lands");
+        assert_eq!(project.events(&[EventKind::FolderDocWritten]).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn rewrites_an_agent_document_in_place() {
+        let project = html_project("folder-doc-rewrite");
+        project.repo.write(CADENCE, "old\n");
+        project.repo.commit("a document");
+        let context = ceremony(&project, "sm", Thread::Retro);
+        write(&context, CADENCE_HTML, "<p>new</p>\n").expect("rewritten");
+        let git = &project.deps.git;
+        assert!(git.file_at("docs/folder-1", CADENCE_HTML).is_ok());
+        assert!(git.file_at("docs/folder-1", CADENCE).is_err());
+        let written = project.events(&[EventKind::FolderDocWritten]);
+        let wire = catervas_protocol::event::event_to_value(&written[0]);
+        assert_eq!(wire["body"]["path"], CADENCE_HTML);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_the_spec_changing_format() {
+        let project = html_project("folder-doc-spec-format");
+        s4_ended(&project);
+        project.repo.write("docs/catervas/product/spec.md", "old\n");
+        project.repo.commit("a spec");
+        let input = json!({
+            "path": "docs/catervas/product/spec.html", "text": "<p>a</p>\n",
+            "agent_text": "- a\n", "summary": "why"
+        });
+        let refused =
+            run(&ceremony(&project, "pm", Thread::Review), TOOL, input).expect_err("refused");
+        assert_eq!(code(&refused), "other_format_exists");
+        assert!(
+            reason_of(&refused).contains("docs/catervas/product/spec.md is this document: change it there; its rewrite as HTML reaches the owner through a task"),
+            "{refused:?}"
+        );
+        assert!(project.events(&[EventKind::FolderDocProposed]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_markdown_spec_beside_an_html_one() {
+        let project = project("folder-doc-spec-md", "auto_merge", false, false);
+        s4_ended(&project);
+        project
+            .repo
+            .write("docs/catervas/product/spec.html", "<p>old</p>\n");
+        project.repo.commit("a spec");
+        let input = json!({
+            "path": "docs/catervas/product/spec.md", "text": "a\n",
+            "agent_text": "- a\n", "summary": "why"
+        });
+        let refused =
+            run(&ceremony(&project, "pm", Thread::Review), TOOL, input).expect_err("refused");
+        assert_eq!(code(&refused), "other_format_exists");
+        assert!(
+            reason_of(&refused)
+                .ends_with("docs/catervas/product/spec.html is this document: change it there."),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn proposes_an_html_spec_with_its_agent_version() {
+        let project = html_project("folder-doc-html-spec");
+        s4_ended(&project);
+        let input = json!({
+            "path": "docs/catervas/product/spec.html", "text": "<p>a</p>\n",
+            "agent_text": "<p>b</p>\n", "summary": "why"
+        });
+        run(&ceremony(&project, "pm", Thread::Review), TOOL, input).expect("proposed");
+        let proposed = project.events(&[EventKind::FolderDocProposed]);
+        assert_eq!(proposed.len(), 1);
+        let wire = catervas_protocol::event::event_to_value(&proposed[0]);
+        assert_eq!(wire["body"]["path"], "docs/catervas/product/spec.html");
+        // Its approval writes the document and its agent version in the same format.
+        crate::orchestrator::human::folder_doc_decide(
+            &project.deps,
+            &[proposed[0].envelope.seq],
+            true,
+            None,
+        )
+        .expect("approved");
+        let git = &project.deps.git;
+        assert_eq!(
+            git.file_at("docs/folder-1", "docs/catervas/product/spec.html")
+                .expect("the document"),
+            "<p>a</p>\n"
+        );
+        assert_eq!(
+            git.file_at("docs/folder-1", "docs/catervas/product/spec.agent.html")
+                .expect("its agent version"),
+            "<p>b</p>\n"
+        );
+        assert!(
+            git.file_at("docs/folder-1", "docs/catervas/product/spec.agent.md")
+                .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_replace_a_protected_document_with_its_other_format() {
+        let project = html_project("folder-doc-protected-rewrite");
+        project
+            .repo
+            .write("docs/catervas/delivery/secret.md", "old\n");
+        project.repo.commit("a secret");
+        let before = project.event_count();
+        let refused = write(
+            &ceremony(&project, "sm", Thread::Retro),
+            "docs/catervas/delivery/secret.html",
+            "<p>new</p>\n",
+        )
+        .expect_err("refused");
+        assert_eq!(code(&refused), "folder_doc_path");
+        assert_eq!(project.event_count(), before);
+        assert_eq!(branches(&project), "");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_integration_branch_not_the_working_tree() {
+        let project = html_project("folder-doc-branch-not-tree");
+        // Uncommitted at the root: the integration branch does not hold it.
+        project
+            .repo
+            .write("docs/catervas/architecture/features.md", "draft\n");
+        let refused = write(
+            &ceremony(&project, "arch", Thread::Review),
+            "docs/catervas/architecture/features.md",
+            "a\n",
+        )
+        .expect_err("a new document in the other format");
+        assert_eq!(code(&refused), "wrong_format");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_markdown_team_is_told_to_write_markdown() {
+        let project = project_in("folder-doc-md-team", "auto_merge", true, false, "markdown");
+        let refused = write(
+            &ceremony(&project, "arch", Thread::Review),
+            FEATURES_HTML,
+            "<p>a</p>\n",
+        )
+        .expect_err("refused");
+        assert_eq!(code(&refused), "wrong_format");
+        assert!(
+            reason_of(&refused)
+                .ends_with("as Markdown: write docs/catervas/architecture/features.md"),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn fails_when_the_integration_branch_cannot_be_read() {
+        let team = a_team_of_three(|wire| {
+            wire["policy"]["document_format"] = json!("html");
+            wire["policy"]["integration_branch"] = json!("nowhere");
+        });
+        let project = TestProject::new("folder-doc-unreadable", &team);
+        s4_ended(&project);
+        let input = json!({
+            "path": "docs/catervas/product/spec.html", "text": "<p>a</p>\n",
+            "agent_text": "<p>b</p>\n", "summary": "why"
+        });
+        let failed = run(&ceremony(&project, "pm", Thread::Review), TOOL, input)
+            .expect_err("a branch that cannot be read fails the call");
+        assert!(matches!(failed, ToolError::Failed { .. }), "{failed:?}");
+        assert!(project.events(&[EventKind::FolderDocProposed]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn land_refuses_removing_a_file_a_change_holds() {
+        let project = self::project("folder-doc-removal-waiting", "auto_merge", true, false);
+        write(&ceremony(&project, "sm", Thread::Retro), CADENCE, "a\n").expect("change 1");
+        let deps = &project.deps;
+        let team = deps.files.read_team().expect("the team reads");
+        let refused = super::land(
+            deps,
+            &team,
+            &[(
+                "docs/catervas/delivery/cadence.html".to_string(),
+                "<p>a</p>\n".to_string(),
+            )],
+            &[CADENCE.to_string()],
+            "docs(delivery): cadence as html",
+            None,
+        )
+        .expect_err("change 1 holds the removed file");
+        assert!(
+            matches!(refused, super::LandRefusal::Waiting { change: 1, .. }),
+            "{refused:?}"
+        );
+        assert_eq!(branches(&project), "docs/folder-1");
     }
 
     #[test]

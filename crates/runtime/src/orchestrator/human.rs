@@ -355,7 +355,11 @@ fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandErro
     let contract = file_product_plan_request(
         &tools.files,
         &tools.log,
-        product_plan_request(reviewer, placeholder_budget_usd(&team.rules())),
+        product_plan_request(
+            reviewer,
+            placeholder_budget_usd(&team.rules()),
+            team.document_format(),
+        ),
         (tools.clock.now(), &tools.ids),
     )
     .map_err(failed)?;
@@ -2030,7 +2034,7 @@ const MOST_FOLDER_DOC_NOTE: usize = 600;
     clippy::too_many_lines,
     reason = "the checks, then approving or sending back"
 )]
-fn folder_doc_decide(
+pub(crate) fn folder_doc_decide(
     tools: &ToolDeps,
     proposals: &[u64],
     approve: bool,
@@ -2131,7 +2135,7 @@ fn folder_doc_decide(
     if !said.is_empty() {
         body["note"] = json!(said);
     }
-    let said_back = match land(tools, &team, &files, &message, Some(&author)) {
+    let said_back = match land(tools, &team, &files, &[], &message, Some(&author)) {
         Ok(Some(landed)) => {
             body["change"] = json!(landed.change);
             body["sha"] = json!(landed.sha);
@@ -3022,6 +3026,20 @@ mod tests {
         assert_eq!(
             contract.reviewer_role,
             catervas_core::contract::Role::Architect
+        );
+        // The team writes HTML (the default), so the plan's files are pages.
+        assert_eq!(
+            contract
+                .allowed_paths
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            [
+                "docs/catervas/product/spec.html",
+                "docs/catervas/product/spec.agent.html",
+                "docs/catervas/product/roadmap.html",
+                "docs/catervas/product/roadmap.agent.html",
+            ]
         );
 
         // Rule 10 and rule 9 move it to ready with no refine session; sprints are on and none is

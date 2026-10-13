@@ -172,7 +172,7 @@
     },
     "plan": {
       "type": "string",
-      "pattern": "^docs/catervas/architecture/plans/CTV-[0-9]{1,6}\\.md$",
+      "pattern": "^docs/catervas/architecture/plans/CTV-[0-9]{1,6}\\.(md|html)$",
       "description": "The implementation plan this task writes or is built from, the Architect's plan for the task's epic. Set by the Product Manager."
     },
     "lane": {

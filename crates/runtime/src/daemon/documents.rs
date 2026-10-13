@@ -3,11 +3,16 @@
 //! is stale. `web.rs` answers the frames; this module answers what they ask.
 
 use std::fmt::Display;
+use std::sync::Arc;
 
-use catervas_core::contract::TaskStatus;
+use axum::extract::{RawQuery, State};
+use axum::http::{HeaderMap, HeaderName, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+
+use catervas_core::contract::{TaskKind, TaskStatus};
 use catervas_core::folders::{
-    Named, OwnerEditRefusal, ROLE_FOLDERS, agent_twin, check_owner_edit, document_name,
-    document_order, human_of_twin, named_in_subject, plain_name,
+    DocumentFormat, Named, OwnerEditRefusal, ROLE_FOLDERS, agent_twin, check_owner_edit,
+    document_name, document_order, human_of_twin, is_human_document, named_in_subject, plain_name,
 };
 use catervas_core::governor::paths::normalise;
 use catervas_core::team::{Role, Team};
@@ -17,7 +22,10 @@ use catervas_store::marketing::marketing_plans;
 use catervas_store::requests::rederive_tasks;
 use serde_json::{Value, json};
 
-use catervas_protocol::event::EventBody;
+use catervas_protocol::event::{EventBody, TaskCreatedBodyFiledAs};
+use catervas_store::requests::{
+    change_request, file_small_request, placeholder_budget_usd, rewrite_request, rewrite_tasks,
+};
 
 use super::DaemonState;
 use super::gates::off_the_worker;
@@ -31,10 +39,20 @@ use crate::transitions::integration_lock;
 pub(super) const QUERIES: [&str; 2] = ["files.tree", "files.read"];
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 1] = ["files.save"];
+pub(super) const METHODS: [&str; 3] = ["files.save", "files.ask_change", "files.rewrite"];
 
 /// Where the team's documents live.
 const ROOT: &str = "docs/catervas";
+
+/// Where the marketing plans are; each is the version the owner approved, so none is rewritten.
+const MARKETING_PLANS: &str = "docs/catervas/marketing/plans/";
+
+/// Whether `path` is a marketing plan `MP-<n>` or its agent version.
+fn is_marketing_plan(path: &str) -> bool {
+    path.starts_with(MARKETING_PLANS)
+        && (is_human_document(path)
+            || human_of_twin(path).is_some_and(|human| is_human_document(&human)))
+}
 
 fn internal(error: &dyn Display) -> Failure {
     Failure::new(INTERNAL_ERROR, error.to_string())
@@ -68,9 +86,9 @@ fn edit_refusal(why: OwnerEditRefusal) -> Failure {
             "/path",
             "That document is not in one of the team's folders.",
         ),
-        OwnerEditRefusal::NotMarkdown => (
+        OwnerEditRefusal::NotADocument => (
             "/path",
-            "Only a document that ends in .md can be saved here.",
+            "Only a document that ends in .md or .html can be saved here.",
         ),
         OwnerEditRefusal::AgentTwin => (
             "/path",
@@ -125,6 +143,7 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         deps,
         &team,
         &[(path.clone(), text.to_string())],
+        &[],
         &message,
         None,
     ) {
@@ -161,16 +180,197 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     Ok(json!({ "change": landed.change, "branch": landed.branch }))
 }
 
+/// `files.ask_change { path, words }`: a small, whole task for the role that owns the document,
+/// to make the change the owner's words ask for. Nothing is filed when the owner may not ask.
+fn ask_change(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    let cannot = || {
+        refusal(
+            "not_editable",
+            "/path",
+            "This document can't be changed from here.",
+        )
+    };
+    let path =
+        check_owner_edit(params["path"].as_str().unwrap_or_default(), 0).map_err(|_| cannot())?;
+    let words = params["words"].as_str().unwrap_or_default().trim();
+    if words.is_empty() {
+        return Err(refusal("no_words", "/words", "Say what should change."));
+    }
+    let (team, _, entries) = listing(deps)?;
+    let owner = ROLE_FOLDERS
+        .iter()
+        .find(|(_, folder)| path.starts_with(&format!("{folder}/")))
+        .map(|(role, _)| *role)
+        .ok_or_else(cannot)?;
+    if owner == Role::ScrumMaster {
+        return Err(refusal(
+            "no_task_taker",
+            "/path",
+            "The Scrum Master keeps this document up to date at its retro.",
+        ));
+    }
+    if !team
+        .active_agents()
+        .any(|agent| Role::from(agent.role) == owner)
+    {
+        return Err(refusal(
+            "no_owner",
+            "/path",
+            "No one on your team owns this folder right now. Resume or add its role first.",
+        ));
+    }
+    let document = folders(&team, &entries, &[])
+        .into_iter()
+        .flat_map(|folder| folder.documents)
+        .find(|document| document.path == path)
+        .ok_or_else(cannot)?;
+    // A human document's twin is named even when it is not there yet: the team writes it.
+    let twin = agent_twin(&path).or(document.twin);
+    let reviewer = catervas_roles::reviewer_for(&team, owner)
+        .ok_or_else(|| internal(&format!("no role reviews the tasks of {owner}")))?;
+    let board = deps.projections.board().map_err(|e| internal(&e))?;
+    let name = document_name(&path, &|stem: &str| {
+        board
+            .iter()
+            .find(|row| row.task_id.as_str() == stem)
+            .map(|row| row.title.clone())
+    });
+    let wire = change_request(
+        &path,
+        twin.as_deref(),
+        &name,
+        words,
+        owner,
+        reviewer,
+        placeholder_budget_usd(&team.rules()),
+    );
+    let filed = file_small_request(
+        &deps.files,
+        &deps.log,
+        wire,
+        "human",
+        TaskCreatedBodyFiledAs::OwnerChange,
+        &format!("the owner's change of {name}"),
+        (deps.clock.now(), &deps.ids),
+    )
+    .map_err(|e| internal(&e))?;
+    Ok(json!({ "task_id": filed.id }))
+}
+
+/// Held while a rewrite checks that none is open and files its tasks, so that two presses file one.
+static REWRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// `files.rewrite {}`: one small, whole task for each role whose folder holds a Markdown document,
+/// to rewrite them as HTML, and `document_rewrite.started` naming the tasks. The Scrum Master's
+/// documents are rewritten at its next retro, so they file no task and only keep the rewrite
+/// from being refused as nothing to do.
+fn rewrite(deps: &ToolDeps) -> Result<Value, Failure> {
+    // ponytail: one lock for the process, as a Catervafication's start has; the command line files none.
+    let _filing = crate::locked(&REWRITING);
+    deps.projections.catch_up().map_err(|e| internal(&e))?;
+    let (team, _, entries) = listing(deps)?;
+    if team.document_format() != DocumentFormat::Html {
+        return Err(refusal(
+            "not_html",
+            "",
+            "Turn on Write documents as HTML first.",
+        ));
+    }
+    for id in rewrite_tasks(&deps.log).map_err(|e| internal(&e))? {
+        let row = deps.projections.task(&id).map_err(|e| internal(&e))?;
+        if row
+            .is_some_and(|row| !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
+        {
+            return Err(refusal(
+                "rewrite_open",
+                "",
+                "Your team is still rewriting its documents.",
+            ));
+        }
+    }
+    let mut delivery_holds_markdown = false;
+    let mut wanted = Vec::new();
+    for folder in folders(&team, &entries, &[]) {
+        if folder.role == Role::ScrumMaster {
+            // It takes no task: its retro rewrites `delivery/`, if it has an active agent.
+            delivery_holds_markdown = folder
+                .documents
+                .iter()
+                .flat_map(|document| std::iter::once(&document.path).chain(&document.twin))
+                .any(|path| DocumentFormat::of(path) == Some(DocumentFormat::Markdown));
+            continue;
+        }
+        let documents: Vec<String> = folder
+            .documents
+            .iter()
+            .flat_map(|document| std::iter::once(&document.path).chain(&document.twin))
+            .filter(|path| {
+                DocumentFormat::of(path) == Some(DocumentFormat::Markdown)
+                    && !is_marketing_plan(path)
+            })
+            .cloned()
+            .collect();
+        // A role the team cannot staff a reviewer for gets no task.
+        if let Some(reviewer) =
+            catervas_roles::default_reviewer_role(&team, TaskKind::Task, folder.role)
+            && !documents.is_empty()
+        {
+            wanted.push((folder.path, folder.role, reviewer, documents));
+        }
+    }
+    if wanted.is_empty() && !delivery_holds_markdown {
+        return Err(refusal(
+            "nothing_to_rewrite",
+            "",
+            "Every document your team can rewrite is already HTML.",
+        ));
+    }
+    let mut tasks = Vec::new();
+    for (folder, role, reviewer, documents) in wanted {
+        let wire = rewrite_request(
+            folder,
+            &documents,
+            role,
+            reviewer,
+            placeholder_budget_usd(&team.rules()),
+        );
+        let filed = file_small_request(
+            &deps.files,
+            &deps.log,
+            wire,
+            "human",
+            TaskCreatedBodyFiledAs::DocumentRewrite,
+            &format!("the owner's rewrite of {folder} as HTML"),
+            (deps.clock.now(), &deps.ids),
+        )
+        .map_err(|e| internal(&e))?;
+        tasks.push(filed.id.to_string());
+    }
+    let body = serde_json::from_value(json!({ "tasks": tasks })).map_err(|e| internal(&e))?;
+    append(deps, EventBody::DocumentRewriteStarted(body))?;
+    Ok(json!({ "tasks": tasks }))
+}
+
 /// The methods, whose params the schema already passed.
 pub(super) async fn call(
     state: &DaemonState,
-    _method: &str,
+    method: &str,
     params: &Value,
 ) -> Result<Value, Failure> {
     let Some(deps) = state.deps().cloned() else {
         return Err(Failure::new(NO_PROJECT, super::NO_PROJECT));
     };
     let params = params.clone();
+    if method == "files.ask_change" {
+        let filed = off_the_worker(move || ask_change(&deps, &params)).await?;
+        state.wakes().notify_one();
+        return Ok(filed);
+    }
+    if method == "files.rewrite" {
+        let filed = off_the_worker(move || rewrite(&deps)).await?;
+        state.wakes().notify_one();
+        return Ok(filed);
+    }
     let saved = off_the_worker(move || save(&deps, &params)).await?;
     if !saved["change"].is_null() {
         state.wakes().notify_one();
@@ -178,10 +378,41 @@ pub(super) async fn call(
     Ok(saved)
 }
 
-/// One document of a folder, and its twin when it has one that is a file.
+/// One document of a folder, and its twin when it has one that is a file. `task` is the accepted
+/// task whose branch alone holds it while it waits to merge.
 struct Document {
     path: String,
     twin: Option<String>,
+    task: Option<String>,
+}
+
+/// A task accepted and still waiting to merge, with its branch's entries under the root.
+struct Pending {
+    task: String,
+    branch: String,
+    entries: Vec<TreeEntry>,
+}
+
+/// The tasks accepted and still waiting to merge, in board order; a branch git cannot read is left
+/// out.
+fn pending(deps: &ToolDeps) -> Result<Vec<Pending>, Failure> {
+    Ok(deps
+        .projections
+        .board()
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .filter(|row| row.status == TaskStatus::Accepted && row.awaiting_integration)
+        .filter_map(|row| {
+            let contract = deps.files.read_contract(&row.task_id).ok()?;
+            let branch = catervas_core::branch::task_branch(&contract);
+            let entries = deps.git.tree_entries(&branch, ROOT).ok()?;
+            Some(Pending {
+                task: row.task_id.to_string(),
+                branch,
+                entries,
+            })
+        })
+        .collect())
 }
 
 /// One folder of an active role, with the documents the tree lists in it.
@@ -196,18 +427,28 @@ fn is_file(entry: &TreeEntry) -> bool {
     matches!(entry.mode.as_str(), "100644" | "100755")
 }
 
-fn is_markdown(path: &str) -> bool {
-    path.strip_suffix(".md").is_some()
+fn is_document(path: &str) -> bool {
+    catervas_core::folders::DocumentFormat::of(path).is_some()
 }
 
-/// The folders of the roles with an active agent, in the table's order, each with its `.md` files
-/// at any depth except the twin of a document that is present, which rides on its document.
-fn folders(team: &Team, entries: &[TreeEntry]) -> Vec<Folder> {
-    let files: Vec<&str> = entries
+/// The folders of the roles with an active agent, in the table's order, each with its `.md` and `.html` files
+/// at any depth except the twin of a document that is present, which rides on its document. A
+/// document only a `pending` task's branch holds is listed with that task; the integrated one wins.
+fn folders(team: &Team, entries: &[TreeEntry], pending: &[Pending]) -> Vec<Folder> {
+    let mut held: Vec<(&str, Option<&str>)> = entries
         .iter()
         .filter(|entry| is_file(entry))
-        .map(|entry| entry.path.as_str())
+        .map(|entry| (entry.path.as_str(), None))
         .collect();
+    for waiting in pending {
+        for entry in waiting.entries.iter().filter(|entry| is_file(entry)) {
+            if !held.iter().any(|(path, _)| *path == entry.path) {
+                held.push((entry.path.as_str(), Some(waiting.task.as_str())));
+            }
+        }
+    }
+    let files: Vec<&str> = held.iter().map(|(path, _)| *path).collect();
+    let task_of = |path: &str| held.iter().find(|(p, _)| *p == path).and_then(|(_, t)| *t);
     ROLE_FOLDERS
         .iter()
         .filter_map(|(role, folder)| {
@@ -217,13 +458,16 @@ fn folders(team: &Team, entries: &[TreeEntry]) -> Vec<Folder> {
             let inside = format!("{folder}/");
             let mut documents: Vec<Document> = files
                 .iter()
-                .filter(|path| path.starts_with(&inside) && is_markdown(path))
+                .filter(|path| path.starts_with(&inside) && is_document(path))
                 .filter(|path| {
                     !human_of_twin(path).is_some_and(|human| files.contains(&human.as_str()))
                 })
                 .map(|path| Document {
                     path: (*path).to_string(),
-                    twin: agent_twin(path).filter(|twin| files.contains(&twin.as_str())),
+                    twin: agent_twin(path)
+                        .filter(|twin| files.contains(&twin.as_str()))
+                        .filter(|twin| task_of(twin) == task_of(path)),
+                    task: task_of(path).map(ToString::to_string),
                 })
                 .collect();
             documents.sort_by_key(|document| document_order(&document.path));
@@ -265,7 +509,7 @@ fn tree(deps: &ToolDeps) -> Result<Value, Failure> {
                     .map(|plan| plan.proposal.title.clone())
             })
     };
-    let listed: Vec<Value> = folders(&team, &entries)
+    let listed: Vec<Value> = folders(&team, &entries, &pending(deps)?)
         .iter()
         .map(|folder| {
             let documents: Vec<Value> = folder
@@ -276,6 +520,7 @@ fn tree(deps: &ToolDeps) -> Result<Value, Failure> {
                         "path": document.path,
                         "name": document_name(&document.path, &title_of),
                         "twin": document.twin,
+                        "task": document.task,
                     })
                 })
                 .collect();
@@ -365,26 +610,50 @@ fn version(
     Ok(json!({ "path": path, "text": text, "blob": entry.blob, "last_change": last }))
 }
 
+/// The owner's own change to `path` that is still waiting, and the branch that holds it.
+fn waiting_change(deps: &ToolDeps, docs: &FolderDocs, path: &str) -> Option<(u64, String)> {
+    docs.changes
+        .iter()
+        .rev()
+        .find(|change| {
+            change.edited
+                && !change.integrated
+                && !change.escalated
+                && change.paths.iter().any(|p| p == path)
+        })
+        .map(|change| (change.change, format!("docs/folder-{}", change.change)))
+        .filter(|(_, held)| deps.git.tree(held).is_ok())
+}
+
 /// `files.read`: one document of the tree with its twin.
 fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
     let missing = || Failure::new(NOT_FOUND, format!("there is no document {asked}"));
     let path = normalise(asked).ok_or_else(missing)?;
     let (team, branch, entries) = listing(deps)?;
-    let document = folders(&team, &entries)
+    let pending = pending(deps)?;
+    let document = folders(&team, &entries, &pending)
         .into_iter()
         .flat_map(|folder| folder.documents)
         .find(|document| document.path == path)
         .ok_or_else(missing)?;
     let docs = folder_docs(&deps.log).map_err(|e| internal(&e))?;
-    let waiting = docs
-        .changes
+    // A document waiting to merge is read from its task's branch, and only read.
+    if let Some(waiting) = pending
         .iter()
-        .rev()
-        .find(|change| {
-            change.edited && !change.integrated && !change.escalated && change.paths.contains(&path)
-        })
-        .map(|change| (change.change, format!("docs/folder-{}", change.change)))
-        .filter(|(_, held)| deps.git.tree(held).is_ok());
+        .find(|waiting| document.task.as_deref() == Some(waiting.task.as_str()))
+    {
+        let on_branch = |path: &str| version(deps, &docs, &waiting.branch, path, false);
+        return Ok(json!({
+            "document": on_branch(&path)?,
+            "twin": document.twin.as_deref().map(on_branch).transpose()?,
+            "stale": false,
+            "rederiving": false,
+            "editable": false,
+            "askable": false,
+            "waiting": null,
+        }));
+    }
+    let waiting = waiting_change(deps, &docs, &path);
     let shown = match &waiting {
         Some((_, held)) => version(deps, &docs, held, &path, true)?,
         None => version(deps, &docs, &branch, &path, false)?,
@@ -412,14 +681,179 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
             .any(|row| !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)),
         None => false,
     };
+    let editable = check_owner_edit(&path, 0).is_ok();
     Ok(json!({
         "document": shown,
         "twin": twin,
         "stale": stale,
         "rederiving": rederiving,
-        "editable": check_owner_edit(&path, 0).is_ok(),
+        "editable": editable,
+        "askable": editable && !path.starts_with("docs/catervas/delivery/"),
         "waiting": waiting.map(|(change, held)| json!({ "change": change, "branch": held })),
     }))
+}
+
+/// The policy an HTML document is answered under: no script, no network, its own origin, and
+/// framed by this app alone.
+const POLICY: &str = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; \
+                      font-src data:; frame-ancestors 'self'";
+
+/// What fits a document to the reader's screen; a document's own styles come after it and win.
+const FIT: &str = concat!(
+    r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#,
+    "<style>",
+    "body { margin: 0 auto; padding: 16px; max-width: 72rem; overflow-wrap: anywhere }",
+    "img, svg, video, canvas { max-width: 100%; height: auto }",
+    "table, pre { display: block; max-width: 100%; overflow-x: auto }",
+    "</style>"
+);
+
+/// The end of the first `open` tag (`<head`, `<html`) in `lower`, which is not a longer name.
+fn after_tag(lower: &str, open: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(found) = lower[from..].find(open) {
+        let start = from + found + open.len();
+        if matches!(
+            lower.as_bytes().get(start),
+            Some(b'>' | b'/' | b' ' | b'\t' | b'\n' | b'\r')
+        ) {
+            return lower[start..].find('>').map(|end| start + end + 1);
+        }
+        from = start;
+    }
+    None
+}
+
+/// `document` with `FIT` after its `<head>`, else its `<html>`, else its doctype, else first.
+/// ponytail: the tag is found by text, not by parsing; use a parser if a document defeats it.
+fn fit_to_screen(document: &str) -> String {
+    let lower = document.to_ascii_lowercase();
+    let at = ["<head", "<html"]
+        .iter()
+        .find_map(|open| after_tag(&lower, open))
+        .or_else(|| {
+            lower
+                .find("<!doctype")
+                .and_then(|n| lower[n..].find('>').map(|end| n + end + 1))
+        })
+        .unwrap_or(0);
+    format!("{}{FIT}{}", &document[..at], &document[at..])
+}
+
+/// A regular file with no link on the way down from `base` along `path`, as text.
+fn plain_file(base: &std::path::Path, path: &str) -> Option<String> {
+    let mut at = base.to_path_buf();
+    for segment in path.split('/') {
+        at.push(segment);
+        if std::fs::symlink_metadata(&at)
+            .ok()?
+            .file_type()
+            .is_symlink()
+        {
+            return None;
+        }
+    }
+    // ponytail: the file is opened after the links were checked, so a link swapped in between
+    // is followed; the frame is sandboxed and has no network, and no dependency gives O_NOFOLLOW.
+    let regular = std::fs::symlink_metadata(&at).ok()?.is_file();
+    regular.then(|| std::fs::read_to_string(&at).ok()).flatten()
+}
+
+/// The text of the HTML document `path`, as the Files page reads it, or as `task` holds it.
+fn raw_text(deps: &ToolDeps, path: &str, task: Option<&str>) -> Option<String> {
+    let path = normalise(path)?;
+    if !path.starts_with("docs/catervas/")
+        || catervas_core::folders::DocumentFormat::of(&path)
+            != Some(catervas_core::folders::DocumentFormat::Html)
+    {
+        return None;
+    }
+    let in_branch = |rev: &str, path: &str| {
+        deps.git
+            .tree_entries(rev, path)
+            .ok()?
+            .into_iter()
+            .find(|entry| entry.path == path && is_file(entry))?;
+        deps.git.file_at(rev, path).ok()
+    };
+    if let Some(task) = task {
+        let id: catervas_core::contract::TaskId = task.parse().ok()?;
+        let contract = deps.files.read_contract(&id).ok()?;
+        return in_branch(&catervas_core::branch::task_branch(&contract), &path).or_else(|| {
+            let base = deps
+                .files
+                .root()
+                .join(".catervas/local/worktrees")
+                .join(id.as_str());
+            plain_file(&base, &path)
+        });
+    }
+    // A twin has no waiting change: only the human document does.
+    let held = match catervas_core::folders::human_of_twin(&path) {
+        Some(_) => None,
+        None => folder_docs(&deps.log)
+            .ok()
+            .and_then(|docs| waiting_change(deps, &docs, &path))
+            .map(|(_, held)| held),
+    };
+    let rev = match held {
+        Some(held) => held,
+        None => integration_branch(&deps.files.read_team().ok()?, &deps.git).ok()?,
+    };
+    // Else the first task waiting to merge that holds it, as the tree lists it.
+    in_branch(&rev, &path).or_else(|| {
+        pending(deps)
+            .ok()?
+            .iter()
+            .find_map(|waiting| in_branch(&waiting.branch, &path))
+    })
+}
+
+/// `GET /documents/raw?path=<path>[&task=<id>]`: an HTML document under its own policy, fitted to
+/// the screen. 403 from another host, 401 without a session, and 404, with no body, for all else.
+pub(super) async fn raw(
+    State(state): State<Arc<DaemonState>>,
+    headers: HeaderMap,
+    RawQuery(query): RawQuery,
+) -> Response {
+    let (Some(web), Some(deps)) = (state.web(), state.deps()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !super::web::own_host(&headers, web) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !super::web::has_session(&headers, web) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let asked = query.unwrap_or_default();
+    let named = |name: &str| {
+        url::form_urlencoded::parse(asked.as_bytes())
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+    };
+    let (Some(path), task) = (named("path"), named("task")) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let deps = Arc::clone(deps);
+    let text = off_the_worker(move || {
+        raw_text(&deps, &path, task.as_deref()).ok_or_else(|| Failure::new(NOT_FOUND, ""))
+    })
+    .await;
+    match text {
+        Ok(text) => (
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CONTENT_SECURITY_POLICY, POLICY),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                (header::REFERRER_POLICY, "no-referrer"),
+                (HeaderName::from_static("x-dns-prefetch-control"), "off"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            fit_to_screen(&text),
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -539,6 +973,7 @@ mod tests {
             deps,
             &team,
             &[(path.to_string(), text.to_string())],
+            &[],
             "docs(product): edit roadmap.md",
             Some("You <you@catervas.invalid>"),
         )
@@ -819,6 +1254,149 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_html_documents_with_their_agent_versions() {
+        let harness = project("files-html-tree", "pull_request");
+        write(&harness, &format!("{PRODUCT}/spec.html"), "<h1>spec</h1>\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/spec.agent.html"),
+            "<h1>agents</h1>\n",
+        );
+        write(&harness, &format!("{PRODUCT}/overview.md"), "overview\n");
+        write(&harness, &format!("{PRODUCT}/notes.txt"), "notes\n");
+        write(&harness, &format!("{PRODUCT}/x.htm"), "<h1>x</h1>\n");
+        commit(&harness, "the documents");
+        let listed = tree(&harness.daemon);
+        let found: Vec<(&str, Value)> = listed["folders"][0]["documents"]
+            .as_array()
+            .expect("documents")
+            .iter()
+            .map(|d| (d["path"].as_str().expect("path"), d["twin"].clone()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    "docs/catervas/product/spec.html",
+                    json!("docs/catervas/product/spec.agent.html")
+                ),
+                ("docs/catervas/product/overview.md", Value::Null),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn shows_a_document_whose_task_waits_to_merge() {
+        let harness = project("files-pending", "pull_request");
+        let spec = format!("{PRODUCT}/spec.html");
+        harness.project.filed("CTV-2", "in_progress", "task", None);
+        commit(&harness, "the task");
+        let branch = harness.branch("CTV-2");
+        git(&harness, &["checkout", "-b", &branch]);
+        write(&harness, &spec, "<h1>the task's spec</h1>\n");
+        commit(&harness, "the spec (CTV-2)");
+        git(&harness, &["checkout", "main"]);
+        harness
+            .project
+            .moved("CTV-2", "in_progress", "accepted", &json!({}));
+        let listed = tree(&harness.daemon);
+        assert_eq!(
+            listed["folders"][0]["documents"],
+            json!([{ "path": spec, "name": "Product description", "twin": null, "task": "CTV-2" }])
+        );
+        let opened = read_path(&harness, &spec);
+        assert_eq!(opened["document"]["text"], "<h1>the task's spec</h1>\n");
+        assert_eq!(opened["editable"], false);
+        let cookie = browse(&harness);
+        let (status, body) = tokio::runtime::Runtime::new()
+            .expect("a runtime")
+            .block_on(served(&harness, &cookie, &spec, ""));
+        assert_eq!(status, 200);
+        assert!(body.contains("the task's spec"), "{body}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn saves_the_owners_edit_of_an_html_document() {
+        let harness = project("files-html-save", "auto_merge");
+        let path = format!("{PRODUCT}/roadmap.html");
+        write(&harness, &path, "<h1>roadmap</h1>\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/roadmap.agent.html"),
+            "<h1>agents</h1>\n",
+        );
+        commit(&harness, "the documents");
+        let saved = save(
+            &harness,
+            &path,
+            "<h1>new roadmap</h1>\n",
+            &blob(&harness, &path),
+        );
+        assert_eq!(
+            saved["result"],
+            json!({ "change": 1, "branch": "docs/folder-1" }),
+            "{saved}"
+        );
+        assert_eq!(
+            git_output(&harness, &["show", &format!("docs/folder-1:{path}")]),
+            "<h1>new roadmap</h1>"
+        );
+        ticks(&harness);
+        let read = read(&harness.daemon, &path);
+        assert_eq!(read["document"]["text"], "<h1>new roadmap</h1>\n");
+        assert_eq!(read["stale"], true, "{read}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn askable_where_editable_but_delivery() {
+        let harness = Harness::new("files-askable", |wire| {
+            with_the_designer(wire);
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+            );
+        });
+        write(
+            &harness,
+            "docs/catervas/architecture/overview.html",
+            "<h1>o</h1>\n",
+        );
+        write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        write(
+            &harness,
+            "docs/catervas/architecture/notes.agent.html",
+            "<h1>n</h1>\n",
+        );
+        write(&harness, &format!("{PRODUCT}/spec.html"), "<h1>spec</h1>\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/spec.agent.html"),
+            "<h1>agents</h1>\n",
+        );
+        commit(&harness, "the documents");
+        let overview = read_path(&harness, "docs/catervas/architecture/overview.html");
+        assert_eq!(overview["askable"], true, "{overview}");
+        assert_eq!(overview["editable"], true);
+        let cadence = read_path(&harness, "docs/catervas/delivery/cadence.md");
+        assert_eq!(cadence["editable"], true, "{cadence}");
+        assert_eq!(cadence["askable"], false);
+        let stray = read_path(&harness, "docs/catervas/architecture/notes.agent.html");
+        assert_eq!(
+            (&stray["editable"], &stray["askable"]),
+            (&json!(false), &json!(false))
+        );
+        let reply = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "files.read", "params": { "path": format!("{PRODUCT}/spec.agent.html") } }),
+        );
+        assert_eq!(reply["error"]["code"], -32002, "{reply}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_nothing_the_tree_would_not_list() {
         let harness = project("files-not-listed", "pull_request");
         put_documents(&harness);
@@ -1016,12 +1594,16 @@ mod tests {
         ] {
             refused(outside, "x\n", &gone, "outside_folders", "/path");
         }
-        refused(
+        let not_a_document = refused(
             "docs/catervas/product/notes.txt",
             "x\n",
             &gone,
-            "not_markdown",
+            "not_a_document",
             "/path",
+        );
+        assert_eq!(
+            said(&not_a_document),
+            "Only a document that ends in .md or .html can be saved here."
         );
         refused(ROADMAP_TWIN, "x\n", &gone, "agent_twin", "/path");
         refused(
@@ -1122,5 +1704,749 @@ mod tests {
             harness.project.events(&[EventKind::FolderDocEdited]).len(),
             1
         );
+    }
+
+    const PORT: u16 = 49_731;
+    const HOST: &str = "127.0.0.1:49731";
+    const OVERVIEW_HTML: &str = "docs/catervas/architecture/overview.html";
+    const POLICY: &str = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'";
+
+    /// Turns the browser routes on and returns a live session's cookie.
+    fn browse(harness: &Harness) -> String {
+        use crate::daemon::web::{BrowserSessions, ConnectCodes, WebState};
+        use catervas_protocol::clock::FixedClock;
+        use chrono::TimeZone;
+        let now = chrono::Utc
+            .with_ymd_and_hms(2026, 10, 12, 9, 0, 0)
+            .single()
+            .expect("a time");
+        let sessions = BrowserSessions::open(None).expect("the sessions open");
+        let secret = sessions.issue(now).expect("a session");
+        assert!(harness.daemon.set_web(WebState {
+            codes: ConnectCodes::default(),
+            sessions,
+            project_root: harness.project.repo.path.clone(),
+            credential: None,
+            port: PORT,
+            clock: Arc::new(FixedClock::new(now)),
+            take_on_error: std::sync::Mutex::default(),
+            leaving: std::sync::Mutex::default(),
+            stores: Vec::new(),
+            env: std::collections::BTreeMap::new(),
+            in_use: None,
+            templates: None,
+            #[cfg(feature = "e2e")]
+            admit_local_preview: false,
+        }));
+        format!("catervas_session={secret}")
+    }
+
+    /// `GET /documents/raw?<query>`: its status, headers and body.
+    async fn raw(
+        state: &Arc<DaemonState>,
+        query: &str,
+        host: &str,
+        cookie: Option<&str>,
+    ) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
+        use tower::ServiceExt;
+        let mut request = axum::http::Request::get(format!("/documents/raw?{query}"))
+            .header(axum::http::header::HOST, host);
+        if let Some(cookie) = cookie {
+            request = request.header(axum::http::header::COOKIE, cookie);
+        }
+        let answer = crate::daemon::router(
+            Arc::clone(state),
+            "token",
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .oneshot(request.body(axum::body::Body::empty()).expect("a request"))
+        .await
+        .expect("the router answers");
+        let (parts, body) = answer.into_parts();
+        let body = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .expect("a body");
+        (
+            parts.status,
+            parts.headers,
+            String::from_utf8(body.to_vec()).expect("text"),
+        )
+    }
+
+    /// The document `path` asked by a signed-in browser, `extra` after the path in the query.
+    async fn served(harness: &Harness, cookie: &str, path: &str, extra: &str) -> (u16, String) {
+        let (status, _, body) = raw(
+            &harness.daemon,
+            &format!("path={path}{extra}"),
+            HOST,
+            Some(cookie),
+        )
+        .await;
+        (status.as_u16(), body)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_an_html_document_sandboxed() {
+        let harness = project("raw-sandboxed", "manual");
+        write(&harness, OVERVIEW_HTML, "<h1>the overview</h1>\n");
+        commit(&harness, "the overview");
+        let cookie = browse(&harness);
+        // The page reloads the frame with `v`, which the route ignores.
+        let (status, headers, body) = raw(
+            &harness.daemon,
+            &format!("path={OVERVIEW_HTML}&v=abc"),
+            HOST,
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, 200);
+        let header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+        };
+        assert_eq!(header("content-type"), "text/html; charset=utf-8");
+        assert_eq!(header("content-security-policy"), POLICY);
+        assert_eq!(header("x-content-type-options"), "nosniff");
+        assert_eq!(header("referrer-policy"), "no-referrer");
+        assert_eq!(header("x-dns-prefetch-control"), "off");
+        assert_eq!(header("cache-control"), "no-store");
+        assert!(body.contains("<h1>the overview</h1>"), "{body}");
+        assert_eq!(body.matches(super::FIT).count(), 1, "{body}");
+    }
+
+    #[test]
+    fn fits_the_document_to_the_screen() {
+        for (document, after) in [
+            (
+                "<!DOCTYPE html><html><head lang=\"en\"><title>t</title></head>",
+                "<head lang=\"en\">",
+            ),
+            ("<!doctype html><HTML lang=en><p>x</p>", "<HTML lang=en>"),
+            ("<!DOCTYPE html><p>x</p>", "<!DOCTYPE html>"),
+            ("<p>x</p>", ""),
+        ] {
+            let fitted = super::fit_to_screen(document);
+            assert_eq!(fitted.matches(super::FIT).count(), 1, "{fitted}");
+            assert_eq!(fitted.replacen(super::FIT, "", 1), document);
+            let at = fitted.find(super::FIT).expect("the block");
+            let wanted = document.find(after).map_or(0, |n| n + after.len());
+            assert_eq!(at, wanted, "{fitted}");
+        }
+        assert!(
+            super::FIT.contains(
+                r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#
+            )
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_the_owners_waiting_change_and_the_agent_version() {
+        let harness = project("raw-waiting", "manual");
+        let roadmap = format!("{PRODUCT}/roadmap.html");
+        let twin = format!("{PRODUCT}/roadmap.agent.html");
+        write(&harness, &roadmap, "<h1>roadmap</h1>\n");
+        write(&harness, &twin, "<h1>for agents</h1>\n");
+        commit(&harness, "the documents");
+        let cookie = browse(&harness);
+        let before = served(&harness, &cookie, &roadmap, "").await;
+        assert!(before.1.contains("<h1>roadmap</h1>"), "{before:?}");
+        owner_edit(&harness, &roadmap, "<h1>the owner's roadmap</h1>\n");
+        let (status, body) = served(&harness, &cookie, &roadmap, "").await;
+        assert_eq!(status, 200);
+        assert!(body.contains("<h1>the owner's roadmap</h1>"), "{body}");
+        let (status, body) = served(&harness, &cookie, &twin, "").await;
+        assert_eq!(status, 200);
+        assert!(body.contains("<h1>for agents</h1>"), "{body}");
+        assert!(!body.contains("owner's"), "{body}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_a_tasks_branch_then_its_worktree() {
+        let harness = project("raw-task", "manual");
+        let spec = format!("{PRODUCT}/spec.html");
+        let plan = format!("{PRODUCT}/plan.html");
+        for id in ["CTV-2", "CTV-3", "CTV-4"] {
+            harness.project.filed(id, "in_progress", "task", None);
+        }
+        commit(&harness, "the tasks");
+        let branch = harness.project.branch("CTV-2");
+        git(&harness, &["checkout", "-b", &branch]);
+        write(&harness, &spec, "<h1>the task's spec</h1>\n");
+        write(&harness, "docs/other.html", "<h1>other</h1>\n");
+        commit(&harness, "the spec");
+        git(&harness, &["checkout", "main"]);
+        let cookie = browse(&harness);
+        let (status, body) = served(&harness, &cookie, &spec, "&task=CTV-2").await;
+        assert_eq!(status, 200);
+        assert!(body.contains("<h1>the task's spec</h1>"), "{body}");
+        // The branch wins over the worktree.
+        let worktree_spec = harness
+            .project
+            .repo
+            .path
+            .join(".catervas/local/worktrees/CTV-2")
+            .join(&spec);
+        std::fs::create_dir_all(worktree_spec.parent().expect("a folder")).expect("a folder");
+        std::fs::write(&worktree_spec, "<h1>the worktree's spec</h1>\n").expect("written");
+        let (_, body) = served(&harness, &cookie, &spec, "&task=CTV-2").await;
+        assert!(body.contains("the task's spec"), "{body}");
+        // Only documents under docs/catervas/ are served, with a task too.
+        let other = served(&harness, &cookie, "docs/other.html", "&task=CTV-2").await;
+        assert_eq!(other, (404, String::new()));
+        // Main does not hold it.
+        assert_eq!(served(&harness, &cookie, &spec, "").await.0, 404);
+
+        // A plan only in the worktree.
+        let root = harness.project.repo.path.join(".catervas/local/worktrees");
+        let file = root.join("CTV-3").join(&plan);
+        std::fs::create_dir_all(file.parent().expect("a folder")).expect("a folder");
+        std::fs::write(&file, "<h1>drafted</h1>\n").expect("written");
+        let (status, body) = served(&harness, &cookie, &plan, "&task=CTV-3").await;
+        assert_eq!(status, 200);
+        assert!(body.contains("<h1>drafted</h1>"), "{body}");
+
+        // A link on the way gives nothing.
+        let outside = harness.project.repo.path.join("outside");
+        std::fs::create_dir_all(outside.join("catervas/product")).expect("a folder");
+        std::fs::write(
+            outside.join("catervas/product/plan.html"),
+            "<h1>secret</h1>\n",
+        )
+        .expect("written");
+        std::fs::create_dir_all(root.join("CTV-4")).expect("a folder");
+        std::os::unix::fs::symlink(&outside, root.join("CTV-4/docs")).expect("a link");
+        let through = served(&harness, &cookie, &plan, "&task=CTV-4").await;
+        assert_eq!(through, (404, String::new()));
+        // A path that climbs out of the worktree gives nothing, written or encoded.
+        for climb in [
+            "docs/catervas/../../../../../../outside/catervas/product/plan.html",
+            "docs%2Fcatervas%2F%2e%2e%2F%2e%2e%2F%2e%2e%2F%2e%2e%2F%2e%2e%2F%2e%2e%2Foutside%2Fcatervas%2Fproduct%2Fplan.html",
+        ] {
+            let up = served(&harness, &cookie, climb, "&task=CTV-3").await;
+            assert_eq!(up, (404, String::new()), "{climb}");
+        }
+        // And a link as the file itself.
+        let linked = format!("{PRODUCT}/linked.html");
+        std::os::unix::fs::symlink(&file, root.join("CTV-3").join(&linked)).expect("a link");
+        let itself = served(&harness, &cookie, &linked, "&task=CTV-3").await;
+        assert_eq!(itself, (404, String::new()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_what_it_does_not_serve() {
+        let harness = project("raw-refused", "manual");
+        write(&harness, OVERVIEW_HTML, "<h1>the overview</h1>\n");
+        write(&harness, OVERVIEW, "the overview\n");
+        write(&harness, "docs/other.html", "<h1>other</h1>\n");
+        commit(&harness, "the documents");
+        let ask = format!("path={OVERVIEW_HTML}");
+        // No browser routes: 404.
+        let (status, _, body) = raw(&harness.daemon, &ask, HOST, None).await;
+        assert_eq!((status.as_u16(), body.as_str()), (404, ""));
+        let cookie = browse(&harness);
+        let (status, _, body) = raw(&harness.daemon, &ask, HOST, None).await;
+        assert_eq!((status.as_u16(), body.as_str()), (401, ""));
+        let (status, _, body) = raw(&harness.daemon, &ask, "evil.example", Some(&cookie)).await;
+        assert_eq!((status.as_u16(), body.as_str()), (403, ""));
+        assert_eq!(served(&harness, &cookie, OVERVIEW_HTML, "").await.0, 200);
+        for query in [
+            format!("path={OVERVIEW}"),
+            "path=docs/catervas/../other.html".to_string(),
+            "path=docs/other.html".to_string(),
+            "path=docs/catervas/architecture/missing.html".to_string(),
+            "path=docs/catervas/architecture".to_string(),
+            String::new(),
+            format!("{ask}&task=nope"),
+            format!("{ask}&task=CTV-99"),
+        ] {
+            let (status, _, body) = raw(&harness.daemon, &query, HOST, Some(&cookie)).await;
+            assert_eq!((status.as_u16(), body.as_str()), (404, ""), "{query}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answers_404_with_no_project() {
+        use tower::ServiceExt;
+        let home = std::env::temp_dir().join(format!("catervas-raw-setup-{}", std::process::id()));
+        let (state, _host) = crate::daemon::web::tests::in_setup(&home, "");
+        let web = state.web().expect("the browser routes are on");
+        let secret = web.sessions.issue(web.clock.now()).expect("a session");
+        let request = axum::http::Request::get(
+            "/documents/raw?path=docs/catervas/architecture/overview.html",
+        )
+        .header(axum::http::header::HOST, HOST)
+        .header(
+            axum::http::header::COOKIE,
+            format!("catervas_session={secret}"),
+        )
+        .body(axum::body::Body::empty())
+        .expect("a request");
+        let answer =
+            crate::daemon::router(state, "token", tokio_util::sync::CancellationToken::new())
+                .oneshot(request)
+                .await
+                .expect("the router answers");
+        let status = answer.status().as_u16();
+        let body = axum::body::to_bytes(answer.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        assert_eq!((status, body.len()), (404, 0));
+    }
+
+    /// The reply to `files.ask_change`.
+    fn ask(harness: &Harness, path: &str, words: &str) -> Value {
+        rpc(
+            &harness.daemon,
+            "files.ask_change",
+            &json!({ "path": path, "words": words }),
+        )
+    }
+
+    /// A project with a Scrum Master, holding the documents the asks are about.
+    fn asked_project(name: &str) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            with_the_designer(wire);
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+            );
+        });
+        write(&harness, OVERVIEW_HTML, "<h1>overview</h1>\n");
+        write(&harness, &format!("{PRODUCT}/spec.html"), "<h1>spec</h1>\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/spec.agent.html"),
+            "<h1>agents</h1>\n",
+        );
+        write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        write(
+            &harness,
+            "docs/catervas/marketing/plans/MP-1.md",
+            "a marketing plan\n",
+        );
+        write(
+            &harness,
+            "docs/catervas/marketing/brand/persona.md",
+            "the persona\n",
+        );
+        commit(&harness, "the documents");
+        harness
+    }
+
+    /// The contract `id` as JSON.
+    fn contract_of(harness: &Harness, id: &str) -> Value {
+        serde_json::to_value(
+            harness
+                .project
+                .deps
+                .files
+                .read_contract(&id.parse().expect("an id"))
+                .expect("the contract is filed"),
+        )
+        .expect("a contract is JSON")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_the_owners_change_for_the_folders_role() {
+        let harness = asked_project("files-ask-change");
+        let reply = ask(&harness, OVERVIEW_HTML, "  Say less about the cache.  ");
+        conforms(&reply["result"], "filesAskChangeResult", &reply);
+        assert_eq!(reply["result"], json!({ "task_id": "CTV-1" }), "{reply}");
+
+        let contract = contract_of(&harness, "CTV-1");
+        assert_eq!(contract["assignee_role"], "architect", "{contract}");
+        assert_eq!(contract["created_by"], "human");
+        assert_eq!(contract["title"], "Change Overview");
+        assert_eq!(contract["allowed_paths"], json!([OVERVIEW_HTML]));
+        assert!(
+            contract["intent"].as_str().is_some_and(
+                |intent| intent.ends_with("in these words:\n\nSay less about the cache.")
+            ),
+            "{contract}"
+        );
+
+        let filed = harness
+            .project
+            .events(&[EventKind::TaskCreated, EventKind::RequestTriaged]);
+        let kinds: Vec<_> = filed.iter().map(|event| event.body.kind()).collect();
+        assert_eq!(kinds, [EventKind::TaskCreated, EventKind::RequestTriaged]);
+        let created = catervas_protocol::event::event_to_value(&filed[0])["body"].clone();
+        assert_eq!(created["filed_as"], "owner_change", "{created}");
+        assert_eq!(created["created_by"], "human");
+        let triaged = catervas_protocol::event::event_to_value(&filed[1])["body"].clone();
+        assert_eq!(triaged["size"], "small", "{triaged}");
+        assert_eq!(triaged["triaged_by"], "catervas");
+
+        // A pair's ask reaches both files.
+        let spec = format!("{PRODUCT}/spec.html");
+        let reply = ask(&harness, &spec, "Add a refund limit.");
+        assert_eq!(reply["result"], json!({ "task_id": "CTV-2" }), "{reply}");
+        let pair = contract_of(&harness, "CTV-2");
+        assert_eq!(pair["assignee_role"], "product_manager");
+        assert_eq!(
+            pair["allowed_paths"],
+            json!([spec, format!("{PRODUCT}/spec.agent.html")])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_ask_the_owner_may_not_make() {
+        let harness = asked_project("files-ask-refused");
+        let refused = |path: &str, code: &str, words: &str| {
+            let reply = ask(&harness, path, "Change it.");
+            assert_eq!(
+                refusal(&reply),
+                (code.to_string(), "/path".to_string()),
+                "{path}: {reply}"
+            );
+            assert_eq!(said(&reply), words, "{path}");
+            assert!(
+                harness
+                    .project
+                    .events(&[EventKind::TaskCreated, EventKind::RequestTriaged])
+                    .is_empty(),
+                "{path}"
+            );
+        };
+        let cannot = "This document can't be changed from here.";
+        refused(
+            &format!("{PRODUCT}/spec.agent.html"),
+            "not_editable",
+            cannot,
+        );
+        refused(
+            "docs/catervas/marketing/plans/MP-1.md",
+            "not_editable",
+            cannot,
+        );
+        refused("README.md", "not_editable", cannot);
+        refused(
+            "docs/catervas/architecture/gone.html",
+            "not_editable",
+            cannot,
+        );
+        refused(
+            "docs/catervas/marketing/brand/persona.md",
+            "no_owner",
+            "No one on your team owns this folder right now. Resume or add its role first.",
+        );
+        refused(
+            "docs/catervas/delivery/cadence.md",
+            "no_task_taker",
+            "The Scrum Master keeps this document up to date at its retro.",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_delivery_ask_is_for_the_scrum_master_even_without_one() {
+        let harness = Harness::new("files-ask-no-sm", with_the_designer);
+        write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        commit(&harness, "the documents");
+        let reply = ask(&harness, "docs/catervas/delivery/cadence.md", "Change it.");
+        assert_eq!(
+            refusal(&reply),
+            ("no_task_taker".to_string(), "/path".to_string()),
+            "{reply}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_human_documents_ask_names_its_twin_even_when_it_has_none() {
+        let harness = Harness::new("files-ask-lone-spec", with_the_designer);
+        let spec = format!("{PRODUCT}/spec.html");
+        write(&harness, &spec, "<h1>spec</h1>\n");
+        commit(&harness, "the spec alone");
+        let reply = ask(&harness, &spec, "Add a refund limit.");
+        assert_eq!(reply["result"], json!({ "task_id": "CTV-1" }), "{reply}");
+        assert_eq!(
+            contract_of(&harness, "CTV-1")["allowed_paths"],
+            json!([spec, format!("{PRODUCT}/spec.agent.html")])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_blank_words() {
+        let harness = asked_project("files-ask-blank");
+        let reply = ask(&harness, OVERVIEW_HTML, " \t\n ");
+        assert_eq!(
+            refusal(&reply),
+            ("no_words".to_string(), "/words".to_string()),
+            "{reply}"
+        );
+        assert_eq!(said(&reply), "Say what should change.");
+        assert!(
+            harness
+                .project
+                .events(&[EventKind::TaskCreated, EventKind::RequestTriaged])
+                .is_empty()
+        );
+    }
+
+    /// The reply to `files.rewrite`.
+    fn rewrite(harness: &Harness) -> Value {
+        rpc(&harness.daemon, "files.rewrite", &json!({}))
+    }
+
+    /// The ids `files.rewrite` answered.
+    fn rewritten(reply: &Value) -> Vec<String> {
+        conforms(&reply["result"], "filesRewriteResult", reply);
+        reply["result"]["tasks"]
+            .as_array()
+            .unwrap_or_else(|| panic!("tasks: {reply}"))
+            .iter()
+            .map(|id| id.as_str().expect("an id").to_string())
+            .collect()
+    }
+
+    /// `document_rewrite.started`'s tasks, one array for each event.
+    fn rewrite_events(harness: &Harness) -> Vec<Value> {
+        harness
+            .project
+            .events(&[EventKind::DocumentRewriteStarted])
+            .iter()
+            .map(|event| catervas_protocol::event::event_to_value(event)["body"]["tasks"].clone())
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_rewrite_task_for_each_folder_with_markdown() {
+        let harness = project("files-rewrite", "manual");
+        write(&harness, &format!("{PRODUCT}/spec.md"), "spec\n");
+        write(
+            &harness,
+            &format!("{PRODUCT}/spec.agent.md"),
+            "spec agents\n",
+        );
+        write(&harness, OVERVIEW, "the overview\n");
+        write(
+            &harness,
+            "docs/catervas/marketing/plans/MP-1.md",
+            "a marketing plan\n",
+        );
+        commit(&harness, "the documents");
+        let tasks = rewritten(&rewrite(&harness));
+        assert_eq!(tasks, ["CTV-1", "CTV-2"]);
+
+        let product = contract_of(&harness, "CTV-1");
+        assert_eq!(product["assignee_role"], "product_manager", "{product}");
+        assert_eq!(product["allowed_paths"], json!([format!("{PRODUCT}/**")]));
+        assert_eq!(product["created_by"], "human");
+        assert_eq!(
+            product["title"],
+            "Rewrite the Product Manager's documents as HTML"
+        );
+        assert_eq!(
+            product["intent"],
+            "The owner asked for the team's documents as HTML. Rewrite each of these documents in \
+             docs/catervas/product as <name>.html, saying everything it says, and delete the .md \
+             it replaces, with its agent version, by naming each in `removed` when you commit with \
+             catervas_git_commit: spec.md, spec.agent.md."
+        );
+        let reaches = |contract: &Value| {
+            let paths: Vec<String> = contract["allowed_paths"]
+                .as_array()
+                .expect("paths")
+                .iter()
+                .map(|path| path.as_str().expect("a path").to_string())
+                .collect();
+            catervas_core::folders::may_change_an_owner_document(&paths)
+        };
+        assert!(reaches(&product), "the spec comes back to the owner");
+        let architect = contract_of(&harness, "CTV-2");
+        assert_eq!(architect["assignee_role"], "architect", "{architect}");
+        assert_eq!(
+            architect["allowed_paths"],
+            json!(["docs/catervas/architecture/**"])
+        );
+        assert!(!reaches(&architect));
+        let artifact = |contract: &Value, path: &str| {
+            contract["exit_criteria"]
+                .as_array()
+                .expect("criteria")
+                .iter()
+                .find(|criterion| criterion["verification"]["path"] == path)
+                .map_or_else(
+                    || panic!("no criterion for {path}: {contract}"),
+                    |criterion| criterion["verification"].clone(),
+                )
+        };
+        let spec = artifact(&product, &format!("{PRODUCT}/spec.html"));
+        assert_eq!(spec["method"], "artifact");
+        assert_eq!(spec["must_contain"], json!(["<h1"]));
+        artifact(&product, &format!("{PRODUCT}/spec.agent.html"));
+        let overview = artifact(&architect, "docs/catervas/architecture/overview.html");
+        assert_eq!(overview["must_contain"], json!(["<h1", "<svg"]));
+
+        let created: Vec<Value> = harness
+            .project
+            .events(&[EventKind::TaskCreated])
+            .iter()
+            .map(|event| {
+                catervas_protocol::event::event_to_value(event)["body"]["filed_as"].clone()
+            })
+            .collect();
+        assert_eq!(
+            created,
+            [json!("document_rewrite"), json!("document_rewrite")]
+        );
+        assert_eq!(rewrite_events(&harness), [json!(["CTV-1", "CTV-2"])]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_role_without_a_reviewer_gets_no_rewrite_task() {
+        // No Architect and no Developer to review the Designer; the Scrum Master reviews the
+        // Product Manager.
+        let harness = Harness::new("files-rewrite-no-reviewer", |wire| {
+            use catervas_core::team::fixtures::an_agent_wire;
+            wire["agents"] = json!([
+                an_agent_wire("pm", "product_manager"),
+                an_agent_wire("sm", "scrum_master"),
+                an_agent_wire("iris", "ui_ux_designer"),
+            ]);
+        });
+        write(&harness, &format!("{PRODUCT}/spec.md"), "spec\n");
+        write(&harness, "docs/catervas/design/screens.md", "screens\n");
+        commit(&harness, "the documents");
+        let tasks = rewritten(&rewrite(&harness));
+        assert_eq!(tasks, ["CTV-1"]);
+        assert_eq!(
+            contract_of(&harness, "CTV-1")["assignee_role"],
+            "product_manager"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_delivery_only_rewrite_records_no_tasks() {
+        let harness = Harness::new("files-rewrite-delivery", |wire| {
+            with_the_designer(wire);
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+            );
+        });
+        write(&harness, "docs/catervas/delivery/cadence.md", "cadence\n");
+        commit(&harness, "the cadence");
+        let reply = rewrite(&harness);
+        assert_eq!(rewritten(&reply), Vec::<String>::new(), "{reply}");
+        assert_eq!(rewrite_events(&harness), [json!([])]);
+        assert!(
+            harness
+                .project
+                .events(&[EventKind::TaskCreated, EventKind::RequestTriaged])
+                .is_empty()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_rewrite_it_cannot_start() {
+        let refused = |reply: &Value, code: &str, words: &str| {
+            assert_eq!(refusal(reply), (code.to_string(), String::new()), "{reply}");
+            assert_eq!(said(reply), words);
+        };
+        // A Markdown team.
+        let markdown = Harness::new("files-rewrite-markdown", |wire| {
+            with_the_designer(wire);
+            wire["policy"]["document_format"] = json!("markdown");
+        });
+        write(&markdown, &format!("{PRODUCT}/spec.md"), "spec\n");
+        commit(&markdown, "the spec");
+        refused(
+            &rewrite(&markdown),
+            "not_html",
+            "Turn on Write documents as HTML first.",
+        );
+
+        // A Markdown team holding only HTML is still refused for its format first.
+        let only_html = Harness::new("files-rewrite-markdown-html", |wire| {
+            with_the_designer(wire);
+            wire["policy"]["document_format"] = json!("markdown");
+        });
+        write(&only_html, &format!("{PRODUCT}/spec.html"), "<h1>s</h1>\n");
+        commit(&only_html, "the spec");
+        refused(
+            &rewrite(&only_html),
+            "not_html",
+            "Turn on Write documents as HTML first.",
+        );
+
+        // Delivery's Markdown is no one's to rewrite without a Scrum Master.
+        let lone = Harness::new("files-rewrite-no-sm", with_the_designer);
+        write(&lone, "docs/catervas/delivery/cadence.md", "cadence\n");
+        commit(&lone, "the cadence");
+        refused(
+            &rewrite(&lone),
+            "nothing_to_rewrite",
+            "Every document your team can rewrite is already HTML.",
+        );
+
+        // `plans/MP-notes.md` is not a marketing plan, so it is rewritten.
+        let notes = Harness::new("files-rewrite-notes", with_the_marketing_specialist);
+        write(
+            &notes,
+            "docs/catervas/marketing/plans/MP-notes.md",
+            "notes\n",
+        );
+        commit(&notes, "the notes");
+        assert_eq!(rewritten(&rewrite(&notes)), ["CTV-1"]);
+
+        // Nothing but a plan, and no delivery `.md`.
+        let plans = Harness::new("files-rewrite-nothing", with_the_marketing_specialist);
+        write(
+            &plans,
+            "docs/catervas/marketing/plans/MP-1.md",
+            "a marketing plan\n",
+        );
+        write(
+            &plans,
+            "docs/catervas/delivery/cadence.html",
+            "<h1>c</h1>\n",
+        );
+        commit(&plans, "the plan");
+        refused(
+            &rewrite(&plans),
+            "nothing_to_rewrite",
+            "Every document your team can rewrite is already HTML.",
+        );
+        assert!(rewrite_events(&plans).is_empty());
+
+        // A rewrite whose tasks are still on the board.
+        let harness = project("files-rewrite-open", "manual");
+        write(&harness, &format!("{PRODUCT}/spec.md"), "spec\n");
+        write(&harness, OVERVIEW, "the overview\n");
+        commit(&harness, "the documents");
+        assert_eq!(rewritten(&rewrite(&harness)), ["CTV-1", "CTV-2"]);
+        let open = "Your team is still rewriting its documents.";
+        refused(&rewrite(&harness), "rewrite_open", open);
+        harness
+            .project
+            .moved("CTV-1", "ready", "accepted", &json!({}));
+        refused(&rewrite(&harness), "rewrite_open", open);
+        harness
+            .project
+            .moved("CTV-2", "ready", "cancelled", &json!({}));
+        assert_eq!(rewritten(&rewrite(&harness)), ["CTV-3", "CTV-4"]);
+        assert_eq!(rewrite_events(&harness).len(), 2);
+        // The newest rewrite is the one that counts.
+        refused(&rewrite(&harness), "rewrite_open", open);
+        // And an open rewrite is refused as open, though no Markdown is left.
+        git(
+            &harness,
+            &["rm", "-q", &format!("{PRODUCT}/spec.md"), OVERVIEW],
+        );
+        commit(&harness, "the rewrite lands");
+        refused(&rewrite(&harness), "rewrite_open", open);
     }
 }

@@ -7,7 +7,7 @@ description: Use when the task touches the business's name, logo, colours, type,
 
 The brand kit is the one document that says how the business looks and sounds. Every other piece
 of work, yours and other roles', starts from it, so keep it short, true and current. It lives in
-`docs/catervas/marketing/brand/brand-kit.md`, with its files under `docs/catervas/marketing/brand/assets/`.
+`docs/catervas/marketing/brand/brand-kit`, with its files under `docs/catervas/marketing/brand/assets/`.
 
 ## 1. Start from what the business already has
 

@@ -325,6 +325,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "name": "shop-api",
             "path": "/home/me/Code/shop-api"
         }),
+        EventKind::DocumentRewriteStarted => json!({ "tasks": ["CTV-1", "CTV-2"] }),
         EventKind::ProjectStarted => json!({
             "name": "little-oak-cakes",
             "description": "A bakery that sells cakes online and bakes to order."

@@ -224,6 +224,7 @@ describe("settings directory", () => {
 			en.rulesSpendTitle,
 			en.rulesFinish,
 			en.rulesPlanning,
+			en.rulesDocuments,
 			en.planTitle,
 			en.uiPathsTitle,
 		];
@@ -233,7 +234,7 @@ describe("settings directory", () => {
 			[
 				"work",
 				en.sectionWork,
-				[en.rulesFinish, en.rulesPlanning, en.planTitle],
+				[en.rulesFinish, en.rulesPlanning, en.rulesDocuments, en.planTitle],
 			],
 		] as const;
 		for (const [path, name, held] of pages) {
@@ -252,6 +253,11 @@ describe("settings directory", () => {
 				expect(
 					main().getByRole("heading", { level: 3, name: part }),
 				).toBeTruthy();
+			expect(
+				main()
+					.getAllByRole("heading", { level: 3 })
+					.map((h) => h.textContent),
+			).toEqual(held);
 			for (const part of parts) {
 				const region = main().queryByRole("region", { name: part });
 				// The patterns come with Advanced, not with the page.

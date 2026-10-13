@@ -54,6 +54,8 @@ export type Team = {
 		permissions?: { runCommands?: boolean; push?: boolean };
 		/** Whether work waits for a sprint (step 15); absent means no. */
 		planInSprints?: boolean;
+		/** The format new documents are written in; absent means HTML. */
+		documentFormat?: "html" | "markdown";
 		[key: string]: unknown;
 	};
 	rules: {
@@ -210,8 +212,13 @@ function teamDraftOf(
 		start,
 	};
 	if ((start === "saved" || start === "builtin") && template) {
-		const { permissions, judgment, integration, planInSprints } =
-			template.policy;
+		const {
+			permissions,
+			judgment,
+			integration,
+			planInSprints,
+			documentFormat,
+		} = template.policy;
 		const { dailyUsd: _, ...budgets } = proposed.team.budgets;
 		return {
 			...base,
@@ -225,6 +232,7 @@ function teamDraftOf(
 					integration,
 					// A saved team without the answer plans in sprints, as any new team.
 					...(planInSprints !== undefined && { planInSprints }),
+					...(documentFormat !== undefined && { documentFormat }),
 				},
 				budgets:
 					template.budgets.dailyUsd === undefined

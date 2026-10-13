@@ -1,4 +1,6 @@
 import {
+	Avatar,
+	type AvatarKey,
 	Button,
 	Choice,
 	Dialog,
@@ -373,7 +375,13 @@ function Editor({
 	return (
 		<div className={styles.page}>
 			<Link to="/team">{t("agentBack")}</Link>
-			<h1 className={styles.title}>{say("agentTitle")}</h1>
+			<div className={styles.titled}>
+				{/* The heading names the agent, so its picture says nothing more. */}
+				{saved.avatar && (
+					<Avatar avatarKey={saved.avatar as AvatarKey} name="" size={64} />
+				)}
+				<h1 className={styles.title}>{say("agentTitle")}</h1>
+			</div>
 			<TextField
 				id="agent-name"
 				label={t("agentName")}

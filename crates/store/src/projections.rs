@@ -788,7 +788,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::RepoRemoved(_)
         | EventBody::RepoMoved(_)
         // The epic's board row is made by its `task.created`; this event only says what it is for.
-        | EventBody::CatervaficationStarted(_) => Ok(()),
+        | EventBody::CatervaficationStarted(_)
+        | EventBody::DocumentRewriteStarted(_) => Ok(()),
     }
 }
 

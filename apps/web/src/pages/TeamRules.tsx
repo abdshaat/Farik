@@ -1,10 +1,11 @@
-import { Button, InfoTip, TextField } from "@catervas/ui";
+import { Button, InfoTip, Switch, TextField } from "@catervas/ui";
 import { type ReactNode, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
+import type { FilesTree } from "./files.ts";
 import styles from "./pages.module.css";
 import {
 	formOf,
@@ -260,6 +261,87 @@ export function Planning(part: Part) {
 				}
 			/>
 			{foot}
+		</Part>
+	);
+}
+
+/** A Markdown document the rewrite would take: a marketing plan stays as it was approved. */
+const rewritable = (path: string) =>
+	path.endsWith(".md") &&
+	!/\/marketing\/plans\/MP-[1-9]\d*(\.agent)?\.md$/.test(path);
+
+/** "Documents": the format new ones are written in, and the rewrite of the Markdown that remains. */
+export function Documents(part: Part) {
+	const { saved, defaults } = part;
+	const { client } = useConnection();
+	const { data: tree } = useQuery<FilesTree>("files.tree", {});
+	const [mine, setMine] = useState<boolean>();
+	// A team file without the key writes HTML.
+	const was = saved.policy.documentFormat !== "markdown";
+	const now = mine ?? was;
+	const next =
+		now === was
+			? saved
+			: {
+					...saved,
+					policy: {
+						...saved.policy,
+						documentFormat: now ? ("html" as const) : ("markdown" as const),
+					},
+				};
+	const { foot } = useChange(part, next);
+	const [pending, setPending] = useState(false);
+	const [state, setState] = useState<
+		{ started: boolean } | { refused: string }
+	>();
+	const markdown = tree?.folders.some((f) =>
+		f.documents.some((d) => [d.path, d.twin].some((p) => p && rewritable(p))),
+	);
+	const rewrite = async () => {
+		if (!client) return;
+		setPending(true);
+		try {
+			await client.call("files.rewrite", {});
+			setState({ started: true });
+		} catch (e) {
+			setState({ refused: saidAll(e) });
+		}
+		setPending(false);
+	};
+	return (
+		<Part id="rules-documents" title={t("rulesDocuments")}>
+			<Switch
+				id="document-format"
+				label={t("documentsHtml")}
+				info={<Bullets text={t("documentsHtmlNote")} />}
+				checked={now}
+				onChange={setMine}
+			/>
+			<PutBack
+				onClick={
+					defaults &&
+					(() => setMine(defaults.policy.documentFormat !== "markdown"))
+				}
+			/>
+			{foot}
+			{was && markdown && (
+				<div>
+					<Button busy={pending} onClick={rewrite}>
+						{t("documentsRewrite")}
+					</Button>
+					<InfoTip id="documents-rewrite-info">
+						<Bullets text={t("documentsRewriteNote")} />
+					</InfoTip>
+					{state && "started" in state && (
+						<p role="status">{t("documentsRewriteStarted")}</p>
+					)}
+					{state && "refused" in state && (
+						<p role="alert" className={styles.alert}>
+							{state.refused}
+						</p>
+					)}
+				</div>
+			)}
 		</Part>
 	);
 }

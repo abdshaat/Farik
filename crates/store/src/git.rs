@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use catervas_core::folders::{
-    PRODUCT_PLAN, agent_twin, is_human_document, product_plan_approved, twin_is_stale,
+    DocumentFormat, PRODUCT_PLAN_STEMS, agent_twin, is_human_document, product_plan_approved,
+    twin_is_stale, with_format,
 };
 use catervas_core::team::Team;
 
@@ -723,13 +724,16 @@ impl Git {
     }
 
     /// Makes the branch `branch` at `from` with one commit that writes `files` (`(path, text)`,
-    /// repository-relative), in the root's checkout as `merge` does, and puts the branch that was
-    /// checked out back (`docs/SPEC.md` 5.14).
+    /// repository-relative) and removes `removed`, in the root's checkout as `merge` does, and
+    /// puts the branch that was checked out back (`docs/SPEC.md` 5.14).
     ///
     /// In order: `Linked` when a file, or a directory between the root and it, is a symbolic link;
-    /// `Busy` when `git status` names any of the files; `Unchanged` when every file's text equals
-    /// the file at `from`. Otherwise `git checkout -b`, each file written, `git add`, and
-    /// `git commit --only` over the files, so nothing else the owner staged is committed. The
+    /// `Busy` when `git status` names any of the files or removed paths; `Unchanged` when every
+    /// file's text equals the file at `from` and `from` holds none of the removed paths (a
+    /// removed path it lacks is left alone, even when the owner has an ignored file there).
+    /// Otherwise
+    /// `git checkout -b`, each file written and each removed path deleted, `git add`, and
+    /// `git commit --only` over them, so nothing else the owner staged is committed. The
     /// commit's author is `author` (`Name <email>`) when given, and its committer the person git
     /// knows there. **Like `merge`, it moves HEAD, and nothing here keeps two callers apart.** A
     /// failure after the branch was made takes everything back: the files restored or removed and
@@ -745,43 +749,60 @@ impl Git {
         branch: &str,
         from: &str,
         files: &[(String, String)],
+        removed: &[String],
         message: &str,
         author: Option<&str>,
     ) -> Result<CommitOutcome, GitError> {
         self.require_repository()?;
         let was_on = self.current_branch()?;
-        if let Some(link) = self.first_link(files) {
+        let paths: Vec<&str> = files
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .chain(removed.iter().map(String::as_str))
+            .collect();
+        if let Some(link) = self.first_link(&paths) {
             return Ok(CommitOutcome::Linked(link));
         }
-        let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
         let busy = self.uncommitted(&paths)?;
         if !busy.is_empty() {
             return Ok(CommitOutcome::Busy(busy));
         }
-        if files
+        let removed: Vec<&str> = removed
             .iter()
-            .all(|(path, text)| self.file_at(from, path).is_ok_and(|held| held == *text))
+            .map(String::as_str)
+            .filter(|path| self.file_at(from, path).is_ok())
+            .collect();
+        if removed.is_empty()
+            && files
+                .iter()
+                .all(|(path, text)| self.file_at(from, path).is_ok_and(|held| held == *text))
         {
             return Ok(CommitOutcome::Unchanged);
         }
+        let paths: Vec<&str> = files
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .chain(removed.iter().copied())
+            .collect();
         self.at_root(&["checkout", "-b", branch, from])?;
-        let sha = match self.commit_files_on_the_new_branch(files, &paths, message, author) {
-            Ok(sha) => sha,
-            Err(failure) => {
-                self.take_back(from, files, &paths);
-                // Best effort: the failure being reported is the one worth keeping.
-                let _ = self.at_root(&["checkout", &was_on]);
-                let _ = self.at_root(&["branch", "-D", branch]);
-                return Err(failure);
-            }
-        };
+        let sha =
+            match self.commit_files_on_the_new_branch(files, &removed, &paths, message, author) {
+                Ok(sha) => sha,
+                Err(failure) => {
+                    self.take_back(from, files, &paths);
+                    // Best effort: the failure being reported is the one worth keeping.
+                    let _ = self.at_root(&["checkout", &was_on]);
+                    let _ = self.at_root(&["branch", "-D", branch]);
+                    return Err(failure);
+                }
+            };
         self.at_root(&["checkout", &was_on])?;
         Ok(CommitOutcome::Committed { sha })
     }
 
     /// The first symbolic link on the way to a file, root first, or the file itself.
-    fn first_link(&self, files: &[(String, String)]) -> Option<String> {
-        for (path, _) in files {
+    fn first_link(&self, paths: &[&str]) -> Option<String> {
+        for path in paths {
             let mut so_far = String::new();
             for segment in path.split('/') {
                 if !so_far.is_empty() {
@@ -816,10 +837,12 @@ impl Git {
             .collect())
     }
 
-    /// Writes, stages and commits `files` on the branch just made.
+    /// Writes `files`, deletes `removed` (paths `from` holds), stages and commits them on the
+    /// branch just made.
     fn commit_files_on_the_new_branch(
         &self,
         files: &[(String, String)],
+        removed: &[&str],
         paths: &[&str],
         message: &str,
         author: Option<&str>,
@@ -834,6 +857,17 @@ impl Git {
                 command: format!("write {path}"),
                 stderr: error.to_string(),
             })?;
+        }
+        for path in removed {
+            match std::fs::remove_file(self.root.join(path)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(GitError::CommandFailed {
+                        command: format!("remove {path}"),
+                        stderr: error.to_string(),
+                    });
+                }
+                _ => {}
+            }
         }
         let mut add = vec!["--literal-pathspecs", "add", "--"];
         add.extend_from_slice(paths);
@@ -850,7 +884,8 @@ impl Git {
     }
 
     /// Undoes what `commit_files_on_the_new_branch` did to the files: each is unstaged, and put
-    /// back to the text at `from` or, when `from` had none, removed with the directories made for it.
+    /// back to the text at `from` or, when `from` had none, removed with the directories made for
+    /// it.
     fn take_back(&self, from: &str, files: &[(String, String)], paths: &[&str]) {
         let mut unstage = vec!["--literal-pathspecs", "reset", "-q", "--"];
         unstage.extend_from_slice(paths);
@@ -1089,8 +1124,34 @@ pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
     }
 }
 
+/// The path `stem` has on `branch`, in whichever format the branch holds it, else `None`. When both
+/// formats are held, the one other than the team's `format` comes first: an existing document keeps
+/// its format (`check_document_format` refuses the team-format path of such a document).
+///
+/// # Errors
+///
+/// `CommandFailed` when `branch` names nothing, as `Git::has_file` does.
+pub fn held_document(
+    git: &Git,
+    branch: &str,
+    stem: &str,
+    format: DocumentFormat,
+) -> Result<Option<String>, GitError> {
+    let other = match format {
+        DocumentFormat::Markdown => DocumentFormat::Html,
+        DocumentFormat::Html => DocumentFormat::Markdown,
+    };
+    for held in [other, format] {
+        let path = with_format(stem, held);
+        if git.has_file(branch, &path)? {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
 /// Whether the new project's product plan is on the team's integration branch: both documents of
-/// `PRODUCT_PLAN` are there (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
+/// `PRODUCT_PLAN_STEMS` are there, each as `.md` or `.html` (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
 ///
 /// # Errors
 ///
@@ -1103,10 +1164,8 @@ pub fn product_plan_on(git: &Git, team: &Team) -> Result<bool, GitError> {
         Err(other) => return Err(other),
     }
     let mut present = Vec::new();
-    for document in PRODUCT_PLAN {
-        if git.has_file(&branch, document)? {
-            present.push(document.to_string());
-        }
+    for stem in PRODUCT_PLAN_STEMS {
+        present.extend(held_document(git, &branch, stem, team.document_format())?);
     }
     Ok(product_plan_approved(&present))
 }

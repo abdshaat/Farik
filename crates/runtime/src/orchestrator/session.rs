@@ -1308,6 +1308,7 @@ fn session_spec_without(
         stale_twins: &stale_twins,
         members: &members,
         own_repo,
+        document_format: team.document_format(),
     })?;
     let limits = budget_state(
         &deps.tools.projections,
@@ -1581,7 +1582,10 @@ async fn read_to_end(
 mod tests {
     use std::sync::Arc;
 
+    use catervas_core::contract::Role;
+    use catervas_core::folders::{DocumentFormat, format_line};
     use catervas_core::governor::permissions::PermissionTier;
+    use catervas_store::requests::product_plan_request;
     use serde_json::json;
 
     use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
@@ -3679,6 +3683,34 @@ mod tests {
         }
     }
 
+    /// The Team rules tell the session the team's `policy.document_format`, HTML when it is left
+    /// out (`docs/design/html-documents.md`).
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_session_is_told_the_teams_document_format() {
+        for (key, format) in [
+            (Some("markdown"), DocumentFormat::Markdown),
+            (None, DocumentFormat::Html),
+        ] {
+            let harness = Harness::new("session-document-format", |wire| {
+                if let Some(key) = key {
+                    wire["policy"]["document_format"] = json!(key);
+                }
+            });
+            let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+            let deps = &orchestrator.deps;
+            let team = deps.tools.files.read_team().expect("the team");
+            let pm = agent(&team, "pm");
+            let spec = session_spec(deps, &team, &asked(deps, pm, SessionPurpose::Triage, None))
+                .expect("the spec");
+            assert!(
+                spec.system_prompt.contains(&format_line(format)),
+                "{key:?}: {}",
+                spec.system_prompt
+            );
+        }
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_review_of_ones_own_task_starts_fresh() {
@@ -3935,10 +3967,7 @@ mod tests {
         let plan = catervas_store::requests::file_product_plan_request(
             &deps.files,
             &deps.log,
-            catervas_store::requests::product_plan_request(
-                catervas_core::contract::Role::Architect,
-                5.0,
-            ),
+            product_plan_request(Role::Architect, 5.0, DocumentFormat::Html),
             (deps.clock.now(), &deps.ids),
         )
         .expect("filed");

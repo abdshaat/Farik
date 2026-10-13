@@ -9,3 +9,8 @@
 	margin: 0;
 	font-weight: 600;
 }
+
+iframe.frame {
+	height: 50vh;
+	min-height: 16rem;
+}

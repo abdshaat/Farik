@@ -2503,6 +2503,26 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_the_rederive_of_an_html_twin() {
+        let harness = with_documents("int-rederive-html", "manual");
+        let spec = "docs/catervas/product/spec.html";
+        let twin = "docs/catervas/product/spec.agent.html";
+        harness.project.repo.write(spec, "<h1>spec</h1>\n");
+        harness.project.repo.write(twin, "<h1>agents</h1>\n");
+        harness.project.repo.commit("the html spec");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let change = owner_saves(&harness, spec, "<h1>new spec</h1>\n");
+        adds(&orchestrator, change);
+
+        assert_eq!(
+            rederives(&harness),
+            [("CTV-1".to_string(), twin.to_string())]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_the_rederive_when_the_tick_integrates_the_owners_change() {
         let harness = with_documents("int-rederive-auto", "auto_merge");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));

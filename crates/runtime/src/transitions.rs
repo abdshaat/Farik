@@ -4314,8 +4314,12 @@ mod tests {
 
     /// Both documents of the product plan, committed on `main`.
     fn approve_the_product_plan(project: &Project) {
-        for document in catervas_core::folders::PRODUCT_PLAN {
-            project.repo.write(document, "# A document\n");
+        for stem in catervas_core::folders::PRODUCT_PLAN_STEMS {
+            let document = catervas_core::folders::with_format(
+                stem,
+                catervas_core::folders::DocumentFormat::Markdown,
+            );
+            project.repo.write(&document, "# A document\n");
         }
         project.repo.commit("approve the product plan");
     }

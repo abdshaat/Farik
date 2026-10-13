@@ -1,7 +1,8 @@
-import { Avatar, type AvatarKey, Button, Dialog } from "@catervas/ui";
+import { Button, Dialog } from "@catervas/ui";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { channelName } from "./marketing.ts";
@@ -279,12 +280,6 @@ export function PostCard({
 	);
 }
 
-/** The agent who wrote a post, by its picture; none when the team does not say which. */
-function Writer({ agent, name }: { agent: Agent | undefined; name: string }) {
-	if (!agent?.avatar) return null;
-	return <Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />;
-}
-
 /** The posts going out, soonest first, and the ones that did not go out in the last day. */
 export function GoingOut({
 	posts,
@@ -337,10 +332,7 @@ export function GoingOut({
 					<ul className={styles.rows} aria-label={t("didNotGoOutList")}>
 						{over.map((post) => (
 							<li key={post.post} className={`${styles.row} ${styles.over}`}>
-								<Writer
-									agent={writer(post.agentId)}
-									name={name(post.agentId)}
-								/>
+								<AgentPicture agent={writer(post.agentId)} />
 								<div className={styles.rowText}>
 									<PostBody post={post} now={now} clamp>
 										<span className={styles.state}>
@@ -411,7 +403,7 @@ function GoingOutRow({
 	const titleId = `going-out-${post.post}`;
 	return (
 		<li className={styles.row}>
-			<Writer agent={agent} name={name} />
+			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
 				<PostBody post={post} now={now} titleId={titleId}>
 					<span className={styles.soon}>{howSoon(new Date(post.at), now)}</span>

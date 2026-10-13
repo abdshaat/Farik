@@ -11,9 +11,12 @@ use jsonschema::Validator;
 use jsonschema::error::ValidationErrorKind;
 use serde_json::{Value, json};
 
-use super::{Agent, AgentStatus, Team, ValidationError, defaults, validate_team};
+use super::{
+    Agent, AgentStatus, PolicyDocumentFormat, Team, ValidationError, defaults, validate_team,
+};
 use crate::contract::{pointer, with_integers_normalised};
 
+use crate::generated::team_template::TemplatePolicyDocumentFormat;
 pub use crate::generated::team_template::{TeamTemplate, TemplateAgent};
 
 const SCHEMA_JSON: &str = include_str!("../../../../docs/schemas/team-template.schema.json");
@@ -157,17 +160,21 @@ pub fn template_from_team(
     if let Some(daily_usd) = team.budgets.daily_usd {
         budgets["daily_usd"] = json!(daily_usd);
     }
+    let mut policy = json!({
+        "permissions": team.permissions(),
+        "judgment": team.policy.judgment.clone().unwrap_or_default(),
+        "integration": team.policy.integration,
+        "plan_in_sprints": team.plans_in_sprints(),
+    });
+    if let Some(document_format) = team.policy.document_format {
+        policy["document_format"] = json!(document_format);
+    }
     validate_template(&json!({
         "version": 1,
         "name": name.trim(),
         "saved_at": saved_at,
         "agents": agents,
-        "policy": {
-            "permissions": team.permissions(),
-            "judgment": team.policy.judgment.clone().unwrap_or_default(),
-            "integration": team.policy.integration,
-            "plan_in_sprints": team.plans_in_sprints(),
-        },
+        "policy": policy,
         "budgets": budgets,
     }))
 }
@@ -272,6 +279,12 @@ pub fn apply_template(
     if let Some(plan_in_sprints) = template.policy.plan_in_sprints {
         team.policy.plan_in_sprints = Some(plan_in_sprints);
     }
+    if let Some(document_format) = template.policy.document_format {
+        team.policy.document_format = Some(match document_format {
+            TemplatePolicyDocumentFormat::Html => PolicyDocumentFormat::Html,
+            TemplatePolicyDocumentFormat::Markdown => PolicyDocumentFormat::Markdown,
+        });
+    }
     team.budgets.daily_usd = template.budgets.daily_usd;
     let errors = serde_json::to_value(&team)
         .map_err(|error| {
@@ -338,6 +351,8 @@ mod tests {
 
     use chrono::{DateTime, Utc};
     use serde_json::{Value, json};
+
+    use crate::folders::DocumentFormat;
 
     use super::{
         TemplateApplied, apply_template, template_from_team, template_slug, validate_template,
@@ -447,6 +462,7 @@ mod tests {
     #[test]
     fn leaves_out_what_belongs_to_the_project() {
         let mut wire = a_full_team_wire();
+        wire["policy"]["document_format"] = json!("html");
         let mut sol = an_agent_wire("sol", "scrum_master");
         sol["status"] = json!("paused");
         let mut old = an_agent_wire("old", "architect");
@@ -463,9 +479,15 @@ mod tests {
         );
         assert_eq!(
             keys(&template["policy"]),
-            ["integration", "judgment", "permissions", "plan_in_sprints"]
-                .map(str::to_string)
-                .into(),
+            [
+                "document_format",
+                "integration",
+                "judgment",
+                "permissions",
+                "plan_in_sprints"
+            ]
+            .map(str::to_string)
+            .into(),
             "no integration branch or other policy key"
         );
         assert_eq!(
@@ -1038,6 +1060,40 @@ mod tests {
             serde_json::to_value(&result.team).expect("serialises"),
             expected,
             "the four answers are the template's; rules, name and every other key the project's"
+        );
+    }
+
+    #[test]
+    fn templates_carry_the_document_format() {
+        let mut wire = a_team_wire();
+        assert!(
+            template_of(&wire)["policy"]
+                .get("document_format")
+                .is_none()
+        );
+        wire["policy"]["document_format"] = json!("markdown");
+        let template = template_of(&wire);
+        assert_eq!(template["policy"]["document_format"], json!("markdown"));
+
+        let mut project = a_full_team_wire();
+        assert_eq!(
+            applied(&project, &template, &[]).team.document_format(),
+            DocumentFormat::Markdown,
+            "the template made from a Markdown team makes a Markdown team"
+        );
+        let without = template_with(&[
+            joining("ada", "Ada", "product_manager"),
+            joining("linus", "Linus", "software_developer"),
+        ]);
+        assert_eq!(
+            applied(&project, &without, &[]).team.policy.document_format,
+            None
+        );
+        project["policy"]["document_format"] = json!("markdown");
+        assert_eq!(
+            applied(&project, &without, &[]).team.document_format(),
+            DocumentFormat::Markdown,
+            "a template without the key keeps the project's answer"
         );
     }
 

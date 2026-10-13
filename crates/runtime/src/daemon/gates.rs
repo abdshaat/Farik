@@ -11,7 +11,7 @@ use catervas_core::branch::task_branch;
 use catervas_core::contract::{
     Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract,
 };
-use catervas_core::folders::PRODUCT_PLAN;
+use catervas_core::folders::PRODUCT_PLAN_STEMS;
 use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteOutcome, DesignerBrowser, check_contract_write,
     check_repo_write,
@@ -634,8 +634,11 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             .read_contract(&row.task_id)
             .map_err(|e| internal(&e))?;
         let branch = task_branch(&contract);
-        for path in PRODUCT_PLAN {
-            if let Ok(text) = deps.git.file_at(&branch, path) {
+        for stem in PRODUCT_PLAN_STEMS {
+            if let Ok(Some(path)) =
+                catervas_store::git::held_document(&deps.git, &branch, stem, team.document_format())
+                && let Ok(text) = deps.git.file_at(&branch, &path)
+            {
                 documents.push(json!({ "path": path, "text": text }));
             }
         }
@@ -3217,7 +3220,7 @@ pub(super) mod tests {
                 }),
                 json!({
                     "kind": "integration", "folder_change": 2, "agent_id": "sm",
-                    "title": "delivery/cadence.md by Sol",
+                    "title": "Sprint rhythm by Sol",
                     "line": "Sol wrote it; it waits for you to add it"
                 }),
             ]
@@ -4530,6 +4533,7 @@ pub(super) mod tests {
             catervas_store::requests::product_plan_request(
                 catervas_core::contract::Role::Architect,
                 5.0,
+                catervas_core::folders::DocumentFormat::Markdown,
             ),
             (deps.clock.now(), &deps.ids),
         )
@@ -4585,6 +4589,61 @@ pub(super) mod tests {
         // Both on main: approved.
         harness.approve_the_product_plan();
         assert_eq!(stands(&harness)["approved"], true);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn product_plan_state_reads_html_documents() {
+        let harness = Harness::new("gates-plan-html", |_| {});
+        harness.started();
+        let deps = &harness.project.deps;
+        let plan = catervas_store::requests::file_product_plan_request(
+            &deps.files,
+            &deps.log,
+            catervas_store::requests::product_plan_request(
+                catervas_core::contract::Role::Architect,
+                5.0,
+                catervas_core::folders::DocumentFormat::Html,
+            ),
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("filed");
+        let root = &harness.project.repo.path;
+        git_in(
+            root,
+            &["checkout", "-b", &catervas_core::branch::task_branch(&plan)],
+        );
+        for (path, text) in [
+            ("docs/catervas/product/roadmap.html", "<h1>Roadmap</h1>\n"),
+            (
+                "docs/catervas/product/spec.html",
+                "<h1>Little Oak Cakes</h1>\n",
+            ),
+        ] {
+            std::fs::create_dir_all(root.join(path).parent().expect("a folder")).expect("a folder");
+            std::fs::write(root.join(path), text).expect("written");
+            git_in(root, &["add", "--", path]);
+        }
+        git_in(root, &["commit", "-m", "Draft the product plan"]);
+        git_in(root, &["checkout", "main"]);
+        harness
+            .project
+            .moved("CTV-1", "draft", "verifying", &json!({}));
+
+        let answer = query(
+            &harness.daemon,
+            "product_plan.state",
+            &json!({}),
+            "productPlanStateResult",
+        );
+
+        assert_eq!(
+            answer["documents"],
+            json!([
+                { "path": "docs/catervas/product/spec.html", "text": "<h1>Little Oak Cakes</h1>\n" },
+                { "path": "docs/catervas/product/roadmap.html", "text": "<h1>Roadmap</h1>\n" }
+            ])
+        );
     }
 
     #[test]

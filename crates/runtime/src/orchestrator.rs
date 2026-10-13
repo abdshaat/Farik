@@ -37,7 +37,7 @@ mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
 pub(crate) mod hand_over;
-mod human;
+pub(crate) mod human;
 pub(crate) use human::{
     forget_removed_keys, status_effects, update_agent_held, with_status, without_connector,
 };

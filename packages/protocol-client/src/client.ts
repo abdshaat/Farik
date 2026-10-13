@@ -43,6 +43,8 @@ export type MethodName =
 	| "repo.add"
 	| "repo.remove"
 	| "repo.locate"
+	| "files.ask_change"
+	| "files.rewrite"
 	| "team.save"
 	| "agent.replace"
 	| "team.start"

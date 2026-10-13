@@ -127,6 +127,7 @@ const read = (more: Record<string, unknown> = {}) => ({
 	stale: false,
 	rederiving: false,
 	editable: true,
+	askable: true,
 	waiting: null,
 	...more,
 });
@@ -367,6 +368,7 @@ describe("Files", () => {
 				document: version(OVERVIEW, "Text", MIRA_FIVE_DAYS),
 				twin: null,
 				editable: false,
+				askable: false,
 			}),
 		});
 		await screen.findByRole("heading", { name: "Overview" });
@@ -653,7 +655,9 @@ describe("Files", () => {
 		it("cancels without saving", async () => {
 			const { s } = await typed();
 			press(en.filesCancel);
-			expect(screen.queryByRole("textbox")).toBeNull();
+			expect(
+				screen.queryByRole("textbox", { name: "Roadmap text" }),
+			).toBeNull();
 			expect(screen.getByText("Pie pre-orders")).toBeTruthy();
 			expect(s.calls("files.save")).toEqual([]);
 		});
@@ -677,6 +681,194 @@ describe("Files", () => {
 			expect(screen.queryByText(en.filesEditing)).toBeNull();
 			// The whole footnote is the policy's sentence: no owner follows it.
 			expect(screen.getByText(en.filesSaveAuto)).toBeTruthy();
+		});
+	});
+});
+
+describe("Files: HTML documents and asking for a change", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	const HTML = `${ROOT}architecture/overview.html`;
+	const TWIN = `${ROOT}architecture/overview.agent.html`;
+	const SECRET = "Secret words";
+	const htmlTree = {
+		integration: "auto_merge",
+		folders: [
+			{
+				folder: `${ROOT}architecture`,
+				name: "Architecture",
+				role: "architect",
+				agent_id: "ada",
+				documents: [{ path: HTML, name: "Overview", twin: TWIN }],
+			},
+		],
+	};
+	const htmlRead = (more: Record<string, unknown> = {}) => ({
+		...read(),
+		document: version(HTML, `<h1>Overview</h1><p>${SECRET}</p>`, null),
+		twin: version(TWIN, "<h1>Overview</h1><p>For the team</p>", null),
+		...more,
+	});
+	const frameOf = (container: HTMLElement) =>
+		container.querySelector("iframe") as HTMLIFrameElement;
+	const press = (name: string) =>
+		fireEvent.click(screen.getByRole("button", { name }));
+
+	it("shows_an_html_document_in_its_frame", async () => {
+		media.set(WIDE, true);
+		const doc = htmlRead();
+		const { container, s } = await files("/files/architecture/overview.html", {
+			tree: htmlTree,
+			read: doc,
+		});
+		await screen.findByRole("heading", { name: "Overview" });
+		expect(screen.queryByText(SECRET)).toBeNull();
+		expect(container.innerHTML).not.toContain(SECRET);
+		expect(frameOf(container).getAttribute("src")).toBe(
+			`/documents/raw?path=${encodeURIComponent(HTML)}&v=${doc.document.blob}`,
+		);
+		expect(frameOf(container).getAttribute("sandbox")).toBe("");
+
+		fireEvent.click(screen.getByRole("button", { name: en.filesForTeam }));
+		expect(frameOf(container).getAttribute("src")).toBe(
+			`/documents/raw?path=${encodeURIComponent(TWIN)}&v=${doc.twin.blob}`,
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.filesForYou }));
+
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		press("Edit source");
+		fireEvent.change(screen.getByRole("textbox", { name: "Overview text" }), {
+			target: { value: "<h1>Overview</h1><p>Changed</p>" },
+		});
+		press(en.filesSave);
+		await s.reply(s.calls("files.save")[0] as never, {
+			change: 1,
+			branch: "docs/folder-1",
+		});
+		await answerQuery(
+			s,
+			"files.read",
+			htmlRead({
+				document: version(HTML, "<h1>Overview</h1><p>Changed</p>", null),
+			}),
+		);
+		await waitFor(() =>
+			expect(frameOf(container).getAttribute("src")).not.toContain(
+				doc.document.blob,
+			),
+		);
+	});
+
+	it("asks_for_a_change", async () => {
+		media.set(WIDE, true);
+		const { s } = await files("/files/product/roadmap.md");
+		await screen.findByRole("heading", { name: "Roadmap" });
+		const box = screen.getByRole("textbox", { name: "What should change?" });
+		fireEvent.change(box, { target: { value: "Add a pricing section" } });
+		press("Send to Mira");
+		const [frame, ...more] = s.calls("files.ask_change");
+		expect(more).toEqual([]);
+		expect(frame?.params).toEqual({
+			path: ROADMAP,
+			words: "Add a pricing section",
+		});
+		await s.reply(frame as never, { task_id: "CTV-31" });
+		expect(
+			await screen.findByText("Sent. Mira has it as CTV-31."),
+		).toBeTruthy();
+	});
+
+	it("asks_for_a_change_refused_says_why", async () => {
+		media.set(WIDE, true);
+		const { s } = await files("/files/product/roadmap.md");
+		await screen.findByRole("heading", { name: "Roadmap" });
+		fireEvent.change(
+			screen.getByRole("textbox", { name: "What should change?" }),
+			{ target: { value: "Add a pricing section" } },
+		);
+		press("Send to Mira");
+		await s.fail(s.calls("files.ask_change")[0] as never, -32005, "refused", {
+			errors: [{ path: "/path", code: "no_owner", message: "raw words" }],
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"No one on your team owns this folder right now. Resume or add its role first.",
+		);
+	});
+
+	it("says_each_refusal_of_a_change_in_its_words", async () => {
+		for (const [code, words] of [
+			["no_words", "Say what should change."],
+			["not_editable", "This document can\u2019t be changed from here."],
+			[
+				"no_task_taker",
+				"The Scrum Master keeps this document up to date at its retro.",
+			],
+		] as const) {
+			media.set(WIDE, true);
+			const { s } = await files("/files/product/roadmap.md");
+			await screen.findByRole("heading", { name: "Roadmap" });
+			fireEvent.change(
+				screen.getByRole("textbox", { name: "What should change?" }),
+				{ target: { value: "Add a pricing section" } },
+			);
+			press("Send to Mira");
+			await s.fail(s.calls("files.ask_change")[0] as never, -32005, "refused", {
+				errors: [{ path: "/path", code, message: "raw words" }],
+			});
+			expect((await screen.findByRole("alert")).textContent).toBe(words);
+			cleanup();
+		}
+	});
+
+	it("does_not_send_blank_words", async () => {
+		media.set(WIDE, true);
+		const { s } = await files("/files/product/roadmap.md");
+		await screen.findByRole("heading", { name: "Roadmap" });
+		fireEvent.change(
+			screen.getByRole("textbox", { name: "What should change?" }),
+			{ target: { value: "   " } },
+		);
+		const send = screen.getByRole("button", { name: "Send to Mira" });
+		expect((send as HTMLButtonElement).disabled).toBe(true);
+		fireEvent.click(send);
+		expect(s.calls("files.ask_change")).toEqual([]);
+	});
+
+	it("shows_no_ask_box_when_not_askable", async () => {
+		media.set(WIDE, true);
+		await files("/files/product/roadmap.md", {
+			read: read({ askable: false }),
+		});
+		await screen.findByRole("heading", { name: "Roadmap" });
+		expect(
+			screen.queryByRole("textbox", { name: "What should change?" }),
+		).toBeNull();
+	});
+
+	it("edits_html_source_under_advanced", async () => {
+		media.set(WIDE, true);
+		const doc = htmlRead();
+		const { s } = await files("/files/architecture/overview.html", {
+			tree: htmlTree,
+			read: doc,
+		});
+		await screen.findByRole("heading", { name: "Overview" });
+		expect(screen.queryByRole("button", { name: en.filesEdit })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Edit source" })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		press("Edit source");
+		expect(screen.queryByRole("button", { name: en.filesPreview })).toBeNull();
+		const box = screen.getByRole("textbox", { name: "Overview text" });
+		expect((box as HTMLTextAreaElement).value).toBe(doc.document.text);
+		fireEvent.change(box, { target: { value: "<h1>New</h1>" } });
+		press(en.filesSave);
+		expect(s.calls("files.save")[0]?.params).toEqual({
+			path: HTML,
+			text: "<h1>New</h1>",
+			base: doc.document.blob,
 		});
 	});
 });

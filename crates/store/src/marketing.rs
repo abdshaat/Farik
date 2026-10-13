@@ -3,6 +3,7 @@
 //! from the six `social_post.` kinds.
 
 use catervas_core::contract::TaskId;
+use catervas_core::folders::DocumentFormat;
 use catervas_core::marketing::{
     Amount, BudgetKind, CapScope, CreatedCampaign, EndReason, PlanCampaign, PlanProposal,
     PlanRecord, PostChannel, PostDetails, PostSlot, parse_amount,
@@ -10,8 +11,9 @@ use catervas_core::marketing::{
 use catervas_protocol::event::{
     CatervasEvent, EventBody, EventKind, MarketingBudgetReachedBodyScope,
     MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBodyWhy,
-    MarketingPlanEndedBodyWhy, MarketingPlanProposedBody, SocialPostMediaKind,
-    SocialPostMissedBodyWhy, SocialPostScheduledBodyApprovedBy, SocialPostStoppedBodyBy,
+    MarketingPlanEndedBodyWhy, MarketingPlanProposedBody, MarketingPlanProposedBodyFormat,
+    SocialPostMediaKind, SocialPostMissedBodyWhy, SocialPostScheduledBodyApprovedBy,
+    SocialPostStoppedBodyBy,
 };
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 
@@ -24,6 +26,8 @@ pub struct MarketingPlan {
     pub record: PlanRecord,
     /// What was proposed.
     pub proposal: PlanProposal,
+    /// The format its text was written in: HTML when the proposal says so, else Markdown.
+    pub format: DocumentFormat,
     /// The agent that proposed it.
     pub agent_id: String,
     /// The task the proposal waited on the owner for.
@@ -238,6 +242,10 @@ fn proposed(
                 .as_ref()
                 .map(|account| account.as_str().to_string()),
             replaces: body.replaces.as_ref().map(|plan| plan.as_str().to_string()),
+        },
+        format: match body.format {
+            Some(MarketingPlanProposedBodyFormat::Html) => DocumentFormat::Html,
+            None => DocumentFormat::Markdown,
         },
         agent_id: body.proposed_by.clone(),
         task_id,
