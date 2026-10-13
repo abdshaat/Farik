@@ -5,6 +5,7 @@ Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their 
 Spec: `docs/SPEC.md` 11; the flows it exercises are 4.1, 4.2, 4.4, 4.5, 5.3, 5.6, 5.14, 5.16 and 5.17
 Depends on: steps 01 to 07b of this phase. A start gate applies: Task 1 does not begin until 07b has landed and the full check passes on the phase branch's head, whose sha is recorded.
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12, round 1: not ready on seven blockers (the scan page, the repositories' checks, nothing to refuse in E, D's count and sprint, F's open choices, the record, the founder's own presses); folded below. Round 2: not ready on the checks' page (only setup's "Show advanced" shows them), a test reading outside its repository, and F5's paths after `env.sh`; folded. Round 3: ready, its three notes folded.
+Amended 2026-10-13 for the HTML documents merged from main (ADR 0058); status: ready.
 
 Signatures, not bodies; around 300 lines at most (ADR 0008). This step writes no product code. It is a runbook, like phase 8's step 08, and keeps its two roles:
 - **[A]** is the controller session preparing, fixing and recording.
@@ -42,9 +43,10 @@ Out of scope: Windows, where no repository is a read root in this phase (step 03
 - **The AI account** is the founder's own Claude subscription key, pasted on the setup's account screen and kept in the keychain; [A] never sees it. The founder makes it in a separate terminal without `env.sh`, or pastes one they have; "Catervas already has your key" is also a pass.
 - **Costs:** a daily limit of $25 on the setup's spending screen (phase 8's). Reaching it pauses everyone and Today says so: not a failure. The founder raises it on the Costs page or waits for the next day; the record lists each raise.
 - **The integration policy** stays the default, which in these copies merges locally in each repository, since none has a remote.
+- **The documents** are HTML: the team keeps the default "Write documents as HTML" (Settings › Work › Documents, ADR 0058), so every document the run makes is an `.html` page shown on the Files page in a sandboxed frame, with "Open full page". [A] does not change the setting. A document in Markdown in these repositories is a finding, not a failure (the format is held by the prompt alone).
 - **"What we found" for several repositories is not built.** The setup's scan page shows the project folder's own facts (a README, no checks). Each repository's scanned checks are seen only on setup's last screen, behind "Show advanced settings", under "Checks for every piece of work" (`SetupAdvanced.tsx`), as "Found in your project. Runs: npm run test" (the scan's `{toolchain} run {script}`). B1 checks that. Three findings are recorded for a later step, not failures: the scan page's words, a check's row not naming its repository, and no page after setup showing the checks (so `montage-web`'s is never seen).
 - **Agent judgement is a finding, not a failure:** the plan's order and compatibility note, a Developer reading the other repository, and the system documents' content are the agents' work; a miss there is a finding.
-- **Each step's result** is pass, fail, finding or skipped, as phase 8's step 08 defines them. A failure is fixed on the phase branch before sign-off as phase 8's Decisions say (a test that fails for it, its own `fix(<scope>): …` commit, a fresh landing review, `bin/catervas` rebuilt and its sha256 recorded, the step run again). A failure that needs a product decision goes to the founder first.
+- **Each step's result** is pass, fail, finding or skipped, as phase 8's step 08 defines them. A failure is fixed on the phase branch before sign-off as phase 8's Decisions say (a test that fails for it, its own `fix(<scope>): …` commit, `bin/catervas` rebuilt and its sha256 recorded, the step run again; no agent review of the fix, ADR 0060). A failure that needs a product decision goes to the founder first.
 - **The screens' words** are the approved mockups' (`SetupRepos`, `SettingsRepositories`, `TodayRepos`, `BoardRepos`, `FilesRepos`, `AddSecondRepository` in `docs/design/mockups/`) and steps 07 and 07b's "Words". Where the built words differ only in wording that keeps the meaning, that is a pass and a note.
 - **The order is A, B, C, D, E, then F.** Between sittings and after a fix: Ctrl-C, then the two lines; it reopens the last project with a new link.
 
@@ -78,8 +80,9 @@ Task 1's commands. Then [A] hands the founder this runbook from B on, `~/caterva
 3. **The Catervafication.** On "Your team is ready", **Start**. Pass if: the Board shows "Catervafy the project" in a sprint, then Mira's "Write the product plan from the project", and for each repository Ada's "Document <name>'s architecture" and a Developer's "Document how <name> is built", each tagged "notes".
 4. **The product plan.** Mira's task comes to "Waiting on you": open it, **Accept**. Pass if: Files › Product shows Product description and Roadmap.
 5. **Marketing.** Kai's marketing plan comes to Today after the product plan is added: **Approve** it. Pass if: it did not start before.
-6. **The system map.** Once both architecture tasks are accepted, the Board shows Ada's "Map how the repositories connect". Accept each task as Today asks. Pass if: Files' picker reads "Project", "openmontage", "montage-infra"; each repository's Architecture and Engineering folders hold its documents; and Project › Architecture › System map draws both repositories and at least one link, each link naming the file it was read from (its content is agent judgement).
+6. **The system map.** Once both architecture tasks are accepted, the Board shows Ada's "Map how the repositories connect". Accept each task as Today asks. Pass if: Files' picker reads "Project", "openmontage", "montage-infra"; each repository's Architecture and Engineering folders hold its documents; and Project › Architecture › System map, shown in its frame (and in a new tab through "Open full page"), draws both repositories and at least one link, each link naming the file it was read from (its content is agent judgement). On a phone-width window (360 px, or the browser's device view) the map fits the screen with no sideways scroll of the page, its diagram scaled to the width.
 7. **The sprint ends.** Accept "Catervafy the project" when Today asks. Pass if: the sprint ends.
+8. **Ask for a change to a repository's document.** Files › openmontage › Architecture › Overview, under the document, "What should change?": "Name the entry point in the first paragraph.", then Send to Ada. Pass if: the page says it was sent with its task's id, and the Board shows that task, tagged "notes". Accept it when Today asks, at any later point of the run.
 
 ### C. A feature across the repositories [F]
 
@@ -153,13 +156,13 @@ claude --version                     # at least MIN_CLAUDE_VERSION
 
 - the date, the start-gate sha and every later binary's sha with the fix it carries, each repository's commit, OpenMontage's entry point, the team, the daily limit and each raise
 - one table per section, B to F, each row `| Step | Result | Note |`: the step's number and name, its result (pass, fail, finding, skipped), and the founder's words or what was seen
-- the failures, each with its fix commit, its landing review, and its result when run again
+- the failures, each with its fix commit and its result when run again
 - the findings, as a list of fixes for later, none made here (B1's three among them)
 - the founder's sign-off, in their own words: `Signed off by the founder, <date>: "<words>"`
 
 Sign-off needs every step to be pass or finding.
 
-- [ ] `fix(<scope>): …` per failure, each with its test and its landing review
+- [ ] `fix(<scope>): …` per failure, each with its test
 - [ ] `docs(docs): record the founder's live check of multi-repo projects`
 
 ### Task 3: The phase's final verification [A]
