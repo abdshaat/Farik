@@ -34,9 +34,9 @@ Out of scope: removing the old image after a new one is built (it stays until th
 
 ### Task 1: the image leaves nothing in `/tmp`
 
-- [ ] `computer.rs`: `the_image_leaves_nothing_in_tmp` reads `DOCKERFILE`, joins its `\`-continued lines, takes the last `RUN` instruction, and asserts that it runs `npm` and ends with `find /tmp -mindepth 1 -delete`, and that no `RUN` follows it. Watched failing: the last `RUN` ends with `chmod -R a+rwX /usr/local/lib/node_modules`.
-- [ ] `crates/runtime/sandbox/Dockerfile`: append `&& find /tmp -mindepth 1 -delete` to the pnpm `RUN` (GNU find: bookworm's findutils is Essential), and say why in the header comment (root's caches under `HOME=/tmp` would be the user's uid's to write); the header's "neither `catervas run` nor CI builds it" becomes that the computer check in Setup builds it (since 0.23) and CI does not.
-- [ ] Live check, pasted in the pull request: `docker build -t catervas/sandbox:check crates/runtime/sandbox`, then, as `--user $(id -u):$(id -g)`, `find /tmp -mindepth 1` prints nothing and `npm install` of a small package in a mounted folder succeeds, where on `catervas/sandbox:0.0.0` it fails with `EACCES`.
+- [x] `computer.rs`: `the_image_leaves_nothing_in_tmp` reads `DOCKERFILE`, joins its `\`-continued lines, takes the last `RUN` instruction, and asserts that it runs `npm` and ends with `find /tmp -mindepth 1 -delete`, and that no `RUN` follows it. Watched failing: the last `RUN` ends with `chmod -R a+rwX /usr/local/lib/node_modules`.
+- [x] `crates/runtime/sandbox/Dockerfile`: append `&& find /tmp -mindepth 1 -delete` to the pnpm `RUN` (GNU find: bookworm's findutils is Essential), and say why in the header comment (root's caches under `HOME=/tmp` would be the user's uid's to write); the header's "neither `catervas run` nor CI builds it" becomes that the computer check in Setup builds it (since 0.23) and CI does not.
+- [x] Live check, pasted in the pull request: `docker build -t catervas/sandbox:check crates/runtime/sandbox`, then, as `--user $(id -u):$(id -g)`, `find /tmp -mindepth 1` prints nothing and `npm install` of a small package in a mounted folder succeeds, where on `catervas/sandbox:0.0.0` it fails with `EACCES`.
 
 ### Task 2: the image's tag names its Dockerfile
 
