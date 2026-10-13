@@ -453,10 +453,12 @@ mod tests {
 
     #[test]
     fn counts_a_reply_once() {
-        let a = usage(10, 1, 1000, 200);
-        let b = usage(10, 40, 1000, 200);
-        assert_eq!(once_per_reply(a, b), b);
-        assert_eq!(once_per_reply(b, a), b);
+        // Each counter is larger in one of the two, in both directions across the four.
+        let a = usage(10, 1, 1000, 0);
+        let b = usage(5, 40, 900, 200);
+        let largest = usage(10, 40, 1000, 200);
+        assert_eq!(once_per_reply(a, b), largest);
+        assert_eq!(once_per_reply(b, a), largest);
         assert_eq!(once_per_reply(a, a), a);
     }
 
