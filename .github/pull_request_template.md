@@ -28,7 +28,7 @@ ADRs added or changed, or "none".
 ## Checklist
 
 - [ ] Every task in every step plan of the phase is ticked by its commit, and its tests were watched to fail first
-- [ ] Each step was reviewed against its plan when it landed, with mutation as the bar, and the review is recorded in this thread
+- [ ] Each step landed with the full check passing locally and the `check` workflow passing on GitHub (ADR 0060: no agent review of code)
 - [ ] No files changed outside the plan's file map, or the plan was updated and the reason is above
 - [ ] `docs/SPEC.md` and any other document describing changed behavior updated; an ADR for any decision a future contributor would want the reason for
 - [ ] Commit messages and branch follow `docs/standards/code.md` (the commit-msg hook is local; CI does not check them)

@@ -6,14 +6,14 @@ Catervas is a production-grade harness system for multi-agent systems: it runs i
 
 - Workflow: `docs/standards/workflow.md`. Brainstorm, plan, execute under TDD, verify, review, finish. In that order.
 - Code: `docs/standards/code.md`. Naming (branches, commits, files, identifiers, wire formats, events), style, and the toolchain.
-- Models: Opus 5.5 plans and reviews (brainstorm, plans, mockups, readiness reviews, one review per task); Sonnet 5.5 executes a passed plan and the fixes a review reports (ADR 0032).
+- Models: Opus 5.5 plans (brainstorm, plans, mockups, readiness reviews); Sonnet 5.5 executes a passed plan (ADR 0032). No agent reviews code after it is written (ADR 0060).
 - Decisions: `docs/decisions/`. Read the existing ADRs before proposing a change that touches architecture, tooling, or process. Add one when you make such a change.
 
 If the superpowers plugin is installed, its skills implement this workflow; use them, except `writing-plans`: write a step plan by copying `docs/plans/step-template.md` (ADR 0008, ADR 0010). If the plugin is not installed, follow the workflow document by hand. Either way the rules below hold.
 
 ## Hard rules
 
-1. No production code before a failing test. Watch the test fail for the right reason. Code written before its test gets deleted, not adapted.
+1. No production code before a failing test. Watch the test fail for the right reason. Code written before its test gets deleted, not adapted. One test per major functionality, not one per case; a security guarantee counts as one (ADR 0060).
 2. No completion claim without fresh evidence. Run the check, read the output, paste it. "Should work" is not a status.
 3. Planning is two-level: `docs/plans/project-plan.md` holds phases and steps; each step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, copied from `docs/plans/step-template.md` and passed by one readiness review (`workflow.md` stage 2) before execution. Tick its checkboxes in the same commits.
 4. Commits follow Conventional Commits with a package scope. One task, one commit.
@@ -22,7 +22,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 7. Event kinds are `<entity>.<past_tense_verb>`.
 8. When behavior changes, `docs/SPEC.md` changes in the same pull request.
 9. Never skip, disable, or quarantine a failing test to get green.
-10. Do not accept your own work. A pull request is reviewed by someone, or by a fresh session, that did not write it. Every step gets a landing review of its running code as it lands, and its bar is mutation: re-introduce the bug each test claims to catch and confirm the suite notices.
+10. Do not accept your own work. A pull request is reviewed and merged by the founder. A step lands when the full check passes locally and the `check` workflow passes on GitHub; there is no agent review of code and no mutation bar (ADR 0060).
 11. One phase is one branch (`phase/<n>-<name>`) and one pull request to `main`. Open it as a draft when the phase's first step is pushed, without waiting to be asked; mark it ready when the last step's verification passes. Its description explains what changed and why it was necessary, and follows `.github/pull_request_template.md`. Never leave a pushed branch without a pull request. Work outside a phase (a standalone fix, a docs change) gets its own branch and pull request the same way.
 
 ## Commands
