@@ -259,3 +259,116 @@ fn prints_paths_as_text() {
         ran.out
     );
 }
+
+/// Every section of the report at once, with home given as a link to the real home, and every
+/// path the report must show as it is or as `~/`.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_every_section() {
+    use std::os::unix::fs::symlink;
+
+    let world = World::new("prints-every-section");
+    let home = world.home();
+    let root = home.parent().expect("a parent").to_path_buf();
+    let linked_home = root.join("home-link");
+    symlink(&home, &linked_home).expect("a link to home");
+    let tmpdir = root.join("tmpdir");
+    std::fs::create_dir_all(&tmpdir).expect("a temporary folder");
+    let tmpdir = tmpdir.canonicalize().expect("a temporary folder");
+    world.make_shop();
+    let shop = home.join("shop");
+    let worktree = shop.join(".catervas/local/worktrees/CTV-1");
+    std::fs::create_dir_all(&worktree).expect("a Catervas worktree");
+    let clone = home.join("clone");
+    std::fs::create_dir_all(&clone).expect("a clone");
+    git_in(&clone, &["init", "-b", "main"]);
+    for (key, value) in [
+        ("user.email", "me@example.invalid"),
+        ("user.name", "Me"),
+        ("commit.gpgsign", "false"),
+        ("core.hooksPath", "/dev/null"),
+    ] {
+        git_in(&clone, &["config", key, value]);
+    }
+    std::fs::write(clone.join("README.md"), "x\n").expect("a file");
+    git_in(&clone, &["add", "-A"]);
+    git_in(
+        &clone,
+        &[
+            "-c",
+            "user.email=other@example.invalid",
+            "commit",
+            "-m",
+            "somebody else's",
+        ],
+    );
+    let sibling = PathBuf::from(format!("{}2/x", home.to_string_lossy()));
+    std::fs::create_dir_all(&sibling).expect("a sibling of home");
+
+    let sessions = [
+        (&home, "2026-10-12T08:00:00Z"),
+        (&tmpdir, "2026-10-12T08:01:00Z"),
+        (&shop, "2026-10-12T09:00:00Z"),
+        (&worktree, "2026-10-12T09:01:00Z"),
+        (&clone, "2026-10-10T09:00:00Z"),
+        (&home.join("gone-app"), "2026-10-09T09:00:00Z"),
+        (&sibling, "2026-10-11T09:00:00Z"),
+    ];
+    let transcripts = home.join(".claude/projects/-shop");
+    for (number, (cwd, at)) in sessions.iter().enumerate() {
+        let id = format!("00000000-0000-4000-8000-{number:012}");
+        let line = a_turn_line(&id, &cwd.to_string_lossy(), at);
+        std::fs::write(transcripts.join(format!("{id}.jsonl")), format!("{line}\n"))
+            .expect("a transcript");
+    }
+    std::fs::write(
+        transcripts.join("bad.jsonl"),
+        "not json\nnot json\nnot json\n",
+    )
+    .expect("an unreadable file");
+    let outside = root.join("outside.jsonl");
+    std::fs::write(&outside, "NEVER-READ\n").expect("an outside file");
+    symlink(&outside, transcripts.join("escape.jsonl")).expect("a link out of projects");
+
+    let config = world.config();
+    let env = [
+        ("HOME", linked_home.as_path()),
+        ("TMPDIR", tmpdir.as_path()),
+        ("XDG_CONFIG_HOME", config.as_path()),
+    ];
+    let ran = run(&env, &["discover"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let outside_home = sibling.to_string_lossy();
+    assert_eq!(
+        ran.out,
+        format!(
+            "reading your Claude Code history on this computer; nothing leaves it\n\
+             read 8 transcript files: 7 sessions, 7 new\n\
+             refused 1 file outside Claude Code's transcripts\n\
+             couldn't read 1 session from this version of Claude Code\n\
+             skipped 3 lines it couldn't read\n\
+             projects: 2\n  \
+             shop  ~/shop  last worked 2026-10-12  1 session  0 in  0 out\n    \
+             Catervas's agents  1 session  0 in  0 out\n  \
+             x  {outside_home}  last worked 2026-10-11  1 session  0 in  0 out\n\
+             explored: 1\n  \
+             clone  ~/clone  last worked 2026-10-10  1 session  0 in  0 out\n\
+             no longer on this computer: 1\n  \
+             ~/gone-app  last worked 2026-10-09  1 session  0 in  0 out\n\
+             not in a project: 2 sessions\n"
+        )
+    );
+
+    let as_json = run(&env, &["discover", "--json"]);
+    let value: Value = serde_json::from_str(&as_json.out).expect("one JSON object");
+    assert_eq!(value["refused"], 1);
+    assert_eq!(value["unreadable_sessions"], 1);
+    assert_eq!(value["unreadable_lines"], 3);
+    assert_eq!(value["gone"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        value["gone"][0]["folder"],
+        home.join("gone-app").to_string_lossy().as_ref()
+    );
+    assert_eq!(value["not_a_project"]["sessions"], 2);
+}
