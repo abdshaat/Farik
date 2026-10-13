@@ -10,12 +10,15 @@ use catervas_core::jobs::computer::{
     ComputerJob, read_crontab, read_launchd_agent, read_systemd_timer, read_task_scheduler,
     timer_units,
 };
+use catervas_core::jobs::repository::{jobs_in_documents, jobs_in_terraform, schedule_file_kind};
 use catervas_core::jobs::{
     JobKind, cron_expires_at, read_background_job, read_scheduled_tasks, tie_to_project,
 };
 use chrono::{DateTime, Utc};
 
 use crate::claude_history::HistoryError;
+use crate::files::yaml_documents;
+use crate::git::{Git, GitError};
 use crate::machine::{JobRow, MachineIndex};
 
 /// The largest file a job is read from.
@@ -266,6 +269,63 @@ impl Scan<'_> {
         }
     }
 
+    /// Reads the schedules a repository commits. Files come from `ls-files`, so an ignored or
+    /// untracked file is not seen.
+    fn repository(&mut self, root: &str) -> Result<(), HistoryError> {
+        let tracked = match Git::open(PathBuf::from(root)).tracked_paths() {
+            Ok(tracked) => tracked,
+            Err(error @ GitError::NotInstalled { .. }) => return Err(error.into()),
+            Err(_) => {
+                self.origin(root, false);
+                self.unreadable += 1;
+                return Ok(());
+            }
+        };
+        self.origin(root, true);
+        let Ok(real) = Path::new(root).canonicalize() else {
+            return Ok(());
+        };
+        for path in tracked {
+            let Some(kind) = schedule_file_kind(&path) else {
+                continue;
+            };
+            let text = match open_inside(&real.join(&path), &real, false) {
+                Opened::Absent => continue,
+                Opened::Refused => {
+                    self.unreadable += 1;
+                    continue;
+                }
+                Opened::Text(text) => text,
+            };
+            if kind == JobKind::Kubernetes && !text.contains("CronJob") {
+                continue;
+            }
+            let found = if kind == JobKind::Terraform {
+                Some(jobs_in_terraform(&text))
+            } else {
+                let documents = if kind == JobKind::Vercel {
+                    serde_json::from_str(&text)
+                        .map(|document| vec![document])
+                        .ok()
+                } else {
+                    yaml_documents(&text, &path).ok()
+                };
+                documents.map(|documents| jobs_in_documents(kind, &path, &documents))
+            };
+            let Some(found) = found else {
+                self.unreadable += 1;
+                continue;
+            };
+            for job in found {
+                let mut row = self.row(root, &path, &job.name, job.kind, &job.name);
+                row.schedules = job.schedules;
+                row.project_root = Some(root.to_string());
+                self.rows.push(row);
+            }
+        }
+        Ok(())
+    }
+
     fn saved_crons(&mut self, folders: &BTreeSet<String>) {
         for folder in folders {
             let origin = format!("claude_tasks:{folder}");
@@ -373,6 +433,9 @@ pub fn find_jobs(
         rows: Vec::new(),
         unreadable: 0,
     };
+    for repository in &search.repositories {
+        scan.repository(repository)?;
+    }
     scan.crontab(run);
     scan.systemd(run, JobKind::SystemdUser);
     scan.systemd(run, JobKind::SystemdSystem);
@@ -397,7 +460,7 @@ pub fn find_jobs(
     }
     index.replace_found_jobs(&scan.answered, &scan.rows, now)?;
     Ok(JobsSummary {
-        repositories: 0,
+        repositories: search.repositories.len() as u64,
         jobs: scan.rows.len() as u64,
         unreadable: scan.unreadable,
     })

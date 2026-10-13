@@ -277,7 +277,9 @@ Files: `jobs.rs` (repositories); `files.rs` (`yaml_documents`); `tests/jobs.rs`.
 - `scans_only_your_repositories`: an `explored` repository, a gone root and an `is_git` 0 root, each with a committed `vercel.json`, give no rows. A stored row of a root that has since become explored is removed. RED.
 - `refuses_a_tracked_link_out_of_the_repository`: a committed `vercel.json` that links to `<tmp>/outside.json`, with a cron at `/SECRET-LINK`, gives no row and no marker in `machine.db`. RED.
 
-- [ ] `feat(store): find the schedules in the owner's repositories`
+Tests reduced to one per major functionality (ADR 0060, founder 2026-10-12).
+
+- [x] `feat(store): find the schedules in the owner's repositories`
 
 ### Task 7: `catervas discover` prints the jobs
 
