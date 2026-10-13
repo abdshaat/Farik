@@ -2,10 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
+use catervas_core::jobs::JobKind;
 use catervas_core::pricing::Usage;
+use catervas_runtime::computer::program_output;
 use catervas_store::claude_history::{ReadSummary, place_sessions, read_transcripts};
+use catervas_store::jobs::{JobPlaces, find_jobs};
 use catervas_store::machine::{
-    Activity, Found, FoundProject, GoneFolder, MACHINE_DB, Ownership, forget_machine_index,
+    Activity, Found, FoundProject, GoneFolder, JobRow, MACHINE_DB, Ownership, forget_machine_index,
     open_machine_index,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -45,7 +48,7 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
         };
         return Ok(Report {
             lines: vec![first, "no Claude Code history on this computer".to_string()],
-            json: found_json(ReadSummary::default(), &none),
+            json: found_json(ReadSummary::default(), &none, &JobsFound::default()),
             json_lines: None,
         });
     }
@@ -55,12 +58,33 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
     let summary =
         read_transcripts(&mut index, &claude, io.clock.now()).map_err(|e| e.to_string())?;
     place_sessions(&mut index, &not_projects(io), io.clock.now()).map_err(|e| e.to_string())?;
+    let now = io.clock.now();
+    let home = io
+        .env
+        .get("HOME")
+        .filter(|home| !home.is_empty())
+        .map(|home| {
+            Path::new(home)
+                .canonicalize()
+                .unwrap_or_else(|_| PathBuf::from(home))
+        });
+    let places = JobPlaces {
+        home,
+        claude_dir: claude.clone(),
+    };
+    let run_program = |program: &str, args: &[&str]| program_output(&io.env, program, args);
+    let searched = find_jobs(&mut index, &places, &run_program, now).map_err(|e| e.to_string())?;
     let found = index.found().map_err(|e| e.to_string())?;
+    let jobs = JobsFound {
+        rows: index.found_jobs(now).map_err(|e| e.to_string())?,
+        unreadable: searched.unreadable,
+        now,
+    };
     let mut lines = vec![first];
-    lines.extend(report_lines(summary, &found, &homes));
+    lines.extend(report_lines(summary, &found, &jobs, &homes));
     Ok(Report {
         lines,
-        json: found_json(summary, &found),
+        json: found_json(summary, &found, &jobs),
         json_lines: None,
     })
 }
@@ -178,7 +202,67 @@ fn name_of(root: &str) -> String {
     )
 }
 
-fn project_lines(project: &FoundProject, homes: &[String]) -> Vec<String> {
+/// The jobs a scan found, and when it ran.
+#[derive(Default)]
+struct JobsFound {
+    rows: Vec<JobRow>,
+    unreadable: u64,
+    now: DateTime<Utc>,
+}
+
+impl JobsFound {
+    fn of(&self, root: &str) -> Vec<&JobRow> {
+        self.rows
+            .iter()
+            .filter(|job| job.project_root.as_deref() == Some(root))
+            .collect()
+    }
+
+    /// The jobs whose project is not one of `shown`.
+    fn elsewhere(&self, shown: &[&FoundProject]) -> Vec<&JobRow> {
+        self.rows
+            .iter()
+            .filter(|job| {
+                !shown
+                    .iter()
+                    .any(|project| job.project_root.as_deref() == Some(project.root.as_str()))
+            })
+            .collect()
+    }
+}
+
+fn is_repository_job(kind: JobKind) -> bool {
+    kind <= JobKind::Terraform
+}
+
+fn job_line(job: &JobRow, now: DateTime<Utc>, indent: &str) -> String {
+    let label = job.kind.label().to_string();
+    let schedules = printable(&job.schedules.join("; ")).into_owned();
+    let name = printable(&job.display_name).into_owned();
+    let parts: Vec<String> = match job.kind {
+        JobKind::SessionCron | JobKind::SavedSessionCron => {
+            let expiry = job.expires_at.map(|at| {
+                let word = if at > now { "until" } else { "expired" };
+                format!("{word} {}", day(at))
+            });
+            vec![label, schedules, expiry.unwrap_or_default()]
+        }
+        JobKind::BackgroundJob => vec![
+            name,
+            label,
+            printable(job.state.as_deref().unwrap_or_default()).into_owned(),
+            job.state_at.map(day).unwrap_or_default(),
+        ],
+        kind if is_repository_job(kind) => {
+            vec![name, label, printable(&job.file).into_owned(), schedules]
+        }
+        _ => vec![name, label, schedules],
+    };
+    let parts: Vec<String> = parts.into_iter().filter(|part| !part.is_empty()).collect();
+    format!("{indent}{}", parts.join("  "))
+}
+
+fn project_lines(project: &FoundProject, jobs: &JobsFound, homes: &[String]) -> Vec<String> {
     let mut lines = vec![format!(
         "  {}  {}  last worked {}  {}",
         printable(&name_of(&project.root)),
@@ -192,6 +276,11 @@ fn project_lines(project: &FoundProject, homes: &[String]) -> Vec<String> {
             activity_text(&project.catervas)
         ));
     }
+    let own = jobs.of(&project.root);
+    if !own.is_empty() {
+        lines.push(format!("    jobs: {}", own.len()));
+        lines.extend(own.iter().map(|job| job_line(job, jobs.now, "      ")));
+    }
     lines
 }
 
@@ -204,7 +293,12 @@ fn gone_line(gone: &GoneFolder, homes: &[String]) -> String {
     )
 }
 
-fn report_lines(summary: ReadSummary, found: &Found, homes: &[String]) -> Vec<String> {
+fn report_lines(
+    summary: ReadSummary,
+    found: &Found,
+    jobs: &JobsFound,
+    homes: &[String],
+) -> Vec<String> {
     let mut lines = vec![format!(
         "read {}: {}, {} new",
         plural(summary.files, "transcript file"),
@@ -229,6 +323,15 @@ fn report_lines(summary: ReadSummary, found: &Found, homes: &[String]) -> Vec<St
             plural(found.unreadable_lines, "line")
         ));
     }
+    if !jobs.rows.is_empty() {
+        lines.push(format!("found {}", plural(jobs.rows.len() as u64, "job")));
+    }
+    if jobs.unreadable > 0 {
+        lines.push(format!(
+            "couldn't read jobs from {}",
+            plural(jobs.unreadable, "place")
+        ));
+    }
     for (heading, ownership) in [
         ("projects", Ownership::Yours),
         ("explored", Ownership::Explored),
@@ -243,7 +346,7 @@ fn report_lines(summary: ReadSummary, found: &Found, homes: &[String]) -> Vec<St
         }
         lines.push(format!("{heading}: {}", section.len()));
         for project in section {
-            lines.extend(project_lines(project, homes));
+            lines.extend(project_lines(project, jobs, homes));
         }
     }
     if !found.gone.is_empty() {
@@ -256,7 +359,29 @@ fn report_lines(summary: ReadSummary, found: &Found, homes: &[String]) -> Vec<St
             plural(found.not_a_project.sessions, "session")
         ));
     }
+    let printed: Vec<&FoundProject> = found.projects.iter().collect();
+    let elsewhere = jobs.elsewhere(&printed);
+    if !elsewhere.is_empty() {
+        lines.push(format!(
+            "this computer: {}",
+            plural(elsewhere.len() as u64, "job")
+        ));
+        lines.extend(elsewhere.iter().map(|job| job_line(job, jobs.now, "  ")));
+    }
     lines
+}
+
+fn job_json(job: &JobRow) -> Value {
+    json!({
+        "kind": job.kind.as_wire(),
+        "name": job.display_name,
+        "file": is_repository_job(job.kind).then_some(&job.file),
+        "schedules": job.schedules,
+        "expires_at": job.expires_at.map(moment),
+        "state": job.state,
+        "state_at": job.state_at.map(moment),
+        "last_seen": moment(job.last_seen),
+    })
 }
 
 fn usage_json(usage: &Usage) -> Value {
@@ -281,7 +406,7 @@ fn moment(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-fn found_json(summary: ReadSummary, found: &Found) -> Value {
+fn found_json(summary: ReadSummary, found: &Found, jobs: &JobsFound) -> Value {
     let projects: Vec<Value> = found
         .projects
         .iter()
@@ -297,6 +422,7 @@ fn found_json(summary: ReadSummary, found: &Found) -> Value {
                 "last_worked_at": moment(project.last_at),
                 "own": activity_json(&project.own),
                 "catervas": activity_json(&project.catervas),
+                "jobs": jobs.of(&project.root).into_iter().map(job_json).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -320,6 +446,13 @@ fn found_json(summary: ReadSummary, found: &Found) -> Value {
         "projects": projects,
         "gone": gone,
         "not_a_project": activity_json(&found.not_a_project),
+        "jobs_found": jobs.rows.len(),
+        "unreadable_job_sources": jobs.unreadable,
+        "this_computer": jobs
+            .elsewhere(&found.projects.iter().collect::<Vec<_>>())
+            .into_iter()
+            .map(job_json)
+            .collect::<Vec<_>>(),
     })
 }
 

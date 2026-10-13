@@ -289,7 +289,9 @@ Files: `computer.rs` (`program_output`, after `on_path`); `discover.rs` (`find_j
 - `discovers_the_jobs_of_a_project` (ignored, needs git). Step 02's fixture home, plus: `shop` commits `GITHUB_WORKFLOW` as `.github/workflows/nightly.yml`; `io.env`'s `PATH` is only a folder holding a `crontab` script (git is found through the process's own environment, as `git.rs` runs it) printing `0 2 * * * <home>/shop/bin/sync.sh --token SECRET-CLI` and `0 1 * * * /usr/bin/backup-all`; `<home>/shop/bin/sync.sh` exists; `<home>/.claude/jobs/abc12345/state.json` holds `BACKGROUND_JOB`, with home substituted. Expected: exit 0, and stdout exactly the Verification's lines; with `--json`, `projects[0].jobs[0]` is `{ kind: "github_actions", name: "nightly-sync", file: ".github/workflows/nightly.yml", schedules: ["0 3 * * *", "30 4 * * 1"], expires_at: null, state: null, state_at: null, last_seen: <the clock's time> }`; `this_computer[0]` has `kind` `crontab`, `name` `backup-all` and `file` null; `jobs_found` is 4; `machine.db` holds no `SECRET`. RED: no jobs printed.
 - `prints_jobs_as_text` (guard, ignored): a crontab program `a\u{1b}[2Jb` is printed `a\u001b[2Jb`.
 
-- [ ] `feat(cli): print the jobs catervas found`
+Tests reduced to one per major functionality (ADR 0060, founder 2026-10-12).
+
+- [x] `feat(cli): print the jobs catervas found`
 
 ### Task 8: Spec
 
