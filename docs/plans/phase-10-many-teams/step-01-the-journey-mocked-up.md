@@ -1,11 +1,11 @@
 # Phase 10, step 01: The journey, mocked up
 
-Status: draft
+Status: done
 Branch: `phase/10-many-teams` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.1, 4.4, 10; no behaviour changes in this step
 Depends on: none. The design is `docs/design/many-teams.md` (approved 2026-10-12, ADR 0059); the house style is phase 9's page "Multi-repo projects" and `docs/brand/brand.md`.
-Mockups: drawn 2026-10-12 on the canvas page "Many teams" (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf, version 23), sources in `docs/design/mockups/Many*.dc.html`; not yet approved.
-Readiness confirmed by: not yet (one round, against `docs/standards/workflow.md` stage 2)
+Mockups: drawn 2026-10-12 on the canvas page "Many teams" (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf, version 23), sources in `docs/design/mockups/Many*.dc.html`; approved by the founder on 2026-10-12 ("Please keep in mind the the project name is catervas but the mockup is approved"), as drawn, every decision below kept. The canvas was retitled and its older boards renamed from Farik to Catervas the same day (version 24 on).
+Readiness confirmed by: no separate round: the boards were drawn in the same pass as this plan, and the founder's click-through and approval is the gate (ADR 0032).
 
 This step writes no code and no test. Its tasks are boards; each is "verified" by the founder clicking it through on the canvas and saying yes, as ADR 0032 has mockups approved before any screen is built.
 
@@ -74,42 +74,42 @@ One task per board group. Each is verified by the founder's click-through on the
 Files: `ManyFindOffer.dc.html`, `ManyScanning.dc.html`, `ManyFound.dc.html`
 Verified when the founder has: opened the consent's info button and read what is read and kept; followed Look for my projects to the counts, Continue setup meanwhile, and Done; checked the defaults on each row, the bookkeeping row from Zoho Books, the "2 folders" reason, the four tucked-away sections, and Already a team.
 
-- [ ] Approved by the founder: <date>, "<words>"
+- [x] Approved by the founder: 2026-10-12, "the mockup is approved"
 
 ### Task 2: Linking with proof and creating teams (journey A, steps 4 to 6)
 
 Files: `ManyLinkPair.dc.html`, `ManyYourTeams.dc.html`, `ManyAllTeams.dc.html`
 Verified when the founder has: read each proof sentence and its files and lines; answered both pairs; opened Maybe related; checked each team card, Suggest names with Claude and its result, Create 3 teams; seen the paused teams with Start, Document it first and Undo, the watched projects with Not mine, the day-later cards, the switcher, journey E's two rows, and journey B's offer.
 
-- [ ] Approved by the founder: <date>, "<words>"
+- [x] Approved by the founder: 2026-10-12, "the mockup is approved"
 
 ### Task 3: Claude on the web (journey C)
 
 Files: `ManyWebOnly.dc.html`
 Verified when the founder has: walked Where do you use Claude?, the export steps and drop, Connect GitHub, the services tiles, the web-only list (Zoho Books bookkeeping, a repository only on GitHub, a claude.ai Project, the waiting export card), and Copy to this computer.
 
-- [ ] Approved by the founder: <date>, "<words>"
+- [x] Approved by the founder: 2026-10-12, "the mockup is approved"
 
 ### Task 4: Fixing a mistake and this computer (journey F)
 
 Files: `ManyFixMistake.dc.html`
 Verified when the founder has: used This doesn't belong here and its two outcomes; read This computer's sections; opened Forget everything's confirm.
 
-- [ ] Approved by the founder: <date>, "<words>"
+- [x] Approved by the founder: 2026-10-12, "the mockup is approved"
 
 ### Task 5: The daily reminder and its notification
 
 Files: `ManyReminders.dc.html`
 Verified when the founder has: read each group and each row's actions (including Open on claude.ai for a web session), the browser-notice ask, the computer's notification, Give to the team and Snooze.
 
-- [ ] Approved by the founder: <date>, "<words>"
+- [x] Approved by the founder: 2026-10-12, "the mockup is approved"
 
 ### Task 6: Analytics and the empty and error states
 
 Files: `ManyAnalytics.dc.html`, `ManyStates.dc.html`
 Verified when the founder has: read usage per team (own sessions against agents, the API label), workflow, blockers, a team's Activity tab; and each of the six states with its next step.
 
-- [ ] Approved by the founder: <date>, "<words>"
+- [x] Approved by the founder: 2026-10-12, "the mockup is approved"
 
 ## Verification
 
