@@ -236,7 +236,7 @@ Tests:
 - `reads_a_launchd_agent`: `LAUNCHD_SHOP_SYNC` gives unit and name `com.me.shop-sync`, schedules `[30 2 * * *, 0 9 * * 1]`, program `sync`, paths `[/home/me/shop/bin/sync, /home/me/shop]`. `StartInterval` 3600 gives `[every 3600 seconds]`. `LAUNCHD_KEEP_ALIVE` and `not json` give `None`. Nothing read holds `SECRET`. RED.
 - `reads_windows_task_scheduler`: four jobs named by `TaskName`: Acrobat's schedules are the two strings `At logon time` and `Daily, 11:00:00 AM, Every 1 day(s)`; ShopSync's paths include `/home/me/shop/bin/sync` and `/home/me/shop`; ShopReport's paths are `[/mnt/c/Users/me/shop/report, final.exe]`. With no `TaskName` header the result is `None`. Nothing read holds `SECRET`. RED.
 
-- [ ] `feat(core): read the computer's schedulers`
+- [x] `feat(core): read the computer's schedulers`
 
 ### Task 4: Jobs in the machine index
 

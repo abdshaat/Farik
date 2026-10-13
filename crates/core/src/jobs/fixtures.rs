@@ -26,3 +26,31 @@ pub const RENDER_YAML: &str = include_str!("fixtures/render.yaml");
 
 /// A Terraform file with two literal schedules, a variable one and a commented one.
 pub const TERRAFORM_MAIN_TF: &str = include_str!("fixtures/main.tf");
+
+/// A crontab: comments, variables with tokens, four jobs and a line that is not one.
+pub const CRONTAB: &str = include_str!("fixtures/crontab.txt");
+
+/// `systemctl list-timers --all --no-legend --no-pager` (systemd 255): `logrotate` and `db-backup`.
+pub const SYSTEMCTL_TIMERS_SYSTEM: &str = include_str!("fixtures/systemctl_timers_system.txt");
+
+/// `systemctl --user list-timers …`: `shop-sync`.
+pub const SYSTEMCTL_TIMERS_USER: &str = include_str!("fixtures/systemctl_timers_user.txt");
+
+/// `systemctl cat logrotate.timer logrotate.service`: a timer that came with the system.
+pub const SYSTEMCTL_CAT_LOGROTATE: &str = include_str!("fixtures/systemctl_cat_logrotate.txt");
+
+/// `systemctl cat db-backup.timer db-backup.service`: a system timer of the owner's, with two
+/// relative schedules.
+pub const SYSTEMCTL_CAT_DB_BACKUP: &str = include_str!("fixtures/systemctl_cat_db_backup.txt");
+
+/// `systemctl --user cat shop-sync.timer shop-sync.service`, with a key and an environment value.
+pub const SYSTEMCTL_CAT_SHOP_SYNC: &str = include_str!("fixtures/systemctl_cat_shop_sync.txt");
+
+/// A launchd agent as `plutil -convert json` prints it (hand-written; no Mac was recorded).
+pub const LAUNCHD_SHOP_SYNC: &str = include_str!("fixtures/launchd_shop_sync.json");
+
+/// A launchd agent with no interval.
+pub const LAUNCHD_KEEP_ALIVE: &str = include_str!("fixtures/launchd_keep_alive.json");
+
+/// `schtasks.exe /query /fo CSV /v` (Windows 11 header), its header twice.
+pub const SCHTASKS_CSV: &str = include_str!("fixtures/schtasks.csv");
