@@ -1,6 +1,6 @@
 # Phase 10, step 03: Finding the jobs
 
-Status: ready
+Status: executed
 Branch: `phase/10-many-teams` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 8.4, 8.6; no functional requirement of section 7 (ADR 0059)
 Depends on: step 02 of this phase (committed, last as `e5d37e5c`; where this plan cites step 02, its code wins): `machine.db` and its migration list, the transcript reader, the found projects, `catervas discover`. Nothing of phase 9 or of steps 03b on.
@@ -303,7 +303,7 @@ Tests reduced to one per major functionality (ADR 0060, founder 2026-10-12).
 
 `docs/design/many-teams.md` section 3: Decisions' limits (Task Scheduler, system timers, worktrees outside the folder, Terraform's literal values, explored repositories). `docs/plans/project-plan.md`: step 03's Spec column becomes "3, 8.4, 8.6".
 
-- [ ] `docs(spec): record finding the jobs`
+- [x] `docs(spec): record finding the jobs`
 
 ## Verification
 
