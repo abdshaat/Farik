@@ -304,3 +304,27 @@ fn remembers_a_root_after_its_folder_is_gone() {
     assert!(found.gone[0].folder.ends_with("/shop"));
     assert_eq!(found.gone[0].activity.sessions, 2);
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn treats_a_file_where_a_folder_was_as_gone() {
+    let mut world = World::new("file-for-folder");
+    let app = world.home().join("app");
+    std::fs::write(&app, "now a file\n").expect("a file");
+    world.session(&app);
+    let found = world.scan();
+    assert!(found.projects.is_empty());
+    assert_eq!(found.gone.len(), 1);
+    assert!(found.gone[0].folder.ends_with("/app"));
+    // The index says it too: the session is `gone`, and no project was made of the file.
+    let connection = rusqlite::Connection::open(world.temp.root.join("state").join(MACHINE_DB))
+        .expect("the index opens");
+    let places: Vec<String> = connection
+        .prepare("SELECT place FROM sessions UNION ALL SELECT root FROM projects")
+        .expect("a statement")
+        .query_map([], |row| row.get(0))
+        .expect("a query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    assert_eq!(places, vec!["gone".to_string()]);
+}
