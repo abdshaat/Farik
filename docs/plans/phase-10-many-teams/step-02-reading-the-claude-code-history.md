@@ -1,6 +1,6 @@
 # Phase 10, step 02: Reading the Claude Code history
 
-Status: done
+Status: done (landed 2026-10-12: full check green but for the known `changes_project_from_the_browser` flake in the serve suite, untouched by this step; `check` workflow green on 4d4eb143; landing review with mutation run before ADR 0060, its twelve findings fixed)
 Branch: `phase/10-many-teams` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 8.4, 8.6; no functional requirement of section 7 (ADR 0059)
 Depends on: none beyond `main`, with ADR 0059 and `docs/design/many-teams.md` on this branch. No code of phase 9 is consumed, though this branch carries it; nothing of step 01 (no code) or of steps 03 on.
