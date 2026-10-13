@@ -326,6 +326,26 @@ mod tests {
     }
 
     #[test]
+    fn the_image_leaves_nothing_in_tmp() {
+        // Root's npm cache under HOME=/tmp would be baked into the image and unwritable by the
+        // user's uid, so the last RUN, the one that runs npm, empties /tmp.
+        let joined = super::DOCKERFILE.replace("\\\n", " ");
+        let runs: Vec<&str> = joined
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("RUN "))
+            .collect();
+        let last = runs.last().expect("the Dockerfile has a RUN");
+        assert!(last.contains("npm "), "{last}");
+        assert!(last.ends_with("find /tmp -mindepth 1 -delete"), "{last}");
+        let after = joined.rsplit_once(last).expect("the last RUN is there").1;
+        assert!(
+            !after.lines().any(|line| line.trim().starts_with("RUN ")),
+            "{after}"
+        );
+    }
+
+    #[test]
     fn retries_a_program_that_is_busy_being_written() {
         let bin =
             std::env::temp_dir().join(format!("catervas-computer-busy-{}", std::process::id()));

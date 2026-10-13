@@ -15,7 +15,16 @@ const NEEDLE: &str = concat!("en", "v!(");
 fn is_cargo_s_own(name: &str) -> bool {
     name.starts_with("CARGO_PKG_")
         || name.starts_with("CARGO_BIN_EXE_")
-        || ["CARGO_MANIFEST_DIR", "CARGO_CRATE_NAME", "CARGO_BIN_NAME"].contains(&name)
+        || [
+            "CARGO_MANIFEST_DIR",
+            "CARGO_CRATE_NAME",
+            "CARGO_BIN_NAME",
+            // Not Cargo's but this crate's own `build.rs`'s, which sets it from the sandbox
+            // Dockerfile's hash (`cargo:rustc-env` overrides the environment's), so it carries no
+            // outside value.
+            "CATERVAS_SANDBOX_DIGEST",
+        ]
+        .contains(&name)
 }
 
 /// The line numbers in `text` where a macro reads a variable at build time, `env!` or
@@ -111,6 +120,7 @@ fn lets_the_names_cargo_sets_through() {
         "CARGO_PKG_VERSION",
         "CARGO_MANIFEST_DIR",
         "CARGO_BIN_EXE_catervas",
+        "CATERVAS_SANDBOX_DIGEST",
     ] {
         let read = format!("{}\"{name}\")", concat!("en", "v!("));
         assert_eq!(build_time_reads(&format!("const A: &str = {read};")), []);
