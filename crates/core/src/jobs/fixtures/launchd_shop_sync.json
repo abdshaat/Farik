@@ -1,0 +1,1 @@
+{"Label":"com.me.shop-sync","ProgramArguments":["/home/me/shop/bin/sync","--token","SECRET-LAUNCHD"],"StartCalendarInterval":[{"Hour":2,"Minute":30},{"Weekday":1,"Hour":9,"Minute":0}],"EnvironmentVariables":{"TOKEN":"SECRET-LAUNCHD-ENV"},"WorkingDirectory":"/home/me/shop"}

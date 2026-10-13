@@ -217,6 +217,8 @@ pub fn tie_to_project(paths: &[String], roots: &[String]) -> Option<String> {
         .cloned()
 }
 
+/// The computer's schedulers: crontab, systemd, launchd and Windows Task Scheduler.
+pub mod computer;
 /// Wire fixtures for tests, in this crate and in others.
 pub mod fixtures;
 /// The schedules committed in a repository's files.
