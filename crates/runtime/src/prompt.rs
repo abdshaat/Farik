@@ -669,8 +669,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        CLOSING_INSTRUCTIONS, INTERVIEW_INSTRUCTION, MemberLine, OwnRepo, PROMPT_SECTIONS, PromptInput,
-        assemble_system_prompt, tier_name, untrusted_block,
+        CLOSING_INSTRUCTIONS, INTERVIEW_INSTRUCTION, MemberLine, OwnRepo, PROMPT_SECTIONS,
+        PromptInput, assemble_system_prompt, tier_name, untrusted_block,
     };
     use crate::session::SessionPurpose;
     use crate::tools::{CatervasTool, tool_descriptors};
