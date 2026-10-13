@@ -114,9 +114,11 @@ fn candidates(projects: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
 }
 
 /// What a candidate is, once its link is followed.
+#[derive(Debug, PartialEq, Eq)]
 enum Opened {
-    /// A regular file inside `projects/`.
-    Transcript,
+    /// A regular file inside `projects/`, as its canonical path: the one to open, so that a link
+    /// swapped after the check cannot redirect the read.
+    Transcript(PathBuf),
     /// Pointing outside `projects/`, or Claude Code's credentials: never opened.
     Refused,
     /// Gone or not a regular file; tried again next scan.
@@ -135,7 +137,7 @@ fn classify(path: &Path, projects: &Path) -> Opened {
         return Opened::Refused;
     }
     if real.is_file() {
-        Opened::Transcript
+        Opened::Transcript(real)
     } else {
         Opened::Skipped
     }
@@ -232,18 +234,18 @@ pub fn read_transcripts(
     };
     let before = index.session_count()?;
     for path in candidates(&projects)? {
-        match classify(&path, &projects) {
+        let real = match classify(&path, &projects) {
             Opened::Skipped => continue,
             Opened::Refused => {
                 summary.refused += 1;
                 continue;
             }
-            Opened::Transcript => {}
-        }
+            Opened::Transcript(real) => real,
+        };
         let key = path.to_string_lossy().into_owned();
         let state = index.file_state(&key)?;
         // A file that cannot be opened or read now keeps its offset and is tried next scan.
-        let Ok(mut file) = std::fs::File::open(&path) else {
+        let Ok(mut file) = std::fs::File::open(&real) else {
             continue;
         };
         let Ok(length) = file.metadata().map(|metadata| metadata.len()) else {
@@ -617,9 +619,17 @@ mod tests {
             vec![whole.len().to_string()]
         );
 
-        let finished = a_turn_line(SESSION, CWD, "2026-10-12T09:03:00Z");
+        // A later turn in a subfolder, on another branch, does not move where the session started.
+        let finished = a_turn_line(SESSION, "/home/me/shop/sub", "2026-10-12T09:03:00Z")
+            .replace("\"main\"", "\"later\"")
+            .replace("2.1.296", "2.1.9")
+            .replace("\"cli\"", "\"vscode\"");
         std::fs::write(&path, format!("{whole}{finished}\n")).expect("a finished line");
         setup.read();
+        assert_eq!(
+            setup.rows("SELECT printf('%s|%s|%s|%s|%s', cwd, git_branch, version, entrypoint, first_at) FROM sessions"),
+            vec!["/home/me/shop|main|2.1.296|cli|2026-10-12T09:00:00.000Z"]
+        );
         assert_eq!(
             setup.rows("SELECT CAST(turns AS TEXT) FROM transcript_files"),
             vec!["8"]
@@ -692,8 +702,19 @@ mod tests {
             ]
         );
 
+        // The resumed file read after the original: the reply keeps its earliest time and session.
+        let late = Setup::new("counts-resumed-late");
+        std::fs::write(late.transcript("zzz"), resumed(OTHER, true)).expect("the resumed file");
+        std::fs::write(late.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("the original");
+        late.read();
+        assert_eq!(
+            late.rows("SELECT printf('%s|%s', session_id, at) FROM replies WHERE reply_key = 'msg_01A'"),
+            vec![format!("{SESSION}|2026-10-12T09:00:05.000Z")]
+        );
+
+        // Started together, the smaller id owns the reply, even when its file is read last.
         let tied = Setup::new("counts-resumed-tied");
-        std::fs::write(tied.transcript(OTHER), resumed(OTHER, false)).expect("the resumed file");
+        std::fs::write(tied.transcript("zzz"), resumed(OTHER, false)).expect("the resumed file");
         std::fs::write(tied.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("the original");
         tied.read();
         assert_eq!(
@@ -704,6 +725,12 @@ mod tests {
                 format!("req_01B|{OTHER}|5|7|0|0"),
             ]
         );
+        // The same, read the other way round: the smaller id's file first.
+        let tied_first = Setup::new("counts-resumed-tied-first");
+        std::fs::write(tied_first.transcript(OTHER), resumed(OTHER, false)).expect("resumed");
+        std::fs::write(tied_first.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("original");
+        tied_first.read();
+        assert_eq!(tied_first.rows(REPLIES), tied.rows(REPLIES));
 
         let subagents = setup
             .claude()
@@ -732,18 +759,82 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_largest_counters_whatever_order_a_files_lines_come_in() {
+        let setup = Setup::new("keeps-largest-in-a-file");
+        let reply = |at: &str, key: &str, usage| {
+            a_reply_line(SESSION, CWD, at, key, "claude-opus-5-5", usage)
+        };
+        let lines = [
+            reply("2026-10-12T09:00:00Z", "big_first", usage(10, 40, 1000, 200)),
+            reply("2026-10-12T09:00:01Z", "big_first", usage(5, 1, 900, 0)),
+            reply("2026-10-12T09:00:02Z", "big_last", usage(5, 1, 900, 0)),
+            reply("2026-10-12T09:00:03Z", "big_last", usage(10, 40, 1000, 200)),
+        ];
+        std::fs::write(setup.transcript(SESSION), lines.join("\n") + "\n").expect("a file");
+        setup.read();
+        assert_eq!(
+            setup.rows("SELECT printf('%s|%d|%d|%d|%d|%s', reply_key, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, at) FROM replies ORDER BY reply_key"),
+            vec![
+                "big_first|10|40|1000|200|2026-10-12T09:00:00.000Z",
+                "big_last|10|40|1000|200|2026-10-12T09:00:02.000Z"
+            ]
+        );
+    }
+
+    #[test]
+    fn moves_a_sessions_start_to_an_earlier_turn_in_a_later_file() {
+        let setup = Setup::new("moves-start-earlier");
+        let late = a_turn_line(SESSION, CWD, "2026-10-12T09:05:00Z");
+        std::fs::write(setup.transcript("a"), format!("{late}\n")).expect("a file");
+        setup.read();
+        let early = a_turn_line(SESSION, "/home/me/other", "2026-10-12T09:00:00Z")
+            .replace("\"main\"", "\"dev\"")
+            .replace("2.1.296", "2.1.0")
+            .replace("\"cli\"", "\"vscode\"");
+        std::fs::write(setup.transcript("b"), format!("{early}\n")).expect("a file");
+        setup.read();
+        assert_eq!(
+            setup.rows("SELECT printf('%s|%s|%s|%s|%s|%s', cwd, git_branch, version, entrypoint, first_at, last_at) FROM sessions"),
+            vec!["/home/me/other|dev|2.1.0|vscode|2026-10-12T09:00:00.000Z|2026-10-12T09:05:00.000Z"]
+        );
+    }
+
+    #[test]
     fn keeps_the_largest_counters_when_a_later_file_repeats_a_reply() {
         let setup = Setup::new("keeps-largest-counters");
         std::fs::write(setup.transcript(SESSION), CLAUDE_CODE_2_1_296).expect("the original");
         setup.read();
-        let partial = CLAUDE_CODE_2_1_296.lines().nth(2).expect("L3");
-        let partial = partial.replace(SESSION, OTHER);
-        std::fs::write(setup.transcript("zzz"), format!("{partial}\n")).expect("a fork");
+        // The fork repeats the reply with every counter smaller, then another file with every one larger.
+        let repeat = |at: &str, usage| {
+            a_reply_line(OTHER, CWD, at, "msg_01A", "claude-opus-5-5", usage)
+        };
+        let smaller = repeat("2026-10-12T09:00:30Z", usage(1, 1, 1, 1));
+        std::fs::write(setup.transcript("zzz"), format!("{smaller}\n")).expect("a fork");
         setup.read();
         assert_eq!(
             setup.rows(REPLIES)[0],
             format!("msg_01A|{SESSION}|10|40|1000|200")
         );
+        let larger = repeat("2026-10-12T09:00:40Z", usage(11, 41, 1001, 201));
+        std::fs::write(setup.transcript("zzy"), format!("{larger}\n")).expect("a fork");
+        setup.read();
+        assert_eq!(
+            setup.rows(REPLIES)[0],
+            format!("msg_01A|{SESSION}|11|41|1001|201")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opens_the_canonical_path_that_was_checked() {
+        use std::os::unix::fs::symlink;
+
+        let setup = Setup::new("opens-canonical");
+        let projects = setup.claude().join("projects").canonicalize().expect("projects");
+        std::fs::write(setup.transcript("real"), "x\n").expect("a file");
+        symlink(setup.transcript("real"), setup.transcript("link")).expect("a link");
+        let real = projects.join("-home-me-shop/real.jsonl");
+        assert_eq!(classify(&setup.transcript("link"), &projects), Opened::Transcript(real));
     }
 
     #[cfg(unix)]
@@ -767,8 +858,15 @@ mod tests {
         std::fs::write(folder.join("s/tool-results/r.jsonl"), format!("{marker}\n"))
             .expect("a result");
 
+        // Inside `projects/`: the credentials, a link to them, and files that are not transcripts.
+        std::fs::write(folder.join(".credentials.json"), format!("{marker}\n")).expect("a copy");
+        symlink(folder.join(".credentials.json"), folder.join("c.jsonl")).expect("a link");
+        std::fs::write(folder.join("notes.json"), format!("{marker}\n")).expect("notes");
+        std::fs::create_dir_all(folder.join("memory")).expect("a memory folder");
+        std::fs::write(folder.join("memory/m.md"), format!("{marker}\n")).expect("a memory");
+
         let summary = setup.read();
-        assert_eq!(summary.refused, 2);
+        assert_eq!(summary.refused, 3);
         assert_eq!(summary.files, 0);
         assert!(setup.rows("SELECT path FROM transcript_files").is_empty());
         let bytes = std::fs::read(setup.db()).expect("the index file");
