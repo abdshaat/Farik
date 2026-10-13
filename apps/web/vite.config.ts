@@ -20,6 +20,7 @@ export default defineConfig({
 				bypass: (req) => (req.method === "GET" ? req.url : undefined),
 			},
 			"/session": toDaemon,
+			"/documents": toDaemon,
 			"/disconnect": toDaemon,
 		},
 	},

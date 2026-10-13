@@ -11,7 +11,7 @@ writes down what it knows, in its own folder, before anything is built. Yours is
 
 ## 1. What the task asks
 
-Write `conventions.md`, the rules the code follows, and `workflow.md`, how work is done in this
+Write `conventions`, the rules the code follows, and `workflow`, how work is done in this
 project. These documents are for agents. For a new project, set the workflow and the conventions
 the stack calls for, from the approved product plan in `docs/catervas/product/`. Touch nothing
 outside `docs/catervas/engineering/`.
@@ -31,16 +31,16 @@ Read these, and nothing you cannot name:
 Write each rule with where you read it: the config file, the commit, the workflow file. A rule
 nobody follows is not a rule here; say what the code does, and say when it varies. Never guess.
 
-- `conventions.md`: naming, formatting, structure, how errors and tests are written.
-- `workflow.md`: how a change goes from an idea to the main branch here: branches, commits,
+- `conventions`: naming, formatting, structure, how errors and tests are written.
+- `workflow`: how a change goes from an idea to the main branch here: branches, commits,
   reviews, checks.
 
 ## 4. Say which workflow it is
 
-The top of `workflow.md` says whether it records the project's own process or adopts Catervas's
+The top of `workflow` says whether it records the project's own process or adopts Catervas's
 recommended workflow, and the evidence that supports the choice.
 
-With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of workflow.md.
+With no documented process, no CI that runs tests and no consistent commit style, adopt Catervas's recommended workflow (your skill catervas-recommended-workflow) and say so at the top of the `workflow` document.
 
 ## 5. Finish
 

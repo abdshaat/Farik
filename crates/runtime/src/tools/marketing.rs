@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 use catervas_core::contract::{Role, TaskId};
+use catervas_core::folders::{DocumentFormat, stem_of, with_format};
 use catervas_core::marketing::{
     Amount, PlanCampaign, PlanProposal, PostChannel, PostSlot, ProposalRefusal, check_proposal,
     parse_amount,
@@ -35,10 +36,12 @@ pub struct ProposeMarketingPlanInput {
     /// it costs and what they get. The owner reads this first.
     summary: String,
     /// The plan in full, 200 to 16,000 characters. Catervas also writes it to
-    /// docs/catervas/marketing/plans/MP-<n>.md.
+    /// docs/catervas/marketing/plans/MP-<n>, as Markdown (`.md`) or, in a team that writes HTML,
+    /// as the body of an HTML page (`.html`) it adds the head and the title to.
     text: String,
     /// The plan written for agents, 200 to 16,000 characters. Catervas writes it to
-    /// docs/catervas/marketing/plans/MP-<n>.agent.md, beside the plan for people.
+    /// docs/catervas/marketing/plans/MP-<n>.agent.md (`.agent.html` in an HTML team), beside the
+    /// plan for people.
     agent_text: String,
     /// The first day, as YYYY-MM-DD in UTC: yesterday's date or later.
     starts_on: String,
@@ -121,13 +124,29 @@ const PLANS_FOLDER: &str = "docs/catervas/marketing/plans";
 
 /// The path of plan `MP-<number>`'s text, relative to a worktree. Number 0 stands for the number
 /// not taken yet: the path of the folder's check.
-pub(super) fn plan_file(number: u32) -> String {
-    format!("{PLANS_FOLDER}/MP-{number}.md")
+pub(super) fn plan_file(number: u32, format: DocumentFormat) -> String {
+    with_format(&format!("{PLANS_FOLDER}/MP-{number}"), format)
 }
 
 /// The path of plan `MP-<number>`'s agent twin, relative to a worktree.
-fn plan_twin_file(number: u32) -> String {
-    format!("{PLANS_FOLDER}/MP-{number}.agent.md")
+fn plan_twin_file(number: u32, format: DocumentFormat) -> String {
+    with_format(&format!("{PLANS_FOLDER}/MP-{number}.agent"), format)
+}
+
+/// An HTML plan as a whole page: the head, with the title `<id>: <title>` escaped, the same
+/// `<h1>`, then `body`, which is the agent's own HTML.
+fn html_plan_page(id: &str, title: &str, body: &str) -> String {
+    let heading = format!("{id}: {title}")
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>{heading}</title>\n</head>\n<body>\n<h1>{heading}</h1>\n{}\n</body>\n</html>\n",
+        body.trim_end()
+    )
 }
 
 /// How many characters a plan written for agents has, once its edges are trimmed.
@@ -252,8 +271,9 @@ pub(crate) fn propose_plan(
         ],
     );
     let id = format!("MP-{number}");
-    let path = plan_file(number);
-    let twin_path = plan_twin_file(number);
+    let format = call.team.document_format();
+    let path = plan_file(number, format);
+    let twin_path = plan_twin_file(number, format);
     let tool = TOOLS
         .iter()
         .find(|tool| tool.name == PROPOSE_TOOL)
@@ -270,14 +290,12 @@ pub(crate) fn propose_plan(
     let title = input.title.split_whitespace().collect::<Vec<_>>().join(" ");
     let file = worktree.join(&path);
     let twin = worktree.join(&twin_path);
-    write_new(
-        &file,
-        &format!("# {id}: {title}\n\n{}\n", input.text.trim_end()),
-    )?;
-    if let Err(error) = write_new(
-        &twin,
-        &format!("# {id}: {title}\n\n{}\n", input.agent_text.trim_end()),
-    ) {
+    let page = |body: &str| match format {
+        DocumentFormat::Markdown => format!("# {id}: {title}\n\n{}\n", body.trim_end()),
+        DocumentFormat::Html => html_plan_page(&id, &title, body),
+    };
+    write_new(&file, &page(&input.text))?;
+    if let Err(error) = write_new(&twin, &page(&input.agent_text)) {
         let _ = std::fs::remove_file(&file);
         return Err(error);
     }
@@ -505,7 +523,7 @@ fn highest_number(plans: &[MarketingPlan], folders: [&Path; 2]) -> u32 {
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 let name = entry.file_name().into_string().ok()?;
-                numbered(name.strip_suffix(".md")?)
+                numbered(stem_of(&name)?)
             })
     });
     from_log.chain(from_files).max().unwrap_or(0)
@@ -564,6 +582,9 @@ fn body_of(
         "measures": input.measures,
         "proposed_by": call.agent_id(),
     });
+    if call.team.document_format() == DocumentFormat::Html {
+        body["format"] = json!("html");
+    }
     for (name, value) in [
         ("google_ads_account", &input.google_ads_account),
         ("replaces", &input.replaces),
@@ -586,8 +607,13 @@ mod tests {
     use crate::tools::fixtures::{TestProject, a_team_of_three};
     use crate::tools::{ToolContext, ToolError};
 
-    /// Kai the Marketing Specialist beside the team of three.
+    /// Kai the Marketing Specialist beside the team of three, writing documents as Markdown.
     fn a_marketing_project(name: &str) -> TestProject {
+        a_marketing_project_in(name, "markdown")
+    }
+
+    /// Kai beside the team of three, whose documents are written in `format`.
+    fn a_marketing_project_in(name: &str, format: &str) -> TestProject {
         TestProject::new(
             name,
             &a_team_of_three(|wire| {
@@ -595,6 +621,7 @@ mod tests {
                     .as_array_mut()
                     .expect("a list of agents")
                     .push(an_agent_wire("kai", "marketing_specialist"));
+                wire["policy"]["document_format"] = json!(format);
             }),
         )
     }
@@ -776,6 +803,88 @@ mod tests {
             .expect("the board reads")
             .expect("a row");
         assert!(row.waiting_on_human, "the task waits on the owner");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_html_teams_marketing_plan_is_a_page() {
+        let project = a_marketing_project_in("tools-plan-html", "html");
+        let worktree = works_on(&project, "CTV-1");
+        let mut plan = a_plan();
+        plan["title"] = json!("A & <B> \"C\"");
+        plan["text"] = json!(format!("<p>{}</p>", "x".repeat(300)));
+        plan["agent_text"] = json!(format!("<p>{}</p>", "y".repeat(300)));
+
+        let answer = propose(&project, "CTV-1", &plan).expect("the plan is proposed");
+
+        assert_eq!(answer["plan"], "MP-1");
+        let page = |body: &str| {
+            format!(
+                "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+                 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+                 <title>MP-1: A &amp; &lt;B&gt; &quot;C&quot;</title>\n</head>\n<body>\n<h1>MP-1: A &amp; &lt;B&gt; &quot;C&quot;</h1>\n\
+                 {body}\n</body>\n</html>\n"
+            )
+        };
+        let plans = worktree.join("docs/catervas/marketing/plans");
+        assert_eq!(
+            std::fs::read_to_string(plans.join("MP-1.html")).expect("the plan is a page"),
+            page(&format!("<p>{}</p>", "x".repeat(300)))
+        );
+        assert_eq!(
+            std::fs::read_to_string(plans.join("MP-1.agent.html")).expect("so is its twin"),
+            page(&format!("<p>{}</p>", "y".repeat(300)))
+        );
+        assert!(!plans.join("MP-1.md").exists());
+        let events = project.events(&[EventKind::MarketingPlanProposed]);
+        let EventBody::MarketingPlanProposed(body) = &events[0].body else {
+            panic!("a marketing plan was proposed");
+        };
+        assert_eq!(
+            body.format,
+            Some(catervas_protocol::event::MarketingPlanProposedBodyFormat::Html)
+        );
+        // marketing_plan.get answers the format from the log.
+        let plans = catervas_store::marketing::marketing_plans(&project.deps.log).expect("plans");
+        let whole = crate::marketing::whole(
+            &plans[0],
+            catervas_store::marketing::PlanState::Proposed,
+            &[],
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 22).expect("a date"),
+            &std::collections::BTreeMap::new(),
+        );
+        assert_eq!(whole["format"], "html");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn plan_numbers_count_both_formats() {
+        let project = a_marketing_project_in("tools-plan-numbers-both", "html");
+        // A Markdown plan approved before the team wrote HTML: the next is MP-2, as a page.
+        let committed = project.repo.path.join("docs/catervas/marketing/plans");
+        std::fs::create_dir_all(&committed).expect("a directory");
+        std::fs::write(committed.join("MP-1.md"), "# MP-1\n").expect("a file");
+        let worktree = works_on(&project, "CTV-1");
+
+        let answer = propose(&project, "CTV-1", &a_plan()).expect("proposed");
+
+        assert_eq!(answer["plan"], "MP-2");
+        assert!(
+            worktree
+                .join("docs/catervas/marketing/plans/MP-2.html")
+                .is_file()
+        );
+        // And an HTML plan counts in a Markdown team.
+        let project = a_marketing_project("tools-plan-numbers-both-md");
+        let committed = project.repo.path.join("docs/catervas/marketing/plans");
+        std::fs::create_dir_all(&committed).expect("a directory");
+        std::fs::write(committed.join("MP-3.html"), "<h1>MP-3</h1>\n").expect("a file");
+        std::fs::write(committed.join("MP-3.agent.html"), "<h1>MP-3</h1>\n").expect("a file");
+        works_on(&project, "CTV-1");
+        assert_eq!(
+            propose(&project, "CTV-1", &a_plan()).expect("proposed")["plan"],
+            "MP-4"
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use catervas_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
-use catervas_core::folders::plan_path;
+use catervas_core::folders::{plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy};
 use catervas_core::governor::gates::fits_the_open_sprint;
 use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
@@ -19,7 +19,7 @@ use catervas_protocol::event::{
 };
 use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
-use catervas_store::git::GitError;
+use catervas_store::git::{GitError, held_document};
 use catervas_store::product_plan::is_the_product_plan;
 
 use super::messages::{
@@ -279,8 +279,9 @@ fn judge(
 
 /// Whether the contract is judged now: written since refining began with no refusal by the
 /// governor since that write, or, with no such write, filed whole (a breakdown's task, a contract
-/// the human holds, a twin's re-derive, a new project's product plan, a Catervafication's epic) and not refused
-/// since refining began. A raw request is not judged: its brief would fail and spend one of the three attempts.
+/// the human holds, a twin's re-derive, an owner's change or rewrite, a new project's product
+/// plan, a Catervafication's epic) and not refused since refining began. A raw request is not
+/// judged: its brief would fail and spend one of the three attempts.
 fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u64) -> bool {
     let refused_after = |after: u64| {
         history.iter().any(|event| {
@@ -295,7 +296,7 @@ fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u6
         .find(|event| event.envelope.seq > began && event.body.kind() == EventKind::ContractWritten)
         .map(|event| event.envelope.seq);
     let is_a_rederive = history.iter().any(
-        |event| matches!(&event.body, EventBody::TaskCreated(body) if body.rederives.is_some()),
+        |event| matches!(&event.body, EventBody::TaskCreated(body) if body.rederives.is_some() || body.filed_as.is_some()),
     );
     // The product plan's task and the Catervafication's epic are Catervas's contracts, filed
     // whole: no refine session rewrites them.
@@ -507,19 +508,23 @@ fn product_managers_message(
     step: &EpicStep,
     listed: &[(String, String, String)],
 ) -> Result<String, OrchestratorError> {
-    let plan = plan_path(contract.id.as_str());
+    let unextended = plan_stem(contract.id.as_str());
     if *step == EpicStep::WriteThePlansTasks {
-        match deps
-            .tools
-            .git
-            .file_at(&integration_branch(team, &deps.tools.git)?, &plan)
-        {
-            Ok(text) => return Ok(plan_tasks_message(contract, &plan, &text, listed)),
+        let git = &deps.tools.git;
+        let branch = integration_branch(team, git)?;
+        // The plan is read in the format it was written in.
+        match held_document(git, &branch, &unextended, team.document_format()) {
+            Ok(Some(plan)) => {
+                let text = git.file_at(&branch, &plan)?;
+                return Ok(plan_tasks_message(contract, &plan, &text, listed));
+            }
             // No plan on the integration branch: the epic is broken down again.
-            Err(GitError::CommandFailed { .. }) => {}
+            Ok(None) | Err(GitError::CommandFailed { .. }) => {}
             Err(error) => return Err(error.into()),
         }
     }
+    // A new plan is named in the team's format.
+    let plan = with_format(&unextended, team.document_format());
     let builders = team
         .active_agents()
         .filter(|agent| changes_code(Role::from(agent.role)))
@@ -1472,6 +1477,7 @@ mod tests {
             catervas_store::requests::product_plan_request(
                 catervas_core::contract::Role::Architect,
                 5.0,
+                catervas_core::folders::DocumentFormat::Html,
             ),
             (at(), &deps.ids),
         )
@@ -2091,6 +2097,53 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_owners_change_is_judged_without_refining() {
+        use catervas_core::contract::Role;
+        use catervas_protocol::event::TaskCreatedBodyFiledAs;
+        use catervas_store::requests::{change_request, file_small_request};
+
+        let harness = Harness::new(
+            "req-owner-change-whole",
+            crate::tools::fixtures::with_the_designer,
+        );
+        let deps = &harness.project.deps;
+        let path = "docs/catervas/architecture/overview.html";
+        file_small_request(
+            &deps.files,
+            &deps.log,
+            change_request(
+                path,
+                None,
+                "Overview",
+                "Say less.",
+                Role::Architect,
+                Role::ProductManager,
+                2.0,
+            ),
+            "human",
+            TaskCreatedBodyFiledAs::OwnerChange,
+            "the owner's change of Overview",
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("the change is filed");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            moves_of(&harness, "CTV-1"),
+            ["draft -> refining", "refining -> ready"]
+        );
+        assert!(
+            adapter.started().is_empty(),
+            "no refine session rewrites it"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn judges_the_catervafication_epic_as_filed_whole() {
         use crate::catervafication::{Project, epic_contract};
         use catervas_store::requests::file_catervafication_epic;
@@ -2207,6 +2260,20 @@ mod tests {
             );
         }
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        // The team writes HTML (the default): the Architect is asked for pages, a diagram among them.
+        let architects = serde_json::to_string(
+            &harness
+                .project
+                .deps
+                .files
+                .read_contract(&task("CTV-3"))
+                .expect("the Architect's task"),
+        )
+        .expect("a contract is json");
+        assert!(
+            architects.contains("architecture/overview.html") && !architects.contains(".md"),
+            "{architects}"
+        );
 
         // A Designer whose browser is not ready (no preview can run) gets no task.
         let unready = Harness::new(
@@ -3314,7 +3381,11 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn files_the_plan_task_with_the_architect() {
-        let harness = Harness::new("epic-plan-task", with_a_scrum_master_and_an_architect);
+        // The plan is named as the team writes it: Markdown here.
+        let harness = Harness::new("epic-plan-task", |wire| {
+            with_a_scrum_master_and_an_architect(wire);
+            wire["policy"]["document_format"] = json!("markdown");
+        });
         a_scrum_masters_epic_in_progress(&harness);
         let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -3343,10 +3414,33 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn names_a_new_plan_in_the_teams_html() {
+        // No document_format: the default team writes HTML.
+        let harness = Harness::new("epic-plan-task-html", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(
+            prompt.contains("docs/catervas/architecture/plans/CTV-1.html"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("plans/CTV-1.md"), "{prompt}");
+    }
+
     /// CTV-2 under the Scrum Master's epic CTV-1: the plan task, accepted, with `plan` and its one
     /// allowed path both the epic's plan.
     fn an_accepted_plan_task(harness: &Harness) {
-        let plan = "docs/catervas/architecture/plans/CTV-1.md";
+        an_accepted_plan_task_at(harness, "docs/catervas/architecture/plans/CTV-1.md");
+    }
+
+    /// `an_accepted_plan_task`, the plan at `plan`.
+    fn an_accepted_plan_task_at(harness: &Harness, plan: &str) {
         harness.file_under("CTV-2", "ready", Some("CTV-1"), |wire| {
             wire["plan"] = json!(plan);
             wire["allowed_paths"] = json!([plan]);
@@ -3426,6 +3520,54 @@ mod tests {
                 spec.initial_prompt
             );
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_plan_is_read_in_either_format() {
+        let harness = Harness::new("epic-plan-html", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task_at(&harness, "docs/catervas/architecture/plans/CTV-1.html");
+        std::fs::create_dir_all(
+            harness
+                .project
+                .repo
+                .path
+                .join("docs/catervas/architecture/plans"),
+        )
+        .expect("the plans folder is made");
+        harness.commit_at_root(
+            "docs/catervas/architecture/plans/CTV-1.html",
+            "<h1>Plan for CTV-1: Add done.txt</h1>\n<h2>Lane 1</h2>\n",
+            "docs: plan CTV-1",
+        );
+        if harness
+            .project
+            .deps
+            .projections
+            .board()
+            .expect("the board")
+            .iter()
+            .any(|row| row.task_id == task("CTV-2") && row.awaiting_integration)
+        {
+            integrated(&harness, false);
+        }
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        let spec = started
+            .iter()
+            .find(|spec| spec.task_id == Some(task("CTV-1")))
+            .expect("a session about the epic");
+        assert!(
+            spec.initial_prompt
+                .contains("<untrusted source=\"plan\">\n<h1>Plan for CTV-1: Add done.txt</h1>"),
+            "{}",
+            spec.initial_prompt
+        );
     }
 
     #[tokio::test]

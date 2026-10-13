@@ -7,12 +7,12 @@ description: Use when the task asks for a marketing plan.
 
 A marketing plan is the owner's decision. You write it, propose it with its budget, and end your
 turn; the owner approves it or sends it back, and nothing in it is spent or posted until they
-approve it. It also becomes the file `docs/catervas/marketing/plans/MP-<n>.md`, for people, beside
-its twin `MP-<n>.agent.md`, for agents.
+approve it. It also becomes the file `docs/catervas/marketing/plans/MP-<n>`, for people, beside
+its agent version, for agents.
 
 ## 1. Research first
 
-Read `docs/catervas/marketing/brand/brand-kit.md`, `docs/catervas/marketing/brand/persona.md` and the notes under
+Read `docs/catervas/marketing/brand/brand-kit`, `docs/catervas/marketing/brand/persona` and the notes under
 `docs/catervas/marketing/research/`. If the research is missing or old, do `researching-the-market` first.
 A plan must not rest on what you have not read.
 
@@ -48,8 +48,8 @@ Propose the plan with `catervas_propose_marketing_plan`: a title, a summary, the
 same plan written for agents as `agent_text` (200 to 16,000 characters: precise, with no pleasantries,
 the figures and keys exactly as in the plan), its dates (at most 92 days), the currency, the budget,
 the campaigns, the post slots and the measures. Catervas checks the numbers and the dates and answers
-every fault at once, so fix them all. It writes `MP-<n>.md` and `MP-<n>.agent.md` into your worktree;
-commit `MP-<n>.md` and `MP-<n>.agent.md` together with `catervas_git_commit`, naming both files,
+every fault at once, so fix them all. It writes `MP-<n>` and its agent version into your worktree;
+commit `MP-<n>` and its agent version together with `catervas_git_commit`, naming both files,
 since the Definition of Done refuses a diff that changes one of them alone. When it accepts the
 plan, end your turn: the owner's decision starts your next session. Do not ask for `verifying` while
 the plan waits; Catervas refuses it.

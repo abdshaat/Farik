@@ -11,7 +11,7 @@ writes down what it knows, in its own folder, before anything is built. Yours is
 
 ## 1. What the task asks
 
-Write `ui-inventory.md`: every screen or page the project has, and the parts the interface is made
+Write `ui-inventory`: every screen or page the project has, and the parts the interface is made
 of. It is for agents. Touch nothing outside `docs/catervas/design/`, and change no code.
 
 ## 2. Read first

@@ -39,6 +39,8 @@ export type MethodName =
 	| "request.file"
 	| "contract.save"
 	| "files.save"
+	| "files.ask_change"
+	| "files.rewrite"
 	| "team.save"
 	| "agent.replace"
 	| "team.start"

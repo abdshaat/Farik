@@ -21,27 +21,28 @@ pub use crate::generated::event::{
     ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody, CostRecordedBody,
     CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
     CriterionRecordedBodyRunBy, DecisionWrittenBody, DesignPlanProposedBody, DesignReviewCheck,
-    DesignReviewRecordedBody, DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody,
-    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, Heard,
-    HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, MarketingBudgetReachedBody,
-    MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
-    MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBody,
-    MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody, MarketingPlanBudget,
-    MarketingPlanCampaign, MarketingPlanCampaignChannel, MarketingPlanEndedBody,
-    MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
-    MarketingPlanProposedBody, MarketingPlanReturnedBody, MemoryWrittenBody, MessagePostedBody,
-    NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
-    ProductDocWrittenBody, ProjectScannedBody, ProjectStartedBody, ProposedRequest,
-    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody,
-    RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
-    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
-    SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody,
-    SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
-    TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal, Violation,
+    DesignReviewRecordedBody, DocumentRewriteStartedBody, DriftDetectedBody,
+    DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventKind, Heard, HumanAcceptedBody, HumanAcceptedBodySubject,
+    JudgmentAnswer, MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope,
+    MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
+    MarketingCampaignPausedBody, MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody,
+    MarketingPlanBudget, MarketingPlanCampaign, MarketingPlanCampaignChannel,
+    MarketingPlanEndedBody, MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
+    MarketingPlanProposedBody, MarketingPlanProposedBodyFormat, MarketingPlanReturnedBody,
+    MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
+    PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
+    ProjectStartedBody, ProposedRequest, PullRequestOpenedBody, QuestionAnsweredBody,
+    QuestionAskedBody, QuestionChoice, ReasonBody, RequestTriagedBody, RequestTriagedBodySize,
+    RetroAppendedBody, ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason,
+    SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
+    SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody, SprintEndedBody,
+    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    TaskCreatedBodyFiledAs, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy,
+    TeamPausedBodyReason, TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody,
+    ToolApprovalRequestedBody, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `catervas-core`'s own types of the same name.
@@ -256,6 +257,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::FolderChangeEscalated => "folderChangeEscalatedBody",
         EventKind::ProjectStarted => "projectStartedBody",
         EventKind::CatervaficationStarted => "catervaficationStartedBody",
+        EventKind::DocumentRewriteStarted => "documentRewriteStartedBody",
     }
 }
 
@@ -457,13 +459,14 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::FolderChangeIntegrated(_)
         | EventBody::FolderChangeEscalated(_)
         | EventBody::ProjectStarted(_)
-        | EventBody::CatervaficationStarted(_) => None,
+        | EventBody::CatervaficationStarted(_)
+        | EventBody::DocumentRewriteStarted(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 111] = [
+pub const EVERY_KIND: [EventKind; 112] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -575,6 +578,7 @@ pub const EVERY_KIND: [EventKind; 111] = [
     EventKind::FolderChangeEscalated,
     EventKind::ProjectStarted,
     EventKind::CatervaficationStarted,
+    EventKind::DocumentRewriteStarted,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -949,6 +953,9 @@ pub enum EventBody {
     /// The team began documenting the project: the epic the event is about is the Catervafication.
     #[serde(rename = "catervafication.started")]
     CatervaficationStarted(CatervaficationStartedBody),
+    /// The owner asked the team to rewrite its Markdown documents as HTML: the tasks filed.
+    #[serde(rename = "document_rewrite.started")]
+    DocumentRewriteStarted(DocumentRewriteStartedBody),
 }
 
 impl EventBody {
@@ -1068,6 +1075,7 @@ impl EventBody {
             Self::FolderChangeEscalated(_) => EventKind::FolderChangeEscalated,
             Self::ProjectStarted(_) => EventKind::ProjectStarted,
             Self::CatervaficationStarted(_) => EventKind::CatervaficationStarted,
+            Self::DocumentRewriteStarted(_) => EventKind::DocumentRewriteStarted,
         }
     }
 }
@@ -2088,7 +2096,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 111);
+        assert_eq!(EVERY_KIND.len(), 112);
     }
 
     #[test]
@@ -2117,7 +2125,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 111);
+        assert_eq!(EVERY_KIND.len(), 112);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2191,6 +2199,15 @@ mod tests {
             wire["body"][field] = value.clone();
             assert!(!refusal(&wire).is_empty(), "{kind} {field} {value}");
         }
+    }
+
+    #[test]
+    fn folder_doc_paths_take_html() {
+        let mut wire = an_event_wire(EventKind::FolderDocWritten);
+        wire["body"]["path"] = json!("docs/catervas/product/overview.html");
+        assert!(event_from_value(&wire).is_ok());
+        wire["body"]["path"] = json!("docs/catervas/product/overview.txt");
+        assert!(!refusal(&wire).is_empty());
     }
 
     #[test]
@@ -2328,6 +2345,27 @@ mod tests {
     }
 
     #[test]
+    fn reads_document_rewrite_started() {
+        let mut wire = an_event_wire(EventKind::DocumentRewriteStarted);
+        for tasks in [json!([]), json!(["CTV-1", "CTV-2"])] {
+            wire["body"] = json!({ "tasks": tasks });
+            let event = event_from_value(&wire).expect("a rewrite reads");
+            assert_eq!(event.body.kind(), EventKind::DocumentRewriteStarted);
+            assert_eq!(event_to_value(&event), wire);
+            assert!(!is_about_one_contract(EventKind::DocumentRewriteStarted));
+            assert!(EVERY_KIND.contains(&EventKind::DocumentRewriteStarted));
+        }
+        for (tasks, at) in [
+            (json!(vec!["CTV-1"; 7]), "/body/tasks"),
+            (json!(["nope"]), "/body/tasks/0"),
+            (json!("CTV-1"), "/body/tasks"),
+        ] {
+            wire["body"] = json!({ "tasks": tasks });
+            assert_eq!(refusal(&wire)[0].path, at, "{wire}");
+        }
+    }
+
+    #[test]
     fn reads_a_folder_doc_edited_event() {
         let mut wire = an_event_wire(EventKind::FolderDocEdited);
         wire["body"] =
@@ -2379,7 +2417,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 111);
+        assert_eq!(EVERY_KIND.len(), 112);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2520,7 +2558,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 111);
+        assert_eq!(EVERY_KIND.len(), 112);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -2835,7 +2873,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 111);
+        assert_eq!(EVERY_KIND.len(), 112);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

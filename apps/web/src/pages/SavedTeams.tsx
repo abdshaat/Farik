@@ -20,6 +20,7 @@ export type Template = {
 		judgment: Judgment;
 		integration: string;
 		planInSprints?: boolean;
+		documentFormat?: "html" | "markdown";
 	};
 	budgets: { dailyUsd?: number };
 };

@@ -13,6 +13,7 @@ use sha2::{Digest as _, Sha256};
 use crate::contract::{
     TaskContract, TaskKind, named, pointer, repeated_ids, with_integers_normalised,
 };
+use crate::folders::DocumentFormat;
 use crate::governor::permissions::{ConnectorTag, PermissionTier, default_tiers};
 use crate::governor::team_rules::TeamRules;
 
@@ -22,9 +23,9 @@ pub use crate::generated::team::{
     ConnectorTag as ConnectorTagWire, JudgmentJudge as JudgeChoice, JudgmentRequired,
     McpServer as McpServerWire, McpServerSource, McpServerTransport, Model as AgentModel,
     ModelEffort as Effort, PermissionTier as PermissionTierWire, Permissions as TeamPermissions,
-    Policy as TeamPolicy, PolicyHumanAcceptsContracts as HumanAcceptsContracts,
-    PolicyIntegration as Integration, Role as RoleWire, Rules as RulesWire,
-    SessionLimits as SessionLimitsWire, SkillPin,
+    Policy as TeamPolicy, PolicyDocumentFormat,
+    PolicyHumanAcceptsContracts as HumanAcceptsContracts, PolicyIntegration as Integration,
+    Role as RoleWire, Rules as RulesWire, SessionLimits as SessionLimitsWire, SkillPin,
 };
 
 /// Wire fixtures for tests, in this crate and in others.
@@ -1179,6 +1180,15 @@ impl Team {
         self.policy.plan_in_sprints == Some(true)
     }
 
+    /// The format new documents are written in: its `policy.document_format`, HTML when left out.
+    #[must_use]
+    pub fn document_format(&self) -> DocumentFormat {
+        match self.policy.document_format {
+            Some(PolicyDocumentFormat::Markdown) => DocumentFormat::Markdown,
+            Some(PolicyDocumentFormat::Html) | None => DocumentFormat::Html,
+        }
+    }
+
     /// The team's answers to what its agents may do: its `policy.permissions`, or the defaults.
     #[must_use]
     pub fn permissions(&self) -> TeamPermissions {
@@ -1376,6 +1386,7 @@ mod tests {
     use super::{CustomServer, CustomTransport, canonical_json, custom_server, spec_sha256};
     use crate::contract::fixtures::a_contract_wire;
     use crate::contract::validate_contract;
+    use crate::folders::DocumentFormat;
     use crate::governor::permissions::ConnectorTag;
     use crate::governor::team_rules::{
         DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS, DEFAULT_UI_PATHS, TeamRules,
@@ -2003,6 +2014,18 @@ mod tests {
         assert!(team(&wire).plans_in_sprints());
         wire["policy"]["plan_in_sprints"] = json!("yes");
         assert_eq!(paths(&wire), ["/policy/plan_in_sprints"]);
+    }
+
+    #[test]
+    fn document_format_is_html_unless_markdown() {
+        let mut wire = a_team_wire();
+        assert_eq!(team(&wire).document_format(), DocumentFormat::Html);
+        wire["policy"]["document_format"] = json!("html");
+        assert_eq!(team(&wire).document_format(), DocumentFormat::Html);
+        wire["policy"]["document_format"] = json!("markdown");
+        assert_eq!(team(&wire).document_format(), DocumentFormat::Markdown);
+        wire["policy"]["document_format"] = json!("pdf");
+        assert_eq!(paths(&wire), ["/policy/document_format"]);
     }
 
     #[test]

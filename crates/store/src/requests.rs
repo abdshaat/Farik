@@ -9,6 +9,7 @@ use std::sync::{Mutex, PoisonError};
 
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use catervas_core::criteria::{CriteriaLibrary, TemplateVerification};
+use catervas_core::folders::{DocumentFormat, artifact_marks};
 use catervas_core::governor::gates::{
     ContractWriteActor, ContractWriteRefusal, FIELDS_FIXED_AT_CREATION,
     FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES, FIELDS_THE_STORE_OWNS,
@@ -16,11 +17,12 @@ use catervas_core::governor::gates::{
 };
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::team::plain_role;
 use catervas_protocol::command::{Command, RequestSize, command_from_value};
 use catervas_protocol::event::{
     CatervaficationStartedBody, CatervaficationStartedBodyProject, CatervasEvent,
     ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds, EventKind,
-    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
+    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, TaskCreatedBodyFiledAs, new_event,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -218,6 +220,7 @@ pub fn file_request(
             rederives: None,
             product_plan: false,
             catervafies: None,
+            filed_as: None,
         },
         (now, ids),
     )
@@ -317,6 +320,7 @@ pub fn file_rederive_request(
             rederives: Some(twin),
             product_plan: false,
             catervafies: None,
+            filed_as: None,
         },
         (now, ids),
     )
@@ -349,36 +353,39 @@ pub fn file_raise_request(
             rederives: None,
             product_plan: false,
             catervafies: None,
+            filed_as: None,
         },
         (now, ids),
     )
 }
 
 /// The whole contract of the task that drafts a new project's product plan (`docs/SPEC.md` 4.3,
-/// 5.16): the Product Manager writes `spec.md` and `roadmap.md` and their `.agent.md` twins from
-/// the owner's interview, `reviewer` checks them within `max_cost_usd`, and the owner accepts them.
+/// 5.16): the Product Manager writes the spec and the roadmap and their `.agent` twins from the
+/// owner's interview, in the team's `format`, `reviewer` checks them within `max_cost_usd`, and the
+/// owner accepts them.
 #[must_use]
-pub fn product_plan_request(reviewer: Role, max_cost_usd: f64) -> Value {
+pub fn product_plan_request(reviewer: Role, max_cost_usd: f64, format: DocumentFormat) -> Value {
+    let x = format.extension();
     json!({
         "title": "Draft the product plan",
-        "intent": "Write this new project's product plan from the owner's interview in your one-to-one chat, which From the human holds: docs/catervas/product/spec.md, the product description, and docs/catervas/product/roadmap.md, the roadmap, each for the owner to read, with its .agent.md version for the team. Nothing else is planned until the owner approves it.",
+        "intent": format!("Write this new project's product plan from the owner's interview in your one-to-one chat, which From the human holds: docs/catervas/product/spec.{x}, the product description, and docs/catervas/product/roadmap.{x}, the roadmap, each for the owner to read, with its .agent.{x} version for the team. Nothing else is planned until the owner approves it."),
         "summary": "The Product Manager writes the product description and the roadmap from your interview, for you to read and approve. Nothing else is planned until you approve them.",
         "scope": {
-            "in_scope": ["The product description (spec.md) and the roadmap (roadmap.md), each with the team's copy."],
+            "in_scope": [format!("The product description (spec.{x}) and the roadmap (roadmap.{x}), each with the team's copy.")],
             "out_of_scope": ["Code, and every other document"]
         },
         "requirements": [
             {
                 "id": "R1",
-                "text": "spec.md has the product's name as its title, a paragraph on what it is and the problem it solves, and the sections Who it is for, What it must do, Not now and How we'll know it works, with Limits when the owner named any, in the owner's words where they gave them."
+                "text": format!("spec.{x} has the product's name as its title, a paragraph on what it is and the problem it solves, and the sections Who it is for, What it must do, Not now and How we'll know it works, with Limits when the owner named any, in the owner's words where they gave them.")
             },
             {
                 "id": "R2",
-                "text": "roadmap.md has the sections Now, Next and Later, each item one line: its name, then one sentence."
+                "text": format!("roadmap.{x} has the sections Now, Next and Later, each item one line: its name, then one sentence.")
             },
             {
                 "id": "R3",
-                "text": "The team's copies of both (spec.agent.md, roadmap.agent.md) say the same, written for the agents."
+                "text": format!("The team's copies of both (spec.agent.{x}, roadmap.agent.{x}) say the same, written for the agents.")
             }
         ],
         "exit_criteria": [
@@ -389,8 +396,8 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64) -> Value {
                 "verification": {
                     "method": "review",
                     "rubric": [
-                        "spec.md has the title, the paragraph and the sections R1 names.",
-                        "roadmap.md has Now, Next and Later, each item one line.",
+                        format!("spec.{x} has the title, the paragraph and the sections R1 names."),
+                        format!("roadmap.{x} has Now, Next and Later, each item one line."),
                         "Both are in plain words, with no technical term the owner did not use."
                     ]
                 }
@@ -402,8 +409,8 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64) -> Value {
                 "verification": {
                     "method": "review",
                     "rubric": [
-                        "Every fact, decision and limit in spec.md and roadmap.md is in their .agent.md versions.",
-                        "Nothing in an .agent.md version contradicts its version for the owner."
+                        format!("Every fact, decision and limit in spec.{x} and roadmap.{x} is in their .agent.{x} versions."),
+                        format!("Nothing in an .agent.{x} version contradicts its version for the owner.")
                     ]
                 }
             }
@@ -413,10 +420,10 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64) -> Value {
         "risk": "low",
         "budget": { "max_cost_usd": max_cost_usd },
         "allowed_paths": [
-            "docs/catervas/product/spec.md",
-            "docs/catervas/product/spec.agent.md",
-            "docs/catervas/product/roadmap.md",
-            "docs/catervas/product/roadmap.agent.md"
+            format!("docs/catervas/product/spec.{x}"),
+            format!("docs/catervas/product/spec.agent.{x}"),
+            format!("docs/catervas/product/roadmap.{x}"),
+            format!("docs/catervas/product/roadmap.agent.{x}")
         ]
     })
 }
@@ -447,6 +454,7 @@ pub fn file_product_plan_request(
             rederives: None,
             product_plan: true,
             catervafies: None,
+            filed_as: None,
         },
         (now, ids),
     )
@@ -479,6 +487,194 @@ pub fn file_catervafication_epic(
             rederives: None,
             product_plan: false,
             catervafies: Some(project),
+            filed_as: None,
+        },
+        (now, ids),
+    )
+}
+
+/// The longest title a contract has.
+const TITLE_LIMIT: usize = 120;
+
+/// The whole contract of the task that makes the change the owner asked `owner` for in `words`
+/// (`docs/SPEC.md` 5.17): `owner` writes it and `reviewer` checks it, within `max_cost_usd`. It
+/// may change `path` and `twin`, its agent version when it has one, and nothing else. `name` is
+/// the document's name on the Files page.
+#[must_use]
+pub fn change_request(
+    path: &str,
+    twin: Option<&str>,
+    name: &str,
+    words: &str,
+    owner: Role,
+    reviewer: Role,
+    max_cost_usd: f64,
+) -> Value {
+    let mut title = format!("Change {name}");
+    if title.chars().count() > TITLE_LIMIT {
+        title = title.chars().take(TITLE_LIMIT - 1).collect::<String>() + "…";
+    }
+    let paths: Vec<&str> = std::iter::once(path).chain(twin).collect();
+    let mut rubric = vec![
+        format!("{path} makes the change the owner's words ask for."),
+        format!("Nothing else in {path} changes."),
+    ];
+    if let Some(twin) = twin {
+        rubric.push(format!("{twin} says what {path} now says."));
+    }
+    json!({
+        "title": title,
+        "intent": format!(
+            "The owner asked on the Files page for a change to {path}, in these words:\n\n{words}"
+        ),
+        "scope": { "in_scope": paths, "out_of_scope": ["Every other file"] },
+        "requirements": [{ "id": "R1", "text": format!("{path} makes the change the owner asked for.") }],
+        "exit_criteria": [{
+            "id": "C1",
+            "text": format!("{path} makes the change the owner's words ask for."),
+            "satisfies": ["R1"],
+            "verification": { "method": "review", "rubric": rubric }
+        }],
+        "assignee_role": owner.to_string(),
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": paths
+    })
+}
+
+/// The whole contract of the task that rewrites `owner`'s Markdown `documents` (their paths, an
+/// agent version beside its document) as HTML (`docs/SPEC.md` 5.17): `owner` writes it and
+/// `reviewer` checks it, within `max_cost_usd`. It may change `folder`, and nothing else. Each
+/// `.html` must exist and hold a heading, and the overview a drawing.
+#[must_use]
+pub fn rewrite_request(
+    folder: &str,
+    documents: &[String],
+    owner: Role,
+    reviewer: Role,
+    max_cost_usd: f64,
+) -> Value {
+    let html = |path: &str| format!("{}.html", path.strip_suffix(".md").unwrap_or(path));
+    let named = documents
+        .iter()
+        .map(|path| path.rsplit('/').next().unwrap_or(path))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let criteria: Vec<Value> = documents
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let page = html(path);
+            let must = artifact_marks(&page, DocumentFormat::Html);
+            json!({
+                "id": format!("C{}", index + 1),
+                "text": format!("{page} exists and holds {}.", must.join(" and ")),
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": page, "must_contain": must }
+            })
+        })
+        .collect();
+    let plans = "The marketing plans (plans/MP-n), each the version the owner approved";
+    let mut rubric = vec![
+        format!("Every document named ({named}) is gone from {folder}, with its agent version."),
+        "Each .html says everything its .md said, and nothing more.".to_string(),
+    ];
+    let mut out_of_scope = vec!["Every other folder", "What the documents say"];
+    if folder.ends_with("/marketing") {
+        rubric.push(format!("{plans} stay as they are."));
+        out_of_scope.push(plans);
+    }
+    let mut exit_criteria = criteria;
+    exit_criteria.push(json!({
+        "id": format!("C{}", documents.len() + 1),
+        "text": "Each Markdown document is gone, and its HTML says what it said.",
+        "satisfies": ["R1"],
+        "verification": {
+            "method": "review",
+            "rubric": rubric
+        }
+    }));
+    json!({
+        "title": format!("Rewrite the {}'s documents as HTML", plain_role(owner)),
+        "intent": format!(
+            "The owner asked for the team's documents as HTML. Rewrite each of these documents in \
+             {folder} as <name>.html, saying everything it says, and delete the .md it replaces, \
+             with its agent version, by naming each in `removed` when you commit with \
+             catervas_git_commit: {named}."
+        ),
+        "scope": {
+            "in_scope": [format!("{folder}/**")],
+            "out_of_scope": out_of_scope
+        },
+        "requirements": [{ "id": "R1", "text": format!("{named} are HTML, and no longer Markdown.") }],
+        "exit_criteria": exit_criteria,
+        "assignee_role": owner.to_string(),
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": [format!("{folder}/**")]
+    })
+}
+
+/// The tasks the last `document_rewrite.started` filed, none before the first.
+///
+/// # Errors
+///
+/// What the log refused, or `InvalidEvent` for an id that is not a task's.
+pub fn rewrite_tasks(log: &EventLog) -> Result<Vec<TaskId>, StoreError> {
+    let started = log.read(&EventQuery {
+        kinds: vec![EventKind::DocumentRewriteStarted],
+        newest_first: true,
+        limit: Some(1),
+        ..EventQuery::default()
+    })?;
+    let Some(EventBody::DocumentRewriteStarted(body)) = started.first().map(|event| &event.body)
+    else {
+        return Ok(Vec::new());
+    };
+    body.tasks
+        .iter()
+        .map(|id| {
+            id.as_str().parse().map_err(|_| StoreError::InvalidEvent {
+                detail: format!(
+                    "a document_rewrite.started holds {:?} as a task id",
+                    id.as_str()
+                ),
+            })
+        })
+        .collect()
+}
+
+/// Files a whole contract for `created_by` that no refine session rewrites, as `file_request`
+/// files one: `task.created` carries `filed_as`, and `request.triaged { small, reason }` by
+/// `catervas` follows at once, so that no triage session runs.
+///
+/// # Errors
+///
+/// As `file_request`.
+pub fn file_small_request(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    created_by: &str,
+    filed_as: TaskCreatedBodyFiledAs,
+    reason: &str,
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            rederives: None,
+            product_plan: false,
+            catervafies: None,
+            filed_as: Some((filed_as, reason)),
         },
         (now, ids),
     )
@@ -494,6 +690,8 @@ struct Filing<'a> {
     rederives: Option<&'a str>,
     product_plan: bool,
     catervafies: Option<CatervaficationStartedBodyProject>,
+    /// How a whole contract was filed, and why it is triaged small.
+    filed_as: Option<(TaskCreatedBodyFiledAs, &'a str)>,
 }
 
 fn file(
@@ -619,6 +817,7 @@ fn creation_bodies(
         rederives,
         product_plan,
         catervafies,
+        filed_as,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
@@ -639,10 +838,11 @@ fn creation_bodies(
                 twin.to_string()
                     .try_into()
                     .map_err(|_| RequestError::Refused {
-                        reason: format!("rederives {twin:?}, which is no .agent.md twin"),
+                        reason: format!("rederives {twin:?}, which is no agent version (.agent.md or .agent.html)"),
                     })
             })
             .transpose()?,
+        filed_as: filed_as.map(|(kind, _)| kind),
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
@@ -655,6 +855,13 @@ fn creation_bodies(
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
             size: RequestTriagedBodySize::Small,
             reason: format!("a raised marketing budget for {plan}"),
+            triaged_by: "catervas".to_string(),
+        }));
+    }
+    if let Some((_, reason)) = filed_as {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: reason.to_string(),
             triaged_by: "catervas".to_string(),
         }));
     }
@@ -1162,13 +1369,41 @@ mod tests {
     }
 
     #[test]
+    fn the_product_plan_task_names_the_teams_format() {
+        use catervas_core::contract::Role;
+        use catervas_core::folders::DocumentFormat;
+        use catervas_core::governor::readiness::evaluate_readiness;
+        use catervas_core::governor::readiness::fixtures::a_ready_context;
+
+        let (project, log) = a_project("product-plan-request-html");
+        let wire = product_plan_request(Role::Architect, 20.0, DocumentFormat::Html);
+        assert_eq!(
+            wire["allowed_paths"],
+            json!([
+                "docs/catervas/product/spec.html",
+                "docs/catervas/product/spec.agent.html",
+                "docs/catervas/product/roadmap.html",
+                "docs/catervas/product/roadmap.agent.html",
+            ])
+        );
+        assert!(!wire.to_string().contains(".md"), "{wire}");
+        let contract = file_product_plan_request(&project.files(), &log, wire, (at(), &ids()))
+            .expect("the store files it");
+        assert_eq!(evaluate_readiness(&contract, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
     fn writes_the_product_plans_contract() {
         use catervas_core::contract::Role;
         use catervas_core::governor::readiness::evaluate_readiness;
         use catervas_core::governor::readiness::fixtures::a_ready_context;
 
         let (project, log) = a_project("product-plan-request");
-        let wire = product_plan_request(Role::Architect, 20.0);
+        let wire = product_plan_request(
+            Role::Architect,
+            20.0,
+            catervas_core::folders::DocumentFormat::Markdown,
+        );
         let paths = [
             "docs/catervas/product/spec.md",
             "docs/catervas/product/spec.agent.md",
@@ -1671,5 +1906,118 @@ mod tests {
                 EventKind::ContractUnlocked
             ]
         );
+    }
+
+    #[test]
+    fn a_marketing_rewrite_leaves_the_approved_plans() {
+        use catervas_core::contract::Role;
+        let rewrite = |folder: &str| {
+            super::rewrite_request(
+                folder,
+                &[format!("{folder}/persona.md")],
+                Role::MarketingSpecialist,
+                Role::ProductManager,
+                5.0,
+            )
+        };
+        let plans = "The marketing plans (plans/MP-n), each the version the owner approved";
+        let wire = rewrite("docs/catervas/marketing");
+        assert!(wire["scope"]["out_of_scope"].to_string().contains(plans));
+        assert!(wire["exit_criteria"].to_string().contains(plans));
+        let product = rewrite("docs/catervas/product");
+        assert!(!product.to_string().contains("MP-n"));
+    }
+
+    #[test]
+    fn a_pairs_change_reaches_both_files() {
+        use catervas_core::contract::Role;
+        let spec = "docs/catervas/product/spec.html";
+        let twin = "docs/catervas/product/spec.agent.html";
+        let wire = super::change_request(
+            spec,
+            Some(twin),
+            "Product spec",
+            "Add a refund limit.",
+            Role::ProductManager,
+            Role::Architect,
+            2.0,
+        );
+        assert_eq!(wire["allowed_paths"], json!([spec, twin]));
+        assert_eq!(wire["scope"]["in_scope"], json!([spec, twin]));
+        assert_eq!(wire["scope"]["out_of_scope"], json!(["Every other file"]));
+        assert_eq!(wire["title"], "Change Product spec");
+        assert_eq!(wire["assignee_role"], "product_manager");
+        assert_eq!(wire["reviewer_role"], "architect");
+        assert_eq!(
+            wire["requirements"][0]["text"],
+            format!("{spec} makes the change the owner asked for.")
+        );
+        assert_eq!(
+            wire["exit_criteria"][0]["verification"]["rubric"],
+            json!([
+                format!("{spec} makes the change the owner's words ask for."),
+                format!("Nothing else in {spec} changes."),
+                format!("{twin} says what {spec} now says."),
+            ])
+        );
+        assert!(
+            wire["intent"]
+                .as_str()
+                .is_some_and(|intent| intent.contains("Add a refund limit.")),
+            "{wire}"
+        );
+
+        let alone = super::change_request(
+            "docs/catervas/architecture/overview.html",
+            None,
+            "Overview",
+            "Shorter.",
+            Role::Architect,
+            Role::ProductManager,
+            2.0,
+        );
+        assert_eq!(
+            alone["allowed_paths"],
+            json!(["docs/catervas/architecture/overview.html"])
+        );
+        assert_eq!(
+            alone["exit_criteria"][0]["verification"]["rubric"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn a_long_name_is_cut_to_the_titles_limit() {
+        use catervas_core::contract::Role;
+        let wire = super::change_request(
+            "docs/catervas/product/spec.html",
+            None,
+            &"a".repeat(200),
+            "x",
+            Role::ProductManager,
+            Role::Architect,
+            2.0,
+        );
+        let title = wire["title"].as_str().expect("a title");
+        assert_eq!(title.chars().count(), 120, "{title}");
+        assert!(
+            title.starts_with("Change aaa") && title.ends_with('…'),
+            "{title}"
+        );
+
+        let whole = super::change_request(
+            "docs/catervas/product/spec.html",
+            None,
+            &"a".repeat(113),
+            "x",
+            Role::ProductManager,
+            Role::Architect,
+            2.0,
+        );
+        let title = whole["title"].as_str().expect("a title");
+        assert_eq!(title.chars().count(), 120);
+        assert!(!title.ends_with('…'), "{title}");
     }
 }

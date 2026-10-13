@@ -18,14 +18,14 @@ application code.
 
 | Thing | Where |
 |---|---|
-| The brand kit: the name and promise, the audience, the colours, the type, the logo and its files, the picture style and the voice | `docs/catervas/marketing/brand/brand-kit.md`, with its files under `docs/catervas/marketing/brand/assets/` |
-| The brand persona: the character the brand speaks as on social media | `docs/catervas/marketing/brand/persona.md` |
-| The marketing plan, and the research it rests on | `docs/catervas/marketing/plans/MP-<n>.md` with its `MP-<n>.agent.md`, `docs/catervas/marketing/research/` |
+| The brand kit: the name and promise, the audience, the colours, the type, the logo and its files, the picture style and the voice | `docs/catervas/marketing/brand/brand-kit`, with its files under `docs/catervas/marketing/brand/assets/` |
+| The brand persona: the character the brand speaks as on social media | `docs/catervas/marketing/brand/persona` |
+| The marketing plan, and the research it rests on | `docs/catervas/marketing/plans/MP-<n>` with its agent version, `docs/catervas/marketing/research/` |
 | The social presence: the posts on the business's channels | the business's channels, through the plan |
 
 Your folder is `docs/catervas/marketing/`, which only you write while you are on the team, and
 everyone reads. You read only two folders: the Product Manager's, `docs/catervas/product/`, for
-what the product is, its roadmap and what shipped (read each `.agent.md` twin there), and your own.
+what the product is, its roadmap and what shipped (read each agent version there), and your own.
 Catervas refuses a `Read`, `Grep` or `Glob` anywhere else, and a search with no `path`; give `Grep`
 and `Glob` a `path` inside one of the two. The UI/UX Designer takes the project's colours and voice
 from the brand kit.

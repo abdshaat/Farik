@@ -1123,6 +1123,222 @@ describe("team page", () => {
 		});
 	});
 
+	it("switches_the_document_format", async () => {
+		// TEAM has no document_format: a team without the key writes HTML.
+		expect("document_format" in TEAM.policy).toBe(false);
+		const { s, part } = await settings(TEAM, "/settings/work");
+		const documents = part(en.rulesDocuments);
+		const toggle = within(documents).getByRole("switch", {
+			name: en.documentsHtml,
+		});
+		expect(toggle.getAttribute("aria-checked")).toBe("true");
+		for (const line of en.documentsHtmlNote.split("\n")) onlyInTips(line);
+		fireEvent.click(toggle);
+		expect(toggle.getAttribute("aria-checked")).toBe("false");
+		await validated(s, []);
+		const save = () =>
+			within(documents).getByRole("button", {
+				name: en.agentSave,
+			}) as HTMLButtonElement;
+		await waitFor(() => expect(save().disabled).toBe(false));
+		fireEvent.click(save());
+		expect((await saved(s)).policy).toMatchObject({
+			document_format: "markdown",
+		});
+	});
+
+	it("puts_back_the_default_document_format", async () => {
+		const markdown = {
+			...TEAM,
+			policy: { ...TEAM.policy, document_format: "markdown" },
+		};
+		const { s, part } = await settings(markdown, "/settings/work");
+		const documents = part(en.rulesDocuments);
+		const toggle = within(documents).getByRole("switch", {
+			name: en.documentsHtml,
+		});
+		expect(toggle.getAttribute("aria-checked")).toBe("false");
+		fireEvent.click(
+			within(documents).getByRole("button", { name: en.putBack }),
+		);
+		expect(toggle.getAttribute("aria-checked")).toBe("true");
+		await validated(s, []);
+		const save = within(documents).getByRole("button", {
+			name: en.agentSave,
+		}) as HTMLButtonElement;
+		await waitFor(() => expect(save.disabled).toBe(false));
+		fireEvent.click(save);
+		expect((await saved(s)).policy).toMatchObject({ document_format: "html" });
+	});
+
+	describe("the rewrite", () => {
+		const doc = (path: string) => ({ path, name: path, twin: null });
+		const treeOf = (...paths: string[]) => ({
+			integration: "auto_merge",
+			folders: [
+				{
+					folder: "docs/catervas/architecture",
+					name: "Architecture",
+					role: "architect",
+					agent_id: "ada",
+					documents: paths.map(doc),
+				},
+			],
+		});
+		const HTML = {
+			...TEAM,
+			policy: { ...TEAM.policy, document_format: "html" },
+		};
+		const MARKDOWN = {
+			...TEAM,
+			policy: { ...TEAM.policy, document_format: "markdown" },
+		};
+		const rewrite = (name: string) =>
+			screen.queryByRole("button", { name }) as HTMLElement | null;
+
+		it("offers_the_rewrite_while_markdown_remains", async () => {
+			const { s, part } = await settings(HTML, "/settings/work");
+			await answerQuery(
+				s,
+				"files.tree",
+				treeOf(
+					"docs/catervas/architecture/overview.md",
+					"docs/catervas/marketing/plans/MP-1.md",
+				),
+			);
+			const documents = part(en.rulesDocuments);
+			const button = await within(documents).findByRole("button", {
+				name: en.documentsRewrite,
+			});
+			for (const line of en.documentsRewriteNote.split("\n")) onlyInTips(line);
+			fireEvent.click(button);
+			const frame = await sent(s, "files.rewrite");
+			expect(frame.params).toEqual({});
+			await s.reply(frame, { tasks: ["t1"] });
+			expect(
+				await within(documents).findByText(en.documentsRewriteStarted),
+			).toBeTruthy();
+		});
+
+		it("hides_the_rewrite_without_markdown_to_rewrite", async () => {
+			// Only .html documents and a marketing plan.
+			const only = treeOf(
+				"docs/catervas/architecture/overview.html",
+				"docs/catervas/marketing/plans/MP-1.md",
+				"docs/catervas/marketing/plans/MP-1.agent.md",
+			);
+			const { s, part } = await settings(HTML, "/settings/work");
+			await answerQuery(s, "files.tree", only);
+			await within(part(en.rulesDocuments)).findByRole("switch", {
+				name: en.documentsHtml,
+			});
+			await act(async () => {});
+			expect(rewrite(en.documentsRewrite)).toBeNull();
+			cleanup();
+
+			// A Markdown team has none either, whatever its tree holds.
+			const md = await settings(MARKDOWN, "/settings/work");
+			await answerQuery(
+				md.s,
+				"files.tree",
+				treeOf("docs/catervas/architecture/overview.md"),
+			);
+			await within(md.part(en.rulesDocuments)).findByRole("switch", {
+				name: en.documentsHtml,
+			});
+			await act(async () => {});
+			expect(rewrite(en.documentsRewrite)).toBeNull();
+		});
+
+		it("offers_the_rewrite_for_a_twin_or_a_note_beside_the_plans", async () => {
+			for (const tree of [
+				{
+					...treeOf(),
+					folders: [
+						{
+							...treeOf().folders[0],
+							documents: [
+								{
+									path: "docs/catervas/architecture/spec.html",
+									name: "spec",
+									twin: "docs/catervas/architecture/spec.agent.md",
+								},
+							],
+						},
+					],
+				},
+				treeOf("docs/catervas/marketing/plans/MP-1-notes.md"),
+			]) {
+				const { s, part } = await settings(HTML, "/settings/work");
+				await answerQuery(s, "files.tree", tree);
+				expect(
+					await within(part(en.rulesDocuments)).findByRole("button", {
+						name: en.documentsRewrite,
+					}),
+				).toBeTruthy();
+				cleanup();
+			}
+		});
+
+		it("sends_one_rewrite_while_one_is_pending", async () => {
+			const { s, part } = await settings(HTML, "/settings/work");
+			await answerQuery(
+				s,
+				"files.tree",
+				treeOf("docs/catervas/architecture/overview.md"),
+			);
+			const documents = part(en.rulesDocuments);
+			const button = await within(documents).findByRole("button", {
+				name: en.documentsRewrite,
+			});
+			fireEvent.click(button);
+			const frame = await sent(s, "files.rewrite");
+			fireEvent.click(button);
+			expect(s.calls("files.rewrite")).toHaveLength(1);
+			expect((button as HTMLButtonElement).disabled).toBe(true);
+			await s.reply(frame, { tasks: [] });
+			expect(
+				await within(documents).findByText(en.documentsRewriteStarted),
+			).toBeTruthy();
+		});
+
+		it("says_why_a_rewrite_was_refused", async () => {
+			const { s, part } = await settings(HTML, "/settings/work");
+			await answerQuery(
+				s,
+				"files.tree",
+				treeOf("docs/catervas/architecture/overview.md"),
+			);
+			const documents = part(en.rulesDocuments);
+			const refusals = [
+				["not_html", en.refuseNotHtml],
+				["rewrite_open", en.refuseRewriteOpen],
+				["nothing_to_rewrite", en.refuseNothingToRewrite],
+			] as const;
+			for (const [index, [code, words]] of refusals.entries()) {
+				fireEvent.click(
+					await within(documents).findByRole("button", {
+						name: en.documentsRewrite,
+					}),
+				);
+				await s.fail(
+					await waitFor(() => {
+						const frame = s.calls("files.rewrite")[index];
+						if (!frame) throw new Error("no files.rewrite was sent");
+						return frame;
+					}),
+					-32005,
+					"refused",
+					{ errors: [{ path: "", message: "no", code }] },
+				);
+				expect(await within(documents).findByText(words)).toBeTruthy();
+				expect(
+					within(documents).queryByText(en.documentsRewriteStarted),
+				).toBeNull();
+			}
+		});
+	});
+
 	it("keeps_each_rules_draft_until_it_is_saved_or_cancelled", async () => {
 		const { s, part } = await settings(TEAM, "/settings/work");
 		// The saved team is checked once on load, not once for each part.
