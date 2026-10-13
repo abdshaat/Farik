@@ -13,7 +13,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 
 ## Hard rules
 
-1. No production code before a failing test. Watch the test fail for the right reason. Code written before its test gets deleted, not adapted.
+1. No production code before a failing test. Watch the test fail for the right reason. Code written before its test gets deleted, not adapted. Since ADR 0058 (2026-10-13), one test per major function: each task gets one test for its main behaviour.
 2. No completion claim without fresh evidence. Run the check, read the output, paste it. "Should work" is not a status.
 3. Planning is two-level: `docs/plans/project-plan.md` holds phases and steps; each step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, copied from `docs/plans/step-template.md` and passed by one readiness review (`workflow.md` stage 2) before execution. Tick its checkboxes in the same commits.
 4. Commits follow Conventional Commits with a package scope. One task, one commit.
@@ -22,7 +22,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 7. Event kinds are `<entity>.<past_tense_verb>`.
 8. When behavior changes, `docs/SPEC.md` changes in the same pull request.
 9. Never skip, disable, or quarantine a failing test to get green.
-10. Do not accept your own work. A pull request is reviewed by someone, or by a fresh session, that did not write it. Every step gets a landing review of its running code as it lands, and its bar is mutation: re-introduce the bug each test claims to catch and confirm the suite notices.
+10. Do not accept your own work. A pull request is reviewed by someone, or by a fresh session, that did not write it. Since ADR 0058 (2026-10-13), a step lands without a landing review, once its full check and the pull request's `check` pass; before then, every step got a landing review whose bar was mutation.
 11. One phase is one branch (`phase/<n>-<name>`) and one pull request to `main`. Open it as a draft when the phase's first step is pushed, without waiting to be asked; mark it ready when the last step's verification passes. Its description explains what changed and why it was necessary, and follows `.github/pull_request_template.md`. Never leave a pushed branch without a pull request. Work outside a phase (a standalone fix, a docs change) gets its own branch and pull request the same way.
 
 ## Commands
