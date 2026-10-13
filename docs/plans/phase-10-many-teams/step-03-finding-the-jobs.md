@@ -263,7 +263,9 @@ Files: `jobs.rs` (`find_jobs` without repositories). The tests use a temporary h
 - `finds_claude_codes_saved_crons_and_background_jobs`: `shop/.claude/scheduled_tasks.json` holds `SCHEDULED_TASKS`, `<claude>/jobs/abc12345/state.json` holds `BACKGROUND_JOB`, and `jobs/def/state.json` holds `not json`. The result: three `saved_session_cron` rows, origin `claude_tasks:<home>/shop`, display names `Session cron <cron>`, tied to `shop`; `a1b2c3d4` expires `2026-10-19T09:00:00Z` and the other two never; one `background_job` row, `abc12345`, shown as `shop-cleanup`, `blocked`, tied to `shop`; `unreadable` 1; no byte of `NEVER-KEPT-TEXT` or `SECRET`. RED.
 - `refuses_whatever_is_not_a_job_file`: three files exist, and none gives a row: `jobs/evil/state.json`, a link to `<claude>/.credentials.json` whose `name` is `SECRET-MARKER`; `jobs/x/timeline.jsonl`, holding the marker; `shop/.claude/scheduled_tasks.json`, a link out of `shop`. `machine.db` holds no marker. RED.
 
-- [ ] `feat(store): find the jobs on this computer and in claude code`
+Tests reduced to one per major functionality (ADR 0060, founder 2026-10-12).
+
+- [x] `feat(store): find the jobs on this computer and in claude code`
 
 ### Task 6: The schedules in the owner's repositories
 

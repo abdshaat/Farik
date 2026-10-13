@@ -517,6 +517,17 @@ impl MachineIndex {
         })
     }
 
+    /// The origins of every stored job except session crons.
+    pub(crate) fn stored_job_origins(&self) -> Result<Vec<String>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT DISTINCT origin FROM jobs WHERE origin != 'claude_session' ORDER BY origin",
+        )?;
+        let rows = statement
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
     /// Replaces the rows of every origin in `answered` with `jobs`, all or none. A source that did
     /// not answer keeps its rows and their `last_seen`. Session crons are never replaced; their
     /// `project_root` is set again from `sessions`. A key given twice is one row, its schedules
