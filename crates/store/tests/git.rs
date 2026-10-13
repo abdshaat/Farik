@@ -1602,6 +1602,8 @@ fn knows_who_committed() {
         "-m",
         "somebody else's",
     ]);
+    // Back on `main`, the other branch's commit is on no checked-out ref but is still found.
+    repository.git(&["checkout", "main"]);
     assert!(
         git.has_commit_by("other@example.invalid")
             .expect("git answers")
