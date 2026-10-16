@@ -121,10 +121,12 @@ impl PreviewFactory for DockerPreviewFactory {
             ));
         }
         if !run(&["image", "inspect", &self.image])?.status.success() {
-            return Err(unavailable(format!(
-                "the sandbox image {} is not on this machine",
-                self.image
-            )));
+            return Err(unavailable(
+                SandboxError::ImageMissing {
+                    image: self.image.clone(),
+                }
+                .to_string(),
+            ));
         }
         // The browser runs `--pull never`: without its image every session would fail to browse.
         if !run(&["image", "inspect", &self.browser])?.status.success() {
