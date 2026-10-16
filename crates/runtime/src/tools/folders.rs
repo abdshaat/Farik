@@ -578,7 +578,7 @@ fn checked_path(
     folder: &str,
     named: &str,
 ) -> Result<(FolderDocPath, Option<String>), ToolError> {
-    let target = check_folder_doc_path(call.role(), named).map_err(|why| match why {
+    let target = check_folder_doc_path(call.role(), named, &[]).map_err(|why| match why {
         FolderDocPathRefusal::NoFolder => refused("folder_doc_refused", "your role owns no folder"),
         FolderDocPathRefusal::Outside => refused(
             "folder_doc_path",

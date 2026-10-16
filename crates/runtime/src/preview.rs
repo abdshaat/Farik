@@ -52,6 +52,11 @@ pub enum PreviewError {
         /// What went wrong.
         detail: String,
     },
+    /// The member repository the task changes is not where the project left it.
+    RepositoryMissing {
+        /// The member's name.
+        repo: String,
+    },
 }
 
 impl fmt::Display for PreviewError {
@@ -65,6 +70,7 @@ impl fmt::Display for PreviewError {
             Self::DockerUnavailable { detail } => {
                 write!(formatter, "Docker could not run the preview: {detail}")
             }
+            Self::RepositoryMissing { repo } => write!(formatter, "{repo} cannot be found"),
         }
     }
 }

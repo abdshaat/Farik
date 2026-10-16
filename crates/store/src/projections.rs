@@ -782,6 +782,11 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::FolderChangeIntegrated(_)
         | EventBody::FolderChangeEscalated(_)
         | EventBody::ProjectStarted(_)
+        // A project folder's members are read from `.catervas/repos.yaml`; nothing on the board
+        // changes when one joins, leaves or is found elsewhere.
+        | EventBody::RepoAdded(_)
+        | EventBody::RepoRemoved(_)
+        | EventBody::RepoMoved(_)
         // The epic's board row is made by its `task.created`; this event only says what it is for.
         | EventBody::CatervaficationStarted(_)
         | EventBody::DocumentRewriteStarted(_) => Ok(()),
@@ -1345,6 +1350,31 @@ mod tests {
             record(&log, &projections, &a_new_event(kind));
         }
         assert_eq!(projections.board().expect("the board reads"), Vec::new());
+        assert_eq!(projections.cursor().expect("the cursor reads"), 4);
+    }
+
+    #[test]
+    fn projects_past_the_repository_events() {
+        // A project folder's members change no row on the board; the cursor passes them.
+        let (without_log, without) = a_board();
+        record(
+            &without_log,
+            &without,
+            &about(EventKind::TaskCreated, "CTV-1"),
+        );
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        for kind in [
+            EventKind::RepoAdded,
+            EventKind::RepoMoved,
+            EventKind::RepoRemoved,
+        ] {
+            record(&log, &projections, &a_new_event(kind));
+        }
+        assert_eq!(
+            projections.board().expect("the board reads"),
+            without.board().expect("the board reads")
+        );
         assert_eq!(projections.cursor().expect("the cursor reads"), 4);
     }
 

@@ -181,6 +181,12 @@
       "maximum": 16,
       "description": "Which lane of its epic's plan the task belongs to: the tasks one builder does in order. Tasks in different lanes of an epic run side by side. Read only on a task with a parent. Set by the Product Manager."
     },
+    "repo": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 32,
+      "description": "The member repository of a project folder that this task changes, by the name repos.yaml gives it. Set by the Product Manager; read only in a project folder, for a task whose assignee_role changes code; fixed once set (docs/SPEC.md 5.11, ADR 0057). A builder's task with no repo changes only the project's documents."
+    },
     "budget": {
       "type": "object",
       "additionalProperties": false,
@@ -212,7 +218,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Glob patterns relative to the project root. The governor refuses acceptance if the task's diff touches anything outside them."
+      "description": "Glob patterns relative to the task's repository: the member repository repo names, else the project root. The governor refuses acceptance if the task's diff touches anything outside them."
     },
     "status": {
       "type": "string",
@@ -341,7 +347,7 @@
                 },
                 "command": {
                   "type": "string",
-                  "description": "Run inside the sandbox from the project root."
+                  "description": "Run inside the sandbox from the root of the task's repository: the member repository repo names, else the project root."
                 },
                 "expect": {
                   "type": "object",
@@ -397,7 +403,7 @@
                 },
                 "path": {
                   "type": "string",
-                  "description": "A file that must exist after the task, relative to the project root."
+                  "description": "A file that must exist after the task, relative to the task's repository: the member repository repo names, else the project root."
                 },
                 "must_contain": {
                   "type": "array",

@@ -20,6 +20,7 @@ use catervas_protocol::event::{
     NoteWrittenBodyKind, ReviewRecordedBody, new_event,
 };
 use catervas_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline, folder_in};
+use catervas_store::repos::TaskRepositoryError;
 use catervas_store::{EventQuery, Git, TaskProjection};
 
 use super::design::DESIGN_REVIEW_TOOLS;
@@ -29,7 +30,10 @@ use super::messages::{
 use super::requests;
 use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
-use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, session_dir, worktree};
+use super::{
+    Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, repository_refused, session_dir,
+    task_repository_of, worktree,
+};
 use crate::criteria::{
     CriterionError, CriterionOutcome, NewTestsInput, check_artifact_in, run_criteria,
 };
@@ -39,8 +43,7 @@ use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::tools::design::{ReviewState, design_review};
 use crate::transitions::{
-    TransitionAsk, TransitionError, TransitionOutcome, integration_branch, last_move_into,
-    refusal_details,
+    TransitionAsk, TransitionError, TransitionOutcome, last_move_into, refusal_details,
 };
 
 /// Who records the criteria Catervas runs for the reviewer: Catervas ran them, as `requested_by:
@@ -87,6 +90,7 @@ pub(super) async fn verifying(
     let ran = match run_what_catervas_runs(orchestrator, team, &contract, &history, since).await? {
         CatervasRan::Criteria(ran) => ran,
         CatervasRan::Unrunnable(why) => return escalate(deps, team, row, &why),
+        CatervasRan::MemberMissing => return Ok(None),
     };
     let context = context(deps, team, &row.task_id)?;
     if let Some(handled) = design_review_first(
@@ -141,6 +145,9 @@ enum CatervasRan {
     Criteria(usize),
     /// One could not be run, for a reason that is not the work's, in these words.
     Unrunnable(String),
+    /// The task's member is not where the project left it: nothing was run, and the task waits
+    /// until the member is located.
+    MemberMissing,
 }
 
 /// Runs, one at a time, each `command`, `test`, or `artifact` criterion with no governor's result
@@ -176,20 +183,31 @@ async fn run_what_catervas_runs(
         return run_in_the_folder(deps, contract, &pending, folder);
     }
     orchestrator.forget_sandbox(&contract.id);
-    let base = integration_branch(team, &deps.tools.git)?;
+    // The task's branch and its base are its repository's: the member's, in a project folder.
+    let repository = match task_repository_of(deps, team, contract) {
+        Ok(repository) => repository,
+        Err(TaskRepositoryError::Missing { .. }) => return Ok(CatervasRan::MemberMissing),
+        Err(error) => return Err(repository_refused(&contract.id, &error)),
+    };
+    let base = repository.integration_branch.clone();
     for criterion in &pending {
         let mut alone = contract.clone();
         alone.exit_criteria = vec![(*criterion).clone()];
         let sandbox = orchestrator.sandbox_for(&contract.id, team)?;
         let factory = Arc::clone(&deps.sandboxes);
-        let root = deps.tools.git.root().to_path_buf();
+        let root = repository.git.root().to_path_buf();
+        let project = deps.tools.git.root().to_path_buf();
         let project_id = deps.tools.ids.project_id.clone();
         let base = base.clone();
         let outcomes = tokio::task::spawn_blocking(move || {
             let git = Git::open(root);
+            let base_worktree = project
+                .join(".catervas/local/worktrees")
+                .join(format!("{}-base", alone.id.as_str()));
             let head = task_branch(&alone);
             let input = NewTestsInput {
                 git: &git,
+                base_worktree: &base_worktree,
                 base: &base,
                 head: &head,
                 sandboxes: factory.as_ref(),
@@ -383,8 +401,15 @@ async fn design_review_first(
     {
         return Ok(Some(ran_criteria(row, ran)));
     }
-    let git = &deps.tools.git;
-    let diff = git.diff(&integration_branch(team, git)?, &task_branch(contract))?;
+    // A member that is not where the project left it passes the task over until it is located.
+    let repository = match task_repository_of(deps, team, contract) {
+        Ok(repository) => repository,
+        Err(TaskRepositoryError::Missing { .. }) => return Ok(Some(ran_criteria(row, ran))),
+        Err(error) => return Err(repository_refused(&row.task_id, &error)),
+    };
+    let diff = repository
+        .git
+        .diff(&repository.integration_branch, &task_branch(contract))?;
     let end = run_session(
         deps,
         team,
@@ -474,8 +499,15 @@ async fn review(
         files = folder_changes(&folder_in(deps.tools.files.root(), folder)?, &contract.id)?;
         Changes::Folder(&files)
     } else {
-        let git = &deps.tools.git;
-        diff = git.diff(&integration_branch(team, git)?, &task_branch(&contract))?;
+        let repository = match task_repository_of(deps, team, &contract) {
+            Ok(repository) => repository,
+            // As in the design review: the task waits until its member is located.
+            Err(TaskRepositoryError::Missing { .. }) => return Ok(ran_criteria(row, ran)),
+            Err(error) => return Err(repository_refused(&row.task_id, &error)),
+        };
+        diff = repository
+            .git
+            .diff(&repository.integration_branch, &task_branch(&contract))?;
         Changes::Diff(&diff)
     };
     let initial_prompt = review_message(&ReviewBrief {
@@ -821,6 +853,7 @@ mod tests {
     use catervas_core::governor::permissions::PermissionTier;
     use catervas_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
     use catervas_store::GitError;
+    use catervas_store::git::fixtures::TempRepo;
     use serde_json::{Value, json};
 
     use super::fails_the_criterion;
@@ -1014,6 +1047,225 @@ mod tests {
         assert_eq!(body.checks.len(), 4);
         assert_eq!(harness.events(&[EventKind::ReviewRecorded]).len(), 1);
         assert_eq!(state(&harness), ReviewState::Passed);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_reviewer_sees_the_members_diff() {
+        let (mut harness, members) =
+            Harness::project_folder_with("design-review-member", &["app", "infra"], browsing);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness
+            .project
+            .deps
+            .transitions
+            .set_previews(Arc::clone(&harness.previews));
+        harness.file("CTV-2", "ready", |wire| {
+            wire["reviewer_role"] = json!("architect");
+            wire["repo"] = json!("app");
+            wire["allowed_paths"] = json!(["site/style.css"]);
+            wire["exit_criteria"][0]["text"] = json!("site/style.css exists.");
+            wire["exit_criteria"][0]["verification"]["command"] = json!("test -f site/style.css");
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "ada" });
+        harness.project.moved("CTV-2", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-2", "assigned", "in_progress", &people);
+        let worktree = harness.worktree("CTV-2");
+        members[0]
+            .adapter()
+            .create_worktree(&worktree, &harness.branch("CTV-2"), "main")
+            .expect("the member makes the task's worktree");
+        std::fs::create_dir_all(worktree.join("site")).expect("made");
+        std::fs::write(worktree.join("site/style.css"), "h1 { color: #3b4a5c; }\n")
+            .expect("written");
+        members[0]
+            .adapter()
+            .commit(&worktree, "The change", &["site/style.css".to_string()])
+            .expect("committed");
+        harness.project.record(
+            "CTV-2",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Changed it.\n\nChanged it.", "written_by": "dev-a" }),
+        );
+        harness.project.moved(
+            "CTV-2",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "dev-a", "reviewer": "ada", "actor": "assignee", "requested_by": "dev-a" }),
+        );
+
+        let (started, _) = ticked(
+            &harness,
+            vec![design_review_passes_ctv_2(), review_writes_note()],
+            2,
+        )
+        .await;
+
+        assert_eq!(
+            who(&started),
+            [
+                ("iris", SessionPurpose::Verify),
+                ("ada", SessionPurpose::Verify)
+            ]
+        );
+        for spec in &started {
+            assert!(
+                spec.initial_prompt.contains("h1 { color: #3b4a5c; }"),
+                "{}: {}",
+                spec.agent_id,
+                spec.initial_prompt
+            );
+        }
+    }
+
+    /// A project folder over the member `app`, whose `trunk` (its own integration branch, not the
+    /// team's `main`) holds `flag.txt` as `broken` (and the test `tests/new.sh` when
+    /// `test_on_trunk`), with CTV-1, a task of `app`, in `verifying`: its
+    /// branch fixes the flag and adds the test, which a task of the member passes only if the
+    /// flag is fixed. Its one criterion is the test command, as the member's `app-the-tests-pass`
+    /// expands, requiring a new test.
+    fn a_member_task_to_verify(name: &str, test_on_trunk: bool) -> (Harness, Vec<TempRepo>) {
+        let (harness, members) = Harness::project_folder(name, &["app"]);
+        let app = &members[0];
+        app.write("flag.txt", "broken\n");
+        app.write("tests/other.sh", "exit 0\n");
+        if test_on_trunk {
+            app.write("tests/new.sh", "[ \"$(cat flag.txt)\" = fixed ]\n");
+        }
+        app.commit("the flag and its tests");
+        // The member's integration branch is its own, not the team's `main`.
+        app.git(&["branch", "-m", "main", "trunk"]);
+        harness.file("CTV-1", "ready", |wire| {
+            wire["repo"] = json!("app");
+            wire["allowed_paths"] = json!(["flag.txt", "tests/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The tests pass in app, and a new one shows the change.",
+                "satisfies": ["R1"],
+                "verification": {
+                    "method": "test", "command": "sh tests/new.sh", "new_tests_required": true
+                }
+            }]);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-1", "assigned", "in_progress", &people);
+        let worktree = harness.worktree("CTV-1");
+        app.adapter()
+            .create_worktree(&worktree, &harness.branch("CTV-1"), "trunk")
+            .expect("the member makes the task's worktree");
+        std::fs::write(worktree.join("flag.txt"), "fixed\n").expect("written");
+        std::fs::create_dir_all(worktree.join("tests")).expect("made");
+        std::fs::write(
+            worktree.join("tests/new.sh"),
+            "[ \"$(cat flag.txt)\" = fixed ]\n",
+        )
+        .expect("written");
+        let paths = if test_on_trunk {
+            vec!["flag.txt".to_string()]
+        } else {
+            vec!["flag.txt".to_string(), "tests/new.sh".to_string()]
+        };
+        app.adapter()
+            .commit(&worktree, "Fix the flag", &paths)
+            .expect("committed on the member's branch");
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Fixed it.\n\nFixed it.", "written_by": "dev-a" }),
+        );
+        harness.project.moved(
+            "CTV-1",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b", "actor": "assignee", "requested_by": "dev-a" }),
+        );
+        (harness, members)
+    }
+
+    fn recorded_run(harness: &Harness) -> (bool, String) {
+        let events = harness.events(&[EventKind::CriterionRecorded]);
+        let [event] = events.as_slice() else {
+            panic!(
+                "one criterion recorded, got {events:?}; escalations {:?}",
+                harness.events(&[EventKind::EscalationRaised])
+            );
+        };
+        let EventBody::CriterionRecorded(body) = &event.body else {
+            panic!("a criterion.recorded");
+        };
+        assert_eq!(body.criterion_id, "C1");
+        (body.passed, body.evidence.clone())
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_a_members_check_on_its_branch() {
+        // The check runs at the member's root in the sandbox made for the task's worktree, and
+        // `new_tests_required` is judged against the member's `trunk`, not the project folder's.
+        let (harness, members) = a_member_task_to_verify("verify-member-check", false);
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 1).await;
+        let (passed, evidence) = recorded_run(&harness);
+        assert!(passed, "{evidence}");
+        for line in [
+            "adds tests: yes",
+            "fails on base: yes",
+            "test files: tests/new.sh",
+        ] {
+            assert!(
+                evidence.lines().any(|one| one == line),
+                "{line} in {evidence}"
+            );
+        }
+        assert_eq!(who(&started), [("dev-b", SessionPurpose::Verify)]);
+        assert!(
+            !members[0].path.join(".catervas").exists(),
+            "nothing of Catervas's goes into the member"
+        );
+        assert!(
+            !harness
+                .project
+                .repo
+                .path
+                .join(".catervas/local/worktrees/CTV-1-base")
+                .exists(),
+            "and the base worktree is removed again"
+        );
+
+        // The same test already on the member's trunk is not a new one.
+        let (already, _members) = a_member_task_to_verify("verify-member-check-old", true);
+        ticked(&already, vec![review_writes_note()], 1).await;
+        let (passed, evidence) = recorded_run(&already);
+        assert!(!passed, "{evidence}");
+        assert!(
+            evidence.lines().any(|one| one == "adds tests: no"),
+            "{evidence}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_missing_member_before_running_its_checks() {
+        // A member that is not where the project left it passes the task over, as every other rule
+        // that resolves its repository does: no run, no escalation, and the tick goes on.
+        let (harness, members) = a_member_task_to_verify("verify-member-missing", false);
+        let away = members[0].path.with_extension("away");
+        let _ = std::fs::remove_dir_all(&away);
+        std::fs::rename(&members[0].path, &away).expect("the member is moved away");
+
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 2).await;
+
+        assert!(started.is_empty(), "{}", started.len());
+        assert!(harness.events(&[EventKind::CriterionRecorded]).is_empty());
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        std::fs::rename(&away, &members[0].path).expect("the member is moved back");
+        ticked(&harness, vec![review_writes_note()], 1).await;
+        let (passed, evidence) = recorded_run(&harness);
+        assert!(passed, "located again, its checks run: {evidence}");
     }
 
     #[tokio::test]

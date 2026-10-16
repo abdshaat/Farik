@@ -80,6 +80,9 @@ pub use crate::generated::event::{
 };
 /// The bodies of the three `renewal.` kinds.
 pub use crate::generated::event::{RenewalCheckedBody, RenewalDismissedBody, RenewalFlaggedBody};
+/// The bodies of the three `repo.` kinds: a repository joined a project folder, left it, or was
+/// found at a new path.
+pub use crate::generated::event::{RepoAddedBody, RepoMovedBody, RepoRemovedBody};
 /// The bodies of the four `site.` kinds: an approval, a decline and a removal share one.
 pub use crate::generated::event::{SiteDecisionBody, SiteRequestedBody};
 /// The bodies of the six `social_post.` kinds, with the vocabularies they repeat.
@@ -257,6 +260,9 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::FolderChangeEscalated => "folderChangeEscalatedBody",
         EventKind::ProjectStarted => "projectStartedBody",
         EventKind::CatervaficationStarted => "catervaficationStartedBody",
+        EventKind::RepoAdded => "repoAddedBody",
+        EventKind::RepoRemoved => "repoRemovedBody",
+        EventKind::RepoMoved => "repoMovedBody",
         EventKind::DocumentRewriteStarted => "documentRewriteStartedBody",
     }
 }
@@ -345,7 +351,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// the agent in `written_by` and `proposed_by`; the other kinds of the folder documents name no one in
 /// the body: the owner decided or edited, or Catervas integrated or escalated a change.
 /// `project.started` names no one: the first run recorded it for the owner's paragraph.
-/// `catervafication.started` names no one: `task.created` names who filed the epic.
+/// `catervafication.started` names no one: `task.created` names who filed the epic. The three
+/// `repo.` kinds name no one either: the owner added, removed or located a repository, and the
+/// envelope names no agent and no session.
 #[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
@@ -460,13 +468,16 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::FolderChangeEscalated(_)
         | EventBody::ProjectStarted(_)
         | EventBody::CatervaficationStarted(_)
+        | EventBody::RepoAdded(_)
+        | EventBody::RepoRemoved(_)
+        | EventBody::RepoMoved(_)
         | EventBody::DocumentRewriteStarted(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 112] = [
+pub const EVERY_KIND: [EventKind; 115] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -578,6 +589,9 @@ pub const EVERY_KIND: [EventKind; 112] = [
     EventKind::FolderChangeEscalated,
     EventKind::ProjectStarted,
     EventKind::CatervaficationStarted,
+    EventKind::RepoAdded,
+    EventKind::RepoRemoved,
+    EventKind::RepoMoved,
     EventKind::DocumentRewriteStarted,
 ];
 
@@ -953,6 +967,15 @@ pub enum EventBody {
     /// The team began documenting the project: the epic the event is about is the Catervafication.
     #[serde(rename = "catervafication.started")]
     CatervaficationStarted(CatervaficationStartedBody),
+    /// A repository joined the project folder.
+    #[serde(rename = "repo.added")]
+    RepoAdded(RepoAddedBody),
+    /// A repository left the project folder.
+    #[serde(rename = "repo.removed")]
+    RepoRemoved(RepoRemovedBody),
+    /// A member repository was found at a new path.
+    #[serde(rename = "repo.moved")]
+    RepoMoved(RepoMovedBody),
     /// The owner asked the team to rewrite its Markdown documents as HTML: the tasks filed.
     #[serde(rename = "document_rewrite.started")]
     DocumentRewriteStarted(DocumentRewriteStartedBody),
@@ -1075,6 +1098,9 @@ impl EventBody {
             Self::FolderChangeEscalated(_) => EventKind::FolderChangeEscalated,
             Self::ProjectStarted(_) => EventKind::ProjectStarted,
             Self::CatervaficationStarted(_) => EventKind::CatervaficationStarted,
+            Self::RepoAdded(_) => EventKind::RepoAdded,
+            Self::RepoRemoved(_) => EventKind::RepoRemoved,
+            Self::RepoMoved(_) => EventKind::RepoMoved,
             Self::DocumentRewriteStarted(_) => EventKind::DocumentRewriteStarted,
         }
     }
@@ -2096,7 +2122,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 112);
+        assert_eq!(EVERY_KIND.len(), 115);
     }
 
     #[test]
@@ -2125,7 +2151,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 112);
+        assert_eq!(EVERY_KIND.len(), 115);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2318,6 +2344,102 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_repository_events() {
+        for kind in [
+            EventKind::RepoAdded,
+            EventKind::RepoRemoved,
+            EventKind::RepoMoved,
+        ] {
+            assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+            let wire = a_full_event_wire(kind);
+            let event = event_from_value(&wire).expect("a valid repository event");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+            assert!(!is_about_one_contract(kind), "{kind}");
+        }
+
+        // `{ name, path }` is a moved repository's body, so an added one that left its branch out
+        // would pass for it; the reader asks for the key itself.
+        let mut no_branch = an_event_wire(EventKind::RepoAdded);
+        no_branch["body"]
+            .as_object_mut()
+            .expect("an object")
+            .remove("integration_branch");
+        let errors = refusal(&no_branch);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body");
+        assert!(
+            errors[0]
+                .message
+                .starts_with("a repo.added event does not carry this body"),
+            "{}",
+            errors[0].message
+        );
+        let mut null_branch = an_event_wire(EventKind::RepoAdded);
+        null_branch["body"]["integration_branch"] = json!(null);
+        let event = event_from_value(&null_branch).expect("a null branch is the default branch");
+        assert_eq!(event_to_value(&event), null_branch);
+
+        let mut bad_name = an_event_wire(EventKind::RepoAdded);
+        bad_name["body"]["name"] = json!("App");
+        assert_eq!(
+            refusal(&bad_name)
+                .iter()
+                .map(|error| error.path.as_str())
+                .collect::<Vec<_>>(),
+            ["/body/name"]
+        );
+        let mut empty_path = an_event_wire(EventKind::RepoMoved);
+        empty_path["body"]["path"] = json!("");
+        assert!(!refusal(&empty_path).is_empty());
+        assert!(
+            refusal(&empty_path)
+                .iter()
+                .all(|error| error.path == "/body/path")
+        );
+        let mut removed_with_a_path = an_event_wire(EventKind::RepoRemoved);
+        removed_with_a_path["body"]["path"] = json!("/home/me/app");
+        let errors = refusal(&removed_with_a_path);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body");
+    }
+
+    #[test]
+    fn copies_the_repository_rules_into_the_events() {
+        // The event schema takes no external reference, so each repo.* body repeats the name's
+        // pattern and the path's bounds that repos.schema.json owns; this stops a copy drifting.
+        let events: serde_json::Value = serde_json::from_str(super::SCHEMA_JSON)
+            .expect("the embedded event schema is valid JSON");
+        let repos: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/schemas/repos.schema.json"))
+                .expect("the embedded repos schema is valid JSON");
+        let name = &repos["$defs"]["repoName"];
+        let entry = &repos["$defs"]["repo"]["properties"];
+        for body in ["repoAddedBody", "repoRemovedBody", "repoMovedBody"] {
+            let properties = &events["$defs"][body]["properties"];
+            assert_eq!(properties["name"]["pattern"], name["pattern"], "{body}");
+            assert_eq!(properties["name"]["maxLength"], name["maxLength"], "{body}");
+            if body == "repoRemovedBody" {
+                continue;
+            }
+            for bound in ["pattern", "minLength", "maxLength"] {
+                assert!(!entry["path"][bound].is_null(), "{bound}");
+                assert_eq!(
+                    properties["path"][bound], entry["path"][bound],
+                    "{body} {bound}"
+                );
+            }
+        }
+        let branch = &events["$defs"]["repoAddedBody"]["properties"]["integration_branch"];
+        for bound in ["pattern", "minLength", "maxLength"] {
+            assert_eq!(
+                branch[bound], entry["integration_branch"][bound],
+                "integration_branch {bound}"
+            );
+        }
+    }
+
+    #[test]
     fn project_started_holds_its_bounds() {
         let kind = EventKind::ProjectStarted;
         assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
@@ -2417,7 +2539,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 112);
+        assert_eq!(EVERY_KIND.len(), 115);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2558,7 +2680,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 112);
+        assert_eq!(EVERY_KIND.len(), 115);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -2873,7 +2995,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 112);
+        assert_eq!(EVERY_KIND.len(), 115);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

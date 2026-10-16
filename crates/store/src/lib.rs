@@ -35,6 +35,8 @@ pub mod purchase_orders;
 pub mod reconcile;
 /// The renewals Catervas flagged for the owner.
 pub mod renewals;
+/// A project folder's member repositories on the file system.
+pub mod repos;
 /// Filing a request, for every caller.
 pub mod requests;
 /// What the repository says it is.
@@ -56,6 +58,7 @@ pub use projections::{
 };
 pub use reconcile::{Drift, ReconcileError, reconcile};
 pub use scan::{
-    AppStart, ProjectScan, ScanError, ScanFacts, material, names_of, project_document,
+    AppStart, CATERVAS_ACTOR, LIBRARY_CAP, MembersScan, MembersScanError, ProjectScan, ScanError,
+    ScanFacts, material, names_of, project_document, renamed, rescan_members, reseeded,
     scan_project, seeded_library,
 };

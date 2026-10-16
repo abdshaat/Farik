@@ -27,6 +27,7 @@ use crate::tools::call_tool;
 #[must_use]
 pub fn a_session_spec() -> SessionSpec {
     SessionSpec {
+        read_roots: Vec::new(),
         session_id: "0b7e4f0e-5a3c-4c55-9d6f-2f1a8c3e9b10".to_string(),
         agent_id: "maya-chen".to_string(),
         task_id: None,

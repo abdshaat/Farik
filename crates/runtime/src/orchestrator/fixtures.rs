@@ -12,9 +12,9 @@ use std::time::Duration;
 use catervas_core::contract::TaskId;
 use catervas_protocol::clock::{Clock, IdSource, MovableClock, SequentialIds};
 use catervas_protocol::event::{CatervasEvent, EventKind, NewEvent, event_from_value};
-use catervas_store::TaskProjection;
-use catervas_store::git::fixtures::{git_in, git_output_in};
+use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
 use catervas_store::requests::file_request;
+use catervas_store::{Git, TaskProjection};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
@@ -49,11 +49,19 @@ impl Harness {
     /// The project, with `change` applied to the team's wire after the WIP limit is set to one,
     /// and nothing on the board.
     pub(crate) fn new(name: &str, change: impl FnOnce(&mut Value)) -> Self {
-        let team = a_team_of_three(|wire| {
+        Self::over(TestProject::new(name, &Self::team(change)), name)
+    }
+
+    /// The team of three, with the WIP limit set to one and `change` applied to its wire.
+    fn team(change: impl FnOnce(&mut Value)) -> catervas_core::team::Team {
+        a_team_of_three(|wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(1);
             change(wire);
-        });
-        let project = TestProject::new(name, &team);
+        })
+    }
+
+    /// The harness over `project`, with the daemon that is not served.
+    fn over(project: TestProject, name: &str) -> Self {
         let daemon = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
         // The user's state folder, beside the repository and outside it, as `~/.config/catervas` is.
         daemon.set_state_dir(std::path::PathBuf::from(format!(
@@ -67,6 +75,23 @@ impl Harness {
             gh,
             previews: Arc::new(NoPreviews),
         }
+    }
+
+    /// `new` for a project folder whose member repositories are `members`, each a repository of
+    /// its own; the members are returned so that the test keeps them alive.
+    pub(crate) fn project_folder(name: &str, members: &[&str]) -> (Self, Vec<TempRepo>) {
+        Self::project_folder_with(name, members, |_| {})
+    }
+
+    /// `project_folder` with `change` applied to the team's wire as `new` applies it, for a test
+    /// that needs other roles or a policy.
+    pub(crate) fn project_folder_with(
+        name: &str,
+        members: &[&str],
+        change: impl FnOnce(&mut Value),
+    ) -> (Self, Vec<TempRepo>) {
+        let (project, repos) = TestProject::project_folder(name, &Self::team(change), members);
+        (Self::over(project, name), repos)
     }
 
     /// A recorded adapter playing `transcripts`, whose Catervas tool calls this harness's daemon
@@ -412,6 +437,20 @@ impl Harness {
         );
     }
 
+    /// `assigned`, the task naming the member repository `repo` and `src/**` as its path.
+    pub(crate) fn assigned_in(&self, task: &str, assignee: &str, reviewer: &str, repo: &str) {
+        self.file(task, "ready", |wire| {
+            wire["repo"] = json!(repo);
+            wire["allowed_paths"] = json!(["src/**"]);
+        });
+        self.project.moved(
+            task,
+            "ready",
+            "assigned",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": assignee, "reviewer": reviewer }),
+        );
+    }
+
     /// Files `task` and moves it through `assigned` to `in_progress`, held by `assignee` and
     /// reviewed by `reviewer`, with its worktree made on its branch from `main`.
     pub(crate) fn in_progress(&self, task: &str, assignee: &str, reviewer: &str) {
@@ -439,12 +478,37 @@ impl Harness {
         notes: bool,
         change: impl FnOnce(&mut Value),
     ) {
-        self.file(task, "ready", change);
+        self.verifying_in(
+            task,
+            commits_done,
+            notes,
+            &self.project.deps.git,
+            None,
+            change,
+        );
+    }
+
+    /// `verifying_with` in the repository `git` opens, which `repo` names in the task's contract
+    /// when it is a member of the project folder.
+    fn verifying_in(
+        &self,
+        task: &str,
+        commits_done: bool,
+        notes: bool,
+        git: &Git,
+        repo: Option<&str>,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.file(task, "ready", |wire| {
+            if let Some(repo) = repo {
+                wire["repo"] = json!(repo);
+            }
+            change(wire);
+        });
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         self.project.moved(task, "ready", "assigned", &people);
         self.project.moved(task, "assigned", "in_progress", &people);
         let worktree = self.worktree(task);
-        let git = &self.project.deps.git;
         git.create_worktree(&worktree, &self.branch(task), "main")
             .expect("the task's worktree is made");
         if commits_done {
@@ -494,7 +558,21 @@ impl Harness {
 
     /// `verifying`, then moved to `accepted` by the Product Manager, its worktree left in place.
     pub(crate) fn accepted_with_worktree(&self, task: &str) {
-        self.verifying(task);
+        self.accepted_in(task, self.project.repo.path.as_path(), None);
+    }
+
+    /// `task` accepted in the repository at `member`, the member `repo` of the project folder when
+    /// one is named: its worktree made by `member`'s git from `main` with `done.txt` committed,
+    /// and left in place.
+    pub(crate) fn accepted_in(&self, task: &str, member: &Path, repo: Option<&str>) {
+        self.verifying_in(
+            task,
+            true,
+            true,
+            &Git::open(member.to_path_buf()),
+            repo,
+            |_| {},
+        );
         self.project.moved(
             task,
             "verifying",
@@ -593,16 +671,20 @@ impl Harness {
 
     /// A bare repository beside the project, added to it as `origin`, with `main` pushed there.
     pub(crate) fn with_origin(&self) -> PathBuf {
-        let origin = self.project.repo.path.with_extension("origin.git");
+        Self::with_origin_in(&self.project.repo.path)
+    }
+
+    /// `with_origin` for the repository at `repo`, a member of the project folder among them.
+    pub(crate) fn with_origin_in(repo: &Path) -> PathBuf {
+        let origin = repo.with_extension("origin.git");
         let _ = std::fs::remove_dir_all(&origin);
         std::fs::create_dir_all(&origin).expect("a directory for the remote");
         git_in(&origin, &["init", "--bare", "-b", "main"]);
-        let root = &self.project.repo.path;
         git_in(
-            root,
+            repo,
             &["remote", "add", "origin", origin.to_str().expect("a path")],
         );
-        git_in(root, &["push", "origin", "main"]);
+        git_in(repo, &["push", "origin", "main"]);
         origin
     }
 
@@ -614,7 +696,13 @@ impl Harness {
 
     /// `merge_on_the_forge` for any branch of the project, a folder change's among them.
     pub(crate) fn merge_branch_on_the_forge(&self, origin: &Path, branch: &str) -> String {
-        let clone = self.project.repo.path.with_extension("forge");
+        Self::merge_branch_on_the_forge_in(&self.project.repo.path, origin, branch)
+    }
+
+    /// `merge_branch_on_the_forge` for a branch of the repository at `repo`, which `origin` is the
+    /// remote of.
+    pub(crate) fn merge_branch_on_the_forge_in(repo: &Path, origin: &Path, branch: &str) -> String {
+        let clone = repo.with_extension("forge");
         let _ = std::fs::remove_dir_all(&clone);
         let parent = clone.parent().expect("a parent");
         git_in(
@@ -628,7 +716,7 @@ impl Harness {
         git_in(&clone, &["config", "user.name", "Catervas Test"]);
         git_in(&clone, &["config", "user.email", "test@catervas.invalid"]);
         git_in(&clone, &["config", "commit.gpgsign", "false"]);
-        let root = self.project.repo.path.to_str().expect("a path").to_string();
+        let root = repo.to_str().expect("a path").to_string();
         git_in(&clone, &["fetch", &root, &format!("refs/heads/{branch}")]);
         git_in(
             &clone,
@@ -1098,11 +1186,15 @@ impl RuntimeAdapter for ExecutorWitness {
     }
 }
 
+/// The repositories a sandbox is told to mount, each by name and folder.
+pub(crate) type Reads = Vec<(String, PathBuf)>;
+
 /// A host sandbox factory that records, for each task, whether each sandbox it made for it had
 /// the network on, and how many times its sandboxes were removed.
 #[derive(Default)]
 pub(crate) struct CountingSandboxFactory {
     created: Mutex<BTreeMap<String, Vec<bool>>>,
+    read: Mutex<BTreeMap<String, Vec<Reads>>>,
     based: Mutex<BTreeMap<String, u32>>,
     removed: Mutex<BTreeMap<String, u32>>,
 }
@@ -1133,6 +1225,16 @@ impl CountingSandboxFactory {
         u32::try_from(self.networks(task).len()).expect("a test makes few sandboxes")
     }
 
+    /// For each sandbox `create` made for `task`, in order, the repositories it was told to mount.
+    pub(crate) fn reads(&self, task: &str) -> Vec<Reads> {
+        self.read
+            .lock()
+            .expect("no test panics holding it")
+            .get(task)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// For each sandbox `create` made for `task`, in order, whether its network was on.
     pub(crate) fn networks(&self, task: &str) -> Vec<bool> {
         self.created
@@ -1151,6 +1253,7 @@ impl SandboxFactory for CountingSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
         network: bool,
+        reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         self.created
             .lock()
@@ -1158,7 +1261,13 @@ impl SandboxFactory for CountingSandboxFactory {
             .entry(task_id.as_str().to_string())
             .or_default()
             .push(network);
-        HostSandboxFactory.create(project_id, task_id, worktree, network)
+        self.read
+            .lock()
+            .expect("no test panics holding it")
+            .entry(task_id.as_str().to_string())
+            .or_default()
+            .push(reads.to_vec());
+        HostSandboxFactory.create(project_id, task_id, worktree, network, reads)
     }
 
     fn create_base(
@@ -1230,10 +1339,11 @@ impl SandboxFactory for BrokenSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
         network: bool,
+        reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         let sandbox = self
             .counting
-            .create(project_id, task_id, worktree, network)?;
+            .create(project_id, task_id, worktree, network, reads)?;
         let broken = self
             .broken
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
@@ -1288,8 +1398,10 @@ impl SandboxFactory for UnremovableSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
         network: bool,
+        reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
-        self.counting.create(project_id, task_id, worktree, network)
+        self.counting
+            .create(project_id, task_id, worktree, network, reads)
     }
 
     fn create_base(
@@ -1363,6 +1475,7 @@ impl FakeGh {
              sub=\"$2\"\n\
              for arg in \"$@\"; do printf '%s\\0' \"$arg\"; done >> \"$dir/calls\"\n\
              printf '\\n' >> \"$dir/calls\"\n\
+             pwd -P >> \"$dir/cwds\"\n\
              cat > \"$dir/$sub.stdin\"\n\
              if [ -f \"$dir/$sub.out\" ]; then cat \"$dir/$sub.out\"; fi\n\
              if [ -f \"$dir/$sub.err\" ]; then cat \"$dir/$sub.err\" >&2; fi\n\
@@ -1420,6 +1533,15 @@ impl FakeGh {
                     .map(str::to_string)
                     .collect()
             })
+            .collect()
+    }
+
+    /// The directory each call ran in, canonicalised by the shell, oldest first.
+    pub(crate) fn cwds(&self) -> Vec<PathBuf> {
+        std::fs::read_to_string(self.dir.join("cwds"))
+            .unwrap_or_default()
+            .lines()
+            .map(PathBuf::from)
             .collect()
     }
 

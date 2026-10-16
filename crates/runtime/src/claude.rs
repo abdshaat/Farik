@@ -9,6 +9,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use catervas_core::governor::paths::literal_folder;
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::team::validate_team;
 use catervas_store::files::yaml_value;
@@ -642,7 +643,7 @@ pub fn claude_args(
     refuse_a_catervas_server(spec)?;
     let protected = protected_paths(&config.team_file)?;
     refuse_an_unexpressible_glob(&protected)?;
-    let settings = settings_json(config, &protected);
+    let settings = settings_json(config, &protected, spec);
     let session_flag = if resume { "--resume" } else { "--session-id" };
     let disallowed = std::iter::once(REFUSED_BUILTIN)
         .chain(spec.disallowed_tools.iter().map(String::as_str))
@@ -695,6 +696,10 @@ pub fn claude_args(
                 .display()
                 .to_string(),
         );
+    }
+    for root in &spec.read_roots {
+        args.push("--add-dir".to_string());
+        args.push(root.display().to_string());
     }
     Ok(args)
 }
@@ -875,9 +880,37 @@ fn refuse_an_unexpressible_glob(protected: &[String]) -> Result<(), RuntimeError
     }
 }
 
+/// The `Read` deny rules for each of `spec`'s read roots (5.12): every protected glob, and
+/// `.git/**`, in Claude Code's absolute form `//<path without its leading />/<glob>`. A rule is
+/// left out when the glob has a literal folder, which holds the session's own working directory:
+/// the project folder's `.catervas/local/**` would refuse a task its own worktree. The hook guards
+/// that folder in a root.
+fn read_root_rules(spec: &SessionSpec, protected: &[String]) -> Vec<String> {
+    let globs: Vec<&str> = protected
+        .iter()
+        .map(String::as_str)
+        .chain([".git/**"])
+        .collect();
+    spec.read_roots
+        .iter()
+        .flat_map(|root| {
+            let absolute = root.display().to_string();
+            let absolute = absolute.trim_start_matches('/').to_string();
+            globs
+                .iter()
+                .filter(|glob| {
+                    let folder = literal_folder(glob);
+                    folder.is_empty() || !spec.cwd.starts_with(root.join(folder))
+                })
+                .map(move |glob| format!("Read(//{absolute}/{glob})"))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 /// `--settings`: both hooks on every tool, and a `Read` deny rule for each protected path, which
-/// Claude Code also holds its search tools to.
-fn settings_json(config: &ClaudeConfig, protected: &[String]) -> Value {
+/// Claude Code also holds its search tools to, and for each of those in a read root.
+fn settings_json(config: &ClaudeConfig, protected: &[String], spec: &SessionSpec) -> Value {
     let hook = |command: String| {
         json!([{
             "matcher": "*",
@@ -899,7 +932,11 @@ fn settings_json(config: &ClaudeConfig, protected: &[String]) -> Value {
             "PostToolUse": hook(line("post-tool-use")),
         },
         "permissions": {
-            "deny": protected.iter().map(|path| format!("Read({path})")).collect::<Vec<_>>(),
+            "deny": protected
+                .iter()
+                .map(|path| format!("Read({path})"))
+                .chain(read_root_rules(spec, protected))
+                .collect::<Vec<_>>(),
         },
         // A skill's body may hold `!` commands that run when it loads; Catervas refuses such a
         // skill (ADR 0034), and this stops one that gets through (a plugin's own, say).
@@ -1181,6 +1218,59 @@ mod tests {
             !Path::new(&with.session_id).exists(),
             "nothing is written relative to the working directory"
         );
+    }
+
+    #[test]
+    fn tells_claude_each_read_root_and_denies_its_protected_files() {
+        let project = a_project("claude-read-roots");
+        let config = config(&project);
+        let spec = SessionSpec {
+            read_roots: vec![PathBuf::from("/r/a"), PathBuf::from("/p")],
+            cwd: PathBuf::from("/p/.catervas/local/worktrees/CTV-1"),
+            ..spec()
+        };
+        let args = claude_args(&spec, &config, &session_dir(&config, &spec), false).expect("args");
+        let added: Vec<&str> = args
+            .windows(2)
+            .filter(|pair| pair[0] == "--add-dir")
+            .map(|pair| pair[1].as_str())
+            .collect();
+        assert_eq!(added, ["/r/a", "/p"]);
+
+        let denied: Vec<String> = settings(&args)["permissions"]["deny"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .filter_map(|rule| rule.as_str().map(str::to_string))
+            .collect();
+        for rule in [
+            "Read(.catervas/local/**)",
+            "Read(//r/a/.env)",
+            "Read(//r/a/.catervas/local/**)",
+            "Read(//r/a/**/*.pem)",
+            "Read(//r/a/.git/**)",
+            "Read(//p/.env)",
+            "Read(//p/**/*.pem)",
+            "Read(//p/.git/**)",
+        ] {
+            assert!(denied.iter().any(|held| held == rule), "{rule}: {denied:?}");
+        }
+        // The project folder's own `.catervas/local/**` would cover the session's worktree.
+        assert!(
+            !denied
+                .iter()
+                .any(|held| held == "Read(//p/.catervas/local/**)")
+        );
+
+        // No roots, no flag.
+        let args = claude_args(
+            &self::spec(),
+            &config,
+            &session_dir(&config, &self::spec()),
+            false,
+        )
+        .expect("args");
+        assert!(!args.iter().any(|arg| arg == "--add-dir"), "{args:?}");
     }
 
     #[test]

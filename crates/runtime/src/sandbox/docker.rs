@@ -2,7 +2,7 @@
 //! `/workspace` (`docs/SPEC.md` 8.3). Docker is the `docker` program, driven as git is.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Duration;
 
@@ -42,30 +42,28 @@ impl DockerSandbox {
             container_name(project_id, task_id),
             project_id,
             task_id,
-            worktree,
+            (worktree, &[]),
             network,
             image,
         )
     }
 
-    /// `create`, under the container name `name`.
+    /// `create`, under the container name `name`, with `mounts` as the worktree and the other
+    /// repositories it can read.
     fn start(
         name: String,
         project_id: &str,
         task_id: &TaskId,
-        worktree: &Path,
+        (worktree, reads): (&Path, &[(String, PathBuf)]),
         network: bool,
         image: &str,
     ) -> Result<DockerSandbox, SandboxError> {
-        // `--mount` splits on commas and wants an absolute source.
-        if !worktree.is_absolute() || worktree.to_string_lossy().contains(',') {
-            return Err(SandboxError::ContainerFailed {
-                detail: format!(
-                    "the worktree {} cannot be mounted: it must be absolute and hold no comma",
-                    worktree.display()
-                ),
-            });
-        }
+        let labels = [
+            ("catervas.project".to_string(), project_id.to_string()),
+            ("catervas.task".to_string(), task_id.as_str().to_string()),
+        ];
+        let user = format!("{}:{}", id("-u")?, id("-g")?);
+        let arguments = run_args(&name, worktree, reads, network, &user, &labels, image)?;
         if !docker(&["version"]).is_ok_and(|output| output.status.success()) {
             return Err(SandboxError::DockerUnavailable);
         }
@@ -76,32 +74,7 @@ impl DockerSandbox {
         }
         // Absent is the usual answer, and not an error.
         docker(&["rm", "-f", &name])?;
-        let user = format!("{}:{}", id("-u")?, id("-g")?);
-        let mount = format!("type=bind,src={},dst=/workspace", worktree.display());
-        let project_label = format!("catervas.project={project_id}");
-        let task_label = format!("catervas.task={}", task_id.as_str());
-        let output = docker(&[
-            "run",
-            "-d",
-            "--init",
-            "--name",
-            &name,
-            "--network",
-            if network { "bridge" } else { "none" },
-            "--mount",
-            &mount,
-            "-w",
-            "/workspace",
-            "--user",
-            &user,
-            "--label",
-            &project_label,
-            "--label",
-            &task_label,
-            image,
-            "sleep",
-            "infinity",
-        ])?;
+        let output = docker(&arguments.iter().map(String::as_str).collect::<Vec<_>>())?;
         if !output.status.success() {
             return Err(SandboxError::ContainerFailed {
                 detail: stderr_of(&output),
@@ -115,6 +88,65 @@ impl DockerSandbox {
     pub fn name(&self) -> &str {
         &self.name
     }
+}
+
+/// The arguments of the `docker run` that starts a sandbox: `worktree` at `/workspace`, then each
+/// of `reads` read-only at `/repos/<name>` (8.3), with the container's `name`, `user` and `labels`.
+///
+/// # Errors
+///
+/// `ContainerFailed` when a folder to mount is relative or holds a comma, which `--mount` splits
+/// on.
+pub(crate) fn run_args(
+    name: &str,
+    worktree: &Path,
+    reads: &[(String, PathBuf)],
+    network: bool,
+    user: &str,
+    labels: &[(String, String)],
+    image: &str,
+) -> Result<Vec<String>, SandboxError> {
+    // `--mount` splits on commas and wants an absolute source.
+    let refuse = |what: &str, path: &Path| SandboxError::ContainerFailed {
+        detail: format!(
+            "{what} {} cannot be mounted: it must be absolute and hold no comma",
+            path.display()
+        ),
+    };
+    let mountable = |path: &Path| path.is_absolute() && !path.to_string_lossy().contains(',');
+    if !mountable(worktree) {
+        return Err(refuse("the worktree", worktree));
+    }
+    let mut arguments: Vec<String> = [
+        "run",
+        "-d",
+        "--init",
+        "--name",
+        name,
+        "--network",
+        if network { "bridge" } else { "none" },
+        "--mount",
+        &format!("type=bind,src={},dst=/workspace", worktree.display()),
+    ]
+    .map(ToString::to_string)
+    .to_vec();
+    for (member, path) in reads {
+        if !mountable(path) {
+            return Err(refuse("the repository", path));
+        }
+        arguments.push("--mount".to_string());
+        arguments.push(format!(
+            "type=bind,src={},dst=/repos/{member},readonly",
+            path.display()
+        ));
+    }
+    arguments.extend(["-w", "/workspace", "--user", user].map(ToString::to_string));
+    for (key, value) in labels {
+        arguments.push("--label".to_string());
+        arguments.push(format!("{key}={value}"));
+    }
+    arguments.extend([image, "sleep", "infinity"].map(ToString::to_string));
+    Ok(arguments)
 }
 
 impl Executor for DockerSandbox {
@@ -193,8 +225,16 @@ impl SandboxFactory for DockerSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
         network: bool,
+        reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
-        let sandbox = DockerSandbox::create(project_id, task_id, worktree, network, &self.image)?;
+        let sandbox = DockerSandbox::start(
+            container_name(project_id, task_id),
+            project_id,
+            task_id,
+            (worktree, reads),
+            network,
+            &self.image,
+        )?;
         Ok(Box::new(sandbox))
     }
 
@@ -208,7 +248,7 @@ impl SandboxFactory for DockerSandboxFactory {
             base_container_name(project_id, task_id),
             project_id,
             task_id,
-            worktree,
+            (worktree, &[]),
             false,
             &self.image,
         )?;
@@ -312,9 +352,61 @@ mod tests {
 
     use super::{
         DockerSandbox, SandboxError, base_container_name, container_name, is_container_gone,
-        removed, whole_seconds,
+        removed, run_args, whole_seconds,
     };
     use crate::exec::{Executor, Finished};
+
+    #[test]
+    fn mounts_each_other_member_read_only_after_the_worktree() {
+        let labels = [("catervas.task".to_string(), "CTV-1".to_string())];
+        let reads = [(
+            "infra".to_string(),
+            std::path::PathBuf::from("/home/me/infra"),
+        )];
+        let arguments = run_args(
+            "c",
+            Path::new("/home/me/wt"),
+            &reads,
+            false,
+            "1000:1000",
+            &labels,
+            "image",
+        )
+        .expect("the arguments");
+        let own = "type=bind,src=/home/me/wt,dst=/workspace".to_string();
+        let sibling = "type=bind,src=/home/me/infra,dst=/repos/infra,readonly".to_string();
+        let mounts: Vec<&String> = arguments
+            .windows(2)
+            .filter(|pair| pair[0] == "--mount")
+            .map(|pair| &pair[1])
+            .collect();
+        assert_eq!(mounts, [&own, &sibling]);
+        // A folder with a comma cannot be named to `--mount`.
+        let comma = [("x".to_string(), std::path::PathBuf::from("/home/me/a,b"))];
+        let refused = run_args(
+            "c",
+            Path::new("/home/me/wt"),
+            &comma,
+            false,
+            "1000:1000",
+            &labels,
+            "image",
+        );
+        assert!(refused.is_err(), "{refused:?}");
+        // With no reads the arguments are the worktree's alone.
+        let alone = run_args(
+            "c",
+            Path::new("/home/me/wt"),
+            &[],
+            true,
+            "1000:1000",
+            &labels,
+            "image",
+        )
+        .expect("the arguments");
+        assert_eq!(alone.iter().filter(|arg| *arg == "--mount").count(), 1);
+        assert_eq!(alone.last().map(String::as_str), Some("infinity"));
+    }
 
     #[test]
     fn counts_a_container_already_gone_as_discarded() {

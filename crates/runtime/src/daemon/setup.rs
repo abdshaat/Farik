@@ -19,6 +19,18 @@ pub enum SetupError {
     Failed(String),
 }
 
+/// A member repository the wizard asks a project folder to hold: its name, its folder relative to
+/// home, and the branch accepted work goes into when it names one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberRequest {
+    /// What the project calls it.
+    pub name: String,
+    /// Its top folder, relative to home.
+    pub path: String,
+    /// The branch accepted work goes into, or none for the repository's default branch.
+    pub integration_branch: Option<String>,
+}
+
 /// What the CLI does for the wizard: take a project on, and keep the credential.
 pub trait SetupHost: Send + Sync {
     /// Opens the git project at `path`, relative to home, for the team. While a project is being
@@ -39,6 +51,20 @@ pub trait SetupHost: Send + Sync {
         parent: &str,
         name: &str,
         description: &str,
+        no_sandbox: bool,
+    ) -> Result<PathBuf, SetupError>;
+    /// Makes the project folder `parent/name`, relative to home, of the member `repos`: a local
+    /// git repository with no remote, whose `.catervas/repos.yaml` lists them (ADR 0057). `parent`
+    /// need not exist yet.
+    ///
+    /// # Errors
+    ///
+    /// `Refused` with the sentence to show; `Failed` when something broke.
+    fn create_folder(
+        &self,
+        parent: &str,
+        name: &str,
+        repos: &[MemberRequest],
         no_sandbox: bool,
     ) -> Result<PathBuf, SetupError>;
     /// Keeps the pasted `secret` of `kind`, and answers where, and whether a project that waited

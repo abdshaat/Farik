@@ -28,7 +28,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::files::{FilesError, ProjectFiles};
-use crate::git::Git;
+use crate::repos::task_branch_numbers_everywhere;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
 /// Who the human is in the log: the id every act of theirs is recorded under.
@@ -770,7 +770,7 @@ fn file(
     // Past every contract the repository already holds as well as the counter: the log is
     // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
     // would hand out CTV-1 again. `list_contracts` is in number order, so the last is the highest.
-    // And past every task branch the repository holds, whatever its contracts say: a project
+    // And past every task branch the project holds in any of its repositories, whatever its contracts say: a project
     // whose `.catervas/` was removed or carried elsewhere still has the branches of its old tasks. A
     // folder whose refs cannot be listed counts as having none; a collision then shows when the
     // worktree is made.
@@ -779,9 +779,7 @@ fn file(
         .last()
         .and_then(|id| id.as_str().trim_start_matches("CTV-").parse::<u64>().ok())
         .unwrap_or(0);
-    let branches = Git::open(files.root().to_path_buf())
-        .task_branch_numbers()
-        .unwrap_or_default()
+    let branches = task_branch_numbers_everywhere(files)
         .into_iter()
         .max()
         .unwrap_or(0);
@@ -1168,6 +1166,10 @@ pub fn contract_write(refusal: &ContractWriteRefusal) -> String {
             listed(fields),
             is_or_are(fields)
         ),
+        ContractWriteRefusal::RepoFixed { repo } => format!(
+            "repo is fixed once set: this task stays in {repo}; cancel it and file another to \
+             change repositories"
+        ),
     }
 }
 
@@ -1257,6 +1259,7 @@ pub fn criteria_json(library: &CriteriaLibrary) -> Value {
                 "name": one.name.as_str(),
                 "text": one.text.as_str(),
                 "source": one.source.as_ref().map(ToString::to_string),
+                "repo": one.repo.as_ref().map(|repo| repo.as_str()),
                 "method": criterion_method(&one.verification),
                 "how": criterion_how(&one.verification),
             }))
@@ -1366,6 +1369,18 @@ mod tests {
         .iter()
         .map(|text| text.as_str().unwrap_or_default().to_string())
         .collect()
+    }
+
+    #[test]
+    fn says_a_repo_is_fixed_once_set() {
+        let refusal = catervas_core::governor::gates::ContractWriteRefusal::RepoFixed {
+            repo: "app".to_string(),
+        };
+        assert_eq!(
+            super::contract_write(&refusal),
+            "repo is fixed once set: this task stays in app; cancel it and file another to \
+             change repositories"
+        );
     }
 
     #[test]
@@ -1656,6 +1671,28 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_past_every_repositorys_task_branches() {
+        let (project, log) = a_project("requests-member-branch");
+        let root = project.root.clone();
+        git_in(&root, &["init", "-b", "main"]);
+        let app = crate::git::fixtures::TempRepo::new("requests-member-app");
+        app.git(&["branch", "feature/CTV-7"]);
+        let files = project.files();
+        files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": app.path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
+            .expect("the request is filed");
+        assert_eq!(request.id.as_str(), "CTV-8");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_a_request_when_git_cannot_list_branches() {
         // The folder is not a repository, so its branches cannot be listed: it counts as having none.
         let (project, log) = a_project("requests-no-repository");
@@ -1906,6 +1943,21 @@ mod tests {
                 EventKind::ContractUnlocked
             ]
         );
+    }
+
+    #[test]
+    fn lists_a_criterions_member() {
+        let library = catervas_core::criteria::validate_criteria(&json!({ "criteria": [
+            { "name": "app-the-tests-pass", "text": "The tests pass in app.",
+              "source": "project_scan", "repo": "app",
+              "verification": { "method": "test", "command": "npm test" } },
+            { "name": "my-check", "text": "A person wrote this one.",
+              "verification": { "method": "human", "question": "Is it right?" } },
+        ]}))
+        .expect("a library");
+        let listed = super::criteria_json(&library);
+        assert_eq!(listed["criteria"][0]["repo"], json!("app"));
+        assert_eq!(listed["criteria"][1].get("repo"), Some(&Value::Null));
     }
 
     #[test]

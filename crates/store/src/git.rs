@@ -247,6 +247,30 @@ impl Git {
         Ok(())
     }
 
+    /// Forgets the worktrees whose folders are gone, so that no stale registration keeps their
+    /// branches from being checked out here.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when git refuses.
+    pub fn prune_worktrees(&self) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.at_root(&["worktree", "prune"])?;
+        Ok(())
+    }
+
+    /// Tells git where this repository's worktrees are after it moved: every worktree outside it
+    /// finds its repository by the path it was made at, and runs no git until it is repaired.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when git refuses.
+    pub fn repair_worktrees(&self) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.at_root(&["worktree", "repair"])?;
+        Ok(())
+    }
+
     /// Makes a worktree at `path` with `at` checked out and no branch: a place to look at a commit
     /// that nothing will commit to, such as the base a task's new tests are run against (5.4).
     ///
@@ -432,6 +456,32 @@ impl Git {
             run_git_reaching_remote(&self.root, &["fetch", remote, &refspec])?;
         }
         Ok(())
+    }
+
+    /// Whether the repository has a local branch of this name. A revision expression such as
+    /// `main~0` or `main@{0}` is not a branch's name, though git resolves it, so it is none.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, or `NotInstalled` when git cannot be run.
+    pub fn has_local_branch(&self, name: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        match self.check_branch_name(name) {
+            Ok(()) => {}
+            Err(GitError::CommandFailed { .. }) => return Ok(false),
+            Err(other) => return Err(other),
+        }
+        match self.at_root(&[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ]) {
+            Ok(_) => Ok(true),
+            // `--quiet` makes git say nothing and exit 1 for a name it does not know.
+            Err(GitError::CommandFailed { .. }) => Ok(false),
+            Err(other) => Err(other),
+        }
     }
 
     /// Refuses a name git would not take for a branch, such as `main:other` or `-f`, so that

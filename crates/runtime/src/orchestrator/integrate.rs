@@ -16,19 +16,21 @@ use catervas_protocol::event::{
 use catervas_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
 use catervas_store::files::FilesError;
 use catervas_store::folder_docs::{FolderChange, folder_docs};
+use catervas_store::repos::{TaskRepositoryError, task_repository};
 use catervas_store::{
     EventQuery, Git, GitError, MergeOutcome, TaskProjection, material, names_of, project_document,
-    scan_project, seeded_library,
+    rescan_members, scan_project, seeded_library,
 };
 
 use super::verify::{GOVERNOR, append, append_stamped};
 use super::{
-    IntegrationOutcome, Orchestrator, OrchestratorError, ScanRefresh, TickReport, worktree,
+    IntegrationOutcome, Orchestrator, OrchestratorError, ScanRefresh, TickReport,
+    task_repository_of, worktree,
 };
 use crate::channel::post_system;
 use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
-use crate::transitions::{INTEGRATION_LOCK, integration_branch, integration_lock, is_move_into};
+use crate::transitions::{INTEGRATION_LOCK, integration_lock, is_move_into};
 
 /// Who asked for an integration: the tick, on the team's policy, or the human.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -263,6 +265,66 @@ async fn attempt(
     }
 }
 
+/// Where an integration happens: the repository the subject's branch is in, with its adapter, its
+/// forge, and the branch accepted work goes into (5.14).
+struct IntegrationTarget {
+    /// The member's name, or `None` for the project's own folder.
+    repo: Option<String>,
+    git: Git,
+    forge: Forge,
+    into: String,
+}
+
+/// Why a subject's target cannot be had: its sentence, and whether it is a member that is not
+/// where `repos.yaml` says, which waits on a tick.
+enum Unresolved {
+    Missing(String),
+    Other(String),
+}
+
+/// The repository, forge and integration branch the subject integrates in. A task names its
+/// member in its contract; a folder change, and a task with no member, integrate in the project
+/// folder's own repository.
+fn target(
+    tools: &ToolDeps,
+    forge: &Forge,
+    team: &Team,
+    subject: &Subject,
+) -> Result<IntegrationTarget, Unresolved> {
+    let repo = match subject {
+        Subject::Task(task_id) => {
+            let contract = tools
+                .files
+                .read_contract(task_id)
+                .map_err(|error| Unresolved::Other(error.to_string()))?;
+            contract.repo.as_ref().map(|repo| repo.as_str().to_string())
+        }
+        Subject::FolderChange(_) => None,
+    };
+    match task_repository(&tools.files, team, &tools.git, repo.as_deref()) {
+        Ok(found) => {
+            let forge = match found.repo {
+                Some(_) => Forge {
+                    program: forge.program.clone(),
+                    root: found.git.root().to_path_buf(),
+                },
+                None => forge.clone(),
+            };
+            Ok(IntegrationTarget {
+                repo: found.repo,
+                git: found.git,
+                forge,
+                into: found.integration_branch,
+            })
+        }
+        Err(error @ TaskRepositoryError::Missing { .. }) => {
+            Err(Unresolved::Missing(error.to_string()))
+        }
+        Err(TaskRepositoryError::Git(error)) => Err(Unresolved::Other(git_words(&error))),
+        Err(error) => Err(Unresolved::Other(error.to_string())),
+    }
+}
+
 /// What the policy does for the subject, with the lock held: the board is brought up to what other
 /// processes appended first, so that a task another one integrated is answered, not merged again.
 fn integrate_locked(
@@ -299,9 +361,13 @@ fn integrate_locked(
     if asker == Asker::Tick && escalated_since_accepted(tools, subject)? {
         return Ok(None);
     }
-    let into = match integration_branch(team, &tools.git) {
-        Ok(into) => into,
-        Err(error) => return escalate(tools, subject, git_words(&error)).map(Some),
+    let target = match target(tools, forge, team, subject) {
+        Ok(target) => target,
+        // A member that is not there waits, as its tasks do: the human is told why on asking.
+        Err(Unresolved::Missing(_)) if asker == Asker::Tick => return Ok(None),
+        Err(Unresolved::Missing(words) | Unresolved::Other(words)) => {
+            return escalate(tools, subject, words).map(Some);
+        }
     };
     let integrated_by = match asker {
         Asker::Tick => TaskIntegratedBodyIntegratedBy::Governor,
@@ -309,9 +375,9 @@ fn integrate_locked(
     };
     let integrated_before = integrations_of(tools, subject)?;
     let outcome = match team.policy.integration {
-        Integration::Manual => Some(merge(tools, subject, &into, integrated_by, false)?),
-        Integration::AutoMerge => Some(merge(tools, subject, &into, integrated_by, true)?),
-        Integration::PullRequest => through_the_forge(tools, forge, subject, &into, asker)?,
+        Integration::Manual => Some(merge(tools, subject, &target, integrated_by, false)?),
+        Integration::AutoMerge => Some(merge(tools, subject, &target, integrated_by, true)?),
+        Integration::PullRequest => through_the_forge(tools, subject, &target, asker)?,
     };
     // A folder change touches no language, toolchain, test or criterion: no scan to refresh.
     let Subject::Task(task_id) = subject else {
@@ -320,7 +386,7 @@ fn integrate_locked(
     if integrations_of(tools, subject)? == integrated_before {
         return Ok(outcome);
     }
-    let scan = refresh_the_scan(tools, task_id, &into);
+    let scan = refresh_the_scan(tools, task_id, &target);
     Ok(outcome.map(|outcome| match outcome {
         IntegrationOutcome::Merged { sha, .. } => IntegrationOutcome::Merged { sha, scan },
         IntegrationOutcome::Escalated { detail, .. } => IntegrationOutcome::Escalated {
@@ -360,10 +426,20 @@ fn integrations_of(tools: &ToolDeps, subject: &Subject) -> Result<usize, Orchest
 /// Scans the project again once work landed in it (5.8), and writes `project.md` and the
 /// criterion library when what the scan reads changed. It never fails the integration: whatever
 /// goes wrong is the answer's words, not an error.
-fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, into: &str) -> ScanRefresh {
+fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, target: &IntegrationTarget) -> ScanRefresh {
+    let into = target.into.as_str();
+    // A project folder's own scan never runs: its criteria are its members', and a scan of the
+    // folder would wipe them. What landed in a member is read from that member, and the project
+    // folder's own work reports nothing, so no integration says the scan was skipped.
+    if tools.files.is_project_folder() {
+        return match target.repo.as_deref() {
+            Some(repo) => refresh_the_member(tools, repo, target),
+            None => ScanRefresh::Unchanged,
+        };
+    }
     // `scan_project` reads the working tree at the root, which holds what landed only when it is
     // the integration branch that is checked out there.
-    match tools.git.current_branch() {
+    match target.git.current_branch() {
         Ok(branch) if branch == into => {}
         Ok(branch) => {
             return ScanRefresh::Skipped {
@@ -376,12 +452,53 @@ fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, into: &str) -> ScanRefre
             };
         }
     }
-    rescan(tools, task_id).unwrap_or_else(|error| ScanRefresh::Failed { error })
+    rescan(tools, task_id, &target.git).unwrap_or_else(|error| ScanRefresh::Failed { error })
+}
+
+/// The scan of the member `repo` a task landed in, when its checkout is on the integration branch,
+/// which is where its working tree holds what landed.
+fn refresh_the_member(tools: &ToolDeps, repo: &str, target: &IntegrationTarget) -> ScanRefresh {
+    match target.git.current_branch() {
+        Ok(branch) if branch == target.into => {}
+        Ok(branch) => {
+            return ScanRefresh::Skipped {
+                why: format!("{repo}'s checkout is on {branch}, not {}", target.into),
+            };
+        }
+        Err(_) => {
+            return ScanRefresh::Skipped {
+                why: format!("{repo}'s checkout is not on a branch"),
+            };
+        }
+    }
+    rescan_member(tools, repo).unwrap_or_else(|error| ScanRefresh::Failed { error })
+}
+
+/// The member's checks read again and the library reseeded from them, the other members' kept.
+fn rescan_member(tools: &ToolDeps, repo: &str) -> Result<ScanRefresh, String> {
+    let scanned = rescan_members(
+        &tools.files,
+        &tools.log,
+        &tools.ids,
+        tools.clock.now(),
+        Some(repo),
+        GOVERNOR,
+    )
+    .map_err(|error| error.to_string())?;
+    tools
+        .projections
+        .catch_up()
+        .map_err(|error| error.to_string())?;
+    Ok(if scanned.library_changed {
+        ScanRefresh::Refreshed
+    } else {
+        ScanRefresh::Unchanged
+    })
 }
 
 /// The refresh itself, once the checkout is known to hold what landed.
-fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
-    let scan = scan_project(&tools.git, tools.clock.now()).map_err(|error| error.to_string())?;
+fn rescan(tools: &ToolDeps, task_id: &TaskId, git: &Git) -> Result<ScanRefresh, String> {
+    let scan = scan_project(git, tools.clock.now()).map_err(|error| error.to_string())?;
     let found = names_of(&scan.detected_criteria);
     let last = tools
         .log
@@ -411,7 +528,12 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
     let previous = tools.files.read_project_scan().ok();
     tools
         .files
-        .write_project_scan(&project_document(&scan, &library, previous.as_deref()))
+        .write_project_scan(&project_document(
+            &scan.read_back,
+            &library,
+            &[],
+            previous.as_deref(),
+        ))
         .map_err(|error| error.to_string())?;
     if kept.as_ref() != Some(&library) {
         tools
@@ -452,16 +574,16 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
 /// the human asks and the branch is in the integration branch all the same.
 fn through_the_forge(
     tools: &ToolDeps,
-    forge: &Forge,
     subject: &Subject,
-    into: &str,
+    target: &IntegrationTarget,
     asker: Asker,
 ) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
+    let into = target.into.as_str();
     let branch = subject.branch(tools)?;
     let Some(url) = opened_url(tools, subject)? else {
-        return open(tools, forge, subject, into, &branch).map(Some);
+        return open(tools, subject, target, &branch).map(Some);
     };
-    let state = match forge.pull_request_state(&url) {
+    let state = match target.forge.pull_request_state(&url) {
         Ok(state) => state,
         Err(error) => {
             let detail = format!("reading the pull request {url} failed: {error}");
@@ -478,7 +600,7 @@ fn through_the_forge(
                 into,
                 TaskIntegratedBodyIntegratedBy::Human,
             )?;
-            if let Err(error) = tools.git.fetch_fast_forward("origin", into) {
+            if let Err(error) = target.git.fetch_fast_forward("origin", into) {
                 let detail = format!(
                     "the pull request {url} was merged as {sha}, but the local {into} could not be \
                      brought up to it: {}",
@@ -496,7 +618,7 @@ fn through_the_forge(
             escalate(tools, subject, detail).map(Some)
         }
         PullRequestState::Closed => {
-            closed_for_the_human(tools, subject, &url, into, &branch).map(Some)
+            closed_for_the_human(tools, subject, &url, target, &branch).map(Some)
         }
     }
 }
@@ -535,16 +657,17 @@ fn closed_for_the_human(
     tools: &ToolDeps,
     subject: &Subject,
     url: &str,
-    into: &str,
+    target: &IntegrationTarget,
     branch: &str,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
-    let merged = tools
+    let into = target.into.as_str();
+    let merged = target
         .git
         .fetch_fast_forward("origin", into)
-        .and_then(|()| tools.git.commit_count(into, branch));
+        .and_then(|()| target.git.commit_count(into, branch));
     match merged {
         Ok(0) => {
-            let head = tools.git.merge_base(into, into)?;
+            let head = target.git.merge_base(into, into)?;
             record_integrated(
                 tools,
                 subject,
@@ -578,12 +701,12 @@ fn closed_for_the_human(
 /// Pushes the branch to `origin` and opens its pull request, recording it.
 fn open(
     tools: &ToolDeps,
-    forge: &Forge,
     subject: &Subject,
-    into: &str,
+    target: &IntegrationTarget,
     branch: &str,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
-    match tools.git.has_remote("origin") {
+    let into = target.into.as_str();
+    match target.git.has_remote("origin") {
         Ok(true) => {}
         Ok(false) => {
             let detail = format!(
@@ -594,13 +717,13 @@ fn open(
         }
         Err(error) => return escalate(tools, subject, git_words(&error)),
     }
-    if let Err(error) = tools.git.push("origin", &format!("refs/heads/{branch}")) {
+    if let Err(error) = target.git.push("origin", &format!("refs/heads/{branch}")) {
         let detail = format!("pushing {branch} to origin failed: {}", git_words(&error));
         return escalate(tools, subject, detail);
     }
     let (_, title) = subject.titles(tools)?;
     let body = pull_request_body(tools, subject)?;
-    let pull_request = match forge.open_pull_request(into, branch, &title, &body) {
+    let pull_request = match target.forge.open_pull_request(into, branch, &title, &body) {
         Ok(pull_request) => pull_request,
         Err(error) => {
             let detail = format!("opening a pull request for {branch} failed: {error}");
@@ -689,14 +812,15 @@ fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, Orch
 fn merge(
     tools: &ToolDeps,
     subject: &Subject,
-    into: &str,
+    target: &IntegrationTarget,
     integrated_by: TaskIntegratedBodyIntegratedBy,
     push: bool,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
+    let into = target.into.as_str();
     let id = subject.name();
     let branch = subject.branch(tools)?;
     let (message, _) = subject.titles(tools)?;
-    let sha = match tools.git.merge(into, &branch, &message) {
+    let sha = match target.git.merge(into, &branch, &message) {
         Ok(MergeOutcome::Merged { sha }) => sha,
         Ok(MergeOutcome::Conflicts(paths)) => {
             let detail = format!(
@@ -713,9 +837,9 @@ fn merge(
     };
     record_integrated(tools, subject, &sha, into, integrated_by)?;
     if push {
-        let pushed = tools.git.has_remote("origin").and_then(|has| {
+        let pushed = target.git.has_remote("origin").and_then(|has| {
             if has {
-                tools.git.push("origin", &format!("refs/heads/{into}"))
+                target.git.push("origin", &format!("refs/heads/{into}"))
             } else {
                 Ok(())
             }
@@ -991,9 +1115,33 @@ pub(super) fn remove_workspace(
         }
         _ => {}
     }
-    remove_worktree(&deps.tools.git, &base)?;
-    remove_worktree(&deps.tools.git, &own)?;
+    // The member's own git removes a member task's worktrees; the project folder's removes any
+    // other's, and also what a repository that cannot be found leaves as plain folders.
+    if let Some(member) = member_of(orchestrator, task_id) {
+        for path in [&base, &own] {
+            if remove_worktree(&member, path).is_err() {
+                // A member that moved answers that the worktree is not its own.
+                remove_folder(path)?;
+            }
+        }
+        // The folders are gone either way, so a failure here is not tried again; the stale
+        // registration is pruned by the next finished task in the member (5.15).
+        let _ = member.prune_worktrees();
+    } else {
+        remove_worktree(&deps.tools.git, &base)?;
+        remove_worktree(&deps.tools.git, &own)?;
+    }
     Ok(true)
+}
+
+/// The member the task works in, when its contract, the team and `repos.yaml` say one that is
+/// there. Whatever else it is, the task's worktrees are cleaned up as the project folder's.
+fn member_of(orchestrator: &Orchestrator, task_id: &TaskId) -> Option<Git> {
+    let deps = &orchestrator.deps;
+    let contract = deps.tools.files.read_contract(task_id).ok()?;
+    let team = deps.tools.files.read_team().ok()?;
+    let found = task_repository_of(deps, &team, &contract).ok()?;
+    found.repo.map(|_| found.git)
 }
 
 /// Removes the worktree at `path`, whether git has it registered or it is a directory git no
@@ -1008,6 +1156,11 @@ fn remove_worktree(git: &Git, path: &Path) -> Result<(), OrchestratorError> {
         }
         other => other?,
     }
+    remove_folder(path)
+}
+
+/// Removes the folder at `path` and what is in it; one that is not there is removed already.
+fn remove_folder(path: &Path) -> Result<(), OrchestratorError> {
     match std::fs::remove_dir_all(path) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
             Err(OrchestratorError::Files(FilesError::Io {
@@ -1027,7 +1180,7 @@ mod tests {
         PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
         event_from_value,
     };
-    use catervas_store::git::fixtures::{git_in, git_output_in};
+    use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
     use serde_json::json;
 
     use crate::orchestrator::fixtures::Harness;
@@ -1282,6 +1435,70 @@ mod tests {
         assert_eq!(
             integrated[0].integrated_by,
             TaskIntegratedBodyIntegratedBy::Human
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn never_rescans_a_project_folder_itself() {
+        // The Architect's documents land in the project folder, whose own scan never runs: its
+        // members' checks stay in the library, and the integration reports nothing about a scan.
+        let (harness, _members) = Harness::project_folder_with(
+            "int-folder-docs",
+            &["app"],
+            crate::tools::fixtures::with_the_suggested_six,
+        );
+        let library = catervas_core::criteria::validate_criteria(&json!({ "criteria": [
+            { "name": "app-the-tests-pass", "text": "Every test passes in app.",
+              "source": "project_scan", "repo": "app",
+              "verification": { "method": "test", "command": "npm run test" } },
+        ]}))
+        .expect("a library");
+        harness
+            .project
+            .deps
+            .files
+            .write_criteria(&library)
+            .expect("the library is written");
+        harness.verifying_with("CTV-1", true, true, |wire| {
+            wire["assignee_role"] = json!("architect");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!(["docs/**", "done.txt"]);
+        });
+        harness.project.moved(
+            "CTV-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "ada", "reviewer": "pm" }),
+        );
+        harness
+            .project
+            .deps
+            .git
+            .remove_worktree(&harness.worktree("CTV-1"))
+            .expect("the task's worktree is removed");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
+
+        let head = at_root(&harness, &["rev-parse", "main"]);
+        assert_eq!(
+            merged,
+            Ok(IntegrationOutcome::Merged {
+                sha: head,
+                scan: ScanRefresh::Unchanged
+            })
+        );
+        let kept = harness
+            .project
+            .deps
+            .files
+            .read_criteria()
+            .expect("the library reads");
+        assert_eq!(kept, library, "the members' checks are not wiped");
+        assert!(
+            harness.events(&[EventKind::ProjectScanned]).is_empty(),
+            "the project folder is not scanned"
         );
     }
 
@@ -2584,5 +2801,592 @@ mod tests {
             .expect("the human integrates it");
         let integrated = folder_events(&harness, EventKind::FolderChangeIntegrated);
         assert_eq!(integrated[0]["body"]["integrated_by"], "human");
+    }
+
+    /// A project folder over `app` and `infra`, integrating under `policy`.
+    fn in_members(name: &str, policy: &str) -> (Harness, Vec<TempRepo>) {
+        let policy = policy.to_string();
+        Harness::project_folder_with(name, &["app", "infra"], move |wire| {
+            wire["policy"]["integration"] = json!(policy);
+        })
+    }
+
+    /// `id` accepted in `app` with its worktree gone.
+    fn accepted_in_app(harness: &Harness, app: &TempRepo, id: &str) {
+        harness.accepted_in(id, &app.path, Some("app"));
+        app.adapter()
+            .remove_worktree(&harness.worktree(id))
+            .expect("the task's worktree is removed");
+    }
+
+    fn app_canonical(app: &TempRepo) -> std::path::PathBuf {
+        std::fs::canonicalize(&app.path).expect("app is there")
+    }
+
+    fn parents_of_main(repo: &TempRepo) -> Vec<String> {
+        repo.git_output(&["rev-list", "--parents", "-n", "1", "refs/heads/main"])
+            .split(' ')
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn merges_into_its_member_and_pushes_it() {
+        let (harness, members) = in_members("int-member-merge", "auto_merge");
+        let (app, infra) = (&members[0], &members[1]);
+        let origin = Harness::with_origin_in(&app.path);
+        accepted_in_app(&harness, app, "CTV-1");
+        // What a clone records: the branch to integrate into, whatever is checked out.
+        app.git(&["remote", "set-head", "origin", "main"]);
+        app.git(&["checkout", "-b", "topic"]);
+        let root_before = at_root(&harness, &["rev-parse", "main"]);
+        let infra_before = infra.git_output(&["rev-parse", "main"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{report:?}"
+        );
+        assert!(
+            escalations(&harness).is_empty(),
+            "{:?}",
+            escalations(&harness)
+        );
+        let head = app.git_output(&["rev-parse", "refs/heads/main"]);
+        let parents = parents_of_main(app);
+        assert_eq!(parents.len(), 3, "{parents:?}");
+        assert_eq!(
+            app.git_output(&["log", "-1", "--format=%s", "refs/heads/main"]),
+            format!("Merge CTV-1: {}", harness.row("CTV-1").title)
+        );
+        assert_eq!(parents[2], app.git_output(&["rev-parse", "feature/CTV-1"]));
+        assert_eq!(git_output_in(&origin, &["rev-parse", "main"]), head);
+        let integrated = integrations(&harness);
+        assert_eq!(integrated.len(), 1, "{integrated:?}");
+        assert_eq!(integrated[0].sha, head);
+        assert_eq!(integrated[0].into, "main");
+        assert_eq!(at_root(&harness, &["rev-parse", "main"]), root_before);
+        assert_eq!(infra.git_output(&["rev-parse", "main"]), infra_before);
+        assert_eq!(
+            app.git_output(&["symbolic-ref", "HEAD"]),
+            "refs/heads/topic"
+        );
+        assert!(!harness.row("CTV-1").awaiting_integration);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn merges_in_the_member_when_the_human_asks() {
+        let (harness, members) = in_members("int-member-manual", "manual");
+        let app = &members[0];
+        let origin = Harness::with_origin_in(&app.path);
+        accepted_in_app(&harness, app, "CTV-1");
+        let root_before = at_root(&harness, &["rev-parse", "main"]);
+        let app_before = app.git_output(&["rev-parse", "main"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        assert_eq!(app.git_output(&["rev-parse", "main"]), app_before);
+
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
+
+        let head = app.git_output(&["rev-parse", "main"]);
+        assert_ne!(head, app_before);
+        assert!(
+            matches!(&merged, Ok(IntegrationOutcome::Merged { sha, .. }) if *sha == head),
+            "{merged:?}"
+        );
+        assert_eq!(parents_of_main(app).len(), 3);
+        let integrated = integrations(&harness);
+        assert_eq!(integrated.len(), 1, "{integrated:?}");
+        assert_eq!(
+            integrated[0].integrated_by,
+            TaskIntegratedBodyIntegratedBy::Human
+        );
+        assert_eq!(integrated[0].into, "main");
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", "main"]),
+            app_before,
+            "manual does not push"
+        );
+        assert_eq!(at_root(&harness, &["rev-parse", "main"]), root_before);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn opens_and_follows_the_pull_request_in_the_member() {
+        let (harness, members) = in_members("int-member-pr", "pull_request");
+        let app = &members[0];
+        let origin = Harness::with_origin_in(&app.path);
+        accepted_in_app(&harness, app, "CTV-1");
+        let root_before = at_root(&harness, &["rev-parse", "main"]);
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", &harness.branch("CTV-1")]),
+            app.git_output(&["rev-parse", &harness.branch("CTV-1")])
+        );
+        assert_eq!(opened(&harness).len(), 1);
+        assert_eq!(creates(&harness), 1);
+
+        let sha =
+            Harness::merge_branch_on_the_forge_in(&app.path, &origin, &harness.branch("CTV-1"));
+        harness.gh.answers(
+            "view",
+            &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
+            "",
+            0,
+        );
+        orchestrator.tick().await.expect("the tick runs");
+
+        let integrated = integrations(&harness);
+        assert_eq!(integrated.len(), 1, "{integrated:?}");
+        assert_eq!(integrated[0].sha, sha);
+        assert_eq!(integrated[0].into, "main");
+        assert_eq!(app.git_output(&["rev-parse", "main"]), sha);
+        assert_eq!(at_root(&harness, &["rev-parse", "main"]), root_before);
+        assert!(escalations(&harness).is_empty());
+        let cwds = harness.gh.cwds();
+        assert!(!cwds.is_empty());
+        assert!(
+            cwds.iter().all(|cwd| *cwd == app_canonical(app)),
+            "{cwds:?}"
+        );
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_while_its_member_is_missing() {
+        let (harness, members) = in_members("int-member-missing", "auto_merge");
+        let app = &members[0];
+        accepted_in_app(&harness, app, "CTV-1");
+        accepted_in_app(&harness, app, "CTV-2");
+        let there = app_canonical(app);
+        let moved = std::path::PathBuf::from(format!("{}-moved", app.path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&app.path, &moved).expect("the member is moved away");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let events = harness.project.event_count();
+
+        for _ in 0..2 {
+            assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        }
+
+        assert_eq!(harness.project.event_count(), events);
+        assert!(harness.row("CTV-1").awaiting_integration);
+
+        std::fs::rename(&moved, &app.path).expect("the member is moved back");
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{report:?}"
+        );
+        assert!(!harness.row("CTV-1").awaiting_integration);
+        assert!(
+            escalations(&harness).is_empty(),
+            "{:?}",
+            escalations(&harness)
+        );
+
+        // The human is told why nothing happens.
+        std::fs::rename(&app.path, &moved).expect("the member is moved away again");
+        let answered = orchestrator.integrate(&task("CTV-2")).await;
+        assert!(
+            matches!(&answered, Ok(IntegrationOutcome::Escalated { detail, .. })
+                if detail.contains(&format!("app is not at {}", there.display()))),
+            "{answered:?}"
+        );
+        assert_eq!(escalations(&harness).len(), 1);
+        assert!(harness.row("CTV-2").awaiting_integration);
+
+        std::fs::rename(&moved, &app.path).expect("the member is moved back");
+        let merged = orchestrator.integrate(&task("CTV-2")).await;
+        assert!(
+            matches!(merged, Ok(IntegrationOutcome::Merged { .. })),
+            "{merged:?}"
+        );
+        assert!(!harness.row("CTV-2").awaiting_integration);
+    }
+
+    /// An Architect's `CTV-1` accepted in the project folder, its worktree gone.
+    fn a_docs_task_accepted(harness: &Harness) {
+        harness.verifying_with("CTV-1", true, true, |wire| {
+            wire["assignee_role"] = json!("architect");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!(["docs/**", "done.txt"]);
+        });
+        harness.project.moved(
+            "CTV-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "ada", "reviewer": "pm" }),
+        );
+        harness
+            .project
+            .deps
+            .git
+            .remove_worktree(&harness.worktree("CTV-1"))
+            .expect("the task's worktree is removed");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn still_integrates_a_docs_task_and_a_folder_change_in_the_project_folder() {
+        let policy = |name: &str, policy: &'static str| {
+            Harness::project_folder_with(name, &["app", "infra"], move |wire| {
+                crate::tools::fixtures::with_the_suggested_six(wire);
+                wire["policy"]["integration"] = json!(policy);
+            })
+        };
+
+        let (harness, members) = policy("int-member-docs-merge", "auto_merge");
+        a_docs_task_accepted(&harness);
+        harness.folder_change(CADENCE, "a\n");
+        let before: Vec<String> = members
+            .iter()
+            .map(|member| member.git_output(&["rev-parse", "main"]))
+            .collect();
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator
+            .tick()
+            .await
+            .expect("the tick integrates the task");
+        orchestrator
+            .tick()
+            .await
+            .expect("the tick integrates the change");
+        assert_eq!(integrations(&harness).len(), 1);
+        assert_eq!(
+            harness.events(&[EventKind::FolderChangeIntegrated]).len(),
+            1
+        );
+        let parents = at_root(
+            &harness,
+            &["rev-list", "--parents", "-n", "1", "refs/heads/main"],
+        );
+        assert_eq!(parents.split(' ').count(), 3, "{parents}");
+        assert!(
+            at_root(&harness, &["branch", "--merged", "main"]).contains("docs/folder-1"),
+            "the change landed in the project folder"
+        );
+        assert!(
+            at_root(&harness, &["branch", "--merged", "main"]).contains(&harness.branch("CTV-1")),
+            "the task landed in the project folder"
+        );
+        let after: Vec<String> = members
+            .iter()
+            .map(|member| member.git_output(&["rev-parse", "main"]))
+            .collect();
+        assert_eq!(before, after, "the members are untouched");
+
+        let (harness, _members) = policy("int-member-docs-pr", "pull_request");
+        let origin = Harness::with_origin_in(&harness.project.repo.path);
+        a_docs_task_accepted(&harness);
+        harness.folder_change(CADENCE, "a\n");
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
+        harness.gh.answers("view", OPEN, "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator
+            .tick()
+            .await
+            .expect("the tick opens the task's");
+        orchestrator
+            .tick()
+            .await
+            .expect("the tick opens the change's");
+        assert_eq!(creates(&harness), 2);
+        let root = std::fs::canonicalize(&harness.project.repo.path).expect("the root");
+        let cwds = harness.gh.cwds();
+        assert!(
+            !cwds.is_empty() && cwds.iter().all(|cwd| *cwd == root),
+            "{cwds:?}"
+        );
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    /// `app`: an npm project that runs its tests, committed.
+    fn an_npm_app(app: &TempRepo) {
+        app.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+        app.write(
+            "package.json",
+            "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\"}}\n",
+        );
+        app.write("src/index.ts", "export const one = 1;\n");
+        app.commit("an app");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn rescans_the_member_it_integrated_into() {
+        let (harness, members) = in_members("int-member-rescan", "auto_merge");
+        let (app, infra) = (&members[0], &members[1]);
+        an_npm_app(app);
+        infra.write("Cargo.lock", "version = 4\n");
+        infra.write("Cargo.toml", "[package]\nname = \"infra\"\n");
+        infra.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+        infra.commit("an infra");
+        let deps = &harness.project.deps;
+        catervas_store::rescan_members(
+            &deps.files,
+            &deps.log,
+            &deps.ids,
+            deps.clock.now(),
+            None,
+            "human",
+        )
+        .expect("the members are scanned");
+        deps.projections
+            .catch_up()
+            .expect("the board is brought up");
+        let before = deps.files.read_criteria().expect("the library reads");
+        let names_before: Vec<&str> = before.criteria.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            names_before.contains(&"app-the-tests-pass"),
+            "{names_before:?}"
+        );
+        assert!(!names_before.contains(&"app-the-linter-is-clean"));
+
+        // The task adds a lint script to app's package.json.
+        harness.accepted_in("CTV-1", &app.path, Some("app"));
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(
+            worktree.join("package.json"),
+            "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\",\"lint\":\"eslint .\"}}\n",
+        )
+        .expect("package.json is written");
+        app.adapter()
+            .commit(
+                &worktree,
+                "Add a lint script",
+                &["package.json".to_string()],
+            )
+            .expect("the change is committed");
+        app.adapter()
+            .remove_worktree(&worktree)
+            .expect("the worktree is removed");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
+
+        assert!(
+            matches!(
+                &merged,
+                Ok(IntegrationOutcome::Merged {
+                    scan: ScanRefresh::Refreshed,
+                    ..
+                })
+            ),
+            "{merged:?}"
+        );
+        let after = deps.files.read_criteria().expect("the library reads");
+        let linter = after
+            .criteria
+            .iter()
+            .find(|one| one.name.as_str() == "app-the-linter-is-clean")
+            .expect("the new check is in the library");
+        assert_eq!(linter.repo.as_ref().map(|repo| repo.as_str()), Some("app"));
+        let of_infra = |library: &catervas_core::criteria::CriteriaLibrary| -> Vec<_> {
+            library
+                .criteria
+                .iter()
+                .filter(|one| one.name.as_str().starts_with("infra-"))
+                .cloned()
+                .collect()
+        };
+        assert!(!of_infra(&before).is_empty());
+        assert_eq!(of_infra(&after), of_infra(&before));
+        let updated = harness.events(&[EventKind::CriteriaUpdated]);
+        assert!(
+            matches!(&updated.last().expect("an update").body,
+                EventBody::CriteriaUpdated(body) if body.updated_by == "governor"),
+            "{updated:?}"
+        );
+        assert_eq!(harness.events(&[EventKind::ProjectScanned]).len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn skips_the_rescan_when_the_members_checkout_is_elsewhere() {
+        let (harness, members) = in_members("int-member-rescan-elsewhere", "auto_merge");
+        let app = &members[0];
+        // The branch to integrate into is named, so the merge does not follow the checkout.
+        harness
+            .project
+            .deps
+            .files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": app_canonical(app).display().to_string(),
+                      "integration_branch": "main" },
+                    { "name": "infra", "path": members[1].path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        accepted_in_app(&harness, app, "CTV-1");
+        app.git(&["checkout", "-b", "topic"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let merged = orchestrator.integrate(&task("CTV-1")).await;
+
+        assert_eq!(
+            merged,
+            Ok(IntegrationOutcome::Merged {
+                sha: app.git_output(&["rev-parse", "main"]),
+                scan: ScanRefresh::Skipped {
+                    why: "app's checkout is on topic, not main".to_string()
+                }
+            })
+        );
+        assert!(harness.events(&[EventKind::ProjectScanned]).is_empty());
+    }
+
+    /// `id` filed in `app`, `in_progress` with its worktree made by `app`, then cancelled.
+    fn cancelled_in_app(harness: &Harness, app: &TempRepo, id: &str) {
+        harness.assigned_in(id, "dev-a", "dev-b", "app");
+        harness.project.moved(
+            id,
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        app.adapter()
+            .create_worktree(&harness.worktree(id), &harness.branch(id), "main")
+            .expect("app makes the worktree");
+        harness.project.moved(
+            id,
+            "in_progress",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+    }
+
+    /// What `git worktree list` says in `app`.
+    fn worktrees_of(app: &TempRepo) -> String {
+        app.git_output(&["worktree", "list", "--porcelain"])
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removes_a_member_tasks_worktrees_with_its_git() {
+        let (harness, members) = in_members("int-member-cleanup", "manual");
+        let app = &members[0];
+        harness.accepted_in("CTV-1", &app.path, Some("app"));
+        let base = harness.worktree("CTV-1-base");
+        app.adapter()
+            .create_detached_worktree(&base, "main")
+            .expect("the base worktree is made");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator
+            .integrate(&task("CTV-1"))
+            .await
+            .expect("the human integrates it");
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{report:?}"
+        );
+        assert!(!harness.worktree("CTV-1").exists());
+        assert!(!base.exists());
+        let listed = worktrees_of(app);
+        assert!(!listed.contains("CTV-1"), "{listed}");
+        // The branch is kept, and nothing registered holds it.
+        app.git(&["checkout", "feature/CTV-1"]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removes_the_folders_of_a_task_whose_repository_is_gone() {
+        let (harness, members) = in_members("int-member-cleanup-gone", "manual");
+        let app = &members[0];
+        cancelled_in_app(&harness, app, "CTV-1");
+        cancelled_in_app(&harness, app, "CTV-2");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        // The member is not where repos.yaml says: its folders go as plain folders.
+        let moved = std::path::PathBuf::from(format!("{}-moved", app.path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&app.path, &moved).expect("the member is moved away");
+        let report = orchestrator
+            .tick_within(&crate::orchestrator::TickScope {
+                task_id: Some(task("CTV-2")),
+                rules: crate::orchestrator::TickRules::All,
+            })
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-2"),
+            "{report:?}"
+        );
+        assert!(!harness.worktree("CTV-2").exists());
+        std::fs::rename(&moved, &app.path).expect("the member is moved back");
+
+        // The member is not one any more.
+        let removed = crate::daemon::fixtures::answered(
+            &harness.daemon,
+            "repo.remove",
+            &json!({ "name": "app" }),
+        )
+        .await;
+        assert!(removed.get("error").is_none(), "{removed}");
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{report:?}"
+        );
+        assert!(!harness.worktree("CTV-1").exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removes_the_folders_of_a_moved_and_located_member() {
+        let (harness, members) = in_members("int-member-cleanup-moved", "manual");
+        let app = &members[0];
+        cancelled_in_app(&harness, app, "CTV-1");
+        let moved = std::path::PathBuf::from(format!("{}-moved", app.path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&app.path, &moved).expect("the member is moved away");
+        // Located again, as the file says, without the worktree being told where its repository is.
+        harness
+            .project
+            .deps
+            .files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": moved.display().to_string() },
+                    { "name": "infra", "path": members[1].path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
+            "{report:?}"
+        );
+        assert!(!harness.worktree("CTV-1").exists());
+        let listed = git_output_in(&moved, &["worktree", "list", "--porcelain"]);
+        assert!(!listed.contains("CTV-1"), "{listed}");
+        let _ = std::fs::remove_dir_all(&moved);
     }
 }

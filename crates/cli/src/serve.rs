@@ -16,7 +16,7 @@ use crate::project::{open_project, repository_root};
 use crate::run::{INTERRUPTED, OnIdle, Printer, finish, refuse, started, ticks};
 use crate::setup::CliHost;
 use crate::start::{StartOptions, listen, runtime, start, web};
-use crate::state::{last_project, remember, state_dir};
+use crate::state::{home_of, last_project, remember, state_dir};
 use crate::{CliIo, Engine, Interrupts, say};
 
 /// The port `serve` asks for when it is not told one.
@@ -161,11 +161,7 @@ async fn set_up(
     let (chosen, mut choice) = watch::channel(None);
     let host: Arc<dyn SetupHost> = Arc::new(CliHost {
         env: io.env.clone(),
-        home: io
-            .env
-            .get("HOME")
-            .filter(|home| !home.is_empty())
-            .map_or_else(|| io.cwd.clone(), PathBuf::from),
+        home: home_of(io),
         clock: Arc::clone(&io.clock),
         stores: (io.credential_stores)(),
         chosen,

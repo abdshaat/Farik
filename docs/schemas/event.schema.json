@@ -168,6 +168,9 @@
         "folder_change.escalated",
         "project.started",
         "catervafication.started",
+        "repo.added",
+        "repo.removed",
+        "repo.moved",
         "document_rewrite.started"
       ]
     },
@@ -276,6 +279,9 @@
         { "$ref": "#/$defs/folderChangeEscalatedBody" },
         { "$ref": "#/$defs/projectStartedBody" },
         { "$ref": "#/$defs/catervaficationStartedBody" },
+        { "$ref": "#/$defs/repoAddedBody" },
+        { "$ref": "#/$defs/repoRemovedBody" },
+        { "$ref": "#/$defs/repoMovedBody" },
         { "$ref": "#/$defs/documentRewriteStartedBody" }
       ]
     },
@@ -1860,6 +1866,39 @@
       "required": ["project"],
       "properties": {
         "project": { "type": "string", "enum": ["existing", "new"] }
+      }
+    },
+    "repoAddedBody": {
+      "title": "Repo Added Body",
+      "description": "A repository joined the project folder (docs/SPEC.md 4.1 and 8.4; ADR 0057): name and path are the member as .catervas/repos.yaml now holds it, the path canonical; integration_branch is the branch the owner named, or null when the repository's default branch is meant. All three are required, so that the body differs from repo.moved's and the reader refuses an added repository that left the branch out. The envelope names no agent, no session and no task. The name and path rules repeat repos.schema.json's, and a test holds the copies equal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "integration_branch"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 32 },
+        "path": { "type": "string", "pattern": "^(/|[A-Za-z]:[\\\\/])", "minLength": 1, "maxLength": 4096 },
+        "integration_branch": { "type": ["string", "null"], "pattern": "^\\S+$", "minLength": 1, "maxLength": 255 }
+      }
+    },
+    "repoRemovedBody": {
+      "title": "Repo Removed Body",
+      "description": "A repository left the project folder (docs/SPEC.md 4.1; ADR 0057). Nothing in the repository itself was touched. The envelope names no agent, no session and no task. The name rule repeats repos.schema.json's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 32 }
+      }
+    },
+    "repoMovedBody": {
+      "title": "Repo Moved Body",
+      "description": "The owner located a member repository at a new path (docs/SPEC.md 4.1; ADR 0057): path is the canonical path .catervas/repos.yaml now holds. The envelope names no agent, no session and no task. The name and path rules repeat repos.schema.json's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 32 },
+        "path": { "type": "string", "pattern": "^(/|[A-Za-z]:[\\\\/])", "minLength": 1, "maxLength": 4096 }
       }
     },
     "documentRewriteStartedBody": {

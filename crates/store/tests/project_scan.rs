@@ -3,9 +3,20 @@
 //! Every test here needs the `git` program, so every one is `#[ignore]`d and run by
 //! `cargo xtask check --integration`, as `git.rs` is and for the same reasons.
 
+use std::path::Path;
+
+use catervas_core::criteria::{CriteriaLibrary, TemplateVerification};
+use catervas_core::repos::validate_repos;
+use catervas_protocol::event::{EventBody, EventIds, EventKind};
+use catervas_store::files::ProjectFiles;
+use catervas_store::files::fixtures::TempProject;
 use catervas_store::git::fixtures::{TempRepo, git_in};
-use catervas_store::{Git, ScanError, scan_project};
+use catervas_store::scan::{CATERVAS_ACTOR, MembersScanError, rescan_members};
+use catervas_store::{
+    EventLog, EventQuery, Git, IN_MEMORY, ScanError, open_event_log, scan_project,
+};
 use chrono::{DateTime, Utc};
+use serde_json::json;
 
 /// A moment to scan at, so that "last commit today" is an answer rather than a guess.
 fn now() -> DateTime<Utc> {
@@ -359,4 +370,197 @@ fn command_of(verification: &catervas_core::criteria::TemplateVerification) -> S
         }
         other => panic!("a criterion the scan found runs a command: {other:?}"),
     }
+}
+
+/// `app`, a vitest project with its lockfile.
+fn an_app(name: &str) -> TempRepo {
+    let repository = TempRepo::new(name);
+    repository.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+    repository.write(
+        "package.json",
+        "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\"}}\n",
+    );
+    repository.write("src/index.ts", "export const one = 1;\n");
+    repository.commit("an app");
+    repository
+}
+
+/// `infra`, a cargo project with its lockfile.
+fn an_infra(name: &str) -> TempRepo {
+    let repository = TempRepo::new(name);
+    repository.write("Cargo.lock", "version = 4\n");
+    repository.write("Cargo.toml", "[package]\nname = \"infra\"\n");
+    repository.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+    repository.commit("an infra");
+    repository
+}
+
+/// A project folder whose `repos.yaml` names each of `members` at its canonical path.
+fn a_project_folder(name: &str, members: &[(&str, &TempRepo)]) -> TempProject {
+    let project = TempProject::new(name);
+    let listed: Vec<_> = members
+        .iter()
+        .map(|(member, repository)| {
+            json!({
+                "name": member,
+                "path": std::fs::canonicalize(&repository.path)
+                    .expect("the member is there")
+                    .display()
+                    .to_string(),
+            })
+        })
+        .collect();
+    project
+        .files()
+        .write_repos(&validate_repos(&json!({ "repos": listed })).expect("a list of repositories"))
+        .expect("repos.yaml is written");
+    project
+}
+
+fn ids() -> EventIds {
+    EventIds {
+        team_id: "catervas".to_string(),
+        project_id: "catervas".to_string(),
+        ..EventIds::default()
+    }
+}
+
+fn names(library: &CriteriaLibrary) -> Vec<&str> {
+    library
+        .criteria
+        .iter()
+        .map(|one| one.name.as_str())
+        .collect()
+}
+
+fn recorded(log: &EventLog, kind: EventKind) -> Vec<EventBody> {
+    log.read(&EventQuery {
+        kinds: vec![kind],
+        ..EventQuery::default()
+    })
+    .expect("the log reads")
+    .into_iter()
+    .map(|event| event.body)
+    .collect()
+}
+
+fn rescan(
+    files: &ProjectFiles,
+    log: &EventLog,
+    only: Option<&str>,
+    actor: &str,
+) -> Result<catervas_store::scan::MembersScan, MembersScanError> {
+    rescan_members(files, log, &ids(), now(), only, actor)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn scans_every_member() {
+    let app = an_app("members-app");
+    let infra = an_infra("members-infra");
+    let project = a_project_folder("members", &[("app", &app), ("infra", &infra)]);
+    let files = project.files();
+    let log = open_event_log(Path::new(IN_MEMORY), now()).expect("the log opens");
+
+    let scanned = rescan(&files, &log, None, "human").expect("the members are scanned");
+    let (app_says, infra_says) = (read_back(&app), read_back(&infra));
+    assert_eq!(
+        scanned.read_back,
+        format!("app: {app_says}; infra: {infra_says}")
+    );
+    let library = files.read_criteria().expect("the library is written");
+    assert_eq!(
+        names(&library),
+        [
+            "app-the-tests-pass",
+            "infra-the-tests-pass",
+            "infra-the-build-succeeds",
+            "infra-clippy-is-clean",
+            "infra-formatting-is-clean"
+        ]
+    );
+    let tests = &library.criteria[0];
+    assert_eq!(tests.repo.as_ref().map(|repo| repo.as_str()), Some("app"));
+    assert!(matches!(
+        tests.verification,
+        TemplateVerification::Variant1 { .. }
+    ));
+    assert_eq!(scanned.detected, names(&library));
+    assert!(scanned.library_changed);
+    let document = files.read_project_scan().expect("project.md is written");
+    assert!(document.contains(&scanned.read_back), "{document}");
+    assert!(
+        !document.contains("README"),
+        "the project folder itself is not read: {document}"
+    );
+
+    let EventBody::ProjectScanned(body) = &recorded(&log, EventKind::ProjectScanned)[0] else {
+        panic!("a project.scanned");
+    };
+    assert_eq!(body.read_back, scanned.read_back);
+    assert_eq!(body.detected_criteria, names(&library));
+    let EventBody::CriteriaUpdated(body) = &recorded(&log, EventKind::CriteriaUpdated)[0] else {
+        panic!("a criteria.updated");
+    };
+    assert_eq!(body.updated_by, "human");
+    assert_eq!(body.criterion_names, names(&library));
+
+    // Scanned again with nothing changed, the library is not recorded again.
+    let again = rescan(&files, &log, None, CATERVAS_ACTOR).expect("scanned again");
+    assert!(!again.library_changed);
+    assert_eq!(recorded(&log, EventKind::CriteriaUpdated).len(), 1);
+    assert_eq!(recorded(&log, EventKind::ProjectScanned).len(), 2);
+
+    // One member scanned again with nothing changed keeps its place, and is not recorded either.
+    let one = rescan(&files, &log, Some("app"), CATERVAS_ACTOR).expect("scanned again");
+    assert!(!one.library_changed);
+    assert_eq!(recorded(&log, EventKind::CriteriaUpdated).len(), 1);
+
+    // A member that is away reads as not found, and keeps its entries whoever asks.
+    let away = infra.path.with_extension("away");
+    let _ = std::fs::remove_dir_all(&away);
+    std::fs::rename(&infra.path, &away).expect("infra is moved away");
+    let narrowed = rescan(&files, &log, Some("app"), CATERVAS_ACTOR).expect("scanned");
+    assert_eq!(
+        narrowed.read_back,
+        format!("app: {app_says}; infra: not found")
+    );
+    assert_eq!(
+        names(&files.read_criteria().expect("the library")),
+        names(&library)
+    );
+    let everyone = rescan(&files, &log, None, CATERVAS_ACTOR).expect("scanned");
+    assert!(everyone.read_back.ends_with("infra: not found"));
+    assert_eq!(
+        names(&files.read_criteria().expect("the library")),
+        names(&library)
+    );
+
+    // A member whose scan fails reads as not read, and keeps its entries too.
+    std::fs::rename(&away, &infra.path).expect("infra is moved back");
+    std::fs::remove_file(app.path.join("package.json")).expect("a half-checked-out tree");
+    let failed = rescan(&files, &log, None, CATERVAS_ACTOR).expect("scanned");
+    assert!(
+        failed
+            .read_back
+            .starts_with("app: not read (package.json could not be read"),
+        "{}",
+        failed.read_back
+    );
+    assert!(failed.read_back.ends_with(&format!("infra: {infra_says}")));
+    assert_eq!(
+        names(&files.read_criteria().expect("the library")),
+        names(&library)
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn scans_nothing_in_a_folder_with_no_members() {
+    let project = TempProject::new("members-none");
+    let log = open_event_log(Path::new(IN_MEMORY), now()).expect("the log opens");
+    assert!(matches!(
+        rescan(&project.files(), &log, None, "human"),
+        Err(MembersScanError::NotAProjectFolder)
+    ));
 }

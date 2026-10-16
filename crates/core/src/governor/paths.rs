@@ -160,6 +160,21 @@ pub fn reaches_the_folder(glob: &str, folder: &str) -> bool {
     })
 }
 
+/// The folder a protected glob names before its first wildcard, `.catervas/local` for
+/// `.catervas/local/**`; for a glob with no wildcard, all its segments but the last.
+#[must_use]
+pub fn literal_folder(glob: &str) -> String {
+    let segments: Vec<&str> = glob
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect();
+    let end = segments
+        .iter()
+        .position(|segment| segment.contains(['*', '?', '[', '{']))
+        .unwrap_or(segments.len().saturating_sub(1));
+    segments[..end].join("/")
+}
+
 /// Whether every path a glob could match lies within `read`, a read path `<literal segments>/**`
 /// (`docs/SPEC.md` section 5.6). Fails closed: `read` with a wildcard, brace, `.` or `..` segment
 /// before its `/**` is within nothing. A glob stays within when it holds no `\`, no alternative of

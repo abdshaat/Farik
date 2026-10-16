@@ -317,5 +317,6 @@ fn diff_of(
         ));
     }
     let git = Git::open(project.root.clone());
-    catervas_store::diff::diff_of(&git, &project.team, contract, events, &[]).map(|diff| diff.diff)
+    catervas_store::diff::diff_of(&project.files, &git, &project.team, contract, events, &[])
+        .map(|diff| diff.diff)
 }

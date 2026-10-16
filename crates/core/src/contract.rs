@@ -36,7 +36,8 @@ impl Role {
 pub enum Verification {
     /// Run a command; pass on the expected exit code and output.
     Command {
-        /// Run inside the sandbox from the project root.
+        /// Run inside the sandbox from the root of the task's repository: the member repository its
+        /// `repo` names, else the project root.
         command: String,
         /// The exit code that counts as a pass; the schema's default is 0. What a process can
         /// return, which is what the schema now says too.
@@ -55,7 +56,8 @@ pub enum Verification {
     },
     /// A file must exist after the task.
     Artifact {
-        /// The path, relative to the project root.
+        /// The path, relative to the task's repository: the member repository its `repo` names, else
+        /// the project root.
         path: String,
         /// Strings the file must contain.
         must_contain: Vec<String>,
@@ -303,7 +305,8 @@ pub(crate) fn pointer(path: &str) -> String {
 mod tests {
     use serde_json::json;
 
-    use super::fixtures::{a_contract_wire, a_full_contract_wire};
+    use super::SCHEMA_JSON;
+    use super::fixtures::{a_contract_wire, a_contract_wire_in, a_full_contract_wire};
     use super::{ValidationError, Verification, validate_contract};
 
     fn refusal(input: &serde_json::Value) -> Vec<ValidationError> {
@@ -599,6 +602,42 @@ mod tests {
                 "{plan}: {errors:?}"
             );
         }
+    }
+
+    #[test]
+    fn reads_a_repo() {
+        let input = a_contract_wire_in("app");
+        let contract = validate_contract(&input).expect("valid");
+        assert_eq!(
+            contract.repo.as_ref().map(|repo| repo.as_str()),
+            Some("app")
+        );
+        assert_eq!(
+            serde_json::to_value(&contract).expect("serializes")["repo"],
+            "app"
+        );
+        for repo in ["App", "1app", &"a".repeat(33)] {
+            let errors = refusal(&a_contract_wire_in(repo));
+            assert!(
+                errors.iter().any(|e| e.path == "/repo"),
+                "{repo}: {errors:?}"
+            );
+        }
+        // The name is the one a project folder's repos.yaml holds: one pattern, two schemas.
+        let pattern = |schema: &str, at: &[&str]| {
+            let mut value: serde_json::Value = serde_json::from_str(schema).expect("a schema");
+            for key in at {
+                value = value[key].clone();
+            }
+            value["pattern"].as_str().expect("a pattern").to_string()
+        };
+        assert_eq!(
+            pattern(SCHEMA_JSON, &["properties", "repo"]),
+            pattern(
+                include_str!("../../../docs/schemas/repos.schema.json"),
+                &["$defs", "repoName"]
+            )
+        );
     }
 
     #[test]

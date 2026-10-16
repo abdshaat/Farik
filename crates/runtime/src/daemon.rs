@@ -54,6 +54,7 @@ mod gates;
 mod hooks;
 mod mcp;
 pub(crate) mod own_calls;
+mod repos;
 mod setup;
 mod signed_in;
 mod team;
@@ -67,7 +68,7 @@ pub(crate) use hooks::APPROVAL_NEEDED;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };
-pub use setup::{SetupError, SetupHost};
+pub use setup::{MemberRequest, SetupError, SetupHost};
 pub(crate) use signed_in::{Fresh, refreshed_entry};
 pub use team::SETUP_PENDING;
 pub use team::{custom_entry, kit_entry, labelled, matches_kit, plan_tools_of};
@@ -101,6 +102,16 @@ impl fmt::Display for DaemonError {
 }
 
 impl std::error::Error for DaemonError {}
+
+/// A folder outside a session's working directory that it may read (5.6): another repository of
+/// the project, or the project folder, never written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadRoot {
+    /// The member's name, or `project` for the project folder.
+    pub name: String,
+    /// The folder's canonical path.
+    pub path: PathBuf,
+}
 
 /// One session the daemon answers for: who it is, what it works on, and where.
 pub struct SessionRegistration {
@@ -148,6 +159,10 @@ pub struct SessionRegistration {
     /// The `skills/` folder of its plugin folder, when it has skills: `Read`, `Glob` and `Grep`
     /// there are allowed at tier `read`, whatever its worktree.
     pub skills_root: Option<PathBuf>,
+    /// The folders outside `cwd` it may read with `Read`, `Grep`, `Glob` and `LS`, never write:
+    /// the project's other repositories and its folder (5.6). Empty for a one-repository project,
+    /// the Marketing Specialist, and a task in a private folder.
+    pub read_roots: Vec<ReadRoot>,
 }
 
 /// A registration, the tool calls the hook has allowed it, and why it was told to stop, once it
@@ -207,6 +222,9 @@ pub struct DaemonState {
     connectors_kept: Arc<Mutex<BTreeMap<String, Kept>>>,
     /// The user's state folder, where each stdio connector runs (ADR 0030), once it is set.
     state_dir: OnceLock<std::path::PathBuf>,
+    /// The user's home folder, where a member repository's path is relative to (ADR 0057), once it
+    /// is set.
+    home: OnceLock<std::path::PathBuf>,
     /// The certificates a mailbox connection trusts: the platform's, unless a test names its own.
     #[cfg(test)]
     mail_trust: OnceLock<crate::mailbox::Trust>,
@@ -317,6 +335,7 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            home: OnceLock::new(),
             #[cfg(test)]
             mail_trust: OnceLock::new(),
             registered_apps: OnceLock::new(),
@@ -347,6 +366,7 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            home: OnceLock::new(),
             #[cfg(test)]
             mail_trust: OnceLock::new(),
             registered_apps: OnceLock::new(),
@@ -379,6 +399,17 @@ impl DaemonState {
     /// Answers `true`, or `false` when one was already set, which is kept.
     pub fn set_state_dir(&self, directory: std::path::PathBuf) -> bool {
         self.state_dir.set(directory).is_ok()
+    }
+
+    /// Reads a member repository's path as relative to `home` from now on. Answers `true`, or
+    /// `false` when one was already set, which is kept.
+    pub fn set_home(&self, home: std::path::PathBuf) -> bool {
+        self.home.set(home).is_ok()
+    }
+
+    /// The user's home folder, once it is set.
+    pub(crate) fn home(&self) -> Option<&std::path::Path> {
+        self.home.get().map(std::path::PathBuf::as_path)
     }
 
     /// Signs in with the apps of `apps` from now on, in place of `REGISTERED_APPS`: a test's table,
@@ -1850,6 +1881,7 @@ mod tests {
         let daemon = TestDaemon::new("daemon-tool-context", |_| {});
         let executor: Arc<dyn Executor> = Arc::new(HostSandbox::new(daemon.worktree.clone()));
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: "s-exec".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
@@ -2175,6 +2207,7 @@ mod tests {
         let state = DaemonState::new(Arc::clone(&daemon.project.deps));
         for id in ["s-2", "s-1"] {
             state.register_session(SessionRegistration {
+                read_roots: Vec::new(),
                 session_id: id.to_string(),
                 web: catervas_core::governor::sites::WebAccess::Open,
                 reads: catervas_core::folders::ReadAccess::Open,
@@ -2408,6 +2441,7 @@ mod tests {
         }
         daemon.state.set_connector_secrets(through(store));
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: "session-custom".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
@@ -2758,6 +2792,7 @@ mod tests {
             .expect("kept");
         daemon.state.set_connector_secrets(store);
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: "session-signed".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,

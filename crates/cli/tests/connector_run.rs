@@ -182,6 +182,7 @@ impl Served {
         state.set_connector_secrets(store);
         state.set_state_dir(Served::state_of(&repo));
         state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: SESSION.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
