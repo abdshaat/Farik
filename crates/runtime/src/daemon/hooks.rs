@@ -343,6 +343,9 @@ fn judge_call(
         None => match builtin_tool_tier(&request.tool_name) {
             // The skills' folder is outside the worktree, and a read there asks about no path.
             Some(tier) if in_skill_folder(request, registration) => (tier, Vec::new()),
+            // Another repository of the project, or its folder: judged against its own
+            // protected paths, and asked about no path of the session's worktree.
+            Some(tier) if in_read_root(request, registration, team)? => (tier, Vec::new()),
             Some(tier) => (
                 tier,
                 workspace_paths(&request.tool_name, &request.tool_input, &registration.cwd)?,
@@ -591,6 +594,117 @@ fn in_skill_folder(request: &HookRequest, registration: &SessionRegistration) ->
     ) {
         (Ok(root), Some(resolved)) => resolved.starts_with(root),
         _ => false,
+    }
+}
+
+/// Whether a `Read`, `Grep`, `Glob` or `LS` is of a read root (5.6): a folder outside the session's
+/// worktree that it may read and never write. The path is resolved through links, so that a link
+/// is judged by where it points. A path inside the worktree is the worktree's, whatever root also
+/// holds it.
+///
+/// # Errors
+///
+/// `path_protected` when the path is inside a root and is, or a search could reach, a protected
+/// path of the team, or `.git/**`, read relative to the root.
+fn in_read_root(
+    request: &HookRequest,
+    registration: &SessionRegistration,
+    team: &Team,
+) -> Result<bool, String> {
+    if registration.read_roots.is_empty() {
+        return Ok(false);
+    }
+    let tool = request.tool_name.as_str();
+    let field = match tool {
+        "Read" => "file_path",
+        "Glob" | "Grep" | "LS" => "path",
+        _ => return Ok(false),
+    };
+    let Some(raw) = request.tool_input.get(field).and_then(Value::as_str) else {
+        return Ok(false);
+    };
+    // What `workspace_paths` refuses stays refused there.
+    if tool == "Glob"
+        && let Some(pattern) = request.tool_input.get("pattern").and_then(Value::as_str)
+        && (Path::new(pattern).is_absolute()
+            || parts(pattern).any(|part| part == "..")
+            || expands_home(pattern))
+    {
+        return Ok(false);
+    }
+    if expands_home(raw) {
+        return Ok(false);
+    }
+    let (Ok(cwd), Some(resolved)) = (
+        registration.cwd.canonicalize(),
+        resolve(&registration.cwd.join(raw)),
+    ) else {
+        return Ok(false);
+    };
+    if resolved.starts_with(&cwd) {
+        return Ok(false);
+    }
+    for root in &registration.read_roots {
+        let Ok(base) = root.path.canonicalize() else {
+            continue;
+        };
+        let Ok(relative) = resolved.strip_prefix(&base) else {
+            continue;
+        };
+        let relative = relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        let mut protected = team.rules().protected_paths;
+        protected.push(".git/**".to_string());
+        return judge_in_root(tool, &root.name, &relative, &protected).map(|()| true);
+    }
+    Ok(false)
+}
+
+/// A read inside the root `name`, at `relative` to it, against the `protected` globs read
+/// relative to the root. A file is refused when it is protected; a search, when its folder is the
+/// root's top or holds or is held by the literal folder of a protected glob, so that nothing
+/// protected is reached by walking (the globs with no literal folder are Claude Code's deny
+/// rules').
+fn judge_in_root(
+    tool: &str,
+    name: &str,
+    relative: &str,
+    protected: &[String],
+) -> Result<(), String> {
+    use catervas_core::governor::paths::{
+        PathRefusal, check_protected_paths, literal_folder, reaches_the_folder,
+    };
+    use catervas_core::governor::permissions::ToolRefusal;
+
+    let search = matches!(tool, "Grep" | "Glob");
+    let could_reach = |what: &str| {
+        Refusal::Tool(ToolRefusal::PathProtected {
+            path: format!("{name}: {what}"),
+        })
+        .reason()
+    };
+    if relative.is_empty() {
+        return Err(format!(
+            "path_protected: {name}: {tool} of its top could reach protected files"
+        ));
+    }
+    if search
+        && protected.iter().any(|glob| {
+            let folder = literal_folder(glob);
+            !folder.is_empty() && reaches_the_folder(&format!("{relative}/**"), &folder)
+        })
+    {
+        return Err(format!(
+            "path_protected: {name}: searching {relative} could reach protected files"
+        ));
+    }
+    match check_protected_paths(&[relative.to_string()], protected) {
+        Ok(()) => Ok(()),
+        Err(PathRefusal::Violations(_)) => Err(could_reach(relative)),
+        Err(PathRefusal::Glob(error)) => Err(format!("invalid_glob: {error:?}")),
     }
 }
 
@@ -1595,6 +1709,7 @@ mod tests {
         std::fs::create_dir_all(plugin.join(".claude-plugin")).expect("a folder");
         std::fs::write(plugin.join(".claude-plugin/plugin.json"), "{}").expect("a file");
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: session.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
@@ -1734,6 +1849,7 @@ mod tests {
         std::fs::write(root.join(".catervas/local/settings.json"), "{}").expect("written");
         std::fs::write(daemon.worktree.join("x"), "another task's").expect("written");
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: "session-folder".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
@@ -1804,6 +1920,138 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_session_reads_the_other_members_and_nothing_protected_in_them() {
+        use crate::daemon::{ReadRoot, SessionRegistration};
+
+        let daemon = TestDaemon::new("hook-read-roots", |_| {});
+        let infra = catervas_store::git::fixtures::TempRepo::new("hook-read-roots-infra");
+        std::fs::create_dir_all(infra.path.join("src")).expect("a folder");
+        for file in ["src/main.rs", "src/key.pem", ".env"] {
+            std::fs::write(infra.path.join(file), "x").expect("written");
+        }
+        let project = daemon
+            .project
+            .repo
+            .path
+            .canonicalize()
+            .expect("the project folder");
+        std::fs::create_dir_all(project.join("docs/catervas")).expect("a folder");
+        std::fs::write(project.join("docs/catervas/plan.md"), "x").expect("written");
+        std::fs::write(project.join(".catervas/local/catervas.db"), "x").expect("written");
+        let infra_path = infra.path.canonicalize().expect("the member");
+        daemon.state.register_session(SessionRegistration {
+            read_roots: vec![
+                ReadRoot {
+                    name: "infra".to_string(),
+                    path: infra_path.clone(),
+                },
+                ReadRoot {
+                    name: "project".to_string(),
+                    path: project.clone(),
+                },
+            ],
+            session_id: "session-roots".to_string(),
+            web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
+            agent_id: "dev-a".to_string(),
+            task_id: Some("CTV-1".parse().expect("a task id")),
+            purpose: crate::session::SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            catervas_tools: Vec::new(),
+            tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+            connectors: Vec::new(),
+            preview: None,
+        });
+        let hook = |tool: &str, input: Value| {
+            decide_pre_tool_use(&daemon.call("session-roots", tool, &input), &daemon.state)
+        };
+        let under =
+            |root: &std::path::Path, relative: &str| root.join(relative).display().to_string();
+
+        // What the other members and the project folder hold is read.
+        for (tool, input) in [
+            (
+                "Read",
+                json!({ "file_path": under(&infra_path, "src/main.rs") }),
+            ),
+            (
+                "Grep",
+                json!({ "pattern": "x", "path": under(&infra_path, "src") }),
+            ),
+            ("LS", json!({ "path": under(&infra_path, "src") })),
+            (
+                "Glob",
+                json!({ "pattern": "**/*.md", "path": under(&project, "docs/catervas") }),
+            ),
+            ("Read", json!({ "file_path": daemon.inside("README.md") })),
+        ] {
+            let allowed = hook(tool, input.clone());
+            assert!(allowed.allow, "{tool} {input}: {allowed:?}");
+        }
+
+        // Secrets, git's internals, the project's database and a search that could reach them
+        // are not, and the refusal names the root.
+        for (tool, input) in [
+            ("Read", json!({ "file_path": under(&infra_path, ".env") })),
+            (
+                "Read",
+                json!({ "file_path": under(&infra_path, "src/key.pem") }),
+            ),
+            (
+                "Read",
+                json!({ "file_path": under(&infra_path, ".git/config") }),
+            ),
+            (
+                "Read",
+                json!({ "file_path": under(&project, ".catervas/local/catervas.db") }),
+            ),
+            (
+                "Grep",
+                json!({ "pattern": "x", "path": infra_path.display().to_string() }),
+            ),
+            (
+                "Grep",
+                json!({ "pattern": "x", "path": under(&project, ".catervas") }),
+            ),
+            ("LS", json!({ "path": under(&infra_path, ".git") })),
+        ] {
+            let denied = hook(tool, input.clone());
+            denied_for(&denied, "path_protected");
+            assert!(
+                denied.reason.contains("infra: ") || denied.reason.contains("project: "),
+                "{tool} {input}: {denied:?}"
+            );
+        }
+
+        // Writing stays inside the session's own worktree, and a folder that is no root is
+        // outside it.
+        let third = catervas_store::git::fixtures::TempRepo::new("hook-read-roots-third");
+        for (tool, input) in [
+            (
+                "Write",
+                json!({ "file_path": under(&infra_path, "src/main.rs"), "content": "y" }),
+            ),
+            (
+                "Edit",
+                json!({ "file_path": under(&infra_path, "src/main.rs"), "old_string": "x", "new_string": "y" }),
+            ),
+            (
+                "Read",
+                json!({ "file_path": third.path.join("README.md").display().to_string() }),
+            ),
+        ] {
+            denied_for(&hook(tool, input), "path_outside_workspace");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn procurement_cannot_climb_out() {
         // A procurement task's session works in `.catervas/local/procurement` (6.10), beside the
         // finance folder. The hook reads no role: the working directory holds the session, as it
@@ -1832,6 +2080,7 @@ mod tests {
         std::fs::write(folder.join("evaluations/email-sending.md"), "a note").expect("written");
         std::fs::write(finance.join("books.xlsx"), "books").expect("written");
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: "session-procurement".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
@@ -1993,12 +2242,12 @@ mod tests {
         use catervas_core::governor::permissions::{PermissionTier, SessionConnector};
         use catervas_protocol::event::ConnectorTagWire;
 
-        use crate::daemon::SessionRegistration;
-        use crate::session::SessionPurpose;
+        use crate::{daemon::SessionRegistration, session::SessionPurpose};
 
         let daemon = TestDaemon::new("hook-connector", |_| {});
         let definition = catervas_roles::builtin_connector("playwright").expect("shipped");
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: "session-browser".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
@@ -2143,6 +2392,7 @@ mod tests {
         use crate::session::SessionPurpose;
 
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: session.to_string(),
             web: daemon.web_of(agent),
             reads: daemon.reads_of(agent),
@@ -2551,6 +2801,7 @@ mod tests {
         use crate::session::SessionPurpose;
 
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: session.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,

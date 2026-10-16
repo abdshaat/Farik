@@ -30,8 +30,10 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::setup::list_folders;
-use super::{DaemonError, DaemonState, SetupError, SetupHost, hex, random_token, same_token};
-use super::{board, documents, gates, team, templates};
+use super::{
+    DaemonError, DaemonState, MemberRequest, SetupError, SetupHost, hex, random_token, same_token,
+};
+use super::{board, documents, gates, repos, team, templates};
 use crate::claude::CredentialKind;
 use crate::computer::{build_sandbox_image, check_computer, pull_browser_image};
 use crate::credential::CredentialStore;
@@ -621,9 +623,10 @@ pub(super) const NO_PROJECT: i64 = -32004;
 pub(super) const REFUSED: i64 = -32005;
 
 /// The methods the first-run wizard calls, which setup mode's host answers.
-const SETUP_METHODS: [&str; 5] = [
+const SETUP_METHODS: [&str; 6] = [
     "project.open",
     "project.create",
+    "project.create_folder",
     "account.connect",
     "sandbox.build",
     "browser.pull",
@@ -686,6 +689,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         && !team::METHODS.contains(&method)
         && !templates::METHODS.contains(&method)
         && !documents::METHODS.contains(&method)
+        && !repos::METHODS.contains(&method)
     {
         return failure(
             &id,
@@ -729,6 +733,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         method if documents::METHODS.contains(&method) => {
             documents::call(state, method, params).await
         }
+        method if repos::METHODS.contains(&method) => repos::call(state, method, params).await,
         "account.connect" if state.host().is_none() => team::connect(state, params).await,
         "query" => {
             // The store and the files are read off the async workers.
@@ -878,6 +883,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         "allowances.list" => board::allowances(state, deps),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         name if documents::QUERIES.contains(&name) => documents::query(deps, name, params),
+        name if repos::QUERIES.contains(&name) => repos::query(deps, name, params),
         name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
         _ => gates::query(state, deps, name, params),
     }
@@ -1021,6 +1027,20 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
                     no_sandbox,
                 )
                 .map(root),
+            "project.create_folder" => {
+                let repos: Vec<MemberRequest> = params["repos"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|repo| MemberRequest {
+                        name: repo["name"].as_str().unwrap_or_default().to_string(),
+                        path: repo["path"].as_str().unwrap_or_default().to_string(),
+                        integration_branch: repo["integration_branch"].as_str().map(str::to_string),
+                    })
+                    .collect();
+                host.create_folder(text("parent"), text("name"), &repos, no_sandbox)
+                    .map(root)
+            }
             _ => {
                 let kind = serde_json::from_value::<CredentialKind>(params["kind"].clone())
                     .map_err(|_| {
@@ -2978,6 +2998,24 @@ pub(super) mod tests {
         ) -> Result<PathBuf, SetupError> {
             self.calls.lock().expect("the calls").push(json!({
                 "create": [parent, name, description], "no_sandbox": no_sandbox
+            }));
+            Ok(self.home.join(parent).join(name))
+        }
+
+        fn create_folder(
+            &self,
+            parent: &str,
+            name: &str,
+            repos: &[crate::daemon::MemberRequest],
+            no_sandbox: bool,
+        ) -> Result<PathBuf, SetupError> {
+            self.calls.lock().expect("the calls").push(json!({
+                "create_folder": [parent, name],
+                "repos": repos.iter().map(|repo| json!({
+                    "name": repo.name, "path": repo.path,
+                    "integration_branch": repo.integration_branch,
+                })).collect::<Vec<_>>(),
+                "no_sandbox": no_sandbox
             }));
             Ok(self.home.join(parent).join(name))
         }

@@ -35,7 +35,7 @@ A one-repo project becomes a multi-repo one when the owner adds a second reposit
   - `path`: the absolute path of the repository's top folder on this computer
   - `integration_branch`: the branch accepted work goes into, which defaults to the repository's default branch, read as spec 5.14 says
 - A member must be a git repository's top folder. It may not lie inside another member or the project folder, and two members may not be the same repository.
-- A member whose folder is gone when serve starts, or later, is reported as `repo_missing`. Today shows "Can't find <name>" with "Locate…", which records the new path (`repo.moved`). Tasks in that repository wait until it is found.
+- A member whose folder is gone when serve starts, or later, is reported as `repo_missing`: a fact read when asked, `repos.list`'s `missing` for the member, with no event (step 01). Today shows "Can't find <name>" with "Locate…", which records the new path (`repo.moved`). Tasks in that repository wait until it is found.
 
 ## Tasks across repositories
 
@@ -117,7 +117,7 @@ Tasks that are not done keep their ids; a task of a role that changes code, with
 
 ## Screens (mocked up first)
 
-- **First run.** On the project page, "One repository" or "Several repositories". "Several" names the project, picks two or more folders, names each member, and shows where the project folder will be, with "Change".
+- **First run.** On the project page, "Yes, one or more repositories": the owner adds one repository or several, and the page recommends repositories that work together, since Catervas works best across connected repositories. With one, the project is a one-repo project as before (ADR 0051), its notes in the repository. From the second on, the owner names the project and each member, and sees where the project folder will be, with "Change". The founder asked for this on 2026-10-12: "I want the user to be able to create a project with one or more projects. Recommend the user that catervas works best when the repos are interconnected."
 - **Settings › Repositories.** Each member with its name, path and integration branch. "Add repository", "Remove" (refused `repo_in_use` while a task of it is not done or integrated), and "Locate…" for a missing member.
 - **Board and Today.** Each task card carries its repository's name as a tag.
 - **Files.** A picker above the tree: "Project" (the top-level folders) and each member (its `repos/<name>/` folders). Mermaid renders as in phase 8.
@@ -125,7 +125,7 @@ Tasks that are not done keep their ids; a task of a role that changes code, with
 
 ## Events
 
-- `repo.added { name, path, integration_branch }`
+- `repo.added { name, path, integration_branch }`: all three required, `integration_branch` `null` when the owner named none and the repository's default branch is meant (step 01)
 - `repo.removed { name }`
 - `repo.moved { name, path }`
 - `project.converted { project_folder, first_repo }`

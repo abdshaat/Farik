@@ -267,7 +267,7 @@ fn makes_a_base_container_beside_the_task_s_own_with_no_network() {
     };
     let project = project("base");
     let own = factory
-        .create(&project, &task(), &worktree("base-own"), true)
+        .create(&project, &task(), &worktree("base-own"), true, &[])
         .unwrap_or_else(|error| panic!("the task's sandbox could not be made: {error}"));
     let base = factory
         .create_base(&project, &task(), &worktree("base"))
@@ -308,7 +308,7 @@ fn removes_a_container_by_name() {
     };
     let project = project("remove");
     let _own = factory
-        .create(&project, &task(), &worktree("remove-own"), false)
+        .create(&project, &task(), &worktree("remove-own"), false, &[])
         .unwrap_or_else(|error| panic!("the task's sandbox could not be made: {error}"));
     let _base = factory
         .create_base(&project, &task(), &worktree("remove-base"))

@@ -24,6 +24,14 @@ pub fn a_contract_wire() -> Value {
     })
 }
 
+/// `a_contract_wire` for the task that changes the member repository `repo` of a project folder.
+#[must_use]
+pub fn a_contract_wire_in(repo: &str) -> Value {
+    let mut contract = a_contract_wire();
+    contract["repo"] = json!(repo);
+    contract
+}
+
 /// A wire contract with every optional field present and every default written explicitly.
 #[must_use]
 pub fn a_full_contract_wire() -> Value {

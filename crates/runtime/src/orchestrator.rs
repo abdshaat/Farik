@@ -17,6 +17,7 @@ use catervas_protocol::command::{Command, CommandReply, ReplyKind};
 use catervas_roles::{KitError, RoleError};
 use catervas_store::baseline::{folder_in, make_private_directory};
 use catervas_store::files::FilesError;
+use catervas_store::repos::{TaskRepository, TaskRepositoryError, task_repository};
 use catervas_store::{GitError, StoreError};
 use chrono::{DateTime, Utc};
 
@@ -47,6 +48,7 @@ mod recover;
 mod requests;
 mod rules;
 mod session;
+pub(crate) use session::read_roots;
 mod spend;
 mod verify;
 
@@ -668,11 +670,26 @@ impl Orchestrator {
                         .tiers(&team.permissions())
                         .contains(&PermissionTier::Network)
             });
+        // The project's other repositories, which a command can read at `/repos/<name>` (5.6).
+        let contract = self.deps.tools.files.read_contract(task_id)?;
+        let folder = worktree(&self.deps, task_id);
+        let project = std::fs::canonicalize(self.deps.tools.files.root()).ok();
+        let reads: Vec<(String, PathBuf)> = read_roots(
+            &self.deps.tools.files,
+            Some(&contract),
+            &folder,
+            contract.assignee_role,
+        )
+        .into_iter()
+        .filter(|root| Some(&root.path) != project.as_ref())
+        .map(|root| (root.name, root.path))
+        .collect();
         let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
             &self.deps.tools.ids.project_id,
             task_id,
-            &worktree(&self.deps, task_id),
+            &folder,
             network,
+            &reads,
         )?);
         sandboxes.insert(task_id.clone(), Arc::clone(&sandbox));
         Ok(sandbox)
@@ -760,6 +777,27 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
         .root()
         .join(".catervas/local/worktrees")
         .join(task_id.as_str())
+}
+
+/// The repository `contract` works in: the project folder's own, or the member it names.
+fn task_repository_of(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    contract: &TaskContract,
+) -> Result<TaskRepository, TaskRepositoryError> {
+    task_repository(
+        &deps.tools.files,
+        team,
+        &deps.tools.git,
+        contract.repo.as_ref().map(|repo| repo.as_str()),
+    )
+}
+
+/// A task's repository that cannot be had, as the refusal that carries its sentence.
+fn repository_refused(task_id: &TaskId, error: &TaskRepositoryError) -> OrchestratorError {
+    OrchestratorError::Refused {
+        reason: format!("task_repository: {}: {error}", task_id.as_str()),
+    }
 }
 
 /// Where a task's sessions work: its private folder, `.catervas/local/finance` for a Finance
@@ -1367,6 +1405,42 @@ mod tests {
         assert!(error.to_string().contains("is a link"), "{error}");
         // Nothing was made where the link points.
         assert_eq!(std::fs::read_dir(&outside).expect("read").count(), 0);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn makes_a_tasks_sandbox_hold_its_sibling_repositories() {
+        use std::sync::Arc;
+
+        use crate::orchestrator::fixtures::CountingSandboxFactory;
+
+        let (harness, members) = Harness::project_folder("sandbox-siblings", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "iris", "ada", "app");
+        harness.assigned("CTV-2", "iris", "ada");
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator =
+            harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
+        let team = orchestrator.deps.tools.files.read_team().expect("the team");
+        let path = |index: usize| members[index].path.canonicalize().expect("a member");
+
+        for task in ["CTV-1", "CTV-2"] {
+            orchestrator
+                .sandbox_for(&task.parse().expect("a task id"), &team)
+                .expect("a sandbox is made");
+        }
+
+        // A task in `app` mounts `infra`; a task in the project folder mounts both.
+        assert_eq!(
+            sandboxes.reads("CTV-1"),
+            [vec![("infra".to_string(), path(1))]]
+        );
+        assert_eq!(
+            sandboxes.reads("CTV-2"),
+            [vec![
+                ("app".to_string(), path(0)),
+                ("infra".to_string(), path(1))
+            ]]
+        );
     }
 
     #[test]

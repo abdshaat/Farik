@@ -15,10 +15,17 @@ use std::path::Path;
 use catervas_core::criteria::{
     CriteriaLibrary, CriterionSource, CriterionTemplate, validate_criteria,
 };
+use catervas_core::generated::criteria::{CriterionTemplateName, CriterionTemplateRepo};
+use catervas_protocol::event::{EventBody, EventError, EventIds, new_event};
+use catervas_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use crate::error::StoreError;
+use crate::event_log::EventLog;
+use crate::files::{FilesError, ProjectFiles};
 use crate::git::{Git, GitError, HeadSummary};
+use crate::repos::repo_present;
 
 /// What the scan read back about a project.
 #[derive(Debug, Clone, PartialEq)]
@@ -238,6 +245,254 @@ pub fn seeded_library(
     CriteriaLibrary { criteria }
 }
 
+/// The most criteria a library holds (`criteria.schema.json`'s `maxItems`).
+pub const LIBRARY_CAP: usize = 100;
+
+/// Who `criteria.updated` names when Catervas rescans a project folder's members on its own: a
+/// member joined, moved or left. `catervas init` names the human.
+pub const CATERVAS_ACTOR: &str = "catervas";
+
+/// A member's found checks as the project folder's library holds them: each named
+/// `<repo>-<name>` and given `repo`, its text and verification unchanged.
+///
+/// A name the library refuses once renamed (over 64 characters, or against its pattern) is left
+/// out, so that one bad name cannot make `write_criteria` refuse the whole library. Truncating it
+/// was rejected: two checks could then collide.
+#[must_use]
+pub fn renamed(repo: &str, found: &[CriterionTemplate]) -> Vec<CriterionTemplate> {
+    let Ok(member) = CriterionTemplateRepo::try_from(repo) else {
+        return Vec::new();
+    };
+    found
+        .iter()
+        .filter_map(|one| {
+            let name =
+                CriterionTemplateName::try_from(format!("{repo}-{}", one.name.as_str())).ok()?;
+            Some(CriterionTemplate {
+                name,
+                repo: Some(member.clone()),
+                ..one.clone()
+            })
+        })
+        .collect()
+}
+
+/// The library a project folder has after its `members` were scanned.
+///
+/// The existing library is walked in order. A `source: project_scan` entry whose `repo` is one of
+/// `members` is replaced in place by the entry of `found` with the same name, which is then used
+/// up; if none of `found` has that name, it is dropped. Every other entry stays where it is. Then
+/// each of `found` not used up, and whose name is not already kept, is appended in order, up to
+/// `LIBRARY_CAP`; the names that did not fit come back with the library. A human's entry wins a
+/// name clash, as in `seeded_library`, which stays for a project of one repository.
+#[must_use]
+pub fn reseeded(
+    found: &[CriterionTemplate],
+    existing: Option<&CriteriaLibrary>,
+    members: &[&str],
+) -> (CriteriaLibrary, Vec<String>) {
+    let mut used = vec![false; found.len()];
+    let mut criteria: Vec<CriterionTemplate> = Vec::new();
+    for one in existing
+        .map(|library| library.criteria.as_slice())
+        .unwrap_or_default()
+    {
+        let scanned = one.source == Some(CriterionSource::ProjectScan)
+            && one
+                .repo
+                .as_ref()
+                .is_some_and(|repo| members.contains(&repo.as_str()));
+        if !scanned {
+            criteria.push(one.clone());
+            continue;
+        }
+        if let Some(at) = found
+            .iter()
+            .enumerate()
+            .position(|(at, new)| !used[at] && new.name == one.name)
+        {
+            used[at] = true;
+            criteria.push(found[at].clone());
+        }
+    }
+    let mut left_out = Vec::new();
+    for (at, one) in found.iter().enumerate() {
+        if used[at] || criteria.iter().any(|kept| kept.name == one.name) {
+            continue;
+        }
+        if criteria.len() >= LIBRARY_CAP {
+            left_out.push(one.name.to_string());
+        } else {
+            criteria.push(one.clone());
+        }
+    }
+    (CriteriaLibrary { criteria }, left_out)
+}
+
+/// What scanning a project folder's members read back and changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MembersScan {
+    /// `<name>: <read_back>` for each member in `repos.yaml` order, joined by `; `: what
+    /// `project.md` leads with. A member that is missing reads `<name>: not found`, one whose scan
+    /// failed `<name>: not read (<error>)`.
+    pub read_back: String,
+    /// The renamed name of every check found, across the members that were read.
+    pub detected: Vec<String>,
+    /// Whether the library changed, and `criteria.updated` was therefore recorded.
+    pub library_changed: bool,
+    /// The names the library had no room for.
+    pub left_out: Vec<String>,
+}
+
+/// Why a project folder's members could not be scanned. A member's own scan error is never one:
+/// it is in the read-back.
+#[derive(Debug)]
+pub enum MembersScanError {
+    /// There is no `.catervas/repos.yaml`: this is a project of one repository.
+    NotAProjectFolder,
+    /// A file under `.catervas/` could not be read or written.
+    Files(FilesError),
+    /// The log refused an event.
+    Store(StoreError),
+    /// An event could not be made.
+    Event(EventError),
+}
+
+impl fmt::Display for MembersScanError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAProjectFolder => {
+                write!(
+                    formatter,
+                    "this project is one repository, not a project folder"
+                )
+            }
+            Self::Files(error) => write!(formatter, "{error}"),
+            Self::Store(error) => write!(formatter, "{error}"),
+            // Catervas disagreeing with itself rather than anything a person did.
+            Self::Event(EventError::BlankId { field }) => write!(
+                formatter,
+                "this event needed a {field} and it is blank, and a blank id names nobody: that \
+                 is a bug in Catervas rather than anything you did"
+            ),
+            Self::Event(EventError::NoContractNamed { kind }) => write!(
+                formatter,
+                "a {kind} event is about one contract and this one names none, which is a bug in \
+                 Catervas rather than anything you did"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for MembersScanError {}
+
+impl From<FilesError> for MembersScanError {
+    fn from(error: FilesError) -> Self {
+        Self::Files(error)
+    }
+}
+
+impl From<StoreError> for MembersScanError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl From<EventError> for MembersScanError {
+    fn from(error: EventError) -> Self {
+        Self::Event(error)
+    }
+}
+
+/// Scans every present member of a project folder and reseeds the library with what it found.
+///
+/// The members it reseeds are those present whose scan succeeded, narrowed to `only` when given, so
+/// a member that is missing or fails to scan keeps its entries. It writes the library (when it
+/// changed) and `project.md`, and records `project.scanned` and, when the library changed,
+/// `criteria.updated` by `actor`. One function serves `catervas init`, `repo.add`, `repo.locate`
+/// and `repo.remove`: a scan of one member alone could not write the joined read-back.
+///
+/// # Errors
+///
+/// `NotAProjectFolder` when there is no `repos.yaml`; otherwise the files', the log's or the
+/// event's refusal.
+pub fn rescan_members(
+    files: &ProjectFiles,
+    log: &EventLog,
+    ids: &EventIds,
+    now: DateTime<Utc>,
+    only: Option<&str>,
+    actor: &str,
+) -> Result<MembersScan, MembersScanError> {
+    let repos = files
+        .read_repos()?
+        .ok_or(MembersScanError::NotAProjectFolder)?;
+    let (mut lines, mut found, mut detected, mut reseeded_members) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for member in &repos.repos {
+        let name = member.name.as_str();
+        let path = Path::new(member.path.as_str());
+        if !repo_present(path) {
+            lines.push(format!("{name}: not found"));
+            continue;
+        }
+        match scan_project(&Git::open(path.to_path_buf()), now) {
+            Ok(scan) => {
+                lines.push(format!("{name}: {}", scan.read_back));
+                let checks = renamed(name, &scan.detected_criteria);
+                detected.extend(names_of(&checks));
+                if only.is_none_or(|only| only == name) {
+                    reseeded_members.push(name);
+                    found.extend(checks);
+                }
+            }
+            Err(error) => lines.push(format!("{name}: not read ({error})")),
+        }
+    }
+    let existing = match files.read_criteria() {
+        Ok(library) => Some(library),
+        Err(FilesError::NotFound { .. }) => None,
+        Err(other) => return Err(other.into()),
+    };
+    let (library, left_out) = reseeded(&found, existing.as_ref(), &reseeded_members);
+    let library_changed = existing.as_ref() != Some(&library);
+    if library_changed {
+        files.write_criteria(&library)?;
+    }
+    let read_back = lines.join("; ");
+    let previous = files.read_project_scan().ok();
+    files.write_project_scan(&project_document(
+        &read_back,
+        &library,
+        &left_out,
+        previous.as_deref(),
+    ))?;
+    log.append(&new_event(
+        EventBody::ProjectScanned(ProjectScannedBody {
+            detected_criteria: detected.clone(),
+            read_back: read_back.clone(),
+        }),
+        now,
+        ids.clone(),
+    )?)?;
+    if library_changed {
+        log.append(&new_event(
+            EventBody::CriteriaUpdated(CriteriaUpdatedBody {
+                criterion_names: names_of(&library.criteria),
+                updated_by: actor.to_string(),
+            }),
+            now,
+            ids.clone(),
+        )?)?;
+    }
+    Ok(MembersScan {
+        read_back,
+        detected,
+        library_changed,
+        left_out,
+    })
+}
+
 /// What a scan says that matters to whether it changed: its read-back without the part about the
 /// last commit, and the names of the criteria it found.
 ///
@@ -267,17 +522,27 @@ pub(crate) const USER_SAYS: &str = "## The user says";
 /// What `.catervas/project.md` holds: the line the scan read back, and the criteria it found.
 ///
 /// This is the file every session is given (`docs/SPEC.md` section 5.8), so it says what the scan
-/// found and nothing it did not, and what the user said in `previous`, the file as it was.
+/// found and nothing it did not, and what the user said in `previous`, the file as it was. A
+/// project folder has no single scan, so the first argument is the read-back alone; `left_out` are
+/// the names a full library had no room for, which the file says so that the owner and the agents
+/// can see it.
 #[must_use]
 pub fn project_document(
-    scan: &ProjectScan,
+    scan_read_back: &str,
     library: &CriteriaLibrary,
+    left_out: &[String],
     previous: Option<&str>,
 ) -> String {
-    let mut parts = vec![format!("# The project\n\n{}", scan.read_back)];
+    let mut parts = vec![format!("# The project\n\n{scan_read_back}")];
     let names = names_of(&library.criteria);
     if !names.is_empty() {
         parts.push(format!("Criteria: {}.", names.join(", ")));
+    }
+    if !left_out.is_empty() {
+        parts.push(format!(
+            "Left out, the library being full: {}.",
+            left_out.join(", ")
+        ));
     }
     // What the user said is theirs, not the scan's: a rescan carries it through unchanged.
     if let Some(said) = previous.and_then(|text| text.find(USER_SAYS).map(|at| &text[at..])) {
@@ -831,8 +1096,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        AppStart, Reading, ScanError, ScanFacts, TOOLCHAINS, cargo_workspace, how_long_ago,
-        language_of, material, packages_in, scripts_in, seeded_library, tests_in,
+        AppStart, LIBRARY_CAP, Reading, ScanError, ScanFacts, TOOLCHAINS, cargo_workspace,
+        how_long_ago, language_of, material, packages_in, project_document, renamed, reseeded,
+        scripts_in, seeded_library, tests_in,
     };
 
     fn at(text: &str) -> DateTime<Utc> {
@@ -1378,6 +1644,153 @@ mod tests {
             },
             "a project whose scan found nothing still has a library"
         );
+    }
+
+    /// A library entry named `name` from `source` (`project_scan`, or `human`), checking `repo`.
+    fn entry(name: &str, source: &str, repo: Option<&str>) -> super::CriterionTemplate {
+        let mut wire = json!({
+            "name": name, "text": "The tests pass in the repository.", "source": source,
+            "verification": { "method": "test", "command": "npm test" },
+        });
+        if let Some(repo) = repo {
+            wire["repo"] = json!(repo);
+        }
+        validate_criteria(&json!({ "criteria": [wire] }))
+            .expect("a library")
+            .criteria
+            .remove(0)
+    }
+
+    fn names(library: &CriteriaLibrary) -> Vec<&str> {
+        library
+            .criteria
+            .iter()
+            .map(|one| one.name.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn renames_a_members_checks() {
+        let found = [
+            entry("the-tests-pass", "project_scan", None),
+            entry("the-linter-is-clean", "project_scan", None),
+        ];
+        let renamed_found = renamed("app", &found);
+        assert_eq!(
+            renamed_found
+                .iter()
+                .map(|one| (one.name.as_str(), one.repo.as_ref().map(|r| r.as_str())))
+                .collect::<Vec<_>>(),
+            [
+                ("app-the-tests-pass", Some("app")),
+                ("app-the-linter-is-clean", Some("app"))
+            ]
+        );
+        for (before, after) in found.iter().zip(&renamed_found) {
+            assert_eq!(before.text, after.text);
+            assert_eq!(before.verification, after.verification);
+            assert_eq!(after.source, Some(CriterionSource::ProjectScan));
+        }
+
+        // 32 and 32 characters and the dash between them are 65, one over what a name takes; a
+        // member named `a-` gives a name the pattern refuses.
+        let long_member = "a".repeat(32);
+        let long_name = "b".repeat(32);
+        assert_eq!(
+            renamed(&long_member, &[entry(&long_name, "project_scan", None)]),
+            []
+        );
+        assert_eq!(
+            renamed("a-", &[entry("the-tests-pass", "project_scan", None)]),
+            []
+        );
+    }
+
+    #[test]
+    fn reseeds_one_members_checks() {
+        let existing = CriteriaLibrary {
+            criteria: vec![
+                entry("app-the-tests-pass", "project_scan", Some("app")),
+                entry("infra-the-tests-pass", "project_scan", Some("infra")),
+                entry("my-check", "human", Some("app")),
+            ],
+        };
+        let found = [entry(
+            "app-the-linter-is-clean",
+            "project_scan",
+            Some("app"),
+        )];
+        let (library, left_out) = reseeded(&found, Some(&existing), &["app"]);
+        assert_eq!(
+            names(&library),
+            [
+                "infra-the-tests-pass",
+                "my-check",
+                "app-the-linter-is-clean"
+            ]
+        );
+        assert_eq!(left_out, Vec::<String>::new());
+
+        // A human's entry wins a name clash.
+        let clash = [entry("my-check", "project_scan", Some("app"))];
+        let (library, _) = reseeded(&clash, Some(&existing), &["app"]);
+        assert_eq!(
+            library
+                .criteria
+                .iter()
+                .filter(|one| one.name.as_str() == "my-check")
+                .count(),
+            1
+        );
+        let kept = library
+            .criteria
+            .iter()
+            .find(|one| one.name.as_str() == "my-check")
+            .expect("the human's entry stays");
+        assert_eq!(kept.source, Some(CriterionSource::Human));
+
+        // Dropping a member keeps the others.
+        let (library, _) = reseeded(&[], Some(&existing), &["app"]);
+        assert_eq!(names(&library), ["infra-the-tests-pass", "my-check"]);
+
+        // A check found again keeps its place: nothing new, nothing moves.
+        let again = [entry("app-the-tests-pass", "project_scan", Some("app"))];
+        let (library, left_out) = reseeded(&again, Some(&existing), &["app"]);
+        assert_eq!(library, existing);
+        assert_eq!(left_out, Vec::<String>::new());
+    }
+
+    #[test]
+    fn leaves_out_what_a_full_library_cannot_hold() {
+        let full = CriteriaLibrary {
+            criteria: (0..LIBRARY_CAP)
+                .map(|index| entry(&format!("mine-{index}"), "human", None))
+                .collect(),
+        };
+        // The cap is the schema's `maxItems`: change one and this test names the other.
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/schemas/criteria.schema.json"))
+                .expect("the criteria schema parses");
+        assert_eq!(
+            schema["properties"]["criteria"]["maxItems"],
+            json!(LIBRARY_CAP)
+        );
+        let found = [entry(
+            "app-the-linter-is-clean",
+            "project_scan",
+            Some("app"),
+        )];
+        let (library, left_out) = reseeded(&found, Some(&full), &["app"]);
+        assert_eq!(library.criteria.len(), LIBRARY_CAP);
+        assert_eq!(left_out, ["app-the-linter-is-clean"]);
+
+        let document = project_document("Rust, cargo", &library, &left_out, None);
+        assert!(
+            document.ends_with("Left out, the library being full: app-the-linter-is-clean.\n"),
+            "{document}"
+        );
+        let none = project_document("Rust, cargo", &library, &[], None);
+        assert!(!none.contains("Left out"), "{none}");
     }
 
     #[test]

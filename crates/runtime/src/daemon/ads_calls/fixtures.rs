@@ -54,6 +54,7 @@ pub(crate) fn ads_kit() -> catervas_roles::Kit {
 /// Registers Kai's session, given `connector`, and gives its Google Ads server a ticket.
 pub(crate) fn register(harness: &Harness, connector: SessionConnector) -> String {
     harness.daemon.register_session(SessionRegistration {
+        read_roots: Vec::new(),
         session_id: SESSION.to_string(),
         web: catervas_core::governor::sites::WebAccess::Open,
         reads: catervas_core::folders::ReadAccess::Open,

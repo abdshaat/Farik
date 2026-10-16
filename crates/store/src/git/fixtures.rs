@@ -20,10 +20,13 @@ impl TempRepo {
     /// test that uses this is `#[ignore]`d and run by `cargo xtask check --integration`.
     #[must_use]
     pub fn new(name: &str) -> Self {
+        // The thread's id without the parentheses `{:?}` puts round it: a path a session's
+        // settings write a `Read` rule for holds none (5.6).
+        let thread = format!("{:?}", std::thread::current().id())
+            .replace(|character: char| !character.is_ascii_alphanumeric(), "");
         let path = std::env::temp_dir().join(format!(
-            "catervas-git-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
+            "catervas-git-{name}-{}-{thread}",
+            std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("a directory under the temporary directory");

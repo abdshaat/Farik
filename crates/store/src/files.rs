@@ -13,6 +13,7 @@ use catervas_core::contract::{TaskContract, TaskId, ValidationError, validate_co
 use catervas_core::criteria::{CriteriaLibrary, validate_criteria};
 use catervas_core::pricing::prices::PRICE_TABLE;
 use catervas_core::pricing::{PriceTable, validate_price_table};
+use catervas_core::repos::{Repos, validate_repos};
 use catervas_core::sprint::{Sprint, validate_sprint};
 use catervas_core::team::{AgentId, Team, TeamTemplate, validate_team, validate_template};
 use chrono::NaiveDate;
@@ -187,6 +188,41 @@ impl ProjectFiles {
         let value = as_wire(TEAM, team)?;
         validate_team(&value).map_err(|errors| refused(TEAM, &errors))?;
         self.write_yaml(TEAM, &value)
+    }
+
+    /// The member repositories of a project folder, held to the rules a list on the wire is held
+    /// to, or nothing when there is no `repos.yaml`: a project of one repository.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the file is not YAML or not a list `validate_repos` accepts, `Io` otherwise.
+    pub fn read_repos(&self) -> Result<Option<Repos>, FilesError> {
+        let value = match self.read_yaml(REPOS) {
+            Ok(value) => value,
+            Err(FilesError::NotFound { .. }) => return Ok(None),
+            Err(other) => return Err(other),
+        };
+        validate_repos(&value)
+            .map(Some)
+            .map_err(|errors| refused(REPOS, &errors))
+    }
+
+    /// Writes the member repositories, after holding them to the same rules, making `.catervas/`
+    /// when it is not there yet.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the list is not one `validate_repos` accepts, `Io` when it cannot be written.
+    pub fn write_repos(&self, repos: &Repos) -> Result<(), FilesError> {
+        let value = as_wire(REPOS, repos)?;
+        validate_repos(&value).map_err(|errors| refused(REPOS, &errors))?;
+        self.write_yaml(REPOS, &value)
+    }
+
+    /// Whether `.catervas/repos.yaml` is there, which is what makes a folder a project folder.
+    #[must_use]
+    pub fn is_project_folder(&self) -> bool {
+        self.path_of(REPOS).is_file()
     }
 
     /// The criterion library, held to the rules one on the wire is held to.
@@ -749,6 +785,7 @@ impl ProjectFiles {
 /// the whole layout at once and a change to it is one line.
 const TEAM: &str = "team.yaml";
 const CRITERIA: &str = "team/criteria.yaml";
+const REPOS: &str = "repos.yaml";
 const RETRO: &str = "team/retro.md";
 const SPRINTS: &str = "sprints";
 const DECISIONS: &str = "decisions";
@@ -1071,6 +1108,8 @@ impl ProjectFiles {
 #[cfg(test)]
 mod tests {
     use catervas_core::contract::TaskId;
+    use catervas_core::repos::fixtures::two_repos_wire;
+    use catervas_core::repos::validate_repos;
     use catervas_core::team::AgentId;
 
     use chrono::NaiveDate;
@@ -1079,6 +1118,35 @@ mod tests {
     use super::{
         DecisionEntry, FilesError, contract_path, memory_path, slug, template_yaml, yaml_value,
     };
+
+    #[test]
+    fn reads_and_writes_the_repositories() {
+        let project = TempProject::new("repos");
+        let files = project.files();
+        assert_eq!(files.read_repos(), Ok(None));
+        assert!(!files.is_project_folder());
+
+        let repos = validate_repos(&two_repos_wire()).expect("the fixture is a list");
+        files
+            .write_repos(&repos)
+            .expect("a folder with no .catervas/ takes the list");
+        assert!(project.root.join(".catervas/repos.yaml").is_file());
+        assert!(files.is_project_folder());
+        assert_eq!(files.read_repos(), Ok(Some(repos)));
+
+        std::fs::write(
+            project.root.join(".catervas/repos.yaml"),
+            "repos:\n  - name: app\n    path: /home/me/app\n  - name: app\n    path: /home/me/infra\n",
+        )
+        .expect("a hand-edited file");
+        match files.read_repos() {
+            Err(FilesError::Invalid { path, detail }) => {
+                assert_eq!(path, ".catervas/repos.yaml");
+                assert!(detail.contains("/repos/1/name"), "{detail}");
+            }
+            other => panic!("a duplicate name is refused, got {other:?}"),
+        }
+    }
 
     #[test]
     fn round_trips_through_yaml() {

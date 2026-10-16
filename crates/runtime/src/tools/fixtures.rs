@@ -226,6 +226,47 @@ impl TestProject {
         Self { repo, deps, kits }
     }
 
+    /// A project folder: this project as `new` makes it, one repository per name in `members`,
+    /// and `repos.yaml` naming each by its name at its canonicalised path, with no integration
+    /// branch. The members are returned so that the test keeps them alive.
+    pub(crate) fn project_folder(
+        name: &str,
+        team: &Team,
+        members: &[&str],
+    ) -> (Self, Vec<TempRepo>) {
+        let project = Self::new(name, team);
+        let repos: Vec<TempRepo> = members
+            .iter()
+            .map(|member| TempRepo::new(&format!("{name}-{member}")))
+            .collect();
+        project.name_members(members, &repos);
+        (project, repos)
+    }
+
+    /// Writes `repos.yaml` naming `members[i]` at `repos[i]`'s canonicalised path.
+    pub(crate) fn name_members(&self, members: &[&str], repos: &[TempRepo]) {
+        let listed: Vec<Value> = members
+            .iter()
+            .zip(repos)
+            .map(|(member, repo)| {
+                json!({
+                    "name": member,
+                    "path": std::fs::canonicalize(&repo.path)
+                        .expect("the member's folder is there")
+                        .display()
+                        .to_string(),
+                })
+            })
+            .collect();
+        self.deps
+            .files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": listed }))
+                    .expect("a list of repositories"),
+            )
+            .expect("repos.yaml is written");
+    }
+
     /// Swaps in `kit` as its role's kit, for this project alone and from now on.
     pub(crate) fn set_kit(&self, kit: catervas_roles::Kit) {
         if let Ok(mut kits) = self.kits.lock() {

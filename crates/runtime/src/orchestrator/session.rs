@@ -2,13 +2,13 @@
 //! costs it reports, and its end.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
-use catervas_core::folders::{read_access, role_folder};
+use catervas_core::folders::{ReadAccess, read_access, role_folder};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 use catervas_core::governor::sites::{WebAccess, web_access};
@@ -17,7 +17,7 @@ use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::pricing::Usage;
 use catervas_core::team::{
     Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
-    private_folder,
+    private_folder, task_private_folder,
 };
 use catervas_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -26,8 +26,10 @@ use catervas_protocol::event::{
 };
 use catervas_roles::{ConnectorDefinition, builtin_connector, load_role};
 use catervas_store::EventQuery;
+use catervas_store::files::ProjectFiles;
 use catervas_store::git::{integration_branch, stale_twins};
 use catervas_store::product_plan::is_the_product_plan;
+use catervas_store::repos::{TaskRepositoryError, repo_present};
 use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
@@ -35,11 +37,13 @@ use super::design::{DECIDE_TOOL, RECORD_DESIGN_REVIEW_TOOL};
 use super::messages::{human_message, preview_address};
 use super::pipeline::DECIDE_PIPELINE_TOOL;
 use super::verify::{append, append_stamped};
-use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
+use super::{
+    OrchestratorDeps, OrchestratorError, TRIAGE_MODEL, repository_refused, task_repository_of,
+};
 use crate::channel::post_system;
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
-use crate::daemon::{SessionRegistration, builtin_tool_tier};
+use crate::daemon::{ReadRoot, SessionRegistration, builtin_tool_tier};
 use crate::exec::Executor;
 use crate::preview::{
     PLAYWRIGHT, PreviewError, RunningPreview, connector_server, designer_browser, disallowed_tools,
@@ -47,7 +51,8 @@ use crate::preview::{
 };
 use crate::prompt::{
     CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, INTERVIEW_INSTRUCTION,
-    JUDGMENT_INSTRUCTION, PIPELINE_DECISION_INSTRUCTION, PromptInput, assemble_system_prompt,
+    JUDGMENT_INSTRUCTION, MemberLine, OwnRepo, PIPELINE_DECISION_INSTRUCTION, PromptInput,
+    assemble_system_prompt,
 };
 use crate::session::{
     EndReason, McpServerConfig, McpTransport, SessionEvent, SessionHandle, SessionPurpose,
@@ -57,6 +62,136 @@ use crate::sessions::{record_session_ended, record_session_started};
 use crate::skills::{SessionSkills, confirmed_skills, session_skills};
 use crate::tools::{CatervasTool, tool_descriptors, writes_the_project};
 use crate::transitions::TransitionAsk;
+
+/// The folders a session may read outside its `cwd` (5.6): every present member of a project
+/// folder but the task's own repository, by name in `repos.yaml` order, then the project folder,
+/// named `project`, unless `cwd` is it. None for a one-repository project, for a role held to read
+/// paths, for a task in a private folder, and when `repos.yaml` cannot be read: reads fail closed
+/// and the session still starts. A folder whose path cannot be written into a `Read(//<path>/...)`
+/// rule is left out, since Claude Code would ignore the settings that held it.
+pub(crate) fn read_roots(
+    files: &ProjectFiles,
+    contract: Option<&TaskContract>,
+    cwd: &Path,
+    role: Role,
+) -> Vec<ReadRoot> {
+    let Some(repos) = members_read(files, contract, role) else {
+        return Vec::new();
+    };
+    let own = contract
+        .and_then(|contract| contract.repo.as_ref())
+        .map(|repo| repo.as_str());
+    let mut roots: Vec<ReadRoot> = repos
+        .repos
+        .iter()
+        .filter(|repo| Some(repo.name.as_str()) != own)
+        .filter(|repo| repo_present(Path::new(repo.path.as_str())))
+        .filter_map(|repo| {
+            Some(ReadRoot {
+                name: repo.name.to_string(),
+                path: std::fs::canonicalize(repo.path.as_str()).ok()?,
+            })
+        })
+        .collect();
+    if let Ok(project) = std::fs::canonicalize(files.root())
+        && std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf()) != project
+    {
+        roots.push(ReadRoot {
+            name: "project".to_string(),
+            path: project,
+        });
+    }
+    roots.retain(|root| expressible_in_a_rule(&root.path));
+    roots
+}
+
+/// The project's member repositories when a session of `role` on `contract` may read them: none
+/// for a one-repository project, for a role held to read paths, for a task in a private folder,
+/// and when `repos.yaml` cannot be read.
+fn members_read(
+    files: &ProjectFiles,
+    contract: Option<&TaskContract>,
+    role: Role,
+) -> Option<catervas_core::repos::Repos> {
+    if read_access(role) != ReadAccess::Open
+        || contract.is_some_and(|contract| task_private_folder(contract).is_some())
+    {
+        return None;
+    }
+    files.read_repos().ok().flatten()
+}
+
+/// The folders `ask`'s session reads outside its working directory, for Claude Code's `--add-dir`.
+fn read_root_paths(deps: &OrchestratorDeps, ask: &SessionAsk<'_>, role: Role) -> Vec<PathBuf> {
+    read_roots(&deps.tools.files, ask.contract, &ask.cwd, role)
+        .into_iter()
+        .map(|root| root.path)
+        .collect()
+}
+
+/// What the Team rules say of the project's repositories for `ask`'s session (8.2): each member
+/// with where it is, whether the session may read it, and whether a command in its sandbox reads it
+/// at `/repos/<name>`; and where the session's task works. None where `read_roots` gives no roots
+/// for the session's role, its task and the project.
+fn member_lines(
+    deps: &OrchestratorDeps,
+    ask: &SessionAsk<'_>,
+    role: Role,
+) -> (Vec<MemberLine>, Option<OwnRepo>) {
+    let files = &deps.tools.files;
+    let Some(repos) = members_read(files, ask.contract, role) else {
+        return (Vec::new(), None);
+    };
+    let roots = read_roots(files, ask.contract, &ask.cwd, role);
+    let own = ask
+        .contract
+        .and_then(|contract| contract.repo.as_ref())
+        .map(|repo| repo.as_str());
+    // A sandbox mounts the other members when there is a task, and Docker.
+    let sandboxed = ask.contract.is_some()
+        && files.read_settings().unwrap_or_default().sandbox
+            != catervas_store::files::Sandbox::None;
+    let members = repos
+        .repos
+        .iter()
+        .map(|repo| {
+            let found = repo_present(Path::new(repo.path.as_str()))
+                .then(|| std::fs::canonicalize(repo.path.as_str()).ok())
+                .flatten();
+            let is_own = Some(repo.name.as_str()) == own;
+            let readable = is_own
+                || found
+                    .as_ref()
+                    .is_some_and(|path| roots.iter().any(|root| &root.path == path));
+            MemberLine {
+                name: repo.name.to_string(),
+                mounted: sandboxed && readable && !is_own && found.is_some(),
+                path: found.map(|path| path.display().to_string()),
+                own: is_own,
+                readable,
+            }
+        })
+        .collect();
+    let own_repo = ask.contract.map(|contract| match &contract.repo {
+        Some(repo) => OwnRepo::Member(repo.to_string()),
+        None => OwnRepo::ProjectFolder,
+    });
+    (members, own_repo)
+}
+
+/// Whether a path can be written into a `Read(//<path>/<glob>)` rule as it is: no parenthesis
+/// or backslash, which Claude Code reads as syntax, no control character, and no glob character,
+/// which would change what the rule matches.
+pub(crate) fn expressible_in_a_rule(path: &Path) -> bool {
+    path.to_str().is_some_and(|text| {
+        !text.chars().any(|character| {
+            matches!(
+                character,
+                '(' | ')' | '\\' | '*' | '?' | '[' | ']' | '{' | '}'
+            ) || character.is_control()
+        })
+    })
+}
 
 /// The one tool a triage session is given.
 pub(super) const TRIAGE_TOOL: &str = "catervas_triage_request";
@@ -163,6 +298,7 @@ pub(super) async fn run_session(
     }
     let (skills, skills_root) = skill_registration(deps, &spec);
     deps.daemon.register_session(SessionRegistration {
+        read_roots: read_roots(&deps.tools.files, ask.contract, &spec.cwd, role),
         session_id: spec.session_id.clone(),
         web: web_access(role),
         reads: read_access(role),
@@ -289,7 +425,7 @@ async fn give_browser(
     else {
         return Ok(Ok(None));
     };
-    let running = match open_preview(deps, contract, ids, &ask.cwd, &preview).await? {
+    let running = match open_preview(deps, team, contract, ids, &ask.cwd, &preview).await? {
         Ok(running) => running,
         Err(error) => return preview_failed(deps, team, contract, spec, ids, &error).map(Err),
     };
@@ -487,13 +623,23 @@ struct Prepared {
 /// `preview.prepared` and `preview.started` are recorded. A preview that fails is the inner error.
 async fn open_preview(
     deps: &OrchestratorDeps,
+    team: &Team,
     contract: &TaskContract,
     ids: &EventIds,
     worktree: &std::path::Path,
     preview: &Preview,
 ) -> Result<Result<Arc<dyn RunningPreview>, PreviewError>, OrchestratorError> {
     let tools = &deps.tools;
-    let tree = tools.git.tree(&task_branch(contract))?;
+    // The task branch lives in the member the task names, so its tree is read there.
+    // One that is not where the project left it ends this session through `preview_failed`.
+    let repository = match task_repository_of(deps, team, contract) {
+        Ok(repository) => repository,
+        Err(TaskRepositoryError::Missing { repo, .. }) => {
+            return Ok(Err(PreviewError::RepositoryMissing { repo }));
+        }
+        Err(error) => return Err(repository_refused(&contract.id, &error)),
+    };
+    let tree = repository.git.tree(&task_branch(contract))?;
     let cache = tools
         .files
         .root()
@@ -1137,6 +1283,7 @@ fn session_spec_without(
     let stale_twins = integration_branch(team, &deps.tools.git)
         .and_then(|branch| stale_twins(&deps.tools.git, &branch))
         .unwrap_or_default();
+    let (members, own_repo) = member_lines(deps, ask, role_id);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
@@ -1159,6 +1306,8 @@ fn session_spec_without(
         connectors: &connectors,
         active_roles: &active_roles,
         stale_twins: &stale_twins,
+        members: &members,
+        own_repo,
         document_format: team.document_format(),
     })?;
     let limits = budget_state(
@@ -1171,6 +1320,7 @@ fn session_spec_without(
     )?
     .session_limits;
     Ok(SessionSpec {
+        read_roots: read_root_paths(deps, ask, role_id),
         session_id: deps.session_ids.session_id(),
         agent_id: ask.agent.id.to_string(),
         task_id: ask.contract.map(|contract| contract.id.clone()),
@@ -1646,6 +1796,100 @@ mod tests {
         }
     }
 
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_tasks_prompt_names_the_projects_repositories() {
+        use catervas_store::files::{LocalSettings, Sandbox};
+
+        let (harness, members) = Harness::project_folder("prompt-repos", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+        let ask = SessionAsk {
+            agent: agent(&team, "dev-a"),
+            contract: Some(&contract),
+            purpose: SessionPurpose::Implement,
+            cwd: harness.worktree("CTV-1"),
+            executor: None,
+            read_only: false,
+            only_tool: None,
+            tools: None,
+            in_reply_to: None,
+            thread: None,
+            initial_prompt: "Start.".to_string(),
+            pipeline: None,
+        };
+        let infra = members[1].path.canonicalize().expect("infra");
+        let line = |spec: &crate::session::SessionSpec| -> String {
+            spec.system_prompt
+                .lines()
+                .find(|line| line.starts_with("- repositories:"))
+                .unwrap_or_default()
+                .to_string()
+        };
+
+        let spec = session_spec(deps, &team, &ask).expect("the spec");
+        assert_eq!(
+            line(&spec),
+            format!(
+                "- repositories: app (your task's repository), infra ({}; /repos/infra in your sandbox). Your task works in app. Read the others; change only your own task's files.",
+                infra.display()
+            )
+        );
+
+        // With no sandbox there is no `/repos/infra`.
+        deps.tools
+            .files
+            .write_settings(&LocalSettings {
+                sandbox: Sandbox::None,
+            })
+            .expect("the settings");
+        let spec = session_spec(deps, &team, &ask).expect("the spec");
+        assert!(!line(&spec).contains("/repos/"), "{}", line(&spec));
+        assert!(line(&spec).contains(&format!("infra ({})", infra.display())));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn knows_which_folders_a_session_reads() {
+        use super::read_roots;
+        use catervas_core::contract::Role;
+
+        let (harness, members) = Harness::project_folder("read-roots", &["app", "infra"]);
+        harness.assigned_in("CTV-1", "iris", "ada", "app");
+        let files = &harness.project.deps.files;
+        let contract = files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+        let names = |roots: Vec<crate::daemon::ReadRoot>| -> Vec<String> {
+            roots.into_iter().map(|root| root.name).collect()
+        };
+        let root = files.root().to_path_buf();
+
+        // A task in `app` reads `infra` and the project folder, never its own repository.
+        let task = read_roots(
+            files,
+            Some(&contract),
+            &harness.worktree("CTV-1"),
+            Role::SoftwareDeveloper,
+        );
+        assert_eq!(task[0].path, members[1].path.canonicalize().expect("infra"));
+        assert_eq!(names(task), ["infra", "project"]);
+        // The Architect planning at the project root reads every member.
+        assert_eq!(
+            names(read_roots(files, None, &root, Role::Architect)),
+            ["app", "infra"]
+        );
+        // The Marketing Specialist reads no member.
+        assert!(read_roots(files, None, &root, Role::MarketingSpecialist).is_empty());
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn prepares_once_per_tree_then_starts() {
@@ -1760,6 +2004,119 @@ mod tests {
             .as_object_mut()
             .expect("a preview")
             .remove("port");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn previews_the_members_branch() {
+        use crate::preview::fixtures::FakePreviews;
+
+        let (mut harness, members) =
+            Harness::project_folder_with("preview-member", &["app", "infra"], browsing);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness.assigned_in("CTV-1", "iris", "ada", "app");
+        harness.project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "iris", "assignee": "iris", "reviewer": "ada" }),
+        );
+        let worktree = harness.worktree("CTV-1");
+        members[0]
+            .adapter()
+            .create_worktree(&worktree, &harness.branch("CTV-1"), "main")
+            .expect("the member makes the worktree");
+        std::fs::write(worktree.join("site.txt"), "one").expect("written");
+        catervas_store::git::fixtures::git_in(&worktree, &["add", "site.txt"]);
+        catervas_store::git::fixtures::git_in(&worktree, &["commit", "-q", "-m", "A page"]);
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness);
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+
+        run_session(deps, &team, exploring(&harness, &team, &contract))
+            .await
+            .expect("the session runs");
+
+        let trees: Vec<String> = harness
+            .events(&[EventKind::PreviewPrepared])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::PreviewPrepared(body) => Some(body.tree.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            trees,
+            [catervas_store::git::fixtures::git_output_in(
+                &members[0].path,
+                &["rev-parse", "feature/CTV-1^{tree}"]
+            )]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_session_whose_members_preview_cannot_open() {
+        use catervas_protocol::event::EscalationRaisedBodyReason;
+
+        use crate::preview::fixtures::FakePreviews;
+
+        let (mut harness, members) =
+            Harness::project_folder_with("preview-member-gone", &["app", "infra"], browsing);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness.assigned_in("CTV-1", "iris", "ada", "app");
+        harness.project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "iris", "assignee": "iris", "reviewer": "ada" }),
+        );
+        members[0]
+            .adapter()
+            .create_worktree(&harness.worktree("CTV-1"), &harness.branch("CTV-1"), "main")
+            .expect("the member makes the worktree");
+        let moved = std::path::PathBuf::from(format!("{}-moved", members[0].path.display()));
+        let _ = std::fs::remove_dir_all(&moved);
+        std::fs::rename(&members[0].path, &moved).expect("the member is moved away");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+
+        let ended = run_session(deps, &team, exploring(&harness, &team, &contract)).await;
+        let _ = std::fs::remove_dir_all(&moved);
+
+        ended.expect("a member that cannot be found is an answer, not an error");
+        assert!(adapter.started().is_empty(), "no session starts");
+        assert_eq!(
+            harness.row("CTV-1").status,
+            catervas_core::contract::TaskStatus::Escalated
+        );
+        let raised = harness.events(&[EventKind::EscalationRaised]);
+        let EventBody::EscalationRaised(body) = &raised[0].body else {
+            panic!("an escalation");
+        };
+        assert_eq!(body.reason, EscalationRaisedBodyReason::Preview);
+        assert!(
+            body.detail.contains("app cannot be found"),
+            "{}",
+            body.detail
+        );
     }
 
     #[tokio::test]

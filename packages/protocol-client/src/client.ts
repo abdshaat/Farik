@@ -30,6 +30,7 @@ export type CommandReply =
 export type MethodName =
 	| "project.open"
 	| "project.create"
+	| "project.create_folder"
 	| "project.leave"
 	| "keys_copied.dismiss"
 	| "connector_suggestion.hide"
@@ -39,6 +40,9 @@ export type MethodName =
 	| "request.file"
 	| "contract.save"
 	| "files.save"
+	| "repo.add"
+	| "repo.remove"
+	| "repo.locate"
 	| "files.ask_change"
 	| "files.rewrite"
 	| "team.save"

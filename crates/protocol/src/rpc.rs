@@ -130,6 +130,42 @@ mod tests {
     }
 
     #[test]
+    fn reads_project_create_folder_of_two_to_sixteen_repositories() {
+        let folder = |count: usize| {
+            let repos: Vec<Value> = (0..count)
+                .map(|n| json!({ "name": format!("r{n}"), "path": format!("code/r{n}") }))
+                .collect();
+            request(
+                1,
+                "project.create_folder",
+                &json!({ "parent": "Catervas", "name": "shop", "repos": repos, "no_sandbox": false }),
+            )
+        };
+        for count in [2, 16] {
+            let good = folder(count);
+            rpc_request_from_value(&good).unwrap_or_else(|e| panic!("{count} refused: {e:?}"));
+        }
+        for count in [0, 1, 17] {
+            assert!(rpc_request_from_value(&folder(count)).is_err(), "{count}");
+        }
+        let with_branch = request(
+            1,
+            "project.create_folder",
+            &json!({
+                "parent": "", "name": "shop", "no_sandbox": true,
+                "repos": [
+                    { "name": "app", "path": "app", "integration_branch": "main" },
+                    { "name": "infra", "path": "infra" },
+                ],
+            }),
+        );
+        rpc_request_from_value(&with_branch).expect("a branch is allowed");
+        let mut unknown = with_branch.clone();
+        unknown["params"]["repos"][0]["mascot"] = json!("a penguin");
+        assert!(rpc_request_from_value(&unknown).is_err());
+    }
+
+    #[test]
     fn reads_the_setup_queries_and_methods() {
         let q = |name: &str, params: Value| {
             request(1, "query", &json!({ "name": name, "params": params }))

@@ -1,5 +1,6 @@
 //! `catervas rules show` and `catervas criteria list`: the two team files a person hand-edits (F15, F16).
 
+use catervas_core::criteria::CriterionTemplate;
 use catervas_store::requests::{criteria_json, criterion_how, criterion_method, rules_json};
 
 use crate::Report;
@@ -45,6 +46,21 @@ pub fn rules(project: &Project) -> Result<Report, String> {
     })
 }
 
+/// One criterion as `catervas criteria list` prints it: its name, method, source, the member it
+/// checks (empty for any), and what it runs, reads or asks.
+fn criterion_line(one: &CriterionTemplate) -> String {
+    format!(
+        "{:<22} {:<9} {:<12} {:<12} {}",
+        one.name.as_str(),
+        criterion_method(&one.verification),
+        one.source
+            .as_ref()
+            .map_or("human".to_string(), ToString::to_string),
+        one.repo.as_ref().map_or("", |repo| repo.as_str()),
+        criterion_how(&one.verification)
+    )
+}
+
 /// The criterion library a contract refers to by name (`docs/SPEC.md` section 5.13).
 ///
 /// # Errors
@@ -65,24 +81,38 @@ pub fn criteria(project: &Project) -> Result<Report, String> {
             json_lines: None,
         });
     }
-    let lines = library
-        .criteria
-        .iter()
-        .map(|one| {
-            format!(
-                "{:<22} {:<9} {:<12} {}",
-                one.name.as_str(),
-                criterion_method(&one.verification),
-                one.source
-                    .as_ref()
-                    .map_or("human".to_string(), ToString::to_string),
-                criterion_how(&one.verification)
-            )
-        })
-        .collect();
+    let lines = library.criteria.iter().map(criterion_line).collect();
     Ok(Report {
         lines,
         json: criteria_json(&library),
         json_lines: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use catervas_core::criteria::validate_criteria;
+    use serde_json::json;
+
+    use super::criterion_line;
+
+    #[test]
+    fn lists_a_criterions_member() {
+        let library = validate_criteria(&json!({ "criteria": [
+            { "name": "app-the-tests-pass", "text": "The tests pass in app.",
+              "source": "project_scan", "repo": "app",
+              "verification": { "method": "test", "command": "npm test" } },
+            { "name": "my-check", "text": "A person wrote this one.",
+              "verification": { "method": "human", "question": "Is it right?" } },
+        ]}))
+        .expect("a library");
+        assert_eq!(
+            criterion_line(&library.criteria[0]),
+            "app-the-tests-pass     test      project_scan app          npm test"
+        );
+        assert_eq!(
+            criterion_line(&library.criteria[1]),
+            "my-check               human     human                     Is it right?"
+        );
+    }
 }

@@ -27,6 +27,48 @@ pub fn role_folder(role: Role) -> Option<&'static str> {
         .find_map(|(owner, folder)| (*owner == role).then_some(*folder))
 }
 
+/// The role folders each repository of a project folder has of its own, under
+/// `docs/catervas/repos/<name>/` (ADR 0057): the same role owns it as owns the project-wide folder
+/// of the same name. Product, delivery and marketing stay project-wide.
+pub const MEMBER_FOLDERS: [(Role, &str); 3] = [
+    (Role::Architect, "architecture"),
+    (Role::SoftwareDeveloper, "engineering"),
+    (Role::UiUxDesigner, "design"),
+];
+
+const MEMBERS_ROOT: &str = "docs/catervas/repos";
+
+/// A role's folder of its own in the repository `repo`, or `None` for a role that has none.
+#[must_use]
+pub fn member_folder(role: Role, repo: &str) -> Option<String> {
+    MEMBER_FOLDERS.iter().find_map(|(owner, segment)| {
+        (*owner == role).then(|| format!("{MEMBERS_ROOT}/{repo}/{segment}"))
+    })
+}
+
+/// The folder that holds `path` and the role that owns it: a role folder, or a member folder of
+/// one of `members`. The path must be at least one segment below the folder.
+#[must_use]
+pub fn folder_of(path: &str, members: &[&str]) -> Option<(Role, String)> {
+    let path = normalise(path)?;
+    let below = |folder: &str| {
+        path.strip_prefix(folder)
+            .is_some_and(|rest| rest.starts_with('/') && rest.len() > 1)
+    };
+    ROLE_FOLDERS
+        .iter()
+        .find(|(_, folder)| below(folder))
+        .map(|(owner, folder)| (*owner, (*folder).to_string()))
+        .or_else(|| {
+            members.iter().find_map(|name| {
+                MEMBER_FOLDERS.iter().find_map(|(owner, _)| {
+                    let folder = member_folder(*owner, name)?;
+                    below(&folder).then_some((*owner, folder))
+                })
+            })
+        })
+}
+
 /// The format a team document is written in: its file's extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentFormat {
@@ -224,8 +266,8 @@ pub enum FolderDocPathRefusal {
     MarketingPlan,
 }
 
-/// Holds a path to a `.md` or `.html` file at least one segment below the role's folder (letter
-/// case counts), not an agent version, and not a human document the owner does not approve here.
+/// Holds a path to a `.md` or `.html` file at least one segment below the role's folder, or the
+/// role's folder of one of `members` (letter case counts), not an agent version, and not a human document the owner does not approve here.
 ///
 /// # Errors
 ///
@@ -233,13 +275,11 @@ pub enum FolderDocPathRefusal {
 pub fn check_folder_doc_path(
     role: Role,
     path: &str,
+    members: &[&str],
 ) -> Result<FolderDocPath, FolderDocPathRefusal> {
-    let folder = role_folder(role).ok_or(FolderDocPathRefusal::NoFolder)?;
+    role_folder(role).ok_or(FolderDocPathRefusal::NoFolder)?;
     let path = normalise(path).ok_or(FolderDocPathRefusal::Outside)?;
-    if !path
-        .strip_prefix(folder)
-        .is_some_and(|rest| rest.starts_with('/') && rest.len() > 1)
-    {
+    if folder_of(&path, members).is_none_or(|(owner, _)| owner != role) {
         return Err(FolderDocPathRefusal::Outside);
     }
     let stem = stem_of(&path).ok_or(FolderDocPathRefusal::NotADocument)?;
@@ -344,7 +384,8 @@ pub fn folder_doc_author(display_name: &str, agent_id: &str) -> String {
     format!("{name} (Catervas) <catervas@localhost>")
 }
 
-/// The commit message of a folder change: `docs(<the folder's last segment>): <each path within
+/// The commit message of a folder change: `docs(<the folder's last segment, or `<repo>-<segment>`
+/// for a member folder>): <each path within
 /// the folder, joined by ", "> by <agent name>`, with `, approved by the owner` after an approval.
 #[must_use]
 pub fn folder_doc_message(
@@ -353,7 +394,13 @@ pub fn folder_doc_message(
     agent_name: &str,
     approved: bool,
 ) -> String {
-    let scope = folder.rsplit('/').next().unwrap_or(folder);
+    let scope = folder
+        .strip_prefix(MEMBERS_ROOT)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .map_or_else(
+            || folder.rsplit('/').next().unwrap_or(folder).to_string(),
+            |rest| rest.replace('/', "-"),
+        );
     let within = format!("{folder}/");
     let names: Vec<&str> = paths
         .iter()
@@ -394,14 +441,27 @@ pub fn plain_name(stem: &str) -> String {
     })
 }
 
+/// A path under `docs/catervas/repos/<name>/` as the same path without those two segments, so a
+/// member's document is named and placed as the project-wide one of its stem; any other path as is.
+fn without_member(path: &str) -> String {
+    path.strip_prefix(MEMBERS_ROOT)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .and_then(|rest| rest.split_once('/'))
+        .map_or_else(
+            || path.to_string(),
+            |(_, rest)| format!("docs/catervas/{rest}"),
+        )
+}
+
 /// What the Files page calls a document: its fixed name, "Plan: <title>" for a file directly in a
 /// folder's `plans/` whose stem `title_of` knows, else its file stem as [`plain_name`] has it.
 #[must_use]
 pub fn document_name(path: &str, title_of: &dyn Fn(&str) -> Option<String>) -> String {
     let path = normalise(path).unwrap_or_else(|| path.to_string());
+    let project_wide = without_member(&path);
     if let Some((_, name)) = DOCUMENT_STEMS
         .iter()
-        .find(|(known, _)| stem_of(&path) == Some(*known))
+        .find(|(known, _)| stem_of(&project_wide) == Some(*known))
     {
         return (*name).to_string();
     }
@@ -421,7 +481,7 @@ pub fn document_name(path: &str, title_of: &dyn Fn(&str) -> Option<String>) -> S
 pub fn document_order(path: &str) -> (usize, String) {
     let place = DOCUMENT_STEMS
         .iter()
-        .position(|(known, _)| stem_of(path) == Some(*known))
+        .position(|(known, _)| stem_of(&without_member(path)) == Some(*known))
         .unwrap_or(DOCUMENT_STEMS.len());
     (place, path.to_string())
 }
@@ -586,9 +646,10 @@ impl ReadAccess {
 }
 
 /// The Team rules' line about folders (`docs/SPEC.md` 5.17): each folder of an active role, and of
-/// the reader's own, in table order; which one is the reader's; how to read them.
+/// the reader's own, in table order; which one is the reader's; how to read them; and, in a
+/// project folder, the reader's member folders.
 #[must_use]
-pub fn folders_line(role: Role, active_roles: &[Role]) -> String {
+pub fn folders_line(role: Role, active_roles: &[Role], members: &[&str]) -> String {
     let listed: Vec<String> = ROLE_FOLDERS
         .iter()
         .filter(|(owner, _)| *owner == role || active_roles.contains(owner))
@@ -608,7 +669,27 @@ pub fn folders_line(role: Role, active_roles: &[Role]) -> String {
             held.named()
         ),
     };
-    format!("- folders: {}. {yours} {reading}", listed.join(", "))
+    let own = member_folders_sentence(role, members);
+    format!("- folders: {}. {yours} {reading}{own}", listed.join(", "))
+}
+
+/// ` Each repository has its own <segment>/ folder at <list>, which is yours too.` for a role with
+/// member folders in a project folder of `members`, else nothing.
+fn member_folders_sentence(role: Role, members: &[&str]) -> String {
+    let Some((_, segment)) = MEMBER_FOLDERS.iter().find(|(owner, _)| *owner == role) else {
+        return String::new();
+    };
+    let Some((final_name, others)) = members.split_last() else {
+        return String::new();
+    };
+    let at = |name: &str| format!("repos/{name}/{segment}/");
+    let places = if others.is_empty() {
+        at(final_name)
+    } else {
+        let first: Vec<String> = others.iter().map(|name| at(name)).collect();
+        format!("{} and {}", first.join(", "), at(final_name))
+    };
+    format!(" Each repository has its own {segment}/ folder at {places}, which is yours too.")
 }
 
 /// How a line of a document differs between two versions.
@@ -776,7 +857,7 @@ mod tests {
     use super::{
         DocumentFormat, FolderDocPathRefusal, FormatRefusal, OWNER_ACCEPTED_STEMS, ROLE_FOLDERS,
         ReadAccess, agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
-        folder_doc_message, folders_line, format_line, human_of_twin, is_human_document,
+        folder_doc_message, folder_of, folders_line, format_line, human_of_twin, is_human_document,
         is_plan_of, pair_changed_alone, plan_stem, product_plan_approved, read_access, role_folder,
         stem_of, with_format,
     };
@@ -1139,6 +1220,7 @@ mod tests {
                 Role::MarketingSpecialist,
                 Role::FinanceSpecialist,
             ],
+            &[],
         );
         assert_eq!(
             line,
@@ -1151,20 +1233,20 @@ mod tests {
     #[test]
     fn tells_a_role_without_a_folder_to_write_none() {
         assert_eq!(
-            folders_line(Role::FinanceSpecialist, &[Role::ProductManager]),
+            folders_line(Role::FinanceSpecialist, &[Role::ProductManager], &[]),
             format!(
                 "- folders: docs/catervas/product/ (Product Manager). You have none: write none of them. {READ}"
             )
         );
         assert_eq!(
-            folders_line(Role::FinanceSpecialist, &[]),
+            folders_line(Role::FinanceSpecialist, &[], &[]),
             "- folders: none"
         );
     }
 
     #[test]
     fn lists_the_readers_own_folder_when_it_is_not_active() {
-        let line = folders_line(Role::Architect, &[Role::ProductManager]);
+        let line = folders_line(Role::Architect, &[Role::ProductManager], &[]);
         assert!(
             line.starts_with(
                 "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect). Yours is docs/catervas/architecture/"
@@ -1237,7 +1319,8 @@ mod tests {
                     Role::ProductManager,
                     Role::Architect,
                     Role::MarketingSpecialist
-                ]
+                ],
+                &[]
             ),
             "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read only docs/catervas/product/ and docs/catervas/marketing/: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
         );
@@ -1255,7 +1338,7 @@ mod tests {
                 "docs/catervas/delivery/notes/s4.md",
             ),
         ] {
-            let ok = check_folder_doc_path(Role::ScrumMaster, path).expect(path);
+            let ok = check_folder_doc_path(Role::ScrumMaster, path, &[]).expect(path);
             assert_eq!((ok.path.as_str(), ok.owner_accepted), (normalised, false));
         }
         for path in [
@@ -1266,44 +1349,46 @@ mod tests {
             "Docs/catervas/delivery/x.md",
         ] {
             assert_eq!(
-                check_folder_doc_path(Role::ScrumMaster, path),
+                check_folder_doc_path(Role::ScrumMaster, path, &[]),
                 Err(FolderDocPathRefusal::Outside),
                 "{path}"
             );
         }
         assert_eq!(
-            check_folder_doc_path(Role::ScrumMaster, "docs/catervas/delivery/x.txt"),
+            check_folder_doc_path(Role::ScrumMaster, "docs/catervas/delivery/x.txt", &[]),
             Err(FolderDocPathRefusal::NotADocument)
         );
         assert_eq!(
-            check_folder_doc_path(Role::ScrumMaster, "docs/catervas/delivery/x.agent.md"),
+            check_folder_doc_path(Role::ScrumMaster, "docs/catervas/delivery/x.agent.md", &[]),
             Err(FolderDocPathRefusal::AgentTwin)
         );
         for name in ["spec.md", "roadmap.md"] {
-            let ok = check_folder_doc_path(Role::ProductManager, &product(name)).expect(name);
+            let ok = check_folder_doc_path(Role::ProductManager, &product(name), &[]).expect(name);
             assert!(ok.owner_accepted, "{name}");
         }
         assert!(
-            !check_folder_doc_path(Role::ProductManager, &product("notes.md"))
+            !check_folder_doc_path(Role::ProductManager, &product("notes.md"), &[])
                 .expect("notes")
                 .owner_accepted
         );
         assert_eq!(
             check_folder_doc_path(
                 Role::MarketingSpecialist,
-                "docs/catervas/marketing/plans/MP-3.md"
+                "docs/catervas/marketing/plans/MP-3.md",
+                &[]
             ),
             Err(FolderDocPathRefusal::MarketingPlan)
         );
         assert!(
             check_folder_doc_path(
                 Role::MarketingSpecialist,
-                "docs/catervas/marketing/plans/notes.md"
+                "docs/catervas/marketing/plans/notes.md",
+                &[]
             )
             .is_ok()
         );
         assert_eq!(
-            check_folder_doc_path(Role::FinanceSpecialist, "docs/catervas/finance/x.md"),
+            check_folder_doc_path(Role::FinanceSpecialist, "docs/catervas/finance/x.md", &[]),
             Err(FolderDocPathRefusal::NoFolder)
         );
         assert_eq!(OWNER_ACCEPTED_STEMS, [product("spec"), product("roadmap")]);
@@ -1543,7 +1628,7 @@ mod tests {
 
     #[test]
     fn folder_doc_path_takes_md_and_html() {
-        let architect = |path: &str| check_folder_doc_path(Role::Architect, &cat(path));
+        let architect = |path: &str| check_folder_doc_path(Role::Architect, &cat(path), &[]);
         assert!(architect("architecture/overview.html").is_ok());
         assert_eq!(
             architect("architecture/overview.txt"),
@@ -1554,10 +1639,14 @@ mod tests {
             Err(FolderDocPathRefusal::AgentTwin)
         );
         assert_eq!(
-            check_folder_doc_path(Role::MarketingSpecialist, &cat("marketing/plans/MP-2.html")),
+            check_folder_doc_path(
+                Role::MarketingSpecialist,
+                &cat("marketing/plans/MP-2.html"),
+                &[]
+            ),
             Err(FolderDocPathRefusal::MarketingPlan)
         );
-        let spec = check_folder_doc_path(Role::ProductManager, &cat("product/spec.html"));
+        let spec = check_folder_doc_path(Role::ProductManager, &cat("product/spec.html"), &[]);
         assert!(spec.expect("spec").owner_accepted);
     }
 
@@ -1727,6 +1816,87 @@ mod tests {
 
     #[test]
     fn folders_line_names_either_agent_version() {
-        assert!(folders_line(Role::Architect, &[]).contains(".agent.html or .agent.md"));
+        assert!(folders_line(Role::Architect, &[], &[]).contains(".agent.html or .agent.md"));
+    }
+
+    #[test]
+    fn gives_each_member_its_own_role_folders() {
+        let app = |tail: &str| format!("docs/catervas/repos/app/{tail}");
+        let members = ["app", "infra"];
+        assert_eq!(
+            folder_of(&app("architecture/overview.md"), &members),
+            Some((
+                Role::Architect,
+                "docs/catervas/repos/app/architecture".to_string()
+            ))
+        );
+        assert_eq!(
+            folder_of(
+                "docs/catervas/repos/infra/engineering/conventions.md",
+                &members
+            )
+            .map(|(role, _)| role),
+            Some(Role::SoftwareDeveloper)
+        );
+        assert_eq!(
+            folder_of("docs/catervas/architecture/system.html", &members),
+            Some((Role::Architect, "docs/catervas/architecture".to_string()))
+        );
+        for none in [
+            "docs/catervas/repos/web/architecture/x.md",
+            "docs/catervas/repos/app/product/x.md",
+            "docs/catervas/repos/app/x.md",
+        ] {
+            assert_eq!(folder_of(none, &members), None, "{none}");
+        }
+        // The write tool takes only the caller's own member folders.
+        let features = app("architecture/features.md");
+        assert!(check_folder_doc_path(Role::Architect, &features, &["app"]).is_ok());
+        for refused in [
+            check_folder_doc_path(Role::SoftwareDeveloper, &features, &["app"]),
+            check_folder_doc_path(Role::Architect, &features, &[]),
+        ] {
+            assert_eq!(refused.unwrap_err(), FolderDocPathRefusal::Outside);
+        }
+        assert!(
+            check_folder_doc_path(
+                Role::SoftwareDeveloper,
+                &app("engineering/workflow.md"),
+                &["app"]
+            )
+            .is_ok()
+        );
+        // The Files page names a member's document as the project's own.
+        let none = |_: &str| None;
+        assert_eq!(
+            document_name(&app("architecture/overview.html"), &none),
+            "Overview"
+        );
+        assert_eq!(
+            document_order(&app("architecture/overview.html")).0,
+            document_order("docs/catervas/architecture/overview.md").0
+        );
+        let title_of = |stem: &str| (stem == "CTV-1").then(|| "Login".to_string());
+        assert_eq!(
+            document_name(&app("architecture/plans/CTV-1.html"), &title_of),
+            "CTV 1"
+        );
+        // Each session is told its member folders; the commit scope names the repository.
+        let line = folders_line(Role::Architect, &[Role::Architect], &["app", "infra"]);
+        assert!(line.ends_with(
+            "Each repository has its own architecture/ folder at repos/app/architecture/ and repos/infra/architecture/, which is yours too."
+        ), "{line}");
+        assert!(
+            !folders_line(Role::Architect, &[Role::Architect], &[]).contains("Each repository")
+        );
+        assert_eq!(
+            folder_doc_message(
+                "docs/catervas/repos/app/architecture",
+                &["docs/catervas/repos/app/architecture/features.html"],
+                "Ada",
+                false
+            ),
+            "docs(app-architecture): features.html by Ada"
+        );
     }
 }

@@ -257,6 +257,93 @@ fn writes_a_starter_team_that_merges_on_its_own() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn inits_a_project_folder_from_its_members() {
+    // A project folder is scanned through its members and never as itself: its README is in no
+    // read-back, and its one scan is the members' joined.
+    let app = TempRepo::new("cli-init-folder-app");
+    app.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+    app.write(
+        "package.json",
+        "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\"}}\n",
+    );
+    app.write("src/index.ts", "export const one = 1;\n");
+    app.commit_at("an app", COMMITTED);
+    let infra = a_repository("cli-init-folder-infra");
+    let folder = TempRepo::new("cli-init-folder");
+    let listed: Vec<Value> = [("app", &app), ("infra", &infra)]
+        .iter()
+        .map(|(name, member)| {
+            json!({
+                "name": name,
+                "path": std::fs::canonicalize(&member.path).expect("there").display().to_string(),
+            })
+        })
+        .collect();
+    files_of(&folder)
+        .write_repos(
+            &catervas_core::repos::validate_repos(&json!({ "repos": listed }))
+                .expect("a list of repositories"),
+        )
+        .expect("repos.yaml is written");
+
+    let ran = run_in(&folder.path, &["init"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let said = |member: &TempRepo| {
+        catervas_store::scan_project(&member.adapter(), at())
+            .expect("the member scans")
+            .read_back
+    };
+    let read_back = format!("app: {}; infra: {}", said(&app), said(&infra));
+    assert_eq!(
+        ran.out.lines().next(),
+        Some(read_back.as_str()),
+        "{}",
+        ran.out
+    );
+    let files = files_of(&folder);
+    assert_eq!(
+        files
+            .read_criteria()
+            .expect("a library was written")
+            .criteria
+            .iter()
+            .map(|one| one.name.as_str().to_string())
+            .collect::<Vec<_>>(),
+        [
+            "app-the-tests-pass",
+            "infra-the-tests-pass",
+            "infra-the-build-succeeds",
+            "infra-clippy-is-clean",
+            "infra-formatting-is-clean"
+        ]
+    );
+    assert_eq!(
+        kinds_in(&folder),
+        ["team.updated", "project.scanned", "criteria.updated"],
+        "the members' one scan and one library, nothing for the folder itself"
+    );
+    let log =
+        catervas_store::open_event_log(&folder.path.join(".catervas/local/catervas.db"), at())
+            .expect("the log opens");
+    let events = log
+        .read(&catervas_store::EventQuery::default())
+        .expect("the log reads");
+    let catervas_protocol::event::EventBody::ProjectScanned(scanned) = &events[1].body else {
+        panic!("a project.scanned second");
+    };
+    assert_eq!(scanned.read_back, read_back);
+    let catervas_protocol::event::EventBody::CriteriaUpdated(updated) = &events[2].body else {
+        panic!("a criteria.updated third");
+    };
+    assert_eq!(updated.updated_by, "human");
+    let document = files.read_project_scan().expect("project.md was written");
+    assert!(document.contains(&read_back), "{document}");
+    assert!(!document.contains("README"), "{document}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn keeps_the_team_id_the_first_init_gave_after_the_team_is_renamed() {
     // The ids are fixed by the log's first event, so renaming the team does not split one
     // project's log in two (section 3).

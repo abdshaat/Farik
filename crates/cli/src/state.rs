@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::CliIo;
+
 /// The state folder: `$XDG_CONFIG_HOME/catervas`, else `$HOME/.config/catervas`, else `%APPDATA%\catervas`,
 /// and `None` when none is set, when nothing is remembered. The environment is the harness's, not
 /// the process's, so a test sets its own.
@@ -13,6 +15,15 @@ pub(crate) fn state_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
         .map(|base| PathBuf::from(base).join("catervas"))
         .or_else(|| set("HOME").map(|home| PathBuf::from(home).join(".config/catervas")))
         .or_else(|| set("APPDATA").map(|base| PathBuf::from(base).join("catervas")))
+}
+
+/// Home: `HOME` when it is set and not empty, else where the command was run. A project folder's
+/// member repositories, and the folders the first-run wizard browses, are relative to it.
+pub(crate) fn home_of(io: &CliIo<'_>) -> PathBuf {
+    io.env
+        .get("HOME")
+        .filter(|home| !home.is_empty())
+        .map_or_else(|| io.cwd.clone(), PathBuf::from)
 }
 
 /// Makes the state folder `directory` with mode 0700, when it is not there, and sets 0700 on one

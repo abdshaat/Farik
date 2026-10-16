@@ -3,14 +3,16 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use catervas_core::criteria::CriteriaLibrary;
 use catervas_core::team::{Team, defaults, validate_team};
-use catervas_protocol::event::EventBody;
+use catervas_protocol::event::{EventBody, EventIds};
 use catervas_protocol::generated::event::{
     CriteriaUpdatedBody, ProjectScannedBody, TeamUpdatedBody,
 };
 use catervas_store::files::{FilesError, ProjectFiles};
 use catervas_store::{
-    Git, ProjectScan, names_of, open_event_log, project_document, scan_project, seeded_library,
+    EventQuery, Git, ProjectScan, names_of, open_event_log, project_document, rescan_members,
+    scan_project, seeded_library,
 };
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -32,9 +34,14 @@ use crate::{HUMAN, Report};
 /// what could not be written.
 pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
     let root = repository_root(cwd)?;
-    let git = Git::open(root.clone());
-    let scan: ProjectScan = scan_project(&git, now).map_err(|error| error.to_string())?;
     let files = ProjectFiles::open(root.clone());
+    // A project folder is read through its members and never as itself (ADR 0057): its own scan
+    // would wipe the members' checks, and its README is not what the project is.
+    let scan: Option<ProjectScan> = if files.is_project_folder() {
+        None
+    } else {
+        Some(scan_project(&Git::open(root.clone()), now).map_err(|error| error.to_string())?)
+    };
 
     // A file that is there and cannot be read is not a file that is absent. `init` writes nothing
     // over it and refuses instead: `ProjectFiles::init` would leave a broken team file where it is
@@ -53,15 +60,10 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
         None => starter_team(&directory_name(&root))?,
     };
     files.init(&team).map_err(|error| error.to_string())?;
-
-    let library = seeded_library(&scan.detected_criteria, kept.as_ref());
-    files
-        .write_criteria(&library)
-        .map_err(|error| error.to_string())?;
-    let previous = files.read_project_scan().ok();
-    files
-        .write_project_scan(&project_document(&scan, &library, previous.as_deref()))
-        .map_err(|error| error.to_string())?;
+    let library = scan
+        .as_ref()
+        .map(|scan| write_the_scan(&files, scan, kept.as_ref()))
+        .transpose()?;
 
     let log =
         Arc::new(open_event_log(&root.join(DATABASE), now).map_err(|error| error.to_string())?);
@@ -95,6 +97,78 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
         )?;
         recorded.push(project.append(&event)?);
     }
+    let read_back = match (&scan, &library) {
+        (Some(scan), Some(library)) => {
+            record_the_scan(&project, scan, library, now, &mut recorded)?
+        }
+        _ => record_the_members(&project, now, &mut recorded)?,
+    };
+    let criteria = names_of(
+        &project
+            .files
+            .read_criteria()
+            .map_err(|e| e.to_string())?
+            .criteria,
+    );
+
+    let mut lines = vec![read_back.clone()];
+    if team_was_written {
+        lines.push(format!(
+            "wrote .catervas/team.yaml: {}",
+            agent_ids.join(", ")
+        ));
+        lines.push(AUTO_MERGE_NOTICE.to_string());
+    } else {
+        lines.push("kept the team already in .catervas/team.yaml".to_string());
+    }
+    lines.push(match criteria.len() {
+        0 => "no criteria: nothing in this repository says how it is tested".to_string(),
+        count => format!(
+            "{count} criteria in .catervas/team/criteria.yaml: {}",
+            criteria.join(", ")
+        ),
+    });
+    Ok(Report {
+        lines,
+        json: json!({
+            "root": root.display().to_string(),
+            "read_back": read_back,
+            "team_written": team_was_written,
+            "criteria": criteria,
+            "events": recorded,
+        }),
+        json_lines: None,
+    })
+}
+
+/// Writes the criterion library and `project.md` a scan of the project itself gives, keeping what a
+/// person wrote, and answers the library.
+fn write_the_scan(
+    files: &ProjectFiles,
+    scan: &ProjectScan,
+    kept: Option<&CriteriaLibrary>,
+) -> Result<CriteriaLibrary, String> {
+    let library = seeded_library(&scan.detected_criteria, kept);
+    files
+        .write_criteria(&library)
+        .map_err(|error| error.to_string())?;
+    let previous = files.read_project_scan().ok();
+    let document = project_document(&scan.read_back, &library, &[], previous.as_deref());
+    files
+        .write_project_scan(&document)
+        .map_err(|error| error.to_string())?;
+    Ok(library)
+}
+
+/// Records `project.scanned` and `criteria.updated` for the scan of the project itself, and answers
+/// what it read back.
+fn record_the_scan(
+    project: &crate::Project,
+    scan: &ProjectScan,
+    library: &CriteriaLibrary,
+    now: DateTime<Utc>,
+    recorded: &mut Vec<u64>,
+) -> Result<String, String> {
     let event = project.event(
         EventBody::ProjectScanned(ProjectScannedBody {
             detected_criteria: names_of(&scan.detected_criteria),
@@ -113,35 +187,42 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
         None,
     )?;
     recorded.push(project.append(&event)?);
+    Ok(scan.read_back.clone())
+}
 
-    let mut lines = vec![scan.read_back.clone()];
-    if team_was_written {
-        lines.push(format!(
-            "wrote .catervas/team.yaml: {}",
-            agent_ids.join(", ")
-        ));
-        lines.push(AUTO_MERGE_NOTICE.to_string());
-    } else {
-        lines.push("kept the team already in .catervas/team.yaml".to_string());
-    }
-    lines.push(match names_of(&library.criteria).len() {
-        0 => "no criteria: nothing in this repository says how it is tested".to_string(),
-        count => format!(
-            "{count} criteria in .catervas/team/criteria.yaml: {}",
-            names_of(&library.criteria).join(", ")
-        ),
-    });
-    Ok(Report {
-        lines,
-        json: json!({
-            "root": root.display().to_string(),
-            "read_back": scan.read_back,
-            "team_written": team_was_written,
-            "criteria": names_of(&library.criteria),
-            "events": recorded,
-        }),
-        json_lines: None,
-    })
+/// Scans a project folder's members (`rescan_members`, which writes the library and `project.md`
+/// and records both events), and answers the read-back it joined.
+fn record_the_members(
+    project: &crate::Project,
+    now: DateTime<Utc>,
+    recorded: &mut Vec<u64>,
+) -> Result<String, String> {
+    let newest = project
+        .log
+        .read(&EventQuery {
+            newest_first: true,
+            limit: Some(1),
+            ..EventQuery::default()
+        })
+        .map_err(|error| error.to_string())?
+        .first()
+        .map_or(0, |event| event.envelope.seq);
+    let ids = EventIds {
+        team_id: project.ids.team_id.clone(),
+        project_id: project.ids.project_id.clone(),
+        ..EventIds::default()
+    };
+    let scanned = rescan_members(&project.files, &project.log, &ids, now, None, HUMAN)
+        .map_err(|error| error.to_string())?;
+    let appended = project
+        .log
+        .read(&EventQuery {
+            after_seq: Some(newest),
+            ..EventQuery::default()
+        })
+        .map_err(|error| error.to_string())?;
+    recorded.extend(appended.iter().map(|event| event.envelope.seq));
+    Ok(scanned.read_back)
 }
 
 /// What the report says when it writes the starter team, whose policy pushes to `origin` on the

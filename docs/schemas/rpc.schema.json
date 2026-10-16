@@ -76,7 +76,8 @@
         "seller_replies.list",
         "folder_doc_proposals.list",
         "files.tree",
-        "files.read"
+        "files.read",
+        "repos.list"
       ]
     },
     "subscribeRequest": {
@@ -320,6 +321,9 @@
               "$ref": "#/$defs/filesReadQuery"
             },
             {
+              "$ref": "#/$defs/reposListQuery"
+            },
+            {
               "$ref": "#/$defs/purchaseOrdersListQuery"
             },
             {
@@ -509,6 +513,9 @@
           "$ref": "#/$defs/projectCreateRequest"
         },
         {
+          "$ref": "#/$defs/projectCreateFolderRequest"
+        },
+        {
           "$ref": "#/$defs/accountConnectRequest"
         },
         {
@@ -534,6 +541,15 @@
         },
         {
           "$ref": "#/$defs/filesSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/repoAddRequest"
+        },
+        {
+          "$ref": "#/$defs/repoRemoveRequest"
+        },
+        {
+          "$ref": "#/$defs/repoLocateRequest"
         },
         {
           "$ref": "#/$defs/filesAskChangeRequest"
@@ -633,7 +649,7 @@
         },
         "result": {
           "type": "object",
-          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
+          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, which project.create_folder answers too, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
         }
       }
     },
@@ -1540,6 +1556,43 @@
             "description",
             "no_sandbox"
           ]
+        }
+      }
+    },
+    "projectCreateFolderRequest": {
+      "title": "Project Create Folder Request",
+      "description": "Makes the project folder parent/name, relative to home, of two to sixteen existing repositories (docs/SPEC.md 4.1; ADR 0057): a local git repository with no remote, holding .catervas/ and docs/catervas/, whose .catervas/repos.yaml lists repos. parent need not exist yet. Every check runs before anything is made, and a refusal is -32005 with a sentence that ends, for a repository, in its path as sent. Answers projectCreateResult. Records team.paused (or, while a project is being left, carries its team) and one repo.added for each repository, and no project.started.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "project.create_folder" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["parent", "name", "repos", "no_sandbox"],
+          "properties": {
+            "parent": { "type": "string" },
+            "name": { "type": "string" },
+            "repos": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "path"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "path": { "type": "string", "description": "The repository's top folder, relative to home." },
+                  "integration_branch": { "type": "string" }
+                }
+              }
+            },
+            "no_sandbox": { "type": "boolean" }
+          }
         }
       }
     },
@@ -2745,6 +2798,100 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "reposListQuery": {
+      "title": "Repos List Query",
+      "description": "The member repositories of a project folder (docs/SPEC.md 4.1; ADR 0057), as reposListResult shapes them. A project of one repository has no .catervas/repos.yaml and answers repos null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "repos.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "reposListResult": {
+      "description": "repos is null for a project of one repository, else the members in the order .catervas/repos.yaml lists them: name, path (canonical, absolute), integration_branch as written or null for the repository's default branch, and missing, true when path is not a directory or git's top folder of it is not path itself (a fact read when asked, with no event).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repos"],
+      "properties": {
+        "repos": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "path", "integration_branch", "missing"],
+            "properties": {
+              "name": { "type": "string" },
+              "path": { "type": "string" },
+              "integration_branch": { "type": ["string", "null"] },
+              "missing": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "repoAddRequest": {
+      "title": "Repo Add Request",
+      "description": "Adds a repository to a project folder (docs/SPEC.md 4.1; ADR 0057): path is relative to home. Refused with -32005 and data.errors, each with path (a JSON pointer), message and code: not_a_project_folder (/, no .catervas/repos.yaml), then not_there, outside_home, home_itself, not_a_repository, not_the_top, has_team (/path), repo_name, name_taken (/name), path_taken, nested, inside_project_folder, holds_project_folder (/path), too_many_repos (/name) and no_such_branch (/integration_branch). Writes .catervas/repos.yaml, then records repo.added. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "repo.add" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "path"],
+          "properties": {
+            "name": { "type": "string" },
+            "path": { "type": "string" },
+            "integration_branch": { "type": "string" }
+          }
+        }
+      }
+    },
+    "repoRemoveRequest": {
+      "title": "Repo Remove Request",
+      "description": "Removes a repository from a project folder, touching no file of the repository (docs/SPEC.md 4.1; ADR 0057). -32002 when no member has the name; refused with -32005 and data.errors last_repo (/name) when it is the only member. Writes .catervas/repos.yaml, then records repo.removed. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "repo.remove" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": { "name": { "type": "string" } }
+        }
+      }
+    },
+    "repoLocateRequest": {
+      "title": "Repo Locate Request",
+      "description": "Records where a member repository is now (docs/SPEC.md 4.1; ADR 0057): path is relative to home, and is held to the checks repo.add holds a path to, the member itself left out of the others. It works whether or not the member is missing. -32002 when no member has the name. Writes .catervas/repos.yaml, then records repo.moved. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "repo.locate" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "path"],
+          "properties": {
+            "name": { "type": "string" },
+            "path": { "type": "string" }
           }
         }
       }
@@ -5457,6 +5604,63 @@
         }
       }
     },
+    "scanFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "toolchain",
+        "workspace",
+        "packages",
+        "tests_in",
+        "tracked_files",
+        "last_commit"
+      ],
+      "properties": {
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The language with the most tracked files."
+        },
+        "toolchain": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The toolchain's name."
+        },
+        "workspace": {
+          "type": "boolean",
+          "description": "Whether the project is a workspace."
+        },
+        "packages": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many packages the workspace has."
+        },
+        "tests_in": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where the tests are, as a location."
+        },
+        "tracked_files": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many files git tracks."
+        },
+        "last_commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "How long ago the last commit was, in words; null before the first commit."
+        }
+      }
+    },
     "projectScanResult": {
       "type": "object",
       "additionalProperties": false,
@@ -5464,65 +5668,12 @@
         "facts",
         "checks",
         "app_start",
-        "kept_private"
+        "kept_private",
+        "repos"
       ],
       "properties": {
         "facts": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "language",
-            "toolchain",
-            "workspace",
-            "packages",
-            "tests_in",
-            "tracked_files",
-            "last_commit"
-          ],
-          "properties": {
-            "language": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "The language with the most tracked files."
-            },
-            "toolchain": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "The toolchain's name."
-            },
-            "workspace": {
-              "type": "boolean",
-              "description": "Whether the project is a workspace."
-            },
-            "packages": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "How many packages the workspace has."
-            },
-            "tests_in": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "Where the tests are, as a location."
-            },
-            "tracked_files": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "How many files git tracks."
-            },
-            "last_commit": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "How long ago the last commit was, in words; null before the first commit."
-            }
-          }
+          "$ref": "#/$defs/scanFacts"
         },
         "checks": {
           "type": "array",
@@ -5559,6 +5710,54 @@
             "type": "string"
           },
           "description": "The protected-path globs that match something on disk, walked four folders deep without .git and node_modules, over at most 2000 entries."
+        },
+        "repos": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "facts",
+              "checks",
+              "error"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The member repository's name."
+              },
+              "facts": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/scanFacts"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What the scan found in the member, shaped as the project's own facts; null when the member is not there or its scan failed."
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The text of each check the member's scan found; empty when it was not read."
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why the member was not read: not found, or the scan's own sentence; null when it was read."
+              }
+            }
+          },
+          "description": "One row per member repository in repos.yaml order, each from a scan of that member alone; null for a project of one repository. The facts, checks and app_start above stay the project folder's own."
         }
       }
     },

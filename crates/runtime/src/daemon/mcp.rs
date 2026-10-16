@@ -562,6 +562,7 @@ mod tests {
             .write_team(&a_team_of_three(with_the_designer))
             .expect("the Designer joins");
         daemon.state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: "session-iris".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,

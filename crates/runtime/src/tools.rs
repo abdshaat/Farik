@@ -18,6 +18,7 @@ use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{CatervasEvent, EventBody, EventIds, Thread, new_event};
 use catervas_roles::{Kit, KitError};
 use catervas_store::files::ProjectFiles;
+use catervas_store::repos::{TaskRepository, task_repository};
 use catervas_store::{EventLog, Git, Projections, TaskProjection};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -644,6 +645,20 @@ impl Call<'_> {
         contract.reviewer.clone_from(&row.reviewer_id);
         contract.iteration = row.iteration.into();
         Ok((contract, row))
+    }
+
+    /// The repository `contract` works in: the project folder's own, or the member it names.
+    pub(crate) fn task_repository(
+        &self,
+        contract: &TaskContract,
+    ) -> Result<TaskRepository, ToolError> {
+        task_repository(
+            &self.deps().files,
+            &self.team,
+            &self.deps().git,
+            contract.repo.as_ref().map(|repo| repo.as_str()),
+        )
+        .map_err(failed)
     }
 
     /// The board's row of `task`, or `no_such_task`.

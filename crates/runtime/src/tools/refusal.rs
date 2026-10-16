@@ -503,6 +503,13 @@ fn contract_write(refusal: &ContractWriteRefusal) -> (&'static str, String) {
             "unknown_fields",
             format!("{} are not fields of a contract", listed(fields)),
         ),
+        ContractWriteRefusal::RepoFixed { repo } => (
+            "repo_fixed",
+            format!(
+                "repo is fixed once set: this task stays in {repo}; cancel it and file another \
+                 to change repositories"
+            ),
+        ),
     }
 }
 
@@ -511,5 +518,24 @@ impl From<Refusal> for ToolError {
         ToolError::Refused {
             reason: refusal.reason(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use catervas_core::governor::gates::ContractWriteRefusal;
+
+    use super::Refusal;
+
+    #[test]
+    fn says_a_repo_is_fixed_once_set() {
+        let refusal = Refusal::ContractWrite(ContractWriteRefusal::RepoFixed {
+            repo: "app".to_string(),
+        });
+        assert_eq!(
+            refusal.reason(),
+            "repo_fixed: repo is fixed once set: this task stays in app; cancel it and file \
+             another to change repositories"
+        );
     }
 }

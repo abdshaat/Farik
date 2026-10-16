@@ -26,6 +26,16 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::AssigneeAvailable => {
             "Nobody on the team has the role this task is for. Add one on the Team page."
         }
+        ReadinessRule::RepoNotAllowed => {
+            "The plan names a repository where the work does not belong in one."
+        }
+        ReadinessRule::RepoRequired => {
+            "The plan changes code in a project with several repositories and does not say which one."
+        }
+        ReadinessRule::RepoUnknown => "The plan names a repository this project does not have.",
+        ReadinessRule::EpicCommandInProjectFolder => {
+            "The epic asks for a command to run, and with several repositories its tasks run them. Move it to the tasks."
+        }
         ReadinessRule::OutOfScopePresent => "The plan does not say what it leaves out.",
         ReadinessRule::DependenciesReady => "Work this plan depends on is not ready yet.",
         ReadinessRule::RequiredCriteriaPresent => {
@@ -82,7 +92,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 28] = [
+    const EVERY_RULE: [ReadinessRule; 32] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
@@ -91,6 +101,10 @@ mod tests {
         BudgetWithinSprint,
         ReviewerAvailable,
         AssigneeAvailable,
+        RepoNotAllowed,
+        RepoRequired,
+        RepoUnknown,
+        EpicCommandInProjectFolder,
         OutOfScopePresent,
         DependenciesReady,
         RequiredCriteriaPresent,
@@ -124,6 +138,10 @@ mod tests {
             | BudgetWithinSprint
             | ReviewerAvailable
             | AssigneeAvailable
+            | RepoNotAllowed
+            | RepoRequired
+            | RepoUnknown
+            | EpicCommandInProjectFolder
             | OutOfScopePresent
             | DependenciesReady
             | RequiredCriteriaPresent

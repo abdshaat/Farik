@@ -66,6 +66,17 @@ pub enum CriteriaError {
         /// The id that was given twice.
         id: String,
     },
+    /// The criterion checks a member repository other than the one the contract works in (spec
+    /// 5.13: `criterion_of_another_repo`), or checks one where the contract works in the project's
+    /// own folder.
+    OtherRepo {
+        /// The criterion asked for.
+        name: String,
+        /// The member the criterion checks.
+        entry_repo: String,
+        /// The member the contract works in; `None` for the project's own folder.
+        task_repo: Option<String>,
+    },
     /// The library's criterion is not one a contract will take for some other reason. Nothing
     /// reaches this while the two schemas agree about what a criterion is, which a test holds them
     /// to; it stands ready for the day they do not.
@@ -90,6 +101,16 @@ impl fmt::Display for CriteriaError {
             Self::RepeatedId { id } => write!(
                 formatter,
                 "the id {id} was given to two criteria, and a contract's criteria have one each"
+            ),
+            Self::OtherRepo {
+                name,
+                entry_repo,
+                task_repo,
+            } => write!(
+                formatter,
+                "criterion {name} checks {entry_repo}, and this contract works in {}: set repo \
+                 first, or use one of its own criteria",
+                task_repo.as_deref().unwrap_or("the project's own folder")
             ),
             Self::Refused { name, detail } => {
                 write!(
@@ -164,11 +185,13 @@ pub fn validate_criteria(input: &Value) -> Result<CriteriaLibrary, Vec<Validatio
 /// # Errors
 ///
 /// `RepeatedId` when one id was given twice, before anything else is looked at; then
-/// `UnknownCriterion` for the first name the library does not hold, or `NotAnId` when the id is not
-/// one a contract accepts.
+/// `UnknownCriterion` for the first name the library does not hold, `OtherRepo` for the first that
+/// checks a member other than `repo` (the contract's, `None` for the project's own folder), or
+/// `NotAnId` when the id is not one a contract accepts.
 pub fn expand_criteria(
     refs: &[(String, String)],
     library: &CriteriaLibrary,
+    repo: Option<&str>,
 ) -> Result<Vec<ExitCriterion>, CriteriaError> {
     if let Some(id) = repeated_ids(refs.iter().map(|(id, _)| id.as_str())).first() {
         return Err(CriteriaError::RepeatedId { id: id.clone() });
@@ -180,6 +203,15 @@ pub fn expand_criteria(
                 .iter()
                 .find(|criterion| criterion.name.as_str() == name)
                 .ok_or_else(|| CriteriaError::UnknownCriterion { name: name.clone() })?;
+            if let Some(entry_repo) = &template.repo
+                && Some(entry_repo.as_str()) != repo
+            {
+                return Err(CriteriaError::OtherRepo {
+                    name: name.clone(),
+                    entry_repo: entry_repo.to_string(),
+                    task_repo: repo.map(str::to_string),
+                });
+            }
             Ok(ExitCriterion {
                 id: ExitCriterionId::try_from(id.as_str()).map_err(|error| {
                     CriteriaError::NotAnId {
@@ -328,8 +360,12 @@ mod tests {
         let mut wire = a_criteria_library_wire();
         wire["criteria"][0]["verification"]["expect"]["exit_code"] = json!(2.0);
         let library = library(&wire);
-        let expanded = expand_criteria(&[("C1".to_string(), "cargo-check".to_string())], &library)
-            .expect("the name is known");
+        let expanded = expand_criteria(
+            &[("C1".to_string(), "cargo-check".to_string())],
+            &library,
+            None,
+        )
+        .expect("the name is known");
         assert!(matches!(
             Verification::from(&expanded[0].verification),
             Verification::Command { exit_code: 2, .. }
@@ -400,7 +436,8 @@ mod tests {
     #[test]
     fn expands_a_reference_into_the_contract_s_own_criterion() {
         let library = library(&a_criteria_library_wire());
-        let expanded = expand_criteria(&every_reference(), &library).expect("every name is known");
+        let expanded =
+            expand_criteria(&every_reference(), &library, None).expect("every name is known");
         assert_eq!(
             expanded
                 .iter()
@@ -454,8 +491,12 @@ mod tests {
         // Which requirements a criterion provides evidence for is a fact about one contract, and
         // the library has never heard of that contract's requirements.
         let library = library(&a_criteria_library_wire());
-        let expanded = expand_criteria(&[("C1".to_string(), "cargo-check".to_string())], &library)
-            .expect("the name is known");
+        let expanded = expand_criteria(
+            &[("C1".to_string(), "cargo-check".to_string())],
+            &library,
+            None,
+        )
+        .expect("the name is known");
         assert!(expanded[0].satisfies.is_empty());
     }
 
@@ -464,7 +505,8 @@ mod tests {
         // The point of the library: what comes out of it goes into a contract without further
         // work, and the contract's own validator is what says so.
         let library = library(&a_criteria_library_wire());
-        let expanded = expand_criteria(&every_reference(), &library).expect("every name is known");
+        let expanded =
+            expand_criteria(&every_reference(), &library, None).expect("every name is known");
         let mut wire = a_contract_wire();
         wire["exit_criteria"] = Value::Array(
             expanded
@@ -486,6 +528,7 @@ mod tests {
                     ("C2".to_string(), "pnpm-check".to_string()),
                 ],
                 &library,
+                None,
             ),
             Err(CriteriaError::UnknownCriterion {
                 name: "pnpm-check".to_string(),
@@ -496,7 +539,11 @@ mod tests {
     #[test]
     fn refuses_an_id_a_contract_would_not_take() {
         let library = library(&a_criteria_library_wire());
-        let refused = expand_criteria(&[("C0".to_string(), "cargo-check".to_string())], &library);
+        let refused = expand_criteria(
+            &[("C0".to_string(), "cargo-check".to_string())],
+            &library,
+            None,
+        );
         let Err(refusal) = refused else {
             panic!("a contract's ids start at C1: {refused:?}");
         };
@@ -521,6 +568,7 @@ mod tests {
                     ("C1".to_string(), "unit-tests".to_string()),
                 ],
                 &library,
+                None,
             ),
             Err(CriteriaError::RepeatedId {
                 id: "C1".to_string(),
@@ -560,6 +608,98 @@ mod tests {
                  takes",
             ]
         );
+    }
+
+    #[test]
+    fn reads_a_criterion_that_names_its_member() {
+        let mut wire = a_criteria_library_wire();
+        wire["criteria"][0]["name"] = json!("app-test");
+        wire["criteria"][0]["repo"] = json!("app");
+        let read = library(&wire);
+        assert_eq!(
+            read.criteria[0].repo.as_ref().map(|repo| repo.as_str()),
+            Some("app")
+        );
+        assert_eq!(read.criteria[1].repo, None);
+        assert_eq!(
+            serde_json::to_value(&read).expect("a library serialises")["criteria"][0]["repo"],
+            json!("app")
+        );
+        wire["criteria"][0]["repo"] = json!("App");
+        assert_eq!(paths(&wire), ["/criteria/0/repo"]);
+    }
+
+    #[test]
+    fn holds_a_criterions_repo_to_the_repos_file_pattern() {
+        let library: Value =
+            serde_json::from_str(SCHEMA_JSON).expect("the embedded criteria schema is valid JSON");
+        let repos: Value =
+            serde_json::from_str(include_str!("../../../docs/schemas/repos.schema.json"))
+                .expect("the embedded repos schema is valid JSON");
+        let copy = &library["$defs"]["criterionTemplate"]["properties"]["repo"];
+        let name = &repos["$defs"]["repoName"];
+        assert!(
+            copy.is_object() && name.is_object(),
+            "both schemas still keep the repo name where this test looks"
+        );
+        assert_eq!(copy["pattern"], name["pattern"]);
+        assert_eq!(copy["maxLength"], name["maxLength"]);
+    }
+
+    /// A library with a criterion for each of two members and one for any.
+    fn a_library_of_two_members() -> CriteriaLibrary {
+        let mut wire = a_criteria_library_wire();
+        let criteria = wire["criteria"]
+            .as_array_mut()
+            .expect("the fixture holds an array");
+        criteria.truncate(3);
+        criteria[0]["name"] = json!("app-test");
+        criteria[0]["repo"] = json!("app");
+        criteria[1]["name"] = json!("infra-lint");
+        criteria[1]["repo"] = json!("infra");
+        criteria[2]["name"] = json!("review-docs");
+        library(&wire)
+    }
+
+    fn refs(names: &[&str]) -> Vec<(String, String)> {
+        names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (format!("C{}", index + 1), (*name).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn expands_only_a_tasks_own_criteria() {
+        let library = a_library_of_two_members();
+        let own = expand_criteria(&refs(&["app-test", "review-docs"]), &library, Some("app"))
+            .expect("a task's own criteria and a criterion for any repository expand");
+        assert_eq!(own.len(), 2);
+
+        let other = expand_criteria(&refs(&["infra-lint"]), &library, Some("app"))
+            .expect_err("another member's criterion is refused");
+        assert_eq!(
+            other,
+            CriteriaError::OtherRepo {
+                name: "infra-lint".to_string(),
+                entry_repo: "infra".to_string(),
+                task_repo: Some("app".to_string()),
+            }
+        );
+        assert_eq!(
+            other.to_string(),
+            "criterion infra-lint checks infra, and this contract works in app: set repo first, \
+             or use one of its own criteria"
+        );
+
+        let none = expand_criteria(&refs(&["app-test"]), &library, None)
+            .expect_err("a member's criterion is refused where no repo is set");
+        assert_eq!(
+            none.to_string(),
+            "criterion app-test checks app, and this contract works in the project's own folder: \
+             set repo first, or use one of its own criteria"
+        );
+        assert!(expand_criteria(&refs(&["review-docs"]), &library, None).is_ok());
     }
 
     #[test]

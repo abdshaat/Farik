@@ -222,6 +222,7 @@ impl Project {
         state.set_state_dir(state_dir);
         let session_id = a_session_id();
         state.register_session(SessionRegistration {
+            read_roots: Vec::new(),
             session_id: session_id.clone(),
             web: catervas_core::governor::sites::WebAccess::Open,
             reads: catervas_core::folders::ReadAccess::Open,
@@ -260,6 +261,7 @@ impl Project {
 
     fn spec(&self) -> SessionSpec {
         SessionSpec {
+            read_roots: Vec::new(),
             session_id: self.session_id.clone(),
             agent_id: "dev-a".to_string(),
             task_id: None,
@@ -694,6 +696,7 @@ fn a_live_session_loads_a_skill_on_use() {
         .join(&project.session_id)
         .join("skills");
     project.state.register_session(SessionRegistration {
+        read_roots: Vec::new(),
         session_id: project.session_id.clone(),
         web: catervas_core::governor::sites::WebAccess::Open,
         reads: catervas_core::folders::ReadAccess::Open,

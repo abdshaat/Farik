@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://catervas.dev/schemas/repos.schema.json",
+  "title": "Repos",
+  "description": "The member repositories of a project folder, stored as .catervas/repos.yaml: a project of several repositories keeps its team and its documents in a local project folder of its own, and this file says which repositories on this computer the team works across. Its presence is what makes a folder a project folder. See docs/SPEC.md sections 3, 4.1 and 8.4 and ADR 0057.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "repos"
+  ],
+  "properties": {
+    "repos": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/repo"
+      },
+      "description": "Names and paths are unique and no path is inside another, which JSON Schema cannot say and validate_repos therefore does. One member is what a removal leaves; creating a project folder takes two."
+    }
+  },
+  "$defs": {
+    "repo": {
+      "title": "Repo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/repoName"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^(/|[A-Za-z]:[\\\\/])",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "The absolute path of the repository's top folder on this computer."
+        },
+        "integration_branch": {
+          "type": "string",
+          "pattern": "^\\S+$",
+          "minLength": 1,
+          "maxLength": 255,
+          "description": "The branch accepted work goes into. Left out, the repository's default branch, read when it is needed."
+        }
+      }
+    },
+    "repoName": {
+      "title": "RepoName",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 32,
+      "description": "What a task and a document refer to the repository by. Kebab-case starting with a letter, so that <name>-<criterion> is always a valid criterion name."
+    }
+  }
+}

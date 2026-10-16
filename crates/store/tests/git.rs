@@ -7,6 +7,7 @@
 
 use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
 use catervas_store::git::stale_twins;
+use catervas_store::repos::MemberPathRefusal;
 use catervas_store::{CommitOutcome, Git, GitError, MergeOutcome};
 
 #[test]
@@ -1736,6 +1737,85 @@ fn reads_the_product_plan_from_the_integration_branch() {
     assert!(!product_plan_on(&git, &team(Some("develop"))).expect("the read works"));
     // A branch the repository does not have is not an error: the plan is not there yet.
     assert!(!product_plan_on(&git, &team(Some("release"))).expect("the read works"));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_a_local_branch() {
+    let repository = TempRepo::new("local-branch");
+    let git = repository.adapter();
+    assert_eq!(git.has_local_branch("main"), Ok(true));
+    assert_eq!(git.has_local_branch("feature/x"), Ok(false));
+    repository.git(&["branch", "feature/x"]);
+    assert_eq!(git.has_local_branch("feature/x"), Ok(true));
+    // A revision expression is not a branch's name, though git resolves it.
+    for expression in ["main~0", "main@{0}", "main:", "main^{commit}"] {
+        assert_eq!(git.has_local_branch(expression), Ok(false), "{expression}");
+    }
+
+    let refusal = MemberPathRefusal::NoSuchBranch {
+        branch: "nope".to_string(),
+    };
+    assert_eq!(refusal.code(), "no_such_branch");
+    assert_eq!(refusal.pointer(), "/integration_branch");
+    assert_eq!(
+        refusal.message(),
+        "that repository has no branch named nope"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prunes_stale_worktrees() {
+    // A worktree whose folder was deleted from under git stays registered, and keeps its branch
+    // from being checked out anywhere else, until the repository is told to forget it.
+    let repository = TempRepo::new("prune-worktrees");
+    let git = repository.adapter();
+    let worktree = repository.path.join(".catervas/local/worktrees/CTV-1");
+    git.create_worktree(&worktree, "catervas/CTV-1", "main")
+        .expect("the worktree is made");
+    std::fs::remove_dir_all(&worktree).expect("the folder is deleted");
+    let listed = repository.git_output(&["worktree", "list", "--porcelain"]);
+    assert!(listed.contains("prunable"), "{listed}");
+
+    git.prune_worktrees().expect("the stale worktree is pruned");
+
+    let listed = repository.git_output(&["worktree", "list", "--porcelain"]);
+    assert!(!listed.contains("CTV-1"), "{listed}");
+    repository.git(&["checkout", "catervas/CTV-1"]);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn repairs_worktrees_after_a_move() {
+    // A worktree finds its repository by the path it was made at, so a repository that moves
+    // leaves every worktree outside it unable to run git until it is told where they are.
+    let repository = TempRepo::new("repair-worktrees");
+    let git = repository.adapter();
+    let worktree = repository.path.with_extension("elsewhere");
+    let _ = std::fs::remove_dir_all(&worktree);
+    git.create_worktree(&worktree, "catervas/CTV-1", "main")
+        .expect("the worktree is made");
+    let moved = repository.path.with_extension("moved");
+    let _ = std::fs::remove_dir_all(&moved);
+    std::fs::rename(&repository.path, &moved).expect("the repository is moved");
+    let status = std::process::Command::new("git")
+        .args(["status"])
+        .current_dir(&worktree)
+        .output()
+        .expect("git runs");
+    assert!(
+        !status.status.success(),
+        "the worktree has lost its repository"
+    );
+
+    Git::open(moved.clone())
+        .repair_worktrees()
+        .expect("the worktrees are repaired");
+
+    git_in(&worktree, &["status"]);
+    let _ = std::fs::remove_dir_all(&worktree);
+    std::fs::rename(&moved, &repository.path).expect("the repository is moved back");
 }
 
 #[test]
