@@ -233,6 +233,11 @@ pub(super) async fn run_session(
     team: &Team,
     ask: SessionAsk<'_>,
 ) -> Result<SessionEnd, OrchestratorError> {
+    // First of all: one agent has one session at a time (ADR 0064).
+    let _claim = deps.work.claim(
+        ask.agent.id.as_str(),
+        ask.contract.map(|contract| &contract.id),
+    )?;
     let left_out = refresh_signed_in(deps, team, &ask).await;
     let mut spec = session_spec_without(deps, team, &ask, &left_out)?;
     let role = Role::from(ask.agent.role);
@@ -280,6 +285,12 @@ pub(super) async fn run_session(
         connectors,
         preview: browser.clone(),
     });
+    // From here the session runs beside the others; its end is recorded under the turn again.
+    super::work::session_runs(super::work::Started {
+        agent_id: spec.agent_id.clone(),
+        task_id: spec.task_id.clone(),
+        purpose: crate::sessions::purpose_wire(spec.purpose).to_string(),
+    });
     let ended = drive(
         deps,
         team,
@@ -290,6 +301,7 @@ pub(super) async fn run_session(
         &spec,
     )
     .await;
+    super::work::session_ran(&deps.work).await;
     deps.daemon.end_session(&spec.session_id);
     let closed = browser.map_or(Ok(()), |browser| {
         close_preview(deps, &ids, browser.as_ref(), "the session ended")

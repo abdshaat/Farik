@@ -66,7 +66,7 @@ pub(super) struct Waiting {
     /// Whether the team's daily budget stopped one (`spent`).
     pub(super) day_spent: bool,
     /// The earliest time a sleeping agent whose session was not started wakes, and that agent
-    /// (`asleep`).
+    /// (`unavailable`).
     pub(super) slept: Option<(DateTime<Utc>, String)>,
 }
 
@@ -161,7 +161,9 @@ pub(super) async fn tick(
     // The store gives the board in the order of the number in each task id, which is how ties
     // are broken.
     let board = deps.tools.projections.board()?;
-    let in_scope = in_scope(scope);
+    // The tasks whose sessions run: no rule acts on one (ADR 0064).
+    let busy = deps.work.busy_tasks();
+    let in_scope = in_scope(scope, &busy);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut waiting = Waiting::default();
     // The tasks each agent may work: those past its limit are "returning", and wait for a hand-over.
@@ -315,7 +317,7 @@ fn resume_elsewhere(
                 && !requests::is_epic(row)
                 && !within.contains(&row.task_id)
         })
-        .filter(in_scope(scope))
+        .filter(in_scope(scope, &deps.work.busy_tasks()))
     {
         let Some(holder) = active(team, row.assignee_id.as_deref()) else {
             continue;
@@ -416,13 +418,18 @@ fn idle(waiting: &Waiting) -> TickReport {
     }
 }
 
-/// Whether `scope` takes in a row: every row, or the one task it names.
-fn in_scope(scope: &TickScope) -> impl Fn(&&TaskProjection) -> bool + Copy + '_ {
+/// Whether `scope` takes in a row: every row, or the one task it names; never a task whose
+/// session runs (ADR 0064).
+fn in_scope<'a>(
+    scope: &'a TickScope,
+    busy: &'a BTreeSet<TaskId>,
+) -> impl Fn(&&TaskProjection) -> bool + Copy + 'a {
     move |row| {
         scope
             .task_id
             .as_ref()
             .is_none_or(|task_id| &row.task_id == task_id)
+            && !busy.contains(&row.task_id)
     }
 }
 
@@ -535,7 +542,7 @@ async fn review_and_retro(
         return Ok(None);
     };
     if day_is_spent(deps, team, Role::from(runner.role), &mut waiting.day_spent)?
-        | asleep(deps, runner, &mut waiting.slept)?
+        | unavailable(deps, runner, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -776,7 +783,7 @@ fn due_refresh<'a>(
     let cannot_be_asked = |agent: &Agent, waiting: &mut Waiting| {
         Ok::<_, OrchestratorError>(
             day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-                | asleep(deps, agent, &mut waiting.slept)?,
+                | unavailable(deps, agent, &mut waiting.slept)?,
         )
     };
     if let Some(agent) = product {
@@ -948,7 +955,7 @@ async fn chat(
     pending.sort_by_key(|(seq, _)| *seq);
     for (seq, agent) in pending {
         if day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-            | asleep(deps, agent, &mut waiting.slept)?
+            | unavailable(deps, agent, &mut waiting.slept)?
         {
             continue;
         }
@@ -1034,7 +1041,7 @@ async fn open_the_interview(
         });
     if began
         || day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-            | asleep(deps, agent, &mut waiting.slept)?
+            | unavailable(deps, agent, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -1085,7 +1092,7 @@ async fn conversation(
             continue;
         };
         if day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-            | asleep(deps, agent, &mut waiting.slept)?
+            | unavailable(deps, agent, &mut waiting.slept)?
         {
             continue;
         }
@@ -1309,8 +1316,13 @@ fn budget(
     if scope.rules != TickRules::All || scope.task_id.is_some() {
         return Ok(None);
     }
+    // A task whose session runs is left to it (ADR 0064).
+    let busy = deps.work.busy_tasks();
     for row in board.iter().filter(|row| {
-        !is_terminal(row.status) && row.status != TaskStatus::Escalated && !row.waiting_on_human
+        !is_terminal(row.status)
+            && row.status != TaskStatus::Escalated
+            && !row.waiting_on_human
+            && !busy.contains(&row.task_id)
     }) {
         if let Some(report) = escalate_if_spent(deps, team, row)? {
             return Ok(Some(report));
@@ -1444,15 +1456,19 @@ pub(super) fn spent(
         .any(|scope| matches!(scope, BudgetScope::TaskUsd | BudgetScope::TaskSessions)))
 }
 
-/// Whether `agent` is asleep until its model provider's limit resets (5.5): no session of its
+/// Whether `agent` can start no session now: one of its runs in this process (ADR 0064), or it is
+/// asleep until its model provider's limit resets (5.5). No session of its
 /// starts, and no sandbox is made for it. The earliest `until` of the tick and its agent are kept
 /// in `slept`, as `spent` keeps a spent day in `day_spent`. A rule asks it with `|` beside
 /// `spent`, not `||`, so that both are kept whichever stops the session.
-pub(super) fn asleep(
+pub(super) fn unavailable(
     deps: &OrchestratorDeps,
     agent: &Agent,
     slept: &mut Option<(DateTime<Utc>, String)>,
 ) -> Result<bool, OrchestratorError> {
+    if deps.work.is_busy(agent.id.as_str()) {
+        return Ok(true);
+    }
     let Some(until) = asleep_until(&deps.tools.log, agent.id.as_str(), deps.tools.clock.now())?
     else {
         return Ok(false);
@@ -1493,7 +1509,7 @@ async fn in_progress(
         None
     };
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, assignee, &mut waiting.slept)?
+        | unavailable(deps, assignee, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -1776,7 +1792,7 @@ async fn ready(
     };
     // A sleeping agent is still offered as an assignee below; only its own sessions wait.
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, assigner, &mut waiting.slept)?
+        | unavailable(deps, assigner, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -3903,7 +3919,7 @@ mod tests {
         let harness = Harness::new("orch-stop", |_| {});
         harness.ready("CTV-1");
         let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
+        let orchestrator = Arc::new(harness.orchestrator(adapter.clone()));
 
         orchestrator.stop();
         orchestrator.run_until_idle().await.expect("nothing runs");
@@ -5882,8 +5898,7 @@ mod tests {
         if idle {
             // A delivery already closed: the run is about the session it starts, not the close.
             harness.settle_delivery();
-            harness
-                .orchestrator(probe.clone())
+            Arc::new(harness.orchestrator(probe.clone()))
                 .run_until_idle()
                 .await
                 .expect("the run ends idle");
@@ -6266,7 +6281,7 @@ mod tests {
             recorded.clone(),
             Arc::clone(&harness.daemon),
         ));
-        let orchestrator = harness.orchestrator(witness.clone());
+        let orchestrator = Arc::new(harness.orchestrator(witness.clone()));
         // A delivery already closed: the run is about the verify sessions, not the close.
         harness.settle_delivery();
 

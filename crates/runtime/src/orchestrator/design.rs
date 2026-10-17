@@ -8,7 +8,7 @@ use catervas_protocol::event::{EventBody, EventKind, ReasonBody};
 use catervas_store::{EventQuery, TaskProjection};
 
 use super::messages::explore_message;
-use super::rules::{Waiting, acted, asleep, governor_moves, refused_since_entering, spent};
+use super::rules::{Waiting, acted, governor_moves, refused_since_entering, spent, unavailable};
 use super::session::{SessionAsk, run_session};
 use super::verify::append;
 use super::{Orchestrator, OrchestratorError, TickReport, worktree};
@@ -149,7 +149,7 @@ async fn explore(
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     if spent(deps, team, contract, &mut waiting.day_spent)?
-        | asleep(deps, designer, &mut waiting.slept)?
+        | unavailable(deps, designer, &mut waiting.slept)?
     {
         return Ok(None);
     }

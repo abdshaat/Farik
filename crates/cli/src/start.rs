@@ -249,6 +249,7 @@ pub(crate) fn command_deps(
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
+        work: Arc::default(),
     })
 }
 
@@ -475,6 +476,10 @@ fn never() -> Interrupts {
 }
 
 /// `start_holding` once the interrupts are listened for: the driver it answers hears none yet.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one setup in order, each step failing by shutting the daemon down"
+)]
 async fn start_listening(
     project: &Project,
     io: &mut CliIo<'_>,
@@ -557,6 +562,7 @@ async fn start_listening(
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
+        work: Arc::default(),
     }));
     daemon.set_command_handler(command_handler(Arc::clone(&orchestrator)));
     let recovering = Arc::clone(&orchestrator);

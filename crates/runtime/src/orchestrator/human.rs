@@ -4114,7 +4114,7 @@ mod tests {
         let harness = Harness::new("human-run-stop", |_| {});
         harness.ready("CTV-1");
         let adapter = harness.recorded(Vec::new());
-        let orchestrator = harness.orchestrator(adapter.clone());
+        let orchestrator = Arc::new(harness.orchestrator(adapter.clone()));
 
         let report = handled(&orchestrator, Command::RunStop).await;
         assert!(report.events.is_empty());
