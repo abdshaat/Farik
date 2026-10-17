@@ -217,10 +217,12 @@ fn keeps_serving_when_the_board_is_idle() {
             })
     });
 
-    // Back in its idle wait, with no permit left, so the stop lands before any other tick.
-    waiting
-        .recv_timeout(Duration::from_secs(30))
-        .unwrap_or_else(|_| panic!("serve waits again once the board is idle\n{}", out.text()));
+    // Back in its idle wait, with no permit left, so the stop lands before any other tick. The
+    // sleeper is also entered while a session runs (the next tick waits for it, ADR 0064), so the
+    // idle line itself says that the board is idle again.
+    until("serve says it is idle again", || {
+        out.idle_lines().len() == 2
+    });
     let stopped = run(&repository.path, &["stop"]);
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     let ran = joined(serving, "the serve");

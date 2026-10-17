@@ -495,7 +495,7 @@ fn stops_after_the_session_then_aborts_it_on_ctrl_c() {
 
     assert_eq!(ran.code, 130, "{}\n{}", ran.out, ran.err);
     assert!(
-        ran.err.contains("stopping after the current session"),
+        ran.err.contains("stopping after the running sessions"),
         "{}",
         ran.err
     );
@@ -509,6 +509,52 @@ fn stops_after_the_session_then_aborts_it_on_ctrl_c() {
     assert_eq!(status_of(&repository, &task), "refining");
     assert!(!daemon_file(&repository).exists());
     lock_is_free(&repository);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn runs_two_agents_at_once_and_stops_after_both() {
+    let repository = a_team("run-two-at-once");
+    let task = a_small_request(&repository);
+    let said = run(&repository.path, &["say", "@dev-a status?"]);
+    assert_eq!(said.code, 0, "{}", said.err);
+    let adapter = Arc::new(UsageThenWaitAdapter::waiting(Usage::default()));
+    let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
+    let root = repository.path.clone();
+    let engine = given(&adapter);
+
+    let running = std::thread::spawn(move || {
+        run_with(&root, &["run"], |io| {
+            io.engine = engine;
+            io.interrupts = Interrupts::Channel(interrupts);
+        })
+    });
+    wait_for(&repository, EventKind::SessionStarted, 2);
+    assert!(events(&repository, &[EventKind::SessionEnded]).is_empty());
+    interrupt.send(()).expect("the run listens");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(adapter.aborts(), 0);
+    assert!(!running.is_finished());
+    adapter.complete();
+    let ran = joined(running, "the run");
+
+    assert_eq!(ran.code, 130, "{}\n{}", ran.out, ran.err);
+    assert!(ran.out.lines().any(|line| line == "stopped"), "{}", ran.out);
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line == "dev-a: started its conversation session"),
+        "{}",
+        ran.out
+    );
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line == format!("{task}: pm started its refine session")),
+        "{}",
+        ran.out
+    );
+    assert_eq!(adapter.started().len(), 2);
 }
 
 #[test]
