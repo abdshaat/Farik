@@ -4,12 +4,13 @@
 //! review is filed as a rejection in the reviewer's name, with its note; a passed one goes to the
 //! Product Manager's session, which accepts it, unless the human has to.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::{ExitCriterion, TaskContract, TaskId, TaskStatus, wire_method};
-use catervas_core::governor::done::{CriterionResult, RunBy};
+use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
 use catervas_core::governor::gates::Rejection;
 use catervas_core::governor::team_rules::is_ui_change;
 use catervas_core::governor::transition::{TransitionContext, TransitionRequest};
@@ -17,7 +18,7 @@ use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Agent, Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, EventIds,
-    NoteWrittenBodyKind, ReviewRecordedBody, new_event,
+    NoteWrittenBody, NoteWrittenBodyKind, ReviewRecordedBody, new_event,
 };
 use catervas_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline, folder_in};
 use catervas_store::repos::TaskRepositoryError;
@@ -84,6 +85,9 @@ pub(super) async fn verifying(
         )
         .await;
     }
+    if catervas_verifies_alone(&contract) {
+        return verify_alone(orchestrator, team, row, &contract, waiting).await;
+    }
     let Some(reviewer) = active(team, row.reviewer_id.as_deref()) else {
         return Ok(None);
     };
@@ -134,6 +138,135 @@ pub(super) async fn verifying(
         ran,
     )
     .await
+}
+
+/// Rule 5 for a task no agent reviews, whose every criterion Catervas runs (ADR 0061): Catervas
+/// runs them, writes the review note itself, and accepts or rejects as the governor, with no
+/// reviewer's session and no Product Manager's.
+pub(super) async fn verify_alone(
+    orchestrator: &Orchestrator,
+    team: &Team,
+    row: &TaskProjection,
+    contract: &TaskContract,
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let deps = &orchestrator.deps;
+    if spent(deps, team, contract, &mut waiting.day_spent)? {
+        return Ok(None);
+    }
+    let history = history(deps, &row.task_id)?;
+    let since = since_verifying(&history);
+    let ran = match run_what_catervas_runs(orchestrator, team, contract, &history, since).await? {
+        CatervasRan::Criteria(ran) => ran,
+        CatervasRan::Unrunnable(why) => return escalate(deps, team, row, &why),
+        CatervasRan::MemberMissing => return Ok(None),
+    };
+    decide_alone(deps, team, row, contract, ran)
+}
+
+/// The end of `verify_alone`, and of an epic Catervas verifies alone once its criteria ran: while
+/// a criterion has no result of Catervas's, nothing; then the review note Catervas writes from
+/// them, once; then the governor's rejection for the criteria that failed, or its acceptance.
+pub(super) fn decide_alone(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+    contract: &TaskContract,
+    ran: usize,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let history = history(deps, &row.task_id)?;
+    let results = governor_results(&history, since_verifying(&history));
+    if contract.exit_criteria.iter().any(|criterion| {
+        !results
+            .iter()
+            .any(|result| result.criterion_id == criterion.id.as_str())
+    }) {
+        return Ok(ran_criteria(row, ran));
+    }
+    // The contract's order, whatever the order the runs were recorded in.
+    let ordered: Vec<CriterionResult> = contract
+        .exit_criteria
+        .iter()
+        .filter_map(|criterion| {
+            results
+                .iter()
+                .find(|result| result.criterion_id == criterion.id.as_str())
+                .cloned()
+        })
+        .collect();
+    let note = catervas_note(&ordered);
+    if context(deps, team, &row.task_id)?
+        .done
+        .review_note
+        .is_none()
+    {
+        append(
+            &deps.tools,
+            &row.task_id,
+            None,
+            None,
+            EventBody::NoteWritten(NoteWrittenBody {
+                kind: NoteWrittenBodyKind::Review,
+                text: note.clone(),
+                written_by: "catervas".to_string(),
+            }),
+        )?;
+    }
+    let failed = failed(contract, &results);
+    let rejecting = !failed.is_empty();
+    let outcome = deps.tools.transitions.request(
+        &TransitionRequest {
+            task_id: row.task_id.clone(),
+            to: if rejecting {
+                TaskStatus::Rejected
+            } else {
+                TaskStatus::Accepted
+            },
+            actor: TransitionActor::Governor,
+            agent_id: None,
+        },
+        &TransitionAsk {
+            rejection: rejecting.then(|| Rejection {
+                failed_criterion_ids: failed.clone(),
+                reasons: note,
+            }),
+            ..TransitionAsk::default()
+        },
+        team,
+    )?;
+    let what = match outcome {
+        TransitionOutcome::Moved(_) if rejecting => {
+            format!("rejected it for {}, which Catervas ran", failed.join(", "))
+        }
+        TransitionOutcome::Moved(_) => {
+            "accepted it on its criteria, which Catervas ran: only code is reviewed".to_string()
+        }
+        TransitionOutcome::Refused(refusal) => format!(
+            "the governor would not {} it: {}",
+            if rejecting { "reject" } else { "accept" },
+            refusal_details(&refusal).join("; ")
+        ),
+    };
+    Ok(Some(TickReport::Acted {
+        task_id: row.task_id.clone(),
+        what,
+    }))
+}
+
+/// The note Catervas writes for a task it verified alone, from its latest results: what it did,
+/// then a line for each criterion, in the order given.
+pub(super) fn catervas_note(results: &[CriterionResult]) -> String {
+    let mut note = "Catervas ran every criterion of this task itself; only a code change is reviewed by an agent (ADR 0061).\n".to_string();
+    for result in results {
+        let _ = write!(
+            note,
+            "\n{}: {}: {}",
+            result.criterion_id,
+            if result.passed { "passed" } else { "failed" },
+            result.evidence
+        );
+    }
+    note
 }
 
 /// What Catervas's runs for the reviewer came to.
@@ -848,7 +981,9 @@ mod tests {
 
     use catervas_core::contract::TaskStatus;
     use catervas_core::governor::permissions::PermissionTier;
-    use catervas_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
+    use catervas_protocol::event::{
+        EscalationRaisedBodyReason, EventBody, EventKind, NoteWrittenBodyKind,
+    };
     use catervas_store::GitError;
     use catervas_store::git::fixtures::TempRepo;
     use serde_json::{Value, json};
@@ -1504,6 +1639,132 @@ mod tests {
             ]
         );
         assert_eq!(harness.events(&[EventKind::DesignReviewRecorded]).len(), 2);
+    }
+
+    /// CTV-2, the Architect `ada`'s task, which the Product Manager `pm` is named to review, in
+    /// `verifying`: its one criterion C1 is an `artifact` on `docs/catervas/architecture/overview.md`,
+    /// committed on its branch when `committed`, with its completion note written.
+    fn an_architects_task(harness: &Harness, committed: bool) {
+        let path = "docs/catervas/architecture/overview.md";
+        harness.file("CTV-2", "ready", |wire| {
+            wire["assignee_role"] = json!("architect");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([path]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": format!("{path} exists."),
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": path }
+            }]);
+        });
+        let people = json!({ "assignee": "ada", "reviewer": "pm" });
+        harness.project.moved("CTV-2", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-2", "assigned", "in_progress", &people);
+        let git = &harness.project.deps.git;
+        let worktree = harness.worktree("CTV-2");
+        git.create_worktree(&worktree, &harness.branch("CTV-2"), "main")
+            .expect("the task's worktree is made");
+        if committed {
+            let file = worktree.join(path);
+            std::fs::create_dir_all(file.parent().expect("a folder")).expect("made");
+            std::fs::write(&file, "# Overview\n").expect("written");
+            git.commit(&worktree, "The overview", &[path.to_string()])
+                .expect("committed");
+        }
+        harness.project.record(
+            "CTV-2",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Wrote the overview.\n\nWrote the overview.", "written_by": "ada" }),
+        );
+        let moved = json!({ "assignee": "ada", "reviewer": "pm", "actor": "assignee", "requested_by": "ada" });
+        harness
+            .project
+            .moved("CTV-2", "in_progress", "verifying", &moved);
+    }
+
+    /// The moves of `task` out of `verifying` that the governor made, as `(from, to)`.
+    fn governor_moves(harness: &Harness, task: &str) -> Vec<(String, String)> {
+        harness
+            .events(&[EventKind::TaskTransitioned])
+            .iter()
+            .filter(|event| event.envelope.ids.task_id.as_ref().map(|id| id.as_str()) == Some(task))
+            .filter_map(|event| match &event.body {
+                EventBody::TaskTransitioned(body)
+                    if body.actor.to_string() == "governor"
+                        && body.from.to_string() == "verifying"
+                        && event.envelope.ids.agent_id.is_none() =>
+                {
+                    Some((body.from.to_string(), body.to.to_string()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn catervas_verifies_a_task_no_agent_reviews() {
+        let harness = a_harness("verify-alone-accepts", |_| {});
+        an_architects_task(&harness, true);
+        let (started, _) = ticked(&harness, Vec::new(), 2).await;
+
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Accepted);
+        let runs = harness.events(&[EventKind::CriterionRecorded]);
+        assert!(matches!(&runs[0].body,
+            EventBody::CriterionRecorded(body) if body.recorded_by == "governor" && body.passed));
+        let notes = harness.events(&[EventKind::NoteWritten]);
+        let review = notes
+            .iter()
+            .find_map(|event| match &event.body {
+                EventBody::NoteWritten(body) if body.kind == NoteWrittenBodyKind::Review => {
+                    Some((event, body))
+                }
+                _ => None,
+            })
+            .expect("Catervas wrote the review note");
+        assert_eq!(review.1.written_by, "catervas");
+        assert_eq!(review.0.envelope.ids.agent_id, None);
+        assert_eq!(review.0.envelope.ids.session_id, None);
+        assert!(review.1.text.contains("C1: passed"), "{}", review.1.text);
+        assert_eq!(
+            governor_moves(&harness, "CTV-2"),
+            [("verifying".to_string(), "accepted".to_string())]
+        );
+        assert!(harness.events(&[EventKind::ReviewRecorded]).is_empty());
+
+        // Nothing committed: the criterion fails, and Catervas sends the task back.
+        let harness = a_harness("verify-alone-rejects", |_| {});
+        an_architects_task(&harness, false);
+        let (started, _) = ticked(&harness, Vec::new(), 1).await;
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Rejected);
+        assert_eq!(
+            governor_moves(&harness, "CTV-2"),
+            [("verifying".to_string(), "rejected".to_string())]
+        );
+        let runs = harness.events(&[EventKind::CriterionRecorded]);
+        assert!(matches!(&runs[0].body,
+            EventBody::CriterionRecorded(body) if body.criterion_id == "C1" && !body.passed));
+
+        // A Finance Specialist's task, in its private folder, is accepted the same way.
+        let harness = a_harness(
+            "verify-alone-folder",
+            crate::tools::fixtures::with_the_finance_specialist,
+        );
+        harness.finance_task("CTV-3", Some("verifying"));
+        std::fs::create_dir_all(harness.finance_folder()).expect("the folder");
+        std::fs::write(harness.finance_folder().join("books.xlsx"), "books").expect("written");
+        harness.project.record(
+            "CTV-3",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Kept the books.\n\nKept the books.", "written_by": "fin" }),
+        );
+        let (started, _) = ticked(&harness, Vec::new(), 2).await;
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::Accepted);
     }
 
     #[test]

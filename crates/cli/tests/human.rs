@@ -23,9 +23,9 @@ use catervas_runtime::{RecordedAdapter, RuntimeAdapter};
 use serde_json::{Value, json};
 
 use project::{
-    LiveDriver, a_high_risk_task_verifying, a_project, a_team, events, filed, files_of,
-    hold_the_run_lock, joined, moved, record, record_as, recorded, run, run_with, status_of,
-    tool_deps,
+    LiveDriver, a_project, a_task_with_a_human_criterion_verifying, a_team, events, filed,
+    files_of, hold_the_run_lock, joined, moved, record, record_as, recorded, run, run_with,
+    status_of, tool_deps,
 };
 
 /// Records a question from `pm` on `task`, and answers its sequence number.
@@ -289,7 +289,7 @@ fn refuses_while_the_lock_holder_serves_no_daemon() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn accepts_a_result_with_the_humans_review() {
     let repository = a_team("human-accept");
-    let task = a_high_risk_task_verifying(&repository, "Add done.txt");
+    let task = a_task_with_a_human_criterion_verifying(&repository, "Add done.txt");
 
     let ran = run(
         &repository.path,

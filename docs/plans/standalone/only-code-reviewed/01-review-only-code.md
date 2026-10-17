@@ -190,7 +190,7 @@ Tests:
   - A Finance Specialist's task in its private folder with an `artifact` criterion on `books.xlsx` (the file in `.catervas/local/finance/`) is accepted the same way.
 - `catervas_accepts_an_epic_once_its_tasks_are_integrated` (`requests.rs`): an epic in `verifying` whose one task is accepted and integrated, with the criterion `{ "method": "command", "command": "true", "expect": { "exit_code": 0 } }`, is accepted by `governor` with no session. While its task still awaits integration, a tick does nothing to it.
 
-- [ ] `feat(runtime): accept what no agent reviews on Catervas's own runs`
+- [x] `feat(runtime): accept what no agent reviews on Catervas's own runs`
 
 ### Task 5: the task page says Catervas checks it
 

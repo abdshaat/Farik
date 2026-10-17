@@ -1246,8 +1246,8 @@ mod tests {
             .collect()
     }
 
-    /// Runs until idle, answers the one question, runs, approves the epic, runs, accepts its
-    /// result with the human's words, and runs again, as the human at a terminal would.
+    /// Runs until idle, answers the one question, runs, approves the epic, and runs again, as the
+    /// human at a terminal would: Catervas accepts the epic's result on its criteria (ADR 0061).
     async fn drive_one_request(
         harness: &Harness,
         orchestrator: &super::Orchestrator,
@@ -1273,15 +1273,6 @@ mod tests {
             .await
             .expect("the human approves the epic");
         orchestrator.run_until_idle().await.expect("the run idles");
-        orchestrator
-            .handle(Command::HumanAccept {
-                task_id: epic.clone(),
-                subject: AcceptSubject::Result,
-                message: Some("done.txt is on main.".to_string()),
-            })
-            .await
-            .expect("the human accepts the epic");
-        orchestrator.run_until_idle().await.expect("the run idles");
     }
 
     #[tokio::test]
@@ -1301,7 +1292,6 @@ mod tests {
             review_writes_note(),
             accept_ctv_1(),
             plan_closes_epic_ctv_1(),
-            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let epic: TaskId = "CTV-1".parse().expect("a task id");
@@ -1337,7 +1327,6 @@ mod tests {
             (SessionStartedBodyPurpose::Verify, "dev-b", "CTV-2"),
             (SessionStartedBodyPurpose::Verify, "pm", "CTV-2"),
             (SessionStartedBodyPurpose::Plan, "pm", "CTV-1"),
-            (SessionStartedBodyPurpose::Verify, "pm", "CTV-1"),
         ]
         .into_iter()
         .map(|(purpose, agent, task)| (purpose, agent.to_string(), task.to_string()))
@@ -1361,7 +1350,6 @@ mod tests {
                 "CTV-1 in_progress -> verifying",
                 "CTV-1 C1 run by the governor",
                 "CTV-1 C2 run by the governor",
-                "human.accepted result",
                 "CTV-1 verifying -> accepted",
             ]
         );

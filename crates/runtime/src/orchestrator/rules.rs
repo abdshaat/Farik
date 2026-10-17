@@ -2627,6 +2627,11 @@ mod tests {
         for (present, passes) in [(true, true), (false, false)] {
             let harness = Harness::with_finance(&format!("orch-folder-artifact-{present}"));
             harness.finance_task("CTV-1", Some("verifying"));
+            harness.project.record(
+                "CTV-1",
+                "note.written",
+                &json!({ "kind": "completion", "text": "Finished the work.\n\nFinished the work.", "written_by": "fin" }),
+            );
             if present {
                 std::fs::create_dir_all(harness.finance_folder()).expect("the folder is made");
                 std::fs::write(harness.finance_folder().join("books.xlsx"), "books")
@@ -2654,16 +2659,27 @@ mod tests {
             assert_eq!(sandboxes.created("CTV-1"), 0);
             assert_eq!(sandboxes.based("CTV-1"), 0);
             assert!(!orchestrator.holds_sandbox(&"CTV-1".parse().expect("a task id")));
-            // The reviewer's session follows, in the folder.
-            assert_eq!(recorded.started().len(), 1);
+            // No reviewer's session follows: Catervas accepts or rejects on its own run (ADR 0061).
+            assert!(recorded.started().is_empty());
+            let expected = if passes {
+                TaskStatus::Accepted
+            } else {
+                TaskStatus::Rejected
+            };
+            assert_eq!(harness.row("CTV-1").status, expected, "{present}");
         }
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn the_reviewer_is_told_what_changed() {
+    async fn catervas_accepts_a_finance_task_that_changed_its_books() {
         let harness = Harness::with_finance("orch-folder-review");
         harness.finance_task("CTV-1", Some("verifying"));
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Finished the work.\n\nFinished the work.", "written_by": "fin" }),
+        );
         let folder = harness.finance_folder();
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "first books").expect("written");
@@ -2674,22 +2690,17 @@ mod tests {
         std::fs::write(folder.join("books.xlsx"), "second books, longer").expect("written");
         std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
         std::fs::remove_file(folder.join("old.xlsx")).expect("removed");
-        let adapter = harness.recorded(vec![review_writes_note()]);
+        let adapter = harness.recorded(Vec::new());
 
         harness
             .orchestrator(adapter.clone())
             .tick()
             .await
-            .expect("the review runs");
+            .expect("the tick runs");
 
-        let prompt = &adapter.started()[0].initial_prompt;
-        assert_eq!(
-            block(prompt, "changes").trim(),
-            "books.xlsx: changed, 20 bytes\nforecast.xlsx: new, 8 bytes\nold.xlsx: removed, it was 10 bytes"
-        );
-        assert!(!prompt.contains("The diff from"), "{prompt}");
-        assert!(prompt.contains("`catervas_read_sheet`"), "{prompt}");
-        assert!(block(prompt, "results").contains("C1: passed"), "{prompt}");
+        // Only code is reviewed (ADR 0061): no session reads the changes, and Catervas accepts.
+        assert!(adapter.started().is_empty());
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
     }
 
     #[tokio::test]
@@ -2847,9 +2858,14 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn the_procurement_reviewer_is_told_what_changed() {
+    async fn catervas_accepts_a_procurement_task_that_wrote_its_comparison() {
         let harness = Harness::with_procurement("orch-procurement-review");
         harness.procurement_task("CTV-1", Some("verifying"));
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Finished the work.\n\nFinished the work.", "written_by": "proc" }),
+        );
         let folder = harness.procurement_folder();
         std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
         std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
@@ -2863,21 +2879,17 @@ mod tests {
             "# Email sending",
         )
         .expect("written");
-        let adapter = harness.recorded(vec![review_writes_note()]);
+        let adapter = harness.recorded(Vec::new());
 
         harness
             .orchestrator(adapter.clone())
             .tick()
             .await
-            .expect("the review runs");
+            .expect("the tick runs");
 
-        let prompt = &adapter.started()[0].initial_prompt;
-        assert_eq!(
-            block(prompt, "changes").trim(),
-            "evaluations/email-sending.md: new, 15 bytes\nvendors.xlsx: changed, 16 bytes"
-        );
-        assert!(!prompt.contains("The diff from"), "{prompt}");
-        assert!(block(prompt, "results").contains("C1: passed"), "{prompt}");
+        // Only code is reviewed (ADR 0061): no session reads the changes, and Catervas accepts.
+        assert!(adapter.started().is_empty());
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
     }
 
     #[tokio::test]

@@ -30,9 +30,9 @@ use serde_json::{Value, json};
 
 use catervas_core::team::fixtures::an_agent_wire;
 use project::{
-    LiveDriver, a_bare_env, a_claude_saying, a_high_risk_task_verifying, a_project, a_team,
-    a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as,
-    recorded, run, run_with, scratch, status_of, the_run_lock_frees, walked,
+    LiveDriver, a_bare_env, a_claude_saying, a_project, a_task_with_a_human_criterion_verifying,
+    a_team, a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record,
+    record_as, recorded, run, run_with, scratch, status_of, the_run_lock_frees, walked,
 };
 
 /// An engine whose sessions are `adapter`'s.
@@ -900,9 +900,9 @@ fn says_the_backlog_waits() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn lists_a_high_risk_result_and_no_answered_question() {
+fn lists_a_result_with_a_human_criterion_and_no_answered_question() {
     let repository = a_team("plan-waiting");
-    let task = a_high_risk_task_verifying(&repository, "Add done.txt");
+    let task = a_task_with_a_human_criterion_verifying(&repository, "Add done.txt");
     // A result waits on the human once its reviewer has passed it.
     record(
         &repository,

@@ -7,7 +7,7 @@ use catervas_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
 use catervas_core::folders::{plan_stem, with_format};
-use catervas_core::governor::done::{CriterionResult, RunBy};
+use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
 use catervas_core::governor::gates::fits_the_open_sprint;
 use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
 use catervas_core::governor::transition::TransitionRequest;
@@ -29,9 +29,9 @@ use super::messages::{
 use super::rules::{Waiting, acted, active, asleep, has_room, refused_since_entering, spent};
 use super::session::{JUDGMENT_TOOL, SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
-    GOVERNOR, append, context, escalate, failed, fails_the_criterion, governor_results, history,
-    is_mechanical, ran_criteria, read_only, record_review, reject, reviewer_results,
-    since_verifying, unanswered,
+    GOVERNOR, append, context, decide_alone, escalate, failed, fails_the_criterion,
+    governor_results, history, is_mechanical, ran_criteria, read_only, record_review, reject,
+    reviewer_results, since_verifying, unanswered,
 };
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::catervafication::{FileDue, catervafication_of, file_due};
@@ -721,6 +721,11 @@ pub(super) async fn verifying_epic(
             EpicRan::Criteria(count) => Ok(ran_criteria(row, count)),
             EpicRan::Unrunnable(why) => escalate(deps, team, row, &why),
         };
+    }
+    // An epic whose every criterion Catervas ran is accepted or rejected by the governor, with no
+    // Product Manager's session and no human (ADR 0061).
+    if catervas_verifies_alone(contract) {
+        return decide_alone(deps, team, row, contract, 0);
     }
     if !the_human_reviews_the_epic(contract.kind, row.reviewer_id.as_deref()) {
         return reviewed_by_the_product_manager(
@@ -2676,6 +2681,40 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn catervas_accepts_an_epic_once_its_tasks_are_integrated() {
+        let harness = Harness::new("epic-governor-accepts", |_| {});
+        an_epic_verifying(&harness, |wire| {
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The check passes.",
+                "satisfies": ["R1"],
+                "verification": { "method": "command", "command": "true", "expect": { "exit_code": 0 } }
+            }]);
+        });
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // Its task is accepted but not yet integrated: nothing happens to the epic.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
+        assert!(governor_runs(&harness, "CTV-1").is_empty());
+
+        integrated(&harness, true);
+        orchestrator.tick().await.expect("the criteria run");
+        orchestrator.tick().await.expect("the epic is decided");
+
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
+        assert!(adapter.started().is_empty());
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(body.actor, TransitionActorWire::Governor);
+        assert_eq!(moved.envelope.ids.agent_id, None);
     }
 
     #[tokio::test]
