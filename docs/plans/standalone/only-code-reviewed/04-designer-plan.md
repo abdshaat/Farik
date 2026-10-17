@@ -4,7 +4,7 @@ Status: draft
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.2 (the Designer paragraph), 5.6 (`design_plan_not_approved`), 6.8; F9
 Depends on: plan 1 committed on this branch; ADR 0061
-Readiness confirmed by: pending
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies (ADR 0008). One test per major functionality (ADR 0060). Tests that pin the old behaviour change in the task that changes it.
 
@@ -26,7 +26,7 @@ Unchanged:
   - `orchestrator/design.rs`'s `decide` and `DECIDE_TOOL`;
   - `tools/design.rs`'s `DecideDesignPlanInput` and `decide`;
   - the tool in `tools.rs` (descriptor, dispatch, and `lists_every_tool_with_its_tier`);
-  - `session.rs`'s `(None, Some(DECIDE_TOOL))` arm and its tests at 4397 and 4726;
+  - `session.rs`'s `(None, Some(DECIDE_TOOL))` arm (1125) and its rows in the tests at 4397 and 4726;
   - `prompt.rs`'s `DESIGN_DECISION_INSTRUCTION`;
   - `messages.rs`'s `decide_design_plan_message`;
   - the transcripts `decide_design_plan_approves_ctv_1.jsonl` and `decide_design_plan_returns_ctv_1.jsonl`, their functions in `recorded/fixtures.rs`, and their entry in `crates/cli/src/bin/catervas-e2e-serve.rs`;

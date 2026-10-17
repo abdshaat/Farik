@@ -4,13 +4,20 @@ Status: draft
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.1, 5.2, 5.3, 5.4, 5.16 items 3 and 4; F9
 Depends on: `origin/main` at `74b4a5af`; ADR 0061
-Readiness confirmed by: pending
+Readiness confirmed by: pending (Opus 5.5 readiness review, 2026-10-16: two decisions unmade, see Open decisions; everything else is fixed in the plan)
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008). One test per major functionality (ADR 0060). A test that pins the old behaviour is changed in the task that changes the behaviour, never skipped.
 
+## Open decisions (found in the readiness review of 2026-10-16)
+
+Task 2 cannot be executed until the planning role answers both:
+
+1. **The Catervafication's Marketing task.** Its template (`catervafication.rs` `task_contract`, `row`'s `(_, Role::MarketingSpecialist)`) has no documents, so its one criterion is the `review` one. Dropping it leaves no criterion (the schema's `minItems: 1` and `CriteriaPresent` refuse that), and its output, a marketing plan at `docs/catervas/marketing/plans/MP-<n>.<x>`, has a number nobody knows when the contract is written. Which machine criterion does it carry?
+2. **The Catervafication epic in a project folder.** The epic's C1 becomes a `command` (Decisions), and `EpicCommandInProjectFolder` refuses a `command` or `test` criterion on an epic in a project folder (ADR 0057), so a Catervafication started in a project folder (`catervafication_start` does not refuse one) would never be ready. Which criterion does a project folder's epic carry? (Phase 9 step 06, not yet executed, owns the per-member Catervafication.)
+
 ## Goal
 
-A task that does not change code is accepted or rejected by the governor on the criteria Catervas runs (`command`, `test`, `artifact`), with no reviewer session and no Product Manager acceptance session. This covers an epic, a plan, a document, research, and the Marketing, Finance and Procurement Specialists' tasks. A code task (`reviewed_by_an_agent`) is reviewed exactly as today. Readiness refuses `review` and `human` criteria outside code, and every contract Catervas files whole carries machine criteria. No result waits on the human.
+A task that does not change code is accepted or rejected by the governor on the criteria Catervas runs (`command`, `test`, `artifact`), with no reviewer session and no Product Manager acceptance session. This covers an epic, a plan, a document, research, and the Marketing, Finance and Procurement Specialists' tasks. A code task (`reviewed_by_an_agent`) is reviewed exactly as today. Readiness refuses `review` and `human` criteria outside code, and every contract Catervas files whole carries machine criteria. No result waits on the human except a code task's `human` criterion and an older epic Catervas does not verify alone.
 
 Out of scope:
 - integration, which is plan 2;
@@ -22,27 +29,31 @@ Out of scope:
 
 - **"Changes code"** is `reviewed_by_an_agent(contract) = kind == Task && changes_code(assignee_role)` (the README says why).
 - **Catervas verifies alone** a contract that `catervas_verifies_alone` holds: `!reviewed_by_an_agent` and every exit criterion is `command`, `test` or `artifact`. A contract that is not reviewed but still carries a `review` or `human` criterion (an older one, written before readiness refused them) takes the old path unchanged, so old logs finish.
-- **The reviewer field** stays as `fill_reviewer_role` and the assignment gate set it, and is never run for such a task. Chosen over clearing it, which would change `ReviewerAvailable`, the assignment gate, `default_reviewer_role` and every fixture for no behaviour.
+- **The reviewer field** stays as `fill_reviewer_role` and the assignment gate set it, and is never run for such a task. Chosen over clearing it, which would change `ReviewerAvailable`, the assignment gate, `default_reviewer_role` and every fixture for no behaviour. `PrivateFolderReviewer` stays for the same reason.
 - **Two governor rows**:
-  - `verifying -> accepted` (`Governor`, `DefinitionOfDone`), after the PM's row;
-  - `verifying -> rejected` (`Governor`, `RejectionReasons`), after the reviewer's row.
+  - `verifying -> accepted` (`Governor`, `DefinitionOfDone`), right after the Product Manager's row (table index 14);
+  - `verifying -> rejected` (`Governor`, `RejectionReasons`), right after the reviewer's row and before the human's (index 16).
 
-  `check_gate` refuses both, when `!catervas_verifies_alone`, with the detail `Catervas accepts or rejects on its own only a task that changes no code and whose every criterion it runs (ADR 0061)`. Agents cannot ask as `Governor` (`actor_for`).
+  `TRANSITION_TABLE` becomes `[TransitionRow; 24]`. `check_gate` refuses both, when `!catervas_verifies_alone`, with the detail `Catervas accepts or rejects on its own only a task that changes no code and whose every criterion it runs (ADR 0061)`. Agents cannot ask as `Governor` (`actor_for`, `crates/runtime/src/tools/work.rs:390`).
 
   This was chosen over filing the move in an agent's name, which would put a false actor in the log.
-- **The Definition of Done keeps every rule but `HumanAccepted`.** Catervas writes the review note itself as `note.written { kind: review, written_by: "catervas" }`, with no agent and no session on the envelope. Its text is `Catervas ran every criterion of this task itself; only a code change is reviewed by an agent (ADR 0061).`, then a blank line, then one line per criterion, `<id>: passed|failed: <evidence>`. No `review.recorded` is written.
-- **Results need no human.** These are removed with their callers:
+- **The Definition of Done keeps every rule but `HumanAccepted`.** Catervas writes the review note itself as `note.written { kind: review, written_by: "catervas" }`, with no agent and no session on the envelope. Its text is `Catervas ran every criterion of this task itself; only a code change is reviewed by an agent (ADR 0061).`, then a blank line, then one line per criterion, `<id>: passed|failed: <evidence>`. No `review.recorded` is written. Catervas's runs are recorded as today (`criterion.recorded { run_by: reviewer, recorded_by: "governor" }`), so `CriterionRunByReviewer` holds.
+- **Results need no human.** Removed with their callers:
   - `result_needs_the_human`;
-  - `result_awaits_human`;
-  - `DoneRule::HumanAccepted` and its check `human_accepted`;
-  - the result half of `requires_human_acceptance`.
+  - `DoneRule::HumanAccepted` and its check `human_accepted` (`CHECKS` becomes `[Check; 10]`);
+  - the result half of `requires_human_acceptance` (its doc comment; the function stays, used by the contract gate alone until plan 5).
 
-  `requires_human_acceptance` stays, used by the contract gate alone until plan 5. `DoneRule::HumanCriterionAccepted` stays for code tasks' `human` criteria. `HumanRejection` stays in the table; its gate opens only while a result waits on a `human` criterion of a code task.
+  `result_awaits_human` stays and narrows to `status == Verifying && !catervas_verifies_alone(contract) && (kind == Epic || any human criterion)`: a code task's `human` criterion, an older non-code contract that still carries one, and an older epic that takes the old path. A `high` risk task and a task that may change the product plan no longer wait. Its callers (`transitions.rs:633`, `human.rs:1677` and `:1757`, `waiting.rs:442`) keep calling it, so the `Acceptance` row on Today, the human's acceptance and the human's send-back follow the narrowed rule with no change of their own. `DoneRule::HumanCriterionAccepted` stays. `HumanRejection` stays in the table, its gate unchanged. `verify.rs:125`'s wait becomes `contract.exit_criteria.iter().any(is_human) && !context.done.human_accepted`.
 - **An epic** is verified by `verifying_epic` as today up to its criteria: it waits for its tasks' integration, then runs its mechanical criteria on the integration branch. After that, when `catervas_verifies_alone(epic)` holds, the governor writes the note and accepts or rejects, with no Product Manager session and no human. Otherwise the old path runs.
-- **Readiness rule `NoReviewOutsideCode`** (`no_review_outside_code`), placed after `CriteriaMethodsValid`. For a contract that `!reviewed_by_an_agent` with any `review` or `human` criterion, it refuses: `<ids> ask for a review or the human, and only a code change is reviewed (ADR 0061): use command, test or artifact criteria`. The plain words, in `plain.rs`, are "This task asks for a review, and only code is reviewed. Check it with a command, a test or a file instead." `private_folder_task`'s "use artifact, review and human criteria" becomes "use artifact criteria".
-- **Whole-filed templates** use only `artifact` criteria when their assignee's role does not change code: one per file of the contract's `allowed_paths` (none of these templates holds a glob), `{ "method": "artifact", "path": <file> }`, numbered C1 onwards, each with the `satisfies` its review criterion had.
-  - The functions: `rederive_request`, `product_plan_request`, `change_request` and `rewrite_request` (in `crates/store/src/requests.rs`), and every task of `crates/runtime/src/catervafication.rs` (its last, `review` criterion goes; its path criteria stay).
-  - The Catervafication epic's C1 (`file_catervafication_epic`) becomes `{ "method": "command", "command": "test -d docs/catervas" }`, run on the integration branch once its tasks are merged.
+- **Readiness rule `NoReviewOutsideCode`** (`no_review_outside_code`), placed after `CriteriaMethodsValid` in the enum, in `CHECKS` (which becomes `[Check; 31]`) and in `plain.rs`'s `EVERY_RULE` and `listed`. For a contract that `!reviewed_by_an_agent` with any `review` or `human` criterion, it refuses: `<ids> ask for a review or the human, and only a code change is reviewed (ADR 0061): use command, test or artifact criteria`, `<ids>` as `listed("criterion", "criteria", ..)` words them. The plain words, in `plain.rs`, are "This task asks for a review, and only code is reviewed. Check it with a command, a test or a file instead." `private_folder_task`'s "use artifact, review and human criteria" becomes "use artifact criteria".
+- **Required criteria follow the same rule.** `required_criteria_present` skips a required `review` or `human` method for a contract that `!reviewed_by_an_agent`, as it already skips `command` and `test` for a task that runs none. Otherwise a team whose rules require `review` (as `team.rs:1643`'s fixture does) could never ready a non-code task.
+- **Whole-filed templates** use only machine criteria when their assignee's role does not change code. Each criterion is `{ "id": "C<n>", "text": "<path> exists.", "satisfies": [..], "verification": { "method": "artifact", "path": <path> } }`, numbered C1 onwards in `allowed_paths` order:
+  - `rederive_request` (`crates/store/src/requests.rs:257`): one, on `twin`, satisfying `R1`.
+  - `product_plan_request` (`:367`): one per allowed path: `spec.<x>` satisfies `R1`, `roadmap.<x>` `R2`, and each `.agent.<x>` file `R3`.
+  - `change_request` (`:504`): one per path of `paths` (the document, then its twin), satisfying `R1`.
+  - `rewrite_request` (`:551`): its allowed path is the glob `<folder>/**`, so it adds none. Its per-document `artifact` criteria stay and its last, `review` criterion goes.
+  - Every task of `crates/runtime/src/catervafication.rs` (`task_contract`): its last, `review` criterion goes; its path criteria stay. The Marketing row is Open decision 1.
+  - The Catervafication epic's C1 (`epic_contract`, `catervafication.rs:171`) becomes `{ "method": "command", "command": "test -d docs/catervas", "expect": { "exit_code": 0 } }`, run on the integration branch once its tasks are merged; its `id`, `text` and `satisfies` stay. A project folder's epic is Open decision 2.
   - A template whose owner changes code (`change_request` for the Developer's or the Designer's folder) keeps its `review` criterion.
 - **Role prompts.** Every sentence in these files that says a non-code task is reviewed, or tells the author to give one a `review` or `human` criterion, says instead that Catervas checks its criteria and that only code is reviewed:
   - `finance_specialist/system.md` and `skills/keeping-the-books/SKILL.md`;
@@ -53,38 +64,33 @@ Out of scope:
   - `scrum_master/system.md` and `skills/keeping-work-flowing/SKILL.md`.
 
   All are under `crates/roles/roles/`. The Developer's and the Designer's files are unchanged.
-- **The task page.** For a task that `!reviewedByAnAgent` (the same rule in TypeScript), the lead's `taskReviews` part ("{name} reviews it", `TaskDetail.tsx:206`) becomes `taskChecked` ("Catervas checks it"), and the summary's signature of a review note `written_by: catervas` (line 371) uses `gateChecked` ("Catervas checked it") in place of `gateReviewed`.
+- **The task page.** For a task that `!reviewedByAnAgent` (the same rule in TypeScript: `contract.kind !== "epic"` and `assigneeRole` is `software_developer` or `ui_ux_designer`), the lead's `taskReviews` part ("{name} reviews it", `TaskDetail.tsx:206`) becomes `taskChecked` ("Catervas checks it"). The summary (`TaskDetail.tsx:367`) also renders when its note's `writtenBy` is `catervas`, which `agentOf` does not find, and then signs it with `t("gateChecked")` ("Catervas checked it") in place of `signed("gateReviewed", ..)`. `riskHighWhy` ("High. You approve its plan, and you accept the work yourself.") becomes "High. You approve its plan." (plan 5 removes the plan's approval and must change it again).
 
 ## File map
 
 ```
 crates/core/src/team.rs                         modifies: reviewed_by_an_agent (Task 1)
-crates/core/src/folders.rs                      modifies: is_plan_task (Task 1; consumed by plan 3)
-crates/core/src/governor/done.rs                modifies: catervas_verifies_alone (Task 1); results need no human (Task 2)
+crates/core/src/governor/done.rs                modifies: catervas_verifies_alone (Task 1); results need no human (Task 3)
 crates/core/src/governor/transition_table.rs    modifies: the two rows, its three table tests (Task 1)
-crates/core/src/governor/transition.rs          modifies: check_gate (Task 1); result callers (Task 2)
-crates/core/src/governor/readiness.rs, plain.rs modifies: NoReviewOutsideCode, private_folder_task's words (Task 2)
-crates/core/src/governor/gates.rs               modifies: result_needs_the_human's caller (Task 2)
-crates/runtime/src/orchestrator/verify.rs       modifies: verify_alone; tests (Task 3)
-crates/runtime/src/orchestrator/requests.rs     modifies: verifying_epic's governor ending; tests (Task 3)
-crates/runtime/src/transitions.rs, orchestrator/human.rs, crates/store/src/waiting.rs   result callers (Task 2 or 3, where they break)
-crates/store/src/requests.rs, crates/runtime/src/catervafication.rs   templates (Task 4)
-crates/roles/roles/** (the files above)         prompts (Task 4)
+crates/core/src/governor/transition.rs          modifies: check_gate (Task 1)
+crates/store/src/requests.rs, crates/runtime/src/catervafication.rs   templates (Task 2)
+crates/roles/roles/** (the files above)         prompts (Task 2)
+crates/core/src/governor/readiness.rs, plain.rs modifies: NoReviewOutsideCode, required criteria, private_folder_task's words (Task 3)
+crates/runtime/src/orchestrator/verify.rs       modifies: verify.rs:125's wait (Task 3); verify_alone; tests (Task 4)
+crates/runtime/src/orchestrator/rules.rs        tests: the human's acceptance of a high risk or product plan task (Task 3)
+crates/runtime/src/orchestrator/requests.rs     modifies: verifying_epic's governor ending; tests (Task 4)
 apps/web/src/pages/TaskDetail.tsx, apps/web/src/strings/en.ts, TaskDetail.test.tsx    (Task 5)
 ```
 
 ## Interfaces
 
-Consumes (on `main`): `changes_code`, `task_private_folder`, `wire_method`, `evaluate_done`, `check_rejection_reasons`, `run_what_catervas_runs`, `governor_results`, `since_verifying`, `history`, `append`, `context`, `escalate`, `ran_criteria`, `run_on_the_integration_branch`; harnesses `a_harness`, `Harness`, `ticked`.
+Consumes (on `main`): `changes_code`, `task_private_folder`, `wire_method`, `evaluate_done`, `check_rejection_reasons`, `run_what_catervas_runs`, `governor_results`, `since_verifying`, `history`, `append`, `context`, `escalate`, `ran_criteria`, `run_on_the_integration_branch`, `spent`; harnesses `a_harness`, `Harness`, `ticked`.
 
 Produces:
 
 ```rust
 // catervas_core::team
 #[must_use] pub fn reviewed_by_an_agent(contract: &TaskContract) -> bool;
-// catervas_core::folders
-/// `plan` is set and `allowed_paths` are exactly it: the task writes an epic's plan.
-#[must_use] pub fn is_plan_task(contract: &TaskContract) -> bool;
 // catervas_core::governor::done
 #[must_use] pub fn catervas_verifies_alone(contract: &TaskContract) -> bool;
 // catervas_core::governor::readiness
@@ -106,15 +112,15 @@ export function reviewedByAnAgent(contract: Contract): boolean;
 ### Task 1: the governor may verify what no agent reviews
 
 Files:
-- `crates/core/src/team.rs` and `crates/core/src/folders.rs`: the new functions.
+- `crates/core/src/team.rs`: `reviewed_by_an_agent`.
 - `crates/core/src/governor/done.rs`: `catervas_verifies_alone`.
 - `transition_table.rs`:
   - add the two rows;
   - `has_exactly_twenty_two_distinct_rows` becomes `has_exactly_twenty_four_distinct_rows`;
   - `has_eighteen_specific_rows_and_four_any_rows` becomes `has_twenty_specific_rows_and_four_any_rows`;
-  - `matches_every_line_of_the_spec_table` gains the two pairs.
+  - `matches_every_line_of_the_spec_table` gains `(A::Governor, G::DefinitionOfDone)` after the Product Manager's pair of `verifying -> accepted`, and `(A::Governor, G::RejectionReasons)` between the reviewer's and the human's pairs of `verifying -> rejected`.
 - `transition.rs`: `check_gate`, for `actor == Governor` on `DefinitionOfDone` or `RejectionReasons`, gives the refusal above unless `catervas_verifies_alone`, then the gate as today. In `mod tests`:
-  - `every_row` becomes `[Case; 24]`, the rows renumbered in table order, with two cases added: `Verifying -> Accepted` and `Verifying -> Rejected` by `A::Governor`. Their `prepare` makes the contract an Architect's docs task, with `allowed_paths` `docs/catervas/architecture/overview.md`, one `artifact` criterion holding the id `a_result` records, and `done.changed_paths` that path. For the rejection, it sets `rejection` to that criterion with written reasons.
+  - `every_row` becomes `[Case; 24]`, the rows renumbered in table order, with two cases added: `Verifying -> Accepted` and `Verifying -> Rejected` by `A::Governor`. Their `prepare` makes the contract an Architect's docs task (`assignee_role` `architect`), with `allowed_paths` `docs/catervas/architecture/overview.md`, one `artifact` criterion with the id `C1` that `a_result` records, and `done.changed_paths` that path. `a_context`'s `rejection` already names `C1` with written reasons.
   - `refuses_every_row_of_the_table_to_an_actor_it_does_not_name` asks a `Governor` row from `verifying` as `A::Assignee`, since the reviewer shares `verifying -> rejected`.
   - These two fixes were found in the readiness round of 2026-10-16 on the earlier plan.
 
@@ -122,67 +128,79 @@ Tests:
 - `the_governor_verifies_only_what_no_agent_reviews` (`transition.rs`). Take a verifying Architect task with one `artifact` criterion and passing done evidence:
   - `ask(Accepted, A::Governor, None)` decides on the governor's row;
   - with rejection reasons, `ask(Rejected, A::Governor, None)` decides on the governor's row;
-  - the same contract assigned to `software_developer`, and the Architect's with a `review` criterion added, are each refused on both moves with `GateFailed`, and details exactly the refusal sentence.
-- `is_plan_task` and `reviewed_by_an_agent` are covered by the assertion above and by plan 3.
+  - the same contract assigned to `software_developer`, and the Architect's with a `review` criterion added, are each refused on both moves with `GateFailed`, one failure each, whose details are exactly `[the refusal sentence]`.
+- `reviewed_by_an_agent` is covered by the assertion above.
 
 - [ ] `feat(core): let the governor accept or reject what no agent reviews`
 
-### Task 2: no result waits on the human, and no review outside code
+### Task 2: what Catervas files whole carries machine criteria
+
+Blocked by Open decisions 1 and 2.
+
+Files: `crates/store/src/requests.rs` and `crates/runtime/src/catervafication.rs` (the templates of Decisions), and the role files of Decisions. Tests that read the templates' criteria change here: in `requests.rs`, `writes_the_product_plans_contract` (1411: four criteria, each an `artifact`, in place of two `review`s; its `result_needs_the_human` assertion stays until Task 3); in `catervafication.rs`, `writes_each_template_as_the_table_says` (785) and `every_template_passes_the_definition_of_ready` (704).
+
+This task comes before Task 3, so that no template Catervas files is refused by `NoReviewOutsideCode`. Until Task 4, such a task still goes through its reviewer's session, which reviews Catervas's runs as it does today.
+
+Tests:
+- `whole_filed_contracts_need_no_review` (`crates/store/src/requests.rs`): for each owner role that does not change code (Product Manager, Architect, Marketing Specialist), the contracts of `rederive_request`, `product_plan_request`, `change_request` and `rewrite_request` validate (`validate_contract`) and hold no `review` or `human` criterion, and each criterion is an `artifact` whose path is one of `allowed_paths` or, for `rewrite_request`, lies under its folder; `change_request` for `software_developer` keeps its `review` criterion.
+- `epic_contract`'s criterion is the `command` of Decisions, asserted in `writes_each_template_as_the_table_says`.
+
+- [ ] `feat(store): file whole contracts with machine criteria outside code`
+
+### Task 3: no result waits on the human, and no review outside code
 
 Files:
-- `done.rs`, `transition.rs`, `gates.rs`: the removals of Decisions. Their callers in `crates/runtime/src/transitions.rs`, `orchestrator/human.rs`, `orchestrator/verify.rs`, `orchestrator/requests.rs` and `crates/store/src/waiting.rs` stop asking; an `Acceptance` waiting row is listed only for a task with an unanswered `human` criterion.
-- `readiness.rs`: `no_review_outside_code` in `CHECKS` after `criteria_methods_valid`, and the `private_folder_task` wording.
-- `plain.rs`: the plain words.
+- `done.rs`, `transition.rs`: the removals and the narrowed `result_awaits_human` of Decisions.
+- `verify.rs:125`: the narrowed wait.
+- `readiness.rs`: `no_review_outside_code` in `CHECKS` after `criteria_methods_valid`, the required-criteria skip, and the `private_folder_task` wording.
+- `plain.rs`: the plain words, `EVERY_RULE` (33 rules) and `listed`.
+- Tests that pinned the removed behaviour change here:
+  - in `done.rs`, `the_human_accepts_a_task_that_may_change_the_product_plan` (886) and `needs_the_human_for_a_high_risk_task_and_for_every_epic` (927) give way to the test below, and `reports_every_failure_in_rule_order` (953) no longer lists `R::HumanAccepted`;
+  - in `crates/runtime/src/orchestrator/rules.rs`, `leaves_a_high_risk_task_for_the_human` (4717), `accepts_a_high_risk_task_after_the_human` (4741), `leaves_a_task_that_may_change_the_product_plan_for_the_human` (4770) and `accepts_it_after_the_human` (4796) become one test, `accepts_a_high_risk_or_product_plan_task_without_the_human`, in which each goes from the reviewer's session to the Product Manager's `verify` session and `accepted` with no human. `leaves_a_task_with_a_human_criterion_for_the_human` (4827) is unchanged;
+  - `crates/store/src/requests.rs:1448`'s `result_needs_the_human` assertion goes;
+  - any other test whose contract is a non-code task or an epic with a `review` or `human` criterion, and that expects it to pass readiness, gives it an `artifact` criterion instead.
 
 Tests:
 - `refuses_review_and_human_criteria_outside_code` (`readiness.rs`):
   - a Product Manager docs task with a `review` criterion fails `NoReviewOutsideCode` with the message above naming its id;
   - an epic with a `human` criterion fails it too;
   - a Developer's task with both passes it;
-  - a Finance Specialist's private-folder task with only an `artifact` criterion passes every rule.
-- `accepts_an_epic_and_a_high_risk_task_without_the_human` (`done.rs`, replacing the tests that asserted `HumanAccepted` failures, e.g. those at lines 791, 886, 927): an epic, a `high` risk task and a task whose `allowed_paths` name `docs/catervas/product/spec.md`, each with passing evidence and `human_accepted: false`, pass `evaluate_done`.
+  - a Finance Specialist's private-folder task (`reviewer_role` `product_manager`) with only an `artifact` criterion passes every rule;
+  - with team rules requiring `review`, the Product Manager's docs task with only an `artifact` criterion passes `RequiredCriteriaPresent`, and a Developer's task with no `review` criterion still fails it.
+- `accepts_an_epic_and_a_high_risk_task_without_the_human` (`done.rs`): an epic, a `high` risk task and a task whose `allowed_paths` name `docs/catervas/product/spec.md`, each with passing evidence and `human_accepted: false`, pass `evaluate_done`.
 
 - [ ] `feat(core): review only code, and let no result wait on the human`
 
-### Task 3: Catervas verifies a task and an epic with no session
+### Task 4: Catervas verifies a task and an epic with no session
 
 Files:
 - `crates/runtime/src/orchestrator/verify.rs`. In `verifying`, after the epic branch and before the reviewer lookup, `if catervas_verifies_alone(&contract) { return verify_alone(..) }`. `verify_alone` does, in order:
-  1. checks `spent`;
+  1. checks `spent`, returning `None` when it is spent;
   2. calls `run_what_catervas_runs`, handling its three outcomes as `verifying` does;
-  3. takes the latest governor result per criterion (`governor_results`); while any criterion lacks one, returns `ran_criteria`;
-  4. with no review note since work began, appends `catervas_note`;
-  5. when any criterion failed, files `to: Rejected, actor: Governor, agent_id: None` with `Rejection { failed_criterion_ids, reasons: note }`;
-  6. otherwise files `to: Accepted, actor: Governor`.
+  3. reads the history again and takes the latest governor result per criterion (`governor_results`); while any criterion lacks one, returns `ran_criteria`;
+  4. with no review note since work began, appends `catervas_note` (`append`, no agent, no session);
+  5. when any criterion failed, files `to: Rejected, actor: Governor, agent_id: None` with `TransitionAsk { rejection: Some(Rejection { failed_criterion_ids, reasons: <the note> }), .. }`;
+  6. otherwise files `to: Accepted, actor: Governor, agent_id: None`.
 
-  Its reports are `accepted it on its criteria, which Catervas ran: only code is reviewed`, `rejected it for <ids>, which Catervas ran`, or `the governor would not <accept|reject> it: <details>`.
-- `requests.rs`: `verifying_epic` ends the same way after its integration-branch runs, when `catervas_verifies_alone(contract)`.
-- Tests that pinned a Product Manager's review or acceptance of a non-code task, or the human's of an epic, change to this flow here. For example, in `requests.rs`: `reviewed_by_the_product_manager` cases, 2945, 3187, 3682 and 3923; and the `rules.rs` tests from 4717 to 4827.
+  Its `TickReport::Acted` words are `accepted it on its criteria, which Catervas ran: only code is reviewed`, `rejected it for <ids>, which Catervas ran`, or `the governor would not <accept|reject> it: <details>` (`refusal_details` joined with `; `).
+- `requests.rs`: `verifying_epic` ends the same way after its integration-branch runs, when `catervas_verifies_alone(contract)`, before `the_human_reviews_the_epic`.
+- Tests that pinned a Product Manager's review or acceptance of a non-code task, or the human's of an epic whose criteria Catervas now runs alone, change to this flow here. For example, in `requests.rs`: the tests of `reviewed_by_the_product_manager`, `hands_the_humans_acceptance_to_the_product_manager` (2945), `records_an_epics_review_once_with_its_human_criterion` (3187), `refuses_the_humans_acceptance_of_an_epic_before_catervas_ran_its_criteria` (3682) and `keeps_a_human_reviewed_epic_with_the_human_once_a_scrum_master_activates` (3923). An epic test whose epic keeps a `review` or `human` criterion keeps the old path and its assertions.
 - Tests are `#[ignore = "needs the git program: cargo xtask check --integration"]`.
 
 Tests:
 - `catervas_verifies_a_task_no_agent_reviews` (`verify.rs`, with `a_harness`):
   - An Architect's task CTV-2 (reviewer `pm`, one `artifact` criterion C1 on `docs/catervas/architecture/overview.md`) is verifying with the file committed on `docs/CTV-2` and a completion note. Two ticks start no session. CTV-2 is `accepted`. The log holds a `criterion.recorded` by `governor`, a `note.written` of kind `review` with `written_by` `catervas` and no `agent_id`, and a `task.transitioned` to `accepted` with `actor` `governor`.
   - In a second harness with nothing committed, CTV-2 is `rejected` by `governor` with C1 failed, and no session starts.
-  - A Finance Specialist's task in its private folder with an `artifact` criterion on `books.xlsx` is accepted the same way.
-- `catervas_accepts_an_epic_once_its_tasks_are_integrated` (`requests.rs`): an epic in `verifying` whose one task is accepted and integrated, with a `command` criterion `true`, is accepted by `governor` with no session. While its task still awaits integration, nothing happens.
+  - A Finance Specialist's task in its private folder with an `artifact` criterion on `books.xlsx` (the file in `.catervas/local/finance/`) is accepted the same way.
+- `catervas_accepts_an_epic_once_its_tasks_are_integrated` (`requests.rs`): an epic in `verifying` whose one task is accepted and integrated, with the criterion `{ "method": "command", "command": "true", "expect": { "exit_code": 0 } }`, is accepted by `governor` with no session. While its task still awaits integration, a tick does nothing to it.
 
 - [ ] `feat(runtime): accept what no agent reviews on Catervas's own runs`
-
-### Task 4: what Catervas files whole carries machine criteria
-
-Files: `crates/store/src/requests.rs` and `crates/runtime/src/catervafication.rs` (the templates of Decisions), and the role files of Decisions. Tests that read the templates' criteria change here.
-
-Tests:
-- `whole_filed_contracts_need_no_review` (`crates/store/src/requests.rs`): for each owner role that does not change code (Product Manager, Architect, Marketing Specialist), the contracts of `rederive_request`, `product_plan_request`, `change_request` and `rewrite_request` validate (`validate_contract`) and hold no `review` or `human` criterion, and each criterion is an `artifact` on a path of `allowed_paths`; `change_request` for `software_developer` keeps its `review` criterion; `file_catervafication_epic`'s criterion is the `command` `test -d docs/catervas`.
-
-- [ ] `feat(store): file whole contracts with machine criteria outside code`
 
 ### Task 5: the task page says Catervas checks it
 
 Files:
-- `apps/web/src/pages/TaskDetail.tsx`: `reviewedByAnAgent` (`kind === "task"` and `assigneeRole` is `software_developer` or `ui_ux_designer`), the lead and the signature.
-- `apps/web/src/strings/en.ts`: `taskChecked` "Catervas checks it" and `gateChecked` "Catervas checked it".
+- `apps/web/src/pages/TaskDetail.tsx`: `reviewedByAnAgent`, the lead, the summary's condition and signature.
+- `apps/web/src/strings/en.ts`: `taskChecked` "Catervas checks it", `gateChecked` "Catervas checked it", and `riskHighWhy`.
 - `TaskDetail.test.tsx`.
 
 Tests:

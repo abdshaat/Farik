@@ -3,8 +3,8 @@
 Status: draft
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.2 (the dependency paragraph), 5.14, 5.16 item 3, 6.1, 6.3; F9
-Depends on: plans 1 and 2 committed on this branch (`is_plan_task`, `catervas_verifies_alone`, pull requests only); ADR 0061
-Readiness confirmed by: pending
+Depends on: plans 1 and 2 committed on this branch (`catervas_verifies_alone`, pull requests only); ADR 0061
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies (ADR 0008). One test per major functionality (ADR 0060). Tests that pin the old behaviour change in the task that changes it.
 
@@ -23,7 +23,7 @@ Out of scope: the new project's product plan (plan 5).
 
 ## Decisions
 
-- **A dependency counts once accepted.** `check_assignment`'s dependency rule (`crates/core/src/governor/gates.rs`) and rule 8's filter (`crates/runtime/src/orchestrator/rules.rs:2063`) take `status == Accepted` and no longer read `integrated`. `DependencyState.integrated` goes, since nothing reads it. The 5.2 sentence "A dependency counts as integrated when…" becomes "A dependency counts once it is accepted (ADR 0061)".
+- **A dependency counts once accepted.** `check_assignment`'s dependency rule (`crates/core/src/governor/gates.rs`) and rule 8's filter (`assignable`, `crates/runtime/src/orchestrator/rules.rs:2066`) take `status == Accepted` and no longer read `integrated`. `DependencyState.integrated` goes, since nothing reads it. The 5.2 sentence "A dependency counts as integrated when…" becomes "A dependency counts once it is accepted (ADR 0061)".
 - **A task's start point** is computed by `start_point(deps, board, contract, repository) -> Result<Vec<String>, OrchestratorError>` (`requests.rs`). It lists the branches the worktree is made from, the first being the base:
   1. each dependency that is accepted, still `awaiting_integration`, has a branch (not a private-folder task), and has the same `repo` as `contract`, in `dependencies` order, as `task_branch`;
   2. then, for a contract with `plan` P that is not itself a plan task and has a `parent`: the branch of the last accepted plan task under that parent whose `plan` is P and whose `repo` equals its own, when P is not on the integration branch (`Git::has_file`);
@@ -48,6 +48,7 @@ Out of scope: the new project's product plan (plan 5).
   - This was chosen over adding the plan, or each dependency's paths, to `allowed_paths`, which would let the task change them, and over leaving the plan out of the diff by name, which handles plans only.
 - **`Git::delete_branch(name)`** is `git branch -D <name>` at the root, refused for the branch checked out there.
 - **`Git::merge_in`** (`crates/store/src/git.rs`) is `git -C <worktree> merge --no-ff -m <message> <from>`, as `merge_what_is_checked_out` does. On conflicts it aborts and answers `Conflicts`. It never checks out at the root, unlike `Git::merge`.
+- **`is_plan_task`** (`crates/core/src/folders.rs`): `plan` is set and `allowed_paths` are exactly it, the rule `children_of_epic` applies inline today (`requests.rs:480`), moved to core so that `start_point`, `children_of_epic` and `integrate_locked` share it. (The readiness review moved it here from plan 1, which had no test or caller for it.)
 - **The epic's step** (`requests.rs`):
   - `Child` becomes `{ task_id: TaskId, status: TaskStatus, plan_task: bool }`, losing `awaiting_integration`.
   - `children_of_epic` uses `is_plan_task`.
@@ -65,26 +66,32 @@ Out of scope: the new project's product plan (plan 5).
 
   It goes by the file, not by ancestry, so a squash merge counts. No scan refresh follows.
 
+  Today (`crates/store/src/waiting.rs`, plan 2's `Integration` rows) lists no row for a plan task, since nothing of it is the human's to merge on its own.
+
 ## File map
 
 ```
 crates/core/src/governor/gates.rs, crates/runtime/src/transitions.rs   dependency once accepted (Task 1)
 crates/runtime/src/orchestrator/rules.rs                               rule 8's filter (Task 1); assigned's start (Task 3)
 crates/store/src/git.rs, crates/store/tests/git.rs                     merge_in (Task 2)
+crates/core/src/folders.rs                                             is_plan_task (Task 3)
 crates/runtime/src/orchestrator/requests.rs                            start_point (Task 3); epic step and message (Task 4)
 crates/runtime/src/transitions.rs, orchestrator/verify.rs, tools/git.rs, crates/store/src/diff.rs   diffs from task_base (Task 3)
 crates/runtime/src/orchestrator/messages.rs                            plan messages (Task 4)
 crates/roles/roles/product_manager/system.md, skills/writing-task-contracts/SKILL.md   (Task 4)
-crates/runtime/src/orchestrator/integrate.rs                           carried_plan (Task 5)
+crates/runtime/src/orchestrator/integrate.rs, crates/store/src/waiting.rs   carried_plan; no Today row (Task 5)
 ```
 
 ## Interfaces
 
-Consumes: `is_plan_task` (plan 1), `task_branch`, `held_document`, `integration_branch`, `task_repository_of`, `TaskRepository`, `Git::has_file`, `Git::has_local_branch`, `Git::create_worktree`, `Git::remove_worktree`, `MergeOutcome`, `record_integrated`; test harnesses `an_accepted_plan_task_at`, `a_scrum_masters_epic_in_progress`, `integrated`, `commit_at_root`.
+Consumes: `task_branch`, `held_document`, `integration_branch`, `task_repository_of`, `TaskRepository`, `Git::has_file`, `Git::has_local_branch`, `Git::create_worktree`, `Git::remove_worktree`, `MergeOutcome`, `record_integrated`; test harnesses `an_accepted_plan_task_at`, `a_scrum_masters_epic_in_progress`, `integrated`, `commit_at_root`.
 
 Produces:
 
 ```rust
+// catervas_core::folders
+/// `plan` is set and `allowed_paths` are exactly it: the task writes an epic's plan.
+#[must_use] pub fn is_plan_task(contract: &TaskContract) -> bool;
 // catervas_store::git::Git
 pub fn merge_in(&self, worktree: &Path, from: &str, message: &str) -> Result<MergeOutcome, GitError>;
 pub fn delete_branch(&self, name: &str) -> Result<(), GitError>;
@@ -100,10 +107,10 @@ pub(super) fn start_point(deps: &OrchestratorDeps, board: &[TaskProjection],
 
 ### Task 1: a dependency counts once accepted
 
-Files: `gates.rs` (the rule and its words "<id> is not accepted yet"), `transitions.rs` (`dependency_states` without `integrated`), `rules.rs:2063`.
+Files: `gates.rs` (the rule loses its "is accepted but not integrated" arm; its words for a dependency not accepted, `<id> is <status> and a dependency is assigned only once it is accepted`, stay), `transitions.rs` (`dependency_states` without `integrated`, and the `DependencyState` literals of its tests at 3437, 3498 and 3513), `rules.rs:2066`.
 
 Tests:
-- `assigns_a_task_once_every_dependency_is_accepted` (renames `assigns_a_task_only_once_every_dependency_is_accepted_and_integrated`, `gates.rs:1872`): a dependency `accepted` and still awaiting integration lets the assignment through; one `verifying` refuses it, naming the dependency.
+- `assigns_a_task_once_every_dependency_is_accepted` (renames `assigns_a_task_only_once_every_dependency_is_accepted_and_integrated`, `gates.rs:1872`): a dependency `accepted` and still awaiting integration lets the assignment through; one `verifying` refuses it with exactly `CTV-2 is verifying and a dependency is assigned only once it is accepted`.
 - `rules.rs`'s `waits_for_a_dependency_to_be_integrated` and `waits_for_an_accepted_dependency_until_it_is_integrated` become `plans_a_task_whose_dependency_is_accepted`, asserting that the ready task gets its plan session while its dependency is accepted and not integrated.
 
 - [ ] `feat(core): count a dependency once it is accepted`
@@ -121,7 +128,7 @@ Tests:
 
 ### Task 3: a task starts from what it needs
 
-Files: `requests.rs` (`start_point`), `rules.rs` (`assigned` uses it and writes the start ref), `crates/store/src/git.rs` (`set_ref`, `task_base`), and the diff sites of Decisions. Tests are ignored and need git, in `requests.rs`.
+Files: `crates/core/src/folders.rs` (`is_plan_task`), `requests.rs` (`start_point`), `rules.rs` (`assigned` uses it and writes the start ref), `crates/store/src/git.rs` (`set_ref`, `task_base`), and the diff sites of Decisions. Tests are ignored and need git, in `requests.rs`.
 
 Tests:
 - `a_task_starts_from_its_unmerged_dependencies_and_its_plan`:
@@ -147,11 +154,11 @@ Tests:
 
 ### Task 5: a plan task rides with its tasks
 
-Files: `integrate.rs`. The test is ignored and needs git.
+Files: `integrate.rs`, `crates/store/src/waiting.rs`. The test is ignored and needs git.
 
 Tests:
 - `integrates_a_plan_task_by_its_plan_not_a_pull_request`:
-  - An accepted plan task has its plan on its own branch. A tick opens no pull request (no `pull_request.opened`; the fake forge was asked nothing) and leaves the task awaiting.
+  - An accepted plan task has its plan on its own branch. A tick opens no pull request (no `pull_request.opened`; the fake forge was asked nothing) and leaves the task awaiting, and Today's waiting list holds no row for it.
   - `integrate` answers the refusal starting `carried_by_its_tasks: `.
   - With the plan committed on `main`, the next tick records `task.integrated { into: "main", integrated_by: "governor" }`, and the task no longer awaits.
 
