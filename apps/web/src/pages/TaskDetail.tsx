@@ -41,6 +41,8 @@ type Diff = {
 	removed: number;
 	/** A task in its role's private folder: no diff, only the names of what changed. */
 	privateFolder?: boolean;
+	/** The branch Catervas recorded at the task's start (ADR 0066). */
+	branch?: string;
 };
 type Waiting = { taskId: string; kind: string };
 type Activity = {
@@ -269,12 +271,6 @@ export function TaskDetail() {
 	)?.sessionId;
 	const cancellable =
 		contract.status !== "accepted" && contract.status !== "cancelled";
-	// The branch as `catervas_core::branch::task_branch` names it.
-	const branch =
-		contract.assigneeRole === "software_developer" ||
-		contract.assigneeRole === "ui_ux_designer"
-			? `${contract.change === "fix" ? "fix" : "feature"}/${id}`
-			: `docs/${id}`;
 
 	const design = detail.designPlan;
 	const proposal = events.findLast((e) => e.kind === "design_plan.proposed");
@@ -567,7 +563,7 @@ export function TaskDetail() {
 								.replace("{added}", String(diff.added))
 								.replace("{removed}", String(diff.removed)),
 						)
-						.replace("{branch}", branch)}
+						.replace("{branch}", diff.branch ?? "")}
 				</p>
 				<DiffView diff={diff.diff} label={t("gateChanges")} />
 			</>

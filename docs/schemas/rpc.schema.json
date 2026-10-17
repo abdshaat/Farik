@@ -3297,6 +3297,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "branch": {
+          "description": "The task's branch, as Catervas recorded it at the task's start (ADR 0066); absent for an epic and a task in a private folder.",
+          "type": "string"
+        },
         "private_folder": {
           "description": "True for a task that works in its role's private folder, which has no diff to show: diff is then empty, and files names what changed in the folder since the copy taken when the task was assigned.",
           "type": "boolean"

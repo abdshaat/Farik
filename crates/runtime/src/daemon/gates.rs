@@ -525,6 +525,9 @@ fn task_diff(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, Fa
     let mut answer = json!({
         "diff": diff.diff, "files": diff.files, "added": diff.added, "removed": diff.removed,
     });
+    if let Some(branch) = &diff.branch {
+        answer["branch"] = json!(branch);
+    }
     // A task in a private folder shows its files' names and no diff (6.6).
     if diff.private_folder {
         answer["private_folder"] = json!(true);
@@ -4018,6 +4021,7 @@ pub(super) mod tests {
         );
 
         assert_eq!(diff["files"], json!(["src/a.rs"]), "{diff}");
+        assert_eq!(diff["branch"], json!(harness.branch("CTV-1")), "{diff}");
     }
 
     #[test]
