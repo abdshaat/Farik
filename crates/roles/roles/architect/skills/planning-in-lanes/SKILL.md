@@ -46,4 +46,4 @@ to respect).
 
 ## 3. Finish
 
-Commit the plan with `catervas_git_commit`, and request `verifying`. The Product Manager reviews it.
+Commit the plan with `catervas_git_commit`, and request `verifying`. Catervas checks its criteria itself: only code is reviewed.

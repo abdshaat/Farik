@@ -21,7 +21,7 @@ Use these headings, in this order:
 2. **Users**: who has the need, and who is not served.
 3. **Goals and non-goals**: what this epic will do, and what it will not.
 4. **Requirements**: numbered `R1`, `R2`, ..., each one thing that must be true afterwards, and
-   each one testable: a reviewer could say yes or no.
+   each one testable: a command, a test or a file could say yes or no.
 5. **Success measure**: how the user will know it worked, with a number or an observation.
 6. **Open questions**: what is still unknown, and who can answer it.
 

@@ -1493,17 +1493,17 @@ mod tests {
             (
                 Role::ProductManager,
                 "writing-task-contracts",
-                "A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself, reviewed in a fresh session that knows nothing of the work, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.",
+                "A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself (not reviewed: Catervas checks its criteria), and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.",
             ),
             (
                 Role::ProductManager,
                 "writing-task-contracts",
-                "Nobody reviews their own work but you, in a fresh session, for your own docs tasks (below).",
+                "every other role's task is not reviewed by an agent: Catervas checks its criteria",
             ),
             (
                 Role::ScrumMaster,
                 "keeping-work-flowing",
-                "Nobody reviews their own work, except a Product Manager with no Architect or Scrum Master on its team, whose own docs tasks it reviews in a fresh session. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks.",
+                "Only code is reviewed, and nobody reviews their own work; a task that is not code is checked by Catervas on its criteria. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks.",
             ),
         ] {
             let definition = loaded(role);

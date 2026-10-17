@@ -6,8 +6,8 @@ description: Use when a request from the user needs triage, or a draft or refini
 # Writing task contracts
 
 A contract is the only way work enters the team. The governor checks it against the Definition of
-Ready before anyone may start, and every criterion in it is what a reviewer will run to decide
-whether the work is done. Write it for the reviewer who has nothing else.
+Ready before anyone may start, and every criterion in it is what a reviewer (for code) or Catervas itself (for anything else) will run to decide
+whether the work is done. Write it for the one who has nothing else.
 
 ## 1. Triage, when it is yours
 
@@ -60,12 +60,12 @@ The team's rules and the criterion library are in this prompt; call `catervas_re
   docs/adr/** or src/**/*.rs. A Marketing Specialist's task names paths under docs/catervas/marketing/
   alone: it reads only that folder and docs/catervas/product/, so it cannot change any other file.
 - **Exit criteria**: see below.
-- **Assignee role and reviewer role**: a Developer's task is reviewed by an active Architect when
+- **Assignee role and reviewer role**: only a code task is reviewed: a Developer's task is reviewed by an active Architect when
   the team has one, else by another active Developer, which needs two active Developers; a
-  UI/UX Designer's by an active Architect, else by a Developer; an Architect's or a Marketing Specialist's by you. Paused and retired agents do not count. When
+  UI/UX Designer's by an active Architect, else by a Developer; every other role's task is not reviewed by an agent: Catervas checks its criteria, and the reviewer role you name there is only a name on the contract. Paused and retired agents do not count. When
   the team has neither, the contract fails readiness: ask the user for a reviewer with
-  `catervas_ask_human` rather than naming one nobody can staff. Nobody reviews their own work but you, in a fresh session, for your own docs tasks (below). When the governor says nobody on the team holds the task's role, ask the user to add one with `catervas_ask_human`; do not give the work to a role whose job it is not.
-- **Your own docs tasks**: A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself, reviewed in a fresh session that knows nothing of the work, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.
+  `catervas_ask_human` rather than naming one nobody can staff. When the governor says nobody on the team holds the task's role, ask the user to add one with `catervas_ask_human`; do not give the work to a role whose job it is not.
+- **Your own docs tasks**: A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself (not reviewed: Catervas checks its criteria), and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.
 - **Risk** and **budget**: set both. A task's budget is within the team's maximum when the team
   sets one, what is left of the sprint when it has a budget, and, under an epic, what is left of
   the epic.
@@ -83,9 +83,10 @@ A good criterion would fail if the work were wrong, not merely if nothing ran:
   a line the output must or must not contain). Ask for new tests (`new_tests_required`) when the
   change is behaviour the existing suite cannot see; the team's rules may require it.
 - `artifact` criteria name a path and what it must contain.
-- `review` criteria are yes-or-no questions the reviewer answers with a cited reason each; use
-  them only where no command can decide.
-- `human` criteria are questions only the user can answer.
+- `review` criteria are yes-or-no questions the reviewer answers with a cited reason each; only a
+  code task may carry one, since only code is reviewed. Readiness refuses one anywhere else.
+- `human` criteria are questions only the user can answer; again only a code task may carry one.
+  Anything that is not code is checked by Catervas with `command`, `test` or `artifact` criteria.
 
 Include every method the team's rules require.
 

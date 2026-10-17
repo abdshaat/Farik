@@ -141,7 +141,7 @@ Tests:
 - `whole_filed_contracts_need_no_review` (`crates/store/src/requests.rs`): for each owner role that does not change code (Product Manager, Architect, Marketing Specialist), the contracts of `rederive_request`, `product_plan_request`, `change_request` and `rewrite_request` validate (`validate_contract`) and hold no `review` or `human` criterion, and each criterion is an `artifact` whose path is one of `allowed_paths` or, for `rewrite_request`, lies under its folder; `change_request` for `software_developer` keeps its `review` criterion.
 - In `writes_each_template_as_the_table_says`: `epic_contract`'s criterion, for Markdown and for HTML, is the `artifact` of Decisions (`docs/catervas/product/spec.md` with `"# "`, `docs/catervas/product/spec.html` with `"<h1"`); the Marketing task's one criterion is the `command` of Decisions; and in `every_template_passes_the_definition_of_ready` the epic also passes with `repos` set (a project folder).
 
-- [ ] `feat(store): file whole contracts with machine criteria outside code`
+- [x] `feat(store): file whole contracts with machine criteria outside code`
 
 ### Task 3: no result waits on the human, and no review outside code
 

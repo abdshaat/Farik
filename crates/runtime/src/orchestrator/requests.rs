@@ -2153,7 +2153,11 @@ mod tests {
         file_catervafication_epic(
             &deps.files,
             &deps.log,
-            epic_contract(Project::New, 2.0),
+            epic_contract(
+                Project::New,
+                2.0,
+                catervas_core::folders::DocumentFormat::Markdown,
+            ),
             "catervas",
             Project::New,
             (deps.clock.now(), &deps.ids),

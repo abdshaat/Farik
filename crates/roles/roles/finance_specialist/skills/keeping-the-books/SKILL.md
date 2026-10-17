@@ -37,7 +37,7 @@ Write every number that came from a service, a receipt, a statement or a page as
 a formula, and write text as text: Catervas keeps a text as text whatever it starts with, an equals
 sign, a plus, a minus or an at sign among them, so it can do nothing in the user's spreadsheet
 program. Use a formula only for a sum or a total inside the workbook. Catervas refuses a formula that
-reaches outside it, so do not try. Catervas never computes a formula, so a total the reviewer must
+reaches outside it, so do not try. Catervas never computes a formula, so a total your criteria must
 check is also written as a value beside it.
 
 ## 4. Every number names its source
@@ -69,7 +69,7 @@ Work in your private folder, `.catervas/local/finance/`. It is your working dire
 just `books.xlsx`, and nothing there is committed. When the work is done, record each `artifact`
 criterion with `catervas_record_criterion_result` before asking for `verifying`, citing the workbook as
 your evidence. Then ask for `verifying` with `catervas_request_transition` and name every workbook you
-wrote or changed in `workbooks`: one to twenty paths in your folder. Your reviewer is told which files changed and reads each beside the copy Catervas
+wrote or changed in `workbooks`: one to twenty paths in your folder. Catervas checks your criteria itself, because only code is reviewed, and reads each changed file beside the copy Catervas
 took of your folder when the task was assigned to you. You can read that copy too, with
 `catervas_read_sheet` and `baseline: true`, to see what you changed.
 

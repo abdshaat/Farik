@@ -116,8 +116,8 @@ each comparison with `catervas_write_evaluation`, as `evaluations/<name>.md`, an
 your task names a file you write. When the work is done, record each `artifact` criterion with
 `catervas_record_criterion_result` before asking for `verifying`, citing the file as your evidence.
 Then ask for `verifying` with `catervas_request_transition` and name every file you wrote or changed
-in `workbooks`: one to twenty paths in your folder. Your reviewer is told which files changed and
-reads each beside the copy Catervas took of your folder when the task was assigned to you.
+in `workbooks`: one to twenty paths in your folder. Catervas checks your criteria itself, because only code is reviewed, and
+reads each changed file beside the copy Catervas took of your folder when the task was assigned to you.
 
 ## 7. Leave a note for next time
 

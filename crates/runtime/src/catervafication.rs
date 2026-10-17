@@ -8,7 +8,7 @@ use catervas_core::folders::{DocumentFormat, artifact_marks, role_folder, with_f
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
-use catervas_core::team::Team;
+use catervas_core::team::{Team, changes_code};
 use catervas_protocol::event::{
     CatervasEvent, EventBody, EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject,
     new_event,
@@ -50,8 +50,6 @@ const ASKS_WHERE_IT_READ: &str = "Does each document say only what the project, 
 const ASKS_FOR_CONTRADICTIONS: &str = "Does any document contradict another, or the code?";
 /// `{x}` stands for the extension of the team's format.
 const ASKS_ABOUT_THE_WORKFLOW: &str = "Does workflow.{x} say at its top whether it records the project's own process or adopts Catervas's recommended workflow, and does the evidence it names support that choice?";
-const ASKS_ABOUT_THE_PLAN: &str =
-    "Was a marketing plan proposed from docs/catervas/product/ alone?";
 
 /// The roles that get a task, each with the role that reviews it, in the order they are filed.
 ///
@@ -136,7 +134,7 @@ fn row(project: Project, role: Role) -> Row {
             intent: "Read the approved product plan under docs/catervas/product/ and propose the project's first marketing plan from it.",
             summary: "The Marketing Specialist writes your marketing plan, after you approve the product plan.",
             documents: &[],
-            question: Some(ASKS_ABOUT_THE_PLAN),
+            question: None,
         },
         (Project::New, Role::Architect) => Row {
             title: "Write the first architecture from the product spec",
@@ -166,9 +164,11 @@ fn row(project: Project, role: Role) -> Row {
 /// The wire of the epic of a Catervafication, as `request_from_brief` makes a request (the store
 /// fills in the id, the kind and the stamps): approved by the owner's Start, or by the owner's
 /// acceptance of a new project's product plan. Its budget is `max_cost_usd`, the budget of each of
-/// its tasks, times the tasks it is filed with (five for an existing repository, else three).
+/// its tasks, times the tasks it is filed with (five for an existing repository, else three). Its
+/// one criterion is the product plan's spec in the team's `format`, which Catervas reads itself on
+/// the integration branch (ADR 0061).
 #[must_use]
-pub(crate) fn epic_contract(project: Project, max_cost_usd: f64) -> Value {
+pub(crate) fn epic_contract(project: Project, max_cost_usd: f64, format: DocumentFormat) -> Value {
     let (title, intent, summary, tasks) = match project {
         Project::Existing => (
             "Catervafy the repository",
@@ -183,6 +183,7 @@ pub(crate) fn epic_contract(project: Project, max_cost_usd: f64) -> Value {
             3.0,
         ),
     };
+    let spec = format!("docs/catervas/product/spec.{}", format.extension());
     json!({
         "title": title,
         "intent": intent,
@@ -200,10 +201,9 @@ pub(crate) fn epic_contract(project: Project, max_cost_usd: f64) -> Value {
             "text": "Every Catervafication task is accepted or cancelled, and each accepted one's work is in your project.",
             "satisfies": ["R1"],
             "verification": {
-                "method": "review",
-                "rubric": [
-                    "Is every task under the epic accepted or cancelled, and is each accepted one's work in your project?"
-                ]
+                "method": "artifact",
+                "path": spec,
+                "must_contain": artifact_marks(&spec, format)
             }
         }],
         "assignee_role": "product_manager",
@@ -270,17 +270,32 @@ pub(crate) fn task_contract(
             })
         })
         .collect();
-    let question = row
-        .question
-        .map(|question| question.replace("{x}", extension));
-    let mut rubric = vec![ASKS_WHERE_IT_READ, ASKS_FOR_CONTRADICTIONS];
-    rubric.extend(question.as_deref());
-    criteria.push(json!({
-        "id": format!("C{}", paths.len() + 1),
-        "text": "Everything written says only what the project, its history or its owner's words show.",
-        "satisfies": ["R1"],
-        "verification": { "method": "review", "rubric": rubric }
-    }));
+    if changes_code(role) {
+        let question = row
+            .question
+            .map(|question| question.replace("{x}", extension));
+        let mut rubric = vec![ASKS_WHERE_IT_READ, ASKS_FOR_CONTRADICTIONS];
+        rubric.extend(question.as_deref());
+        criteria.push(json!({
+            "id": format!("C{}", paths.len() + 1),
+            "text": "Everything written says only what the project, its history or its owner's words show.",
+            "satisfies": ["R1"],
+            "verification": { "method": "review", "rubric": rubric }
+        }));
+    } else if paths.is_empty() {
+        // The Marketing Specialist's task has no document: a plan file is the evidence. The glob
+        // expands in `sh -c` at the root of the task's worktree, where the plan is committed.
+        criteria.push(json!({
+            "id": "C1",
+            "text": "A marketing plan is written in docs/catervas/marketing/plans/",
+            "satisfies": ["R1"],
+            "verification": {
+                "method": "command",
+                "command": "ls docs/catervas/marketing/plans/MP-* >/dev/null 2>&1",
+                "expect": { "exit_code": 0 }
+            }
+        }));
+    }
     json!({
         "title": row.title,
         "intent": format!("{} {FOLLOW_THE_SKILL}", row.intent),
@@ -423,7 +438,11 @@ pub(crate) fn start(
     let epic = file_catervafication_epic(
         &deps.files,
         &deps.log,
-        epic_contract(project, placeholder_budget_usd(&team.rules())),
+        epic_contract(
+            project,
+            placeholder_budget_usd(&team.rules()),
+            team.document_format(),
+        ),
         by,
         project,
         (deps.clock.now(), &deps.ids),
@@ -706,7 +725,11 @@ mod tests {
         for (project, count) in [(Project::Existing, 5.0), (Project::New, 3.0)] {
             let mut context = a_ready_context();
             context.active_agents_by_role.insert(Role::UiUxDesigner, 1);
-            let wire = epic_contract(project, 20.0);
+            let wire = epic_contract(
+                project,
+                20.0,
+                catervas_core::folders::DocumentFormat::Markdown,
+            );
             assert!(
                 (wire["budget"]["max_cost_usd"].as_f64().expect("a budget") - 20.0 * count).abs()
                     < 1e-9
@@ -719,6 +742,14 @@ mod tests {
                 evaluate_readiness(&epic, &context),
                 Ok(()),
                 "{project:?} epic"
+            );
+            // In a project folder too: its one criterion is an artifact, not a command.
+            let mut in_a_folder = context.clone();
+            in_a_folder.repos = Some(vec!["api".to_string()]);
+            assert_eq!(
+                evaluate_readiness(&epic, &in_a_folder),
+                Ok(()),
+                "{project:?} epic in a project folder"
             );
             context.human_approves = false;
 
@@ -769,15 +800,32 @@ mod tests {
                 "Your team reads your approved product plan and writes down how it will build the project, before building anything. You can read all of it in Files.",
             ),
         ] {
-            let wire = epic_contract(project, 20.0);
-            assert_eq!(wire["summary"], summary, "{project:?}");
-            assert_eq!(
-                wire["exit_criteria"][0]["verification"]["rubric"],
-                json!([
-                    "Is every task under the epic accepted or cancelled, and is each accepted one's work in your project?"
-                ]),
-                "{project:?}"
+            let wire = epic_contract(
+                project,
+                20.0,
+                catervas_core::folders::DocumentFormat::Markdown,
             );
+            assert_eq!(wire["summary"], summary, "{project:?}");
+            // Catervas runs the epic's one criterion itself (ADR 0061): the spec is there.
+            for (format, spec, heading) in [
+                (
+                    catervas_core::folders::DocumentFormat::Markdown,
+                    "docs/catervas/product/spec.md",
+                    "# ",
+                ),
+                (
+                    catervas_core::folders::DocumentFormat::Html,
+                    "docs/catervas/product/spec.html",
+                    "<h1",
+                ),
+            ] {
+                let wire = epic_contract(project, 20.0, format);
+                assert_eq!(
+                    wire["exit_criteria"][0]["verification"],
+                    json!({ "method": "artifact", "path": spec, "must_contain": [heading] }),
+                    "{project:?}"
+                );
+            }
         }
     }
 
@@ -793,7 +841,6 @@ mod tests {
             "Does any document contradict another, or the code?",
         ];
         let developer_question = "Does workflow.md say at its top whether it records the project's own process or adopts Catervas's recommended workflow, and does the evidence it names support that choice?";
-        let marketing_question = "Was a marketing plan proposed from docs/catervas/product/ alone?";
         let rows: [TableRow<'_>; 7] = [
             (
                 Project::Existing,
@@ -833,7 +880,7 @@ mod tests {
                 ProductManager,
                 "Propose the first marketing plan from the product plan",
                 &[],
-                Some(marketing_question),
+                None,
             ),
             (
                 Project::New,
@@ -897,7 +944,17 @@ mod tests {
                 assert_eq!(wire["scope"]["in_scope"], json!(paths));
             }
             let criteria = wire["exit_criteria"].as_array().expect("criteria");
-            assert_eq!(criteria.len(), documents.len() + 1, "{project:?} {role:?}");
+            // Only a code role's task is reviewed (ADR 0061); Catervas runs every other criterion.
+            let reviewed = catervas_core::team::changes_code(role);
+            assert_eq!(
+                criteria.len(),
+                if documents.is_empty() {
+                    1
+                } else {
+                    documents.len() + usize::from(reviewed)
+                },
+                "{project:?} {role:?}"
+            );
             for (index, path) in paths.iter().enumerate() {
                 let verification = criterion(&wire, index);
                 assert_eq!(verification["method"], "artifact");
@@ -909,11 +966,28 @@ mod tests {
                 assert_eq!(verification["must_contain"], json!(must), "{path}");
                 assert_eq!(wire["exit_criteria"][index]["satisfies"], json!(["R1"]));
             }
-            let review = criterion(&wire, documents.len());
-            assert_eq!(review["method"], "review");
-            let mut rubric: Vec<&str> = rubric_two.to_vec();
-            rubric.extend(extra);
-            assert_eq!(review["rubric"], json!(rubric), "{project:?} {role:?}");
+            if reviewed {
+                let review = criterion(&wire, documents.len());
+                assert_eq!(review["method"], "review");
+                let mut rubric: Vec<&str> = rubric_two.to_vec();
+                rubric.extend(extra);
+                assert_eq!(review["rubric"], json!(rubric), "{project:?} {role:?}");
+            } else if documents.is_empty() {
+                // The Marketing Specialist's task has no document: a plan file is the evidence.
+                assert_eq!(
+                    wire["exit_criteria"][0],
+                    json!({
+                        "id": "C1",
+                        "text": "A marketing plan is written in docs/catervas/marketing/plans/",
+                        "satisfies": ["R1"],
+                        "verification": {
+                            "method": "command",
+                            "command": "ls docs/catervas/marketing/plans/MP-* >/dev/null 2>&1",
+                            "expect": { "exit_code": 0 }
+                        }
+                    })
+                );
+            }
             if !documents.is_empty() {
                 assert_eq!(
                     wire["requirements"][0]["text"],

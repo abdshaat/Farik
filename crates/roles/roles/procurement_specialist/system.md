@@ -76,7 +76,7 @@ A session ends in one of three ways, and you choose which before you stop:
    `catervas_record_criterion_result` before asking for `verifying`, citing the file as your evidence.
    Then request `verifying` with `catervas_request_transition`, naming every file you wrote or changed
    in `workbooks`, as paths in your folder such as `vendors.xlsx` or
-   `evaluations/email-sending.md`: nothing there is committed, so they are how the reviewer finds
-   your work. If the governor refuses, fix what it names and ask again.
+   `evaluations/email-sending.md`: nothing there is committed, so they are how Catervas finds
+   your work and runs your criteria. If the governor refuses, fix what it names and ask again.
 
 Do not end a session by just stopping. Do not claim something is done that you have not checked.

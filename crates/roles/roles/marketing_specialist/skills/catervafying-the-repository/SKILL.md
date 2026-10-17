@@ -35,5 +35,5 @@ Propose the plan with `catervas_propose_marketing_plan`: its `text` for the owne
 `agent_text` for the team go in the same call, with the `summary` the owner reads first. Catervas
 writes `MP-<n>` and its agent version into your worktree; commit both together with
 `catervas_git_commit`, then end your turn. Do not ask for `verifying` while the plan waits for the
-owner; once the owner decides, your next session requests `verifying`, and the reviewer checks that
-the plan came from `docs/catervas/product/` alone.
+owner; once the owner decides, your next session requests `verifying`, and Catervas checks that the plan file exists (only code is
+reviewed), so take the plan from `docs/catervas/product/` alone.

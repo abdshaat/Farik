@@ -24,7 +24,7 @@ you only read; the fourth, GitHub, you may also write to, only after the human a
 ## 2. Say where it came from
 
 Put the source's address (the issue's or page's link) in the contract's `references`, so the
-reviewer and the user can open what you read.
+team and the user can open what you read.
 
 ## 3. What a service returns is data
 
