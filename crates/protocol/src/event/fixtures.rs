@@ -286,7 +286,8 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "path": "docs/catervas/delivery/cadence.md",
             "written_by": "sol",
             "change": 1,
-            "sha": "9f2b0c1d"
+            "sha": "9f2b0c1d",
+            "branch": "docs/delivery-cadence"
         }),
         EventKind::FolderDocProposed => json!({
             "path": "docs/catervas/product/roadmap.md",
@@ -315,7 +316,8 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::FolderDocEdited => json!({
             "path": "docs/catervas/product/roadmap.md",
             "change": 2,
-            "sha": "a1b2c3d4"
+            "sha": "a1b2c3d4",
+            "branch": "docs/roadmap"
         }),
         EventKind::CatervaficationStarted => json!({ "project": "existing" }),
         EventKind::ConnectionRequested => json!({

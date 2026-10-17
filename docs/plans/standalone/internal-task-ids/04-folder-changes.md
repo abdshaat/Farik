@@ -117,7 +117,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   folder change by hand pass with `harness.folder_branch(change)` in place of
   `format!("docs/folder-{change}")`. They prove the recorded branch is the one integration reads.
 
-- [ ] `feat(runtime): a folder change's branch and pull request are named for its documents`
+- [x] `feat(runtime): a folder change's branch and pull request are named for its documents`
 
 ## Verification
 
