@@ -110,7 +110,7 @@ closes, Catervas files a docs task of yours whose `allowed_paths` name `CHANGELO
   shipped role, its `system.md`, `role.yaml` and `kit.yaml`, and every skill a role or kit embeds:
   no match of `(?i)sprint`, `(?i)standup` or "Start sprint". Watched to fail before the words change.
 
-- [ ] `docs(roles): no role speaks of sprints; the Scrum Master runs each delivery's review and retro`
+- [x] `docs(roles): no role speaks of sprints; the Scrum Master runs each delivery's review and retro`
 
 ### Task 2: tools, prompts and schema words
 

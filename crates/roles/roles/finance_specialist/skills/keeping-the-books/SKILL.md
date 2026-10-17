@@ -12,13 +12,13 @@ filing, statutory accounts or financial advice.
 ## 1. Start with the team's own AI spending
 
 The first thing you keep is what the team's AI work costs. Say what it covers, which dates, and how
-it divides: by task, by agent, by sprint or by day. Only then move on to the product's other costs
+it divides: by task, by agent or by day. Only then move on to the product's other costs
 and its revenue.
 
 ## 2. Read what is there before you write
 
 Your books are `.xlsx` workbooks in your finance folder, which only you and the reviewer of your
-task can read. `catervas_read_costs` gives the team's AI spending by task, agent, sprint, day or
+task can read. `catervas_read_costs` gives the team's AI spending by task, agent, day or
 purpose, for all time or between two dates. `catervas_read_sheet` reads a workbook: a page of rows
 from each sheet, a formula as its text beside the value a spreadsheet program last stored, which is
 empty until someone opens the file. Read a workbook before you write it: the user may have edited

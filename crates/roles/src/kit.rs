@@ -42,7 +42,7 @@ pub enum KitConnector {
         entry: McpServerWire,
         /// What the user reads while connecting.
         copy: SetupCopy,
-        /// The calls per sprint a user may pre-approve, by tool (step 05b).
+        /// The calls per day a user may pre-approve, by tool (step 05b).
         allowances: BTreeMap<String, KitAllowance>,
         /// The tools the owner's approved marketing plan approves (ADR 0042): `external_effect`
         /// tools of Catervas's own connector only. Not part of the entry or its hash.
@@ -83,7 +83,7 @@ pub struct SetupCopy {
 /// What a user may pre-approve for a spending tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KitAllowance {
-    /// The default calls per sprint.
+    /// The default calls per day.
     pub calls: u32,
     /// A plural noun, such as "images".
     pub what: String,
@@ -2205,7 +2205,6 @@ mod tests {
             &[
                 "you cannot set one",
                 "The user sets the daily limit in Settings",
-                "when they start the sprint",
             ],
         );
     }

@@ -1,32 +1,25 @@
 ---
 name: running-ceremonies
-description: Use in a standup, a review or a retro, to run it from the board and post its result to the team channel.
+description: Use in a delivery's review or retro, to run it from the board and post its result to the team channel.
 ---
 
 # Running ceremonies
 
 The session's own instructions come first; where they differ from this skill, follow them.
 
-## 1. Standup
+## 1. Review
 
-Build it from the facts in the first message, never from memory; read the board
-(`catervas_read_board`) only to check one. Three parts, one line each: what
-moved, what is blocked, and what waits on the human. Post it with `catervas_post_message` in the one
-post the session allows.
+Say, from the first message, what the delivery delivered and what it did not: what was accepted,
+what was sent back, and the reason given. You report the Product Manager's acceptance; you do not
+judge it again. Read the board (`catervas_read_board`) only to check one fact.
 
-## 2. Review
-
-Say, from the first message, what the sprint delivered and what it did not: what was accepted, what
-was sent back, and the reason given. You report the Product Manager's acceptance; you do not judge
-it again.
-
-## 3. Retro
+## 2. Retro
 
 Look at what went well, what did not, and what repeats. Pick one to three changes the team will
-try next sprint, each small enough to check. Post them first (section 4), then record what the next planning should know with
-`catervas_append_retro`, and end the session.
+try in the next delivery, each small enough to check. Post them first (section 3), then record what
+the next delivery should know with `catervas_append_retro`, and end the session.
 
-## 4. Post it
+## 3. Post it
 
 Post each ceremony's result to the team channel with `catervas_post_message`, short and in plain
 words.
