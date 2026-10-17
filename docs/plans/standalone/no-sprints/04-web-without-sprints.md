@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/no-sprints` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 4.1, 4.2, 4.4, F3, F7, F17, the web UI; recorded by plan 8 (revision 0.116)
 Depends on: plans 1 to 3 of this folder (committed on this branch)
-Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -20,7 +20,9 @@ retro run by themselves. Epic C3's web half holds: no `SprintPage.tsx`, no `spri
 ## Decisions
 
 - Shared pieces move before anything is deleted, unchanged: `useCommand` from
-  `pages/dialogs/StartSprint.tsx` to a new `apps/web/src/app/command.ts` (its 22 importers updated);
+  `pages/dialogs/StartSprint.tsx` to a new `apps/web/src/app/command.ts` (every file that imports it updated: 22 on `main`, fewer once ADR
+  0061's plans deleted `ProductPlanCard.tsx` and the sites pages; nothing ADR 0061 deleted comes
+  back);
   `MEETINGS` and `threadAnchor` from `pages/SprintPage.tsx` into `pages/Channel.tsx`, their one user.
   `Board.tsx`'s `Backlog`, `moreWaits` and `plannerOf` are deleted with their callers.
 - Deleted whole: `pages/SprintPage.tsx` and its test, `pages/dialogs/StartSprint.tsx`,
@@ -50,10 +52,11 @@ retro run by themselves. Epic C3's web half holds: no `SprintPage.tsx`, no `spri
   written"; `rulesPlanning`, `planInSprints`, `planInSprintsNote`,
   `finishSprints*` deleted. The pages stop sending `plan_in_sprints`.
 - Copy that named sprints: `cardLead` "A first piece of work where your team reads your project and
-  writes down what it learns, before building anything."; `planGate` "Nothing else is planned until
-  you approve. Then your team documents the plan first."; `readyOfferTitle` "Start with a
-  Catervafication"; `refuseCatervaficationNewProject` "A new project's documenting work starts by
-  itself once you approve its product plan."; `raiseNextWrites` "{agent} writes the new version at
+  writes down what it learns, before building anything."; `planGate` and every other key only
+  `ProductPlanCard.tsx` used are deleted if ADR 0061's plan 5, which deletes the card, left them;
+  `readyOfferTitle` "Start with a Catervafication"; `refuseCatervaficationNewProject` "A new
+  project's documenting work starts by itself once its product plan is written." (since ADR 0061
+  nobody approves the product plan); `raiseNextWrites` "{agent} writes the new version at
   once, from today to {day}."; `sprintNotNow` is renamed `notNow` ("Not now") for `DailyLimit.tsx`.
   `refusals.ts` loses `sprint_open` and `no_sprint_open` and their keys. Every other key whose name
   or value holds "sprint" or the Backlog-as-a-hold is deleted with its last user. `packages/ui`:
@@ -69,12 +72,12 @@ apps/web/src/app/command.ts                         creates: useCommand, moved (
 apps/web/src/pages/** (22 importers), Channel.tsx   modifies: imports (Task 1)
 apps/web/src/pages/Board.tsx, Today.tsx, Channel.tsx, TaskDetail.tsx, app/lanes.ts, app/App.tsx   modifies (Task 2)
 apps/web/src/pages/SprintPage.tsx(.test), dialogs/StartSprint.tsx, dialogs/EndSprint.tsx        deletes (Task 2)
-apps/web/src/pages/Board.test.tsx, Today.test.tsx, Channel.test.tsx, TaskDetail.test.tsx, app/lanes.test.ts, Chats.test.tsx, test/{productPlan,orders,folderDocs,posts,sellerMail}.ts   modifies: sprint fixtures and tests (Task 2)
+apps/web/src/pages/Board.test.tsx, Today.test.tsx, Channel.test.tsx, TaskDetail.test.tsx, app/lanes.test.ts, Chats.test.tsx, test/{productPlan,orders,folderDocs,posts,sellerMail}.ts (those ADR 0061 left)   modifies: sprint fixtures and tests (Task 2)
 apps/web/src/pages/Costs.tsx, allowances.tsx, AgentEdit.tsx, KitConnect.tsx, dialogs/ToolApproval.tsx, dialogs/ConnectorAllowance.tsx   modifies (Task 3)
 apps/web/src/pages/Costs.test.tsx, allowances.test.tsx   modifies (Task 3)
 apps/web/src/pages/TeamRules.tsx, settings/Work.tsx, settings/SettingsLayout.tsx, setup/{SetupAdvanced,TeamSetup,SetupFinish}.tsx, SavedTeams.tsx   modifies (Task 4)
 apps/web/src/pages/team.test.tsx, setup/team.test.tsx, settings/settings.test.tsx   modifies (Task 4)
-apps/web/src/strings/en.ts, app/refusals.ts, app/words.test.ts, dialogs/DailyLimit.tsx, CatervaficationCard.tsx, ProductPlanCard.tsx, dialogs/RaiseBudget.tsx, setup/SetupReady.tsx, packages/ui/gallery/Gallery.tsx, packages/ui/src/ChatList.test.tsx   modifies (Task 5)
+apps/web/src/strings/en.ts, app/refusals.ts, app/words.test.ts, dialogs/DailyLimit.tsx, CatervaficationCard.tsx, dialogs/RaiseBudget.tsx, setup/SetupReady.tsx, packages/ui/gallery/Gallery.tsx, packages/ui/src/ChatList.test.tsx   modifies (Task 5)
 apps/web/e2e/sprints.spec.ts                        deletes (Task 5)
 apps/web/e2e/board.spec.ts, e2e/fixtures/serve.ts   modifies (Task 5)
 packages/protocol-client/src/client.test.ts         modifies: maps_the_backlog_and_the_sprint_policy deleted (Task 2)
@@ -141,8 +144,9 @@ place of the sprints switch (as ADR 0061 left that test); `splits_the_rules_acro
 expects no "Planning work" heading.
 
 - `setup_and_settings_never_ask_about_sprints` (`setup/team.test.tsx`) — through setup with
-  Advanced open, then Settings' "How work runs": no switch or text matching `/sprint/i`, and the
-  `team.save` sent at the end of setup has no `plan_in_sprints` under `policy`.
+  Advanced open, then Settings' "How work runs": no switch or text matching `/sprint/i`; with a
+  `team.propose` answer whose policy holds `plan_in_sprints: true`, the `team.start` call sent at the
+  end of setup (`sent(s, "team.start")`) has no `plan_in_sprints` under `params.team.policy`.
 
 - [ ] `feat(web): setup and Settings no longer ask about sprints`
 

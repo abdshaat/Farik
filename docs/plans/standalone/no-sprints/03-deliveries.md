@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/no-sprints` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 3, 5.8, 5.9, 5.17, 6.1, 6.2, 8.5; recorded by plan 8 (revision 0.116)
 Depends on: plans 1 and 2 of this folder (committed on this branch)
-Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -63,7 +63,8 @@ the standup and the sprint commands (plan 5); the words of roles and skills (pla
   escalation (`escalation_line`) and each `budget.exhausted` of the day's dollars after
   `since_seq`. `due_refresh` and `product_files` take the delivery; the report is
   `docs/catervas/product/reports/D<n>` in the team's format. The Architect's refresh lists the
-  delivery's tasks integrated after `since_seq`.
+  delivery's tasks integrated after `since_seq`. `catervas_append_retro` answers
+  `{ "delivery_id": "D<n>" }` in place of `{ "sprint_id": ... }`.
 - `retro.appended` gains an optional `delivery_id` (`^D[1-9][0-9]{0,5}$`), and its `sprint_id`
   becomes optional, so old logs read and new events carry `delivery_id` alone. `folder_doc.proposed`
   is unchanged: since ADR 0061 the refreshes write `spec` and `roadmap` as folder changes and no new
@@ -74,9 +75,9 @@ the standup and the sprint commands (plan 5); the words of roles and skills (pla
 - `folder_doc_proposals.list`'s cards now come only from proposals an older log holds; the wire is
   unchanged (its `sprint_id` is an old log's), and the page's line becomes "From {name}, after the
   team's review" (no number). Today's "What moved" lines become "{name} proposed a change to the
-  product plan at the team's review." (and "{n} changes"), "{name} brought the architecture notes
-  up to date after the team's review" and "{name} sent the architecture notes as a pull request
-  after the team's review"; the Architect's lines group by session, not by sprint.
+  product plan at the team's review." (and "{n} changes") and "{name} sent the architecture notes as a
+  pull request after the team's review" (the only Architect line left once ADR 0061's plan 2 made
+  every policy `pull_request`); the Architect's lines group by session, not by sprint.
 - `TickReport::Delivery { delivery_id, what }` is added; `catervas run` prints `D1: <what>` as it
   prints a sprint's line. `what` for a close: `closed it: an epic was accepted` / `closed it: 5
   tasks were accepted` / `closed it: the team has no work left`, then `; filed CTV-<n> for its
@@ -97,7 +98,8 @@ crates/cli/src/run.rs                          modifies: prints TickReport::Deli
 crates/runtime/src/orchestrator/messages.rs, src/prompt.rs   modifies: review, refresh, retro, cadence words (Task 4)
 crates/runtime/src/ceremonies.rs               modifies: EndedSprint, ended_sprint, sprint_events deleted (Task 4)
 crates/runtime/src/tools/retro.rs, tools/folders.rs, crates/store/src/files.rs   modifies: per delivery (Task 4)
-crates/runtime/src/recorded/transcripts/review.jsonl, retro.jsonl   modifies: "S1" words become "delivery 1" (Task 4)
+crates/runtime/src/recorded/transcripts/review.jsonl, retro.jsonl   modifies: "S1" words become "delivery 1", the retro tool's result `{"delivery_id":"D1"}` (Task 4)
+apps/web/e2e/sprints.spec.ts                   modifies: no ceremony after an ended sprint (Task 4)
 crates/store/src/activity.rs                   modifies: the lines (Task 5)
 apps/web/src/pages/DocumentChanges.tsx, strings/en.ts   modifies: docChangesFrom (Task 5)
 ```
@@ -106,7 +108,8 @@ apps/web/src/pages/DocumentChanges.tsx, strings/en.ts   modifies: docChangesFrom
 
 Consumes: `ceremonies::{has_run, open_escalations}`, `requests::file_small_request`,
 `placeholder_budget_usd`, `catervas_roles::reviewer_for`, `rules::{assigner, day_is_spent, asleep,
-run_session, ran}`, `messages::{escalation_line, ProductFiles, untrusted_block}`, the `Harness`
+ran}`, `orchestrator::session::run_session`, `messages::{escalation_line, ProductFiles, Digest}`,
+`prompt::untrusted_block`, the `Harness`
 fixtures (`accepted`, `moved`, `spent`, `commit_at_root`, `recorded`), `review()`, `retro()`.
 
 Produces:
@@ -117,7 +120,7 @@ pub const TASKS_PER_DELIVERY: usize = 5;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryTrigger { EpicAccepted, TasksAccepted, TeamQuiet }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AcceptedRow { pub kind: Kind, pub has_parent: bool }
+pub struct AcceptedRow { pub kind: TaskKind, pub has_parent: bool }   // catervas_core::contract::TaskKind
 #[must_use] pub fn delivery_trigger(accepted: &[AcceptedRow], work_left: bool) -> Option<DeliveryTrigger>;
 
 // catervas_runtime::deliveries
@@ -175,9 +178,10 @@ Files: created `crates/core/src/delivery.rs` (`mod tests`); `crates/core/src/lib
 Files: created `crates/runtime/src/deliveries.rs` (`due_delivery`, `close_delivery`,
 `delivery_start`, `changelog_tasks`); modified `crates/store/src/requests.rs` (`changelog_request`,
 its contract as the Decisions say, requirement R1 "CHANGELOG.md has a section for delivery <n> at
-its top saying, in the user's words, what each of its tasks changed", criterion C1 by `review` with
-the rubric "The section is at the top and names delivery <n>.", "Each task listed in the intent has
-a line, in plain words.", "Nothing else in CHANGELOG.md changed."),
+its top saying, in the user's words, what each of its tasks changed", and only the two criteria of
+the Decisions, C1 `artifact` on `CHANGELOG.md` and C2 the `command` `grep -qi 'delivery <n>'
+CHANGELOG.md`, each `satisfies: ["R1"]`; no `review` criterion, which `no_review_outside_code`
+refuses),
 `crates/runtime/src/orchestrator.rs` (`TickReport::Delivery`; the loop treats it as `Sprint`),
 `crates/runtime/src/orchestrator/rules.rs` (a rule `close_a_delivery`, first in `sprint_rules`,
 only under `All` scoped to no task, returning `TickReport::Delivery`), `crates/cli/src/run.rs`.
@@ -189,10 +193,11 @@ only under `All` scoped to no task, returning `TickReport::Delivery`), `crates/c
   task_ids: ["CTV-1"] }` and one `task.created` with `filed_as: "changelog"` and `created_by:
   "catervas"`, whose contract has `allowed_paths: ["CHANGELOG.md"]` and `assignee_role:
   "product_manager"`; the changelog task then moved to `accepted` (`harness.moved`), three more
-  ticks append no second `delivery.closed`.
+  ticks append no second `delivery.closed` (the adapter holds `review()` and `retro()`, which D1's
+  review and retro play in those ticks; a recorded adapter with no transcript left fails the tick).
 
-Then run `cargo xtask check --integration` and fix each orchestrator or CLI test whose counts the
-new rule changes (a quiet board after an acceptance now closes a delivery and files a task): extend
+Then run `cargo xtask check --integration` and fix each orchestrator, CLI or browser-journey
+(`apps/web/e2e/`) test whose expectations the new rule changes (a quiet board after an acceptance now closes a delivery and files a task): extend
 its expected events or sessions, or end its loop earlier; never drop an assertion about anything
 else. Name each changed test in the commit body.
 
@@ -213,7 +218,10 @@ work the team just delivered. Post what to keep and what to change with `caterva
 at most three messages, then record what the team should remember next time with
 `catervas_append_retro`, and end the session." each keeping today's closing sentence),
 `tools/retro.rs`, `tools/folders.rs`, `files.rs` (`append_retro(heading_id, ...)`), and the two
-transcripts. Every test that used `a_finished_sprint` or an ended sprint for a review, a refresh or
+transcripts. `apps/web/e2e/sprints.spec.ts` loses its `review` and `retro` transcripts and its
+step 7 wait for one `retro.appended` (an ended sprint holds no ceremony now, and nothing is accepted
+in that journey); `board.spec.ts` keeps its assertions (its review and retro now come from D1).
+Every test that used `a_finished_sprint` or an ended sprint for a review, a refresh or
 a retro uses a closed delivery instead (its first tick closes D1); delete
 `holds_no_review_once_a_new_sprint_started` and
 `holds_no_review_or_retro_of_a_sprint_that_held_no_task`, whose behaviour is gone.
@@ -221,13 +229,14 @@ a retro uses a closed delivery instead (its first tick closes D1); delete
 - `a_delivery_runs_its_review_refreshes_and_retro_once` (rules.rs, ignored as above; a Scrum Master,
   a Product Manager and an Architect; `docs/catervas/product/spec.html` and
   `docs/catervas/architecture/structure.html` committed on main; epic CTV-1 and its task CTV-2
-  accepted, CTV-2 integrated; CTV-3 escalated with reason `iterations`; the recorded transcripts
-  the refresh tests use today) — over eight ticks: D1 closes with trigger `epic_accepted`; then, in
-  this order, one `review`-thread session of the Scrum Master whose first message holds "delivery 1",
+  accepted, CTV-2 integrated; CTV-3, with no parent, escalated with reason `iterations`; the
+  recorded transcripts the refresh tests use today; the changelog task CTV-4 that the first tick
+  files is moved to `cancelled` with `harness.moved` right after it, so no session is about it) —
+  the first tick closes D1 with trigger `epic_accepted`; then, in the next four ticks, in this order, one `review`-thread session of the Scrum Master whose first message holds "delivery 1",
   "CTV-2" and an escalation line for CTV-3, one `review` session of the Product Manager naming
   `docs/catervas/product/reports/D1.html`, one of the Architect naming CTV-2, and one `retro`-thread
   session; the log holds one `retro.appended` with `delivery_id: "D1"`; four more ticks start no
-  ceremony session.
+  session.
 
 - [ ] `feat(runtime): each delivery gets its review, refreshes and retro once`
 
@@ -241,8 +250,8 @@ Files: `activity.rs` (the lines of the Decisions), `DocumentChanges.tsx` (`docCh
 - `says_what_a_review_did_without_naming_a_sprint` (activity.rs `mod tests`) — two older
   `folder_doc.proposed` of Ada's with `sprint_id: "S4"` after `since`, and an Architect `review`
   session after a `delivery.closed` that wrote a folder document: `moved_since` holds "Ada proposed
-  2 changes to the product plan at the team's review." and "<the Architect> brought the
-  architecture notes up to date after the team's review", and no line contains "sprint".
+  2 changes to the product plan at the team's review." and "<the Architect> sent the
+  architecture notes as a pull request after the team's review", and no line contains "sprint".
 
 - [ ] `feat(web): a review's proposals and notes say nothing of sprints`
 

@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/no-sprints` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.7 (escalation), F12; recorded by plan 8 (revision 0.116)
 Depends on: `origin/main` at `74b4a5af`, rebased onto `fix/plans-need-no-review` (ADR 0061)
-Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: not yet. The Opus 5.5 readiness review of 2026-10-16 found one unmade decision: what gives a `budget` or `sessions` escalation room (see plan 1's Decisions, the `budget`, `sessions` row)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -30,21 +30,23 @@ view (plan 2), changing any escalation reason or limit.
   wire by the daemon and into command lines by the CLI: chose a shared typed list over the JSON
   `choices` of `daemon/gates.rs` that the CLI cannot read (the controller: nothing builds the list
   twice). `daemon::gates::choices` is deleted.
-- The table of choices, suggested first (labels and next words exact; `{who}` is the assignee's
-  display name, else "The team"; `{pm}` the active Product Manager's, else "The Product Manager";
+- The table of choices, suggested first (labels and next words exact; `{who}` is the display name of the task's
+  `assignee_id` on the board at the moment `escalation.choices` is read (or the run ends), else "The
+  team"; the words are composed then, never stored, so after plan 6 hands a task to another agent
+  they name whoever holds it; `{pm}` the active Product Manager's, else "The Product Manager";
   `{before}` the status the task left for `escalated`, in `catervas_store::activity::status_in_words`
   lower-cased):
 
   | Reason | Choice: label, action, next |
   |---|---|
   | `iterations` | "Give 2 more tries", resolve `in_progress` `extra_tries` 2, "{who} picks up {id} again with 2 more tries." · "Ask {pm} to change the plan", resolve `refining`, "{pm} rewrites the plan of {id}; it is assigned again once it is ready." · Cancel |
-  | `budget`, `sessions` | "Ask {pm} to change the plan" (as above) · Cancel |
+  | `budget`, `sessions` | UNMADE (readiness review, 2026-10-16): "Ask {pm} to change the plan" (as above) · Cancel. A resolve to `refining` while the dollars or sessions are still spent is escalated again by the budget rule on the next `All` tick, before rule 9 gives the Product Manager a session (SPEC 5.7; `rules.rs` `escalates_again_a_task_resumed_without_room`, `escalates_a_refining_contract_out_of_sessions`), so these next words would not come true. The founder or the planner decides what gives the task room before this row is executed |
   | `blocker_age` | "Answer and carry on", resolve `in_progress`, "{who} reads your answer and carries on with {id}." · change · Cancel |
   | `permission`, `explicit_request` | "Carry on", resolve `{before}`, "{id} goes back to {before} and {who} is told what you wrote." (only when `before` is known and is neither `refining` nor `escalated`) · change · Cancel |
   | `readiness_failures` | "Ask {pm} to try the plan again", resolve `refining`, "{pm} writes the plan of {id} again with your note." · Cancel |
-  | `approval`, `risk_gate` (only in logs made before ADR 0061, which no longer raises them) | "Review the plan", open `/tasks/{id}/plan`, "You read the plan and approve it or send it back." · Cancel |
+  | `approval`, `risk_gate` (only in logs made before ADR 0061, which no longer raises them) | "Review the plan", open `/tasks/{id}/plan`, "You read the plan of {id} and approve it or send it back." · Cancel |
   | `integration` (a push or a forge failure; ADR 0061: Catervas never merges) | "Open the pull request again", command `task_integrate`, "Catervas pushes the branch of {id} and opens its pull request again, for you to merge." (alone) |
-  | `preview` | "Fix how your app opens", open `/settings/your-app`, "You tell Catervas in Settings how to start your app; then come back here and choose Carry on." · "Carry on", resolve `{before}`, "{id} goes back to {before} and {who} opens your app again." · Cancel |
+  | `preview` | "Fix how your app opens", open `/settings/your-app`, "You tell Catervas in Settings how to start your app; then come back to {id} and choose Carry on." · "Carry on", resolve `{before}`, "{id} goes back to {before} and {who} opens your app again." · Cancel |
   | any other | change · Cancel |
 
   Cancel is "Cancel the task", resolve `cancelled`, "{id} stops for good. Its branch is kept, and
@@ -66,7 +68,8 @@ view (plan 2), changing any escalation reason or limit.
   is the same "Waiting on you" row.
 - Wire, additive: each choice gains `next` (string), `suggested` (boolean) and `kind` (`command` or
   `open`), all required; `body` becomes optional (present for `command`), and `path` (string, pattern
-  `^/`) is added for `open`. The page adds the message to `body.body` as today.
+  `^/`) is added for `open`. The page adds the message to `body.body` of an `escalation_resolve`
+  choice only, as today; `task_integrate` takes `taskIdBody`, which holds no `message` (readiness fix).
 - `catervas resolve` gains `--extra-tries <n>` (1 to 5, clap's range), passed as `extra_tries`,
   before the message words. The end of a run prints, under each escalated task's line, one line per
   choice: two spaces, the command, two spaces, `# `, the next words, and ` (suggested)` after the
@@ -177,7 +180,10 @@ Decisions). Consumes Task 1's ADR only as text.
   after the move: `escalation.choices` answers one choice whose `body` is
   `{ "command": "task_integrate", "body": { "task_id": <id> } }`, `kind` `command`, `suggested`
   true; after a `task.integrated` it answers `{ "choices": [] }`; the reply conforms to
-  `escalationChoicesResult`.
+  `escalationChoicesResult`. In the same test, the `next` words are composed when read: a second task CTV-2,
+  escalated with reason `iterations` while held by `dev-a`, answers a first choice whose `next` names
+  dev-a's display name; after a `task.transitioned` the harness appends gives CTV-2 the assignee
+  `dev-b`, the same query names dev-b's.
 
 Existing web tests that read `escalation.choices` fixtures (`apps/web/src/test/gate.ts`,
 `HelpNeeded.test.tsx`) keep passing: their fixtures lack the new fields, which the page does not
@@ -192,13 +198,14 @@ Files: modified `crates/cli/src/lib.rs` (`Commands::Resolve` gains
 passed to `Command::EscalationResolve { extra_tries }` in `humans()`), `crates/cli/src/waiting.rs`
 (`Waiting` gains `choices: Vec<(String, String, bool)>`, filled for `WaitingKind::Help` from
 `choices::offer_for`; `lines()` prints them after the row's line per the Decisions; `json()` adds
-`choices`; the Help row's own command becomes `choose one:`), tested by `crates/cli/tests/human.rs`.
+`choices`; the Help row's own command becomes `choose one`, so its line reads `CTV-1 is escalated (iterations): choose one`), tested by `crates/cli/tests/human.rs`.
 Consumes Task 2's `offer_for` and `Choice::command_line`.
 
 - `the_end_of_a_run_names_a_command_for_each_choice` (`#[ignore = "needs the git program: cargo
   xtask check --integration"]`, on `a_team` with the shared helpers `filed`, `record`, `moved`, as
   `cancels_and_resolves_for_the_human` sets up an escalation) — a task escalated from `in_progress`
-  with `escalation.raised { reason: iterations }`: `catervas run` exits 0 and its output holds, in
+  (moved through `assigned` with an `assignee` in `moved`'s `extra`, so the resolve back to
+  `in_progress` passes its gate) with `escalation.raised { reason: iterations }`: `catervas run` exits 0 and its output holds, in
   order, `CTV-1 is escalated (iterations): choose one`, a line `  catervas resolve CTV-1
   in_progress --extra-tries 2 "<your message>"  # ` followed by the next words and ` (suggested)`,
   then the refining and the cancelled lines without `(suggested)`; `catervas --json run`'s
