@@ -383,7 +383,7 @@ export const en = {
 	tierGitRemote: "Push to GitHub and open pull requests",
 	tierGitRemoteNote: "Off until you give it.",
 	tierExternal: "Do things outside your computer",
-	tierExternalNote: "Mail, posts, deploys. You approve each.",
+	tierExternalNote: "Mail, posts, deploys. Only a payment asks you.",
 	agentDefaults: "Put back the role’s defaults",
 	agentEffects: "What this changes",
 	agentPlace: "{name}’s place on the team",
@@ -494,7 +494,7 @@ export const en = {
 	decided: "{name}, your {role}, decided",
 	sizeLargeCard: "A big request",
 	sizeLargeBody:
-		"{pm} writes a plan with parts, asks you what is needed, and waits for your approval before anyone starts building.",
+		"{pm} writes a plan with parts and asks you what is needed. The team starts building without waiting for your approval.",
 	sizeSmallCard: "A small request",
 	sizeSmallBody:
 		"One task, planned and built straight away. Choose this if you only want a first, simple version.",
@@ -506,7 +506,7 @@ export const en = {
 	nextTitle: "What happens next",
 	nextLarge1: "{pm} asks you a few questions. You will see them on Today.",
 	nextLarge2: "{pm} writes the plan and Catervas checks it is complete.",
-	nextLarge3: "You approve the plan, or ask for changes.",
+	nextLarge3: "The plan needs no approval. You can read it on its page.",
 	nextLarge4: "{breaker} splits it into tasks and the team starts.",
 	nextSmall1:
 		"{pm} asks you anything that is unclear. You will see it on Today.",
@@ -544,6 +544,7 @@ export const en = {
 		"A question is not a problem. {agent} just needs your answer to carry on.",
 	aboutQuestionsNext: "Your answer goes straight into {agent}’s next session.",
 	approveTitle: "Approve the plan for {title}",
+	planTitle: "The plan for {title}",
 	approveLead: "Plan {id}.",
 	approveLeadTask:
 		"Plan {id}. It waits for your approval before anyone builds it.",
@@ -625,8 +626,7 @@ export const en = {
 	verdictNote:
 		"Catervas checks the plan as you type. The results come from your project, not from this page.",
 	editSave: "Save",
-	savedBack:
-		"Saved. {pm} checks the plan again, then it comes back to you to approve.",
+	savedBack: "Saved. {pm} checks the plan again.",
 	saved: "Saved.",
 	editClash:
 		"{pm} changed this plan while you were editing. Your changes are kept.",
@@ -713,7 +713,7 @@ export const en = {
 	refuseChecksFailed:
 		"Some checks failed once the parts were put together, so this cannot be accepted yet. Send it back with what is missing.",
 	refuseUsePlan:
-		"This plan is waiting for your approval. Approve it from its plan page.",
+		"This plan does not wait for your approval; read it from its plan page.",
 	refuseUseHelp:
 		"This task is waiting for your help. Answer it from its help page.",
 	refuseExtraTries:
@@ -774,7 +774,7 @@ export const en = {
 	mayGitLocal: "saves its work on its own branch",
 	mayNetwork: "looks things up on the web",
 	mayGitRemote: "sends its work to its own branches online",
-	mayExternal: "acts outside your computer, with your approval",
+	mayExternal: "acts outside your computer; only a payment asks you",
 	putBack: "Put back the default",
 	rulesNextSession:
 		"Your answers from setup. Change them whenever you like.\nA change starts with each agent’s next piece of work, never in the middle of one.",
@@ -1273,7 +1273,7 @@ export const en = {
 	addChanged:
 		"{server}’s settings in your project changed since you connected it on this computer, or it was never connected here. Check each one against the service’s or the connector’s instructions before you go on.",
 	addListLead:
-		"Catervas has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things, asks you”.",
+		"Catervas has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things”.",
 	addFrom: "Each tool’s description comes from {server}.",
 	addUnusable:
 		"Catervas can’t use this tool: its name has characters Catervas can’t pass on. {name} is not given it.",
@@ -1421,10 +1421,10 @@ export const en = {
 	allowSignedIn: "Signed in to {service}.",
 	allowQuestion: "How many may {name} make each sprint without asking?",
 	allowSpends:
-		"Each one uses your {service} credits. After that many, {name} asks you first, as for anything that changes things outside your project.",
+		"Each one uses your {service} credits. After that many, {name} asks you first.",
 	allowEach: "each sprint",
 	allowRange: "0 means {name} asks every time. Up to 1,000 each.",
-	allowAlwaysAsk: "Tools that publish or post always ask.",
+	allowAlwaysAsk: "Only tools that cost money count here.",
 	allowDay: "With no sprint running, the count starts again each day.",
 	allowApplies:
 		"A new number applies from {name}’s next piece of work. It does not allow a call that is already waiting; decide that one on Today.",
@@ -2522,13 +2522,13 @@ export const en = {
 	readyOfferLead:
 		"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
 	readyPm:
-		"writes what your product is and what comes next, as your product plan to approve.",
+		"writes what your product is and what comes next, as your product plan.",
 	readyArchitect: "writes how your project is put together, with diagrams.",
 	readyDeveloper:
 		"writes how your project is built and worked on: its habits and rules.",
 	readyDesigner: "writes down every screen your project has.",
 	readyMarketing:
-		"writes your marketing plan, after you approve the product plan.",
+		"writes your marketing plan, after the product plan is written.",
 	readyNote:
 		"Your team only adds its notes; nothing else in your project changes.",
 	readyStart: "Start",
@@ -2537,7 +2537,7 @@ export const en = {
 	refuseCatervaficationStarted:
 		"Your team is already documenting this project.",
 	refuseCatervaficationNewProject:
-		"A new project's documenting sprint starts by itself once you approve its product plan.",
+		"A new project's documenting sprint starts by itself once its product plan is accepted.",
 	refuseCatervaficationNoPm:
 		"Your Product Manager is paused. Resume them on the Team page, then start.",
 	refuseCatervaficationNoWriters:
