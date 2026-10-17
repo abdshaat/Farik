@@ -20,7 +20,6 @@ import { ChannelPreview } from "./Channel.tsx";
 import {
 	DocumentChanges,
 	type DocumentChangesCard,
-	type Integration,
 } from "./DocumentChanges.tsx";
 import { DataPipeline, type PipelineAsk } from "./dialogs/DataPipeline.tsx";
 import {
@@ -207,7 +206,6 @@ export function Today() {
 	}>("social_posts.list", {});
 	// The product plan's changes, one card for each sprint review and agent that proposed them.
 	const { data: planChanges, again: askPlanChangesAgain } = useQuery<{
-		integration: Integration;
 		cards: DocumentChangesCard[];
 	}>("folder_doc_proposals.list", {});
 	const cards = planChanges?.cards ?? [];
@@ -318,7 +316,6 @@ export function Today() {
 												""
 											}
 											agent={agent(item.agentId) ?? pm}
-											integration={team?.team.policy.integration as Integration}
 											again={askPlanAgain}
 										/>
 									</li>
@@ -390,7 +387,6 @@ export function Today() {
 										<li key={`plan-${card.sprintId}-${card.agentId}`}>
 											<DocumentChanges
 												card={card}
-												integration={planChanges.integration}
 												name={one?.displayName ?? card.agentId}
 												agent={one}
 												again={askPlanChangesAgain}

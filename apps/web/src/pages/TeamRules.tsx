@@ -14,7 +14,6 @@ import {
 	previewOf,
 } from "./setup/PreviewFields.tsx";
 import { PlanCheck, SprintsSwitch } from "./setup/SetupAdvanced.tsx";
-import { IntegrationChoice } from "./setup/SetupFinish.tsx";
 import { PermissionChoices } from "./setup/SetupPermissions.tsx";
 import { useDailyLimit } from "./setup/SetupSpending.tsx";
 import setup from "./setup/setup.module.css";
@@ -222,21 +221,10 @@ export function Spend(part: Part) {
 	);
 }
 
-export function Finish(part: Part) {
-	const { saved, defaults } = part;
-	const [mine, setMine] = useState<string>();
-	const next = mine
-		? { ...saved, policy: { ...saved.policy, integration: mine } }
-		: saved;
-	const { foot } = useChange(part, next);
+export function Finish() {
 	return (
 		<Part id="rules-finish" title={t("rulesFinish")}>
-			<IntegrationChoice
-				value={mine ?? saved.policy.integration}
-				onChange={setMine}
-				putBack={defaults && (() => setMine(defaults.policy.integration))}
-			/>
-			{foot}
+			<p>{t("rulesFinishPullRequest")}</p>
 		</Part>
 	);
 }

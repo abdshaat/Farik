@@ -128,7 +128,7 @@ Files: the web files of the File map; tests in `apps/web/src/pages/setup/team.te
 Tests:
 - `setup_and_rules_offer_no_integration_choice` (`setup/team.test.tsx`): setup's last step has no radio group named for the integration, and the Team rules page has no such group either. With a team whose file says `auto_merge`, the Team rules page's `rules-finish` part shows "Finished work opens a pull request for you to merge." and no Save button.
 
-- [ ] `feat(web): drop the integration choice; finished work opens a pull request`
+- [x] `feat(web): drop the integration choice; finished work opens a pull request`
 
 ## Verification
 

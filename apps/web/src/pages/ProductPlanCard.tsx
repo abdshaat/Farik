@@ -7,7 +7,6 @@ import { Markdown } from "../components/Markdown.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentChanges.module.css";
-import type { Integration } from "./DocumentChanges.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { docKey, isHtml } from "./files.ts";
 import card from "./ProductPlanCard.module.css";
@@ -24,12 +23,6 @@ export type ProductPlanState = {
 const NAMES: Record<string, keyof typeof en> = {
 	"product/spec": "docNameSpec",
 	"product/roadmap": "docNameRoadmap",
-};
-
-/** What approving does, said under the buttons; under `auto_merge` nothing needs saying. */
-const POLICY: Partial<Record<Integration, keyof typeof en>> = {
-	pull_request: "docChangesPullRequest",
-	manual: "docChangesManual",
 };
 
 const startOfDay = (at: Date) =>
@@ -70,13 +63,11 @@ export function ProductPlanCard({
 	state,
 	name,
 	agent,
-	integration,
 	again,
 }: {
 	state: ProductPlanState;
 	name: string;
 	agent?: Agent | undefined;
-	integration: Integration;
 	again: () => void;
 }) {
 	const id = useId();
@@ -107,7 +98,6 @@ export function ProductPlanCard({
 			},
 		});
 	};
-	const policy = POLICY[integration];
 	return (
 		<section className={styles.card} aria-labelledby={`${id}-title`}>
 			<div className={styles.head}>
@@ -160,7 +150,7 @@ export function ProductPlanCard({
 				<Button busy={busy} onClick={sendBack}>
 					{t("docChangesSendBack")}
 				</Button>
-				{policy && <span className={styles.policy}>{t(policy)}</span>}
+				<span className={styles.policy}>{t("docChangesPullRequest")}</span>
 			</div>
 			{refusal && (
 				<p role="alert" className={styles.alert}>

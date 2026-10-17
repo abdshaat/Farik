@@ -938,46 +938,13 @@ describe("team page", () => {
 		expect((await saved(s2)).budgets).toEqual({ daily_usd: 15 });
 	});
 
-	it("changes_how_work_is_added_and_how_plans_are_checked_from_settings", async () => {
+	it("changes_how_plans_are_checked_from_settings", async () => {
 		const { container, s, part } = await settings(TEAM, "/settings/work");
 
+		// Finished work always opens a pull request (ADR 0061): said, and nothing to choose.
 		const finish = part(en.rulesFinish);
-		expect(
-			picked(
-				within(finish).getByRole("radio", {
-					name: new RegExp(`^${en.finishAuto}`),
-				}),
-			),
-		).toBe(true);
-		fireEvent.click(
-			within(finish).getByRole("radio", {
-				name: new RegExp(`^${en.finishManual}`),
-			}),
-		);
-		const manual = await validated(s, [
-			"Finished work waits for you to merge it.",
-		]);
-		expect(manual.policy.integration).toBe("manual");
-		expect(
-			await within(finish).findByText(
-				"Finished work waits for you to merge it.",
-			),
-		).toBeTruthy();
-		fireEvent.click(within(finish).getByRole("button", { name: en.putBack }));
-		expect(
-			picked(
-				within(finish).getByRole("radio", {
-					name: new RegExp(`^${en.finishAuto}`),
-				}),
-			),
-		).toBe(true);
-		expect(
-			(
-				within(finish).getByRole("button", {
-					name: en.agentSave,
-				}) as HTMLButtonElement
-			).disabled,
-		).toBe(true);
+		expect(within(finish).getByText(en.rulesFinishPullRequest)).toBeTruthy();
+		expect(within(finish).queryByRole("radio")).toBeNull();
 
 		const plans = part(en.planTitle);
 		const small = within(plans).getByRole("checkbox", {
@@ -1355,14 +1322,16 @@ describe("team page", () => {
 		expect(sprints().getAttribute("aria-checked")).toBe("false");
 		fireEvent.click(sprints());
 		expect(sprints().getAttribute("aria-checked")).toBe("true");
-		const finish = part(en.rulesFinish);
+		const plans = () => part(en.planTitle);
+		const small = () =>
+			within(plans()).getByRole("checkbox", {
+				name: new RegExp(`^${en.planSmall}`),
+			});
+		fireEvent.click(small());
+		await validated(s, ["Plans are checked against 3 questions."]);
 		fireEvent.click(
-			within(finish).getByRole("radio", {
-				name: new RegExp(`^${en.finishManual}`),
-			}),
+			within(plans()).getByRole("button", { name: en.agentSave }),
 		);
-		await validated(s, ["Finished work waits for you to merge it."]);
-		fireEvent.click(within(finish).getByRole("button", { name: en.agentSave }));
 		await s.reply(await sent(s, "team.save"), {});
 		const reread = await waitFor(() => {
 			const f = s
@@ -1374,20 +1343,22 @@ describe("team page", () => {
 			return f as never;
 		});
 		await s.reply(reread, {
-			team: { ...TEAM, policy: { ...TEAM.policy, integration: "manual" } },
+			team: {
+				...TEAM,
+				policy: {
+					...TEAM.policy,
+					judgment: {
+						required: "always",
+						questions: [BUDGET, NOTICE, SMALL],
+						judge: "auto",
+					},
+				},
+			},
 			agents: EFFECTIVE,
 			judges: JUDGES,
 			max_agents: 7,
 		});
-		await waitFor(() =>
-			expect(
-				picked(
-					within(part(en.rulesFinish)).getByRole("radio", {
-						name: new RegExp(`^${en.finishManual}`),
-					}),
-				),
-			).toBe(true),
-		);
+		await waitFor(() => expect(picked(small())).toBe(true));
 		expect(sprints().getAttribute("aria-checked")).toBe("true");
 
 		// Cancel drops the draft: the part shows the team's own answer again.

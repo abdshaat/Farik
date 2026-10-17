@@ -1006,11 +1006,11 @@ describe("task detail", () => {
 		});
 		cleanup();
 
-		// Accepted and being added by Catervas on its own, or through a pull request.
+		// Accepted: Catervas opens a pull request for it, whatever the team file says.
 		await opened({ ...CONTRACT, status: "accepted" });
 		expect(
 			await screen.findByText(
-				"Accepted. Catervas adds it to your project on its own.",
+				"Accepted. Catervas opens a pull request for it, for you to merge.",
 			),
 		).toBeTruthy();
 		cleanup();

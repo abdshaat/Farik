@@ -1389,8 +1389,9 @@ describe("team setup", () => {
 		await answerQuery(s, "team.propose", proposed());
 		await answerStatus(s, false, 1, { setup_pending: true });
 		await screen.findByRole("heading", { name: en.finishTitle });
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		fireEvent.click(
-			screen.getByRole("radio", { name: /^Open a pull request/ }),
+			await screen.findByRole("switch", { name: en.planInSprints }),
 		);
 		expect(sessionStorage.getItem("catervas.setupDraft")).not.toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
@@ -1473,38 +1474,38 @@ describe("team setup", () => {
 		).toBeTruthy();
 	});
 
-	it("chooses_how_work_is_finished", async () => {
-		const { container, socket } = await renderApp("/setup/finish");
-		const s = socket as FakeSocket;
+	it("setup_and_rules_offer_no_integration_choice", async () => {
+		// Catervas never merges (ADR 0061): finished work always opens a pull request.
+		const first = await renderApp("/setup/finish");
+		const s = first.socket as FakeSocket;
 		await answerQuery(s, "team.propose", proposed());
 		await answerStatus(s, false, 1, { setup_pending: true });
 		await screen.findByRole("heading", { name: en.finishTitle });
-		expect(
-			(
-				screen.getByRole("radio", {
-					name: /^Catervas adds it/,
-				}) as HTMLInputElement
-			).checked,
-		).toBe(true);
-		await expectNoAxeViolations(container);
-		fireEvent.click(
-			screen.getByRole("radio", { name: /^Open a pull request/ }),
-		);
+		expect(screen.queryByRole("group", { name: "Accepted work" })).toBeNull();
+		expect(screen.queryByRole("radio", { name: /pull request/i })).toBeNull();
+		expect(screen.queryByRole("button", { name: en.putBack })).toBeNull();
+		cleanup();
 
-		// Advanced and back keeps the choice.
-		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
-		fireEvent.click(
-			await screen.findByRole("button", { name: en.advancedHide }),
-		);
+		const rules = await renderApp("/settings/work");
+		const r = rules.socket as FakeSocket;
+		await answerStatus(r, false);
+		await answerQuery(r, "team.get", {
+			team: { ...proposed().team, rules: {} },
+			agents: [],
+			judges: {},
+			max_agents: 7,
+		});
+		await answerQuery(r, "settings.defaults", RECOMMENDED);
+		const finish = await screen.findByRole("region", {
+			name: en.rulesFinish,
+		});
 		expect(
-			(
-				(await screen.findByRole("radio", {
-					name: /^Open a pull request/,
-				})) as HTMLInputElement
-			).checked,
-		).toBe(true);
-		const start = await startFrom(s, en.finishTitle);
-		expect(start.team.policy).toMatchObject({ integration: "pull_request" });
+			within(finish).getByText(
+				"Finished work opens a pull request for you to merge.",
+			),
+		).toBeTruthy();
+		expect(within(finish).queryByRole("radio")).toBeNull();
+		expect(within(finish).queryByRole("button")).toBeNull();
 	});
 
 	it("edits_the_checks_and_the_plan_check", async () => {
@@ -1701,7 +1702,6 @@ describe("team setup", () => {
 			team.budgets = { daily_usd: 25 };
 			team.rules = { require_new_tests: true };
 			const policy = team.policy as Record<string, unknown>;
-			policy.integration = "manual";
 			policy.judgment = {
 				required: "never",
 				questions: [SMALL],
@@ -1757,19 +1757,9 @@ describe("team setup", () => {
 		fireEvent.click(screen.getByRole("button", { name: en.continue }));
 
 		await screen.findByRole("heading", { name: en.finishTitle });
-		await answerDefaults(3);
-		fireEvent.click(back());
-		expect(
-			(
-				screen.getByRole("radio", {
-					name: /^Catervas adds it/,
-				}) as HTMLInputElement
-			).checked,
-		).toBe(true);
-
 		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		await screen.findByRole("button", { name: en.advancedHide });
-		await answerDefaults(4);
+		await answerDefaults(3);
 		const backs = within(
 			document.getElementById("finish-advanced") as HTMLElement,
 		).getAllByRole("button", { name: en.putBack });
@@ -2148,13 +2138,6 @@ describe("team setup's four starts", () => {
 		).toBe("20");
 		fireEvent.click(screen.getByRole("button", { name: en.continue }));
 		await screen.findByRole("heading", { name: en.finishTitle });
-		expect(
-			(
-				screen.getByRole("radio", {
-					name: /^Open a pull request/,
-				}) as HTMLInputElement
-			).checked,
-		).toBe(true);
 		const carried = screen.getByRole("region", {
 			name: t("finishCarried", { name: "Three of us" }),
 		});

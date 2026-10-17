@@ -124,16 +124,16 @@ describe("the product plan on Today", () => {
 		expect(refusedBy("humanSendBackBody", bodyOf(sent))).toEqual([]);
 	});
 
-	it("says_what_approving_does_under_the_policy", async () => {
-		for (const [integration, words] of [
-			["pull_request", en.docChangesPullRequest],
-			["manual", en.docChangesManual],
-			["auto_merge", undefined],
+	it("says_what_approving_does", async () => {
+		// Catervas never merges (ADR 0061): approving always opens a pull request.
+		for (const integration of [
+			"pull_request",
+			"manual",
+			"auto_merge",
 		] as const) {
 			await todayWithPlan({ integration });
 			const region = await card();
-			if (words) expect(within(region).getByText(words)).toBeTruthy();
-			else expect(region.textContent).not.toContain("Nothing changes");
+			expect(within(region).getByText(en.docChangesPullRequest)).toBeTruthy();
 			cleanup();
 		}
 	});

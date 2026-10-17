@@ -303,18 +303,7 @@ export const en = {
 	firstDay:
 		"A first full day for the suggested team of six costs about twenty-five dollars (an estimate) on your own key at today’s prices. A smaller team costs less.",
 	finishTitle: "When you accept a piece of work, what happens to it?",
-	finishLead:
-		"Accepted work has to be added to your project. Choose how much you want to do by hand.",
-	finishChoice: "Accepted work",
-	finishAuto: "Catervas adds it for me",
-	finishAutoNote:
-		"Recommended. Catervas adds the work to your project as soon as you accept it, and sends it to your online repository if you have one.",
-	finishPullRequest: "Open a pull request on GitHub for each piece",
-	finishPullRequestNote:
-		"You, or someone you trust, merges each one on GitHub. Needs the GitHub app on this computer.",
-	finishManual: "I will add each one myself",
-	finishManualNote:
-		"Catervas waits. Each accepted piece shows an “Add to project” button until you press it.",
+	finishLead: "Accepted work opens a pull request for you to merge.",
 	finishSafe:
 		"Rules for the whole team, the checks every piece of work must pass, and how plans are judged are already set to safe choices.",
 	startTeam: "Start the team",
@@ -814,6 +803,8 @@ export const en = {
 	rulesSpend: "Daily spending limit",
 	rulesSpendTitle: "What the team may spend",
 	rulesFinish: "How finished work is added",
+	rulesFinishPullRequest:
+		"Finished work opens a pull request for you to merge.",
 	accountConfirm:
 		"Disconnecting pauses your team until you start Catervas again and connect an account.",
 	accountDisconnectYes: "Disconnect and pause the team",
@@ -1003,10 +994,8 @@ export const en = {
 		"Once the task is accepted, Catervas adds its changes to your main branch, one task at a time.",
 	taskAdd: "Add to the project",
 	taskAddNotYet: "Not yet: the task has not been accepted.",
-	taskAddOnItsOwn: "Accepted. Catervas adds it to your project on its own.",
 	taskAddByPullRequest:
 		"Accepted. Catervas opens a pull request for it, for you to merge.",
-	taskAddByHand: "Accepted. It waits for you to add it.",
 	riskLowWhy: "Low. The team may accept it without you.",
 	riskMediumWhy: "Medium. The team may still accept it without you.",
 	riskHighWhy: "High. You approve its plan.",
@@ -1589,10 +1578,10 @@ export const en = {
 	teamNameAll:
 		"Name the Product Manager and at least one more person to continue.",
 	teamSavedAnswers:
-		"{name} also holds your answers about what they may do, spending, finishing work and checking plans. You will see them on the next screens, already chosen.",
+		"{name} also holds your answers about what they may do, spending and checking plans. You will see them on the next screens, already chosen.",
 	templateMeta: "{names} · saved {date}",
 	finishLeadSaved:
-		"Accepted work has to be added to your project. {name}’s answer is already chosen; change it if this project needs another.",
+		"Accepted work opens a pull request for you to merge. {name}’s other answers are already chosen; change them if this project needs others.",
 	finishCarried: "What they may do, from {name}",
 	finishCommands: "Run commands on this computer",
 	finishPush: "Send work to your online repository",
@@ -1614,7 +1603,7 @@ export const en = {
 		"Catervas keeps a copy on this computer, so any of your projects can start from it.",
 	saveKeeps: "What it keeps",
 	saveKeepsBody:
-		"Everyone’s name, picture, persona and model, and your answers about what they may do, checking plans, spending and finishing work.",
+		"Everyone’s name, picture, persona and model, and your answers about what they may do, checking plans and spending.",
 	saveStays: "What stays with this project",
 	saveStaysBody:
 		"The team’s rules, the checks, how to open your app, and who is paused or retired.",
@@ -2521,11 +2510,8 @@ export const en = {
 	docChangesApprove: "Approve",
 	docChangesSendBack: "Send back",
 	docChangesNeedNotes: "Write what {name} should change first.",
-	docChangesNothingYet: "Nothing changes until you approve.",
 	docChangesPullRequest:
 		"Nothing changes until you approve. Then Catervas opens a pull request, and the change is in your project once it is merged.",
-	docChangesManual:
-		"Nothing changes until you approve. Then it waits under Waiting on you for you to add it to your project.",
 	planToApprove: "Your product plan to approve",
 	planFrom: "From {name}, written from your chat {when}",
 	planWhenMorning: "this morning",
@@ -2595,18 +2581,11 @@ export const en = {
 		"No one on your team owns this folder right now. Resume or add its role first.",
 	refuseNoTaskTaker:
 		"The Scrum Master keeps this document up to date at its retro.",
-	filesSaveAuto: "Saving keeps your change at once.",
 	filesSavePullRequest:
 		"Saving puts your change in a pull request; it is in your project once that is merged.",
-	filesSaveManual:
-		"Saving puts your change on a branch for you to add with catervas integrate.",
-	filesThenAuto: "{owner} will update the team’s version.",
 	filesThen: "Then {owner} updates the team’s version.",
-	filesWaitingAuto: "Saved. Catervas adds it to your project in a moment.",
 	filesWaitingPullRequest: "Saved. It goes out with a pull request.",
 	filesNotMerged: "Not merged yet. It comes from {task}, which waits to merge.",
-	filesWaitingManual:
-		"Saved. It goes out when you run catervas integrate folder-{change}.",
 	filesChangedWhile:
 		"This file changed while you were editing. Your text is still here; copy it, then reload to see the new version.",
 	filesReload: "Reload",

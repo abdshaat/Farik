@@ -468,7 +468,7 @@ describe("Files", () => {
 			expect((box() as HTMLTextAreaElement).value).toBe(read().document.text);
 			expect(
 				screen.getByText(
-					"Saving keeps your change at once. Mira will update the team’s version.",
+					"Saving puts your change in a pull request; it is in your project once that is merged. Then Mira updates the team’s version.",
 				),
 			).toBeTruthy();
 
@@ -498,54 +498,35 @@ describe("Files", () => {
 			expect(queries(s, "files.tree").length).toBeGreaterThan(before[1] ?? 0);
 		});
 
-		it("says what saving does under each policy", async () => {
-			for (const [integration, words] of [
-				[
-					"pull_request",
+		it("says what saving does", async () => {
+			media.set(WIDE, true);
+			await files("/files/product/roadmap.md", { tree: tree("pull_request") });
+			await screen.findByRole("heading", { name: "Roadmap" });
+			press(en.filesEdit);
+			expect(
+				screen.getByText(
 					"Saving puts your change in a pull request; it is in your project once that is merged. Then Mira updates the team’s version.",
-				],
-				[
-					"manual",
-					"Saving puts your change on a branch for you to add with catervas integrate. Then Mira updates the team’s version.",
-				],
-			] as const) {
-				media.set(WIDE, true);
-				await files("/files/product/roadmap.md", { tree: tree(integration) });
-				await screen.findByRole("heading", { name: "Roadmap" });
-				press(en.filesEdit);
-				expect(screen.getByText(words)).toBeTruthy();
-				expect(document.body.textContent).not.toContain("at once");
-				cleanup();
-			}
+				),
+			).toBeTruthy();
+			expect(document.body.textContent).not.toContain("at once");
 		});
 
 		it("says a saved change is on its way", async () => {
-			for (const [integration, words] of [
-				["auto_merge", "Saved. Catervas adds it to your project in a moment."],
-				["pull_request", "Saved. It goes out with a pull request."],
-				[
-					"manual",
-					"Saved. It goes out when you run catervas integrate folder-3.",
-				],
-			] as const) {
-				media.set(WIDE, true);
-				const { s } = await files("/files/product/roadmap.md", {
-					tree: tree(integration),
-					read: read({ waiting: { change: 3, branch: "docs/folder-3" } }),
-				});
-				await screen.findByText(words);
-				expect(screen.queryByRole("button", { name: en.filesEdit })).toBeNull();
-				expect(document.body.textContent).not.toContain("at once");
-				if (integration === "auto_merge") {
-					await eventArrives(s, 9);
-					await answerQuery(s, "files.read", read());
-					expect(
-						await screen.findByRole("button", { name: en.filesEdit }),
-					).toBeTruthy();
-					expect(screen.queryByText(words)).toBeNull();
-				}
-				cleanup();
-			}
+			media.set(WIDE, true);
+			const words = "Saved. It goes out with a pull request.";
+			const { s } = await files("/files/product/roadmap.md", {
+				tree: tree("pull_request"),
+				read: read({ waiting: { change: 3, branch: "docs/folder-3" } }),
+			});
+			await screen.findByText(words);
+			expect(screen.queryByRole("button", { name: en.filesEdit })).toBeNull();
+			expect(document.body.textContent).not.toContain("at once");
+			await eventArrives(s, 9);
+			await answerQuery(s, "files.read", read());
+			expect(
+				await screen.findByRole("button", { name: en.filesEdit }),
+			).toBeTruthy();
+			expect(screen.queryByText(words)).toBeNull();
 		});
 
 		it("keeps the draft while events arrive", async () => {
@@ -680,7 +661,7 @@ describe("Files", () => {
 			press(en.filesEdit);
 			expect(screen.queryByText(en.filesEditing)).toBeNull();
 			// The whole footnote is the policy's sentence: no owner follows it.
-			expect(screen.getByText(en.filesSaveAuto)).toBeTruthy();
+			expect(screen.getByText(en.filesSavePullRequest)).toBeTruthy();
 		});
 	});
 });

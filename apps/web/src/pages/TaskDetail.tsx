@@ -758,11 +758,7 @@ export function TaskDetail() {
 									{t(
 										contract.status !== "accepted"
 											? "taskAddNotYet"
-											: team.team.policy.integration === "auto_merge"
-												? "taskAddOnItsOwn"
-												: team.team.policy.integration === "pull_request"
-													? "taskAddByPullRequest"
-													: "taskAddByHand",
+											: "taskAddByPullRequest",
 									)}
 								</p>
 							)}
