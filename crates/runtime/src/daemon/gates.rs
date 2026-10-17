@@ -4,7 +4,6 @@
 //! this module answers what they ask.
 
 use std::fmt::Display;
-use std::str::FromStr as _;
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
@@ -46,6 +45,7 @@ use serde_json::{Value, json};
 
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
+use crate::choices::offer_for;
 use crate::cost::extra_tries;
 use crate::marketing::ads::{ads_rows, open_raise, spend_and_pauses};
 use crate::marketing::{going_out, kinds_made, known_spend, list_row, states_today, whole};
@@ -712,34 +712,17 @@ fn questions(deps: &ToolDeps, task: Option<&str>) -> Result<Value, Failure> {
     Ok(json!({ "questions": listed }))
 }
 
-/// `escalation.choices`: what the human may do about the task's escalation, or nothing when it
-/// is not escalated.
+/// `escalation.choices`: what the human may do about the task's open escalation (ADR 0062), or
+/// nothing when it has none. An accepted task whose integration failed has one.
 fn escalation_choices(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, Failure> {
-    if row(deps, task_id)?.status != TaskStatus::Escalated {
-        return Ok(json!({ "choices": [] }));
-    }
-    let events = history(deps, task_id)?;
-    let reason = events
-        .iter()
-        .rev()
-        .find_map(|event| match &event.body {
-            EventBody::EscalationRaised(body) => Some(body.reason.to_string()),
-            _ => None,
-        })
+    let offered = offer_for(&deps.log, &deps.projections, &deps.files, team, task_id)
+        .map_err(|e| internal(&e))?
         .unwrap_or_default();
-    let before =
-        last_move_into(&events, TaskStatus::Escalated).and_then(|event| match &event.body {
-            EventBody::TaskTransitioned(body) => TaskStatus::from_str(&body.from.to_string()).ok(),
-            _ => None,
-        });
-    let product_manager = team
-        .active_agents()
-        .find(|agent| Role::from(agent.role) == Role::ProductManager)
-        .map_or_else(
-            || "the Product Manager".to_string(),
-            |agent| name_of(team, agent.id.as_str()),
-        );
-    Ok(json!({ "choices": choices(task_id.as_str(), &reason, before, &product_manager) }))
+    let wire: Vec<Value> = offered
+        .iter()
+        .map(|choice| choice.wire(task_id.as_str()))
+        .collect();
+    Ok(json!({ "choices": wire }))
 }
 
 /// The gates' methods, whose params the schema already passed.
@@ -1213,46 +1196,6 @@ fn schema_words(errors: &[catervas_core::contract::ValidationError]) -> String {
         .join("; ")
 }
 
-/// The choices a task escalated for `reason` offers the human (ADR 0024): the label, and the
-/// command the page sends, to which it adds the message. `before` is the status the task held
-/// before it escalated, and `product_manager` the name the plan's writer goes by.
-pub(crate) fn choices(
-    task_id: &str,
-    reason: &str,
-    before: Option<TaskStatus>,
-    product_manager: &str,
-) -> Vec<Value> {
-    let resolve = |to: String| json!({ "command": "escalation_resolve", "body": { "task_id": task_id, "to": to } });
-    let choice = |label: &str, body: Value| json!({ "label": label, "body": body });
-    let cancel = choice("Cancel the task", resolve("cancelled".to_string()));
-    let change = || choice("Change the plan", resolve("refining".to_string()));
-    match reason {
-        "iterations" => {
-            let mut more = resolve("in_progress".to_string());
-            more["body"]["extra_tries"] = json!(2);
-            vec![
-                choice("Give 2 more tries", more),
-                choice(
-                    &format!("Ask {product_manager} to change the plan"),
-                    resolve("refining".to_string()),
-                ),
-                cancel,
-            ]
-        }
-        // Spec 5.7 raises these again on a resume, so only the plan's budget changing helps.
-        "budget" | "sessions" => vec![change(), cancel],
-        "blocker_age" | "permission" | "readiness_failures" | "explicit_request" => {
-            let mut offered = Vec::new();
-            if let Some(before) = before {
-                offered.push(choice("Carry on", resolve(before.to_string())));
-            }
-            offered.extend([change(), cancel]);
-            offered
-        }
-        _ => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 pub(super) mod tests {
     use std::sync::Arc;
@@ -1261,7 +1204,6 @@ pub(super) mod tests {
     use catervas_protocol::event::EventKind;
     use serde_json::{Value, json};
 
-    use super::choices;
     use crate::daemon::DaemonState;
     use crate::orchestrator::fixtures::Harness;
     use crate::orchestrator::{Waited, command_handler};
@@ -4798,82 +4740,90 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn offers_to_carry_on_where_the_task_was() {
-        let harness = driven("gates-carry-on");
-        harness.file("CTV-4", "refining", |_| {});
+    fn answers_the_choice_of_an_integration_waiting_on_an_accepted_task() {
+        let harness = driven("gates-integration-choice");
+        let choices = |id: &str| {
+            query(
+                &harness.daemon,
+                "escalation.choices",
+                &json!({ "task_id": id }),
+                "escalationChoicesResult",
+            )
+        };
+        let name = |id: &str| {
+            let team = harness.project.deps.files.read_team().expect("the team");
+            catervas_store::waiting::name_of(&team, id)
+        };
+        harness.file("CTV-1", "ready", |_| {});
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
         harness
             .project
-            .moved("CTV-4", "refining", "escalated", &json!({}));
+            .moved("CTV-1", "assigned", "in_progress", &people);
+        harness
+            .project
+            .moved("CTV-1", "in_progress", "verifying", &people);
+        harness
+            .project
+            .moved("CTV-1", "verifying", "accepted", &people);
         harness.project.record(
-            "CTV-4",
+            "CTV-1",
             "escalation.raised",
-            &json!({ "reason": "explicit_request", "detail": "the PM asks" }),
+            &json!({ "reason": "integration", "detail": "the push failed" }),
         );
-        let offered = query(
-            &harness.daemon,
-            "escalation.choices",
-            &json!({ "task_id": "CTV-4" }),
-            "escalationChoicesResult",
-        );
+
+        let offered = choices("CTV-1");
+        assert_eq!(offered["choices"].as_array().map(Vec::len), Some(1));
         assert_eq!(
-            offered["choices"][0],
-            json!({ "label": "Carry on", "body": resolve("refining") })
+            offered["choices"][0]["body"],
+            json!({ "command": "task_integrate", "body": { "task_id": "CTV-1" } })
         );
-    }
+        assert_eq!(offered["choices"][0]["kind"], "command");
+        assert_eq!(offered["choices"][0]["suggested"], true);
 
-    fn resolve(to: &str) -> Value {
-        json!({ "command": "escalation_resolve", "body": { "task_id": "CTV-4", "to": to } })
-    }
-
-    #[test]
-    fn offers_the_choices_for_each_reason() {
-        let cancel = json!({ "label": "Cancel the task", "body": resolve("cancelled") });
-        let change = json!({ "label": "Change the plan", "body": resolve("refining") });
-        let offered = |reason| choices("CTV-4", reason, Some(TaskStatus::InProgress), "Ada");
-
-        let mut more = resolve("in_progress");
-        more["body"]["extra_tries"] = json!(2);
-        assert_eq!(
-            offered("iterations"),
-            vec![
-                json!({ "label": "Give 2 more tries", "body": more }),
-                json!({ "label": "Ask Ada to change the plan", "body": resolve("refining") }),
-                cancel.clone(),
-            ]
+        harness.project.record(
+            "CTV-1",
+            "task.integrated",
+            &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
         );
-        for reason in ["budget", "sessions"] {
-            assert_eq!(
-                offered(reason),
-                vec![change.clone(), cancel.clone()],
-                "{reason}"
+        assert_eq!(choices("CTV-1"), json!({ "choices": [] }));
+
+        // The words are composed when read: they name whoever holds the task then.
+        harness.file("CTV-2", "ready", |_| {});
+        let escalate = |holder: &str| {
+            let people = json!({ "assignee": holder, "reviewer": "dev-b" });
+            harness
+                .project
+                .moved("CTV-2", "assigned", "in_progress", &people);
+            harness
+                .project
+                .moved("CTV-2", "in_progress", "escalated", &people);
+            harness.project.record(
+                "CTV-2",
+                "escalation.raised",
+                &json!({ "reason": "iterations", "detail": "three tries" }),
             );
-        }
-        for reason in [
-            "blocker_age",
-            "permission",
-            "readiness_failures",
-            "explicit_request",
-        ] {
-            assert_eq!(
-                offered(reason),
-                vec![
-                    json!({ "label": "Carry on", "body": resolve("in_progress") }),
-                    change.clone(),
-                    cancel.clone(),
-                ],
-                "{reason}"
-            );
-        }
-        // Carrying on goes back to where the task was.
-        assert_eq!(
-            choices("CTV-4", "blocker_age", Some(TaskStatus::Blocked), "Ada")[0]["body"],
-            resolve("blocked")
+        };
+        harness.project.moved(
+            "CTV-2",
+            "ready",
+            "assigned",
+            &json!({ "assignee": "dev-a" }),
         );
-        // A plan to approve is the plan page's, and is no help case.
-        assert!(offered("approval").is_empty());
-        // Integration is no escalation of a task: an accepted task waits to be added (5.7).
-        assert!(offered("integration").is_empty());
-        assert!(offered("risk_gate").is_empty());
+        escalate("dev-a");
+        let first = choices("CTV-2");
+        let next = first["choices"][0]["next"].as_str().expect("words");
+        assert!(next.starts_with(&name("dev-a")), "{next}");
+        harness.project.moved(
+            "CTV-2",
+            "escalated",
+            "assigned",
+            &json!({ "assignee": "dev-b" }),
+        );
+        escalate("dev-b");
+        let second = choices("CTV-2");
+        let next = second["choices"][0]["next"].as_str().expect("words");
+        assert!(next.starts_with(&name("dev-b")), "{next}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

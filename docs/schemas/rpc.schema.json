@@ -3549,7 +3549,7 @@
       ]
     },
     "escalationChoicesResult": {
-      "description": "What the human may do about an escalation: each choice's label and the command the page sends, to which it adds the message.",
+      "description": "What the human may do about an escalation (ADR 0062): each choice's label, what happens next in plain words, whether the team suggests it, and either the command the page sends (kind command; body, to which the page adds the message of a resolve) or the page it opens (kind open; path). The first is the suggested one.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -3562,13 +3562,32 @@
               "label": {
                 "type": "string"
               },
+              "next": {
+                "type": "string"
+              },
+              "suggested": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "command",
+                  "open"
+                ]
+              },
               "body": {
                 "type": "object"
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^/"
               }
             },
             "required": [
               "label",
-              "body"
+              "next",
+              "suggested",
+              "kind"
             ]
           }
         }

@@ -239,7 +239,7 @@ Existing web tests that read `escalation.choices` fixtures (`apps/web/src/test/g
 `HelpNeeded.test.tsx`) keep passing: their fixtures lack the new fields, which the page does not
 read yet.
 
-- [ ] `feat(runtime): every escalation says what each choice does and suggests one`
+- [x] `feat(runtime): every escalation says what each choice does and suggests one`
 
 ### Task 4: the command line answers each choice
 

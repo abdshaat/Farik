@@ -12,6 +12,8 @@ pub mod ceremonies;
 pub mod channel;
 /// The user's one-to-one chats with each agent, kept apart from the channel.
 pub mod chat;
+/// What the human may do about an escalation, in words, one choice suggested.
+pub mod choices;
 /// The Claude Code program as a runtime: its command line, credential, and version.
 #[cfg(unix)]
 pub mod claude;
