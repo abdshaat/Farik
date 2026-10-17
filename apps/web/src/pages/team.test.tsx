@@ -159,7 +159,11 @@ const DEFAULTS = {
 const RULES_PAGES = ["allowed-actions", "spending", "work"];
 
 /** A Settings section, with the queries it asks answered: a rules page asks for the defaults. */
-async function settings(team: object = TEAM, path = "/settings/work") {
+async function settings(
+	team: object = TEAM,
+	path = "/settings/work",
+	answer: object = {},
+) {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
@@ -170,6 +174,7 @@ async function settings(team: object = TEAM, path = "/settings/work") {
 			team,
 			agents: EFFECTIVE,
 			max_agents: 7,
+			...answer,
 		});
 	if (isRules) await answerQuery(s, "settings.defaults", DEFAULTS);
 	const main = await screen.findByRole("main");
@@ -775,6 +780,36 @@ describe("team page", () => {
 		await settings(TEAM, "/settings/your-app");
 		expect(screen.queryByRole("region", { name: en.previewTitle })).toBeNull();
 		expect(await screen.findByText(en.yourAppNone)).toBeTruthy();
+	});
+
+	it("says_whether_the_apps_settings_file_is_there", async () => {
+		const present = t("previewEnvPresent", { designer: "Iris" });
+		const absent = en.previewEnvAbsent;
+		const region = async () =>
+			await screen.findByRole("region", { name: en.previewTitle });
+		await settings(WITH_IRIS, "/settings/your-app", {
+			preview_env_present: true,
+		});
+		let preview = await region();
+		expect(within(preview).getByText(present)).toBeTruthy();
+		expect(within(preview).queryByText(absent)).toBeNull();
+		const tip = document.getElementById("previewEnv-info");
+		expect(tip).not.toBeNull();
+		for (const line of en.previewEnvMore.split("\n"))
+			expect(
+				within(preview)
+					.getAllByRole("listitem")
+					.map((item) => item.textContent),
+			).toContain(line);
+		cleanup();
+
+		for (const answer of [{ preview_env_present: false }, {}]) {
+			await settings(WITH_IRIS, "/settings/your-app", answer);
+			preview = await region();
+			expect(within(preview).getByText(absent)).toBeTruthy();
+			expect(within(preview).queryByText(present)).toBeNull();
+			cleanup();
+		}
 	});
 
 	it("edits_the_ui_paths_in_advanced", async () => {

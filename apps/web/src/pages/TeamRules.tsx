@@ -313,7 +313,10 @@ export function Documents(part: Part) {
  * asked only of a team with a UI/UX Designer, and saved on their own.
  */
 export function HowToOpen({ none }: { none?: ReactNode }) {
-	const { data, again } = useQuery<{ team: Team }>("team.get", {});
+	const { data, again } = useQuery<{
+		team: Team;
+		previewEnvPresent?: boolean;
+	}>("team.get", {});
 	const [round, setRound] = useState(0);
 	const designer = data?.team.agents.find(
 		(a) => a.role === "ui_ux_designer" && a.status !== "retired",
@@ -325,6 +328,7 @@ export function HowToOpen({ none }: { none?: ReactNode }) {
 			key={round}
 			saved={data.team}
 			designer={designer.displayName}
+			envPresent={data.previewEnvPresent === true}
 			done={() => {
 				setRound((n) => n + 1);
 				again();
@@ -336,10 +340,12 @@ export function HowToOpen({ none }: { none?: ReactNode }) {
 function Preview({
 	saved,
 	designer,
+	envPresent,
 	done,
 }: {
 	saved: Team;
 	designer: string;
+	envPresent: boolean;
 	done: () => void;
 }) {
 	const [mine, setMine] = useState<PreviewForm>();
@@ -368,6 +374,16 @@ function Preview({
 				errors={errors}
 				onChange={setMine}
 			/>
+			<div className={styles.titled}>
+				<p id="preview-env">
+					{envPresent
+						? t("previewEnvPresent", { designer })
+						: t("previewEnvAbsent")}
+				</p>
+				<InfoTip id="previewEnv-info">
+					<Bullets text={t("previewEnvMore")} />
+				</InfoTip>
+			</div>
 			{foot}
 		</section>
 	);
