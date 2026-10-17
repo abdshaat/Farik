@@ -151,7 +151,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 
 - `files_a_bug_with_its_evidence` (changed): the filed contract's `change` is `fix` as well.
 
-- [ ] `feat(runtime): a bug a hunt files is a fix`
+- [x] `feat(runtime): a bug a hunt files is a fix`
 
 ### Task 3: the human's save keeps the recorded branch
 
