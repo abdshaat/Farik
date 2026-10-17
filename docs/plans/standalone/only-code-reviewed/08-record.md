@@ -4,7 +4,7 @@ Status: draft
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md`, revision 0.115
 Depends on: plans 1 to 7 committed on this branch; ADR 0061
-Readiness confirmed by: pending
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 ## Goal
 
@@ -21,15 +21,15 @@ Readiness confirmed by: pending
     - the human's `verifying -> rejected` opens only for a code task's `human` criterion (plan 1);
     - the Designer paragraph says the plan is approved by Catervas as it is proposed (plan 4);
     - the dependency paragraph says a dependency counts once accepted (plan 3).
-  - 5.3: the judgment of a contract by an agent, its rules `judgment_recorded` and `judgment_answers`, and the judge go (plan 7); the rule `no_review_outside_code` (plan 1); `product_plan_first` waits for the product plan task's acceptance (plan 5); `human_accepts_contracts` is ignored (plan 5).
+  - 5.3: the judgment of a contract by an agent, its rules `judgment_recorded` and `judgment_answers`, and the judge go (plan 7); the rule `no_review_outside_code` (plan 1); the rule `summary_present` goes, and a contract's `summary` is optional (plan 5); `product_plan_first` waits for the product plan task's acceptance (plan 5); `human_accepts_contracts` is ignored (plan 5).
   - 5.4:
     - item 5 (the human's acceptance) goes;
-    - the paragraph on what a human gate shows keeps only the gates that remain: a code task's `human` criterion, and the money gates of 5.7;
+    - the paragraph on what a human gate shows ("What a human gate shows", added in 0.18) keeps only the gates that remain: a code task's `human` criterion, and the money gates of 5.7; its sentences on a contract's required summary go (plan 5);
     - Catervas's own review note for a task it verifies alone (plan 1).
-  - 5.5 and 5.7: the owner is asked only before money is spent. The list of what waits for the owner is cut to a marketing plan with money in it, a raised budget, a purchase order, a paid or unknown-cost data source, and a `paid` connector call (plan 5). Seller messages are unchanged.
+  - 5.5 and 5.7: the owner is asked only before money is spent. The list of what waits for the owner is cut to a marketing plan with money in it, a raised budget, a purchase order, a data source that is paid, of unknown cost or that sends the project's data out, and a `paid` connector call (plan 5); the site requests and `catervas site approve|decline` go from 5.7 (plan 6). Seller messages are unchanged.
   - 5.6:
     - the tier table gives `network` to every role (plan 6);
-    - connector tags gain `paid`, and `external_effect` runs without asking (plan 5);
+    - connector tags gain `paid`, and `external_effect` runs without asking; a custom connector's unlabelled tool is `paid`; an allowance and a plan mark go on a `paid` tool; an older kit entry pinned `external_effect` runs nothing until connected again (plan 5);
     - "A role held to read paths" and "A role held to approved sites" go (plan 6);
     - "Read roots" covers every role (plan 6);
     - the hook order loses the sites and the read paths (plan 6).
@@ -44,14 +44,17 @@ Readiness confirmed by: pending
   - 4.1 and 4.3: setup's last step loses the integration choice (plan 2), and its advanced step the plan check (plan 7); the interview ends in a plan the Product Manager finishes, and Today has no product plan card (plan 5).
   - 6.1, 6.3, 6.5, 6.6, 6.8 and 6.10: each role's paragraph says who reviews what and what it may read, per plans 1, 4, 5 and 6.
     - 6.5: a plan that spends nothing is approved at once, and posts outside a plan go out with Stop.
-    - 6.10: no sites; a data source is filed at once unless it costs money, its cost is unknown, or it sends the project's data out, which ask the owner.
+    - 6.10: no sites, no `catervas_request_sites` or `catervas_read_sites`, no `catervas site` command (plan 6); every role reads both private folders' workbooks through `catervas_read_sheet` with `folder` (plan 6); a data source is filed at once, `by: catervas`, unless it costs money, its cost is unknown, or it sends the project's data out, which ask the owner; `catervas_decide_data_pipeline` and the skill `deciding-data-pipelines` go (plan 5).
   - 8.2, 8.3 and 8.6: every session's web tools, every sandbox's network, and what still protects secrets (plan 6).
   - F9 and F16: one sentence each.
 - **Design documents:**
-  - `docs/design/catervas-folders.md`: "Planning a feature" gains, after its step 2, that no agent reviews the plan and its tasks are filed once Catervas accepts it and start from its branch. "Read all; Marketing reads PM only" becomes "Everyone reads everything but secrets". The product plan's approval and the Marketing task's wait become the Product Manager's acceptance.
+  - `docs/design/catervas-folders.md`, each changed sentence ending "(ADR 0061)":
+    - "Planning a feature: PM → Architect → PM → Scrum Master" (line 68) gains, after its step 2, that no agent reviews the plan and its tasks are filed once Catervas accepts it and start from its branch.
+    - Line 14's "The Marketing Specialist reads the Product Manager's folder and its own, and no other." and line 40's **Reading** bullet become "Every agent reads every folder; only secrets stay out of reach."
+    - Line 9's "documents nothing until the owner has approved the product plan", line 53's owner acceptance of a task that changes a human document, line 56's `folder_doc.proposed` flow, and line 87's Marketing wait say instead: the Product Manager's product plan task is accepted by Catervas, a change to `spec` or `roadmap` lands at the sprint review as any document does, and the Marketing Specialist's task depends on the Product Manager's.
   - `docs/design/marketing-specialist.md`: the owner approves a plan only when it spends money.
   - `docs/design/designer-chats-templates.md`: one line saying that ADR 0061 replaced the Product Manager's approval of the plan.
-- **The plans:** each of the eight plan files gets status `done`, its boxes ticked, and the README's table its plans' commits.
+- **The plans:** each of the eight plan files and the README gets `Status: done`, each plan's boxes ticked, and the README's table a fourth column, `Commits`, holding each plan's commit hashes, short form, in order.
 
 ## Tasks
 
