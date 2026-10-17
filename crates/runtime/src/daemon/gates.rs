@@ -468,7 +468,7 @@ fn readiness(
         .readiness_context(team, contract)
         .map_err(|e| internal(&e))?;
     let result = evaluate_readiness(contract, &context);
-    let total = rules_evaluated(&result);
+    let total = rules_evaluated();
     Ok((result.err().unwrap_or_default(), total))
 }
 

@@ -39,18 +39,15 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 		team: "pm-architect-developer",
 		sprints: true,
 		transcripts: [
-			// CTV-1, the small request: Mira sizes it and asks, then writes it; Ada checks it.
+			// CTV-1, the small request: Mira sizes it and asks, then writes it.
 			"triage_ctv_1_small_by_pm",
 			"ask_with_choices_ctv_1",
 			"refine_writes_task_for_theo_ctv_1",
-			"judge_ctv_1_by_architect",
-			// CTV-2, the epic: sized, written, checked, approved by the user, then broken down
-			// outside a sprint into CTV-3, which Ada checks.
+			// CTV-2, the epic: sized, written, approved by the user, then broken down
+			// outside a sprint into CTV-3.
 			"triage_ctv_1_large",
 			"refine_writes_epic_ctv_1",
-			"judge_ctv_1_by_architect",
 			"plan_breaks_down_ctv_2",
-			"judge_ctv_1_by_architect",
 			// Sprint 1: planned, CTV-1 handed to Theo, and Theo asks the user before he builds.
 			"planning_ceremony_ctv_1_ctv_2",
 			"plan_assigns_ctv_1_to_theo",
@@ -58,7 +55,6 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 			// CTV-4, the late request, ready during sprint 1.
 			"triage_ctv_1_small_by_pm",
 			"refine_writes_task_for_theo_ctv_1",
-			"judge_ctv_1_by_architect",
 			// Sprint 1 ended early: its review and look back; then, with the policy off, Theo builds.
 			"review",
 			"retro",

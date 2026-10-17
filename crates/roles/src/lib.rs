@@ -552,17 +552,14 @@ mod tests {
     }
 
     #[test]
-    fn ends_the_scrum_masters_one_tool_sessions_on_their_one_tool() {
+    fn ends_the_scrum_masters_one_tool_session_on_its_one_tool() {
         let prompt = loaded(Role::ScrumMaster).system_prompt;
         let ending = &prompt[prompt.find("## How a session ends").expect("the section")..];
         assert!(
             ending.contains("recorded with `catervas_triage_request`: end your turn"),
             "{ending}"
         );
-        assert!(
-            ending.contains("recorded with `catervas_record_judgment`: end your turn"),
-            "{ending}"
-        );
+        assert!(!ending.contains("catervas_record_judgment"), "{ending}");
         assert!(
             !ending.contains("a triage or a breakdown you finished"),
             "a triage requests no transition: {ending}"

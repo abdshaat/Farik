@@ -10,7 +10,6 @@ use catervas_core::contract::{
 use catervas_core::folders::{is_plan_task, plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
 use catervas_core::governor::gates::fits_the_open_sprint;
-use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Agent, Team, changes_code, task_private_folder};
@@ -26,10 +25,10 @@ use catervas_store::repos::TaskRepository;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
-    judgment_message, plan_task_message, plan_tasks_message, refine_message, triage_message,
+    plan_task_message, plan_tasks_message, refine_message, triage_message,
 };
 use super::rules::{Waiting, acted, active, asleep, has_room, refused_since_entering, spent};
-use super::session::{JUDGMENT_TOOL, SessionAsk, TRIAGE_TOOL, run_session};
+use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
     GOVERNOR, append, context, decide_alone, escalate, failed, fails_the_criterion,
     governor_results, history, is_mechanical, ran_criteria, read_only, record_review, reject,
@@ -130,12 +129,9 @@ pub(super) async fn draft(
 
 /// Rule 9: a contract `refining`. A contract written since refining began and not judged since,
 /// or one filed whole (a breakdown's child, or a contract the human holds) and not judged since
-/// refining began, is judged: `escalated` asked as the governor first, whose rows open on three
-/// readiness failures or on a passing contract the human must approve, then `ready`. One whose
-/// Definition of Ready fails on the judge's missing review alone gets a judgment session of the
-/// first active agent of the team's judge role (`Team::judge`) first, so that the governor is not
-/// asked, and an attempt spent, on a contract nobody has judged. Otherwise the Product Manager
-/// gets a refine session.
+/// refining began, is judged by the governor's rules alone: `escalated` asked as the governor
+/// first, whose rows open on three readiness failures, then `ready`. No agent judges a contract
+/// (ADR 0061). Otherwise the Product Manager gets a refine session.
 pub(super) async fn refining(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -154,38 +150,7 @@ pub(super) async fn refining(
     }
     let began = refining_began(&history);
     if is_to_be_judged(&contract, &history, began) {
-        let judge_role = team.judge();
-        let checker = match team
-            .active_agents()
-            .find(|agent| Role::from(agent.role) == judge_role)
-        {
-            Some(checker) if awaits_judgment(deps, team, row)? => checker,
-            _ => return judge(deps, team, row).map(Some),
-        };
-        if spent(deps, team, &contract, &mut waiting.day_spent)?
-            | asleep(deps, checker, &mut waiting.slept)?
-        {
-            return Ok(None);
-        }
-        let end = run_session(
-            deps,
-            team,
-            SessionAsk {
-                agent: checker,
-                contract: Some(&contract),
-                purpose: SessionPurpose::Refine,
-                cwd: deps.tools.files.root().to_path_buf(),
-                executor: None,
-                read_only: false,
-                only_tool: Some(JUDGMENT_TOOL),
-                tools: None,
-                in_reply_to: None,
-                thread: None,
-                initial_prompt: judgment_message(&contract, &team.judgment().questions),
-            },
-        )
-        .await?;
-        return Ok(Some(acted(row, checker, "judgment", &end)));
+        return judge(deps, team, row).map(Some);
     }
     if spent(deps, team, &contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
     {
@@ -214,31 +179,6 @@ pub(super) async fn refining(
     )
     .await?;
     Ok(Some(acted(row, pm, "refine", &end)))
-}
-
-/// Whether the contract's Definition of Ready, evaluated on the context the governor's
-/// `refining -> ready` would use, fails on the judge's missing review alone. It records
-/// nothing: a structurally broken contract goes back to the Product Manager without a judgment.
-fn awaits_judgment(
-    deps: &OrchestratorDeps,
-    team: &Team,
-    row: &TaskProjection,
-) -> Result<bool, OrchestratorError> {
-    let request = TransitionRequest {
-        task_id: row.task_id.clone(),
-        to: TaskStatus::Ready,
-        actor: TransitionActor::Governor,
-        agent_id: None,
-    };
-    let context = deps
-        .tools
-        .transitions
-        .context(&request, &TransitionAsk::default(), team)?;
-    let failures = evaluate_readiness(&context.contract, &context.readiness).err();
-    Ok(matches!(
-        failures.as_deref(),
-        Some([only]) if only.rule == ReadinessRule::JudgmentRecorded
-    ))
 }
 
 /// Asks the governor to judge a contract: `escalated` first, because asking for `ready` on a
@@ -1137,10 +1077,8 @@ mod tests {
         BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness, waits_for,
     };
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
-    use crate::prompt::JUDGMENT_INSTRUCTION;
     use crate::recorded::fixtures::{
-        accept_ctv_1, chat_answers_with_a_request, implement_finishes_ctv_1,
-        judge_ctv_1_by_architect, judge_ctv_1_fails, judge_ctv_1_passes, plan_assigns_ctv_1,
+        accept_ctv_1, chat_answers_with_a_request, implement_finishes_ctv_1, plan_assigns_ctv_1,
         plan_assigns_ctv_2, plan_breaks_down_ctv_1, plan_closes_epic_ctv_1,
         planning_ceremony_ctv_1_ctv_3, refine_asks_ctv_1, refine_writes_epic_ctv_1,
         refine_writes_task_ctv_1, replays_catervas_read_board, review_epic_ctv_1,
@@ -1341,86 +1279,10 @@ mod tests {
             }));
     }
 
-    /// Checks every plan: the team's `policy.judgment.required` is `always`.
-    fn judging(wire: &mut Value) {
-        wire["policy"]["judgment"] = json!({ "required": "always" });
-    }
-
-    /// `with_a_scrum_master`, on a team that checks every plan.
-    fn judging_with_a_scrum_master(wire: &mut Value) {
-        with_a_scrum_master(wire);
-        judging(wire);
-    }
-
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn starts_the_judgment_for_the_resolved_judge() {
-        let harness = Harness::new("req-judge-architect", |wire| {
-            judging_with_a_scrum_master(wire);
-            wire["agents"]
-                .as_array_mut()
-                .expect("a list of agents")
-                .push(catervas_core::team::fixtures::an_agent_wire(
-                    "ari",
-                    "architect",
-                ));
-        });
-        let adapter =
-            harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_by_architect()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let started = adapter.started();
-        assert_eq!(started.len(), 2);
-        assert_eq!(started[1].agent_id, "ari");
-        assert_eq!(
-            started[1].catervas_tools,
-            vec!["catervas_record_judgment".to_string()]
-        );
-        let judged = last(&harness, EventKind::ContractJudged).expect("the judgment");
-        let EventBody::ContractJudged(body) = &judged.body else {
-            panic!("a judgment");
-        };
-        assert_eq!(body.judged_by, "ari");
-
-        orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn judges_with_the_team_questions() {
-        let questions = [
-            "Does the task fit its budget?",
-            "Would its checks notice if the work went wrong the way its intent worries about?",
-            "Is it small enough to finish in one go?",
-        ];
-        let harness = Harness::new("req-judge-questions", |wire| {
-            judging_with_a_scrum_master(wire);
-            wire["policy"]["judgment"]["questions"] = json!(questions);
-        });
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let message = &adapter.started()[1].initial_prompt;
-        let numbered = format!(
-            "1. {}\n2. {}\n3. {}",
-            questions[0], questions[1], questions[2]
-        );
-        assert!(message.contains(&numbered), "{message}");
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn honours_never() {
-        let harness = Harness::new("req-judge-never", |wire| {
+    async fn readies_a_written_contract_without_a_judgment() {
+        let harness = Harness::new("req-no-judgment", |wire| {
             with_a_scrum_master(wire);
             wire["agents"]
                 .as_array_mut()
@@ -1429,7 +1291,11 @@ mod tests {
                     "ari",
                     "architect",
                 ));
-            wire["policy"]["judgment"] = json!({ "required": "never" });
+            wire["policy"]["judgment"] = json!({
+                "required": "always",
+                "questions": ["Is the plan small enough to review?"],
+                "judge": "architect"
+            });
         });
         let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -1738,124 +1604,8 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn asks_the_scrum_master_to_judge_a_written_contract() {
-        let harness = Harness::new("req-sm-judges", judging_with_a_scrum_master);
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-        assert!(last(&harness, EventKind::ContractWritten).is_some());
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let started = adapter.started();
-        assert_eq!(started.len(), 2);
-        let spec = &started[1];
-        assert_eq!(spec.agent_id, "sam");
-        assert_eq!(spec.purpose, SessionPurpose::Refine);
-        assert_eq!(
-            spec.catervas_tools,
-            vec!["catervas_record_judgment".to_string()]
-        );
-        assert_eq!(
-            listed_tools(&spec.system_prompt),
-            vec!["catervas_record_judgment"]
-        );
-        assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
-        // The Scrum Master's own model and effort, not triage's.
-        assert_eq!(
-            (spec.model.as_str(), spec.effort),
-            ("claude-sonnet-5-5", Effort::Medium)
-        );
-        assert!(
-            spec.system_prompt.contains(JUDGMENT_INSTRUCTION),
-            "{}",
-            spec.system_prompt
-        );
-        assert!(last(&harness, EventKind::ContractJudged).is_some());
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
-        assert_eq!(adapter.started().len(), 2);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn judges_on_the_scrum_masters_own_model() {
-        let harness = Harness::new("req-sm-judges-model", |wire| {
-            judging_with_a_scrum_master(wire);
-            wire["agents"]
-                .as_array_mut()
-                .expect("a list of agents")
-                .last_mut()
-                .expect("sam")["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
-        });
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let spec = &adapter.started()[1];
-        assert_eq!(spec.agent_id, "sam");
-        assert_eq!(
-            (spec.model.as_str(), spec.effort),
-            ("claude-opus-5", Effort::High)
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn sends_a_badly_judged_contract_back_to_the_product_manager() {
-        let harness = Harness::new("req-sm-judges-badly", judging_with_a_scrum_master);
-        let adapter = harness.recorded(vec![
-            refine_writes_task_ctv_1(),
-            judge_ctv_1_fails(),
-            replays_catervas_read_board(),
-        ]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-        orchestrator.tick().await.expect("the contract is judged");
-        assert!(last(&harness, EventKind::ContractJudged).is_some());
-
-        orchestrator.tick().await.expect("the tick runs");
-        let evaluated = last(&harness, EventKind::ContractEvaluated).expect("the readiness");
-        let EventBody::ContractEvaluated(body) = &evaluated.body else {
-            panic!("a readiness");
-        };
-        assert!(!body.passed);
-        assert!(
-            body.failures.iter().any(|failure| failure.contains(
-                "Would its checks notice if the work went wrong the way its intent worries \
-                     about?"
-            )),
-            "{:?}",
-            body.failures
-        );
-        assert_eq!(adapter.started().len(), 2);
-
-        orchestrator.tick().await.expect("the tick runs");
-        let started = adapter.started();
-        assert_eq!(started.len(), 3);
-        assert_eq!(started[2].agent_id, "pm");
-        assert_eq!(started[2].purpose, SessionPurpose::Refine);
-        assert!(
-            started[2]
-                .initial_prompt
-                .contains("C1 checks that done.txt exists, not what it says."),
-            "{}",
-            started[2].initial_prompt
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn judges_a_structurally_broken_contract_without_the_scrum_master() {
-        let harness = Harness::new("req-sm-broken", judging_with_a_scrum_master);
+    async fn refuses_a_structurally_broken_contract_without_a_session() {
+        let harness = Harness::new("req-sm-broken", |_| {});
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
@@ -1880,11 +1630,6 @@ mod tests {
             body.details
                 .iter()
                 .any(|detail| detail.contains("out_of_scope")),
-            "{:?}",
-            body.details
-        );
-        assert!(
-            !body.details.iter().any(|detail| detail.contains("judg")),
             "{:?}",
             body.details
         );
@@ -4416,19 +4161,6 @@ mod tests {
         harness.asleep("pm", in_an_hour());
 
         waits_for(&orchestrator, "pm", in_an_hour()).await;
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn waits_for_a_sleeping_scrum_master_to_judge() {
-        let harness = Harness::new("req-sleep-judge", judging_with_a_scrum_master);
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter);
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-        harness.asleep("sam", in_an_hour());
-
-        waits_for(&orchestrator, "sam", in_an_hour()).await;
     }
 
     #[tokio::test]

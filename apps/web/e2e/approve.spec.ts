@@ -10,9 +10,7 @@ test("a plan is read, edited with a live check, saved back to refining, then app
 		transcripts: [
 			"triage_ctv_1_large",
 			"refine_writes_epic_ctv_1",
-			"judge_ctv_1_by_architect",
 			"refine_writes_epic_ctv_1",
-			"judge_ctv_1_by_architect",
 		],
 	});
 	try {
@@ -72,14 +70,10 @@ test("a plan is read, edited with a live check, saved back to refining, then app
 			),
 		).toBeVisible();
 
-		// Mira writes the plan again and Ada checks it; then it waits on the user once more.
+		// Mira writes the plan again; then it waits on the user once more.
 		await page.goto(`http://127.0.0.1:${serve.port}/tasks/CTV-1/plan`);
 		const approve = page.getByRole("button", { name: "Approve the plan" });
 		await expect(approve).toBeVisible({ timeout: 15_000 });
-		const judged = events(serve.project).filter(
-			(e) => e.kind === "contract.judged",
-		);
-		expect(judged).toHaveLength(2);
 		await approve.click();
 		await expect(page).toHaveURL(/:\d+\/$/);
 		await expect

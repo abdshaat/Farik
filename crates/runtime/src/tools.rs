@@ -211,11 +211,6 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "Size this session's request as large (an epic) or small (a task), with a reason.",
         ),
-        tool::<contracts::RecordJudgmentInput>(
-            "catervas_record_judgment",
-            Read,
-            "Record your check of this session's contract: one answer (pass, and why) to each question the session's message numbers, in that order, and your overall reason.",
-        ),
         tool::<contracts::WriteContractInput>(
             "catervas_write_contract",
             Read,
@@ -487,7 +482,6 @@ pub async fn call_tool(
         "catervas_read_rules" => nothing_in(input).map(|()| reading::read_rules(&call)),
         "catervas_read_criteria" => nothing_in(input).and_then(|()| reading::read_criteria(&call)),
         "catervas_triage_request" => contracts::triage(&call, &parse(input)?),
-        "catervas_record_judgment" => contracts::record_judgment(&call, &parse(input)?),
         "catervas_write_contract" => contracts::write_contract(&call, parse(input)?),
         "catervas_create_task" => contracts::create_task(&call, parse(input)?),
         "catervas_request_transition" => work::request_transition(&call, parse(input)?),
@@ -807,7 +801,6 @@ mod tests {
             "catervas_read_rules",
             "catervas_read_criteria",
             "catervas_triage_request",
-            "catervas_record_judgment",
             "catervas_write_contract",
             "catervas_create_task",
             "catervas_request_transition",
@@ -863,7 +856,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..37] {
+        for tool in &tools[..36] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

@@ -11,7 +11,6 @@ test("a request is sized, its question answered by choice, and it becomes a task
 			"triage_ctv_1_small_by_pm",
 			"ask_with_choices_ctv_1",
 			"refine_writes_task_for_theo_ctv_1",
-			"judge_ctv_1_by_architect",
 		],
 	});
 	try {

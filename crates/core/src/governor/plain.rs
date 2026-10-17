@@ -84,8 +84,6 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::ProductPlanFirst => {
             "A new project plans nothing until the owner approves its product plan."
         }
-        ReadinessRule::JudgmentRecorded => "The plan has not been checked yet.",
-        ReadinessRule::JudgmentAnswers => "The check found the plan not ready.",
     }
 }
 
@@ -94,7 +92,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 32] = [
+    const EVERY_RULE: [ReadinessRule; 30] = [
         IntentPresent,
         CriteriaPresent,
         CriteriaMethodsValid,
@@ -125,8 +123,6 @@ mod tests {
         LaneBeyondBuilders,
         LanesOverlap,
         ProductPlanFirst,
-        JudgmentRecorded,
-        JudgmentAnswers,
     ];
 
     /// Fails to compile when a rule is added and `EVERY_RULE` does not list it.
@@ -161,9 +157,7 @@ mod tests {
             | BudgetWithinParent
             | LaneBeyondBuilders
             | LanesOverlap
-            | ProductPlanFirst
-            | JudgmentRecorded
-            | JudgmentAnswers => {}
+            | ProductPlanFirst => {}
         }
     }
 

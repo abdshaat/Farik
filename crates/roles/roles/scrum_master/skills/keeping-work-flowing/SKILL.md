@@ -1,12 +1,11 @@
 ---
 name: keeping-work-flowing
-description: Use when a request needs triage, a refining contract needs its Definition of Ready judgment, or a ready task needs an assignee.
+description: Use when a request needs triage, an epic needs closing out, or a ready task needs an assignee.
 ---
 
 # Keeping work flowing
 
-Your job is the flow of work, not the work itself: size requests correctly, judge readiness where
-the governor cannot, and keep everyone within the WIP limit.
+Your job is the flow of work, not the work itself: size requests correctly and keep everyone within the WIP limit.
 
 ## 1. Triage a request
 
@@ -19,24 +18,7 @@ With `catervas_triage_request`, size every new request:
 Give the reason in one or two sentences. The Product Manager writes the contract next; your triage
 does not.
 
-## 2. Judge the Definition of Ready
-
-The governor checks the structural rules on its own; what is left is yours. For a refining contract
-that already passes them, answer two questions, each with a reason:
-
-- **Does it fit its budget?** If the work plainly needs more sessions or more of the sprint than the
-  contract allows, say so; it goes back to the Product Manager to be split, not padded.
-- **Would the criteria detect the failure the intent worries about?** A criterion that only checks
-  that a command ran, not that it ran correctly, does not count. Read the intent, not just the
-  requirements, before you answer.
-
-A contract you send back for either reason gets your reason in full: the Product Manager rewrites
-from it, not from a guess.
-
-Record both answers and your reason with `catervas_record_judgment`, the one tool a judgment session
-gives you.
-
-## 3. Tasks at an epic's close-out
+## 2. Tasks at an epic's close-out
 
 When you close out an epic whose reviewer rejected it, or whose human's message asks for more,
 file the tasks that fix it with `catervas_create_task`, `parent` set to the epic, each contract
@@ -52,7 +34,7 @@ While a role that owns a folder under docs/catervas/ has an active agent, anothe
 names no path that could reach that folder (not docs/**, docs/catervas/**, docs, ** or **/*.md);
 name the folder it needs, such as docs/adr/** or src/**/*.rs.
 
-## 4. Assign within the WIP limit
+## 3. Assign within the WIP limit
 
 Assign a ready task to an agent of its assignee role with room under the team's WIP limit, using
 `catervas_assign_task`. A task with a `lane` goes to its lane's builder, named in your message: the
@@ -60,7 +42,7 @@ governor refuses anyone else (`lane_taken`). The first task of a lane goes to an
 with room, who then builds the lane. Only code is reviewed, and nobody reviews their own work; a task that is not code is checked by Catervas on its criteria. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks. When nobody has room or no agent of the role is active, leave the task
 ready and say why in your note; do not force an assignment past the limit.
 
-## 5. Escalation hygiene
+## 4. Escalation hygiene
 
 Read the board (`catervas_read_board`) for what is stuck and why. A task escalated more than once is a
 pattern, not a one-off; say so rather than let the same reason repeat silently.

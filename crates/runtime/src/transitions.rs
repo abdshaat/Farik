@@ -14,7 +14,6 @@ use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetState, SessionLedger};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
 use catervas_core::folders::human_of_twin;
-use catervas_core::generated::team::Judgment;
 pub(crate) use catervas_core::governor::done::result_awaits_human;
 use catervas_core::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
 use catervas_core::governor::escalation::EscalationReason;
@@ -22,26 +21,21 @@ use catervas_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
     FolderWork, Rejection, WorkState, waits_for_a_sprint,
 };
-use catervas_core::governor::readiness::{
-    JudgmentAnswer, JudgmentReview, LanedTask, ParentState, ReadinessContext,
-};
+use catervas_core::governor::readiness::{LanedTask, ParentState, ReadinessContext};
 use catervas_core::governor::team_rules::is_ui_change;
 use catervas_core::governor::transition::{
     GateFailure, TransitionContext, TransitionDecision, TransitionEffect, TransitionRefusal,
     TransitionRequest, evaluate_transition,
 };
 use catervas_core::governor::transition_table::{GateId, TransitionActor};
-use catervas_core::team::{
-    AgentStatus, JudgmentRequired, Team, private_folder, task_private_folder,
-};
+use catervas_core::team::{AgentStatus, Team, private_folder, task_private_folder};
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{
     BlockerWire, CatervasEvent, ContractEvaluatedBody, ContractEvaluatedBodyGate,
-    ContractJudgedBody, CriterionRecordedBodyRunBy, EscalationRaisedBody,
-    EscalationRaisedBodyReason, EventBody, EventIds, EventKind, GateWire, HumanAcceptedBodySubject,
-    NoteWrittenBodyKind, RejectionWire, TaskStatusWire, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TransitionActorWire, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal, new_event,
+    CriterionRecordedBodyRunBy, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody,
+    EventIds, EventKind, GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind, RejectionWire,
+    TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
 };
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
@@ -760,8 +754,6 @@ impl Transitions {
             active_agents_by_role: active_agents_by_role(team),
             parent: self.parent_state(board, contract)?,
             rules: team.rules(),
-            requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
-            judgment_review: judgment_since_written(history),
             awaits_the_product_plan: self.awaits_the_product_plan()?,
             is_the_product_plan: is_the_product_plan(history),
             repos: self.files.read_repos()?.map(|listed| {
@@ -1486,59 +1478,6 @@ pub(crate) fn refining_began(history: &[CatervasEvent]) -> u64 {
         .map(|event| event.envelope.seq)
         .max()
         .unwrap_or(0)
-}
-
-/// The judge's review of the contract the task has now (5.3): the last `contract.judged`
-/// after both the task's last `contract.written` and where refining last began, else none, since a
-/// contract written again, or refined over, is not the one that was judged.
-pub(crate) fn judgment_since_written(history: &[CatervasEvent]) -> Option<JudgmentReview> {
-    let since = history
-        .iter()
-        .filter(|event| event.body.kind() == EventKind::ContractWritten)
-        .map(|event| event.envelope.seq)
-        .max()
-        .unwrap_or(0)
-        .max(refining_began(history));
-    history
-        .iter()
-        .rev()
-        .filter(|event| event.envelope.seq > since)
-        .find_map(|event| match &event.body {
-            EventBody::ContractJudged(body) => Some(judgment_review(body)),
-            _ => None,
-        })
-}
-
-/// A `contract.judged` as the judge's review: its answers, or, for one recorded before the
-/// questions were the team's, its two booleans as answers to the default two questions, each with
-/// the judgment's reason. A boolean left out of such an event is read as no.
-fn judgment_review(body: &ContractJudgedBody) -> JudgmentReview {
-    let answers = if body.answers.is_empty() {
-        let old = [body.fits_budget, body.criteria_detect_failure];
-        Judgment::default()
-            .questions
-            .into_iter()
-            .zip(old)
-            .map(|(question, pass)| JudgmentAnswer {
-                question: question.to_string(),
-                pass: pass.unwrap_or(false),
-                reason: body.reason.clone(),
-            })
-            .collect()
-    } else {
-        body.answers
-            .iter()
-            .map(|answer| JudgmentAnswer {
-                question: answer.question.clone(),
-                pass: answer.pass,
-                reason: answer.reason.clone(),
-            })
-            .collect()
-    };
-    JudgmentReview {
-        answers,
-        reason: body.reason.clone(),
-    }
 }
 
 /// Whether the human accepted the contract the task has now (5.16 item 2): a `human.accepted
@@ -3346,7 +3285,6 @@ mod tests {
             .into_iter()
             .collect()
         );
-        assert!(context.readiness.requires_judgment_review);
         assert_eq!(context.blocked_limit, Duration::from_hours(24));
         assert_eq!(
             context.budget.session_limits,
@@ -4187,24 +4125,6 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Escalated);
     }
 
-    /// The default team with an active Scrum Master, `sam`, who checks every plan against the
-    /// default two questions, whose judgment readiness then needs.
-    fn a_team_with_a_scrum_master() -> Team {
-        a_team_with_a_scrum_master_and(|_| {})
-    }
-
-    /// `a_team_with_a_scrum_master`, with `change` applied to its wire last.
-    fn a_team_with_a_scrum_master_and(change: impl FnOnce(&mut Value)) -> Team {
-        a_team(|wire| {
-            wire["agents"]
-                .as_array_mut()
-                .expect("a list of agents")
-                .push(an_agent_wire("sam", "scrum_master"));
-            wire["policy"]["judgment"] = json!({ "required": "always" });
-            change(wire);
-        })
-    }
-
     /// The project's `project.started`, about no task.
     fn started(project: &Project) {
         project.append_wire(&json!({
@@ -4293,42 +4213,6 @@ mod tests {
         );
     }
 
-    /// A `contract.judged` of `task` by `sam`, answering the default two questions, and a reason.
-    fn judged(project: &Project, task: &str, fits_budget: bool, criteria_detect_failure: bool) {
-        judged_with(
-            project,
-            task,
-            &[
-                ("Does the task fit its budget?", fits_budget),
-                (
-                    "Would its checks notice if the work went wrong the way its intent worries \
-                     about?",
-                    criteria_detect_failure,
-                ),
-            ],
-        );
-    }
-
-    /// A `contract.judged` of `task` by `sam` with these answers, each with its own reason.
-    fn judged_with(project: &Project, task: &str, answers: &[(&str, bool)]) {
-        let answers: Vec<Value> = answers
-            .iter()
-            .map(|(question, pass)| {
-                json!({ "question": question, "pass": pass, "reason": format!("Answered {pass}.") })
-            })
-            .collect();
-        project.record(
-            task,
-            "contract.judged",
-            &json!({
-                "judged_by": "sam",
-                "answers": answers,
-                "reason": "Two files and one form, too much for five dollars."
-            }),
-            at(10),
-        );
-    }
-
     /// The governor asks to move `task` from `refining` to `ready`.
     fn readying(project: &Project, task: &str) -> TransitionOutcome {
         project.ask(
@@ -4353,241 +4237,6 @@ mod tests {
 
     fn holds(failures: &[String], text: &str) -> bool {
         failures.iter().any(|failure| failure.contains(text))
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn passes_a_contract_the_scrum_master_judged() {
-        let project = Project::new("judged-passes", a_team_with_a_scrum_master(), at(12));
-        project.file("CTV-1", |_| {});
-        project.created("CTV-1", "refining");
-        written(&project, "CTV-1");
-        judged(&project, "CTV-1", true, true);
-        let outcome = readying(&project, "CTV-1");
-        assert!(
-            matches!(outcome, TransitionOutcome::Moved(_)),
-            "{outcome:?}"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_contract_the_scrum_master_judged_too_large() {
-        let project = Project::new("judged-too-large", a_team_with_a_scrum_master(), at(12));
-        project.file("CTV-1", |_| {});
-        project.created("CTV-1", "refining");
-        written(&project, "CTV-1");
-        judged(&project, "CTV-1", false, true);
-        let outcome = readying(&project, "CTV-1");
-        assert!(
-            matches!(outcome, TransitionOutcome::Refused(_)),
-            "{outcome:?}"
-        );
-        let failures = readiness_failures(&project, "CTV-1");
-        assert!(
-            holds(&failures, "Does the task fit its budget?"),
-            "{failures:?}"
-        );
-        assert!(
-            holds(
-                &failures,
-                "Two files and one form, too much for five dollars."
-            ),
-            "{failures:?}"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn passes_only_when_every_answer_passes() {
-        let questions = [
-            "Does the task fit its budget?",
-            "Is it small enough to finish in one go?",
-            "Would its checks notice if the work went wrong the way its intent worries about?",
-        ];
-        for (answers, moves) in [([true, true, true], true), ([true, false, true], false)] {
-            let project = Project::new(
-                &format!("judged-answers-{moves}"),
-                a_team_with_a_scrum_master_and(|wire| {
-                    wire["policy"]["judgment"]["questions"] = json!(questions);
-                }),
-                at(12),
-            );
-            project.file("CTV-1", |_| {});
-            project.created("CTV-1", "refining");
-            written(&project, "CTV-1");
-            let answered: Vec<(&str, bool)> = questions.into_iter().zip(answers).collect();
-            judged_with(&project, "CTV-1", &answered);
-            let outcome = readying(&project, "CTV-1");
-            assert_eq!(
-                matches!(outcome, TransitionOutcome::Moved(_)),
-                moves,
-                "{answers:?}: {outcome:?}"
-            );
-            if !moves {
-                let failures = readiness_failures(&project, "CTV-1");
-                assert!(
-                    holds(
-                        &failures,
-                        "Is it small enough to finish in one go? (Answered false.)"
-                    ),
-                    "{failures:?}"
-                );
-                assert!(
-                    !holds(&failures, "Does the task fit its budget?"),
-                    "only the failed question is named: {failures:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn reads_old_judgments() {
-        for (fits_budget, moves) in [(true, true), (false, false)] {
-            let project = Project::new(
-                &format!("judged-old-{moves}"),
-                a_team_with_a_scrum_master(),
-                at(12),
-            );
-            project.file("CTV-1", |_| {});
-            project.created("CTV-1", "refining");
-            written(&project, "CTV-1");
-            project.record(
-                "CTV-1",
-                "contract.judged",
-                &json!({
-                    "judged_by": "sam",
-                    "fits_budget": fits_budget,
-                    "criteria_detect_failure": true,
-                    "reason": "One file, and C1 runs it."
-                }),
-                at(10),
-            );
-            let outcome = readying(&project, "CTV-1");
-            assert_eq!(
-                matches!(outcome, TransitionOutcome::Moved(_)),
-                moves,
-                "{outcome:?}"
-            );
-            if !moves {
-                let failures = readiness_failures(&project, "CTV-1");
-                assert!(
-                    holds(
-                        &failures,
-                        "Does the task fit its budget? (One file, and C1 runs it.)"
-                    ),
-                    "{failures:?}"
-                );
-            }
-        }
-        // A judgment with neither answers nor the old booleans passes nothing.
-        let project = Project::new("judged-empty", a_team_with_a_scrum_master(), at(12));
-        project.file("CTV-1", |_| {});
-        project.created("CTV-1", "refining");
-        written(&project, "CTV-1");
-        project.record(
-            "CTV-1",
-            "contract.judged",
-            &json!({ "judged_by": "sam", "reason": "Looks fine." }),
-            at(10),
-        );
-        let outcome = readying(&project, "CTV-1");
-        assert!(
-            !matches!(outcome, TransitionOutcome::Moved(_)),
-            "{outcome:?}"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn passes_a_child_filed_whole_once_judged() {
-        let project = Project::new("judged-child", a_team_with_a_scrum_master(), at(12));
-        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
-        project.created_under("CTV-1", "in_progress", "epic", None);
-        // Filed whole by the breakdown: created with its full contract, never written since.
-        project.file("CTV-2", |wire| wire["parent"] = json!("CTV-1"));
-        project.created_under("CTV-2", "refining", "task", Some("CTV-1"));
-        judged(&project, "CTV-2", true, true);
-        let outcome = readying(&project, "CTV-2");
-        assert!(
-            matches!(outcome, TransitionOutcome::Moved(_)),
-            "{outcome:?}"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_contract_judged_before_its_last_write() {
-        let project = Project::new("judged-then-written", a_team_with_a_scrum_master(), at(12));
-        project.file("CTV-1", |_| {});
-        project.created("CTV-1", "refining");
-        written(&project, "CTV-1");
-        judged(&project, "CTV-1", true, true);
-        written(&project, "CTV-1");
-        let outcome = readying(&project, "CTV-1");
-        assert!(
-            matches!(outcome, TransitionOutcome::Refused(_)),
-            "{outcome:?}"
-        );
-        let failures = readiness_failures(&project, "CTV-1");
-        assert!(
-            holds(&failures, "judgment review is not recorded"),
-            "{failures:?}"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn uses_the_last_judgment_after_the_write() {
-        for (first, last, moves) in [(false, true, true), (true, false, false)] {
-            let project = Project::new(
-                &format!("judged-twice-{moves}"),
-                a_team_with_a_scrum_master(),
-                at(12),
-            );
-            project.file("CTV-1", |_| {});
-            project.created("CTV-1", "refining");
-            written(&project, "CTV-1");
-            judged(&project, "CTV-1", first, true);
-            judged(&project, "CTV-1", last, true);
-            let outcome = readying(&project, "CTV-1");
-            assert_eq!(
-                matches!(outcome, TransitionOutcome::Moved(_)),
-                moves,
-                "judged {first} then {last}: {outcome:?}"
-            );
-        }
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn ignores_a_judgment_from_before_refining_began() {
-        let project = Project::new(
-            "judged-then-retriaged",
-            a_team_with_a_scrum_master(),
-            at(12),
-        );
-        project.file("CTV-1", |_| {});
-        project.created("CTV-1", "refining");
-        written(&project, "CTV-1");
-        judged(&project, "CTV-1", true, true);
-        project.record(
-            "CTV-1",
-            "request.triaged",
-            &json!({ "size": "large", "reason": "Two deliverables.", "triaged_by": "sam" }),
-            at(11),
-        );
-        let outcome = readying(&project, "CTV-1");
-        assert!(
-            matches!(outcome, TransitionOutcome::Refused(_)),
-            "{outcome:?}"
-        );
-        let failures = readiness_failures(&project, "CTV-1");
-        assert!(
-            holds(&failures, "judgment review is not recorded"),
-            "{failures:?}"
-        );
     }
 
     #[test]

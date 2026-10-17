@@ -17,7 +17,6 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		transcripts: [
 			"triage_ctv_1_small_by_pm",
 			"refine_writes_task_for_theo_ctv_1",
-			"judge_ctv_1_by_architect",
 			"planning_ceremony_ctv_1",
 			"plan_assigns_ctv_1_to_theo",
 			"implement_finishes_ctv_1",

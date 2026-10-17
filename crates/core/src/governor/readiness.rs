@@ -100,32 +100,6 @@ pub enum ReadinessRule {
     /// A new project plans nothing but its product plan until the plan is on the integration
     /// branch.
     ProductPlanFirst,
-    /// The judge's review is recorded when the team's policy checks plans.
-    JudgmentRecorded,
-    /// The judge answered yes to every question it was asked.
-    JudgmentAnswers,
-}
-
-/// The judge's answer to one question of the plan check.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JudgmentAnswer {
-    /// The question, as it was asked.
-    pub question: String,
-    /// Whether the plan passes it.
-    pub pass: bool,
-    /// Why.
-    pub reason: String,
-}
-
-/// The judge's check of a plan (`docs/SPEC.md` section 5.3), recorded by the runtime as a
-/// `contract.judged` event and passed in. It counts under whatever questions it answered: a
-/// change to the team's questions does not reopen a judged contract.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JudgmentReview {
-    /// One answer per question, in the order asked.
-    pub answers: Vec<JudgmentAnswer>,
-    /// The judge's overall reason.
-    pub reason: String,
 }
 
 /// Another task of an epic that has a lane: what `LanesOverlap` reads.
@@ -169,10 +143,6 @@ pub struct ReadinessContext {
     pub parent: Option<ParentState>,
     /// The team rules in force.
     pub rules: TeamRules,
-    /// Whether the team's policy checks plans, and the judge's review is then required.
-    pub requires_judgment_review: bool,
-    /// The recorded judgment review, when there is one.
-    pub judgment_review: Option<JudgmentReview>,
     /// Whether this is a new project whose product plan is not on the integration branch yet.
     pub awaits_the_product_plan: bool,
     /// Whether this contract is that product plan's own task.
@@ -226,14 +196,9 @@ const CHECKS: [Check; 30] = [
     product_plan_first,
 ];
 
-/// The judge's review, asked of a contract only once every other rule passes, so that a
-/// contract going back for another rule is not also refused for a judgment nobody asked for yet.
-const JUDGMENT_CHECKS: [Check; 2] = [judgment_recorded, judgment_answers];
-
 /// Checks a contract against the Definition of Ready: the structural rules of `docs/SPEC.md`
-/// section 5.3, the team rules of 5.12, the parent rules of 5.16, and the judge's
-/// recorded judgment when the team checks plans, evaluated only when every other rule passes. Refuses
-/// with every rule the contract fails.
+/// section 5.3, the team rules of 5.12 and the parent rules of 5.16. Refuses with every rule the
+/// contract fails.
 ///
 /// # Errors
 ///
@@ -243,16 +208,10 @@ pub fn evaluate_readiness(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Result<(), Vec<ReadinessFailure>> {
-    let failed = |checks: &[Check]| -> Vec<ReadinessFailure> {
-        checks
-            .iter()
-            .filter_map(|check| check(contract, context))
-            .collect()
-    };
-    let mut failures = failed(&CHECKS);
-    if failures.is_empty() {
-        failures = failed(&JUDGMENT_CHECKS);
-    }
+    let failures: Vec<ReadinessFailure> = CHECKS
+        .iter()
+        .filter_map(|check| check(contract, context))
+        .collect();
     if failures.is_empty() {
         Ok(())
     } else {
@@ -260,19 +219,10 @@ pub fn evaluate_readiness(
     }
 }
 
-/// How many rules `evaluate_readiness` ran to give `result`: every rule but the judge's, and the
-/// judge's two as well once every other passed.
+/// How many rules `evaluate_readiness` runs.
 #[must_use]
-pub fn rules_evaluated(result: &Result<(), Vec<ReadinessFailure>>) -> usize {
-    let judged = result.as_ref().err().is_none_or(|failures| {
-        failures.iter().all(|failure| {
-            matches!(
-                failure.rule,
-                ReadinessRule::JudgmentRecorded | ReadinessRule::JudgmentAnswers
-            )
-        })
-    });
-    CHECKS.len() + if judged { JUDGMENT_CHECKS.len() } else { 0 }
+pub fn rules_evaluated() -> usize {
+    CHECKS.len()
 }
 
 fn failure(rule: ReadinessRule, message: String) -> ReadinessFailure {
@@ -1214,48 +1164,13 @@ fn product_plan_first(_: &TaskContract, context: &ReadinessContext) -> Option<Re
     })
 }
 
-fn judgment_recorded(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
-    if context.requires_judgment_review && context.judgment_review.is_none() {
-        return Some(failure(
-            ReadinessRule::JudgmentRecorded,
-            "the judge's judgment review is not recorded".to_string(),
-        ));
-    }
-    None
-}
-
-fn judgment_answers(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
-    let review = context
-        .judgment_review
-        .as_ref()
-        .filter(|_| context.requires_judgment_review)?;
-    let failed: Vec<String> = review
-        .answers
-        .iter()
-        .filter(|answer| !answer.pass)
-        .map(|answer| format!("{} ({})", answer.question, answer.reason))
-        .collect();
-    if failed.is_empty() {
-        return None;
-    }
-    Some(failure(
-        ReadinessRule::JudgmentAnswers,
-        format!(
-            "the judge answered no: {}. {}",
-            failed.join("; "),
-            review.reason
-        ),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::fixtures::{a_contract, a_project_folder_context, a_ready_context};
     use super::{
-        JudgmentAnswer, JudgmentReview, LanedTask, ParentState, ReadinessContext,
-        ReadinessRule as R, TeamRules, evaluate_readiness,
+        LanedTask, ParentState, ReadinessContext, ReadinessRule as R, TeamRules, evaluate_readiness,
     };
     use crate::contract::fixtures::a_contract_wire;
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire, validate_contract};
@@ -1276,21 +1191,6 @@ mod tests {
             .find(|failure| failure.rule == rule)
             .map(|failure| failure.message)
             .expect("the rule failed")
-    }
-
-    fn a_review(fits_budget: bool, criteria_detect_failure: bool) -> JudgmentReview {
-        let answer = |question: &str, pass: bool| JudgmentAnswer {
-            question: question.to_string(),
-            pass,
-            reason: format!("{question} {pass}"),
-        };
-        JudgmentReview {
-            answers: vec![
-                answer("Fits?", fits_budget),
-                answer("Caught?", criteria_detect_failure),
-            ],
-            reason: "Two files, one form.".to_string(),
-        }
     }
 
     fn a_task_under(parent: ParentState) -> (TaskContract, ReadinessContext) {
@@ -2790,59 +2690,10 @@ mod tests {
     }
 
     #[test]
-    fn requires_the_judgment_review_only_when_the_policy_asks_for_it() {
-        let mut context = a_ready_context();
-        context.judgment_review = None;
-        assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
-        context.requires_judgment_review = false;
-        context.active_agents_by_role.remove(&Role::ScrumMaster);
-        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-        context.judgment_review = Some(a_review(false, false));
-        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-    }
-
-    #[test]
-    fn refuses_a_judgment_with_a_failed_answer_naming_each_one() {
-        let mut context = a_ready_context();
-        context.judgment_review = Some(a_review(false, true));
-        assert_eq!(
-            message_of(&a_contract(), &context, R::JudgmentAnswers),
-            "the judge answered no: Fits? (Fits? false). Two files, one form."
-        );
-        context.judgment_review = Some(a_review(false, false));
-        assert_eq!(
-            message_of(&a_contract(), &context, R::JudgmentAnswers),
-            "the judge answered no: Fits? (Fits? false); Caught? (Caught? false). Two files, \
-             one form."
-        );
-        context.judgment_review = Some(a_review(true, true));
-        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-    }
-
-    #[test]
-    fn asks_no_judgment_of_a_contract_that_fails_another_rule() {
-        let mut contract = a_contract();
-        contract.scope.out_of_scope.clear();
-        let mut context = a_ready_context();
-        context.requires_judgment_review = true;
-        context.judgment_review = None;
-        assert_eq!(failed_rules(&contract, &context), [R::OutOfScopePresent]);
-    }
-
-    #[test]
-    fn asks_the_judgment_of_an_otherwise_ready_contract() {
-        let mut context = a_ready_context();
-        context.requires_judgment_review = true;
-        context.judgment_review = None;
-        assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
-    }
-
-    #[test]
     fn reports_every_failure_in_rule_order() {
         let mut contract = a_contract();
         contract.exit_criteria.clear();
         let mut context = a_ready_context();
-        context.judgment_review = None;
         context.remaining_sprint_budget_usd = 1.0;
         context.rules.required_criteria = vec!["human".to_string()];
         assert_eq!(

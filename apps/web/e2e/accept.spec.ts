@@ -20,7 +20,6 @@ test("a high-risk plan is approved, its work sent back once, then accepted", asy
 		transcripts: [
 			"triage_ctv_1_small_by_pm",
 			"refine_writes_high_risk_ctv_1",
-			"judge_ctv_1_by_architect",
 			"plan_assigns_ctv_1_to_theo",
 			"implement_finishes_ctv_1",
 			"review_writes_note",

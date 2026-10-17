@@ -46,8 +46,8 @@ pub struct PromptInput<'a> {
     /// What the human said for this session (an answer, or an escalation's message), when they
     /// said something.
     pub human_message: Option<&'a str>,
-    /// The `This session` section, when it is not the purpose's own: the judgment session's
-    /// `JUDGMENT_INSTRUCTION`, or a ceremony's entry in `CEREMONY_INSTRUCTIONS`.
+    /// The `This session` section, when it is not the purpose's own: a ceremony's entry in
+    /// `CEREMONY_INSTRUCTIONS`.
     pub closing: Option<&'a str>,
     /// The connectors the session is given, by name, whose every answer is untrusted (8.6).
     pub connectors: &'a [String],
@@ -219,15 +219,6 @@ pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [
          by all.",
     ),
 ];
-
-/// The `This session` section of the judge's check of a contract's plan (5.3), a `refine`
-/// session given `catervas_record_judgment` alone.
-pub const JUDGMENT_INSTRUCTION: &str = "This session checks the plan of the contract above, \
-     which already passes the governor's structural rules. Answer each question of the message you \
-     were given, honestly: yes only when the plan passes it, not just when something would run. \
-     End the session by calling `catervas_record_judgment` with one answer to each question, in the \
-     order they are numbered, and your overall reason, which the Product Manager rewrites from \
-     when any answer is no.";
 
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///

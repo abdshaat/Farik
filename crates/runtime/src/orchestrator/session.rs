@@ -48,8 +48,8 @@ use crate::preview::{
     has_playwright,
 };
 use crate::prompt::{
-    CEREMONY_INSTRUCTIONS, INTERVIEW_INSTRUCTION, JUDGMENT_INSTRUCTION, MemberLine, OwnRepo,
-    PromptInput, assemble_system_prompt,
+    CEREMONY_INSTRUCTIONS, INTERVIEW_INSTRUCTION, MemberLine, OwnRepo, PromptInput,
+    assemble_system_prompt,
 };
 use crate::session::{
     EndReason, McpServerConfig, McpTransport, SessionEvent, SessionHandle, SessionPurpose,
@@ -180,10 +180,6 @@ pub(crate) fn expressible_in_a_rule(path: &Path) -> bool {
 /// The one tool a triage session is given.
 pub(super) const TRIAGE_TOOL: &str = "catervas_triage_request";
 
-/// The one tool the Scrum Master's judgment session is given; a session given it alone closes
-/// with `JUDGMENT_INSTRUCTION`.
-pub(super) const JUDGMENT_TOOL: &str = "catervas_record_judgment";
-
 /// What a rule asks a session for.
 pub(super) struct SessionAsk<'a> {
     /// The agent the session is.
@@ -202,7 +198,7 @@ pub(super) struct SessionAsk<'a> {
     /// this one alone.
     pub(super) read_only: bool,
     /// The one Catervas tool it is given, when it is given one alone and no built-in tool: triage's
-    /// `catervas_triage_request`, the judgment's `catervas_record_judgment`.
+    /// `catervas_triage_request`.
     pub(super) only_tool: Option<&'static str>,
     /// The Catervas tools it is offered, when it is offered a list of them rather than every tool:
     /// each still only when the agent's tiers allow it.
@@ -1055,17 +1051,14 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         .collect()
 }
 
-/// The instruction that closes the system prompt of `ask`'s session: a ceremony's, or the one of
-/// the single decision a session given one tool alone ends with.
+/// The instruction that closes the system prompt of `ask`'s session: a ceremony's.
 fn closing_instruction(ask: &SessionAsk<'_>) -> Option<&'static str> {
-    match (ask.thread, ask.only_tool) {
-        (Some(thread), _) => CEREMONY_INSTRUCTIONS
+    ask.thread.and_then(|thread| {
+        CEREMONY_INSTRUCTIONS
             .iter()
             .find(|(named, _)| *named == thread)
-            .map(|(_, text)| *text),
-        (None, Some(JUDGMENT_TOOL)) => Some(JUDGMENT_INSTRUCTION),
-        (None, _) => None,
-    }
+            .map(|(_, text)| *text)
+    })
 }
 
 /// The tiers the hook holds `ask`'s session to. An explore or a chat session reads, whatever the
@@ -2609,7 +2602,7 @@ mod tests {
                 cwd: deps.tools.files.root().to_path_buf(),
                 executor: None,
                 read_only: false,
-                only_tool: Some("catervas_record_judgment"),
+                only_tool: Some(TRIAGE_TOOL),
                 tools: None,
                 in_reply_to: None,
                 thread: None,
@@ -2618,10 +2611,7 @@ mod tests {
         )
         .expect("the spec");
 
-        assert_eq!(
-            spec.catervas_tools,
-            vec!["catervas_record_judgment".to_string()]
-        );
+        assert_eq!(spec.catervas_tools, vec![TRIAGE_TOOL.to_string()]);
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
     }
 
@@ -4207,15 +4197,7 @@ mod tests {
                 "{purpose:?}"
             );
         }
-        for (purpose, only_tool) in [
-            (SessionPurpose::Triage, Some(TRIAGE_TOOL)),
-            (SessionPurpose::Refine, Some(super::JUDGMENT_TOOL)),
-        ] {
-            assert!(
-                skills(purpose, only_tool).is_empty(),
-                "{purpose:?} {only_tool:?}"
-            );
-        }
+        assert!(skills(SessionPurpose::Triage, Some(TRIAGE_TOOL)).is_empty());
     }
 
     #[test]
@@ -4537,7 +4519,6 @@ mod tests {
         }
         for (purpose, only_tool) in [
             (SessionPurpose::Triage, Some(TRIAGE_TOOL)),
-            (SessionPurpose::Refine, Some(super::JUDGMENT_TOOL)),
             (SessionPurpose::Ceremony, None),
             (SessionPurpose::Conversation, None),
             (SessionPurpose::Chat, None),

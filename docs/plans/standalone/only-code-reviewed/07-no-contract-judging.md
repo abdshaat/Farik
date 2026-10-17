@@ -66,7 +66,7 @@ Files: those of the File map for Task 1: the core readiness items of Decisions, 
 Tests:
 - `readies_a_written_contract_without_a_judgment` (`requests.rs`; ignored, needs git): in a team whose file carries `policy.judgment` `{ required: "always", questions: ["Is the plan small enough to review?"], judge: "architect" }` and has an active Architect, a contract the Product Manager has written in `refining` moves to `ready` on the next tick for the governor. No session is started, and no `contract.judged` is recorded. An older log holding a `contract.judged` for it still loads.
 
-- [ ] `feat(runtime): judge contracts by the governor's rules alone`
+- [x] `feat(runtime): judge contracts by the governor's rules alone`
 
 ### Task 2: the team has no judgment policy
 
