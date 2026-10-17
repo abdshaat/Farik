@@ -37,7 +37,7 @@ export type McpServer = {
 	credentialKeys?: string[];
 	/** Present when the user signs in to the service instead of giving a key (ADR 0033). */
 	oauth?: { clientId?: string; callbackPort?: number; scopes?: string[] };
-	tools?: Record<string, "network" | "external_effect" | "denied">;
+	tools?: Record<string, "network" | "paid" | "external_effect" | "denied">;
 };
 export type Judgment = {
 	required?: "always" | "never";

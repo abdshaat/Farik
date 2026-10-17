@@ -1238,9 +1238,11 @@ export const en = {
 	tagNetwork: "Only reads",
 	tagNetworkNote:
 		"{name} may use it any time. It looks things up and changes nothing.",
-	tagExternal: "Changes things, asks you",
-	tagExternalNote:
+	tagPaid: "Costs money, asks you",
+	tagPaidNote:
 		"{name} asks you before each use, and you see exactly what {name} wants to send.",
+	tagExternal: "Changes things",
+	tagExternalNote: "{name} may use it without asking; each use is recorded.",
 	tagDenied: "Never",
 	tagDeniedNote: "{name} is not given it.",
 	addTitle: "Add a custom connector to {name}",

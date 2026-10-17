@@ -689,7 +689,7 @@ fn fixture_kit(test: &str) -> catervas_roles::Kit {
             "name": "fixture", "transport": "stdio", "command": "sh",
             "args": [script.display().to_string()],
             "title": "Fixture", "about": "A stand-in.", "why": "To pin.", "setup": "Nothing to do.",
-            "tools": { "search": "network", "env": "external_effect", "delete_repo": "denied" },
+            "tools": { "search": "network", "env": "paid", "delete_repo": "denied" },
         }],
     });
     catervas_roles::parse_fixture_kit(

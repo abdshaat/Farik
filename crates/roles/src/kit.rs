@@ -650,11 +650,11 @@ fn load_server(
     }
     let mut allowances = BTreeMap::new();
     for (tool, allowance) in connector["allowances"].as_object().into_iter().flatten() {
-        if tools.get(tool) != Some(&ConnectorTag::ExternalEffect) {
+        if tools.get(tool) != Some(&ConnectorTag::Paid) {
             refused.add(
                 at(&format!("allowances/{tool}")),
-                "allowance_not_external",
-                &format!("only a tool tagged external_effect has an allowance, and {tool} is not"),
+                "allowance_not_paid",
+                &format!("only a tool tagged paid has an allowance, and {tool} is not"),
             );
         }
         let what = allowance["what"].as_str().unwrap_or_default().to_string();
@@ -723,13 +723,11 @@ fn check_plan_marks(
         );
     }
     for tool in &plan_approved {
-        if tools.get(tool) != Some(&ConnectorTag::ExternalEffect) {
+        if tools.get(tool) != Some(&ConnectorTag::Paid) {
             refused.add(
                 at(&format!("plan_approved/{tool}")),
-                "plan_mark_not_external",
-                &format!(
-                    "only a tool tagged external_effect is approved by the plan, and {tool} is not"
-                ),
+                "plan_mark_not_paid",
+                &format!("only a tool tagged paid is approved by the plan, and {tool} is not"),
             );
         }
         if allowances.contains_key(tool) {
@@ -778,6 +776,7 @@ fn tool_tags(connector: &Value) -> BTreeMap<String, ConnectorTag> {
             let tag = match tag.as_str()? {
                 "network" => ConnectorTag::Network,
                 "external_effect" => ConnectorTag::ExternalEffect,
+                "paid" => ConnectorTag::Paid,
                 _ => ConnectorTag::Denied,
             };
             Some((tool.clone(), tag))
@@ -1037,7 +1036,7 @@ mod tests {
                 "setup": "Make a key on Notion's page, then paste it.",
                 "key_page": "https://www.notion.so/profile/integrations",
                 "labels": { "search": "search pages" },
-                "tools": { "search": "network", "create_page": "external_effect", "delete_page": "denied" },
+                "tools": { "search": "network", "create_page": "paid", "delete_page": "denied" },
                 "allowances": { "create_page": { "calls": 20, "what": "pages" } }
             }]
         })
@@ -1830,10 +1829,7 @@ mod tests {
             copy.key_page.as_deref(),
             Some("https://serpapi.com/manage-api-key")
         );
-        assert_eq!(
-            names_tagged(&server, ConnectorTag::ExternalEffect),
-            ["search"]
-        );
+        assert_eq!(names_tagged(&server, ConnectorTag::Paid), ["search"]);
         assert_eq!(
             names_tagged(&server, ConnectorTag::Denied),
             ["search_dashboard", "search_table"]
@@ -2048,12 +2044,12 @@ mod tests {
             let server = custom_server(entry).expect("a custom server");
             assert!(plan_approved.is_empty(), "{}", server.name);
             external.extend(
-                names_tagged(&server, ConnectorTag::ExternalEffect)
+                names_tagged(&server, ConnectorTag::Paid)
                     .into_iter()
                     .map(|tool| (server.name.clone(), tool.to_string())),
             );
             let mut expected = names_tagged(&server, ConnectorTag::Network);
-            expected.extend(names_tagged(&server, ConnectorTag::ExternalEffect));
+            expected.extend(names_tagged(&server, ConnectorTag::Paid));
             expected.sort_unstable();
             assert!(!expected.is_empty(), "{} runs something", server.name);
             let labelled: Vec<&str> = copy.labels.keys().map(String::as_str).collect();
@@ -3085,7 +3081,8 @@ mod tests {
                 panic!("{} is a server", connector.name());
             };
             let server = custom_server(entry).expect("a custom server");
-            // An issue or a comment is published, so each asks: no connector has an allowance.
+            // An issue or a comment is published but costs nothing, so each runs without asking and is
+            // recorded (ADR 0061): no connector has an allowance.
             assert!(allowances.is_empty(), "{}", server.name);
             external.extend(
                 names_tagged(&server, ConnectorTag::ExternalEffect)
@@ -3540,7 +3537,7 @@ mod tests {
         ];
         assert_eq!(allowances.len(), allowed.len());
         for (tool, calls, what) in allowed {
-            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert_eq!(server.tools[tool], ConnectorTag::Paid, "{tool}");
             assert_eq!(
                 allowances[tool],
                 KitAllowance {
@@ -3552,10 +3549,10 @@ mod tests {
         }
 
         for tool in HIGGSFIELD_ASKS {
-            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert_eq!(server.tools[tool], ConnectorTag::Paid, "{tool}");
             assert!(!allowances.contains_key(tool), "{tool} has no allowance");
         }
-        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 28);
+        assert_eq!(tagged(&server, ConnectorTag::Paid), 28);
 
         assert_eq!(
             names_tagged(&server, ConnectorTag::Network),
@@ -3621,7 +3618,7 @@ mod tests {
         ];
         assert_eq!(allowances.len(), allowed.len());
         for (tool, calls, what) in allowed {
-            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert_eq!(server.tools[tool], ConnectorTag::Paid, "{tool}");
             assert_eq!(
                 allowances[tool],
                 KitAllowance {
@@ -3632,10 +3629,10 @@ mod tests {
             );
         }
         for tool in ["creative_upscale", "create_style"] {
-            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert_eq!(server.tools[tool], ConnectorTag::Paid, "{tool}");
             assert!(!allowances.contains_key(tool), "{tool} has no allowance");
         }
-        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 8);
+        assert_eq!(tagged(&server, ConnectorTag::Paid), 8);
         assert_eq!(names_tagged(&server, ConnectorTag::Network), ["get_user"]);
         assert_eq!(tagged(&server, ConnectorTag::Denied), 0);
         assert_eq!(server.tools.len(), 9);
@@ -3703,14 +3700,13 @@ mod tests {
         assert_eq!(copy.title, "Buffer");
         assert_eq!(
             copy.why,
-            "Reads your channels and past posts. Sends posts from your approved plan; asks about others."
+            "Reads your channels and past posts. Sends posts, in your plan or outside it, with a Stop on Today."
         );
         assert_eq!(
             copy.setup,
             "Sign in with your Buffer account and allow Catervas to read and schedule posts. Catervas \
-             can reach every channel your Buffer account has. A post in a plan you approved shows \
-             on Today before it goes out, with a Stop button; Catervas asks you about any other. To \
-             remove Catervas completely, also remove it in Buffer's settings."
+             can reach every channel your Buffer account has. Every post shows on Today before it \
+             goes out, with a Stop button. To remove Catervas completely, also remove it in Buffer's settings."
         );
 
         let mut never: Vec<&str> = BUFFER_NEVER.to_vec();
@@ -3847,22 +3843,14 @@ mod tests {
         assert!(copy.key_page.is_none());
         assert_eq!(copy.title, "Kit");
 
-        // A broadcast is only a draft: the human schedules and sends it from Kit.
-        assert_eq!(allowances.len(), 2);
+        // A broadcast is only a draft the human schedules and sends from Kit, and nothing at Kit
+        // costs money here, so each write runs without asking and has no allowance (ADR 0061).
+        assert!(allowances.is_empty());
         for tool in ["create_broadcast", "update_broadcast"] {
             assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
-            assert_eq!(
-                allowances[tool],
-                KitAllowance {
-                    calls: 10,
-                    what: "email drafts".to_string()
-                },
-                "{tool}"
-            );
         }
         for tool in KIT_ASKS {
             assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
-            assert!(!allowances.contains_key(tool), "{tool} has no allowance");
         }
         assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 12);
         assert_eq!(copy.labels["list_forms"], "list forms and sign-up pages");
@@ -3959,9 +3947,50 @@ mod tests {
         panic!("the {role} kit has no {name}");
     }
 
+    /// A payment guarantee (ADR 0061), which core cannot check because it cannot read the kits:
+    /// every tool of `higgsfield`, `recraft`, `google-ads` and `serpapi` that is not `denied` or
+    /// `network` is tagged `paid`, so a call that costs money asks; and no tool tagged
+    /// `external_effect`, which runs without asking, has an allowance.
+    #[test]
+    fn the_shipped_kits_tag_what_costs_money_paid() {
+        let mut spenders = 0;
+        for role in [Role::MarketingSpecialist, Role::ProcurementSpecialist] {
+            let kit = load_kit(role).expect("the kit validates");
+            for connector in kit.connectors {
+                let KitConnector::Server {
+                    entry, allowances, ..
+                } = connector
+                else {
+                    continue;
+                };
+                let server = custom_server(&entry).expect("a custom server");
+                for tool in allowances.keys() {
+                    assert_eq!(
+                        server.tools[tool],
+                        ConnectorTag::Paid,
+                        "{}: {tool} has an allowance, so it asks",
+                        server.name
+                    );
+                }
+                if !["higgsfield", "recraft", "google-ads", "serpapi"]
+                    .contains(&server.name.as_str())
+                {
+                    continue;
+                }
+                for (tool, tag) in &server.tools {
+                    if !matches!(tag, ConnectorTag::Denied | ConnectorTag::Network) {
+                        spenders += 1;
+                        assert_eq!(*tag, ConnectorTag::Paid, "{}: {tool}", server.name);
+                    }
+                }
+            }
+        }
+        assert_eq!(spenders, 28 + 8 + 7 + 1);
+    }
+
     /// Google Ads is Catervas's own connector (ADR 0042, step 08f): signed in to with Google's one
     /// Ads scope, three reads, and seven writes that run only inside the plan the owner approved,
-    /// so each is `external_effect`, plan-marked and without an allowance. Nothing else in any kit
+    /// so each is `paid`, plan-marked and without an allowance. Nothing else in any kit
     /// carries the mark.
     #[test]
     fn google_ads_runs_only_inside_the_plan() {
@@ -3988,7 +4017,7 @@ mod tests {
             sorted(&GOOGLE_ADS_READS)
         );
         assert_eq!(
-            names_tagged(&server, ConnectorTag::ExternalEffect),
+            names_tagged(&server, ConnectorTag::Paid),
             sorted(&GOOGLE_ADS_WRITES)
         );
         assert_eq!(tagged(&server, ConnectorTag::Denied), 0);
@@ -4323,7 +4352,7 @@ mod tests {
             };
             let server = custom_server(&entry).expect("a custom server");
             for (tool, tag) in &server.tools {
-                if *tag == ConnectorTag::ExternalEffect {
+                if matches!(*tag, ConnectorTag::ExternalEffect | ConnectorTag::Paid) {
                     assert!(copy.labels.contains_key(tool), "{}: {tool}", server.name);
                 }
             }
@@ -4475,7 +4504,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_an_allowance_on_a_tool_that_is_not_external_effect() {
+    fn refuses_an_allowance_on_a_tool_that_is_not_paid() {
         let mut value = base();
         set(
             &mut value,
@@ -4485,7 +4514,7 @@ mod tests {
         refused(
             &value,
             "/connectors/0/allowances/search",
-            "allowance_not_external",
+            "allowance_not_paid",
         );
     }
 
@@ -4695,7 +4724,7 @@ mod tests {
         );
     }
 
-    /// The base's `create_page` is `external_effect` and `search` is `network`: a stdio connector
+    /// The base's `create_page` is `paid` and `search` is `network`: a stdio connector
     /// that marks the named tools as approved by the marketing plan.
     fn marking(command: &str, args: &[&str], marked: &[&str]) -> Value {
         let mut value = stdio(command, args);
@@ -4704,8 +4733,8 @@ mod tests {
     }
 
     #[test]
-    fn the_mark_is_catervas_s_own_and_external_only() {
-        // Catervas's own connector, one `external_effect` tool marked: it loads, by either parser, the
+    fn the_mark_is_catervas_s_own_and_paid_only() {
+        // Catervas's own connector, one `paid` tool marked: it loads, by either parser, the
         // mark is the kit's alone, and the team entry is the one an unmarked kit has.
         let own = marking("catervas", &["connector", "osv"], &["create_page"]);
         let unmarked = stdio("catervas", &["connector", "osv"]);
@@ -4757,13 +4786,13 @@ mod tests {
             "plan_mark_not_catervas",
         );
 
-        // Only an `external_effect` tool: a `network` one, a `denied` one and one the connector
+        // Only a `paid` tool: a `network` one, a `denied` one and one the connector
         // does not list are each refused, at the tool.
         for tool in ["search", "delete_page", "nothing"] {
             refused(
                 &marking("catervas", &["connector", "osv"], &[tool]),
                 &format!("/connectors/0/plan_approved/{tool}"),
-                "plan_mark_not_external",
+                "plan_mark_not_paid",
             );
         }
 

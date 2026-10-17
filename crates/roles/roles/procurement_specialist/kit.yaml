@@ -74,7 +74,7 @@ connectors:
     labels:
       search: "search shops"
     tools:
-      search: external_effect
+      search: paid
       search_table: denied
       search_dashboard: denied
   - name: brex

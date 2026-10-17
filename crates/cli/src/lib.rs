@@ -430,8 +430,8 @@ enum Commands {
         /// What to ask the service for; repeat it for each. Left out, the service chooses.
         #[arg(long = "scope")]
         scopes: Vec<String>,
-        /// A tool's label: `<tool>=network`, `<tool>=external_effect` or `<tool>=denied`. A tool
-        /// left unlabelled is `external_effect`.
+        /// A tool's label: `<tool>=network`, `<tool>=paid`, `<tool>=external_effect` or
+        /// `<tool>=denied`. A tool left unlabelled is `paid`.
         #[arg(long = "tag")]
         tags: Vec<String>,
         /// How many calls each sprint the agent makes of a kit service's spending tool without

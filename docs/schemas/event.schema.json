@@ -1019,7 +1019,7 @@
     },
     "toolApprovalRequestedBody": {
       "title": "Tool Approval Requested Body",
-      "description": "An agent's session called a connector's tool tagged external_effect with no grant of the human's for it, so the call was denied and waits for the human like a question (docs/SPEC.md 5.6, 5.7; ADR 0031). The event's sequence number is the approval's id. input is the call's whole input as compact JSON, never cut, so the human sees all of what they allow; input_sha256 is the sha256 of its canonical JSON, object keys sorted at every depth, which a grant binds. The envelope names the session, the agent, and the task.",
+      "description": "An agent's session called a connector's tool tagged paid with no grant of the human's for it, so the call was denied and waits for the human like a question (docs/SPEC.md 5.6, 5.7; ADR 0031). The event's sequence number is the approval's id. input is the call's whole input as compact JSON, never cut, so the human sees all of what they allow; input_sha256 is the sha256 of its canonical JSON, object keys sorted at every depth, which a grant binds. The envelope names the session, the agent, and the task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["server", "tool", "input", "input_sha256"],
@@ -1918,7 +1918,7 @@
     },
     "connectorTag": {
       "type": "string",
-      "enum": ["network", "external_effect", "denied"],
+      "enum": ["network", "paid", "external_effect", "denied"],
       "description": "A connector tool's tag (docs/SPEC.md section 5.6)."
     },
     "questionAskedBody": {

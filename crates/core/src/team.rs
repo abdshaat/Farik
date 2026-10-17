@@ -503,7 +503,9 @@ pub fn server_errors(server: &McpServerWire) -> Vec<(String, String)> {
     refused
 }
 
-/// The refusals for an entry's allowances (ADR 0037): on a kit entry's external tools alone.
+/// The refusals for an entry's allowances (ADR 0037): on a kit entry's paid tools alone. A team
+/// file written before ADR 0061 may still give one for a tool tagged `external_effect`, which it
+/// accepts so that the file loads.
 fn allowance_errors(server: &McpServerWire) -> Vec<(String, String)> {
     server
         .allowances
@@ -521,11 +523,11 @@ fn allowance_errors(server: &McpServerWire) -> Vec<(String, String)> {
                     .iter()
                     .find(|(name, _)| name.as_str() == tool)
                     .map(|(_, tag)| connector_tag(*tag)),
-                Some(ConnectorTag::ExternalEffect)
+                Some(ConnectorTag::Paid | ConnectorTag::ExternalEffect)
             ) {
                 format!(
-                    "allowance_not_external: {tool} is not a tool that spends or changes \
-                     something outside Catervas, so it has no allowance."
+                    "allowance_not_paid: {tool} is not a tool that costs money, so it has no \
+                     allowance."
                 )
             } else {
                 return None;
@@ -869,6 +871,7 @@ fn connector_tag(tag: ConnectorTagWire) -> ConnectorTag {
     match tag {
         ConnectorTagWire::Network => ConnectorTag::Network,
         ConnectorTagWire::ExternalEffect => ConnectorTag::ExternalEffect,
+        ConnectorTagWire::Paid => ConnectorTag::Paid,
         ConnectorTagWire::Denied => ConnectorTag::Denied,
     }
 }
@@ -887,7 +890,7 @@ pub struct CustomServer {
     /// Whether the entry is a kit's (`source: kit`), whose tags are the kit's.
     pub kit: bool,
     /// How many calls each period the agent makes of a tool without asking (ADR 0037), a kit
-    /// entry's alone and only for tools it tags `external_effect`.
+    /// entry's alone and only for tools it tags `paid` (or, in an older file, `external_effect`).
     pub allowances: BTreeMap<String, u32>,
 }
 
@@ -3601,7 +3604,7 @@ mod tests {
 
     fn a_kit_server_with_allowance(tool: &str, calls: u32) -> Value {
         let mut server = a_kit_server();
-        server["tools"]["generate_image"] = json!("external_effect");
+        server["tools"]["generate_image"] = json!("paid");
         server["allowances"] = json!({ tool: calls });
         server
     }
@@ -3613,13 +3616,17 @@ mod tests {
     }
 
     #[test]
-    fn accepts_allowances_on_a_kit_entrys_external_tools() {
+    fn accepts_allowances_on_a_kit_entrys_paid_tools() {
         let wire = with_servers(json!([a_kit_server_with_allowance("generate_image", 20)]));
         team(&wire);
         assert_eq!(
             server_with(&wire).allowances,
             BTreeMap::from([("generate_image".to_string(), 20)])
         );
+        // A file written before ADR 0061 gives one for an `external_effect` tool; it still loads.
+        let mut older = a_kit_server_with_allowance("generate_image", 20);
+        older["tools"]["generate_image"] = json!("external_effect");
+        team(&with_servers(json!([older])));
     }
 
     #[test]
@@ -3639,7 +3646,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_an_allowance_on_a_tool_not_external() {
+    fn refuses_an_allowance_on_a_tool_that_costs_nothing() {
         for tool in ["list_issues", "unlisted"] {
             let refused = refusals(&with_servers(json!([a_kit_server_with_allowance(tool, 3)])));
             assert_eq!(refused.len(), 1, "{tool}: {refused:?}");
@@ -3648,7 +3655,7 @@ mod tests {
                 format!("/agents/0/mcp_servers/0/allowances/{tool}")
             );
             assert!(
-                refused[0].1.starts_with("allowance_not_external: "),
+                refused[0].1.starts_with("allowance_not_paid: "),
                 "{tool}: {refused:?}"
             );
         }

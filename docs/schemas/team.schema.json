@@ -180,7 +180,7 @@
             "minimum": 0,
             "maximum": 1000
           },
-          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags external_effect (allowance_not_external), how many calls each sprint the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
+          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags paid (allowance_not_paid; an older team file may still give one for an external_effect tool), how many calls each sprint the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
         },
         "oauth": {
           "type": "object",
@@ -216,10 +216,11 @@
       "type": "string",
       "enum": [
         "network",
+        "paid",
         "external_effect",
         "denied"
       ],
-      "description": "A connector tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox and asks the human; denied, never offered."
+      "description": "A connector tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox and runs without asking, each use recorded; paid, it costs money at the service, asks the human and is the only one that does (ADR 0061); denied, never offered."
     },
     "role": {
       "type": "string",

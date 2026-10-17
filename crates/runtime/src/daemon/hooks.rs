@@ -755,9 +755,10 @@ fn connector_of(
 /// `evaluate_connector_call` (5.6): no tier is asked, and `preauthorized_external_tools` is never
 /// consulted. A session held to approved sites has its call's `url` and `urls` fields judged
 /// against the approved sites first (`site_not_approved`, or `sites_unreadable` when the log cannot
-/// be read), before the connector or the tool is looked at (6.10, 8.6). An `external_effect` call meets the Designer's plan gate first, then the human's open
-/// grant for it is looked up, then, with none, the agent's calls of the tool this period are
-/// counted against its allowance; with neither, it asks (ADR 0031, ADR 0037). The caller holds the
+/// be read), before the connector or the tool is looked at (6.10, 8.6). An `external_effect` or
+/// `paid` call meets the Designer's plan gate first. A `paid` call then has the human's open
+/// grant for it looked up, then, with none, the agent's calls of the tool this period are
+/// counted against its allowance; with neither, it asks (ADR 0031, ADR 0037, ADR 0061). The caller holds the
 /// sessions lock, so the count and the call it allows are one step.
 fn judge_connector(
     request: &HookRequest,
@@ -781,15 +782,15 @@ fn judge_connector(
     let mut granted = None;
     let mut used = 0;
     let mut plan = None;
-    if connector.and_then(|connector| connector.tools.get(tool))
-        == Some(&ConnectorTag::ExternalEffect)
-    {
+    let tag = connector.and_then(|connector| connector.tools.get(tool).copied());
+    if matches!(tag, Some(ConnectorTag::Paid | ConnectorTag::ExternalEffect)) {
         plan_gate(deps, team, registration, PermissionTier::ExternalEffect)?;
         if connector.is_some_and(|connector| connector.plan_tools.contains(tool)) {
             // The owner's plan approves it or nothing does: no grant is looked up and no allowance
             // counted, and the log is read for the active plan only for such a tool.
             plan = active_marketing_plan(deps)?;
-        } else {
+        } else if tag == Some(ConnectorTag::Paid) {
+            // Only a call that costs money asks (ADR 0061): an `external_effect` call runs.
             granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
             // Zero asks every time, and a grant is used before an allowance: neither needs the
             // count.
@@ -934,7 +935,7 @@ fn ask(
 ) -> Denial {
     if registration.task_id.is_none() {
         return Denial::from(format!(
-            "external_effect_refused: {tool} of {server} changes something outside the sandbox, \
+            "external_effect_refused: {tool} of {server} costs money, \
              and only a session about a task can ask you to allow it"
         ));
     }
@@ -1109,6 +1110,7 @@ fn tag_wire(tag: ConnectorTag) -> ConnectorTagWire {
     match tag {
         ConnectorTag::Network => ConnectorTagWire::Network,
         ConnectorTag::ExternalEffect => ConnectorTagWire::ExternalEffect,
+        ConnectorTag::Paid => ConnectorTagWire::Paid,
         ConnectorTag::Denied => ConnectorTagWire::Denied,
     }
 }
@@ -2359,7 +2361,7 @@ mod tests {
     }
 
     /// `github_session` on `task`. `github` also has `close_issue`, and the session is given
-    /// `gitlab` too, both tagged `external_effect`.
+    /// `gitlab` too, both tagged `paid`.
     fn task_session(daemon: &TestDaemon, session: &str, agent: &str, task: &str) {
         allowing_session(daemon, session, agent, task, None);
     }
@@ -2414,8 +2416,8 @@ mod tests {
                     origin: None,
                     tools: [
                         ("search_issues", ConnectorTag::Network),
-                        ("create_issue", ConnectorTag::ExternalEffect),
-                        ("close_issue", ConnectorTag::ExternalEffect),
+                        ("create_issue", ConnectorTag::Paid),
+                        ("close_issue", ConnectorTag::Paid),
                         ("delete_repo", ConnectorTag::Denied),
                     ]
                     .into_iter()
@@ -2429,7 +2431,7 @@ mod tests {
                 SessionConnector {
                     server: "gitlab".to_string(),
                     origin: None,
-                    tools: [("create_issue".to_string(), ConnectorTag::ExternalEffect)].into(),
+                    tools: [("create_issue".to_string(), ConnectorTag::Paid)].into(),
                     allowances: std::collections::BTreeMap::new(),
                     plan_tools: std::collections::BTreeSet::new(),
                 },
@@ -2788,7 +2790,7 @@ mod tests {
             when,
             "CTV-1",
             "tool.called",
-            &json!({ "tool": tool, "input": "{}", "server": server, "tag": "external_effect" }),
+            &json!({ "tool": tool, "input": "{}", "server": server, "tag": "paid" }),
         );
     }
 
@@ -4067,7 +4069,7 @@ mod tests {
             .push(SessionConnector {
                 server: "serpapi".to_string(),
                 origin: None,
-                tools: [("search".to_string(), ConnectorTag::ExternalEffect)].into(),
+                tools: [("search".to_string(), ConnectorTag::Paid)].into(),
                 allowances: [("search".to_string(), 50)].into(),
                 plan_tools: std::collections::BTreeSet::new(),
             });
@@ -4102,7 +4104,7 @@ mod tests {
             decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
         };
 
-        // An `external_effect` call to an address that is not approved is refused, not asked
+        // A `paid` call to an address that is not approved is refused, not asked
         // about, whether a grant matches it or an allowance remains.
         let input = json!({ "title": "x", "url": "https://other.example/" });
         let refused = call("session-proc", "mcp__github__create_issue", &input);

@@ -4209,7 +4209,7 @@ mod tests {
                 "credential_keys": ["API_KEY"],
                 "tools": {
                     "search_issues": "network",
-                    "create_issue": "external_effect",
+                    "create_issue": "paid",
                     "delete_repo": "denied"
                 }
             },
@@ -4863,7 +4863,7 @@ mod tests {
                 oauth: None,
             },
             credential_keys: Vec::new(),
-            tools: [("make".to_string(), ConnectorTag::ExternalEffect)].into(),
+            tools: [("make".to_string(), ConnectorTag::Paid)].into(),
             kit: true,
             allowances: [("make".to_string(), 20)].into(),
         };
@@ -4884,7 +4884,7 @@ mod tests {
                 "args": ["connector", "osv"],
                 "title": "Lookups", "about": "Looks things up.", "why": "To look.",
                 "setup": "Nothing to do.",
-                "tools": { "look": "external_effect", "read": "network" },
+                "tools": { "look": "paid", "read": "network" },
                 "plan_approved": ["look"]
             }]
         });
@@ -4924,7 +4924,7 @@ mod tests {
         let mut widened = entry_as(McpServerSource::Kit);
         widened.tools.insert(
             "read".to_string(),
-            catervas_core::governor::permissions::ConnectorTag::ExternalEffect,
+            catervas_core::governor::permissions::ConnectorTag::Paid,
         );
         assert!(
             super::session_connector(widened, Some(&kit))

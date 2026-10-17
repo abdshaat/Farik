@@ -794,7 +794,7 @@ pub enum EventBody {
     /// The human took a custom MCP server away from an agent.
     #[serde(rename = "connector.disconnected")]
     ConnectorDisconnected(ConnectorDisconnectedBody),
-    /// A connector's `external_effect` call waits for the human; its seq is the approval's id.
+    /// A connector's `paid` call waits for the human; its seq is the approval's id.
     #[serde(rename = "tool_approval.requested")]
     ToolApprovalRequested(ToolApprovalRequestedBody),
     /// The human allowed one call an agent asked about.

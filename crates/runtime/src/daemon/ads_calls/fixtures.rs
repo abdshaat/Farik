@@ -27,14 +27,14 @@ pub(crate) const ACCOUNT: &str = "123-456-7890";
 pub(crate) const SESSION: &str = "session-ads";
 
 /// Kai's kit: Google Ads as `catervas connector google-ads`, signing in, its three reads
-/// `network` and its seven writes `external_effect` marked as approved by the plan.
+/// `network` and its seven writes `paid` marked as approved by the plan.
 pub(crate) fn ads_kit() -> catervas_roles::Kit {
     let mut tools = serde_json::Map::new();
     for read in crate::google_ads::READ_TOOLS {
         tools.insert(read.to_string(), json!("network"));
     }
     for write in WRITE_TOOLS {
-        tools.insert(write.to_string(), json!("external_effect"));
+        tools.insert(write.to_string(), json!("paid"));
     }
     let kit = json!({
         "role": "marketing_specialist", "skills": [],

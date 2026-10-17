@@ -173,7 +173,7 @@ Tests:
   - A `paid` call within its allowance runs, and one beyond it asks.
 - `the_shipped_kits_tag_what_costs_money_paid` (`crates/roles/src/kit.rs`, a payment guarantee; core cannot read the kits): the shipped kits validate, every `higgsfield`, `recraft`, `google-ads` and `serpapi` tool tagged other than `denied` or `network` is `paid`, and no tool tagged `external_effect` has an allowance.
 
-- [ ] `feat(core): ask only before a connector call that costs money`
+- [x] `feat(core): ask only before a connector call that costs money`
 
 ### Task 6: a data source asks only when it costs or sends data
 

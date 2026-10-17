@@ -36,7 +36,7 @@ const AIRTABLE = {
 	tools: {
 		list_bases: "network",
 		list_records: "network",
-		create_record: "external_effect",
+		create_record: "paid",
 		delete_records: "denied",
 	},
 };
@@ -218,7 +218,7 @@ describe("connectors on the agent page", () => {
 		expect(within(airtable).getByText(en.connectorStdio)).toBeTruthy();
 		expect(
 			within(airtable).getByText(
-				"4 tools: 2 Only reads, 1 Changes things, asks you, 1 Never",
+				"4 tools: 2 Only reads, 1 Costs money, asks you, 1 Never",
 			),
 		).toBeTruthy();
 		expect(within(row("linear")).getByText(en.connectorHttp)).toBeTruthy();
@@ -308,7 +308,7 @@ describe("connectors on the agent page", () => {
 		);
 		await s.reply(await sent(s, "connector.connect"), {
 			stored_in: "keychain",
-			tools: { search: "external_effect" },
+			tools: { search: "paid" },
 		});
 		const before = teamAskedTimes(s);
 		fireEvent.click(
@@ -693,7 +693,7 @@ describe("connectors on the agent page", () => {
 		).toEqual({ Authorization: "Bearer {LINEAR_KEY}" });
 	});
 
-	it("connector_add_offers_three_labels_and_defaults_to_asks", async () => {
+	it("connector_add_offers_four_labels_and_defaults_to_asks", async () => {
 		const { container, s, dialog, asked } = await listed();
 		expect(asked.params).toEqual({
 			agent: "theo",
@@ -710,12 +710,13 @@ describe("connectors on the agent page", () => {
 		const radios = within(bases).getAllByRole("radio") as HTMLInputElement[];
 		expect(radios.map((r) => r.labels?.[0]?.textContent)).toEqual([
 			en.tagNetwork,
+			en.tagPaid,
 			en.tagExternal,
 			en.tagDenied,
 		]);
 		expect(
 			radios.filter((r) => r.checked).map((r) => r.labels?.[0]?.textContent),
-		).toEqual([en.tagExternal]);
+		).toEqual([en.tagPaid]);
 		// A tool Catervas cannot pass on is shown, never offered a label.
 		expect(
 			within(dialog).queryByRole("group", { name: "records.export" }),
@@ -739,7 +740,7 @@ describe("connectors on the agent page", () => {
 	});
 
 	it("connector_add_sends_an_untouched_tool_as_asks", async () => {
-		// A label the user never chose is "Changes things, asks you", on the wire too (W2).
+		// A label the user never chose is "Costs money, asks you", on the wire too (W2).
 		const { container, s, dialog } = await listed();
 		await expectNoAxeViolations(container);
 		fireEvent.click(
@@ -747,8 +748,8 @@ describe("connectors on the agent page", () => {
 		);
 		const connect = await sent(s, "connector.connect");
 		expect((connect.params as { tags: object }).tags).toEqual({
-			list_bases: "external_effect",
-			delete_records: "external_effect",
+			list_bases: "paid",
+			delete_records: "paid",
 		});
 	});
 
@@ -794,7 +795,7 @@ describe("connectors on the agent page", () => {
 		});
 		await s.reply(second, {
 			stored_in: "keychain",
-			tools: { list_bases: "external_effect" },
+			tools: { list_bases: "paid" },
 		});
 		await within(dialog).findByText("airtable is added to Theo");
 		expect(container.innerHTML).not.toContain("pat-secret-2");
@@ -976,13 +977,13 @@ describe("connectors on the agent page", () => {
 				stored_in: storedIn,
 				tools: {
 					list_bases: "network",
-					delete_records: "external_effect",
+					delete_records: "paid",
 				},
 			});
 			expect(await within(dialog).findByText(words)).toBeTruthy();
 			expect(
 				within(dialog).getByText(
-					"1 Only reads, 1 Changes things, asks you, 1 Catervas can’t use",
+					"1 Only reads, 1 Costs money, asks you, 1 Catervas can’t use",
 				),
 			).toBeTruthy();
 			await expectNoAxeViolations(container);
@@ -1006,7 +1007,7 @@ const SIGNED_NOTION = {
 	transport: "http",
 	url: "https://mcp.notion.com/mcp",
 	oauth: {},
-	tools: { search: "network", create_page: "external_effect" },
+	tools: { search: "network", create_page: "paid" },
 };
 const SIGNED_LINEAR = {
 	name: "linear",
@@ -1383,7 +1384,7 @@ describe("signing in to a service", () => {
 		expect(params.keys).toBeUndefined();
 		await s.reply(connect, {
 			stored_in: "keychain",
-			tools: { search: "external_effect", create_page: "external_effect" },
+			tools: { search: "paid", create_page: "paid" },
 		});
 		expect(
 			await within(dialog).findByText("notion is added to Theo"),
@@ -1532,7 +1533,7 @@ describe("signing in to a service", () => {
 		).toBeTruthy();
 		expect(
 			within(notion).getByText(
-				"2 tools: 1 Only reads, 1 Changes things, asks you",
+				"2 tools: 1 Only reads, 1 Costs money, asks you",
 			),
 		).toBeTruthy();
 		expect(within(notion).queryByText(/^Keys in /)).toBeNull();
@@ -1633,7 +1634,7 @@ const kitEntry = (name: string, transport: "http" | "stdio" = "stdio") => ({
 				command: `${name}-server`,
 				credential_keys: [`${name.toUpperCase()}_KEY`],
 			}),
-	tools: { search: "network", create_page: "external_effect" },
+	tools: { search: "network", create_page: "paid" },
 });
 const KIT_STATES = [
 	{
@@ -2001,7 +2002,7 @@ describe("a role's kit on the agent page", () => {
 			tools: {
 				search: "network",
 				"API-post-search": "network",
-				create_page: "external_effect",
+				create_page: "paid",
 				delete_page: "denied",
 			},
 		});
