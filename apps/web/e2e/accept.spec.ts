@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { events, mergeByHand, startServe } from "./fixtures/serve.ts";
+import {
+	events,
+	mergeByHand,
+	startServe,
+	taskBranch,
+} from "./fixtures/serve.ts";
 import { screenshots } from "./fixtures/shots.ts";
 
 test("a high-risk request needs no approval, and its accepted work waits for the owner's merge", async ({
@@ -48,15 +53,16 @@ test("a high-risk request needs no approval, and its accepted work waits for the
 		await expect(page.getByText(/^Approve the plan for /)).toHaveCount(0);
 		await expect(page.getByText(/^Accept /)).toHaveCount(0);
 		await expect(page.getByText(/^Add .* to your project$/)).toBeVisible();
+		const branch = taskBranch(serve.project, "CTV-1");
 		await expect(
-			page.getByText("Accepted: waiting for you to merge feature/CTV-1", {
+			page.getByText(`Accepted: waiting for you to merge ${branch}`, {
 				exact: true,
 			}),
 		).toBeVisible();
 		await screenshots(page, "gate");
 
 		// The owner merges it on their own checkout, then adds it.
-		mergeByHand(serve.project, "feature/CTV-1");
+		mergeByHand(serve.project, branch);
 		await page.getByRole("link", { name: "Add", exact: true }).click();
 		await expect(page).toHaveURL(/\/tasks\/CTV-1\/accept$/);
 		await page.getByRole("button", { name: "Add to project" }).click();
