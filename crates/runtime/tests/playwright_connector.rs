@@ -345,13 +345,19 @@ fn browse(
     preview: &dyn RunningPreview,
     output: &Path,
     left_out: &[&str],
-) -> (String, String, String) {
+    extra: Option<&str>,
+) -> (String, String, String, String) {
     let server = connector_server(&playwright(), preview, output);
     let mut browser = Mcp::of(&without(&server, left_out));
+    // The owner's page is browsed before the blocked ones: a navigation that failed leaves the
+    // browser on an error page whose own navigation interrupts the next request.
+    let page = browser.navigate(&format!("http://localhost:{PORT}/"));
+    let owner = extra.map_or_else(String::new, |address| browser.navigate(address));
     let answers = (
-        browser.navigate(&format!("http://localhost:{PORT}/")),
+        page,
         browser.navigate(DIRECT),
         browser.navigate(&redirect()),
+        owner,
     );
     drop(browser);
     preview.stop("the test ended").expect("stopped");
@@ -441,7 +447,7 @@ fn on_the_bridge(root: &Path, project: &str, barrier: &str, example: &str) -> Br
 
 #[test]
 #[ignore = "needs docker"]
-fn the_browser_reaches_only_the_preview() {
+fn the_browser_reaches_only_the_preview_and_the_owners_computer() {
     let root = worktree("confined");
     let project = project("confined");
     let _cleanup = Cleanup(project.clone());
@@ -455,28 +461,49 @@ fn the_browser_reaches_only_the_preview() {
         );
     };
 
-    // (a) The preview's network is off, and the browser has neither the proxy nor the origins.
+    // (a) The preview is on the bridge, and the browser has every flag: it reaches the preview and
+    // the owner's computer (a listener here), and nothing else.
+    let listener = std::net::TcpListener::bind("0.0.0.0:0").expect("the listener binds");
+    let owner_port = listener
+        .local_addr()
+        .expect("the listener has an address")
+        .port();
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        for stream in listener.incoming().flatten() {
+            let mut stream = stream;
+            let _ = stream.read(&mut [0_u8; 2048]);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<title>Owner</title>",
+            );
+        }
+    });
     let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
-        .start(&project, &task(), &root, &serving(), "tree")
+        .start(&project, &task(), &root, &serving(), "tree", None)
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
-    let (page, direct, away) = browse(
+    let (page, direct, away, owner) = browse(
         preview.as_ref(),
         &output,
-        &["--proxy-server", "--proxy-bypass", "--allowed-origins"],
+        &[],
+        Some(&format!("http://host.docker.internal:{owner_port}/")),
     );
     preview_page(&page, "a");
     assert!(
-        direct.contains("ERR_INTERNET_DISCONNECTED"),
+        direct.contains("ERR_BLOCKED_BY_CLIENT"),
         "(a) direct: {direct}"
     );
     assert!(
-        away.contains("ERR_INTERNET_DISCONNECTED"),
+        away.contains("ERR_PROXY_CONNECTION_FAILED"),
         "(a) redirect: {away}"
+    );
+    assert!(
+        owner.contains("Page Title: Owner"),
+        "(a) the owner's computer: {owner}"
     );
 
     // (b) The bridge, and the proxy alone.
     let preview = on_the_bridge(&root, &project, "b", &example);
-    let (page, direct, away) = browse(&preview, &output, &["--allowed-origins"]);
+    let (page, direct, away, _) = browse(&preview, &output, &["--allowed-origins"], None);
     preview_page(&page, "b");
     assert!(
         direct.contains("ERR_PROXY_CONNECTION_FAILED"),
@@ -495,7 +522,12 @@ fn the_browser_reaches_only_the_preview() {
     // (c) The bridge, and `--allowed-origins` alone: it blocks the direct navigation, and not the
     // redirect, which reaches example.com, as the server's README says. That is why the proxy is.
     let preview = on_the_bridge(&root, &project, "c", &example);
-    let (page, direct, _) = browse(&preview, &output, &["--proxy-server", "--proxy-bypass"]);
+    let (page, direct, _, _) = browse(
+        &preview,
+        &output,
+        &["--proxy-server", "--proxy-bypass"],
+        None,
+    );
     preview_page(&page, "c");
     assert!(
         direct.contains("ERR_BLOCKED_BY_CLIENT"),
@@ -526,7 +558,7 @@ fn stop_leaves_no_container() {
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let factory = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image);
     let preview = factory
-        .start(&project, &task(), &root, &serving(), "tree")
+        .start(&project, &task(), &root, &serving(), "tree", None)
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     assert!(
         root.join("site/.httpd").exists(),
@@ -566,6 +598,7 @@ fn finds_the_port_it_was_not_told() {
                 ..serving()
             },
             "tree",
+            None,
         )
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     assert_eq!(preview.port(), PORT);
@@ -583,7 +616,7 @@ fn the_task_cleanup_removes_the_preview() {
     let project = project("cleanup");
     let _cleanup = Cleanup(project.clone());
     let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
-        .start(&project, &task(), &root, &serving(), "tree")
+        .start(&project, &task(), &root, &serving(), "tree", None)
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let name = preview.container();
     assert_eq!(containers_named(&name), 1);
@@ -616,7 +649,7 @@ fn checks_a_page_on_the_pinned_image() {
     let output = root.join("screenshots");
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
-        .start(&project, &task(), &root, &serving(), "tree")
+        .start(&project, &task(), &root, &serving(), "tree", None)
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let check = |theme: CheckTheme| {
         check_page(
@@ -671,7 +704,7 @@ fn a_page_cannot_hide_its_violations_from_the_check() {
     let output = root.join("screenshots");
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
-        .start(&project, &task(), &root, &serving(), "tree")
+        .start(&project, &task(), &root, &serving(), "tree", None)
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let checked = check_page(
         &playwright(),
@@ -704,7 +737,7 @@ fn refuses_to_start_without_the_browser_image() {
         ALPINE.to_owned(),
         "catervas-test/no-such-browser:absent".to_owned(),
     )
-    .start(&project, &task(), &root, &serving(), "tree")
+    .start(&project, &task(), &root, &serving(), "tree", None)
     .err()
     .expect("no preview starts without the browser's image");
 

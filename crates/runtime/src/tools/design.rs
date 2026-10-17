@@ -628,7 +628,10 @@ mod tests {
             );
             assert_eq!(after(script, "--module-root"), ["/app/node_modules"]);
             assert_eq!(after(script, "--proxy-server"), ["http://127.0.0.1:9"]);
-            assert_eq!(after(script, "--proxy-bypass"), ["localhost"]);
+            assert_eq!(
+                after(script, "--proxy-bypass"),
+                ["localhost,host.docker.internal"]
+            );
             assert_eq!(
                 after(script, "--tags"),
                 ["wcag2a,wcag2aa,wcag21a,wcag21aa,wcag22aa"]

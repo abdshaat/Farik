@@ -681,7 +681,7 @@ async fn open_preview(
     );
     let started = std::time::Instant::now();
     let running = tokio::task::spawn_blocking(move || {
-        previews.start(&project, &task, &worktree_owned, &asked, &tree_owned)
+        previews.start(&project, &task, &worktree_owned, &asked, &tree_owned, None)
     })
     .await
     .map_err(|error| OrchestratorError::Refused {
