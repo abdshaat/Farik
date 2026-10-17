@@ -2147,6 +2147,102 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn files_a_hunt_per_member_in_the_first_tick() {
+        let (mut harness, members) = Harness::project_folder_with(
+            "req-catervafication-folder",
+            &["api", "web"],
+            crate::tools::fixtures::with_the_suggested_six,
+        );
+        harness.previews = Arc::new(crate::preview::fixtures::FakePreviews::ready());
+        // `web` can start its app; `api` cannot.
+        members[1].write("package.json", r#"{ "scripts": { "dev": "vite" } }"#);
+        // The scan names the package manager by its lock file.
+        members[1].write("package-lock.json", "{}");
+        members[1].commit("add the package");
+        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let under_the_epic = |harness: &Harness| -> Vec<(String, Option<String>)> {
+            let files = &harness.project.deps.files;
+            files
+                .list_contracts()
+                .expect("the contracts list")
+                .iter()
+                .map(|id| files.read_contract(id).expect("a contract"))
+                .filter(|contract| contract.parent.as_ref().map(|p| p.as_str()) == Some("CTV-1"))
+                .map(|contract| {
+                    (
+                        contract.assignee_role.to_string(),
+                        contract.repo.as_ref().map(|repo| repo.as_str().to_string()),
+                    )
+                })
+                .collect()
+        };
+        let hunt = |role: &str, repo: &str| (role.to_string(), Some(repo.to_string()));
+        let filed = under_the_epic(&harness);
+        assert_eq!(filed.len(), 8, "{filed:?}");
+        assert_eq!(
+            filed[5..],
+            [
+                hunt("software_developer", "api"),
+                hunt("software_developer", "web"),
+                hunt("ui_ux_designer", "web"),
+            ]
+        );
+        let notes = |harness: &Harness| -> Vec<String> {
+            harness
+                .events(&[EventKind::NoteWritten])
+                .iter()
+                .filter_map(|event| match &event.body {
+                    EventBody::NoteWritten(body)
+                        if body.kind == NoteWrittenBodyKind::Progress
+                            && event.envelope.ids.task_id == Some(task("CTV-1")) =>
+                    {
+                        assert_eq!(body.written_by, "catervas");
+                        Some(body.text.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            notes(&harness),
+            ["No UI bug hunt for api: Catervas found no way to start its app."]
+        );
+        let budget = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-1"))
+            .expect("the epic")
+            .budget
+            .max_cost_usd;
+        assert!(
+            (budget
+                - 9.0
+                    * catervas_store::requests::placeholder_budget_usd(
+                        &harness
+                            .project
+                            .deps
+                            .files
+                            .read_team()
+                            .expect("a team")
+                            .rules()
+                    ))
+            .abs()
+                < 1e-9,
+            "{budget}"
+        );
+
+        // A second tick files nothing and writes no second note.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(under_the_epic(&harness).len(), 8);
+        assert_eq!(notes(&harness).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn an_epic_without_the_hunts_requirement_files_no_hunt() {
         let harness = Harness::with_the_suggested_six("req-catervafication-no-hunts");
         let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;

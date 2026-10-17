@@ -161,7 +161,7 @@ for `None`; `file_due` passes `hunt_members(deps)?` and holds by member),
   - `catervafication.get`, asked before the Start on a fresh harness, lists `ui_ux_designer`
     among its `roles`.
 
-- [ ] `feat(runtime): file each member's hunts and say why a member has no UI hunt`
+- [x] `feat(runtime): file each member's hunts and say why a member has no UI hunt`
 
 ## Verification
 

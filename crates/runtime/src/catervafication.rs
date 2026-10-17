@@ -11,11 +11,16 @@ use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Team, changes_code};
-use catervas_protocol::event::{CatervasEvent, EventBody, EventKind};
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind, new_event,
+};
 use catervas_store::files::FilesError;
+use catervas_store::git::Git;
+use catervas_store::repos::repo_present;
 use catervas_store::requests::{
     RequestError, file_catervafication_epic, file_request, placeholder_budget_usd,
 };
+use catervas_store::scan::scan_project;
 use catervas_store::{EventLog, EventQuery, StoreError, TaskProjection};
 use serde_json::{Value, json};
 
@@ -103,6 +108,34 @@ pub(crate) struct Hunt {
 pub(crate) struct Hunts {
     pub(crate) rows: Vec<Hunt>,
     pub(crate) no_ui: Vec<String>,
+}
+
+/// The members of a project folder that are present now, in `repos.yaml` order, each with whether
+/// its scan finds a way to start its app (ADR 0054); a scan that fails counts as no UI. `None` for a
+/// project of one repository.
+///
+/// # Errors
+///
+/// `Files` when `repos.yaml` cannot be read.
+pub(crate) fn hunt_members(
+    deps: &ToolDeps,
+) -> Result<Option<Vec<HuntMember>>, CatervaficationError> {
+    let Some(repos) = deps.files.read_repos()? else {
+        return Ok(None);
+    };
+    let now = deps.clock.now();
+    Ok(Some(
+        repos
+            .repos
+            .iter()
+            .filter(|repo| repo_present(std::path::Path::new(repo.path.as_str())))
+            .map(|repo| HuntMember {
+                name: repo.name.as_str().to_string(),
+                has_ui: scan_project(&Git::open(repo.path.as_str().into()), now)
+                    .is_ok_and(|scan| scan.app_start.is_some()),
+            })
+            .collect(),
+    ))
 }
 
 /// The bug hunts of an existing repository's Catervafication, in the order they are filed (ADR
@@ -605,7 +638,7 @@ pub(crate) fn start(
             project,
             placeholder_budget_usd(&team.rules()),
             team.document_format(),
-            1,
+            hunt_members(deps)?.map_or(1, |members| members.len()),
         ),
         by,
         project,
@@ -652,19 +685,23 @@ pub(crate) fn file_due(
 ) -> Result<FileDue, CatervaficationError> {
     let designer_ready = deps.transitions.designer_browser(team) == DesignerBrowser::Ready;
     // The roles of the tasks under the epic, each with whether it is a hunt.
-    let mut held: Vec<(Role, bool)> = Vec::new();
+    let mut held: Vec<(Role, bool, Option<String>)> = Vec::new();
     for task in board
         .iter()
         .filter(|row| row.parent.as_ref() == Some(&epic.task_id))
     {
         let contract = deps.files.read_contract(&task.task_id)?;
-        held.push((contract.assignee_role, is_hunt(&contract)));
+        held.push((
+            contract.assignee_role,
+            is_hunt(&contract),
+            contract.repo.as_ref().map(|repo| repo.as_str().to_string()),
+        ));
     }
     let max_cost_usd = placeholder_budget_usd(&team.rules());
     let format = team.document_format();
     let mut due: Vec<(Value, Role)> = Vec::new();
     for (role, reviewer) in catervafication_roles(team, project, designer_ready) {
-        if !held.contains(&(role, false)) {
+        if !held.contains(&(role, false, None)) {
             due.push((
                 task_contract(project, role, reviewer, &epic.task_id, max_cost_usd, format),
                 role,
@@ -672,16 +709,21 @@ pub(crate) fn file_due(
         }
     }
     if epic_hunts(&deps.files.read_contract(&epic.task_id)?) {
-        // A project folder files no hunt yet: its members are hunted in the next commit.
-        let members: Option<&[HuntMember]> = deps.files.is_project_folder().then_some(&[]);
-        for hunt in catervafication_hunts(team, project, designer_ready, members).rows {
-            if !held.contains(&(hunt.role, true)) {
+        let hunts = catervafication_hunts(
+            team,
+            project,
+            designer_ready,
+            hunt_members(deps)?.as_deref(),
+        );
+        for hunt in hunts.rows {
+            if !held.contains(&(hunt.role, true, hunt.repo.clone())) {
                 due.push((
                     hunt_contract(hunt.role, max_cost_usd, format, hunt.repo.as_deref()),
                     hunt.role,
                 ));
             }
         }
+        note_members_without_a_ui(deps, &epic.task_id, &hunts.no_ui)?;
     }
     let mut filed: Vec<TaskId> = Vec::new();
     for (wire, _) in due {
@@ -703,6 +745,58 @@ pub(crate) fn file_due(
     } else {
         FileDue::Filed(filed)
     })
+}
+
+/// Records on the epic, once for each, that a member has no UI bug hunt because Catervas found no
+/// way to start its app.
+fn note_members_without_a_ui(
+    deps: &ToolDeps,
+    epic: &TaskId,
+    no_ui: &[String],
+) -> Result<(), CatervaficationError> {
+    if no_ui.is_empty() {
+        return Ok(());
+    }
+    let written: Vec<String> = deps
+        .log
+        .read(&EventQuery {
+            task_id: Some(epic.clone()),
+            kinds: vec![EventKind::NoteWritten],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter_map(|event| match event.body {
+            EventBody::NoteWritten(body) => Some(body.text),
+            _ => None,
+        })
+        .collect();
+    for name in no_ui {
+        let text = format!("No UI bug hunt for {name}: Catervas found no way to start its app.");
+        if written.contains(&text) {
+            continue;
+        }
+        let ids = EventIds {
+            task_id: Some(epic.clone()),
+            ..deps.ids.clone()
+        };
+        let event = new_event(
+            EventBody::NoteWritten(NoteWrittenBody {
+                kind: NoteWrittenBodyKind::Progress,
+                text,
+                written_by: "catervas".to_string(),
+            }),
+            deps.clock.now(),
+            ids,
+        )
+        .map_err(|error| {
+            CatervaficationError::Transition(TransitionError::Event {
+                detail: format!("{error:?}"),
+            })
+        })?;
+        let appended = deps.log.append(&event)?;
+        deps.projections.apply(&appended)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
