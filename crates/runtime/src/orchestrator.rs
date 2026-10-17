@@ -1950,4 +1950,79 @@ mod tests {
             spec.initial_prompt
         );
     }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_every_running_session_once_the_day_is_spent() {
+        use crate::orchestrator::fixtures::HeldAdapter;
+        use crate::recorded::fixtures::UsageThenWaitAdapter;
+        use catervas_core::pricing::Usage;
+        use catervas_protocol::event::{BudgetExhaustedBodyScope, SessionEndedBodyReason};
+
+        let harness = Harness::new("parallel-day-spent", |_| {});
+        harness.spent(None, "s-0", 19.75);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-2", "dev-b", "dev-a");
+        let adapter = HeldAdapter::new(std::sync::Arc::new(UsageThenWaitAdapter::completing(
+            Usage {
+                input_tokens: 300_000,
+                ..Usage::default()
+            },
+        )));
+        let orchestrator = std::sync::Arc::new(harness.orchestrator(adapter.clone()));
+        until(&orchestrator, |p| {
+            started_of(p, "dev-a", Some("CTV-1"), "implement")
+        })
+        .await;
+        until(&orchestrator, |p| {
+            started_of(p, "dev-b", Some("CTV-2"), "implement")
+        })
+        .await;
+        adapter.release("dev-a");
+        let acted = |p: &super::Progress| {
+            matches!(p, super::Progress::Ticked(super::TickReport::Acted { .. }))
+        };
+        until(&orchestrator, acted).await;
+        until(&orchestrator, acted).await;
+
+        assert!(adapter.running().is_empty(), "{:?}", adapter.running());
+        let ended = harness.events(&[EventKind::SessionEnded]);
+        let of_dev_b: Vec<_> = ended
+            .iter()
+            .filter(|event| event.envelope.ids.agent_id.as_deref() == Some("dev-b"))
+            .collect();
+        assert_eq!(of_dev_b.len(), 1, "{ended:?}");
+        assert!(
+            matches!(&of_dev_b[0].body, EventBody::SessionEnded(body)
+                if body.reason == SessionEndedBodyReason::Aborted),
+            "{:?}",
+            of_dev_b[0]
+        );
+        let costs: Vec<_> = harness
+            .events(&[EventKind::CostRecorded])
+            .into_iter()
+            .filter(|event| event.envelope.ids.agent_id.as_deref() == Some("dev-b"))
+            .collect();
+        assert_eq!(costs.len(), 1, "{costs:?}");
+        assert!(
+            matches!(&costs[0].body, EventBody::CostRecorded(body) if body.cost_usd == 0.0),
+            "{:?}",
+            costs[0]
+        );
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::InProgress);
+        let exhausted = harness.events(&[EventKind::BudgetExhausted]);
+        assert!(
+            matches!(exhausted.as_slice(), [event] if matches!(&event.body,
+                EventBody::BudgetExhausted(body) if body.scope == BudgetExhaustedBodyScope::DayUsd)),
+            "{exhausted:?}"
+        );
+        assert!(matches!(
+            next_progress(&orchestrator).await,
+            super::Progress::Ticked(super::TickReport::Idle { why, until: None })
+                if why == "the team's daily budget is spent"
+        ));
+        assert_eq!(adapter.starts().len(), 2);
+    }
 }

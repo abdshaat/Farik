@@ -103,7 +103,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   of scope `day_usd`; the next `next_progress` is `Ticked(Idle { why: "the team's daily budget is
   spent", until: None })`; `starts()` has 2 entries.
 
-- [ ] `feat(runtime): a spent day stops every session running at once`
+- [x] `feat(runtime): a spent day stops every session running at once`
 
 ## Verification
 
