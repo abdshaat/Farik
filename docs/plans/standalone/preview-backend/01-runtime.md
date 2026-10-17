@@ -1,6 +1,6 @@
 # Standalone (preview backend), plan 1: the preview reaches the app's backend
 
-Status: ready
+Status: done
 Branch: `feat/preview-backend` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.6, 8.3, 8.6 (recorded in plan 2's revision 0.120)
 Depends on: `feat/parallel-agents` at `2006a978`, and `feat/internal-task-ids` (ADR 0066) beneath it
@@ -157,7 +157,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   `["http://localhost:4400;http://host.docker.internal:*;https://host.docker.internal:*"]`; every
   other assertion stays. Fails first on the bypass, `localhost` alone.
 
-- [ ] `feat(runtime): the designer's browser reaches the owner's computer`
+- [x] `feat(runtime): the designer's browser reaches the owner's computer`
 
 ### Task 2: the preview runs on the network with the owner's environment file
 
@@ -201,7 +201,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   `format!("{env:?}")` holds neither value. Fails first because `start_args` does not exist (write
   the test against the signatures above, then the functions).
 
-- [ ] `feat(runtime): the preview runs on the network with the owner's environment file`
+- [x] `feat(runtime): the preview runs on the network with the owner's environment file`
 
 ### Task 3: no agent reads the file, and Catervas never shows its values
 
@@ -241,7 +241,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   `service-role-secret-0123`. Fails first on `preview_env_present` (the schema refuses the unknown
   field, or it is missing); the hook's denials already hold, which the test pins.
 
-- [ ] `feat(runtime): no agent reads the preview's environment file and no record shows it`
+- [x] `feat(runtime): no agent reads the preview's environment file and no record shows it`
 
 ## Verification
 

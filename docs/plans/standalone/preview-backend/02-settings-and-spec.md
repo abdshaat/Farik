@@ -1,6 +1,6 @@
 # Standalone (preview backend), plan 2: Settings says whether the file is there, and the spec
 
-Status: ready
+Status: done
 Branch: `feat/preview-backend` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 4.1, 5.6, 8.3, 8.6, revision 0.120
 Depends on: plan 1 of this folder (Tasks 1 to 3, committed on this branch)
@@ -86,7 +86,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 `saves_the_preview_in_settings` and any test that reads `previewStartHint` keep passing with the
 new hint, which they read from `en`.
 
-- [ ] `feat(web): settings says whether the app's settings file is there`
+- [x] `feat(web): settings says whether the app's settings file is there`
 
 ### Task 5: the spec records the preview's backend
 
@@ -158,7 +158,7 @@ against plan 1's Decisions and this plan's.
   review; a screenshot of a page that shows one shows it. Keys for testing belong in it, not live
   ones."
 
-- [ ] `docs(spec): the preview reaches the app's backend, revision 0.120`
+- [x] `docs(spec): the preview reaches the app's backend, revision 0.120`
 
 ## Verification
 
