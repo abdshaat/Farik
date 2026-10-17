@@ -291,7 +291,7 @@ Files: `crates/runtime/src/orchestrator/rules.rs`. The test is ignored, as its n
   - starts no session;
   - leaves `CTV-1` `ready`.
 
-- [ ] `feat(runtime): a task given in a chat is assigned to its agent first`
+- [x] `feat(runtime): a task given in a chat is assigned to its agent first`
 
 ## Verification
 

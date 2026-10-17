@@ -263,7 +263,14 @@ pub(super) async fn tick(
         }
     }
     if runs(8) {
-        for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
+        // The tasks given in a chat go first (ADR 0063): next in their agent's queue.
+        let (given, others): (Vec<_>, Vec<_>) = waiting_on_nobody(&board, TaskStatus::Ready)
+            .filter(in_scope)
+            .partition(|row| {
+                catervas_store::requests::given_to(&deps.tools.log, &row.task_id)
+                    .is_ok_and(|agent| agent.is_some())
+            });
+        for row in given.into_iter().chain(others) {
             if let Some(report) = ready(deps, &team, &board, row, &mut waiting).await? {
                 return Ok(report);
             }
@@ -1751,6 +1758,14 @@ async fn ready(
     if requests::is_epic(row) {
         return requests::ready_epic(deps, team, board, row);
     }
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    match requests::given_agent(deps, team, &contract)? {
+        requests::Given::Active(agent) => {
+            return ready_given(deps, team, board, row, &contract, agent);
+        }
+        requests::Given::Waits => return Ok(None),
+        requests::Given::No => {}
+    }
     // A task under an epic is assigned by the epic's assignee (5.16 item 3).
     let assigner = match &row.parent {
         Some(_) => requests::epic_assignee(team, board, row),
@@ -1759,7 +1774,6 @@ async fn ready(
     let Some(assigner) = assigner else {
         return Ok(None);
     };
-    let contract = deps.tools.files.read_contract(&row.task_id)?;
     // A sleeping agent is still offered as an assignee below; only its own sessions wait.
     if spent(deps, team, &contract, &mut waiting.day_spent)?
         | asleep(deps, assigner, &mut waiting.slept)?
@@ -1815,6 +1829,73 @@ async fn ready(
     )
     .await?;
     Ok(Some(acted(row, assigner, "plan", &end)))
+}
+
+/// Rule 8 for a task the owner gave `agent` in its chat (ADR 0063): assigned to that agent, with
+/// no session, as soon as it has room, the reviewer named as usual. Passed over when the agent is
+/// full, the move was refused since the task became `ready`, there is no assigner or reviewer, or
+/// the governor's own conditions for an assignment do not hold.
+fn ready_given(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+    contract: &TaskContract,
+    agent: &Agent,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if !has_room(team, board, agent, None)
+        || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
+    {
+        return Ok(None);
+    }
+    let Some(assigner) = assigner(team) else {
+        return Ok(None);
+    };
+    let reviewer = team
+        .active_agents()
+        .find(|other| {
+            Role::from(other.role) == contract.reviewer_role
+                && other.id.as_str() != agent.id.as_str()
+        })
+        .or_else(|| {
+            (Role::from(agent.role) == contract.reviewer_role
+                && contract.reviewer_role.reviews_its_own())
+            .then_some(agent)
+        });
+    let Some(reviewer) = reviewer else {
+        return Ok(None);
+    };
+    if !assignable(deps, team, contract, assigner, agent.id.as_str())? {
+        return Ok(None);
+    }
+    let outcome = deps.tools.transitions.request(
+        &TransitionRequest {
+            task_id: row.task_id.clone(),
+            to: TaskStatus::Assigned,
+            actor: if Role::from(assigner.role) == Role::ScrumMaster {
+                TransitionActor::ScrumMaster
+            } else {
+                TransitionActor::ProductManager
+            },
+            agent_id: Some(assigner.id.to_string()),
+        },
+        &TransitionAsk {
+            assignee_id: Some(agent.id.to_string()),
+            reviewer_id: Some(reviewer.id.to_string()),
+            ..TransitionAsk::default()
+        },
+        team,
+    )?;
+    Ok(match outcome {
+        TransitionOutcome::Moved(_) => Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: format!(
+                "assigned it to {}, who was given it in its chat",
+                agent.id.as_str()
+            ),
+        }),
+        TransitionOutcome::Refused(_) => None,
+    })
 }
 
 /// Who assigns: the active Scrum Master, else the active Product Manager (D6).
@@ -5651,6 +5732,37 @@ mod tests {
             Some("CTV-2")
         );
         assert_eq!(started[0].purpose, SessionPurpose::Implement);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_a_given_task_to_its_agent_first_without_a_session() {
+        let harness = Harness::new("orch-given-assigned", |wire| {
+            crate::tools::fixtures::with_the_suggested_six(wire);
+            wire["policy"]["wip_limit_per_agent"] = json!(1);
+        });
+        harness.file("CTV-1", "ready", |_| {});
+        harness.file_given("CTV-2", "ready", "dev", |wire| {
+            wire["reviewer_role"] = json!("architect");
+        });
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Acted {
+                task_id: "CTV-2".parse().expect("a task id"),
+                what: "assigned it to dev, who was given it in its chat".to_string(),
+            }
+        );
+        let row = harness.row("CTV-2");
+        assert_eq!(row.status, TaskStatus::Assigned);
+        assert_eq!(row.assignee_id.as_deref(), Some("dev"));
+        assert_eq!(row.reviewer_id.as_deref(), Some("ada"));
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
     }
 
     #[tokio::test]
