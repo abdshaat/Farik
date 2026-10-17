@@ -995,7 +995,7 @@ export const en = {
 		"Accepted. Catervas opens a pull request for it, for you to merge.",
 	riskLowWhy: "Low. The team may accept it without you.",
 	riskMediumWhy: "Medium. The team may still accept it without you.",
-	riskHighWhy: "High. You approve its plan.",
+	riskHighWhy: "High. The team may accept it without you, as for any task.",
 	taskAdded: "Added on {day}.",
 	taskStop: "Stop work on this task",
 	taskCancel: "Cancel this task",

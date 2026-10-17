@@ -127,7 +127,7 @@ The risk line of the task page changes with the approval: `riskHighWhy` (`apps/w
 Tests:
 - `readies_an_epic_and_a_high_risk_contract_without_the_human` (`transition.rs`): an epic, a `high` risk task, and a task under the policy `human_accepts_contracts: all`, each passing the structural checks and none with a `summary`, move `refining -> ready` for the governor. `refining -> escalated` with `ContractRequiresHuman` is refused for each.
 
-- [ ] `feat(core): let no contract wait for the human's approval`
+- [x] `feat(core): let no contract wait for the human's approval`
 
 ### Task 2: a new project's product plan needs no approval
 

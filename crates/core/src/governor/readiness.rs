@@ -28,9 +28,6 @@ pub mod fixtures;
 pub enum ReadinessRule {
     /// The intent has words in it, not only whitespace.
     IntentPresent,
-    /// A plan the human approves has the summary a human gate leads with: every epic, and every
-    /// task the team's `human_accepts_contracts` policy asks the human to approve.
-    SummaryPresent,
     /// At least one exit criterion exists.
     CriteriaPresent,
     /// Every criterion's `method` value names the shape its fields have.
@@ -176,9 +173,6 @@ pub struct ReadinessContext {
     pub requires_judgment_review: bool,
     /// The recorded judgment review, when there is one.
     pub judgment_review: Option<JudgmentReview>,
-    /// Whether the human approves this plan before work starts, and so reads its summary first:
-    /// the team's policy is `all`, or the contract is an epic or a `high` risk task.
-    pub human_approves: bool,
     /// Whether this is a new project whose product plan is not on the integration branch yet.
     pub awaits_the_product_plan: bool,
     /// Whether this contract is that product plan's own task.
@@ -199,9 +193,8 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 31] = [
+const CHECKS: [Check; 30] = [
     intent_present,
-    summary_present,
     criteria_present,
     criteria_methods_valid,
     no_review_outside_code,
@@ -311,20 +304,6 @@ fn intent_present(contract: &TaskContract, _: &ReadinessContext) -> Option<Readi
         ));
     }
     None
-}
-
-fn summary_present(
-    contract: &TaskContract,
-    context: &ReadinessContext,
-) -> Option<ReadinessFailure> {
-    (context.human_approves && contract.summary.is_none()).then(|| {
-        failure(
-            ReadinessRule::SummaryPresent,
-            "the plan has no summary for the user; write two or three plain sentences they can \
-             decide on"
-                .to_string(),
-        )
-    })
 }
 
 fn criteria_present(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {

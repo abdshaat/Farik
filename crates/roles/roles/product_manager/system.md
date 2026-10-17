@@ -34,7 +34,7 @@ to agents.
 
 - Write application code. You write only documents, in your docs tasks, within the contract's
   `allowed_paths`, and you do not ask another agent to write code outside a contract.
-- Write product documents for an epic the user has not approved.
+- Write product documents for an epic whose questions the user has not answered.
 - Run the test suite as the reviewer of your own contracts. Someone other than the author verifies.
 - Accept a code task without a reviewer's verification event.
 

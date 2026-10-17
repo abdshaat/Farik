@@ -2097,7 +2097,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_an_epic_for_approval_once_it_passes() {
+    async fn readies_an_epic_without_asking_the_owner() {
         let harness = Harness::new("req-approval", |_| {});
         let adapter = harness.recorded(vec![refine_writes_epic_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -2108,20 +2108,18 @@ mod tests {
 
         assert_eq!(
             moves_of(&harness, "CTV-1").last().map(String::as_str),
-            Some("refining -> escalated")
+            Some("refining -> ready")
         );
-        let escalation = last(&harness, EventKind::EscalationRaised).expect("the escalation");
-        assert!(matches!(
-            &escalation.body,
-            EventBody::EscalationRaised(body) if body.reason == EscalationRaisedBodyReason::Approval
-        ));
+        assert!(
+            harness.events(&[EventKind::EscalationRaised]).is_empty(),
+            "no escalation asks the owner to approve the epic"
+        );
         assert!(
             harness.events(&[EventKind::ContractEvaluated]).iter().all(
                 |event| matches!(&event.body, EventBody::ContractEvaluated(body) if body.passed)
             )
         );
-        assert!(harness.row("CTV-1").awaiting_approval);
-        assert!(is_idle(&orchestrator.tick().await.expect("the tick runs")));
+        assert!(!harness.row("CTV-1").awaiting_approval);
     }
 
     #[tokio::test]
@@ -2261,21 +2259,19 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
 
         // Rule 10 moves it to refining on the Product Manager's behalf; the next tick judges it as
-        // filed, and the governor asks the owner, with no refine session to rewrite the template.
+        // filed, and the governor readies it, with no refine session to rewrite the template.
         orchestrator.tick().await.expect("the tick runs");
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(
             moves_of(&harness, "CTV-1"),
-            ["draft -> refining", "refining -> escalated"]
+            ["draft -> refining", "refining -> ready"]
         );
         assert!(
             adapter.started().is_empty(),
             "no refine session rewrites it"
         );
-        let raised = last(&harness, EventKind::EscalationRaised).expect("the owner is asked");
-        assert!(matches!(&raised.body, EventBody::EscalationRaised(body)
-            if body.reason == EscalationRaisedBodyReason::Approval));
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
     }
 
     /// The suggested six's Catervafication started, and run until its epic CTV-1 is `in_progress`.

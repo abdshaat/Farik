@@ -737,7 +737,6 @@ mod tests {
             let mut as_epic = filed(wire.clone(), "CTV-1", "draft", None);
             as_epic["kind"] = json!("epic");
             let epic = validate_contract(&as_epic).expect("the epic is a contract");
-            context.human_approves = true;
             assert_eq!(
                 evaluate_readiness(&epic, &context),
                 Ok(()),
@@ -751,7 +750,6 @@ mod tests {
                 Ok(()),
                 "{project:?} epic in a project folder"
             );
-            context.human_approves = false;
 
             context.parent = Some(ParentState {
                 status: catervas_core::contract::TaskStatus::InProgress,

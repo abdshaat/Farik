@@ -5,7 +5,6 @@
 use crate::contract::{ExitCriterion, TaskContract, TaskStatus, wire_method};
 use crate::folders::{agent_twin, human_of_twin, pair_changed_alone as pairs_changed_alone};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
-use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::paths::{
     GlobError, PathRefusal, check_allowed_paths, check_protected_paths,
     reaches_the_catervas_directory,
@@ -106,18 +105,6 @@ pub struct DoneFailure {
     pub rule: DoneRule,
     /// What is wrong and what would fix it.
     pub message: String,
-}
-
-/// Whether the contract itself needs the human's acceptance before work starts: its risk is
-/// `high`, or it is an epic (`docs/SPEC.md` section 5.16 item 2). No result waits on the human any
-/// more (ADR 0061), so only the contract gate asks this, until the contract's approval goes.
-///
-/// This is not the human's approval of the contract before work starts, which spec 5.2's
-/// `refining -> escalated` gate asks and the team policy `human_accepts_contracts` widens to every
-/// task; step 09 takes that answer from its context rather than from here.
-#[must_use]
-pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
-    contract.risk == Risk::High || contract.kind == Kind::Epic
 }
 
 /// Whether the task's result waits on the human (5.4): it is `verifying`, Catervas does not verify

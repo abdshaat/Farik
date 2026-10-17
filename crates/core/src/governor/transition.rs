@@ -17,7 +17,6 @@ use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::done::{
     CriterionResult, DoneEvidence, catervas_verifies_alone, evaluate_done,
-    requires_human_acceptance,
 };
 use crate::governor::escalation::{
     BlockedAge, EscalationReason, READINESS_ATTEMPT_LIMIT, ReadinessOutcome, RejectionOutcome,
@@ -47,20 +46,6 @@ pub struct TransitionRequest {
     pub agent_id: Option<String>,
 }
 
-/// Whether the human must accept the contract the task has now, and whether they have. The two
-/// travel together because one question is asked of them: is this contract waiting for the human?
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ContractAcceptance {
-    /// Whether the team's policy requires the human to accept this contract, over and above the
-    /// risk and the kind that `done::requires_human_acceptance` answers
-    /// (`human_accepts_contracts`, a team policy rather than one of 5.12's rules: `docs/SPEC.md`
-    /// section 5.16 and its resolved question 1, with the values `high_risk` and `all`).
-    pub required_by_policy: bool,
-    /// Whether the human has accepted the contract the task has now. An edit of a frozen contract
-    /// sends the task back to `refining` (5.11), and the acceptance it had does not carry over.
-    pub given: bool,
-}
-
 /// Everything a gate of the table can ask, gathered by the runtime before it asks. Not `PartialEq`:
 /// the generated `TaskContract` is not, and a context is a bundle of inputs rather than a value to
 /// compare.
@@ -85,7 +70,6 @@ pub struct TransitionContext {
     /// contract that has since been fixed.
     pub readiness_failed_attempts: u32,
     /// Whether this contract is waiting for the human, and whether the human has answered.
-    pub acceptance: ContractAcceptance,
     /// The pair of agents an assignment would name, when the move is an assignment.
     pub assignment: Option<AssignmentInput>,
     /// The results the assignee recorded from its own runs.
@@ -358,17 +342,6 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
         }),
         GateId::DefinitionOfReady => {
             let mut details = Vec::new();
-            if waits_for_the_human(context) {
-                details.push(
-                    "this contract needs the human's acceptance before it leaves refining (5.16 item 2), and the human has not given it"
-                        .to_string(),
-                );
-            }
-            // The acceptance first, because it is the last thing to happen, and the failures with
-            // it: a contract that does not pass the structural checks cannot be put to the human
-            // yet (5.16 item 2), so reporting only the acceptance would tell an epic to wait for
-            // something nobody can ask for, and the escalation row would say the opposite about the
-            // same contract.
             details.extend(readiness_failures(context).unwrap_or_default());
             if details.is_empty() {
                 Ok(())
@@ -497,40 +470,13 @@ fn open_or(open: bool, shut: impl FnOnce() -> String) -> GateResult {
     if open { Ok(()) } else { Err(vec![shut()]) }
 }
 
-/// The `ContractRequiresHuman` gate of `refining -> escalated`: the contract needs the human's
-/// acceptance and has not had it. The risk and the kind answer half of it
-/// (`done::requires_human_acceptance`) and the team's policy the other half, which the runtime
-/// passes in because `TeamRules` does not yet carry `human_accepts_contracts`; either is enough,
-/// so the two cannot disagree in the direction that would carry a task past the human.
-fn human_must_accept_the_contract(context: &TransitionContext) -> GateResult {
-    if !(context.acceptance.required_by_policy || requires_human_acceptance(&context.contract)) {
-        return Err(vec![
-            "this contract does not need the human's acceptance: the risk is not high, it is not an epic, and the team's policy does not ask for it"
-                .to_string(),
-        ]);
-    }
-    // 5.16 item 2 asks the human once the contract passes the structural checks. A contract sent to
-    // the user on its first readiness failure would lose the three refining attempts 5.2 gives it,
-    // and the human's gate-free `escalated -> any` row would then carry a contract that never
-    // passed the Definition of Ready into `ready`. This is asked before the acceptance, because a
-    // contract the human has accepted that does not pass would otherwise be told it goes to `ready`,
-    // which the readying gate refuses: the user writing an epic themselves and locking and
-    // approving it (5.11, 5.16) reaches exactly that state.
-    if let Some(failures) = readiness_failures(context) {
-        let mut details = vec![
-            "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
-                .to_string(),
-        ];
-        details.extend(failures);
-        return Err(details);
-    }
-    if context.acceptance.given {
-        return Err(vec![
-            "the human has already accepted this contract, so it goes to ready rather than escalating"
-                .to_string(),
-        ]);
-    }
-    Ok(())
+/// The `ContractRequiresHuman` gate of `refining -> escalated`: shut for every contract, since no
+/// contract waits for the human's acceptance (ADR 0061). The row stays in the table so that an
+/// older log reads, and so does the human's way out of an escalation it opened.
+fn human_must_accept_the_contract(_context: &TransitionContext) -> GateResult {
+    Err(vec![
+        "no contract waits for the human's acceptance (ADR 0061)".to_string(),
+    ])
 }
 
 /// The `ReadinessExhausted` gate of `refining -> escalated`: the contract fails the Definition of
@@ -556,15 +502,6 @@ fn readiness_exhausted(context: &TransitionContext) -> GateResult {
             )
         },
     )
-}
-
-/// Whether this contract is waiting for the human's acceptance: the team's policy asks for it, or
-/// the contract's own risk or kind does (`done::requires_human_acceptance`), and the human has not
-/// answered. Either half is enough, so the two cannot disagree in the direction that would carry a
-/// task past the human.
-fn waits_for_the_human(context: &TransitionContext) -> bool {
-    (context.acceptance.required_by_policy || requires_human_acceptance(&context.contract))
-        && !context.acceptance.given
 }
 
 /// The Definition of Ready's own messages when the contract fails it, in its own order, and `None`
@@ -738,8 +675,8 @@ mod tests {
     use chrono::{DateTime, TimeZone, Utc};
 
     use super::{
-        ContractAcceptance, GateFailure, TransitionContext, TransitionDecision, TransitionEffect,
-        TransitionRefusal, TransitionRequest, evaluate_transition,
+        GateFailure, TransitionContext, TransitionDecision, TransitionEffect, TransitionRefusal,
+        TransitionRequest, evaluate_transition,
     };
     use crate::budget::{BudgetState, DEFAULT_SESSION_LIMITS, SessionLedger};
     use crate::contract::{Role, TaskStatus, VerificationWire};
@@ -825,7 +762,6 @@ mod tests {
             children: Vec::new(),
             readiness: a_ready_context(),
             readiness_failed_attempts: 1,
-            acceptance: ContractAcceptance::default(),
             assignment: Some(an_assignment()),
             assignee_results: vec![a_result(RunBy::Assignee)],
             work: WorkState {
@@ -1186,96 +1122,34 @@ mod tests {
     }
 
     #[test]
-    fn keeps_a_contract_the_human_has_not_accepted_out_of_ready() {
-        // Spec 5.16 item 2: every epic requires the human's acceptance of its contract before it
-        // leaves `refining`, whatever its risk, and 5.2 says the same for a high risk and for the
-        // team's policy. This is the only function the runtime asks, so a rule it does not hold is
-        // not held: the epic would reach `ready`, then `assigned`, with no approval ever asked for.
-        let mut context = a_context();
-        context.contract.status = TaskStatus::Refining;
+    fn readies_an_epic_and_a_high_risk_contract_without_the_human() {
+        // ADR 0061: no contract waits for the human. An epic, a `high` risk task and a task under
+        // the policy `human_accepts_contracts: all` (which is ignored now) pass the structural
+        // checks with no summary and move on to `ready`; the escalation for the human's
+        // acceptance is refused for each.
         let ready = ask(TaskStatus::Ready, A::Governor, None);
-        let waiting =
-            "this contract needs the human's acceptance before it leaves refining (5.16 item 2), and the human has not given it"
-                .to_string();
-        context.contract.kind = Kind::Epic;
-        assert_eq!(
-            one_gate(&ready, &context),
-            (GateId::DefinitionOfReady, vec![waiting.clone()])
-        );
-        context.contract.kind = Kind::Task;
-        context.contract.risk = Risk::High;
-        assert_eq!(
-            one_gate(&ready, &context),
-            (GateId::DefinitionOfReady, vec![waiting.clone()])
-        );
-        context.contract.risk = Risk::Medium;
-        context.acceptance.required_by_policy = true;
-        assert_eq!(
-            one_gate(&ready, &context),
-            (GateId::DefinitionOfReady, vec![waiting.clone()])
-        );
-        // The acceptance comes first because it is the last thing to happen, but the failures are
-        // reported with it: a contract that does not pass the structural checks cannot be put to
-        // the human yet (5.16 item 2), so reporting only the acceptance would tell an epic to wait
-        // for something nobody can ask for, and the escalation row would say the opposite about the
-        // same contract.
-        context.contract.intent = " "
-            .repeat(24)
-            .parse()
-            .expect("twenty-four spaces pass the schema");
-        assert_eq!(
-            one_gate(&ready, &context),
-            (
-                GateId::DefinitionOfReady,
-                vec![
-                    waiting,
-                    "the intent is blank; state the user-facing reason for the task".to_string()
-                ]
-            )
-        );
-        // The fixture's contract is `in_progress`, and this test is about a `refining` one.
-        context.contract = a_context().contract;
-        context.contract.status = TaskStatus::Refining;
-        // Once the human has accepted, the Definition of Ready is the whole gate again.
-        context.acceptance.given = true;
-        assert_eq!(effects(&ready, &context), []);
-    }
-
-    #[test]
-    fn asks_the_human_only_once_the_contract_passes_the_structural_checks() {
-        // Spec 5.16 item 2: "once the contract passes the structural checks, the governor moves the
-        // epic to `escalated` with reason `approval`". An epic sent to the user on its first
-        // readiness failure would lose the three refining attempts 5.2 gives it, and the human's
-        // gate-free `escalated -> any` row would then carry a contract that never passed the
-        // Definition of Ready into `ready`.
-        let mut context = a_context();
-        context.contract.status = TaskStatus::Refining;
-        context.contract.kind = Kind::Epic;
-        context.readiness_failed_attempts = 1;
-        context.contract.intent = " "
-            .repeat(24)
-            .parse()
-            .expect("twenty-four spaces pass the schema");
-        let request = ask(TaskStatus::Escalated, A::Governor, None);
-        let failures = gates(&request, &context);
-        assert_eq!(failures[1].gate, GateId::ContractRequiresHuman);
-        assert_eq!(
-            failures[1].details,
-            vec![
-                "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
-                    .to_string(),
-                "the intent is blank; state the user-facing reason for the task".to_string()
-            ]
-        );
-        // The same epic, written properly, goes to the user.
-        // The fixture's contract is `in_progress`, and this test is about a `refining` one.
-        context.contract = a_context().contract;
-        context.contract.status = TaskStatus::Refining;
-        context.contract.kind = Kind::Epic;
-        assert_eq!(
-            effects(&request, &context),
-            [TransitionEffect::RaiseEscalation(Why::Approval)]
-        );
+        let escalate = ask(TaskStatus::Escalated, A::Governor, None);
+        for prepare in [
+            (|context: &mut TransitionContext| context.contract.kind = Kind::Epic)
+                as fn(&mut TransitionContext),
+            |context| context.contract.risk = Risk::High,
+            |_| {},
+        ] {
+            let mut context = a_context();
+            context.contract.status = TaskStatus::Refining;
+            context.contract.summary = None;
+            prepare(&mut context);
+            assert_eq!(effects(&ready, &context), []);
+            let failures = gates(&escalate, &context);
+            let shut = failures
+                .iter()
+                .find(|failure| failure.gate == GateId::ContractRequiresHuman)
+                .expect("the approval row is still in the table, and shut");
+            assert_eq!(
+                shut.details,
+                vec!["no contract waits for the human's acceptance (ADR 0061)".to_string()]
+            );
+        }
     }
 
     #[test]
@@ -1312,132 +1186,6 @@ mod tests {
             failures[0].details,
             vec![
                 "the contract has failed the Definition of Ready 2 times, and it is refined again until 3"
-                    .to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn asks_the_human_about_a_contract_that_now_passes_however_often_it_failed_before() {
-        // The two rows into `escalated` from `refining` must not overlap: a contract that failed
-        // the Definition of Ready three times, was sent back by the human, and now passes is
-        // waiting for the approval 5.16 item 2 asks for, not for its readiness failures again. The
-        // board would otherwise show it as having failed readiness, the human would resolve it by
-        // moving it rather than approving it, and the approval would never be recorded.
-        let mut context = a_context();
-        context.contract.status = TaskStatus::Refining;
-        context.contract.kind = Kind::Epic;
-        context.readiness_failed_attempts = 3;
-        let decision = decide(&ask(TaskStatus::Escalated, A::Governor, None), &context)
-            .expect("the move is allowed");
-        assert_eq!(decision.row.gate, GateId::ContractRequiresHuman);
-        assert_eq!(
-            decision.effects,
-            [TransitionEffect::RaiseEscalation(Why::Approval)]
-        );
-        // And a contract nobody has to accept, that now passes, is not escalated at all: it is
-        // ready, whatever the counter says.
-        context.contract.kind = Kind::Task;
-        let failures = gates(&ask(TaskStatus::Escalated, A::Governor, None), &context);
-        assert_eq!(
-            failures
-                .iter()
-                .map(|failure| failure.gate)
-                .collect::<Vec<GateId>>(),
-            [
-                GateId::ReadinessExhausted,
-                GateId::ContractRequiresHuman,
-                GateId::GovernorEscalation
-            ]
-        );
-        assert_eq!(
-            failures[0].details,
-            vec![
-                "the contract passes the Definition of Ready, so it goes to ready rather than escalating on its failures"
-                    .to_string()
-            ]
-        );
-        // The contract is answered before the counter, so a fixed contract reads the same whatever
-        // the runtime counted.
-        context.readiness_failed_attempts = 1;
-        assert_eq!(
-            gates(&ask(TaskStatus::Escalated, A::Governor, None), &context)[0].details,
-            vec![
-                "the contract passes the Definition of Ready, so it goes to ready rather than escalating on its failures"
-                    .to_string()
-            ]
-        );
-        assert_eq!(
-            effects(&ask(TaskStatus::Ready, A::Governor, None), &context),
-            []
-        );
-    }
-
-    #[test]
-    fn escalates_a_contract_that_waits_for_the_human_and_names_why() {
-        let mut context = a_context();
-        context.contract.status = TaskStatus::Refining;
-        context.readiness_failed_attempts = 0;
-        let request = ask(TaskStatus::Escalated, A::Governor, None);
-        // An epic waits for the user's approval (5.16 item 2); a high-risk task waits on the risk
-        // gate (5.4 item 5). The reason the escalation carries says which.
-        context.contract.kind = Kind::Epic;
-        assert_eq!(
-            effects(&request, &context),
-            [TransitionEffect::RaiseEscalation(Why::Approval)]
-        );
-        context.contract.kind = Kind::Task;
-        context.contract.risk = Risk::High;
-        assert_eq!(
-            effects(&request, &context),
-            [TransitionEffect::RaiseEscalation(Why::RiskGate)]
-        );
-        // The team's policy is the other half of the question, and either half is enough. A
-        // contract the policy sends to the human has no risk gate, so it is the user's approval:
-        // 5.7's `risk_gate` is the contract's own `high` risk and nothing else.
-        context.contract.risk = Risk::Medium;
-        context.acceptance.required_by_policy = true;
-        assert_eq!(
-            effects(&request, &context),
-            [TransitionEffect::RaiseEscalation(Why::Approval)]
-        );
-        // A contract the human has already accepted goes to `ready`, not to the human again.
-        context.acceptance.given = true;
-        let details = gates(&request, &context)[1].details.clone();
-        assert_eq!(
-            details,
-            vec![
-                "the human has already accepted this contract, so it goes to ready rather than escalating"
-                    .to_string()
-            ]
-        );
-        // A contract the human has accepted that does not pass the Definition of Ready must not be
-        // told it goes to `ready`, because the readying gate refuses that very move: the flow 5.16
-        // names, a user writing an epic themselves and locking and approving it, reaches this state.
-        context.acceptance.given = true;
-        let mut unready = a_context();
-        unready.contract.status = TaskStatus::Refining;
-        unready.contract.kind = Kind::Epic;
-        unready.acceptance.given = true;
-        unready.contract.intent = " "
-            .repeat(24)
-            .parse()
-            .expect("twenty-four spaces pass the schema");
-        assert_eq!(
-            gates(&request, &unready)[1].details,
-            vec![
-                "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
-                    .to_string(),
-                "the intent is blank; state the user-facing reason for the task".to_string()
-            ]
-        );
-        // And one that needs nobody's acceptance says that instead.
-        context.acceptance = ContractAcceptance::default();
-        let details = gates(&request, &context)[1].details.clone();
-        assert_eq!(
-            details,
-            vec![
-                "this contract does not need the human's acceptance: the risk is not high, it is not an epic, and the team's policy does not ask for it"
                     .to_string()
             ]
         );
@@ -2097,6 +1845,17 @@ mod tests {
                 A::Reviewer => Some("arch-1"),
                 A::ScrumMaster | A::ProductManager | A::Governor | A::Human => None,
             };
+            if case.row == 3 {
+                // The row for a contract that waits for the human stays in the table, so older
+                // logs read, but no contract waits any more (ADR 0061): it never opens.
+                assert!(
+                    gates(&ask(case.to, case.actor, agent_id), &context)
+                        .iter()
+                        .any(|failure| failure.gate == GateId::ContractRequiresHuman)
+                );
+                covered.push(case.row);
+                continue;
+            }
             let decision = decide(&ask(case.to, case.actor, agent_id), &context)
                 .unwrap_or_else(|refusal| panic!("row {} was shut: {refusal:?}", case.row));
             assert_eq!(

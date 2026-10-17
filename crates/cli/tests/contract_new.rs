@@ -168,8 +168,7 @@ fn asks_its_questions_at_the_terminal() {
     for expected in [
         "large by pm: A file and the check that it exists.",
         &format!("question {n} from pm: Should done.txt be empty?"),
-        "readiness: passed the structural checks",
-        "CTV-1 awaits your approval",
+        "readiness: passed",
     ] {
         assert!(ran.out.contains(expected), "{expected:?} in {}", ran.out);
     }
@@ -186,7 +185,8 @@ fn asks_its_questions_at_the_terminal() {
         &answers[0].body,
         EventBody::QuestionAnswered(body) if body.answer == "No, one line."
     ));
-    assert_eq!(status_of(&repository, "CTV-1"), "escalated");
+    // No contract waits for the owner's approval (ADR 0061): a contract that passes is ready.
+    assert_eq!(status_of(&repository, "CTV-1"), "ready");
 
     let quiet = a_team("new-asks-json");
     let ran = run_with(
@@ -200,7 +200,7 @@ fn asks_its_questions_at_the_terminal() {
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     assert_eq!(ran.out.trim().lines().count(), 1, "{}", ran.out);
     let object: Value = serde_json::from_str(ran.out.trim()).expect("one JSON object");
-    assert_eq!(object["readiness"]["state"], "structural", "{object}");
+    assert_eq!(object["readiness"]["state"], "passed", "{object}");
     assert_eq!(object["question_open"], Value::Null, "{object}");
 }
 

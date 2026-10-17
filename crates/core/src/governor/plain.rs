@@ -9,7 +9,6 @@ use super::readiness::ReadinessRule;
 pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
     match rule {
         ReadinessRule::IntentPresent => "The plan does not say why the work matters to you.",
-        ReadinessRule::SummaryPresent => "The plan has no short summary for you to decide on.",
         ReadinessRule::CriteriaPresent => "The plan does not say how anyone will know it is done.",
         ReadinessRule::CriteriaMethodsValid => {
             "One of the checks for done is written in a way that cannot be run."
@@ -95,9 +94,8 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 33] = [
+    const EVERY_RULE: [ReadinessRule; 32] = [
         IntentPresent,
-        SummaryPresent,
         CriteriaPresent,
         CriteriaMethodsValid,
         NoReviewOutsideCode,
@@ -135,7 +133,6 @@ mod tests {
     const fn listed(rule: ReadinessRule) {
         match rule {
             IntentPresent
-            | SummaryPresent
             | CriteriaPresent
             | CriteriaMethodsValid
             | NoReviewOutsideCode

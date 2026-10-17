@@ -16,9 +16,7 @@ use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, 
 use catervas_core::folders::human_of_twin;
 use catervas_core::generated::team::Judgment;
 pub(crate) use catervas_core::governor::done::result_awaits_human;
-use catervas_core::governor::done::{
-    CriterionResult, DesignReviewNeed, DoneEvidence, RunBy, requires_human_acceptance,
-};
+use catervas_core::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
 use catervas_core::governor::escalation::EscalationReason;
 use catervas_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
@@ -29,12 +27,12 @@ use catervas_core::governor::readiness::{
 };
 use catervas_core::governor::team_rules::is_ui_change;
 use catervas_core::governor::transition::{
-    ContractAcceptance, GateFailure, TransitionContext, TransitionDecision, TransitionEffect,
-    TransitionRefusal, TransitionRequest, evaluate_transition,
+    GateFailure, TransitionContext, TransitionDecision, TransitionEffect, TransitionRefusal,
+    TransitionRequest, evaluate_transition,
 };
 use catervas_core::governor::transition_table::{GateId, TransitionActor};
 use catervas_core::team::{
-    AgentStatus, HumanAcceptsContracts, JudgmentRequired, Team, private_folder, task_private_folder,
+    AgentStatus, JudgmentRequired, Team, private_folder, task_private_folder,
 };
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{
@@ -611,10 +609,6 @@ impl Transitions {
             children: children_of(&board, id),
             readiness,
             readiness_failed_attempts: readiness_failed_attempts(&history),
-            acceptance: ContractAcceptance {
-                required_by_policy: asks_every_contract(team),
-                given: contract_accepted(&history),
-            },
             assignment,
             assignee_results: results,
             work,
@@ -763,7 +757,6 @@ impl Transitions {
             rules: team.rules(),
             requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
             judgment_review: judgment_since_written(history),
-            human_approves: asks_every_contract(team) || requires_human_acceptance(contract),
             awaits_the_product_plan: self.awaits_the_product_plan(team)?,
             is_the_product_plan: is_the_product_plan(history),
             repos: self.files.read_repos()?.map(|listed| {
@@ -1415,11 +1408,6 @@ fn status_on(board: &[TaskProjection], task: &str) -> Option<TaskStatus> {
         .iter()
         .find(|row| row.task_id.as_str() == task)
         .map(|row| row.status)
-}
-
-/// Whether the team's policy asks the human to approve every contract, not only the risky ones.
-fn asks_every_contract(team: &Team) -> bool {
-    team.policy.human_accepts_contracts == HumanAcceptsContracts::All
 }
 
 /// How many agents of each role are active.
@@ -2676,27 +2664,6 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn reads_the_policy_that_asks_the_human_for_every_contract() {
-        let project = Project::new("policy", a_team(|_| {}), at(12));
-        project.file("CTV-1", |_| {});
-        project.created("CTV-1", "refining");
-        let request = a_request("CTV-1", TaskStatus::Ready, TransitionActor::Governor, None);
-        let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
-        let context = project
-            .transitions
-            .context(&request, &TransitionAsk::default(), &all)
-            .expect("the context reads");
-        assert!(context.acceptance.required_by_policy);
-        assert!(
-            !project
-                .context(&request, &TransitionAsk::default())
-                .acceptance
-                .required_by_policy
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_work_from_the_tasks_worktree() {
         let project = Project::new("worktree-work", a_team(|_| {}), at(12));
         for task in ["CTV-1", "CTV-2"] {
@@ -3269,54 +3236,6 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn binds_the_summary_to_the_plans_a_human_approves() {
-        // The fixture's team asks the human under `high_risk`.
-        let project = Project::new("readiness-summary", a_team(|_| {}), at(12));
-        project.file("CTV-1", |wire| wire["risk"] = json!("high"));
-        project.created("CTV-1", "refining");
-        project.file("CTV-2", |wire| {
-            wire["kind"] = json!("epic");
-            wire["reviewer_role"] = json!("human");
-        });
-        project.created_under("CTV-2", "refining", "epic", None);
-        project.file("CTV-3", |_| {});
-        project.created("CTV-3", "refining");
-        project.file("CTV-4", |wire| {
-            wire["risk"] = json!("high");
-            wire["summary"] = json!("A login page, so that people can sign in to the app.");
-        });
-        project.created("CTV-4", "refining");
-        let misses_its_summary = |task: &str, team: &Team| {
-            let context = project
-                .transitions
-                .context(
-                    &a_request(task, TaskStatus::Ready, TransitionActor::Governor, None),
-                    &TransitionAsk::default(),
-                    team,
-                )
-                .expect("the context reads");
-            let contract = project
-                .files
-                .read_contract(&task.parse().expect("a task id"))
-                .expect("the file reads");
-            evaluate_readiness(&contract, &context.readiness)
-                .err()
-                .unwrap_or_default()
-                .iter()
-                .any(|failure| failure.rule == ReadinessRule::SummaryPresent)
-        };
-
-        assert!(misses_its_summary("CTV-1", &project.team));
-        assert!(misses_its_summary("CTV-2", &project.team));
-        assert!(!misses_its_summary("CTV-3", &project.team));
-        assert!(!misses_its_summary("CTV-4", &project.team));
-        // Under `all` the human approves every plan, the low risk one too.
-        let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
-        assert!(misses_its_summary("CTV-3", &all));
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn checks_readiness_against_the_contracts_own_sprint() {
         let project = Project::new("readiness-sprint", a_team(|_| {}), at(12));
         project.file("CTV-1", |wire| {
@@ -3423,7 +3342,6 @@ mod tests {
             .collect()
         );
         assert!(context.readiness.requires_judgment_review);
-        assert!(!context.acceptance.given);
         assert_eq!(context.blocked_limit, Duration::from_hours(24));
         assert_eq!(
             context.budget.session_limits,
@@ -4369,67 +4287,6 @@ mod tests {
         );
     }
 
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn asks_the_owner_about_the_product_plans_contract_under_all() {
-        // The product plan's contract is the owner's to approve like any other under `all`: it
-        // needs the owner's summary and waits for the owner's word. Only the wait for the plan to
-        // be on main is lifted for it.
-        let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
-        let project = Project::new("plan-asks-all", all, at(12));
-        started(&project);
-        for (task, summary) in [
-            (
-                "CTV-1",
-                Some("A bakery site, so that people can order cakes."),
-            ),
-            ("CTV-2", None),
-        ] {
-            project.file(task, |wire| {
-                if let Some(summary) = summary {
-                    wire["summary"] = json!(summary);
-                }
-            });
-            project.record(
-                task,
-                "task.created",
-                &json!({
-                    "summary": { "kind": "task", "title": "Draft the product plan", "status": "refining", "risk": "low" },
-                    "created_by": "human",
-                    "product_plan": true
-                }),
-                at(9),
-            );
-            written(&project, task);
-        }
-        // With its summary the contract passes the checks and waits for the owner alone.
-        let outcome = readying(&project, "CTV-1");
-        assert!(
-            matches!(outcome, TransitionOutcome::Refused(_)),
-            "{outcome:?}"
-        );
-        let failures = readiness_failures(&project, "CTV-1");
-        assert!(
-            holds(
-                &failures,
-                "needs the human's acceptance before it leaves refining"
-            ),
-            "{failures:?}"
-        );
-        assert!(
-            !holds(&failures, "product plan is not approved yet"),
-            "{failures:?}"
-        );
-        // Without one the owner has nothing to read: the summary is asked of it as of any plan.
-        let outcome = readying(&project, "CTV-2");
-        assert!(
-            matches!(outcome, TransitionOutcome::Refused(_)),
-            "{outcome:?}"
-        );
-        let failures = readiness_failures(&project, "CTV-2");
-        assert!(holds(&failures, "no summary for the user"), "{failures:?}");
-    }
-
     /// A `contract.written` of `task` by the Product Manager.
     fn written(project: &Project, task: &str) {
         project.record(
@@ -4944,66 +4801,6 @@ mod tests {
             TransitionActor::ProductManager,
             Some("maya"),
         )
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn reads_the_approval_of_the_contract_the_task_has_now() {
-        let project = Project::new("approval-now", a_team(|_| {}), at(12));
-        an_epic(&project, "CTV-1", &a_contract_wire()["exit_criteria"]);
-        project.created_under("CTV-1", "draft", "epic", None);
-        project.moved("CTV-1", "draft", "refining", &json!({}), at(9));
-        project.moved("CTV-1", "refining", "escalated", &json!({}), at(9));
-        project.record(
-            "CTV-1",
-            "escalation.raised",
-            &json!({ "reason": "approval", "detail": "contract_requires_human" }),
-            at(9),
-        );
-        let approving = a_request("CTV-1", TaskStatus::Ready, TransitionActor::Human, None);
-        assert!(
-            !project
-                .context(&approving, &TransitionAsk::default())
-                .acceptance
-                .given
-        );
-
-        accepted(&project, "CTV-1", "contract", None);
-        assert!(
-            project
-                .context(&approving, &TransitionAsk::default())
-                .acceptance
-                .given
-        );
-
-        let given = || {
-            project
-                .context(&approving, &TransitionAsk::default())
-                .acceptance
-                .given
-        };
-        let written = || {
-            project.record(
-                "CTV-1",
-                "contract.written",
-                &json!({
-                    "summary": { "kind": "epic", "title": "Add a login page", "status": "refining", "risk": "low" },
-                    "written_by": "maya"
-                }),
-                at(11),
-            );
-        };
-        // Each half of 5.16 item 1 ends the approval on its own: a new write, and a return to
-        // refining.
-        written();
-        assert!(!given(), "an approval is of the contract as it was written");
-        accepted(&project, "CTV-1", "contract", None);
-        assert!(given());
-        project.moved("CTV-1", "escalated", "refining", &json!({}), at(11));
-        assert!(!given(), "a return to refining ends the approval");
-        // The human's acceptance of a result is not an approval of the contract.
-        accepted(&project, "CTV-1", "result", None);
-        assert!(!given(), "only an acceptance of the contract approves it");
     }
 
     #[test]

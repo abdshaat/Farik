@@ -839,7 +839,7 @@ mod tests {
     use catervas_store::git::fixtures::git_output_in;
 
     use catervas_core::contract::{TaskId, TaskKind};
-    use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
+    use catervas_protocol::command::{Command, RequestSize};
     use catervas_protocol::event::EscalationRaisedBodyReason;
 
     use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
@@ -1260,13 +1260,9 @@ mod tests {
             .collect()
     }
 
-    /// Runs until idle, answers the one question, runs, approves the epic, and runs again, as the
-    /// human at a terminal would: Catervas accepts the epic's result on its criteria (ADR 0061).
-    async fn drive_one_request(
-        harness: &Harness,
-        orchestrator: &super::Orchestrator,
-        epic: &TaskId,
-    ) {
+    /// Runs until idle, answers the one question, runs, and runs again, as the human at a
+    /// terminal would: Catervas accepts the epic's result on its criteria (ADR 0061).
+    async fn drive_one_request(harness: &Harness, orchestrator: &super::Orchestrator) {
         orchestrator.run_until_idle().await.expect("the run idles");
         let question = harness.events(&[EventKind::QuestionAsked]);
         assert_eq!(question.len(), 1, "one question is asked");
@@ -1278,15 +1274,7 @@ mod tests {
             .await
             .expect("the human answers");
         orchestrator.run_until_idle().await.expect("the run idles");
-        orchestrator
-            .handle(Command::HumanAccept {
-                task_id: epic.clone(),
-                subject: AcceptSubject::Contract,
-                message: None,
-            })
-            .await
-            .expect("the human approves the epic");
-        orchestrator.run_until_idle().await.expect("the run idles");
+        // No contract waits for the owner (ADR 0061), so the epic is ready and runs on.
         // Catervas never merges: the owner merges the task's branch, and the epic goes on.
         harness.merge_by_hand("CTV-2");
         orchestrator.run_until_idle().await.expect("the run idles");
@@ -1313,7 +1301,7 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
         let epic: TaskId = "CTV-1".parse().expect("a task id");
 
-        drive_one_request(&harness, &orchestrator, &epic).await;
+        drive_one_request(&harness, &orchestrator).await;
 
         let ctv_1 = harness.row("CTV-1");
         assert_eq!(
@@ -1356,10 +1344,7 @@ mod tests {
                 "CTV-1 draft -> refining",
                 "question.asked",
                 "question.answered",
-                "CTV-1 refining -> escalated",
-                "escalation.raised approval",
-                "human.accepted contract",
-                "CTV-1 escalated -> ready",
+                "CTV-1 refining -> ready",
                 "CTV-1 ready -> assigned",
                 "CTV-1 assigned -> in_progress",
                 "CTV-2 created",
