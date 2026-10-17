@@ -1445,7 +1445,7 @@ fn model_label(id: &str, newest: &[(String, &str)]) -> String {
 
 /// What the browser shows of `team` and does not work out itself: each agent's model and effort
 /// as its sessions run them, the tiers it holds and those its role and the team's answers give it
-/// before its own grants and revokes; and who checks plans under each choice.
+/// before its own grants and revokes.
 fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     let newest = newest(deps)?;
     let permissions = team.permissions();
@@ -1466,25 +1466,7 @@ fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             }))
         })
         .collect::<Result<Vec<_>, Failure>>()?;
-    let holder = |role: Role| {
-        team.active_agents()
-            .find(|agent| Role::from(agent.role) == role)
-            .map(|agent| {
-                json!({ "agent_id": agent.id, "display_name": agent.display_name, "role": agent.role })
-            })
-    };
-    let mut auto = team.clone();
-    if let Some(judgment) = auto.policy.judgment.as_mut() {
-        judgment.judge = catervas_core::team::JudgeChoice::Auto;
-    }
-    Ok(json!({
-        "agents": agents,
-        "judges": {
-            "auto": holder(auto.judge()),
-            "architect": holder(Role::Architect),
-            "scrum_master": holder(Role::ScrumMaster),
-        },
-    }))
+    Ok(json!({ "agents": agents }))
 }
 
 /// `project.scan`: the project scanned again, its facts for the rows, the checks it found, and the
@@ -1646,9 +1628,6 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["agents", _, "display_name"] => "name",
         ["agents", _, "revokes"] => "keeps_read",
         ["agents", _, "status"] if message == FROM_THE_CARD => "status_from_card",
-        ["policy", "judgment", "judge"] => "judge_not_held",
-        ["policy", "judgment", "questions"] => "no_questions",
-        ["policy", "judgment", "questions", _] => "question_length",
         _ => "invalid",
     }
 }
@@ -3905,13 +3884,6 @@ pub(super) mod tests {
                 },
             ])
         );
-        // A paused Architect checks nothing: Catervas's choice is the Product Manager.
-        let pm = json!({ "agent_id": "pm", "display_name": "pm", "role": "product_manager" });
-        assert_eq!(
-            got["judges"],
-            json!({ "auto": pm, "architect": null, "scrum_master": null })
-        );
-
         // A draft is answered the same way, before it is saved.
         paused["id"] = json!("ivo");
         paused["display_name"] = json!("Ivo");
@@ -3922,11 +3894,6 @@ pub(super) mod tests {
             "team.validate",
             &json!({ "team": team }),
             "teamValidateResult",
-        );
-        let ivo = json!({ "agent_id": "ivo", "display_name": "Ivo", "role": "architect" });
-        assert_eq!(
-            checked["judges"],
-            json!({ "auto": ivo, "architect": ivo, "scrum_master": null })
         );
         assert_eq!(
             checked["agents"][4]["tiers"],
@@ -4003,19 +3970,6 @@ pub(super) mod tests {
                 team["agents"].as_array_mut().expect("agents").remove(2);
             }),
             ["/agents worked"]
-        );
-        assert_eq!(
-            codes(&|team| team["policy"]["judgment"] = json!({ "judge": "architect" })),
-            ["/policy/judgment/judge judge_not_held"]
-        );
-        assert_eq!(
-            codes(&|team| team["policy"]["judgment"] =
-                json!({ "required": "always", "questions": [] })),
-            ["/policy/judgment/questions no_questions"]
-        );
-        assert_eq!(
-            codes(&|team| team["policy"]["judgment"] = json!({ "questions": ["short"] })),
-            ["/policy/judgment/questions/0 question_length"]
         );
         assert_eq!(
             codes(&|team| team["policy"]["integration"] = json!("mail")),
@@ -4663,14 +4617,6 @@ pub(super) mod tests {
                 "ambient_messages_per_sprint": 1,
                 "escalation_age_hours": 24,
                 "memory_cap_tokens": 8000,
-                "judgment": {
-                    "required": "always",
-                    "questions": [
-                        "Does the task fit its budget?",
-                        "Would its checks notice if the work went wrong the way its intent worries about?"
-                    ],
-                    "judge": "auto"
-                },
                 "permissions": { "run_commands": true, "push": false },
                 "plan_in_sprints": true
             })

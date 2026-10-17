@@ -116,6 +116,21 @@ fn a_second_init_keeps_what_a_person_added_to_the_ignore_file() {
 }
 
 #[test]
+fn drops_the_judgment_policy_when_it_writes_the_team() {
+    // ADR 0061: a team file may still carry `policy.judgment`, and no file written after it does.
+    let project = TempProject::new("drops-judgment");
+    let files = project.files();
+    let mut old = a_team();
+    old.policy.judgment = Some(catervas_core::generated::team::Judgment::default());
+    files.write_team(&old).expect("the team is written");
+
+    let written =
+        std::fs::read_to_string(project.root.join(".catervas/team.yaml")).expect("the file");
+    assert!(!written.contains("judgment"), "{written}");
+    assert_eq!(files.read_team().expect("the team").policy.judgment, None);
+}
+
+#[test]
 fn reads_back_the_team_it_wrote() {
     let project = TempProject::new("round-trip-team");
     let files = project.files();

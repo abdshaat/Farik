@@ -963,9 +963,6 @@
             "$ref": "#/$defs/effectiveAgent"
           }
         },
-        "judges": {
-          "$ref": "#/$defs/planJudges"
-        },
         "max_agents": {
           "type": "integer",
           "minimum": 1,
@@ -1173,7 +1170,6 @@
       "required": [
         "team",
         "agents",
-        "judges",
         "max_agents",
         "connectors",
         "kits",
@@ -5398,10 +5394,6 @@
             "$ref": "#/$defs/effectiveAgent"
           },
           "description": "The team as it would be, as team.get answers it; left out when there are errors."
-        },
-        "judges": {
-          "$ref": "#/$defs/planJudges",
-          "description": "Left out when there are errors."
         }
       },
       "required": [
@@ -6272,100 +6264,6 @@
           "items": {
             "type": "string"
           }
-        }
-      }
-    },
-    "planJudges": {
-      "title": "Plan Judges",
-      "description": "Who checks plans under each choice of policy.judgment.judge: the first active agent of the role, and under auto the one Team::judge resolves (spec 5.3); null where no active agent holds it.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "auto",
-        "architect",
-        "scrum_master"
-      ],
-      "properties": {
-        "auto": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "agent_id",
-                "display_name",
-                "role"
-              ],
-              "properties": {
-                "agent_id": {
-                  "type": "string"
-                },
-                "display_name": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                }
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "architect": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "agent_id",
-                "display_name",
-                "role"
-              ],
-              "properties": {
-                "agent_id": {
-                  "type": "string"
-                },
-                "display_name": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                }
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "scrum_master": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "agent_id",
-                "display_name",
-                "role"
-              ],
-              "properties": {
-                "agent_id": {
-                  "type": "string"
-                },
-                "display_name": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                }
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       }
     },

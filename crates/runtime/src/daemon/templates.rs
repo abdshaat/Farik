@@ -408,7 +408,6 @@ mod tests {
             ],
             "policy": {
                 "permissions": { "run_commands": true, "push": false },
-                "judgment": { "required": "never" },
                 "integration": "manual"
             },
             "budgets": {}
@@ -441,7 +440,6 @@ mod tests {
             ],
             "policy": {
                 "permissions": { "run_commands": false, "push": true },
-                "judgment": { "required": "never" },
                 "integration": "pull_request"
             },
             "budgets": {}
@@ -669,16 +667,8 @@ mod tests {
         );
         let policy = &listed["templates"][0]["template"]["policy"];
         assert_eq!(
-            [
-                &policy["permissions"],
-                &policy["judgment"]["required"],
-                &policy["integration"]
-            ],
-            [
-                &pair()["policy"]["permissions"],
-                &json!("never"),
-                &json!("pull_request")
-            ]
+            [&policy["permissions"], &policy["integration"]],
+            [&pair()["policy"]["permissions"], &json!("pull_request")]
         );
         assert_eq!(listed["templates"][0]["template"]["budgets"], json!({}));
         assert_eq!(listed["unreadable"], json!([{ "slug": "broken" }]));

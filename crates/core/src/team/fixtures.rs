@@ -1,8 +1,7 @@
 use serde_json::{Value, json};
 
 /// A schema-valid wire team: the two agents a team cannot work without, and no optional field
-/// but one. It checks no plans (`judgment.required: never`), so that a test not about checking
-/// plans keeps testing what it names; a test about them sets `always`.
+/// but one.
 #[must_use]
 pub fn a_team_wire() -> Value {
     json!({
@@ -14,8 +13,7 @@ pub fn a_team_wire() -> Value {
             "wip_limit_per_agent": 2,
             "blocked_limit_hours": 24,
             "max_iterations": 3,
-            "integration": "manual",
-            "judgment": { "required": "never" }
+            "integration": "manual"
         },
         "rules": {}
     })
@@ -78,11 +76,6 @@ pub fn a_full_team_wire() -> Value {
             "memory_cap_tokens": 8000,
             "integration": "auto_merge",
             "integration_branch": "trunk",
-            "judgment": {
-                "required": "always",
-                "questions": ["Does the task fit its budget?", "Is it small enough to finish in one go?"],
-                "judge": "auto"
-            },
             "permissions": { "run_commands": true, "push": false }
         },
         "rules": {
@@ -125,7 +118,6 @@ pub fn a_template_wire() -> Value {
         ],
         "policy": {
             "permissions": { "run_commands": true, "push": false },
-            "judgment": { "required": "always", "judge": "auto" },
             "integration": "auto_merge"
         },
         "budgets": { "daily_usd": 20 }

@@ -78,7 +78,7 @@ Tests:
   - The team written by `Files::write_team` and read back has no `policy.judgment`.
   - A template made from that team (`template_of`) has no `policy.judgment`.
 
-- [ ] `feat(core): drop the agent judgment of contracts from the team`
+- [x] `feat(core): drop the agent judgment of contracts from the team`
 
 ### Task 3: setup and the Team rules page stop asking who checks
 

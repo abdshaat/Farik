@@ -5,7 +5,6 @@
 use serde_json::json;
 
 use super::{TeamBudgets, TeamPermissions, TeamPolicy};
-use crate::generated::team::Judgment;
 
 /// The plan check's optional third question, which a team may turn on; off by default.
 pub const SMALL_ENOUGH_QUESTION: &str = "Is it small enough to finish in one go?";
@@ -36,7 +35,6 @@ pub fn defaults() -> TeamDefaults {
         "integration": "pull_request"
     }))
     .expect("the starter policy is one the team schema accepts");
-    policy.judgment = Some(Judgment::default());
     policy.permissions = Some(TeamPermissions::default());
     // A new team plans its work in sprints (ADR 0028); an old file without the key does not.
     policy.plan_in_sprints = Some(true);
