@@ -3,30 +3,33 @@
 Status: draft
 Branch: `feat/parallel-agents` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md`, revision 0.118
-Depends on: plans 1 to 4 of this folder (committed on this branch)
+Depends on: plans 1, 2, 2b, 3 and 4 of this folder (committed on this branch)
 Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
 
-`docs/SPEC.md` says what plans 1 to 4 built (hard rule 8), in one revision, 0.118: sessions of
+`docs/SPEC.md` says what plans 1, 2, 2b, 3 and 4 built (hard rule 8), in one revision, 0.118: sessions of
 different agents run at once, one per agent, everything else one at a time; a task under review
 does not count towards its assignee's WIP limit and a sent-back one does and stays with its
-author; a spent day stops every running session; the drivers print each start and drain on stop.
+author; a chat is a quick fork beside its agent's work; a spent day stops every running session; the
+drivers print each start and drain on stop.
 This plan touches documents only, so it has no test; its check is the full check and a reading
-against plans 1 to 4's Decisions.
+against those plans' Decisions.
 
 ## Decisions
 
 - **One revision**, 0.118, dated 2026-10-16, naming ADR 0064 and the standalone plans
-  `parallel-agents` 1 to 4, placed after 0.117's line in the revisions list at the top. 0.115 to
+  `parallel-agents` 1 to 4 and 2b, placed after 0.117's line in the revisions list at the top. 0.115 to
   0.117 are ADRs 0061 to 0063's. Each changed paragraph carries "(changed in 0.118; ADR 0064)" or
   "(added in 0.118; ADR 0064)".
 - **The revision line**: "Revision 0.118 (2026-10-16) records that agents work in parallel
   (ADR 0064, standalone plans `parallel-agents`): in 5.2 a task in `verifying` no longer counts
   towards its assignee's work-in-progress limit, a `rejected` one counts from its rejection and is
-  never handed to another agent; in 5.5 a daily budget crossed by one session stops every other
+  never handed to another agent; in 4.3 and 5.9 a chat is a fork that runs at once beside its
+  agent's work session, one per agent, bounded to answer quickly and told what the agent is doing
+  now; in 5.5 a daily budget crossed by one session stops every other
   session running then; in 5.14 integration stays one at a time beside concurrent sessions; in 6.7
   a `stdio` connector's folder is safe because an agent runs one session at a time; in 8.2 one
   session per agent runs at once while everything else a tick does stays one at a time under the
@@ -40,6 +43,15 @@ against plans 1 to 4's Decisions.
   no new work while it waits") and that a sent-back task is never handed to another agent, unlike a
   blocked, escalated or waiting one (0.116's hand-over). The private folder's hold, in the same
   row, is unchanged.
+- **4.3** (asking an agent a question) and **5.9**, the paragraph on one-to-one chats: add "A chat
+  session is a fork (added in 0.118; ADR 0064): it starts at once, before any other work, beside
+  the agent's work session, which it does not touch; an agent has at most one chat fork at a time,
+  and messages written meanwhile are answered by the next one. It runs in the project's root with
+  no worktree, sandbox, executor, connector or browser, on the read tier and the chat's tools, at
+  low effort, within 100,000 input and 4,000 output tokens, 3 minutes and 12 tool calls, or the
+  team's limits where smaller (the interview keeps the team's limits). Its first message says what
+  the agent is doing now: the task of its running work session, else its oldest held task, with
+  its title, status and the agent's last note on it." 4.3 gets one sentence pointing to it: "A chat answers at once, beside the agent's work (5.9; added in 0.118; ADR 0064)."
 - **5.5**, the paragraph "This release enforces the table above": after "a task's dollars or a
   daily budget crossed during a session stops the next one from starting rather than cutting that
   one short", add: "; with sessions of several agents running at once (8.2), a daily budget that a
@@ -60,7 +72,8 @@ against plans 1 to 4's Decisions.
     session runs and takes it again when the session ends. So every agent may have one session
     running beside other agents' sessions, while everything else is done one at a time; an agent
     never runs two sessions at once, and a rule passes over an agent whose session runs as it
-    passes over a sleeping one, and over a task whose session runs. There is no other limit than
+    passes over a sleeping one, and over a task whose session runs; a chat is the one fork, beside
+    its agent's work (5.9). There is no other limit than
     the team's active agents. A session's start prints `<task>: <agent> started its <purpose>
     session` (`<agent>: started its <purpose> session` about no task; JSON `{"started", "agent_id",
     "task_id"}`), and its tick's line follows when it ends. While sessions run and the next tick
@@ -82,21 +95,21 @@ against plans 1 to 4's Decisions.
 ## File map
 
 ```
-docs/SPEC.md                                           modifies: revision 0.118; 5.2, 5.5, 5.14, 6.7, 8.2 (Task 1)
+docs/SPEC.md                                           modifies: revision 0.118; 4.3, 5.2, 5.5, 5.9, 5.14, 6.7, 8.2 (Task 1)
 docs/plans/standalone/parallel-agents/README.md        modifies: Status done (Task 1)
 docs/plans/standalone/parallel-agents/05-spec.md       modifies: its checkbox (Task 1)
 ```
 
 ## Interfaces
 
-Consumes: plans 1 to 4's behaviour as their Decisions state it. Produces: nothing.
+Consumes: plans 1, 2, 2b, 3 and 4's behaviour as their Decisions state it. Produces: nothing.
 
 ## Tasks
 
 ### Task 1: SPEC 0.118
 
 Files as the map. No test (documents only); the check is the full check and a read of each
-changed paragraph against plans 1 to 4.
+changed paragraph against plans 1, 2, 2b, 3 and 4.
 
 - [ ] `docs(spec): agents work in parallel, revision 0.118`
 
@@ -106,5 +119,5 @@ changed paragraph against plans 1 to 4.
 cargo xtask check
 # expected: xtask check: ok
 grep -c "0.118; ADR 0064" docs/SPEC.md
-# expected: 5 (the lines of 5.2's row, 5.5's, 5.14's, 6.7's and 8.2's paragraphs)
+# expected: 7 (the lines of 4.3's, 5.2's row, 5.5's, 5.9's, 5.14's, 6.7's and 8.2's paragraphs)
 ```
