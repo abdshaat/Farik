@@ -1467,7 +1467,8 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
         .map_or(Role::Human, |agent| Role::from(agent.role))
 }
 
-/// The tasks an agent holds and works: assigned, in progress, verifying or rejected, and not
+/// The tasks an agent holds and works: assigned, in progress or rejected (sent back; a task under
+/// review is its reviewer's, ADR 0064), and not
 /// waiting on the human (`TaskProjection::counts_towards_wip`, ADR 0062), leaving out the epic
 /// `under`, when one is named: an epic does not hold its own tasks back from its assignee. A
 /// blocked or escalated task, or one that waits on the human, leaves its agent free. The one place
@@ -2431,8 +2432,9 @@ mod tests {
                 .assignment
                 .expect("an assignment");
             assert!(assignment.private_folder_busy, "{held}");
-            // A blocked or escalated task keeps the folder busy but leaves its agent free.
-            let works = u32::from(!matches!(held, "blocked" | "escalated"));
+            // A blocked, escalated or reviewed task keeps the folder busy but leaves its agent
+            // free (ADR 0064).
+            let works = u32::from(!matches!(held, "blocked" | "escalated" | "verifying"));
             assert_eq!(assignment.assignee_open_tasks, works, "{held}");
             assert_eq!(assignment.wip_limit, 2, "{held}");
             let TransitionOutcome::Refused(refusal) = project.ask(&request, &second) else {

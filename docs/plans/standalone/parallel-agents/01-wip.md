@@ -118,7 +118,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   status of `TaskStatus`, `counts_towards_wip` is true exactly for `Assigned`, `InProgress` and
   `Rejected`.
 
-- [ ] `feat(runtime): a task under review frees its agent, a sent-back one waits for it`
+- [x] `feat(runtime): a task under review frees its agent, a sent-back one waits for it`
 
 ## Verification
 

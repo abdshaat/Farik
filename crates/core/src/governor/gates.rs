@@ -90,12 +90,12 @@ pub struct AssignmentInput {
     pub reviewer_id: String,
     /// The proposed reviewer's role.
     pub reviewer_role: Role,
-    /// How many tasks the proposed assignee already holds and works, as the runtime's
-    /// `transitions::open_tasks` counts them: assigned, in progress, verifying or rejected, and
-    /// not waiting on the human (ADR 0062). Counting only the started ones would let an agent be
-    /// assigned any number of tasks and start none, because `assigned -> in_progress` has no
-    /// gate, and counting fewer statuses would let the limit be walked through `verifying` and
-    /// `rejected`. A blocked or escalated task leaves its agent free.
+    /// The tasks the assignee holds that count towards its limit (`counts_towards_wip`: assigned,
+    /// in progress, sent back), not one waiting on the human, the epic under assignment left out.
+    /// A task under review is its reviewer's work and is not counted (ADR 0064). Counting only
+    /// the started ones would let an agent be assigned any number of tasks and start none,
+    /// because `assigned -> in_progress` has no gate. A blocked or escalated task leaves its
+    /// agent free.
     pub assignee_open_tasks: u32,
     /// The team's limit on work in progress per agent.
     pub wip_limit: u32,
@@ -225,7 +225,7 @@ pub struct ReassignmentInput {
 }
 
 /// The rules a hand-over of a task whose wait cleared must pass (ADR 0062): the task is
-/// `assigned`, `in_progress` or `rejected`, returning, no epic and in no lane; the candidate is
+/// `assigned` or `in_progress` (a sent-back task waits for its author, ADR 0064), returning, no epic and in no lane; the candidate is
 /// active, holds the task's role, has room, is not the holder, and is not the reviewer, but where
 /// the role may review its own work (as `check_assignment` allows).
 ///
@@ -235,12 +235,9 @@ pub struct ReassignmentInput {
 pub fn check_reassignment(contract: &TaskContract, input: &ReassignmentInput) -> GateResult {
     let mut reasons = Vec::new();
     let to = input.to.trim();
-    if !matches!(
-        input.status,
-        TaskStatus::Assigned | TaskStatus::InProgress | TaskStatus::Rejected
-    ) {
+    if !matches!(input.status, TaskStatus::Assigned | TaskStatus::InProgress) {
         reasons.push(format!(
-            "a task is handed over only while assigned, in progress or rejected, and this one is {}",
+            "{}: only an assigned or in-progress task is handed over",
             input.status
         ));
     }
