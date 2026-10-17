@@ -108,12 +108,7 @@ export function DocumentChanges({
 				<AgentPicture agent={agent} size={48} />
 				<div className={styles.headText}>
 					<strong id={`${id}-title`}>{t("docChangesTitle")}</strong>
-					<p className={styles.muted}>
-						{t("docChangesFrom", {
-							name,
-							n: card.sprintId.replace(/^S/, ""),
-						})}
-					</p>
+					<p className={styles.muted}>{t("docChangesFrom", { name })}</p>
 					<p>{visibly(card.summary)}</p>
 				</div>
 			</div>

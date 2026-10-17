@@ -2417,7 +2417,7 @@ export const en = {
 		"This message went with an order that was decided without it, so it is not sent.",
 	// The product plan's changes the owner approves on Today (spec 5.7).
 	docChangesTitle: "Product plan changes to approve",
-	docChangesFrom: "From {name}, after the sprint {n} review",
+	docChangesFrom: "From {name}, after the team's review",
 	docChangesLegend: "Lines marked + are added; lines marked − are removed.",
 	docNameRoadmap: "Roadmap",
 	docNameSpec: "Product description",

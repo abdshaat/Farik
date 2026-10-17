@@ -418,8 +418,9 @@ pub fn moved_since(
     Ok(moved.into_iter().map(|(_, moved)| moved).collect())
 }
 
-/// Who proposed changes to the product plan since `since`: one line for each agent and sprint
-/// review, with the latest proposal's sequence number and time, and `k` the distinct documents.
+/// Who proposed changes to the product plan since `since`: one line for each agent and review (a
+/// proposal of an older log carries its sprint, which tells reviews apart), with the latest
+/// proposal's sequence number and time, and `k` the distinct documents.
 fn proposal_moves(
     log: &EventLog,
     who: &impl Fn(&str) -> String,
@@ -449,9 +450,8 @@ fn proposal_moves(
                 k => format!("{k} changes"),
             };
             let line = format!(
-                "{} proposed {what} to the product plan from the sprint {} review.",
-                who(&latest.agent_id),
-                latest.sprint_id.trim_start_matches('S')
+                "{} proposed {what} to the product plan at the team's review.",
+                who(&latest.agent_id)
             );
             (
                 latest.proposal,
@@ -465,19 +465,17 @@ fn proposal_moves(
         .collect())
 }
 
-/// An Architect's `review` session, the sprint it came after, and its latest write: its seq and
-/// time.
+/// An Architect's `review` session and its latest write: its seq and time.
 struct ReviewSession {
     session: String,
     agent: String,
-    sprint: String,
     wrote: Option<(u64, DateTime<Utc>)>,
 }
 
 /// Where the Architect brought its notes up to date since `since`: one line for each of its `review`
-/// sessions that wrote a folder document, at its latest write, naming the sprint of the last
-/// `sprint.ended` before the session started. Under the `pull_request` policy the change reaches
-/// the project only when it is merged, and the line says it was sent as a pull request.
+/// sessions that wrote a folder document, at its latest write. Under the `pull_request` policy the
+/// change reaches the project only when it is merged, and the line says it was sent as a pull
+/// request.
 fn architecture_moves(
     log: &EventLog,
     team: &Team,
@@ -485,11 +483,7 @@ fn architecture_moves(
     since: DateTime<Utc>,
 ) -> Result<Vec<(u64, Moved)>, StoreError> {
     let events = log.read(&EventQuery {
-        kinds: vec![
-            EventKind::SprintEnded,
-            EventKind::SessionStarted,
-            EventKind::FolderDocWritten,
-        ],
+        kinds: vec![EventKind::SessionStarted, EventKind::FolderDocWritten],
         ..EventQuery::default()
     })?;
     let is_architect = |agent: &str| {
@@ -497,22 +491,18 @@ fn architecture_moves(
             .iter()
             .any(|each| each.id.as_str() == agent && Role::from(each.role) == Role::Architect)
     };
-    let mut last_ended: Option<String> = None;
-    // Each review session of an Architect, with the sprint it came after, and its latest write.
+    // Each review session of an Architect, and its latest write.
     let mut sessions: Vec<ReviewSession> = Vec::new();
     for event in &events {
         let ids = &event.envelope.ids;
         match &event.body {
-            EventBody::SprintEnded(body) => last_ended = Some(body.sprint_id.as_str().to_string()),
             EventBody::SessionStarted(body) if body.thread == Some(Thread::Review) => {
-                if let (Some(agent), Some(session), Some(sprint)) =
-                    (&ids.agent_id, &ids.session_id, &last_ended)
+                if let (Some(agent), Some(session)) = (&ids.agent_id, &ids.session_id)
                     && is_architect(agent)
                 {
                     sessions.push(ReviewSession {
                         session: session.clone(),
                         agent: agent.clone(),
-                        sprint: sprint.clone(),
                         wrote: None,
                     });
                 }
@@ -531,10 +521,9 @@ fn architecture_moves(
         .into_iter()
         .filter_map(|each| {
             let (seq, at) = each.wrote?;
-            let (agent, n) = (&each.agent, each.sprint.trim_start_matches('S'));
             let line = format!(
-                "{} sent the architecture notes for sprint {n} as a pull request",
-                who(agent)
+                "{} sent the architecture notes as a pull request after the team's review",
+                who(&each.agent)
             );
             Some((
                 seq,
@@ -823,7 +812,7 @@ mod tests {
             [(
                 at(10, 2),
                 "ada".to_string(),
-                "Ada proposed a change to the product plan from the sprint 4 review.".to_string()
+                "Ada proposed a change to the product plan at the team's review.".to_string()
             )]
         );
 
@@ -833,7 +822,7 @@ mod tests {
             [(
                 at(10, 3),
                 "ada".to_string(),
-                "Ada proposed 2 changes to the product plan from the sprint 4 review.".to_string()
+                "Ada proposed 2 changes to the product plan at the team's review.".to_string()
             )]
         );
     }
@@ -933,8 +922,75 @@ mod tests {
             [(
                 at(10, 3),
                 "ada".to_string(),
-                "Ada sent the architecture notes for sprint 4 as a pull request".to_string()
+                "Ada sent the architecture notes as a pull request after the team's review"
+                    .to_string()
             )]
+        );
+    }
+
+    #[test]
+    fn says_what_a_review_did_without_naming_a_sprint() {
+        let board = Board::new("moved-review-without-sprint");
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
+        wire["agents"] = json!([
+            { "id": "ada", "display_name": "Ada", "role": "architect", "status": "active" },
+            { "id": "pm", "display_name": "Pat", "role": "product_manager", "status": "active" },
+            { "id": "dev", "display_name": "Dee", "role": "software_developer", "status": "active" },
+        ]);
+        wire["policy"]["integration"] = json!("pull_request");
+        let team = validate_team(&wire).expect("the fixture is a team");
+        // Two proposals an older log holds, of Ada's, after `since`.
+        proposes(&board, at(10, 1), "S4", SPEC);
+        proposes(&board, at(10, 2), "S4", ROADMAP);
+        // A delivery closes; Ada's review session writes an architecture note.
+        board.put(
+            at(11, 0),
+            None,
+            None,
+            "delivery.closed",
+            json!({
+                "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": ["CTV-1"]
+            }),
+        );
+        board.session(
+            at(11, 1),
+            None,
+            "ada",
+            "session-2",
+            "session.started",
+            json!({
+                "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                "thread": "review"
+            }),
+        );
+        board.session(
+            at(11, 2),
+            None,
+            "ada",
+            "session-2",
+            "folder_doc.written",
+            json!({
+                "path": "docs/catervas/architecture/structure.html", "written_by": "ada",
+                "change": 1, "sha": "abc123"
+            }),
+        );
+
+        let lines: Vec<String> = moved_since(&board.log, &board.projections, &team, at(9, 0))
+            .expect("the store reads")
+            .into_iter()
+            .map(|one| one.line)
+            .collect();
+
+        assert_eq!(
+            lines,
+            [
+                "Ada proposed 2 changes to the product plan at the team's review.",
+                "Ada sent the architecture notes as a pull request after the team's review"
+            ]
+        );
+        assert!(
+            lines.iter().all(|line| !line.contains("sprint")),
+            "{lines:?}"
         );
     }
 

@@ -253,7 +253,7 @@ Files: `activity.rs` (the lines of the Decisions), `DocumentChanges.tsx` (`docCh
   2 changes to the product plan at the team's review." and "<the Architect> sent the
   architecture notes as a pull request after the team's review", and no line contains "sprint".
 
-- [ ] `feat(web): a review's proposals and notes say nothing of sprints`
+- [x] `feat(web): a review's proposals and notes say nothing of sprints`
 
 ## Verification
 
