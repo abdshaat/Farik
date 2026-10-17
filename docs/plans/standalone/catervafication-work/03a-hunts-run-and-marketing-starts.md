@@ -136,7 +136,7 @@ spends 2,000, keeps its "end your turn" assertion.
   - a proposal with a total budget of 100 answers `next` "end your turn: the owner's decision
     starts the next session".
 
-- [ ] `feat(runtime): a marketing plan approved at once is started in the same session`
+- [x] `feat(runtime): a marketing plan approved at once is started in the same session`
 
 ### Task 3: the skills
 

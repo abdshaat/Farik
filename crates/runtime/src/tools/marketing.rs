@@ -316,7 +316,7 @@ pub(crate) fn propose_plan(
             .map_err(|error| failed(format!("{error:?}")))?;
         return Ok(json!({
             "plan": id,
-            "next": "Catervas approved it, since it spends nothing; end your turn: the approval starts the next session",
+            "next": format!("{id} is approved: it spends nothing. Start on it now: schedule its first posts with catervas_schedule_post, then write your kickoff document and commit it."),
         }));
     }
     Ok(json!({
@@ -769,6 +769,35 @@ mod tests {
         assert_eq!(answer["plan"], "MP-1");
         assert_eq!(proposed_events(&paid), 1);
         assert!(paid.events(&[EventKind::MarketingPlanApproved]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_start_now_when_the_plan_spends_nothing() {
+        let project = a_marketing_project("tools-plan-start-now");
+        works_on(&project, "CTV-1");
+        let mut free = a_plan();
+        free["budget"] = json!({ "total": "0", "google_ads": "0" });
+        free["campaigns"] = json!([]);
+        free.as_object_mut()
+            .expect("an object")
+            .remove("google_ads_account");
+        let answer = propose(&project, "CTV-1", &free).expect("the plan is proposed");
+        assert_eq!(
+            answer["next"],
+            "MP-1 is approved: it spends nothing. Start on it now: schedule its first posts with catervas_schedule_post, then write your kickoff document and commit it."
+        );
+
+        let paid = a_marketing_project("tools-plan-start-later");
+        works_on(&paid, "CTV-1");
+        let mut plan = a_plan();
+        plan["budget"] = json!({ "total": "100", "google_ads": "100" });
+        plan["campaigns"][0]["budget"] = json!("100");
+        let answer = propose(&paid, "CTV-1", &plan).expect("the plan is proposed");
+        assert_eq!(
+            answer["next"],
+            "end your turn: the owner's decision starts the next session"
+        );
     }
 
     #[test]
