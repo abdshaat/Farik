@@ -1,6 +1,6 @@
 # Standalone internal-task-ids, plan 5: the Files page and the task page
 
-Status: draft
+Status: done
 Branch: `feat/internal-task-ids` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.17, 5.14 (recorded by plan 6)
 Depends on: plans 1, 2 and 4 of this branch

@@ -1,6 +1,6 @@
 # Standalone internal-task-ids, plan 4: a folder change's branch and pull request
 
-Status: draft
+Status: done
 Branch: `feat/internal-task-ids` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.14 "Folder changes", 5.17, 8.5 (recorded by plan 6)
 Depends on: plans 1 and 2 of this branch

@@ -1,6 +1,6 @@
 # Standalone: task ids stay inside Catervas
 
-Status: draft
+Status: done
 Branch: `feat/internal-task-ids` (work outside a phase, one pull request to `main`)
 Decision: ADR 0066 (`docs/decisions/0066-task-ids-stay-inside-catervas.md`)
 Depends on: `feat/catervafication-work` (ADRs 0061 to 0063, SPEC 0.117), then `feat/parallel-agents`
