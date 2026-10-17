@@ -1048,7 +1048,13 @@ export const en = {
 		"A command that installs what your app needs and builds it, such as “npm install”.\nYou can leave it empty.\nIt may use the internet, for up to 15 minutes.",
 	previewStart: "Start it",
 	previewStartHint:
-		"The command that starts your app, such as “npm start”.\nThe internet is off while your app runs.",
+		"The command that starts your app, such as “npm start”.\nYour app can reach the internet and this computer while it runs.",
+	previewEnvPresent:
+		"Your app’s settings file is in place. {designer} starts your app with it.",
+	previewEnvAbsent:
+		"No settings file for your app. If it needs keys or addresses, put them in .catervas/local/preview.env in your project folder.",
+	previewEnvMore:
+		"One NAME=value per line, without quotes.\nOnly your app gets it, while it runs. No agent can read it, and it is never committed.\nUse keys for testing, not your live ones.\nFor a service on this computer, write host.docker.internal instead of localhost.",
 	previewPort: "Port (optional)",
 	previewPortHint:
 		"Leave it empty: Catervas finds it when your app starts.\nSet it only if your app answers on more than one.\nIt must be a number from 1024 to 65535.",
