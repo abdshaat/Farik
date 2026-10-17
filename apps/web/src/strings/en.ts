@@ -979,6 +979,7 @@ export const en = {
 	chatsSendRequest: "Send as a request",
 	chatsNothingSent: "Nothing is sent until you press it.",
 	chatsSentAs: "Sent as {id}",
+	chatsGivenAs: "Given to {name} as {id}",
 	chatsAnswering: "{name} is thinking…",
 	chatsDaySpent:
 		"Today’s spending limit is reached, so {name} will answer tomorrow. Your message is kept.",

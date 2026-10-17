@@ -588,6 +588,25 @@ describe("chats", () => {
 		);
 	});
 
+	it("shows_the_task_a_message_became", async () => {
+		const { container } = await chats("/channel/mira", {
+			messages: [
+				chat("human", "Add a dark mode switch to the settings page", {
+					sent_as: "CTV-7",
+				}),
+			],
+			waiting: null,
+		});
+		const link = await screen.findByRole("link", {
+			name: "Given to Mira as CTV-7",
+		});
+		expect(link.getAttribute("href")).toBe("/tasks/CTV-7");
+		expect(
+			screen.queryByText(en.chatsAnswering.replace("{name}", "Mira")),
+		).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+
 	it("shows_no_such_teammate", async () => {
 		const { s } = await chats("/channel/nobody");
 		expect(await screen.findByText(en.chatsNoSuch)).toBeTruthy();
@@ -1167,6 +1186,9 @@ describe("chats", () => {
 		const open = await chats("/channel/mira", {
 			messages: [
 				chat("human", "Could customers also pay with Apple Pay?"),
+				chat("human", "Add a dark mode switch to the settings page", {
+					sent_as: "CTV-7",
+				}),
 				chat("mira", "Yes.", { request: APPLE }),
 				chat("mira", "Done.", { request: APPLE, sent_as: "CTV-12" }),
 				chat("mira", "Short answer.\n\n- **One**\n- Two\n\nCTV-12 is next."),

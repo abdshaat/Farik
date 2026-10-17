@@ -115,7 +115,7 @@ tested by `apps/web/src/pages/Chats.test.tsx`.
   - `en.chatsAnswering` filled with "Mira" is not on the page;
   - `expectNoAxeViolations(container)` passes.
 
-- [ ] `feat(web): a chat message given as a task links to its task`
+- [x] `feat(web): a chat message given as a task links to its task`
 
 ### Task 3: the Catervafication's words and the activity word
 

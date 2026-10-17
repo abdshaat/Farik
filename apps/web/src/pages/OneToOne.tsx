@@ -224,6 +224,7 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 							key={m.seq}
 							message={m}
 							agents={agents}
+							name={name}
 							onSent={(taskId) => markSent(m.seq, taskId)}
 							action={
 								interviewing && m.seq === newestOfHers ? (
@@ -324,11 +325,14 @@ function waitingWords(
 function Row({
 	message,
 	agents,
+	name,
 	onSent,
 	action,
 }: {
 	message: ChatMessage;
 	agents: Agent[];
+	/** The display name of the agent whose chat this is. */
+	name: string;
 	onSent: (taskId: string) => void;
 	/** What the owner can do about this reply: it sits inside "What I heard", else under the text. */
 	action?: ReactNode;
@@ -360,9 +364,18 @@ function Row({
 					</time>
 				</p>
 				{mine ? (
-					<p className={`${channel.text} ${styles.lines}`}>
-						{renderMessageText(message.text, agents, [])}
-					</p>
+					<>
+						<p className={`${channel.text} ${styles.lines}`}>
+							{renderMessageText(message.text, agents, [])}
+						</p>
+						{message.sentAs && (
+							<p className={channel.muted}>
+								<Link to={`/tasks/${message.sentAs}`}>
+									{t("chatsGivenAs", { name, id: message.sentAs })}
+								</Link>
+							</p>
+						)}
+					</>
 				) : (
 					// biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: the links inside are the interactive elements and keep their keyboard behaviour
 					<div
