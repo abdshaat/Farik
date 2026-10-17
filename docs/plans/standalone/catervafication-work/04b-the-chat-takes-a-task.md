@@ -147,7 +147,7 @@ come from a `Chat` session of `dev-a`: `project.context("dev-a", None)` with `pu
     - `in_reply_to` `Some(m)`: `task_too_short: `;
     - `dev-a` paused: `agent_not_active: `.
 
-- [ ] `feat(runtime): an agent's chat takes the owner's request as its own task`
+- [x] `feat(runtime): an agent's chat takes the owner's request as its own task`
 
 ### Task 2: offered in the chat, and the chat told when
 

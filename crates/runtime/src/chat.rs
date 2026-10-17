@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU64;
 
 use catervas_core::contract::Role;
-use catervas_core::team::{AgentStatus, Team};
+use catervas_core::governor::team_rules::TeamRules;
+use catervas_core::team::{Agent, AgentStatus, Team};
 use chrono::{DateTime, Utc};
 
 use catervas_protocol::clock::Clock;
@@ -14,9 +15,11 @@ use catervas_protocol::event::{
     SessionStartedBodyPurpose, new_event,
 };
 use catervas_store::product_plan::new_project;
+use catervas_store::requests::{placeholder_budget_usd, request_from_text};
 use catervas_store::{EventLog, EventQuery, Projections, StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::{Value, json};
 
 use crate::cost::CostError;
 
@@ -127,6 +130,30 @@ fn within(text: &str, what: &str, min: usize, max: usize) -> Result<(), ChatErro
         )));
     }
     Ok(())
+}
+
+/// The contract of a task given to `agent` in its chat (ADR 0063): `text`, the owner's message, as
+/// its intent, the agent's role as its assignee and the usual reviewer role. Both the owner's
+/// "Send as a task" and the agent's own `catervas_take_task` file it, so a task given in a chat is
+/// one shape.
+///
+/// # Errors
+///
+/// `request_from_text`'s sentence (its floor is 20 characters), or that the agent's role has no
+/// reviewer role.
+pub(crate) fn given_request(
+    team: &Team,
+    agent: &Agent,
+    text: &str,
+    rules: &TeamRules,
+) -> Result<Value, String> {
+    let mut wire = request_from_text(text, placeholder_budget_usd(rules))?;
+    let role = Role::from(agent.role);
+    let reviewer = catervas_roles::reviewer_for(team, role)
+        .ok_or_else(|| format!("{role} has no reviewer role"))?;
+    wire["assignee_role"] = json!(role.to_string());
+    wire["reviewer_role"] = json!(reviewer.to_string());
+    Ok(wire)
 }
 
 /// Records `message` in its agent's chat and answers its seq. The text keeps its line breaks.

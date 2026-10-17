@@ -308,10 +308,15 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "End your design review with your answer: pass, or fail with what the Developer is to change. Check the task's pages at both widths in both themes first.",
         ),
+        tool::<chat::TakeTaskInput>(
+            "catervas_take_task",
+            Read,
+            "In your one-to-one chat: take the work the owner's message asks for as your own task; text is its one-line title, and its intent is the owner's message. You write its contract and start once your current work allows. Then reply in one line naming it.",
+        ),
         tool::<chat::ChatReplyInput>(
             "catervas_chat_reply",
             Read,
-            "Answer the user in your one-to-one chat, once, then end your turn. When work is needed, add a request, a title and what it asks for, for the user to send. During a new project's interview, put your summary in heard.",
+            "Answer the user in your one-to-one chat, once, then end your turn. When work another role does is needed, add a request, a title and what it asks for, for the user to send. During a new project's interview, put your summary in heard.",
         ),
         tool::<costs::ReadCostsInput>(
             "catervas_read_costs",
@@ -508,6 +513,7 @@ pub async fn call_tool(
         "catervas_propose_design_plan" => design::propose(&call, parse(input)?),
         "catervas_check_page" => design::check(&call, parse(input)?).await,
         "catervas_record_design_review" => design::record_review(&call, parse(input)?),
+        "catervas_take_task" => chat::take_task(&call, &parse(input)?),
         "catervas_chat_reply" => chat::chat_reply(&call, parse(input)?),
         "catervas_read_costs" => costs::read_costs(&call, &parse(input)?),
         "catervas_write_sheet" => sheets::write_sheet(&call, &parse(input)?),
@@ -850,6 +856,7 @@ mod tests {
             "catervas_propose_design_plan",
             "catervas_check_page",
             "catervas_record_design_review",
+            "catervas_take_task",
             "catervas_chat_reply",
             "catervas_read_costs",
             "catervas_write_sheet",

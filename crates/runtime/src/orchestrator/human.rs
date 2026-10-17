@@ -25,7 +25,7 @@ use catervas_store::product_plan::{drafts_the_plan, new_project, product_plan_ta
 use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use catervas_store::requests::{
     RequestError, TOO_SHORT, file_given_task, file_product_plan_request, hold_contract,
-    placeholder_budget_usd, product_plan_request, request_from_text, triage_by_human,
+    placeholder_budget_usd, product_plan_request, triage_by_human,
 };
 use catervas_store::{EventQuery, TaskProjection};
 use serde_json::json;
@@ -36,7 +36,7 @@ use super::verify::{governor_results, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::catervafication::{self, Project};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
-use crate::chat::{ChatError, NewChatMessage, post_chat};
+use crate::chat::{ChatError, NewChatMessage, given_request, post_chat};
 use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
 use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
@@ -608,22 +608,17 @@ fn given_contract(
             ),
         });
     }
-    let mut wire =
-        request_from_text(text, placeholder_budget_usd(&team.rules())).map_err(|reason| {
-            if reason == TOO_SHORT {
-                CommandError::Refused {
-                    reason: format!("task_too_short: {reason}"),
-                }
-            } else {
-                CommandError::Invalid { detail: reason }
+    given_request(team, agent, text, &team.rules()).map_err(|reason| {
+        if reason == TOO_SHORT {
+            CommandError::Refused {
+                reason: format!("task_too_short: {reason}"),
             }
-        })?;
-    let role = Role::from(agent.role);
-    let reviewer = catervas_roles::reviewer_for(team, role)
-        .ok_or_else(|| failed(format!("{role} has no reviewer role")))?;
-    wire["assignee_role"] = json!(role.to_string());
-    wire["reviewer_role"] = json!(reviewer.to_string());
-    Ok(wire)
+        } else if reason.ends_with("reviewer role") {
+            failed(reason)
+        } else {
+            CommandError::Invalid { detail: reason }
+        }
+    })
 }
 
 /// The human's triage of a draft, through the store (5.16).
