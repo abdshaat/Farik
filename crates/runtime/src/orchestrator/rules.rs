@@ -8982,7 +8982,7 @@ mod tests {
         let ask = adapter.started()[1].initial_prompt.clone();
         assert!(
             ask.contains(
-                "Propose changes to docs/catervas/product/spec.md and docs/catervas/product/roadmap.html with"
+                "Write changes to docs/catervas/product/spec.md and docs/catervas/product/roadmap.html with"
             ),
             "{ask}"
         );

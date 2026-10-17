@@ -1,8 +1,9 @@
 //! `catervas_write_folder_doc` (`docs/SPEC.md` 5.17) and the folder change it makes (5.14): at a
 //! sprint ceremony an agent keeps a small recurring document of its own folder under
 //! `docs/catervas/`. A document for agents is committed by Catervas on a branch of its own, and the
-//! team's integration policy adds it to the project as it does an accepted task's branch; a
-//! document the owner approves is proposed at the sprint review and waits for the owner.
+//! team's integration policy adds it to the project as it does an accepted task's branch. The
+//! product's spec and roadmap, which the owner edits, are written the same way, both files and their
+//! agent versions as one change, at the sprint review (ADR 0061).
 
 use catervas_core::contract::{TaskId, TaskStatus};
 use catervas_core::folders::{
@@ -13,12 +14,12 @@ use catervas_core::folders::{
 use catervas_core::governor::paths::check_protected_paths;
 use catervas_core::team::Team;
 use catervas_protocol::event::{EventBody, EventKind, Thread};
+use catervas_store::CommitOutcome;
 use catervas_store::folder_docs::{FolderDocProposal, ProposalState, folder_docs};
 use catervas_store::requests::{
     RequestError, file_rederive_request, placeholder_budget_usd, rederive_request, rederive_tasks,
 };
 use catervas_store::waiting::name_of;
-use catervas_store::{CommitOutcome, Git};
 use catervas_store::{EventQuery, StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -26,7 +27,6 @@ use serde_json::{Value, json};
 
 use super::refusal::Refusal;
 use super::{Call, ToolDeps, ToolError, failed};
-use crate::ceremonies::ended_sprint;
 use crate::session::SessionPurpose;
 use crate::transitions::{integration_branch, integration_lock};
 
@@ -42,20 +42,13 @@ pub(crate) struct WriteFolderDocInput {
     /// Only for the product's spec and roadmap: their agent version (`.agent.md` or
     /// `.agent.html`), in full.
     pub agent_text: Option<String>,
-    /// Only for the product's spec and roadmap: what changed and why, in 1 to 300 characters, for
-    /// the owner.
+    /// Only for the product's spec and roadmap, and no longer needed: it is not recorded, whether
+    /// given or not.
     pub summary: Option<String>,
 }
 
 /// The most a document says, in bytes: the Files page's cap.
 const DOC_BYTES: usize = 262_144;
-/// The most a proposal's summary says, in characters.
-const SUMMARY_CHARS: usize = 300;
-
-/// What the tool answers to a proposal.
-const PROPOSED: &str =
-    "The owner approves it or sends it back on Today; you are told at your next sprint review.";
-
 /// A folder change made: its number, its branch, its commit, and what happens to it next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Landed {
@@ -406,12 +399,12 @@ struct Checked<'a> {
     text: &'a str,
     /// The same document in the other format, which the write replaces.
     removed: Vec<String>,
-    /// For a human document: its agent version's path and text, and the summary for the owner.
-    proposal: Option<(String, &'a str, String)>,
+    /// For a human document: its agent version's path and text, written with it.
+    twin: Option<(String, &'a str)>,
 }
 
-/// Writes a document of the caller's folder as a folder change, or proposes a human document at
-/// the sprint review (`docs/SPEC.md` 5.17). Holds the integration lock from its checks to its event,
+/// Writes a document of the caller's folder as a folder change, a human document and its agent
+/// version together at the sprint review (`docs/SPEC.md` 5.17). Holds the integration lock from its checks to its event,
 /// so that a write, an approval and an integration never interleave on the root's checkout.
 ///
 // ponytail: the lock is taken on the async thread, as `git::commit` already runs git there;
@@ -423,13 +416,15 @@ pub(super) fn write_folder_doc(
     let checked = check_input(call, input)?;
     let deps = call.deps();
     let _lock = integration_lock(deps.files.root()).map_err(failed)?;
-    if checked.proposal.is_some() {
-        return propose(call, &checked);
-    }
     let path = &checked.path;
     let name = call.agent.display_name.to_string();
-    let files = [(path.clone(), checked.text.to_string())];
-    let message = folder_doc_message(checked.folder, &[path], &name, false);
+    let mut files = vec![(path.clone(), checked.text.to_string())];
+    let mut paths = vec![path.as_str()];
+    if let Some((twin, agent_text)) = &checked.twin {
+        files.push((twin.clone(), (*agent_text).to_string()));
+        paths.push(twin);
+    }
+    let message = folder_doc_message(checked.folder, &paths, &name, false);
     let author = folder_doc_author(&name, call.agent_id());
     let landed = match land(
         deps,
@@ -510,9 +505,7 @@ fn check_input<'a>(
     if target.owner_accepted && call.context.thread != Some(Thread::Review) {
         return Err(refused(
             "folder_doc_at_review",
-            format!(
-                "{path} is proposed to the owner at the sprint review, not at another ceremony"
-            ),
+            format!("{path} is written at the sprint review, not at another ceremony"),
         ));
     }
     let text = checked_text("text", &input.text)?;
@@ -534,7 +527,7 @@ fn check_input<'a>(
             path,
             text,
             removed,
-            proposal: None,
+            twin: None,
         });
     };
     let agent_text = input.agent_text.as_deref().ok_or_else(|| {
@@ -544,24 +537,12 @@ fn check_input<'a>(
         )
     })?;
     let agent_text = checked_text("agent_text", agent_text)?;
-    let summary = input.summary.as_deref().map(str::trim).ok_or_else(|| {
-        refused(
-            "folder_doc_summary",
-            format!("{path} needs a summary of what changed and why, for the owner"),
-        )
-    })?;
-    if summary.is_empty() || summary.chars().count() > SUMMARY_CHARS {
-        return Err(refused(
-            "folder_doc_summary",
-            format!("summary is 1 to {SUMMARY_CHARS} characters"),
-        ));
-    }
     Ok(Checked {
         folder,
         path,
         text,
         removed,
-        proposal: Some((twin, agent_text, summary.to_string())),
+        twin: Some((twin, agent_text)),
     })
 }
 
@@ -649,41 +630,6 @@ fn checked_text<'a>(field: &str, text: &'a str) -> Result<&'a str, ToolError> {
     Ok(text)
 }
 
-/// Records the proposal of a human document and its twin for the sprint review's sprint, the lock
-/// held. Nothing is written.
-fn propose(call: &Call<'_>, checked: &Checked<'_>) -> Result<Value, ToolError> {
-    let Some((twin, agent_text, summary)) = &checked.proposal else {
-        return Err(failed("a proposal was asked for with none to make"));
-    };
-    let (path, text) = (&checked.path, checked.text);
-    let deps = call.deps();
-    let sprint = ended_sprint(&deps.log).map_err(failed)?.ok_or_else(|| {
-        refused(
-            "folder_doc_at_review",
-            "no sprint has ended, so there is no review to propose at",
-        )
-    })?;
-    let into = integration_branch(&call.team, &deps.git).map_err(failed)?;
-    if holds(&deps.git, &into, path, text) && holds(&deps.git, &into, twin, agent_text) {
-        return Err(refused(
-            "folder_doc_unchanged",
-            format!("{path} and {twin} already say this on the integration branch"),
-        ));
-    }
-    let body = serde_json::from_value(json!({
-        "path": path, "text": text, "agent_text": agent_text, "summary": summary,
-        "sprint_id": sprint.sprint_id, "proposed_by": call.agent_id(),
-    }))
-    .map_err(failed)?;
-    let proposed = call.append(None, EventBody::FolderDocProposed(body))?;
-    Ok(json!({ "proposal": proposed.envelope.seq, "next": PROPOSED }))
-}
-
-/// Whether `rev` holds `path` with exactly `text`.
-fn holds(git: &Git, rev: &str, path: &str, text: &str) -> bool {
-    git.file_at(rev, path).is_ok_and(|held| held == text)
-}
-
 #[cfg(test)]
 mod tests {
     use catervas_protocol::event::{EventKind, Thread};
@@ -698,8 +644,6 @@ mod tests {
     const TOOL: &str = "catervas_write_folder_doc";
     const CADENCE: &str = "docs/catervas/delivery/cadence.md";
     const ROADMAP: &str = "docs/catervas/product/roadmap.md";
-    const NEXT: &str =
-        "The owner approves it or sends it back on Today; you are told at your next sprint review.";
 
     /// A team of `pm`, two Developers, the Scrum Master `sm` ("Sol") and, when asked, the Finance
     /// Specialist `fin`, integrating `policy`.
@@ -871,12 +815,11 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn proposes_the_product_plan_at_the_review() {
+    fn writes_the_product_spec_without_a_proposal() {
         let project = project("folder-doc-propose", "auto_merge", false, false);
         s4_ended(&project);
         let input = json!({
             "path": ROADMAP, "text": "Now: pie pre-orders.\n", "agent_text": "- now: pie pre-orders\n",
-            "summary": "Pie pre-orders are done, so they move to Done."
         });
 
         let answer = run(
@@ -884,29 +827,28 @@ mod tests {
             TOOL,
             input.clone(),
         )
-        .expect("the proposal is recorded");
+        .expect("the change is made");
 
-        let proposed = project.events(&[EventKind::FolderDocProposed]);
-        assert_eq!(proposed.len(), 1);
-        let wire = catervas_protocol::event::event_to_value(&proposed[0]);
+        assert!(project.events(&[EventKind::FolderDocProposed]).is_empty());
+        assert_eq!(answer["change"], 1);
+        assert_eq!(answer["branch"], "docs/folder-1");
+        // The document and its agent version are one folder change.
+        let git = &project.deps.git;
         assert_eq!(
-            wire["body"],
-            json!({
-                "path": ROADMAP, "text": "Now: pie pre-orders.\n",
-                "agent_text": "- now: pie pre-orders\n",
-                "summary": "Pie pre-orders are done, so they move to Done.",
-                "sprint_id": "S4", "proposed_by": "pm"
-            })
+            git.file_at("docs/folder-1", ROADMAP).expect("the document"),
+            "Now: pie pre-orders.\n"
         );
         assert_eq!(
-            answer,
-            json!({ "proposal": proposed[0].envelope.seq, "next": NEXT })
+            git.file_at("docs/folder-1", "docs/catervas/product/roadmap.agent.md")
+                .expect("its agent version"),
+            "- now: pie pre-orders\n"
         );
-        assert_eq!(branches(&project), "", "a proposal makes no branch");
+        assert_eq!(project.events(&[EventKind::FolderDocWritten]).len(), 1);
 
+        // Only the review writes the owner's documents; a summary, given or not, is not recorded.
         let before = project.event_count();
         let refused = run(&ceremony(&project, "pm", Thread::Retro), TOOL, input)
-            .expect_err("only the review proposes");
+            .expect_err("only the review writes it");
         assert_eq!(code(&refused), "folder_doc_at_review");
         assert_eq!(project.event_count(), before);
     }
@@ -962,11 +904,6 @@ mod tests {
                 &pm,
                 json!({ "path": ROADMAP, "text": "a", "summary": "why" }),
                 "folder_doc_agent_text",
-            ),
-            (
-                &pm,
-                json!({ "path": ROADMAP, "text": "a", "agent_text": "b" }),
-                "folder_doc_summary",
             ),
             (
                 &sm,
@@ -1144,26 +1081,15 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn proposes_an_html_spec_with_its_agent_version() {
+    fn writes_an_html_spec_with_its_agent_version() {
         let project = html_project("folder-doc-html-spec");
         s4_ended(&project);
         let input = json!({
             "path": "docs/catervas/product/spec.html", "text": "<p>a</p>\n",
-            "agent_text": "<p>b</p>\n", "summary": "why"
+            "agent_text": "<p>b</p>\n"
         });
-        run(&ceremony(&project, "pm", Thread::Review), TOOL, input).expect("proposed");
-        let proposed = project.events(&[EventKind::FolderDocProposed]);
-        assert_eq!(proposed.len(), 1);
-        let wire = catervas_protocol::event::event_to_value(&proposed[0]);
-        assert_eq!(wire["body"]["path"], "docs/catervas/product/spec.html");
-        // Its approval writes the document and its agent version in the same format.
-        crate::orchestrator::human::folder_doc_decide(
-            &project.deps,
-            &[proposed[0].envelope.seq],
-            true,
-            None,
-        )
-        .expect("approved");
+        run(&ceremony(&project, "pm", Thread::Review), TOOL, input).expect("written");
+        // The document and its agent version are written in the same format, as one change.
         let git = &project.deps.git;
         assert_eq!(
             git.file_at("docs/folder-1", "docs/catervas/product/spec.html")

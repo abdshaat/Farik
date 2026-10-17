@@ -2,7 +2,7 @@
 //! (`docs/SPEC.md` section 5.17, ADR 0051). Pure: paths in, answers out.
 
 use crate::contract::TaskId;
-use crate::governor::paths::{PathRefusal, check_allowed_paths, normalise, stays_within};
+use crate::governor::paths::{normalise, stays_within};
 use crate::team::{Role, plain_role};
 
 /// Each role that owns a folder, with its folder, in the order the Team rules list them. The Finance
@@ -224,23 +224,6 @@ pub const PRODUCT_PLAN_STEMS: [&str; 2] = [
     "docs/catervas/product/spec",
     "docs/catervas/product/roadmap",
 ];
-
-/// Whether a task with these `allowed_paths` may change a document of [`OWNER_ACCEPTED_STEMS`], in
-/// either format: a path passes the Definition of Done's own test of a diff
-/// (`check_allowed_paths`), or a glob does not compile, which fails closed.
-#[must_use]
-pub fn may_change_an_owner_document(allowed_paths: &[String]) -> bool {
-    OWNER_ACCEPTED_STEMS.iter().any(|stem| {
-        [DocumentFormat::Markdown, DocumentFormat::Html]
-            .into_iter()
-            .any(|format| {
-                !matches!(
-                    check_allowed_paths(&[with_format(stem, format)], allowed_paths),
-                    Err(PathRefusal::Violations(_))
-                )
-            })
-    })
-}
 
 /// A path `catervas_write_folder_doc` may write: normalised, and whether the owner approves it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -860,10 +843,7 @@ mod tests {
         folder_doc_message, folder_of, folders_line, format_line, human_of_twin, is_human_document,
         is_plan_of, pair_changed_alone, plan_stem, read_access, role_folder, stem_of, with_format,
     };
-    use super::{
-        LineChange, ShownLine, artifact_marks, changed_lines, is_heading,
-        may_change_an_owner_document,
-    };
+    use super::{LineChange, ShownLine, artifact_marks, changed_lines, is_heading};
     use super::{
         Named, OwnerEditRefusal, check_owner_edit, document_name, document_order, named_in_subject,
         plain_name, stale_line, twin_is_stale,
@@ -1501,35 +1481,6 @@ mod tests {
         assert_eq!(changed_lines(&before, &after), expected);
     }
 
-    #[test]
-    fn knows_which_paths_may_change_the_product_plan() {
-        let globs = |globs: &[&str]| globs.iter().map(ToString::to_string).collect::<Vec<_>>();
-        for may in [
-            &["docs/catervas/product/**"][..],
-            &["docs/catervas/product/*.md"],
-            &["docs/catervas/product/spec.md"],
-            &["docs/catervas/product/{spec,notes}.md"],
-            &["**"],
-            &["docs/**"],
-            &["docs/["],
-        ] {
-            assert!(may_change_an_owner_document(&globs(may)), "{may:?}");
-        }
-        for may_not in [
-            &["docs/catervas/product/reports/**"][..],
-            &["docs/catervas/product/spec.agent.md"],
-            &["docs/catervas/product"],
-            &["Docs/Catervas/Product/spec.md"],
-            &["src/**"],
-            &[],
-        ] {
-            assert!(
-                !may_change_an_owner_document(&globs(may_not)),
-                "{may_not:?}"
-            );
-        }
-    }
-
     fn list(paths: &[&str]) -> Vec<String> {
         paths.iter().map(|path| (*path).to_string()).collect()
     }
@@ -1586,13 +1537,6 @@ mod tests {
             pair_changed_alone(&[md.clone(), twin.clone()], &[]),
             [md, twin]
         );
-    }
-
-    #[test]
-    fn owner_documents_by_stem() {
-        assert!(may_change_an_owner_document(&list(&[
-            "docs/catervas/product/spec.html"
-        ])));
     }
 
     #[test]

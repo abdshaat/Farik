@@ -148,7 +148,7 @@ Files: those of the File map for Task 3; these tests change here: `human.rs`' `a
 Tests:
 - `writes_the_product_spec_without_a_proposal` (`tools/folders.rs`): in a sprint review session, `catervas_write_folder_doc` on `docs/catervas/product/spec.md` (with `agent_text`) records `folder_change.opened` for both files and no `folder_doc.proposed`. An older log's open `folder_doc.proposed` is still decided by `folder_doc_decide`.
 
-- [ ] `feat(runtime): write the product's spec and roadmap without the owner's approval`
+- [x] `feat(runtime): write the product's spec and roadmap without the owner's approval`
 
 ### Task 4: free marketing goes out without asking
 

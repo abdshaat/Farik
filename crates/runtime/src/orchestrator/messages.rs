@@ -746,7 +746,7 @@ pub(super) struct ProductFiles {
 }
 
 /// What the Product Manager is asked at a sprint review, after its opening: the changes it
-/// proposes to the product plan and the sprint report it writes (`docs/SPEC.md` 5.9, 5.17).
+/// writes to the product plan and the sprint report it writes (`docs/SPEC.md` 5.9, 5.17).
 fn product_refresh_asks(files: &ProductFiles) -> String {
     let ProductFiles {
         spec,
@@ -754,8 +754,8 @@ fn product_refresh_asks(files: &ProductFiles) -> String {
         report,
     } = files;
     format!(
-        "Propose changes to {spec} and {roadmap} with \
-         catervas_write_folder_doc, with agent_text and summary, only where the sprint changed what \
+        "Write changes to {spec} and {roadmap} with \
+         catervas_write_folder_doc, with agent_text, only where the sprint changed what \
          the product does or what comes next, and nothing otherwise. Write the sprint report, for \
          agents, to {report} with catervas_write_folder_doc."
     )
@@ -786,7 +786,7 @@ fn completion_note(task: &SprintTask) -> &str {
 }
 
 /// The Product Manager's refresh at a sprint review (`docs/SPEC.md` 5.9): to keep the product plan
-/// true to what the sprint did, proposing changes to the spec and the roadmap only where it changed
+/// true to what the sprint did, writing changes to the spec and the roadmap only where it changed
 /// them and writing the sprint report; then each task of the sprint with its status and its
 /// completion note, as untrusted text; then what the owner decided of its proposals (`decisions`)
 /// and the proposals that still wait (`pending`), a line each, in the owner's own words (ADR 0011).
@@ -2239,7 +2239,6 @@ mod tests {
             "roadmap.md",
             "catervas_write_folder_doc",
             "agent_text",
-            "summary",
             "docs/catervas/product/reports/S4.md",
             "CTV-1 (accepted)",
         ] {

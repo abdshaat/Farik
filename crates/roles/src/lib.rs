@@ -1621,9 +1621,6 @@ mod tests {
     /// as globs that reach either format, a plan with the team's extension.
     #[test]
     fn contract_values_keep_their_extension() {
-        assert!(catervas_core::folders::may_change_an_owner_document(&[
-            "docs/catervas/product/spec.*".to_string()
-        ]));
         let globs = vec!["docs/catervas/product/spec.*".to_string()];
         for path in [
             "docs/catervas/product/spec.html",

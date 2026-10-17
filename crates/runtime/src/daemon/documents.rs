@@ -2256,23 +2256,12 @@ mod tests {
              it replaces, with its agent version, by naming each in `removed` when you commit with \
              catervas_git_commit: spec.md, spec.agent.md."
         );
-        let reaches = |contract: &Value| {
-            let paths: Vec<String> = contract["allowed_paths"]
-                .as_array()
-                .expect("paths")
-                .iter()
-                .map(|path| path.as_str().expect("a path").to_string())
-                .collect();
-            catervas_core::folders::may_change_an_owner_document(&paths)
-        };
-        assert!(reaches(&product), "the spec comes back to the owner");
         let architect = contract_of(&harness, "CTV-2");
         assert_eq!(architect["assignee_role"], "architect", "{architect}");
         assert_eq!(
             architect["allowed_paths"],
             json!(["docs/catervas/architecture/**"])
         );
-        assert!(!reaches(&architect));
         let artifact = |contract: &Value, path: &str| {
             contract["exit_criteria"]
                 .as_array()
