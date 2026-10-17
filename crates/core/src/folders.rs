@@ -565,6 +565,9 @@ pub enum Named {
     Task(TaskId),
     /// A folder change, as `folder-<n>` or `Folder change <n>`.
     FolderChange(u64),
+    /// A pull request, as `Merge pull request #<n>` or a trailing `(#<n>)`: the forge's own words
+    /// for a merge, which carry no task id (ADR 0066).
+    PullRequest(u64),
 }
 
 fn number_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
@@ -576,9 +579,27 @@ fn number_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 /// The first task or folder change a commit's subject names, in subject order; a name counts
-/// only at the start of a word.
+/// only at the start of a word. A subject that names none is read for a pull request number: it
+/// starts `Merge pull request #<n>` or ends `(#<n>)`.
 #[must_use]
 pub fn named_in_subject(subject: &str) -> Option<Named> {
+    named_by_id(subject).or_else(|| pull_request_in(subject))
+}
+
+fn pull_request_in(subject: &str) -> Option<Named> {
+    let subject = subject.trim();
+    if let Some(n) = number_after(subject, "Merge pull request #") {
+        return n.parse().ok().map(Named::PullRequest);
+    }
+    let digits = subject.strip_suffix(')')?;
+    let start = digits.rfind("(#")?;
+    let n = &digits[start + 2..];
+    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        .then(|| n.parse().ok().map(Named::PullRequest))
+        .flatten()
+}
+
+fn named_by_id(subject: &str) -> Option<Named> {
     subject
         .char_indices()
         .filter(|(i, _)| !subject[..*i].ends_with(char::is_alphanumeric))
@@ -1160,6 +1181,13 @@ mod tests {
             named_in_subject("Merge docs/folder-3: architecture/plans/CTV-12.md"),
             change(3)
         );
+        let request = |n| Some(Named::PullRequest(n));
+        assert_eq!(named_in_subject("Feat: Gift cards (#4)"), request(4));
+        assert_eq!(
+            named_in_subject("Merge pull request #12 from me/docs/roadmap"),
+            request(12)
+        );
+        assert_eq!(named_in_subject("Docs: Update Roadmap (#9) again"), None);
         assert_eq!(named_in_subject("subfolder-3"), None);
         assert_eq!(named_in_subject("ACTV-1: x"), None);
         assert_eq!(named_in_subject("docs(product): edit roadmap.md"), None);

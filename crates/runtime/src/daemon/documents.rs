@@ -22,7 +22,8 @@ use catervas_store::marketing::marketing_plans;
 use catervas_store::requests::rederive_tasks;
 use serde_json::{Value, json};
 
-use catervas_protocol::event::{EventBody, TaskCreatedBodyFiledAs};
+use catervas_protocol::event::{EventBody, EventKind, TaskCreatedBodyFiledAs};
+use catervas_store::EventQuery;
 use catervas_store::requests::{
     change_request, file_small_request, placeholder_budget_usd, rewrite_request, rewrite_tasks,
 };
@@ -561,6 +562,22 @@ fn last_change(
                     None => (None, None, false),
                 }
             }
+            Some(Named::PullRequest(number)) => match named_by_pull_request(deps, number)? {
+                Some(Named::Task(id)) => {
+                    match deps.projections.task(&id).map_err(|e| internal(&e))? {
+                        Some(row) => (Some(id.to_string()), row.assignee_id, false),
+                        None => (None, None, false),
+                    }
+                }
+                Some(Named::FolderChange(number)) => {
+                    match docs.changes.iter().find(|change| change.change == number) {
+                        Some(change) if change.edited => (None, None, true),
+                        Some(change) => (None, writer_of(docs, change), false),
+                        None => (None, None, false),
+                    }
+                }
+                _ => (None, None, false),
+            },
             None => (None, None, false),
         }
     };
@@ -571,6 +588,39 @@ fn last_change(
         "author": commit.author_name,
         "by_you": by_you,
     }))
+}
+
+/// What pull request `number` was opened for in the project folder, newest first; `None` when the
+/// log opened none with that number. A task's pull request counts only when its contract names no
+/// `repo`: a member's pull request numbers are the member's, not the project folder's.
+fn named_by_pull_request(deps: &ToolDeps, number: u64) -> Result<Option<Named>, Failure> {
+    let opened = deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::PullRequestOpened, EventKind::FolderChangeOpened],
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
+    for event in opened {
+        match &event.body {
+            EventBody::PullRequestOpened(body) if body.number == number => {
+                let Some(task) = event.envelope.ids.task_id.clone() else {
+                    continue;
+                };
+                let in_a_member = deps
+                    .files
+                    .read_contract(&task)
+                    .is_ok_and(|contract| contract.repo.is_some());
+                return Ok((!in_a_member).then_some(Named::Task(task)));
+            }
+            EventBody::FolderChangeOpened(body) if body.number.get() == number => {
+                return Ok(Some(Named::FolderChange(body.change.get())));
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
 }
 
 /// The agent that wrote a folder change, or whose proposals the owner approved in it.
@@ -1182,6 +1232,76 @@ mod tests {
         let overview = read_overview(&harness);
         assert_eq!(overview["document"]["last_change"]["agent_id"], "ada");
         assert_eq!(overview["document"]["last_change"]["by_you"], false);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn names_who_made_a_change_merged_by_pull_request() {
+        let harness = project("files-read-pr", "pull_request");
+        put_documents(&harness);
+        harness.project.moved(
+            "CTV-1",
+            "draft",
+            "assigned",
+            &json!({ "assignee": "pm", "reviewer": "dev-b" }),
+        );
+        // A task's pull request, merged on the forge with a merge commit.
+        git(&harness, &["checkout", "-b", "feat/pie-pre-orders"]);
+        write(&harness, ROADMAP, "a new roadmap\n");
+        commit(&harness, "update the roadmap");
+        git(&harness, &["checkout", "main"]);
+        git(
+            &harness,
+            &[
+                "merge",
+                "--no-ff",
+                "-m",
+                "Merge pull request #4 from me/feat/pie-pre-orders",
+                "feat/pie-pre-orders",
+            ],
+        );
+        harness.project.record(
+            "CTV-1",
+            "pull_request.opened",
+            &json!({
+                "url": "https://github.com/pie/shop/pull/4", "number": 4,
+                "branch": "feat/pie-pre-orders"
+            }),
+        );
+        let last = read_path(&harness, ROADMAP)["document"]["last_change"].clone();
+        assert_eq!(
+            (&last["task_id"], &last["agent_id"], &last["by_you"]),
+            (&json!("CTV-1"), &json!("pm"), &json!(false))
+        );
+
+        // A folder change's pull request, squashed on the forge.
+        git(&harness, &["checkout", "-b", "docs/overview"]);
+        write(&harness, OVERVIEW, "a rewritten overview\n");
+        commit(&harness, "docs(architecture): overview.md by Ada");
+        git(&harness, &["checkout", "main"]);
+        git(&harness, &["merge", "--squash", "docs/overview"]);
+        commit(&harness, "Docs: Update Overview (#9)");
+        harness.project.record_in(
+            Some("ada"),
+            Some("session-1"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": OVERVIEW, "written_by": "ada", "change": 2,
+                "sha": git_output(&harness, &["rev-parse", "docs/overview"]),
+                "branch": "docs/overview"
+            }),
+        );
+        harness.project.record(
+            "",
+            "folder_change.opened",
+            &json!({ "change": 2, "url": "https://github.com/pie/shop/pull/9", "number": 9 }),
+        );
+        let last = read_overview(&harness)["document"]["last_change"].clone();
+        assert_eq!(
+            (&last["task_id"], &last["agent_id"], &last["by_you"]),
+            (&Value::Null, &json!("ada"), &json!(false))
+        );
     }
 
     fn read_path(harness: &Harness, path: &str) -> Value {

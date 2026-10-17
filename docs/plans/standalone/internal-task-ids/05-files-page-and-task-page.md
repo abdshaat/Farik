@@ -107,7 +107,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 
   It fails first on the roadmap's task, which is null.
 
-- [ ] `feat(runtime): the Files page names who made a change merged through a pull request`
+- [x] `feat(runtime): the Files page names who made a change merged through a pull request`
 
 ### Task 2: the task page shows the branch Catervas recorded
 
