@@ -217,30 +217,6 @@ pub fn triage_by_sm_ctv_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/triage_by_sm_ctv_1.jsonl"))
 }
 
-/// The Scrum Master's judgment of CTV-1: `catervas_record_judgment` answering yes to each of the
-/// default two questions, "One file in five dollars, and C1 fails while done.txt is missing.".
-/// Hand-written.
-#[must_use]
-pub fn judge_ctv_1_passes() -> Transcript {
-    Transcript::from_jsonl(include_str!("transcripts/judge_ctv_1_passes.jsonl"))
-}
-
-/// The Scrum Master's judgment of CTV-1: `catervas_record_judgment` answering yes to the first of the
-/// default two questions and no to the second, "C1 checks that done.txt exists, not what it
-/// says.". Hand-written.
-#[must_use]
-pub fn judge_ctv_1_fails() -> Transcript {
-    Transcript::from_jsonl(include_str!("transcripts/judge_ctv_1_fails.jsonl"))
-}
-
-/// The Architect's judgment of CTV-1: `catervas_record_judgment` answering yes to each of the
-/// default two questions, "The design is one file, and C1 fails while done.txt is missing.".
-/// Hand-written.
-#[must_use]
-pub fn judge_ctv_1_by_architect() -> Transcript {
-    Transcript::from_jsonl(include_str!("transcripts/judge_ctv_1_by_architect.jsonl"))
-}
-
 /// The Product Manager's refine session of CTV-1 that asks the human "Should done.txt be empty?"
 /// with `catervas_ask_human`, and nothing else. Hand-written.
 #[must_use]
@@ -417,37 +393,6 @@ pub fn plan_assigns_ctv_1_to_iris() -> Transcript {
 #[must_use]
 pub fn explore_plans_ctv_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/explore_plans_ctv_1.jsonl"))
-}
-
-/// The Product Manager's decision on CTV-1's plan: `catervas_decide_design_plan` approving it, "The
-/// plan keeps to the sign-in page and says what it leaves alone.". Hand-written.
-#[must_use]
-pub fn decide_design_plan_approves_ctv_1() -> Transcript {
-    Transcript::from_jsonl(include_str!(
-        "transcripts/decide_design_plan_approves_ctv_1.jsonl"
-    ))
-}
-
-/// The Product Manager's decision on CTV-1's plan: `catervas_decide_design_plan` returning it, "Say
-/// what the page looks like in the dark theme too.". Hand-written.
-#[must_use]
-pub fn decide_design_plan_returns_ctv_1() -> Transcript {
-    Transcript::from_jsonl(include_str!(
-        "transcripts/decide_design_plan_returns_ctv_1.jsonl"
-    ))
-}
-
-/// The Product Manager's decision session of data pipeline request number `pipeline`:
-/// `catervas_decide_data_pipeline` with `decision` (`approve`, `decline` or `escalate`) and `reason`.
-/// Hand-written.
-#[must_use]
-pub fn decide_data_pipeline(pipeline: u64, decision: &str, reason: &str) -> Transcript {
-    Transcript::from_jsonl(
-        &include_str!("transcripts/decide_data_pipeline.jsonl")
-            .replace("__PIPELINE__", &pipeline.to_string())
-            .replace("__DECISION__", decision)
-            .replace("__REASON__", reason),
-    )
 }
 
 /// A session that says it could not decide and ends, calling no tool. Hand-written.

@@ -187,7 +187,7 @@ fn access_of(
             ));
         }
         Some(tag) if write => {
-            if *tag != ConnectorTag::ExternalEffect || !connector.plan_tools.contains(tool) {
+            if *tag != ConnectorTag::Paid || !connector.plan_tools.contains(tool) {
                 return Err(format!(
                     "tool_not_plan_marked: {tool} is not marked as approved by a marketing plan, so \
                      it does not run"

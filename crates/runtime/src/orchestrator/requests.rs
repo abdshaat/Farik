@@ -3,16 +3,16 @@
 
 use std::sync::Arc;
 
+use catervas_core::branch::task_branch;
 use catervas_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
-use catervas_core::folders::{plan_stem, with_format};
-use catervas_core::governor::done::{CriterionResult, RunBy};
+use catervas_core::folders::{is_plan_task, plan_stem, with_format};
+use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
 use catervas_core::governor::gates::fits_the_open_sprint;
-use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
-use catervas_core::team::{Agent, Team, changes_code};
+use catervas_core::team::{Agent, Team, changes_code, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy,
     EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody,
@@ -21,19 +21,20 @@ use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
 use catervas_store::git::{GitError, held_document};
 use catervas_store::product_plan::is_the_product_plan;
+use catervas_store::repos::TaskRepository;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
-    judgment_message, plan_task_message, plan_tasks_message, refine_message, triage_message,
+    plan_task_message, plan_tasks_message, refine_message, triage_message,
 };
 use super::rules::{Waiting, acted, active, asleep, has_room, refused_since_entering, spent};
-use super::session::{JUDGMENT_TOOL, SessionAsk, TRIAGE_TOOL, run_session};
+use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
-    GOVERNOR, append, context, escalate, failed, fails_the_criterion, governor_results, history,
-    is_mechanical, ran_criteria, read_only, record_review, reject, reviewer_results,
-    since_verifying, unanswered,
+    GOVERNOR, append, context, decide_alone, escalate, failed, fails_the_criterion,
+    governor_results, history, is_mechanical, ran_criteria, read_only, record_review, reject,
+    reviewer_results, since_verifying, unanswered,
 };
-use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
+use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, task_repository_of};
 use crate::catervafication::{FileDue, catervafication_of, file_due};
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
@@ -99,7 +100,6 @@ pub(super) async fn draft(
                 in_reply_to: None,
                 thread: None,
                 initial_prompt: triage_message(&contract),
-                pipeline: None,
             },
         )
         .await?;
@@ -109,7 +109,7 @@ pub(super) async fn draft(
         return Ok(None);
     }
     let outcome = deps.tools.transitions.request(
-        &TransitionRequest {
+        &catervas_core::governor::transition::TransitionRequest {
             task_id: row.task_id.clone(),
             to: TaskStatus::Refining,
             actor: TransitionActor::ProductManager,
@@ -129,12 +129,9 @@ pub(super) async fn draft(
 
 /// Rule 9: a contract `refining`. A contract written since refining began and not judged since,
 /// or one filed whole (a breakdown's child, or a contract the human holds) and not judged since
-/// refining began, is judged: `escalated` asked as the governor first, whose rows open on three
-/// readiness failures or on a passing contract the human must approve, then `ready`. One whose
-/// Definition of Ready fails on the judge's missing review alone gets a judgment session of the
-/// first active agent of the team's judge role (`Team::judge`) first, so that the governor is not
-/// asked, and an attempt spent, on a contract nobody has judged. Otherwise the Product Manager
-/// gets a refine session.
+/// refining began, is judged by the governor's rules alone: `escalated` asked as the governor
+/// first, whose rows open on three readiness failures, then `ready`. No agent judges a contract
+/// (ADR 0061). Otherwise the Product Manager gets a refine session.
 pub(super) async fn refining(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -148,44 +145,12 @@ pub(super) async fn refining(
     let history = history(deps, &row.task_id)?;
     // A new project plans nothing but its product plan until the plan is approved (5.3): the
     // contract waits, with no session and no governor ask to spend an attempt or escalate.
-    if !is_the_product_plan(&history) && deps.tools.transitions.awaits_the_product_plan(team)? {
+    if !is_the_product_plan(&history) && deps.tools.transitions.awaits_the_product_plan()? {
         return Ok(None);
     }
     let began = refining_began(&history);
     if is_to_be_judged(&contract, &history, began) {
-        let judge_role = team.judge();
-        let checker = match team
-            .active_agents()
-            .find(|agent| Role::from(agent.role) == judge_role)
-        {
-            Some(checker) if awaits_judgment(deps, team, row)? => checker,
-            _ => return judge(deps, team, row).map(Some),
-        };
-        if spent(deps, team, &contract, &mut waiting.day_spent)?
-            | asleep(deps, checker, &mut waiting.slept)?
-        {
-            return Ok(None);
-        }
-        let end = run_session(
-            deps,
-            team,
-            SessionAsk {
-                agent: checker,
-                contract: Some(&contract),
-                purpose: SessionPurpose::Refine,
-                cwd: deps.tools.files.root().to_path_buf(),
-                executor: None,
-                read_only: false,
-                only_tool: Some(JUDGMENT_TOOL),
-                tools: None,
-                in_reply_to: None,
-                thread: None,
-                initial_prompt: judgment_message(&contract, &team.judgment().questions),
-                pipeline: None,
-            },
-        )
-        .await?;
-        return Ok(Some(acted(row, checker, "judgment", &end)));
+        return judge(deps, team, row).map(Some);
     }
     if spent(deps, team, &contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
     {
@@ -210,36 +175,10 @@ pub(super) async fn refining(
             in_reply_to: None,
             thread: None,
             initial_prompt: refine_message(&contract, !asked, &failures),
-            pipeline: None,
         },
     )
     .await?;
     Ok(Some(acted(row, pm, "refine", &end)))
-}
-
-/// Whether the contract's Definition of Ready, evaluated on the context the governor's
-/// `refining -> ready` would use, fails on the judge's missing review alone. It records
-/// nothing: a structurally broken contract goes back to the Product Manager without a judgment.
-fn awaits_judgment(
-    deps: &OrchestratorDeps,
-    team: &Team,
-    row: &TaskProjection,
-) -> Result<bool, OrchestratorError> {
-    let request = TransitionRequest {
-        task_id: row.task_id.clone(),
-        to: TaskStatus::Ready,
-        actor: TransitionActor::Governor,
-        agent_id: None,
-    };
-    let context = deps
-        .tools
-        .transitions
-        .context(&request, &TransitionAsk::default(), team)?;
-    let failures = evaluate_readiness(&context.contract, &context.readiness).err();
-    Ok(matches!(
-        failures.as_deref(),
-        Some([only]) if only.rule == ReadinessRule::JudgmentRecorded
-    ))
 }
 
 /// Asks the governor to judge a contract: `escalated` first, because asking for `ready` on a
@@ -251,7 +190,7 @@ fn judge(
 ) -> Result<TickReport, OrchestratorError> {
     let ask = |to: TaskStatus| {
         deps.tools.transitions.request(
-            &TransitionRequest {
+            &catervas_core::governor::transition::TransitionRequest {
                 task_id: row.task_id.clone(),
                 to,
                 actor: TransitionActor::Governor,
@@ -411,10 +350,10 @@ pub(super) fn assigned_epic(
         return Ok(None);
     }
     let outcome = deps.tools.transitions.request(
-        &TransitionRequest {
+        &catervas_core::governor::transition::TransitionRequest {
             task_id: row.task_id.clone(),
             to: TaskStatus::InProgress,
-            actor: TransitionActor::Assignee,
+            actor: catervas_core::governor::transition_table::TransitionActor::Assignee,
             agent_id: Some(assignee.id.to_string()),
         },
         &TransitionAsk::default(),
@@ -431,8 +370,8 @@ pub(super) fn assigned_epic(
 
 /// What a task under an epic says of the epic's progress.
 struct Child {
+    task_id: TaskId,
     status: TaskStatus,
-    awaiting_integration: bool,
     /// Its `allowed_paths` are exactly its `plan`: it writes the epic's plan.
     plan_task: bool,
 }
@@ -448,8 +387,8 @@ enum EpicStep {
 
 /// Every task cancelled, or none: break the epic down. Any task neither accepted nor cancelled:
 /// nothing, its tasks being worked. When every task not cancelled is a plan task, the Architect's
-/// plan is written: its tasks come next once the plan is integrated, and nothing while it awaits
-/// integration. Otherwise the epic's work is done and it is closed out.
+/// plan is written: its tasks come next once the plan task is accepted, integrated or not
+/// (ADR 0061). Otherwise the epic's work is done and it is closed out.
 fn epic_step(children: &[Child]) -> EpicStep {
     let live = || {
         children
@@ -462,11 +401,86 @@ fn epic_step(children: &[Child]) -> EpicStep {
         EpicStep::Nothing
     } else if !live().all(|c| c.plan_task) {
         EpicStep::CloseOut
-    } else if live().any(|c| c.awaiting_integration) {
-        EpicStep::Nothing
     } else {
         EpicStep::WriteThePlansTasks
     }
+}
+
+/// The branches a task's worktree is made from, the first being its base (ADR 0061): each
+/// dependency that is accepted and still awaiting integration, in the order the contract lists
+/// them, then, for a task of an epic's plan, the plan task's branch while the plan is not on the
+/// integration branch. A branch that does not exist, or that is listed twice, is left out. With
+/// nothing unmerged to start from, the integration branch.
+///
+/// # Errors
+///
+/// What reading a contract or git refuses.
+pub(super) fn start_point(
+    deps: &OrchestratorDeps,
+    board: &[TaskProjection],
+    contract: &TaskContract,
+    repository: &TaskRepository,
+) -> Result<Vec<String>, OrchestratorError> {
+    let mine = |theirs: &TaskContract| theirs.repo == contract.repo;
+    let mut branches = Vec::new();
+    for dependency in &contract.dependencies {
+        let Some(row) = board
+            .iter()
+            .find(|row| row.task_id.as_str() == dependency.as_str())
+        else {
+            continue;
+        };
+        if row.status != TaskStatus::Accepted || !row.awaiting_integration {
+            continue;
+        }
+        let theirs = match deps.tools.files.read_contract(&row.task_id) {
+            Ok(theirs) => theirs,
+            Err(FilesError::NotFound { .. }) => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if task_private_folder(&theirs).is_none() && mine(&theirs) {
+            branches.push(task_branch(&theirs));
+        }
+    }
+    if let (Some(plan), Some(parent)) = (&contract.plan, &contract.parent)
+        && !is_plan_task(contract)
+    {
+        let mut plan_branch = None;
+        for row in board.iter().filter(|row| {
+            row.parent
+                .as_ref()
+                .is_some_and(|own| own.to_string() == parent.to_string())
+                && row.status == TaskStatus::Accepted
+        }) {
+            let theirs = match deps.tools.files.read_contract(&row.task_id) {
+                Ok(theirs) => theirs,
+                Err(FilesError::NotFound { .. }) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if is_plan_task(&theirs) && theirs.plan.as_ref() == Some(plan) && mine(&theirs) {
+                plan_branch = Some(task_branch(&theirs));
+            }
+        }
+        if let Some(branch) = plan_branch {
+            let on_the_branch = repository
+                .git
+                .has_file(&repository.integration_branch, &plan.to_string())
+                .unwrap_or(false);
+            if !on_the_branch {
+                branches.push(branch);
+            }
+        }
+    }
+    let mut starts: Vec<String> = Vec::new();
+    for branch in branches {
+        if !starts.contains(&branch) && repository.git.has_local_branch(&branch)? {
+            starts.push(branch);
+        }
+    }
+    if starts.is_empty() {
+        starts.push(repository.integration_branch.clone());
+    }
+    Ok(starts)
 }
 
 /// What each of `tasks`, the tasks under an epic, says of the epic's progress.
@@ -478,23 +492,35 @@ fn children_of_epic(
         .iter()
         .map(|task| {
             let plan_task = match deps.tools.files.read_contract(&task.task_id) {
-                Ok(theirs) => theirs.plan.as_ref().is_some_and(|own| {
-                    theirs
-                        .allowed_paths
-                        .iter()
-                        .map(ToString::to_string)
-                        .eq([own.to_string()])
-                }),
+                Ok(theirs) => is_plan_task(&theirs),
                 Err(FilesError::NotFound { .. }) => false,
                 Err(error) => return Err(error.into()),
             };
             Ok(Child {
+                task_id: task.task_id.clone(),
                 status: task.status,
-                awaiting_integration: task.awaiting_integration,
                 plan_task,
             })
         })
         .collect()
+}
+
+/// The plan at `stem` on `branch` of `git` and its text, in the format it was written in. A branch
+/// that does not exist holds no plan.
+fn plan_on(
+    git: &catervas_store::Git,
+    branch: &str,
+    stem: &str,
+    team: &Team,
+) -> Result<Option<(String, String)>, OrchestratorError> {
+    match held_document(git, branch, stem, team.document_format()) {
+        Ok(Some(plan)) => {
+            let text = git.file_at(branch, &plan)?;
+            Ok(Some((plan, text)))
+        }
+        Ok(None) | Err(GitError::CommandFailed { .. }) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The Product Manager's message for an epic that is to be broken down, or whose plan is to be
@@ -507,20 +533,23 @@ fn product_managers_message(
     contract: &TaskContract,
     step: &EpicStep,
     listed: &[(String, String, String)],
+    plan_task: Option<&TaskId>,
 ) -> Result<String, OrchestratorError> {
     let unextended = plan_stem(contract.id.as_str());
     if *step == EpicStep::WriteThePlansTasks {
         let git = &deps.tools.git;
         let branch = integration_branch(team, git)?;
-        // The plan is read in the format it was written in.
-        match held_document(git, &branch, &unextended, team.document_format()) {
-            Ok(Some(plan)) => {
-                let text = git.file_at(&branch, &plan)?;
-                return Ok(plan_tasks_message(contract, &plan, &text, listed));
-            }
-            // No plan on the integration branch: the epic is broken down again.
-            Ok(None) | Err(GitError::CommandFailed { .. }) => {}
-            Err(error) => return Err(error.into()),
+        // The plan is read in the format it was written in: on the integration branch, else on the
+        // branch of the accepted plan task that has not been integrated yet.
+        if let Some(found) = plan_on(git, &branch, &unextended, team)? {
+            return Ok(plan_tasks_message(contract, &found.0, &found.1, listed));
+        }
+        if let Some(plan_task) = plan_task
+            && let Ok(theirs) = deps.tools.files.read_contract(plan_task)
+            && let Ok(repository) = task_repository_of(deps, team, &theirs)
+            && let Some(found) = plan_on(&repository.git, &task_branch(&theirs), &unextended, team)?
+        {
+            return Ok(plan_tasks_message(contract, &found.0, &found.1, listed));
         }
     }
     // A new plan is named in the team's format.
@@ -572,7 +601,6 @@ pub(super) async fn in_progress_epic(
                     what: format!("filed the Catervafication's tasks: {}", ids.join(", ")),
                 }));
             }
-            FileDue::MarketingWaits => return Ok(None),
             FileDue::Nothing => {}
         }
     }
@@ -610,7 +638,17 @@ pub(super) async fn in_progress_epic(
             };
             (
                 pm,
-                product_managers_message(deps, team, &contract, &step, &listed)?,
+                product_managers_message(
+                    deps,
+                    team,
+                    &contract,
+                    &step,
+                    &listed,
+                    children
+                        .iter()
+                        .rfind(|child| child.plan_task && child.status != TaskStatus::Cancelled)
+                        .map(|child| &child.task_id),
+                )?,
             )
         }
     };
@@ -634,7 +672,6 @@ pub(super) async fn in_progress_epic(
             in_reply_to: None,
             thread: None,
             initial_prompt,
-            pipeline: None,
         },
     )
     .await?;
@@ -721,6 +758,11 @@ pub(super) async fn verifying_epic(
             EpicRan::Criteria(count) => Ok(ran_criteria(row, count)),
             EpicRan::Unrunnable(why) => escalate(deps, team, row, &why),
         };
+    }
+    // An epic whose every criterion Catervas ran is accepted or rejected by the governor, with no
+    // Product Manager's session and no human (ADR 0061).
+    if catervas_verifies_alone(contract) {
+        return decide_alone(deps, team, row, contract, 0);
     }
     if !the_human_reviews_the_epic(contract.kind, row.reviewer_id.as_deref()) {
         return reviewed_by_the_product_manager(
@@ -1035,10 +1077,8 @@ mod tests {
         BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness, waits_for,
     };
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
-    use crate::prompt::JUDGMENT_INSTRUCTION;
     use crate::recorded::fixtures::{
-        accept_ctv_1, chat_answers_with_a_request, implement_finishes_ctv_1,
-        judge_ctv_1_by_architect, judge_ctv_1_fails, judge_ctv_1_passes, plan_assigns_ctv_1,
+        accept_ctv_1, chat_answers_with_a_request, implement_finishes_ctv_1, plan_assigns_ctv_1,
         plan_assigns_ctv_2, plan_breaks_down_ctv_1, plan_closes_epic_ctv_1,
         planning_ceremony_ctv_1_ctv_3, refine_asks_ctv_1, refine_writes_epic_ctv_1,
         refine_writes_task_ctv_1, replays_catervas_read_board, review_epic_ctv_1,
@@ -1054,55 +1094,42 @@ mod tests {
             EpicStep::{BreakDown, CloseOut, Nothing, WriteThePlansTasks},
             epic_step,
         };
-        let child = |status, awaiting_integration, plan_task| Child {
+        let child = |status, plan_task| Child {
+            task_id: "CTV-2".parse().expect("a task id"),
             status,
-            awaiting_integration,
             plan_task,
         };
-        let plan_task = |status, awaiting| child(status, awaiting, true);
-        let built = |status| child(status, false, false);
+        let plan_task = |status| child(status, true);
+        let built = |status| child(status, false);
         assert_eq!(epic_step(&[]), BreakDown);
+        assert_eq!(epic_step(&[plan_task(TaskStatus::Cancelled)]), BreakDown);
+        assert_eq!(epic_step(&[plan_task(TaskStatus::InProgress)]), Nothing);
         assert_eq!(
-            epic_step(&[plan_task(TaskStatus::Cancelled, false)]),
-            BreakDown
-        );
-        assert_eq!(
-            epic_step(&[plan_task(TaskStatus::InProgress, false)]),
-            Nothing
-        );
-        assert_eq!(epic_step(&[plan_task(TaskStatus::Accepted, true)]), Nothing);
-        assert_eq!(
-            epic_step(&[plan_task(TaskStatus::Accepted, false)]),
+            epic_step(&[plan_task(TaskStatus::Accepted)]),
             WriteThePlansTasks
         );
         assert_eq!(
             epic_step(&[
-                plan_task(TaskStatus::Cancelled, false),
-                plan_task(TaskStatus::Accepted, false)
+                plan_task(TaskStatus::Cancelled),
+                plan_task(TaskStatus::Accepted)
             ]),
             WriteThePlansTasks
         );
         assert_eq!(
-            epic_step(&[
-                plan_task(TaskStatus::Accepted, false),
-                built(TaskStatus::Accepted)
-            ]),
+            epic_step(&[plan_task(TaskStatus::Accepted), built(TaskStatus::Accepted)]),
             CloseOut
         );
         assert_eq!(epic_step(&[built(TaskStatus::Accepted)]), CloseOut);
         // A cancelled task that is no plan task does not stop the plan's tasks from being written.
         assert_eq!(
             epic_step(&[
-                plan_task(TaskStatus::Accepted, false),
+                plan_task(TaskStatus::Accepted),
                 built(TaskStatus::Cancelled)
             ]),
             WriteThePlansTasks
         );
         assert_eq!(
-            epic_step(&[
-                plan_task(TaskStatus::Accepted, false),
-                built(TaskStatus::Ready)
-            ]),
+            epic_step(&[plan_task(TaskStatus::Accepted), built(TaskStatus::Ready)]),
             Nothing
         );
     }
@@ -1252,86 +1279,10 @@ mod tests {
             }));
     }
 
-    /// Checks every plan: the team's `policy.judgment.required` is `always`.
-    fn judging(wire: &mut Value) {
-        wire["policy"]["judgment"] = json!({ "required": "always" });
-    }
-
-    /// `with_a_scrum_master`, on a team that checks every plan.
-    fn judging_with_a_scrum_master(wire: &mut Value) {
-        with_a_scrum_master(wire);
-        judging(wire);
-    }
-
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn starts_the_judgment_for_the_resolved_judge() {
-        let harness = Harness::new("req-judge-architect", |wire| {
-            judging_with_a_scrum_master(wire);
-            wire["agents"]
-                .as_array_mut()
-                .expect("a list of agents")
-                .push(catervas_core::team::fixtures::an_agent_wire(
-                    "ari",
-                    "architect",
-                ));
-        });
-        let adapter =
-            harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_by_architect()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let started = adapter.started();
-        assert_eq!(started.len(), 2);
-        assert_eq!(started[1].agent_id, "ari");
-        assert_eq!(
-            started[1].catervas_tools,
-            vec!["catervas_record_judgment".to_string()]
-        );
-        let judged = last(&harness, EventKind::ContractJudged).expect("the judgment");
-        let EventBody::ContractJudged(body) = &judged.body else {
-            panic!("a judgment");
-        };
-        assert_eq!(body.judged_by, "ari");
-
-        orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn judges_with_the_team_questions() {
-        let questions = [
-            "Does the task fit its budget?",
-            "Would its checks notice if the work went wrong the way its intent worries about?",
-            "Is it small enough to finish in one go?",
-        ];
-        let harness = Harness::new("req-judge-questions", |wire| {
-            judging_with_a_scrum_master(wire);
-            wire["policy"]["judgment"]["questions"] = json!(questions);
-        });
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let message = &adapter.started()[1].initial_prompt;
-        let numbered = format!(
-            "1. {}\n2. {}\n3. {}",
-            questions[0], questions[1], questions[2]
-        );
-        assert!(message.contains(&numbered), "{message}");
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn honours_never() {
-        let harness = Harness::new("req-judge-never", |wire| {
+    async fn readies_a_written_contract_without_a_judgment() {
+        let harness = Harness::new("req-no-judgment", |wire| {
             with_a_scrum_master(wire);
             wire["agents"]
                 .as_array_mut()
@@ -1340,7 +1291,11 @@ mod tests {
                     "ari",
                     "architect",
                 ));
-            wire["policy"]["judgment"] = json!({ "required": "never" });
+            wire["policy"]["judgment"] = json!({
+                "required": "always",
+                "questions": ["Is the plan small enough to review?"],
+                "judge": "architect"
+            });
         });
         let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -1649,124 +1604,8 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn asks_the_scrum_master_to_judge_a_written_contract() {
-        let harness = Harness::new("req-sm-judges", judging_with_a_scrum_master);
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-        assert!(last(&harness, EventKind::ContractWritten).is_some());
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let started = adapter.started();
-        assert_eq!(started.len(), 2);
-        let spec = &started[1];
-        assert_eq!(spec.agent_id, "sam");
-        assert_eq!(spec.purpose, SessionPurpose::Refine);
-        assert_eq!(
-            spec.catervas_tools,
-            vec!["catervas_record_judgment".to_string()]
-        );
-        assert_eq!(
-            listed_tools(&spec.system_prompt),
-            vec!["catervas_record_judgment"]
-        );
-        assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
-        // The Scrum Master's own model and effort, not triage's.
-        assert_eq!(
-            (spec.model.as_str(), spec.effort),
-            ("claude-sonnet-5-5", Effort::Medium)
-        );
-        assert!(
-            spec.system_prompt.contains(JUDGMENT_INSTRUCTION),
-            "{}",
-            spec.system_prompt
-        );
-        assert!(last(&harness, EventKind::ContractJudged).is_some());
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
-        assert_eq!(adapter.started().len(), 2);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn judges_on_the_scrum_masters_own_model() {
-        let harness = Harness::new("req-sm-judges-model", |wire| {
-            judging_with_a_scrum_master(wire);
-            wire["agents"]
-                .as_array_mut()
-                .expect("a list of agents")
-                .last_mut()
-                .expect("sam")["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
-        });
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1(), judge_ctv_1_passes()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let spec = &adapter.started()[1];
-        assert_eq!(spec.agent_id, "sam");
-        assert_eq!(
-            (spec.model.as_str(), spec.effort),
-            ("claude-opus-5", Effort::High)
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn sends_a_badly_judged_contract_back_to_the_product_manager() {
-        let harness = Harness::new("req-sm-judges-badly", judging_with_a_scrum_master);
-        let adapter = harness.recorded(vec![
-            refine_writes_task_ctv_1(),
-            judge_ctv_1_fails(),
-            replays_catervas_read_board(),
-        ]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-        orchestrator.tick().await.expect("the contract is judged");
-        assert!(last(&harness, EventKind::ContractJudged).is_some());
-
-        orchestrator.tick().await.expect("the tick runs");
-        let evaluated = last(&harness, EventKind::ContractEvaluated).expect("the readiness");
-        let EventBody::ContractEvaluated(body) = &evaluated.body else {
-            panic!("a readiness");
-        };
-        assert!(!body.passed);
-        assert!(
-            body.failures.iter().any(|failure| failure.contains(
-                "Would its checks notice if the work went wrong the way its intent worries \
-                     about?"
-            )),
-            "{:?}",
-            body.failures
-        );
-        assert_eq!(adapter.started().len(), 2);
-
-        orchestrator.tick().await.expect("the tick runs");
-        let started = adapter.started();
-        assert_eq!(started.len(), 3);
-        assert_eq!(started[2].agent_id, "pm");
-        assert_eq!(started[2].purpose, SessionPurpose::Refine);
-        assert!(
-            started[2]
-                .initial_prompt
-                .contains("C1 checks that done.txt exists, not what it says."),
-            "{}",
-            started[2].initial_prompt
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn judges_a_structurally_broken_contract_without_the_scrum_master() {
-        let harness = Harness::new("req-sm-broken", judging_with_a_scrum_master);
+    async fn refuses_a_structurally_broken_contract_without_a_session() {
+        let harness = Harness::new("req-sm-broken", |_| {});
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
@@ -1791,11 +1630,6 @@ mod tests {
             body.details
                 .iter()
                 .any(|detail| detail.contains("out_of_scope")),
-            "{:?}",
-            body.details
-        );
-        assert!(
-            !body.details.iter().any(|detail| detail.contains("judg")),
             "{:?}",
             body.details
         );
@@ -2003,7 +1837,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_an_epic_for_approval_once_it_passes() {
+    async fn readies_an_epic_without_asking_the_owner() {
         let harness = Harness::new("req-approval", |_| {});
         let adapter = harness.recorded(vec![refine_writes_epic_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -2014,20 +1848,18 @@ mod tests {
 
         assert_eq!(
             moves_of(&harness, "CTV-1").last().map(String::as_str),
-            Some("refining -> escalated")
+            Some("refining -> ready")
         );
-        let escalation = last(&harness, EventKind::EscalationRaised).expect("the escalation");
-        assert!(matches!(
-            &escalation.body,
-            EventBody::EscalationRaised(body) if body.reason == EscalationRaisedBodyReason::Approval
-        ));
+        assert!(
+            harness.events(&[EventKind::EscalationRaised]).is_empty(),
+            "no escalation asks the owner to approve the epic"
+        );
         assert!(
             harness.events(&[EventKind::ContractEvaluated]).iter().all(
                 |event| matches!(&event.body, EventBody::ContractEvaluated(body) if body.passed)
             )
         );
-        assert!(harness.row("CTV-1").awaiting_approval);
-        assert!(is_idle(&orchestrator.tick().await.expect("the tick runs")));
+        assert!(!harness.row("CTV-1").awaiting_approval);
     }
 
     #[tokio::test]
@@ -2153,7 +1985,11 @@ mod tests {
         file_catervafication_epic(
             &deps.files,
             &deps.log,
-            epic_contract(Project::New, 2.0),
+            epic_contract(
+                Project::New,
+                2.0,
+                catervas_core::folders::DocumentFormat::Markdown,
+            ),
             "catervas",
             Project::New,
             (deps.clock.now(), &deps.ids),
@@ -2163,21 +1999,19 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
 
         // Rule 10 moves it to refining on the Product Manager's behalf; the next tick judges it as
-        // filed, and the governor asks the owner, with no refine session to rewrite the template.
+        // filed, and the governor readies it, with no refine session to rewrite the template.
         orchestrator.tick().await.expect("the tick runs");
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(
             moves_of(&harness, "CTV-1"),
-            ["draft -> refining", "refining -> escalated"]
+            ["draft -> refining", "refining -> ready"]
         );
         assert!(
             adapter.started().is_empty(),
             "no refine session rewrites it"
         );
-        let raised = last(&harness, EventKind::EscalationRaised).expect("the owner is asked");
-        assert!(matches!(&raised.body, EventBody::EscalationRaised(body)
-            if body.reason == EscalationRaisedBodyReason::Approval));
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
     }
 
     /// The suggested six's Catervafication started, and run until its epic CTV-1 is `in_progress`.
@@ -2233,7 +2067,8 @@ mod tests {
             report,
             TickReport::Acted {
                 task_id: task("CTV-1"),
-                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5".to_string()
+                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5, CTV-6"
+                    .to_string()
             }
         );
         assert_eq!(
@@ -2242,10 +2077,11 @@ mod tests {
                 "product_manager",
                 "architect",
                 "software_developer",
-                "ui_ux_designer"
+                "ui_ux_designer",
+                "marketing_specialist"
             ]
         );
-        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5"] {
+        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5", "CTV-6"] {
             let row = harness.row(id);
             assert_eq!(row.parent, Some(task("CTV-1")), "{id}");
             assert_eq!(row.sprint.as_deref(), Some("S1"), "{id}");
@@ -2284,50 +2120,40 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
         assert_eq!(
             roles_under_the_epic(&unready),
-            ["product_manager", "architect", "software_developer"]
+            [
+                "product_manager",
+                "architect",
+                "software_developer",
+                "marketing_specialist"
+            ]
         );
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn files_the_marketing_task_once_the_product_plan_is_in() {
+    async fn files_the_marketing_task_with_the_others_depending_on_the_plan() {
         let harness = Harness::with_the_suggested_six("req-catervafication-marketing");
-        let (orchestrator, adapter) = a_catervafication_in_progress(&harness).await;
+        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
         orchestrator.tick().await.expect("the tick files the tasks");
-        // CTV-3 to CTV-5 are accepted and integrated; the plan, CTV-2, awaits its integration.
-        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5"] {
-            harness.project.moved(id, "draft", "accepted", &json!({}));
-        }
-        let integrate = |id: &str| {
-            harness.project.record(
-                id,
-                "task.integrated",
-                &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
-            );
-        };
-        for id in ["CTV-3", "CTV-4", "CTV-5"] {
-            integrate(id);
-        }
-        assert!(harness.row("CTV-2").awaiting_integration);
 
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(is_idle(&report), "{report:?}");
-        assert_eq!(roles_under_the_epic(&harness).len(), 4);
-        assert!(adapter.started().is_empty(), "the epic is not closed out");
-
-        integrate("CTV-2");
-        let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(
-            report,
-            TickReport::Acted {
-                task_id: task("CTV-1"),
-                what: "filed the Catervafication's tasks: CTV-6".to_string()
-            }
-        );
         assert_eq!(
             roles_under_the_epic(&harness).last().map(String::as_str),
             Some("marketing_specialist")
+        );
+        let marketing = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-6"))
+            .expect("the Marketing task");
+        assert_eq!(
+            marketing
+                .dependencies
+                .iter()
+                .map(|dependency| dependency.as_str())
+                .collect::<Vec<_>>(),
+            ["CTV-2"],
+            "it reads the Product Manager's task, and starts from its branch once accepted"
         );
     }
 
@@ -2335,34 +2161,38 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn files_no_marketing_task_for_a_cancelled_product_plan() {
         let harness = Harness::with_the_suggested_six("req-catervafication-no-plan");
-        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator
-            .handle(Command::CatervaficationStart)
-            .await
-            .expect("the owner starts it");
-        for _ in 0..4 {
-            orchestrator.tick().await.expect("the tick runs");
-        }
+        // The Marketing Specialist is paused at first, so its task is not filed with the others.
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        let mut wire = serde_json::to_value(&team).expect("the team is JSON");
+        wire["agents"][5]["status"] = json!("paused");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
+            .expect("the team is written");
+        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
+        orchestrator.tick().await.expect("the tick files the tasks");
+        assert_eq!(roles_under_the_epic(&harness).len(), 4);
         harness
             .project
             .moved("CTV-2", "draft", "cancelled", &json!({}));
-        for id in ["CTV-3", "CTV-4", "CTV-5"] {
-            harness.project.moved(id, "draft", "accepted", &json!({}));
-            harness.project.record(
-                id,
-                "task.integrated",
-                &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
-            );
-        }
+        wire["agents"][5]["status"] = json!("active");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
+            .expect("the team is written");
 
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(roles_under_the_epic(&harness).len(), 4, "no Marketing task");
-        let started = adapter.started();
-        let spec = started.first().expect("the epic's close-out starts");
-        assert_eq!(spec.purpose, SessionPurpose::Plan);
-        assert_eq!(spec.task_id, Some(task("CTV-1")));
     }
 
     #[tokio::test]
@@ -2395,7 +2225,12 @@ mod tests {
             .expect("the tick files the tasks");
         assert_eq!(
             roles_under_the_epic(&harness),
-            ["product_manager", "architect", "software_developer"]
+            [
+                "product_manager",
+                "architect",
+                "software_developer",
+                "marketing_specialist"
+            ]
         );
 
         // The owner cancels the Architect's task: it is not filed again.
@@ -2410,7 +2245,7 @@ mod tests {
             .await
             .expect("the tick runs");
         assert!(is_idle(&report), "{report:?}");
-        assert_eq!(roles_under_the_epic(&harness).len(), 3);
+        assert_eq!(roles_under_the_epic(&harness).len(), 4);
 
         // A Designer who joins later gets its task on the next tick.
         wire["agents"][4]["status"] = json!("active");
@@ -2425,7 +2260,7 @@ mod tests {
             .await
             .expect("the tick runs");
         assert!(
-            matches!(&report, TickReport::Acted { what, .. } if what.ends_with("CTV-5")),
+            matches!(&report, TickReport::Acted { what, .. } if what.ends_with("CTV-6")),
             "{report:?}"
         );
         assert_eq!(
@@ -2676,6 +2511,40 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn catervas_accepts_an_epic_once_its_tasks_are_integrated() {
+        let harness = Harness::new("epic-governor-accepts", |_| {});
+        an_epic_verifying(&harness, |wire| {
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The check passes.",
+                "satisfies": ["R1"],
+                "verification": { "method": "command", "command": "true", "expect": { "exit_code": 0 } }
+            }]);
+        });
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // Its task is accepted but not yet integrated: nothing happens to the epic.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
+        assert!(governor_runs(&harness, "CTV-1").is_empty());
+
+        integrated(&harness, true);
+        orchestrator.tick().await.expect("the criteria run");
+        orchestrator.tick().await.expect("the epic is decided");
+
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
+        assert!(adapter.started().is_empty());
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(body.actor, TransitionActorWire::Governor);
+        assert_eq!(moved.envelope.ids.agent_id, None);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assigns_an_approved_epic_to_its_product_manager() {
         let harness = Harness::new("epic-assigns", |_| {});
         an_epic(&harness, "CTV-1", "ready", |_| {});
@@ -2904,6 +2773,7 @@ mod tests {
     async fn waits_for_an_epics_tasks_to_be_integrated() {
         let harness = Harness::new("epic-waits-integration", |_| {});
         an_epic_verifying(&harness, |_| {});
+        harness.unmerged_branch("CTV-2");
         assert!(harness.row("CTV-2").awaiting_integration);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -3313,6 +3183,7 @@ mod tests {
         for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
             harness.project.moved("CTV-2", pair[0], pair[1], &people);
         }
+        harness.unmerged_branch("CTV-2");
         harness.file_under("CTV-3", "ready", Some("CTV-1"), |wire| {
             wire["lane"] = json!(1);
         });
@@ -3455,48 +3326,24 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn writes_the_plans_tasks_once_the_plan_is_integrated() {
+    async fn writes_the_plans_tasks_from_the_plan_tasks_branch() {
         let harness = Harness::new("epic-plans-tasks", with_a_scrum_master_and_an_architect);
         a_scrum_masters_epic_in_progress(&harness);
         an_accepted_plan_task(&harness);
+        // The plan is on CTV-2's branch alone: `main` has none, and CTV-2 awaits integration.
+        branch_with(
+            &harness,
+            "docs/CTV-2",
+            "main",
+            &[(
+                THE_PLAN,
+                "# Plan for CTV-1: Add done.txt\n\n## Lane 1\n\n### 1.1 Write it\n",
+            )],
+        );
+        assert!(harness.row("CTV-2").awaiting_integration);
         let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        // Accepted, not yet integrated: nothing is asked about the epic.
-        orchestrator.tick().await.expect("the tick runs");
-        assert!(
-            adapter
-                .started()
-                .iter()
-                .all(|spec| spec.task_id != Some(task("CTV-1"))),
-            "{:?}",
-            adapter.started().len()
-        );
-
-        std::fs::create_dir_all(
-            harness
-                .project
-                .repo
-                .path
-                .join("docs/catervas/architecture/plans"),
-        )
-        .expect("the plans folder is made");
-        harness.commit_at_root(
-            "docs/catervas/architecture/plans/CTV-1.md",
-            "# Plan for CTV-1: Add done.txt\n\n## Lane 1\n\n### 1.1 Write it\n",
-            "docs: plan CTV-1",
-        );
-        if harness
-            .project
-            .deps
-            .projections
-            .board()
-            .expect("the board")
-            .iter()
-            .any(|row| row.task_id == task("CTV-2") && row.awaiting_integration)
-        {
-            integrated(&harness, false);
-        }
         orchestrator.tick().await.expect("the tick runs");
 
         let started = adapter.started();
@@ -3570,6 +3417,252 @@ mod tests {
         );
     }
 
+    /// Commits `files` on a new branch `branch` made from `from`, in a worktree of its own that is
+    /// removed again: the branch is left holding the work.
+    fn branch_with(harness: &Harness, branch: &str, from: &str, files: &[(&str, &str)]) {
+        let git = &harness.project.deps.git;
+        let path = harness
+            .project
+            .repo
+            .path
+            .join(".catervas/local/worktrees")
+            .join(format!("scratch-{}", branch.replace('/', "-")));
+        git.create_worktree(&path, branch, from)
+            .expect("the scratch worktree is made");
+        let mut paths = Vec::new();
+        for (file, text) in files {
+            let target = path.join(file);
+            std::fs::create_dir_all(target.parent().expect("a folder")).expect("made");
+            std::fs::write(target, text).expect("written");
+            paths.push((*file).to_string());
+        }
+        git.commit(&path, "The branch's work", &paths)
+            .expect("committed");
+        git.remove_worktree(&path)
+            .expect("the scratch worktree goes");
+    }
+
+    const THE_PLAN: &str = "docs/catervas/architecture/plans/CTV-1.md";
+
+    /// CTV-`n` under the epic CTV-1, a Software Developer's task of the plan's lane `lane`,
+    /// `dev-a`'s, assigned, depending on `needs`.
+    fn a_lane_task_assigned(harness: &Harness, n: u32, lane: u32, needs: &[&str]) {
+        let id = format!("CTV-{n}");
+        harness.file_under(&id, "ready", Some("CTV-1"), |wire| {
+            wire["plan"] = json!(THE_PLAN);
+            wire["lane"] = json!(lane);
+            wire["allowed_paths"] = json!(["site/**"]);
+            wire["dependencies"] = json!(needs);
+        });
+        harness.project.moved(
+            &id,
+            "ready",
+            "assigned",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_task_starts_from_its_unmerged_dependencies_and_its_plan() {
+        let harness = Harness::new("epic-start-points", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task(&harness);
+        branch_with(
+            &harness,
+            "docs/CTV-2",
+            "main",
+            &[(THE_PLAN, "# Plan for CTV-1\n")],
+        );
+        let git = &harness.project.deps.git;
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let tick_until_started = |id: &'static str| {
+            let harness = &harness;
+            let orchestrator = &orchestrator;
+            async move {
+                for _ in 0..4 {
+                    orchestrator.tick().await.expect("the tick runs");
+                    if harness.worktree(id).is_dir() {
+                        return;
+                    }
+                }
+            }
+        };
+
+        // A lane task starts from the plan's branch, the plan being on no integration branch.
+        a_lane_task_assigned(&harness, 3, 1, &[]);
+        tick_until_started("CTV-3").await;
+        assert!(harness.worktree("CTV-3").join(THE_PLAN).is_file());
+
+        // A task that depends on an accepted, unmerged task starts from its branch.
+        std::fs::create_dir_all(harness.worktree("CTV-3").join("site")).expect("made");
+        std::fs::write(harness.worktree("CTV-3").join("site/a.txt"), "a\n").expect("written");
+        git.commit(
+            &harness.worktree("CTV-3"),
+            "Add site/a.txt",
+            &["site/a.txt".to_string()],
+        )
+        .expect("committed");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.record_by(
+            Some("dev-a"),
+            at(),
+            "CTV-3",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "ok",
+                     "run_by": "assignee", "recorded_by": "dev-a" }),
+        );
+        harness
+            .project
+            .moved("CTV-3", "in_progress", "verifying", &people);
+        harness
+            .project
+            .moved("CTV-3", "verifying", "accepted", &people);
+        assert!(harness.row("CTV-3").awaiting_integration);
+        a_lane_task_assigned(&harness, 4, 2, &["CTV-3"]);
+        tick_until_started("CTV-4").await;
+        assert!(harness.worktree("CTV-4").join("site/a.txt").is_file());
+        assert!(harness.worktree("CTV-4").join(THE_PLAN).is_file());
+
+        // A task with nothing unmerged starts from the integration branch.
+        harness
+            .project
+            .moved("CTV-4", "in_progress", "verifying", &people);
+        harness
+            .project
+            .moved("CTV-4", "verifying", "accepted", &people);
+        harness.file_under("CTV-5", "ready", Some("CTV-1"), |_| {});
+        harness.project.moved("CTV-5", "ready", "assigned", &people);
+        tick_until_started("CTV-5").await;
+        assert_eq!(git.commit_count("main", "feature/CTV-5"), Ok(0));
+        assert_eq!(
+            catervas_store::git::task_base(git, "main", &task("CTV-5")),
+            "main"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_task_that_conflicts_with_its_start_waits_without_a_worktree() {
+        let harness = Harness::new("epic-start-conflict", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task(&harness);
+        branch_with(
+            &harness,
+            "docs/CTV-2",
+            "main",
+            &[(THE_PLAN, "the plan's line\n")],
+        );
+        // CTV-3 was built from `main` and changed the plan's file differently.
+        harness.file_under("CTV-3", "ready", Some("CTV-1"), |wire| {
+            wire["allowed_paths"] = json!(["site/**"]);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
+            harness.project.moved("CTV-3", pair[0], pair[1], &people);
+        }
+        branch_with(
+            &harness,
+            "feature/CTV-3",
+            "main",
+            &[(THE_PLAN, "another line\n")],
+        );
+        a_lane_task_assigned(&harness, 4, 2, &["CTV-3"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert!(!harness.worktree("CTV-4").exists());
+        assert_eq!(
+            harness.project.deps.git.has_local_branch("feature/CTV-4"),
+            Ok(false)
+        );
+        assert_eq!(harness.row("CTV-4").status, TaskStatus::Assigned);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_lane_task_is_judged_by_its_own_work_not_the_plans() {
+        let harness = Harness::new("epic-start-diff", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task(&harness);
+        branch_with(
+            &harness,
+            "docs/CTV-2",
+            "main",
+            &[(THE_PLAN, "# Plan for CTV-1\n")],
+        );
+        a_lane_task_assigned(&harness, 3, 1, &[]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick runs");
+        let worktree = harness.worktree("CTV-3");
+        let git = &harness.project.deps.git;
+        std::fs::create_dir_all(worktree.join("site")).expect("made");
+        std::fs::write(worktree.join("site/b.txt"), "b\n").expect("written");
+        git.commit(&worktree, "Add site/b.txt", &["site/b.txt".to_string()])
+            .expect("committed");
+        harness.project.record(
+            "CTV-3",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Added it.", "written_by": "dev-a" }),
+        );
+        harness.project.record_by(
+            Some("dev-a"),
+            at(),
+            "CTV-3",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "ok",
+                     "run_by": "assignee", "recorded_by": "dev-a" }),
+        );
+
+        let base = catervas_store::git::task_base(git, "main", &task("CTV-3"));
+        assert_eq!(base, "refs/catervas/start/CTV-3");
+        assert_eq!(
+            git.changed_paths(&base, "feature/CTV-3"),
+            Ok(vec!["site/b.txt".to_string()])
+        );
+        // The plan is outside the task's allowed paths, and not in its diff.
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        let request = catervas_core::governor::transition::TransitionRequest {
+            task_id: task("CTV-3"),
+            to: TaskStatus::Verifying,
+            actor: catervas_core::governor::transition_table::TransitionActor::Assignee,
+            agent_id: Some("dev-a".to_string()),
+        };
+        let context = harness
+            .project
+            .deps
+            .transitions
+            .context(
+                &request,
+                &crate::transitions::TransitionAsk::default(),
+                &team,
+            )
+            .expect("the context reads");
+        assert_eq!(context.done.changed_paths, vec!["site/b.txt".to_string()]);
+        let outcome = harness
+            .project
+            .deps
+            .transitions
+            .request(
+                &request,
+                &crate::transitions::TransitionAsk::default(),
+                &team,
+            )
+            .expect("the governor answers");
+        assert!(
+            matches!(outcome, crate::transitions::TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn closes_an_epic_whose_plans_tasks_are_done() {
@@ -3627,19 +3720,7 @@ mod tests {
         an_accepted_plan_task(&harness);
         let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("the tick runs");
-        if harness
-            .project
-            .deps
-            .projections
-            .board()
-            .expect("the board")
-            .iter()
-            .any(|row| row.task_id == task("CTV-2") && row.awaiting_integration)
-        {
-            integrated(&harness, false);
-        }
-
+        // The plan task is accepted, and its plan is on no branch.
         orchestrator.tick().await.expect("the tick runs");
 
         let started = adapter.started();
@@ -4080,19 +4161,6 @@ mod tests {
         harness.asleep("pm", in_an_hour());
 
         waits_for(&orchestrator, "pm", in_an_hour()).await;
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn waits_for_a_sleeping_scrum_master_to_judge() {
-        let harness = Harness::new("req-sleep-judge", judging_with_a_scrum_master);
-        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter);
-        refining(&harness, &orchestrator, RequestSize::Small).await;
-        orchestrator.tick().await.expect("the contract is written");
-        harness.asleep("sam", in_an_hour());
-
-        waits_for(&orchestrator, "sam", in_an_hour()).await;
     }
 
     #[tokio::test]

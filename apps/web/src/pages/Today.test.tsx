@@ -51,12 +51,7 @@ import {
 	UNDECIDED_ROW,
 } from "../test/pipelines.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
-import {
-	APPROVED,
-	IN_REVIEW,
-	INTERVIEWING,
-	PRODUCT_PLAN_ROW,
-} from "../test/productPlan.ts";
+import { APPROVED, INTERVIEWING } from "../test/productPlan.ts";
 import {
 	answerQuery,
 	answerStatus,
@@ -64,12 +59,6 @@ import {
 	renderApp,
 } from "../test/render-app.tsx";
 import { bodyOf, refusedBy } from "../test/schema.ts";
-import {
-	SCRIPT_ROW,
-	MARKUP as SITE_MARKUP,
-	SITE_ROW,
-	TEAM as SITE_TEAM,
-} from "../test/sites.ts";
 import styles from "./PostGoingOut.module.css";
 import { Today } from "./Today.tsx";
 
@@ -493,66 +482,6 @@ describe("today", () => {
 			await screen.findByRole("region", { name: en.docChangesTitle }),
 		).toBeTruthy();
 		expect(screen.queryByText(en.waitingNone)).toBeNull();
-	});
-
-	it("puts_the_plan_in_place_of_its_acceptance_row", async () => {
-		const question = {
-			task_id: "CTV-3",
-			kind: "question",
-			agent_id: "mira",
-			title: "the launch post",
-			line: "question line",
-		};
-		const other = {
-			task_id: "CTV-5",
-			kind: "acceptance",
-			agent_id: "mira",
-			title: "the weekly report",
-			line: "Accept the result",
-		};
-		await today({
-			waiting: [PRODUCT_PLAN_ROW, question, other],
-			plan: IN_REVIEW,
-		});
-		expect(
-			await screen.findByRole("heading", { name: "Waiting on you (3)" }),
-		).toBeTruthy();
-		const list = screen.getByRole("list", { name: en.waitingList });
-		picturesOpenTheirAgents(
-			await within(list).findByRole("region", {
-				name: "Your product plan to approve",
-			}),
-			TEAM.agents,
-		);
-		// The plan's task has no row of its own besides the card; the question keeps its row.
-		expect(within(list).getByText("Mira has a question")).toBeTruthy();
-		// Another acceptance stays the generic row beside the one plan card.
-		expect(within(list).getByText("Accept the weekly report")).toBeTruthy();
-		expect(
-			within(list).getAllByRole("region", {
-				name: "Your product plan to approve",
-			}),
-		).toHaveLength(1);
-		expect(
-			within(list).queryByText("Accept Draft the product plan"),
-		).toBeNull();
-		cleanup();
-
-		// Until both documents are there, the generic row, which still accepts.
-		await today({
-			waiting: [PRODUCT_PLAN_ROW, question],
-			plan: { ...IN_REVIEW, documents: [] },
-		});
-		const generic = await screen.findByRole("list", { name: en.waitingList });
-		expect(
-			await within(generic).findByText("Accept Draft the product plan"),
-		).toBeTruthy();
-		expect(
-			screen.queryByRole("region", { name: "Your product plan to approve" }),
-		).toBeNull();
-		expect(
-			screen.getByRole("heading", { name: "Waiting on you (2)" }),
-		).toBeTruthy();
 	});
 
 	it("says_the_team_waits_for_the_plan", async () => {
@@ -1491,99 +1420,6 @@ describe("today's posts", () => {
 	});
 });
 
-describe("a site the Procurement Specialist asks to read", () => {
-	afterEach(() => vi.unstubAllGlobals());
-
-	it("today_lists_a_site_request", async () => {
-		const { container } = await todayWith({
-			waiting: [SITE_ROW, SCRIPT_ROW],
-			team: SITE_TEAM,
-		});
-
-		const list = await screen.findByRole("list", { name: en.waitingList });
-		const [plain, script] = within(list).getAllByRole("listitem");
-		expect(
-			screen.getByRole("heading", { name: "Waiting on you (2)" }),
-		).toBeTruthy();
-
-		// The host is in bold, and the address is text: nothing in the row opens it.
-		const host = within(plain as HTMLElement).getByText("pieboxpros.com", {
-			selector: "strong code",
-		});
-		expect(host.closest("strong")?.textContent).toBe(
-			"Ivo asks to read pieboxpros.com",
-		);
-		const address = within(plain as HTMLElement).getByText(SITE_ROW.url);
-		expect(address.closest("a")).toBeNull();
-		expect(
-			within(plain as HTMLElement)
-				.getAllByRole("link")
-				.map((link) => link.getAttribute("href")),
-		).toEqual(["/team/ivo", "/tasks/CTV-31"]);
-		expect(container.querySelector("a[href*='pieboxpros']")).toBeNull();
-		expect(
-			within(plain as HTMLElement).getByText(/The task waits until you decide/),
-		).toBeTruthy();
-		expect(
-			within(plain as HTMLElement).getByText(
-				/Allowing pieboxpros\.com lets it read any page there until you remove it\./,
-			),
-		).toBeTruthy();
-
-		// Why is the agent's own words, in a frame that says so, and markup in it stays text.
-		const why = within(plain as HTMLElement).getByRole("group", {
-			name: "Why, in Ivo’s words",
-		});
-		expect(why.getAttribute("data-trust")).toBe("untrusted");
-		expect(why.textContent).toContain("They print pie boxes with your logo");
-		expect(why.textContent).toContain(SITE_MARKUP);
-		expect(container.querySelector("b")).toBeNull();
-
-		// A name written in another alphabet is warned of, in its plain form, where the other is not.
-		expect(
-			within(plain as HTMLElement).queryByText(en.siteRequestScriptWhat),
-		).toBeNull();
-		expect(
-			within(script as HTMLElement).getByText(en.siteRequestScriptWhat),
-		).toBeTruthy();
-		expect(
-			within(script as HTMLElement).getByText("xn--ulne-m9d.com", {
-				selector: "strong code",
-			}),
-		).toBeTruthy();
-		expect(
-			within(script as HTMLElement).getByText(SCRIPT_ROW.url),
-		).toBeTruthy();
-		for (const row of [plain, script])
-			for (const name of ["Allow", "Don’t allow"])
-				expect(
-					within(row as HTMLElement).getByRole("button", { name }),
-				).toBeTruthy();
-		await expectNoAxeViolations(container);
-	});
-
-	it("a_site_request_shows_what_hides_as_text", async () => {
-		await todayWith({
-			waiting: [
-				{
-					...SITE_ROW,
-					url: "https://pieboxpros.com/a\u202eb",
-					why: "Quote \u202ethis",
-				},
-			],
-			team: SITE_TEAM,
-		});
-
-		const list = await screen.findByRole("list", { name: en.waitingList });
-		const row = within(list).getByRole("listitem");
-		// A character that reorders text is written out, so what is read is what was sent.
-		expect(
-			within(row).getByText("https://pieboxpros.com/a\\u{202e}b"),
-		).toBeTruthy();
-		expect(row.textContent).toContain("Quote \\u{202e}this");
-	});
-});
-
 describe("a marketing plan's ads and their budget", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
@@ -1832,7 +1668,7 @@ describe("a purchase order the Procurement Specialist suggests", () => {
 		expect(
 			within(row).getByText("Check it is Pie Box Pros’s page before you pay."),
 		).toBeTruthy();
-		expect(within(row).queryByText(en.siteRequestScriptWhat)).toBeNull();
+		expect(within(row).queryByText(en.scriptWarningWhat)).toBeNull();
 
 		// Why is the agent's own words, in a frame that says so; the day it closes by itself is plain.
 		const why = within(row).getByRole("group", { name: "Why, in Ivo’s words" });
@@ -1941,8 +1777,8 @@ describe("a purchase order the Procurement Specialist suggests", () => {
 		expect(within(insecure).getByText("http://pieboxpros.com/x")).toBeTruthy();
 
 		// A name written in another alphabet is warned of, in its plain form, where the other is not.
-		expect(within(written).queryByText(en.siteRequestScriptWhat)).toBeNull();
-		expect(within(scripted).getByText(en.siteRequestScriptWhat)).toBeTruthy();
+		expect(within(written).queryByText(en.scriptWarningWhat)).toBeNull();
+		expect(within(scripted).getByText(en.scriptWarningWhat)).toBeTruthy();
 		expect(
 			within(scripted).getByText("xn--ulne-m9d.com", {
 				selector: "strong code",
@@ -2499,14 +2335,12 @@ describe("a data pipeline waiting on the owner", () => {
 				.textContent,
 		).toContain("It sends your data to Shippo.The Product Manager asks you:");
 		expect(within(shippo).queryByText("It costs money.")).toBeNull();
-		// Three tries: Catervas says so, and there is no reason to show.
+		// Catervas passed it on at once: the cost says why, and there is no reason to show.
 		const undecided = await rowOf("Azure prices");
 		const unclear = within(undecided).getByRole("group", {
 			name: "Why it comes to you",
 		});
-		expect(unclear.textContent).toBe(
-			"Its cost is not known.The Product Manager did not decide.",
-		);
+		expect(unclear.textContent).toBe("Its cost is not known.");
 		expect(within(undecided).queryByText(en.pipelineAsks)).toBeNull();
 	});
 
@@ -2568,8 +2402,8 @@ describe("a data pipeline waiting on the owner", () => {
 		}
 		// Another alphabet is warned of, a plain name is not.
 		const script = await rowOf("Ulіne");
-		expect(within(script).getByText(en.siteRequestScriptWhat)).toBeTruthy();
-		expect(within(paid).queryByText(en.siteRequestScriptWhat)).toBeNull();
+		expect(within(script).getByText(en.scriptWarningWhat)).toBeTruthy();
+		expect(within(paid).queryByText(en.scriptWarningWhat)).toBeNull();
 		await expectNoAxeViolations(container);
 	});
 });

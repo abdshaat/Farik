@@ -72,8 +72,8 @@ const entry = (allowances: Record<string, number>) => ({
 	oauth: {},
 	tools: {
 		check_credits: "network",
-		generate_image: "external_effect",
-		generate_video: "external_effect",
+		generate_image: "paid",
+		generate_video: "paid",
 	},
 	allowances,
 });
@@ -133,7 +133,6 @@ const teamGot = (
 ) => ({
 	team: team(servers),
 	agents: EFFECTIVE,
-	judges: { auto: null, architect: null, scrum_master: null },
 	max_agents: 7,
 	connectors,
 	sandboxed: true,
@@ -246,8 +245,8 @@ describe("allowances on the screens", () => {
 			stored_in: "keychain",
 			tools: {
 				check_credits: "network",
-				generate_image: "external_effect",
-				generate_video: "external_effect",
+				generate_image: "paid",
+				generate_video: "paid",
 			},
 		});
 		// Done: the numbers are in what Kai can do, and what is beyond them asks.
@@ -303,8 +302,8 @@ describe("allowances on the screens", () => {
 			stored_in: "keychain",
 			tools: {
 				check_credits: "network",
-				generate_image: "external_effect",
-				generate_video: "external_effect",
+				generate_image: "paid",
+				generate_video: "paid",
 			},
 		});
 		// A tool at 0 asks every time: it is not in what runs, and it is in what asks.

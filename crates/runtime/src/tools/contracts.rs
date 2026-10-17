@@ -11,8 +11,7 @@ use catervas_core::governor::gates::{
 };
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_protocol::event::{
-    ContractJudgedBody, ContractWrittenBody, EventBody, EventKind, JudgmentAnswer,
-    RequestTriagedBody, RequestTriagedBodySize, Thread,
+    ContractWrittenBody, EventBody, EventKind, RequestTriagedBody, RequestTriagedBodySize, Thread,
 };
 use catervas_store::EventQuery;
 use catervas_store::requests::{RequestError, file_request, summary_of};
@@ -43,26 +42,6 @@ pub(crate) struct TriageInput {
     size: Size,
     /// Why, in a sentence the log keeps.
     reason: String,
-}
-
-/// One answer of `catervas_record_judgment`, to the question of the same number.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct JudgmentAnswerInput {
-    /// Whether the plan passes the question.
-    pub(crate) pass: bool,
-    /// Why, in a sentence the log keeps.
-    pub(crate) reason: String,
-}
-
-/// `catervas_record_judgment`'s input.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct RecordJudgmentInput {
-    /// One answer per question, in the order the session's message numbers them.
-    pub(crate) answers: Vec<JudgmentAnswerInput>,
-    /// Why, overall, in a sentence the log keeps.
-    pub(crate) reason: String,
 }
 
 /// A criterion from the library, and the id it takes in the contract.
@@ -161,56 +140,6 @@ pub(super) fn triage(call: &Call<'_>, input: &TriageInput) -> Result<Value, Tool
     Ok(
         json!({ "task_id": task.as_str(), "kind": contract.kind.to_string(), "seq": event.envelope.seq }),
     )
-}
-
-/// Records the judge's check of the session's contract's plan (5.3): one answer per question of
-/// the team's `policy.judgment`, in order, and an overall reason. Only the team's judge
-/// (`Team::judge`) checks, only a task `refining`, and only with one answer per question.
-pub(super) fn record_judgment(
-    call: &Call<'_>,
-    input: &RecordJudgmentInput,
-) -> Result<Value, ToolError> {
-    let task = call.task()?;
-    let reason = input.reason.trim();
-    if reason.is_empty() {
-        return Err(Refusal::BlankReason.into());
-    }
-    let (_, row) = call.contract(task)?;
-    let judge = call.team.judge();
-    if call.role() != judge || row.status != TaskStatus::Refining {
-        return Err(Refusal::JudgmentNotAllowed {
-            role: call.role(),
-            judge,
-            status: row.status,
-        }
-        .into());
-    }
-    let questions = call.team.judgment().questions;
-    if input.answers.len() != questions.len() {
-        return Err(Refusal::JudgmentAnswers {
-            expected: questions.len(),
-        }
-        .into());
-    }
-    let event = call.append(
-        Some(task),
-        EventBody::ContractJudged(ContractJudgedBody {
-            judged_by: call.agent_id().to_string(),
-            answers: questions
-                .into_iter()
-                .zip(&input.answers)
-                .map(|(question, answer)| JudgmentAnswer {
-                    question,
-                    pass: answer.pass,
-                    reason: answer.reason.clone(),
-                })
-                .collect(),
-            fits_budget: None,
-            criteria_detect_failure: None,
-            reason: reason.to_string(),
-        }),
-    )?;
-    Ok(json!({ "task_id": task.as_str(), "seq": event.envelope.seq }))
 }
 
 /// Writes fields of the session's contract and appends criteria from the library by name, as
@@ -639,8 +568,7 @@ mod tests {
         assert_eq!(project.event_count(), before);
     }
 
-    /// `a_team_of_three`, with an active Scrum Master `sm` besides, who checks every plan
-    /// against the default two questions.
+    /// `a_team_of_three`, with an active Scrum Master `sm` besides.
     fn a_project_with_scrum_master(name: &str) -> TestProject {
         TestProject::new(
             name,
@@ -648,202 +576,8 @@ mod tests {
                 wire["agents"].as_array_mut().expect("agents").push(
                     catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
                 );
-                wire["policy"]["judgment"] = json!({ "required": "always" });
             }),
         )
-    }
-
-    /// An answer to each of the default two questions, and `reason` for the whole.
-    fn judgment(fits_budget: bool, criteria_detect_failure: bool, reason: &str) -> Value {
-        json!({
-            "answers": [
-                { "pass": fits_budget, "reason": "One file in five dollars." },
-                { "pass": criteria_detect_failure, "reason": "C1 runs the form." }
-            ],
-            "reason": reason
-        })
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn records_one_answer_per_question() {
-        let project = a_project_with_scrum_master("tools-judge-answers");
-        project.filed("CTV-1", "refining", "task", None);
-        project
-            .call(
-                "sm",
-                Some("CTV-1"),
-                "catervas_record_judgment",
-                judgment(true, false, "It fits, but the checks miss the failure."),
-            )
-            .expect("the judge answers each question");
-        let judged = project.events(&[EventKind::ContractJudged]);
-        let EventBody::ContractJudged(body) = &judged[0].body else {
-            panic!("a contract.judged");
-        };
-        let answers: Vec<(&str, bool, &str)> = body
-            .answers
-            .iter()
-            .map(|answer| {
-                (
-                    answer.question.as_str(),
-                    answer.pass,
-                    answer.reason.as_str(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            answers,
-            [
-                (
-                    "Does the task fit its budget?",
-                    true,
-                    "One file in five dollars."
-                ),
-                (
-                    "Would its checks notice if the work went wrong the way its intent worries \
-                     about?",
-                    false,
-                    "C1 runs the form."
-                ),
-            ]
-        );
-        assert_eq!(body.reason, "It fits, but the checks miss the failure.");
-        assert_eq!(
-            (body.fits_budget, body.criteria_detect_failure),
-            (None, None),
-            "a new judgment leaves the old answers out"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_the_wrong_number_of_answers() {
-        let project = a_project_with_scrum_master("tools-judge-count");
-        project.filed("CTV-1", "refining", "task", None);
-        let before = project.event_count();
-        for answers in [
-            json!([{ "pass": true, "reason": "Fits." }]),
-            json!([
-                { "pass": true, "reason": "Fits." },
-                { "pass": true, "reason": "Caught." },
-                { "pass": true, "reason": "Small." }
-            ]),
-        ] {
-            let refused = project.call(
-                "sm",
-                Some("CTV-1"),
-                "catervas_record_judgment",
-                json!({ "answers": answers, "reason": "One file." }),
-            );
-            assert!(
-                matches!(&refused, Err(ToolError::Refused { reason })
-                    if reason == "judgment_answers: expected 2 answers, one per question"),
-                "{refused:?}"
-            );
-        }
-        assert_eq!(project.event_count(), before);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn records_a_judgment_by_the_scrum_master() {
-        let project = a_project_with_scrum_master("tools-judge-sm");
-        project.filed("CTV-1", "refining", "task", None);
-        let result = project
-            .call(
-                "sm",
-                Some("CTV-1"),
-                "catervas_record_judgment",
-                judgment(
-                    true,
-                    false,
-                    "It fits the sprint, but the criteria only check the happy path.",
-                ),
-            )
-            .expect("the Scrum Master judges a refining task");
-        let judged = project.events(&[EventKind::ContractJudged]);
-        assert_eq!(judged.len(), 1);
-        let EventBody::ContractJudged(body) = &judged[0].body else {
-            panic!("a contract.judged");
-        };
-        assert_eq!(body.judged_by, "sm");
-        assert_eq!(
-            body.answers
-                .iter()
-                .map(|answer| answer.pass)
-                .collect::<Vec<_>>(),
-            [true, false]
-        );
-        assert_eq!(
-            body.reason,
-            "It fits the sprint, but the criteria only check the happy path."
-        );
-        assert_eq!(result["seq"], judged[0].envelope.seq);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_judgment_by_anyone_else() {
-        let project = a_project_with_scrum_master("tools-judge-others");
-        project.filed("CTV-1", "refining", "task", None);
-        let before = project.event_count();
-        for agent in ["pm", "dev-a"] {
-            refused_with(
-                project.call(
-                    agent,
-                    Some("CTV-1"),
-                    "catervas_record_judgment",
-                    judgment(
-                        true,
-                        true,
-                        "Fits the sprint and the criteria would catch it.",
-                    ),
-                ),
-                "judgment_not_allowed",
-            );
-        }
-        assert_eq!(project.event_count(), before);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_judgment_outside_refining() {
-        let project = a_project_with_scrum_master("tools-judge-status");
-        project.filed("CTV-1", "ready", "task", None);
-        let before = project.event_count();
-        refused_with(
-            project.call(
-                "sm",
-                Some("CTV-1"),
-                "catervas_record_judgment",
-                judgment(
-                    true,
-                    true,
-                    "Fits the sprint and the criteria would catch it.",
-                ),
-            ),
-            "judgment_not_allowed",
-        );
-        assert_eq!(project.event_count(), before);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_blank_reason() {
-        let project = a_project_with_scrum_master("tools-judge-blank");
-        project.filed("CTV-1", "refining", "task", None);
-        let before = project.event_count();
-        refused_with(
-            project.call(
-                "sm",
-                Some("CTV-1"),
-                "catervas_record_judgment",
-                judgment(true, true, "  "),
-            ),
-            "blank_reason",
-        );
-        assert_eq!(project.event_count(), before);
     }
 
     #[test]

@@ -17,7 +17,7 @@ use catervas_core::governor::gates::{
 };
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::governor::transition_table::TransitionActor;
-use catervas_core::team::plain_role;
+use catervas_core::team::{changes_code, plain_role};
 use catervas_protocol::command::{Command, RequestSize, command_from_value};
 use catervas_protocol::event::{
     CatervaficationStartedBody, CatervaficationStartedBodyProject, CatervasEvent,
@@ -250,6 +250,17 @@ pub fn rederive_tasks(log: &EventLog) -> Result<Vec<(TaskId, String)>, StoreErro
         .collect())
 }
 
+/// One `artifact` criterion that `path` exists (ADR 0061): what Catervas files whole carries
+/// criteria it runs itself when its assignee changes no code.
+fn exists_criterion(number: usize, path: &str, satisfies: &str) -> Value {
+    json!({
+        "id": format!("C{number}"),
+        "text": format!("{path} exists."),
+        "satisfies": [satisfies],
+        "verification": { "method": "artifact", "path": path }
+    })
+}
+
 /// The whole contract of the task that brings `twin`, the version of `human` written for agents,
 /// up to date with the owner's change to `human` (`docs/SPEC.md` 5.17): `owner` writes it and
 /// `reviewer` checks it, within `max_cost_usd`, and it may change nothing but the twin.
@@ -263,6 +274,22 @@ pub fn rederive_request(
 ) -> Value {
     let file = |path: &str| path.rsplit('/').next().unwrap_or(path).to_string();
     let says = format!("{twin} says what {human} says now");
+    let exit_criteria = if changes_code(owner) {
+        json!([{
+            "id": "C1",
+            "text": format!("{says}."),
+            "satisfies": ["R1"],
+            "verification": {
+                "method": "review",
+                "rubric": [
+                    format!("Every fact, decision and limit in {human} is in {twin}."),
+                    format!("Nothing in {twin} contradicts {human}.")
+                ]
+            }
+        }])
+    } else {
+        json!([exists_criterion(1, twin, "R1")])
+    };
     json!({
         "title": format!("Bring {} up to date with the owner's change", file(twin)),
         "intent": format!(
@@ -274,18 +301,7 @@ pub fn rederive_request(
             "out_of_scope": [format!("{human}, which stays as the owner left it")]
         },
         "requirements": [{ "id": "R1", "text": format!("{says}, written for agents.") }],
-        "exit_criteria": [{
-            "id": "C1",
-            "text": format!("{says}."),
-            "satisfies": ["R1"],
-            "verification": {
-                "method": "review",
-                "rubric": [
-                    format!("Every fact, decision and limit in {human} is in {twin}."),
-                    format!("Nothing in {twin} contradicts {human}.")
-                ]
-            }
-        }],
+        "exit_criteria": exit_criteria,
         "assignee_role": owner.to_string(),
         "reviewer_role": reviewer.to_string(),
         "risk": "low",
@@ -389,31 +405,10 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64, format: DocumentF
             }
         ],
         "exit_criteria": [
-            {
-                "id": "C1",
-                "text": "The product description and the roadmap have every part listed above.",
-                "satisfies": ["R1", "R2"],
-                "verification": {
-                    "method": "review",
-                    "rubric": [
-                        format!("spec.{x} has the title, the paragraph and the sections R1 names."),
-                        format!("roadmap.{x} has Now, Next and Later, each item one line."),
-                        "Both are in plain words, with no technical term the owner did not use."
-                    ]
-                }
-            },
-            {
-                "id": "C2",
-                "text": "The team's copies say the same as the documents you read.",
-                "satisfies": ["R3"],
-                "verification": {
-                    "method": "review",
-                    "rubric": [
-                        format!("Every fact, decision and limit in spec.{x} and roadmap.{x} is in their .agent.{x} versions."),
-                        format!("Nothing in an .agent.{x} version contradicts its version for the owner.")
-                    ]
-                }
-            }
+            exists_criterion(1, &format!("docs/catervas/product/spec.{x}"), "R1"),
+            exists_criterion(2, &format!("docs/catervas/product/spec.agent.{x}"), "R3"),
+            exists_criterion(3, &format!("docs/catervas/product/roadmap.{x}"), "R2"),
+            exists_criterion(4, &format!("docs/catervas/product/roadmap.agent.{x}"), "R3")
         ],
         "assignee_role": "product_manager",
         "reviewer_role": reviewer.to_string(),
@@ -522,6 +517,22 @@ pub fn change_request(
     if let Some(twin) = twin {
         rubric.push(format!("{twin} says what {path} now says."));
     }
+    let exit_criteria = if changes_code(owner) {
+        json!([{
+            "id": "C1",
+            "text": format!("{path} makes the change the owner's words ask for."),
+            "satisfies": ["R1"],
+            "verification": { "method": "review", "rubric": rubric }
+        }])
+    } else {
+        Value::Array(
+            paths
+                .iter()
+                .enumerate()
+                .map(|(index, file)| exists_criterion(index + 1, file, "R1"))
+                .collect(),
+        )
+    };
     json!({
         "title": title,
         "intent": format!(
@@ -529,12 +540,7 @@ pub fn change_request(
         ),
         "scope": { "in_scope": paths, "out_of_scope": ["Every other file"] },
         "requirements": [{ "id": "R1", "text": format!("{path} makes the change the owner asked for.") }],
-        "exit_criteria": [{
-            "id": "C1",
-            "text": format!("{path} makes the change the owner's words ask for."),
-            "satisfies": ["R1"],
-            "verification": { "method": "review", "rubric": rubric }
-        }],
+        "exit_criteria": exit_criteria,
         "assignee_role": owner.to_string(),
         "reviewer_role": reviewer.to_string(),
         "risk": "low",
@@ -586,15 +592,17 @@ pub fn rewrite_request(
         out_of_scope.push(plans);
     }
     let mut exit_criteria = criteria;
-    exit_criteria.push(json!({
-        "id": format!("C{}", documents.len() + 1),
-        "text": "Each Markdown document is gone, and its HTML says what it said.",
-        "satisfies": ["R1"],
-        "verification": {
-            "method": "review",
-            "rubric": rubric
-        }
-    }));
+    if changes_code(owner) {
+        exit_criteria.push(json!({
+            "id": format!("C{}", documents.len() + 1),
+            "text": "Each Markdown document is gone, and its HTML says what it said.",
+            "satisfies": ["R1"],
+            "verification": {
+                "method": "review",
+                "rubric": rubric
+            }
+        }));
+    }
     json!({
         "title": format!("Rewrite the {}'s documents as HTML", plain_role(owner)),
         "intent": format!(
@@ -1408,6 +1416,78 @@ mod tests {
     }
 
     #[test]
+    fn whole_filed_contracts_need_no_review() {
+        use catervas_core::contract::Role;
+        use catervas_core::folders::DocumentFormat;
+
+        let documents = vec![
+            "docs/catervas/architecture/overview.md".to_string(),
+            "docs/catervas/architecture/overview.agent.md".to_string(),
+        ];
+        for owner in [
+            Role::ProductManager,
+            Role::Architect,
+            Role::MarketingSpecialist,
+        ] {
+            let wires = [
+                super::rederive_request(
+                    "docs/catervas/product/spec.md",
+                    "docs/catervas/product/spec.agent.md",
+                    owner,
+                    Role::ProductManager,
+                    5.0,
+                ),
+                product_plan_request(Role::Architect, 5.0, DocumentFormat::Markdown),
+                super::change_request(
+                    "docs/catervas/architecture/overview.md",
+                    Some("docs/catervas/architecture/overview.agent.md"),
+                    "the overview",
+                    "Add a section.",
+                    owner,
+                    Role::ProductManager,
+                    5.0,
+                ),
+                super::rewrite_request(
+                    "docs/catervas/architecture",
+                    &documents,
+                    owner,
+                    Role::ProductManager,
+                    5.0,
+                ),
+            ];
+            for mut wire in wires {
+                wire["id"] = json!("CTV-1");
+                wire["status"] = json!("draft");
+                validate_contract(&wire).expect("the contract is schema-valid");
+                let allowed = wire["allowed_paths"].as_array().expect("paths").clone();
+                let folder = allowed
+                    .iter()
+                    .find_map(|path| path.as_str()?.strip_suffix("/**"));
+                for criterion in wire["exit_criteria"].as_array().expect("criteria") {
+                    let verification = &criterion["verification"];
+                    assert_eq!(verification["method"], "artifact", "{owner}: {criterion}");
+                    let path = verification["path"].as_str().expect("a path");
+                    assert!(
+                        allowed.contains(&json!(path))
+                            || folder.is_some_and(|folder| path.starts_with(folder)),
+                        "{owner}: {path} is outside {allowed:?}"
+                    );
+                }
+            }
+        }
+        let kept = super::change_request(
+            "src/a.rs",
+            None,
+            "a",
+            "Change it.",
+            Role::SoftwareDeveloper,
+            Role::Architect,
+            5.0,
+        );
+        assert_eq!(kept["exit_criteria"][0]["verification"]["method"], "review");
+    }
+
+    #[test]
     fn writes_the_product_plans_contract() {
         use catervas_core::contract::Role;
         use catervas_core::governor::readiness::evaluate_readiness;
@@ -1432,11 +1512,11 @@ mod tests {
         assert_eq!(wire["risk"], "low");
         assert_eq!(wire["budget"]["max_cost_usd"], 20.0);
         let criteria = wire["exit_criteria"].as_array().expect("criteria");
-        assert_eq!(criteria.len(), 2);
+        assert_eq!(criteria.len(), 4);
         assert!(
             criteria
                 .iter()
-                .all(|criterion| criterion["verification"]["method"] == "review")
+                .all(|criterion| criterion["verification"]["method"] == "artifact")
         );
 
         let contract = file_product_plan_request(&project.files(), &log, wire, (at(), &ids()))
@@ -1444,10 +1524,6 @@ mod tests {
         assert_eq!(contract.assignee_role, Role::ProductManager);
         assert_eq!(contract.allowed_paths, paths);
         assert_eq!(evaluate_readiness(&contract, &a_ready_context()), Ok(()));
-        // The owner reads and accepts the result.
-        assert!(catervas_core::governor::done::result_needs_the_human(
-            &contract
-        ));
         // The words the owner reads are plain, and these are the ones they get.
         assert_eq!(
             contract.scope.in_scope,
@@ -1461,11 +1537,11 @@ mod tests {
         );
         assert_eq!(
             contract.exit_criteria[0].text.to_string(),
-            "The product description and the roadmap have every part listed above."
+            "docs/catervas/product/spec.md exists."
         );
         assert_eq!(
-            contract.exit_criteria[1].text.to_string(),
-            "The team's copies say the same as the documents you read."
+            contract.exit_criteria[3].text.to_string(),
+            "docs/catervas/product/roadmap.agent.md exists."
         );
 
         let events = log.read(&EventQuery::default()).expect("the log reads");
@@ -1975,7 +2051,7 @@ mod tests {
         let plans = "The marketing plans (plans/MP-n), each the version the owner approved";
         let wire = rewrite("docs/catervas/marketing");
         assert!(wire["scope"]["out_of_scope"].to_string().contains(plans));
-        assert!(wire["exit_criteria"].to_string().contains(plans));
+        // Catervas runs the per-document criteria itself; the review that said it is gone (ADR 0061).
         let product = rewrite("docs/catervas/product");
         assert!(!product.to_string().contains("MP-n"));
     }
@@ -2004,12 +2080,14 @@ mod tests {
             wire["requirements"][0]["text"],
             format!("{spec} makes the change the owner asked for.")
         );
+        // The Product Manager changes no code: Catervas checks that both files exist.
         assert_eq!(
-            wire["exit_criteria"][0]["verification"]["rubric"],
+            wire["exit_criteria"],
             json!([
-                format!("{spec} makes the change the owner's words ask for."),
-                format!("Nothing else in {spec} changes."),
-                format!("{twin} says what {spec} now says."),
+                { "id": "C1", "text": format!("{spec} exists."), "satisfies": ["R1"],
+                  "verification": { "method": "artifact", "path": spec } },
+                { "id": "C2", "text": format!("{twin} exists."), "satisfies": ["R1"],
+                  "verification": { "method": "artifact", "path": twin } },
             ])
         );
         assert!(
@@ -2032,12 +2110,7 @@ mod tests {
             alone["allowed_paths"],
             json!(["docs/catervas/architecture/overview.html"])
         );
-        assert_eq!(
-            alone["exit_criteria"][0]["verification"]["rubric"]
-                .as_array()
-                .map(Vec::len),
-            Some(2)
-        );
+        assert_eq!(alone["exit_criteria"].as_array().map(Vec::len), Some(1));
     }
 
     #[test]

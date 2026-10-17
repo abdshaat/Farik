@@ -88,14 +88,6 @@ export type ConnectorState = {
 	/** Where its keys or sign-in are kept, whenever some are. */
 	storedIn?: "keychain" | "file";
 };
-type Holder = { agentId: string; displayName: string; role: Agent["role"] };
-/** Who checks plans under each choice of judge, or null where nobody active holds it. */
-export type Judges = {
-	auto: Holder | null;
-	architect: Holder | null;
-	scrumMaster: Holder | null;
-};
-
 /** The team file, what the daemon works out for each agent, and the models the price table knows. */
 export function useTeam() {
 	const { data, again } = useQuery<{

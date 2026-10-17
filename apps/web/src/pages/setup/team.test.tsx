@@ -30,7 +30,6 @@ const RECOMMENDED = {
 const BUDGET = "Does the task fit its budget?";
 const NOTICE =
 	"Would its checks notice if the work went wrong the way its intent worries about?";
-const SMALL = "Is it small enough to finish in one go?";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -1389,8 +1388,9 @@ describe("team setup", () => {
 		await answerQuery(s, "team.propose", proposed());
 		await answerStatus(s, false, 1, { setup_pending: true });
 		await screen.findByRole("heading", { name: en.finishTitle });
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		fireEvent.click(
-			screen.getByRole("radio", { name: /^Open a pull request/ }),
+			await screen.findByRole("switch", { name: en.planInSprints }),
 		);
 		expect(sessionStorage.getItem("catervas.setupDraft")).not.toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
@@ -1473,41 +1473,40 @@ describe("team setup", () => {
 		).toBeTruthy();
 	});
 
-	it("chooses_how_work_is_finished", async () => {
-		const { container, socket } = await renderApp("/setup/finish");
-		const s = socket as FakeSocket;
+	it("setup_and_rules_offer_no_integration_choice", async () => {
+		// Catervas never merges (ADR 0061): finished work always opens a pull request.
+		const first = await renderApp("/setup/finish");
+		const s = first.socket as FakeSocket;
 		await answerQuery(s, "team.propose", proposed());
 		await answerStatus(s, false, 1, { setup_pending: true });
 		await screen.findByRole("heading", { name: en.finishTitle });
-		expect(
-			(
-				screen.getByRole("radio", {
-					name: /^Catervas adds it/,
-				}) as HTMLInputElement
-			).checked,
-		).toBe(true);
-		await expectNoAxeViolations(container);
-		fireEvent.click(
-			screen.getByRole("radio", { name: /^Open a pull request/ }),
-		);
+		expect(screen.queryByRole("group", { name: "Accepted work" })).toBeNull();
+		expect(screen.queryByRole("radio", { name: /pull request/i })).toBeNull();
+		expect(screen.queryByRole("button", { name: en.putBack })).toBeNull();
+		cleanup();
 
-		// Advanced and back keeps the choice.
-		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
-		fireEvent.click(
-			await screen.findByRole("button", { name: en.advancedHide }),
-		);
+		const rules = await renderApp("/settings/work");
+		const r = rules.socket as FakeSocket;
+		await answerStatus(r, false);
+		await answerQuery(r, "team.get", {
+			team: { ...proposed().team, rules: {} },
+			agents: [],
+			max_agents: 7,
+		});
+		await answerQuery(r, "settings.defaults", RECOMMENDED);
+		const finish = await screen.findByRole("region", {
+			name: en.rulesFinish,
+		});
 		expect(
-			(
-				(await screen.findByRole("radio", {
-					name: /^Open a pull request/,
-				})) as HTMLInputElement
-			).checked,
-		).toBe(true);
-		const start = await startFrom(s, en.finishTitle);
-		expect(start.team.policy).toMatchObject({ integration: "pull_request" });
+			within(finish).getByText(
+				"Finished work opens a pull request for you to merge.",
+			),
+		).toBeTruthy();
+		expect(within(finish).queryByRole("radio")).toBeNull();
+		expect(within(finish).queryByRole("button")).toBeNull();
 	});
 
-	it("edits_the_checks_and_the_plan_check", async () => {
+	it("edits_the_checks", async () => {
 		const { container, socket } = await renderApp("/setup/finish");
 		const advanced = () =>
 			within(document.getElementById("finish-advanced") as HTMLElement);
@@ -1523,28 +1522,11 @@ describe("team setup", () => {
 		fireEvent.click(
 			await screen.findByRole("button", { name: en.advancedSwitch }),
 		);
-		// Who checks plans is the daemon's answer, not the page's own reckoning.
-		const mira = {
-			agent_id: "mira",
-			display_name: "Mira",
-			role: "product_manager",
-		};
 		await answerQuery(s, "team.validate", {
 			errors: [],
 			effects: [],
 			agents: [],
-			judges: { auto: mira, architect: null, scrum_master: null },
 		});
-		expect(
-			await advanced().findByRole("radio", {
-				name: "Catervas chooses: Mira, the Product Manager",
-			}),
-		).toBeTruthy();
-		expect(
-			advanced().getByRole("radio", {
-				name: "The Scrum Master, once the team has one",
-			}),
-		).toBeTruthy();
 		const checks = await advanced().findByRole("list", {
 			name: en.checksTitle,
 		});
@@ -1573,71 +1555,57 @@ describe("team setup", () => {
 		await s.reply(save, {});
 		expect(await within(checks).findByText(text)).toBeTruthy();
 
-		const small = advanced().getByRole("checkbox", {
-			name: new RegExp(`^${en.planSmall}`),
-		});
-		expect((small as HTMLInputElement).checked).toBe(false);
-		fireEvent.click(small);
-		expect((small as HTMLInputElement).checked).toBe(true);
-
-		fireEvent.click(advanced().getByRole("radio", { name: /the Architect/i }));
-		await waitFor(async () => {
-			const frame = await asked(s, "team.validate");
-			const team = (
-				frame.params.params as {
-					team: { policy: { judgment: { judge: string } } };
-				}
-			).team;
-			expect(team.policy.judgment.judge).toBe("architect");
-		});
-		const refusal = "No active Architect can check plans.";
-		await s.reply(await asked(s, "team.validate"), {
-			errors: [
-				{
-					path: "/policy/judgment/judge",
-					message: refusal,
-					code: "judge_not_held",
-				},
-			],
-			effects: [],
-		});
-		// Said at the choice it concerns, in the page's own words.
-		const who = advanced().getByRole("group", { name: en.planJudge });
-		expect(
-			await within(who).findByText(
-				en.refuseJudge.replaceAll("{role}", en.roleArchitect),
-			),
-		).toBeTruthy();
-		expect(who.getAttribute("aria-describedby")).toBeTruthy();
-		expect(screen.queryByText(refusal)).toBeNull();
-		// Start stays enabled: the daemon refuses an invalid team and Start says why.
-		expect(
-			(screen.getByRole("button", { name: en.startTeam }) as HTMLButtonElement)
-				.disabled,
-		).toBe(false);
-
-		fireEvent.click(
-			advanced().getByRole("radio", { name: /^Catervas chooses/ }),
-		);
-		await answerQuery(s, "team.validate", { errors: [], effects: [] });
-		await waitFor(() =>
-			expect(
-				screen.queryByText(
-					en.refuseJudge.replaceAll("{role}", en.roleArchitect),
-				),
-			).toBeNull(),
-		);
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		const start = (await sent(s, "team.start")).params as {
-			team: { policy: { judgment: unknown } };
 			criteria: unknown;
 		};
-		expect(start.team.policy.judgment).toEqual({
-			required: "always",
-			questions: [BUDGET, NOTICE, SMALL],
-			judge: "auto",
-		});
 		expect(start.criteria).toEqual({ criteria: [TESTS_PASS, added] });
+	});
+
+	it("setup_and_rules_ask_nothing_about_checking_plans", async () => {
+		// ADR 0061: no agent checks a plan. A team file may still carry `policy.judgment`
+		// (proposed() does), and both pages open on it with nothing said about checking.
+		const none = (where: HTMLElement) => {
+			expect(screen.queryByRole("group", { name: /^Who checks/ })).toBeNull();
+			expect(
+				screen.queryByRole("switch", { name: /Check every plan/ }),
+			).toBeNull();
+			expect(
+				screen.queryByRole("checkbox", { name: /within its budget/ }),
+			).toBeNull();
+			expect(
+				screen.queryByRole("heading", { name: /^Checking plans/ }),
+			).toBeNull();
+			expect(where.textContent ?? "").not.toMatch(/Who checks/);
+		};
+		const { socket } = await renderApp("/setup/finish");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.advancedSwitch }),
+		);
+		await answerQuery(s, "team.validate", {
+			errors: [],
+			effects: [],
+			agents: [],
+		});
+		await screen.findByRole("list", { name: en.checksTitle });
+		none(document.getElementById("finish-advanced") as HTMLElement);
+		cleanup();
+
+		const rules = await renderApp("/settings/work");
+		const r = rules.socket as FakeSocket;
+		await answerStatus(r, false);
+		await answerQuery(r, "team.get", {
+			team: proposed().team,
+			agents: [],
+			max_agents: 7,
+		});
+		await answerQuery(r, "settings.defaults", RECOMMENDED);
+		await screen.findByRole("region", { name: en.rulesFinish });
+		none(screen.getByRole("main"));
+		expect(screen.queryByRole("alert")).toBeNull();
 	});
 
 	it("says_a_refused_check_or_note_in_plain_words", async () => {
@@ -1689,24 +1657,12 @@ describe("team setup", () => {
 			rules: {},
 			policy: {
 				integration: "auto_merge",
-				judgment: {
-					required: "always",
-					questions: [BUDGET, NOTICE],
-					judge: "auto",
-				},
 				permissions: { run_commands: true, push: false },
 			},
 		};
 		const changed = proposed((team) => {
 			team.budgets = { daily_usd: 25 };
 			team.rules = { require_new_tests: true };
-			const policy = team.policy as Record<string, unknown>;
-			policy.integration = "manual";
-			policy.judgment = {
-				required: "never",
-				questions: [SMALL],
-				judge: "auto",
-			};
 		});
 		const { socket } = await renderApp("/setup/permissions");
 		const s = socket as FakeSocket;
@@ -1757,23 +1713,13 @@ describe("team setup", () => {
 		fireEvent.click(screen.getByRole("button", { name: en.continue }));
 
 		await screen.findByRole("heading", { name: en.finishTitle });
-		await answerDefaults(3);
-		fireEvent.click(back());
-		expect(
-			(
-				screen.getByRole("radio", {
-					name: /^Catervas adds it/,
-				}) as HTMLInputElement
-			).checked,
-		).toBe(true);
-
 		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		await screen.findByRole("button", { name: en.advancedHide });
-		await answerDefaults(4);
+		await answerDefaults(3);
 		const backs = within(
 			document.getElementById("finish-advanced") as HTMLElement,
 		).getAllByRole("button", { name: en.putBack });
-		expect(backs).toHaveLength(2);
+		expect(backs).toHaveLength(1);
 		for (const one of backs) fireEvent.click(one);
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		const start = (await sent(s, "team.start")).params as {
@@ -1895,7 +1841,6 @@ const ready = (
 		agents,
 		policy: {
 			permissions: { run_commands: true, push: false },
-			judgment: { required: "always", questions: [BUDGET], judge: "auto" },
 			integration: "manual",
 		},
 		budgets: {},
@@ -1989,7 +1934,6 @@ const THREE = {
 		],
 		policy: {
 			permissions: { run_commands: true, push: false },
-			judgment: { required: "never", questions: [BUDGET], judge: "auto" },
 			integration: "pull_request",
 		},
 		budgets: { daily_usd: 20 },
@@ -2030,7 +1974,6 @@ const SHOP = {
 		],
 		policy: {
 			permissions: { run_commands: true, push: false },
-			judgment: { required: "never", questions: [BUDGET], judge: "auto" },
 			integration: "pull_request",
 		},
 		budgets: { daily_usd: 20 },
@@ -2148,13 +2091,6 @@ describe("team setup's four starts", () => {
 		).toBe("20");
 		fireEvent.click(screen.getByRole("button", { name: en.continue }));
 		await screen.findByRole("heading", { name: en.finishTitle });
-		expect(
-			(
-				screen.getByRole("radio", {
-					name: /^Open a pull request/,
-				}) as HTMLInputElement
-			).checked,
-		).toBe(true);
 		const carried = screen.getByRole("region", {
 			name: t("finishCarried", { name: "Three of us" }),
 		});
@@ -2195,7 +2131,6 @@ describe("team setup's four starts", () => {
 			push: false,
 		});
 		expect(start.team.policy.integration).toBe("pull_request");
-		expect(start.team.policy.judgment).toEqual(THREE.template.policy.judgment);
 		expect(start.team.budgets).toEqual({ daily_usd: 20 });
 		// A saved team without the sprint answer plans in sprints, as any new team.
 		expect(start.team.policy.plan_in_sprints).toBe(true);

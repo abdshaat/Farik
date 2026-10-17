@@ -22,8 +22,6 @@ pub mod generated;
 mod kit;
 /// Which role reviews a task (D7).
 mod reviewer;
-/// Catervas's own list of approved sites for the Procurement Specialist.
-pub mod sites;
 /// Checking a skill a user adds.
 mod skill_check;
 
@@ -554,17 +552,14 @@ mod tests {
     }
 
     #[test]
-    fn ends_the_scrum_masters_one_tool_sessions_on_their_one_tool() {
+    fn ends_the_scrum_masters_one_tool_session_on_its_one_tool() {
         let prompt = loaded(Role::ScrumMaster).system_prompt;
         let ending = &prompt[prompt.find("## How a session ends").expect("the section")..];
         assert!(
             ending.contains("recorded with `catervas_triage_request`: end your turn"),
             "{ending}"
         );
-        assert!(
-            ending.contains("recorded with `catervas_record_judgment`: end your turn"),
-            "{ending}"
-        );
+        assert!(!ending.contains("catervas_record_judgment"), "{ending}");
         assert!(
             !ending.contains("a triage or a breakdown you finished"),
             "a triage requests no transition: {ending}"
@@ -1026,35 +1021,6 @@ mod tests {
         assert!(skill.contains(recording), "{skill}");
     }
 
-    /// Step 10b2: the role reads only Catervas's approved sites and the sites the owner allowed, and
-    /// its prompt and its skill say how it learns which they are, how it asks for another, and that
-    /// the address it asks with is no place for the business's details (ADR 0039). The tool names
-    /// are held to tools Catervas lists by `kit_skills_name_only_tools_catervas_lists` in the runtime.
-    #[test]
-    fn sourcing_a_product_says_how_to_ask_for_a_site() {
-        let definition = loaded(Role::ProcurementSpecialist);
-        let flatten = |text: &str| {
-            text.split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .to_lowercase()
-        };
-        let prompt = flatten(&definition.system_prompt);
-        let skill = flatten(&definition.skills[0].body);
-        assert!(
-            prompt.contains("catervas's approved sites and the sites the owner allowed"),
-            "the prompt lost the sites it may read: {prompt}"
-        );
-        for phrase in [
-            "`catervas_read_sites`",
-            "`catervas_request_sites`",
-            "end your turn",
-            "never put the business's details in an address",
-        ] {
-            assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
-        }
-    }
-
     /// Step 10c: the role suggests an order and tracks it, and its prompt and its skill say that it
     /// never places, pays for, confirms or cancels one, nor marks one placed or received (ADR
     /// 0039). The tool names are held to tools Catervas lists by `kit_skills_name_only_tools_catervas_lists`
@@ -1094,8 +1060,6 @@ mod tests {
         for phrase in [
             "`catervas_draft_purchase_order`",
             "`evaluations/<name>.md`",
-            "on a site the owner allowed",
-            "ask for it with `catervas_request_sites`",
             "`catervas_read_purchase_orders`",
             "`catervas_update_purchase_order`",
             "`preparing`, `shipped`, `delayed`",
@@ -1131,8 +1095,8 @@ mod tests {
     }
 
     /// ADR 0042: the Marketing Specialist owns the brand kit, the brand persona, the marketing plan
-    /// and the social presence. It posts, advertises and spends only as the owner's approved plan
-    /// says or after the owner allows that one call, and the prompt carries every `forbidden` line
+    /// and the social presence. It advertises and spends only as the owner's approved plan says or
+    /// after the owner allows a call that costs money, and the prompt carries every `forbidden` line
     /// and the three paths it keeps its documents at.
     #[test]
     fn the_marketing_specialist_owns_the_brand_and_the_plan() {
@@ -1141,7 +1105,7 @@ mod tests {
             definition.forbidden,
             [
                 "write application code",
-                "publish, send or spend money except through a call the owner allows or the owner's approved marketing plan",
+                "spend money except through a call the owner allows or the owner's approved marketing plan, or send an email the human has not sent",
                 "delete a post, an email or a campaign",
                 "change billing, account access or conversion tracking at any service",
             ]
@@ -1174,7 +1138,7 @@ mod tests {
             assert!(prompt.contains(path), "the prompt does not name {path}");
         }
         assert!(
-            prompt.contains("after the owner allows that one call"),
+            prompt.contains("a plan that spends nothing is approved by catervas"),
             "{prompt}"
         );
         assert!(
@@ -1230,8 +1194,8 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        // The lines that say who sends a post: one in the owner's approved plan goes out through
-        // the tool that schedules it, and any other waits for the owner (a line may wrap).
+        // The lines that say who sends a post: any post goes out through the tool that schedules it,
+        // in the owner's plan or outside it, and the owner can Stop it (a line may wrap).
         for name in [
             "marketing-what-ships",
             "planning-a-launch",
@@ -1240,9 +1204,9 @@ mod tests {
         ] {
             let said = of(name);
             assert!(
-                said.contains(
-                    "in the owner's approved marketing plan goes out through `catervas_schedule_post`"
-                ) && said.contains("any other post waits for the owner"),
+                said.contains("goes out through `catervas_schedule_post`")
+                    && said.contains("Stop")
+                    && !said.contains("waits for the owner"),
                 "{name} lost its line on who sends a post"
             );
         }
@@ -1493,17 +1457,17 @@ mod tests {
             (
                 Role::ProductManager,
                 "writing-task-contracts",
-                "A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself, reviewed in a fresh session that knows nothing of the work, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.",
+                "A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself (not reviewed: Catervas checks its criteria), and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.",
             ),
             (
                 Role::ProductManager,
                 "writing-task-contracts",
-                "Nobody reviews their own work but you, in a fresh session, for your own docs tasks (below).",
+                "every other role's task is not reviewed by an agent: Catervas checks its criteria",
             ),
             (
                 Role::ScrumMaster,
                 "keeping-work-flowing",
-                "Nobody reviews their own work, except a Product Manager with no Architect or Scrum Master on its team, whose own docs tasks it reviews in a fresh session. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks.",
+                "Only code is reviewed, and nobody reviews their own work; a task that is not code is checked by Catervas on its criteria. The Scrum Master is never a task's assignee, and the Product Manager is the assignee only of its own docs tasks.",
             ),
         ] {
             let definition = loaded(role);
@@ -1621,9 +1585,6 @@ mod tests {
     /// as globs that reach either format, a plan with the team's extension.
     #[test]
     fn contract_values_keep_their_extension() {
-        assert!(catervas_core::folders::may_change_an_owner_document(&[
-            "docs/catervas/product/spec.*".to_string()
-        ]));
         let globs = vec!["docs/catervas/product/spec.*".to_string()];
         for path in [
             "docs/catervas/product/spec.html",
@@ -1661,16 +1622,13 @@ mod tests {
         );
     }
 
-    /// The Marketing Specialist reads two folders (step 02): its prompt says so and where, and
-    /// nothing it is given sends it to `CHANGELOG.md` or to "the project" at large.
+    /// The Marketing Specialist reads the whole project (ADR 0061): its prompt says so and names
+    /// the Product Manager's folder, and nothing it is given sends it to `CHANGELOG.md`.
     #[test]
     fn the_marketing_specialist_is_told_where_it_reads() {
         let definition = loaded(Role::MarketingSpecialist);
         let prompt = flattened(&definition.system_prompt);
-        for needle in [
-            "Catervas refuses a `Read`, `Grep` or `Glob` anywhere else",
-            "`docs/catervas/product/`",
-        ] {
+        for needle in ["You read the whole project", "`docs/catervas/product/`"] {
             assert!(prompt.contains(needle), "{needle}: {prompt}");
         }
         let root =

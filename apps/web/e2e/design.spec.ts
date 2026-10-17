@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { startServe } from "./fixtures/serve.ts";
 import { screenshots } from "./fixtures/shots.ts";
 
-test("a Designer's plan waits for the Product Manager on its task page", async ({
+test("a Designer's plan is approved by Catervas at once and shown on its task page", async ({
 	page,
 }) => {
 	const serve = await startServe({
@@ -24,18 +24,21 @@ test("a Designer's plan waits for the Product Manager on its task page", async (
 		await page.getByRole("button", { name: "Send to the team" }).click();
 		await expect(page).toHaveURL(/\/requests\/CTV-1$/);
 
-		// Iris explores and plans; Mira's decision session then waits, unplayed.
+		// Iris explores and plans; Catervas approves the plan at once, no one waits on it, and her
+		// building session waits, unplayed.
 		await page.goto(`http://127.0.0.1:${serve.port}/tasks/CTV-1`);
-		await expect(
-			page.getByText("Waiting for Mira to approve the plan").first(),
-		).toBeVisible({ timeout: 20_000 });
+		await expect(page.getByText("Being built").first()).toBeVisible({
+			timeout: 20_000,
+		});
+		await expect(page.getByText(/^Waiting for .* to approve/)).toHaveCount(0);
 		await page.getByRole("tab", { name: "The plan" }).click();
 		const panel = page.getByRole("tabpanel");
 		await expect(
 			panel.getByText(
-				"Iris looked at your app and wrote this. Iris changes nothing until Mira approves it.",
+				"Iris looked at your app and wrote this, then changes the page as it says. The finished change is reviewed, as for any task.",
 			),
 		).toBeVisible();
+		await expect(panel.getByText(/^Catervas approved the plan /)).toBeVisible();
 		await expect(
 			panel.getByText(/^Iris wrote this plan (today|on .+) at \d\d:\d\d$/),
 		).toBeVisible();

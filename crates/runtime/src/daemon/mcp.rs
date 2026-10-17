@@ -480,7 +480,7 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         let mut expected: Vec<&str> = tool_descriptors().iter().map(|tool| tool.name).collect();
-        assert_eq!(expected.len(), 48);
+        assert_eq!(expected.len(), 43);
         expected.push("permission");
         assert_eq!(names, expected);
         for tool in answer["result"]["tools"].as_array().expect("a list") {
@@ -564,8 +564,6 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             read_roots: Vec::new(),
             session_id: "session-iris".to_string(),
-            web: catervas_core::governor::sites::WebAccess::Open,
-            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "iris".to_string(),
             task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),

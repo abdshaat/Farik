@@ -7,7 +7,7 @@ import { useQuery } from "../app/store.ts";
 import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
-import { type Agent, type Judgment, ringOf } from "./setup/TeamSetup.tsx";
+import { type Agent, ringOf } from "./setup/TeamSetup.tsx";
 
 /** A saved team as `templates.list` answers it (spec 4.4). */
 export type Template = {
@@ -17,7 +17,6 @@ export type Template = {
 		Partial<Pick<Agent, "persona" | "avatar" | "model">>)[];
 	policy: {
 		permissions: { runCommands: boolean; push: boolean };
-		judgment: Judgment;
 		integration: string;
 		planInSprints?: boolean;
 		documentFormat?: "html" | "markdown";

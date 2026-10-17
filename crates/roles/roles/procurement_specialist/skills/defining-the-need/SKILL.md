@@ -39,5 +39,5 @@ assumed for the rest.
 ## 3. Write the need down
 
 Open your comparison, written later with `catervas_write_evaluation`, with the need as a short list.
-Mark each line "must" (an offer without it is out) or "nice" (it only breaks a tie). The reviewer
+Mark each line "must" (an offer without it is out) or "nice" (it only breaks a tie). Your comparison
 checks every offer against that list.

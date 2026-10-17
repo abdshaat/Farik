@@ -7,6 +7,7 @@ use catervas_core::branch::task_branch;
 use catervas_core::contract::TaskId;
 use catervas_core::governor::paths::{PathRefusal, check_allowed_paths, normalise};
 use catervas_core::governor::permissions::ToolRefusal;
+use catervas_store::git::task_base;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -50,7 +51,10 @@ pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
     let repository = call.task_repository(&contract)?;
     let diff = repository
         .git
-        .diff(&repository.integration_branch, &task_branch(&contract))
+        .diff(
+            &task_base(&repository.git, &repository.integration_branch, task),
+            &task_branch(&contract),
+        )
         .map_err(failed)?;
     Ok(json!({ "diff": diff }))
 }

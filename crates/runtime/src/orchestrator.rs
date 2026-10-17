@@ -8,9 +8,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use catervas_core::contract::{Role, TaskContract, TaskId};
+use catervas_core::contract::{TaskContract, TaskId};
 use catervas_core::governor::permissions::PermissionTier;
-use catervas_core::governor::sites::{WebAccess, web_access};
 use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::clock::IdSource;
 use catervas_protocol::command::{Command, CommandReply, ReplyKind};
@@ -43,7 +42,6 @@ pub(crate) use human::{
 };
 mod integrate;
 mod messages;
-mod pipeline;
 mod recover;
 mod requests;
 mod rules;
@@ -328,6 +326,14 @@ pub enum IntegrationOutcome {
     },
     /// Its pull request is open on the forge, waiting for the human.
     AwaitingForge,
+    /// The project has no `origin` to open a pull request on: the branch waits for the human to
+    /// merge it into the integration branch by hand.
+    AwaitingHand {
+        /// The branch to merge.
+        branch: String,
+        /// The integration branch it goes into.
+        into: String,
+    },
     /// It could not land, and the human was told why in these words.
     Escalated {
         /// The escalation's detail.
@@ -559,11 +565,10 @@ impl Orchestrator {
     }
 
     /// Integrates an accepted task now, as the human asks (`catervas integrate`), whatever
-    /// escalations it carries: under `manual` a merge into the integration branch with no push,
-    /// under `auto_merge` the merge and the push to `origin` when there is one, under
-    /// `pull_request` a pull request opened when none was since acceptance, else the recorded one
-    /// read (`AwaitingForge` while open; when closed, `Merged` if the branch is in the integration
-    /// branch all the same). A task already integrated answers the commit it was integrated at and
+    /// escalations it carries: a pull request opened when none was since acceptance, else the
+    /// recorded one read (`AwaitingForge` while open; when closed, `Merged` if the branch is in
+    /// the integration branch all the same). Catervas never merges: with no `origin`, `Merged`
+    /// once the branch is in the integration branch, else `Refused` as `not_merged`. A task already integrated answers the commit it was integrated at and
     /// does nothing. One task integrates at a time, across processes too.
     ///
     /// # Errors
@@ -658,32 +663,26 @@ impl Orchestrator {
             .projections
             .task(task_id)?
             .and_then(|row| row.assignee_id);
-        // A role held to approved sites (8.6) gets no network in its sandbox, `network` or not: a
-        // command is not held to the sites a `WebFetch` is.
+        // The network follows the tier for every role (ADR 0061).
         let network = team
             .agents
             .iter()
             .find(|agent| Some(agent.id.as_str()) == assignee.as_deref())
             .is_some_and(|agent| {
-                web_access(Role::from(agent.role)) == WebAccess::Open
-                    && agent
-                        .tiers(&team.permissions())
-                        .contains(&PermissionTier::Network)
+                agent
+                    .tiers(&team.permissions())
+                    .contains(&PermissionTier::Network)
             });
         // The project's other repositories, which a command can read at `/repos/<name>` (5.6).
         let contract = self.deps.tools.files.read_contract(task_id)?;
         let folder = worktree(&self.deps, task_id);
         let project = std::fs::canonicalize(self.deps.tools.files.root()).ok();
-        let reads: Vec<(String, PathBuf)> = read_roots(
-            &self.deps.tools.files,
-            Some(&contract),
-            &folder,
-            contract.assignee_role,
-        )
-        .into_iter()
-        .filter(|root| Some(&root.path) != project.as_ref())
-        .map(|root| (root.name, root.path))
-        .collect();
+        let reads: Vec<(String, PathBuf)> =
+            read_roots(&self.deps.tools.files, Some(&contract), &folder)
+                .into_iter()
+                .filter(|root| Some(&root.path) != project.as_ref())
+                .map(|root| (root.name, root.path))
+                .collect();
         let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
             &self.deps.tools.ids.project_id,
             task_id,
@@ -832,7 +831,7 @@ mod tests {
     use catervas_store::git::fixtures::git_output_in;
 
     use catervas_core::contract::{TaskId, TaskKind};
-    use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
+    use catervas_protocol::command::{Command, RequestSize};
     use catervas_protocol::event::EscalationRaisedBodyReason;
 
     use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
@@ -1036,6 +1035,13 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
         let base = git_output_in(&harness.project.repo.path, &["rev-parse", "main"]);
 
+        orchestrator
+            .run_until_idle()
+            .await
+            .expect("the run ends idle");
+        // Catervas never merges: the run waits for the owner, who merges the branch by hand.
+        assert!(harness.row("CTV-1").awaiting_integration);
+        harness.merge_by_hand("CTV-1");
         orchestrator
             .run_until_idle()
             .await
@@ -1246,13 +1252,9 @@ mod tests {
             .collect()
     }
 
-    /// Runs until idle, answers the one question, runs, approves the epic, runs, accepts its
-    /// result with the human's words, and runs again, as the human at a terminal would.
-    async fn drive_one_request(
-        harness: &Harness,
-        orchestrator: &super::Orchestrator,
-        epic: &TaskId,
-    ) {
+    /// Runs until idle, answers the one question, runs, and runs again, as the human at a
+    /// terminal would: Catervas accepts the epic's result on its criteria (ADR 0061).
+    async fn drive_one_request(harness: &Harness, orchestrator: &super::Orchestrator) {
         orchestrator.run_until_idle().await.expect("the run idles");
         let question = harness.events(&[EventKind::QuestionAsked]);
         assert_eq!(question.len(), 1, "one question is asked");
@@ -1264,23 +1266,9 @@ mod tests {
             .await
             .expect("the human answers");
         orchestrator.run_until_idle().await.expect("the run idles");
-        orchestrator
-            .handle(Command::HumanAccept {
-                task_id: epic.clone(),
-                subject: AcceptSubject::Contract,
-                message: None,
-            })
-            .await
-            .expect("the human approves the epic");
-        orchestrator.run_until_idle().await.expect("the run idles");
-        orchestrator
-            .handle(Command::HumanAccept {
-                task_id: epic.clone(),
-                subject: AcceptSubject::Result,
-                message: Some("done.txt is on main.".to_string()),
-            })
-            .await
-            .expect("the human accepts the epic");
+        // No contract waits for the owner (ADR 0061), so the epic is ready and runs on.
+        // Catervas never merges: the owner merges the task's branch, and the epic goes on.
+        harness.merge_by_hand("CTV-2");
         orchestrator.run_until_idle().await.expect("the run idles");
     }
 
@@ -1301,12 +1289,11 @@ mod tests {
             review_writes_note(),
             accept_ctv_1(),
             plan_closes_epic_ctv_1(),
-            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let epic: TaskId = "CTV-1".parse().expect("a task id");
 
-        drive_one_request(&harness, &orchestrator, &epic).await;
+        drive_one_request(&harness, &orchestrator).await;
 
         let ctv_1 = harness.row("CTV-1");
         assert_eq!(
@@ -1337,7 +1324,6 @@ mod tests {
             (SessionStartedBodyPurpose::Verify, "dev-b", "CTV-2"),
             (SessionStartedBodyPurpose::Verify, "pm", "CTV-2"),
             (SessionStartedBodyPurpose::Plan, "pm", "CTV-1"),
-            (SessionStartedBodyPurpose::Verify, "pm", "CTV-1"),
         ]
         .into_iter()
         .map(|(purpose, agent, task)| (purpose, agent.to_string(), task.to_string()))
@@ -1350,17 +1336,14 @@ mod tests {
                 "CTV-1 draft -> refining",
                 "question.asked",
                 "question.answered",
-                "CTV-1 refining -> escalated",
-                "escalation.raised approval",
-                "human.accepted contract",
-                "CTV-1 escalated -> ready",
+                "CTV-1 refining -> ready",
                 "CTV-1 ready -> assigned",
                 "CTV-1 assigned -> in_progress",
                 "CTV-2 created",
-                "CTV-2 integrated",
                 "CTV-1 in_progress -> verifying",
+                "CTV-2 integrated",
                 "CTV-1 C1 run by the governor",
-                "human.accepted result",
+                "CTV-1 C2 run by the governor",
                 "CTV-1 verifying -> accepted",
             ]
         );

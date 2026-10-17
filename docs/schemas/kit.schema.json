@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://catervas.dev/schemas/kit.schema.json",
   "title": "CatervasKit",
-  "description": "What a role's kit is: the skills it carries and the services it may be connected to, stored as roles/<role_id>/kit.yaml beside role.yaml. catervas-roles loads it and refuses what this schema cannot say, each at its field with a code: kit_role_mismatch, kit_skill_missing, kit_skill_in_role, kit_connector_twice, key_page_missing, label_not_a_tool, package_not_pinned, container_not_builtin, image_not_pinned, allowance_not_external, copy_word_refused, and every refusal the team file gives the same entry. See docs/SPEC.md 6.7 and ADR 0036.",
+  "description": "What a role's kit is: the skills it carries and the services it may be connected to, stored as roles/<role_id>/kit.yaml beside role.yaml. catervas-roles loads it and refuses what this schema cannot say, each at its field with a code: kit_role_mismatch, kit_skill_missing, kit_skill_in_role, kit_connector_twice, key_page_missing, label_not_a_tool, package_not_pinned, container_not_builtin, image_not_pinned, allowance_not_paid, copy_word_refused, and every refusal the team file gives the same entry. See docs/SPEC.md 6.7 and ADR 0036.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -49,10 +49,11 @@
       "type": "string",
       "enum": [
         "network",
+        "paid",
         "external_effect",
         "denied"
       ],
-      "description": "A tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox or spends credits and asks the human; denied, never offered. There is no read: that tier is the project's files."
+      "description": "A tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox at no cost and runs without asking, each use recorded; paid, it costs money (credits or a charge) and asks the human, the only tag that does (ADR 0061); denied, never offered. There is no read: that tier is the project's files."
     },
     "connector": {
       "type": "object",
@@ -203,7 +204,7 @@
           "additionalProperties": {
             "$ref": "#/$defs/allowance"
           },
-          "description": "A tool tagged external_effect to the calls per sprint a user may pre-approve (allowance_not_external otherwise). Step 05b reads it."
+          "description": "A tool tagged paid to the calls per sprint a user may pre-approve (allowance_not_paid otherwise). Step 05b reads it."
         },
         "plan_approved": {
           "type": "array",
@@ -213,7 +214,7 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{1,64}$"
           },
-          "description": "Tools the owner's approved marketing plan approves: each tagged external_effect (plan_mark_not_external), none with an allowance (plan_mark_with_allowance), and only on Catervas's own connector, catervas connector <name> (plan_mark_not_catervas), since only Catervas's own server can be trusted to check the plan (ADR 0038, ADR 0042). Not part of the team entry or its hash."
+          "description": "Tools the owner's approved marketing plan approves: each tagged paid (plan_mark_not_paid), none with an allowance (plan_mark_with_allowance), and only on Catervas's own connector, catervas connector <name> (plan_mark_not_catervas), since only Catervas's own server can be trusted to check the plan (ADR 0038, ADR 0042). Not part of the team entry or its hash."
         },
         "image": {
           "type": "string",

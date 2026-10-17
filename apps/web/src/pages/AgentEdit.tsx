@@ -32,7 +32,6 @@ import { MailboxSection } from "./Mailbox.tsx";
 import { OrdersSection } from "./Orders.tsx";
 import styles from "./pages.module.css";
 import { ServiceLogo } from "./ServiceLogo.tsx";
-import { SitesSection } from "./Sites.tsx";
 import {
 	type Agent,
 	type McpServer,
@@ -446,7 +445,7 @@ function Editor({
 			{saved.role === "procurement_specialist" && (
 				<MailboxSection id={saved.id} name={name} />
 			)}
-			{/* The Procurement Specialist's orders come before the sites it reads, and both before what it may do. */}
+			{/* The Procurement Specialist's orders come before what it may do. */}
 			{saved.role === "procurement_specialist" && (
 				<OrdersSection
 					name={name}
@@ -458,8 +457,6 @@ function Editor({
 					}
 				/>
 			)}
-			{/* The Procurement Specialist reads only the sites it is given: they come before what it may do. */}
-			{saved.role === "procurement_specialist" && <SitesSection name={name} />}
 			<section className={styles.section} aria-labelledby="may-heading">
 				<h2 id="may-heading">{say("agentMay")}</h2>
 				<ShowAdvanced

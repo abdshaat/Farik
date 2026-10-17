@@ -13,7 +13,6 @@ import {
 	type FileRead,
 	type FilesTree,
 	type FileVersion,
-	type Integration,
 	isHtml,
 	timeAgo,
 } from "./files.ts";
@@ -21,17 +20,6 @@ import type { Agent } from "./setup/TeamSetup.tsx";
 
 /** What the editor holds: the owner's draft and the blob it was written against. */
 type Draft = { text: string; base: string; preview: boolean };
-
-const SAVING = {
-	auto_merge: "filesSaveAuto",
-	pull_request: "filesSavePullRequest",
-	manual: "filesSaveManual",
-} as const;
-const WAITING = {
-	auto_merge: "filesWaitingAuto",
-	pull_request: "filesWaitingPullRequest",
-	manual: "filesWaitingManual",
-} as const;
 
 /** "Changed by Mira 5 days ago, in CTV-9": no line when nobody changed the version. */
 function Changed({
@@ -58,13 +46,10 @@ function Changed({
 	);
 }
 
-/** What saving does, by the team's integration policy; for a pair, who then updates the team's version. */
-function whatSaving(integration: Integration, owner: string | null) {
-	if (owner === null) return t(SAVING[integration]);
-	const then = t(integration === "auto_merge" ? "filesThenAuto" : "filesThen", {
-		owner,
-	});
-	return `${t(SAVING[integration])} ${then}`;
+/** What saving does; for a pair, who then updates the team's version. */
+function whatSaving(owner: string | null) {
+	if (owner === null) return t("filesSavePullRequest");
+	return `${t("filesSavePullRequest")} ${t("filesThen", { owner })}`;
 }
 
 /**
@@ -203,9 +188,7 @@ export function FileDocument({
 					!team &&
 					data.editable &&
 					(data.waiting ? (
-						<p className={styles.forTeam}>
-							{t(WAITING[tree.integration], { change: data.waiting.change })}
-						</p>
+						<p className={styles.forTeam}>{t("filesWaitingPullRequest")}</p>
 					) : html ? (
 						<>
 							<ShowAdvanced
@@ -277,12 +260,7 @@ export function FileDocument({
 						<Button kind="quiet" onClick={() => setDraft(null)}>
 							{t("filesCancel")}
 						</Button>
-						<p>
-							{whatSaving(
-								tree.integration,
-								pair ? (owner?.displayName ?? "") : null,
-							)}
-						</p>
+						<p>{whatSaving(pair ? (owner?.displayName ?? "") : null)}</p>
 					</div>
 				</>
 			) : (

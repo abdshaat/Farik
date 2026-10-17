@@ -37,12 +37,7 @@ export type McpServer = {
 	credentialKeys?: string[];
 	/** Present when the user signs in to the service instead of giving a key (ADR 0033). */
 	oauth?: { clientId?: string; callbackPort?: number; scopes?: string[] };
-	tools?: Record<string, "network" | "external_effect" | "denied">;
-};
-export type Judgment = {
-	required?: "always" | "never";
-	questions?: string[];
-	judge?: "auto" | "architect" | "scrum_master";
+	tools?: Record<string, "network" | "paid" | "external_effect" | "denied">;
 };
 export type Team = {
 	name: string;
@@ -50,7 +45,6 @@ export type Team = {
 	budgets: { dailyUsd?: number; [key: string]: unknown };
 	policy: {
 		integration: string;
-		judgment?: Judgment;
 		permissions?: { runCommands?: boolean; push?: boolean };
 		/** Whether work waits for a sprint (step 15); absent means no. */
 		planInSprints?: boolean;
@@ -212,13 +206,8 @@ function teamDraftOf(
 		start,
 	};
 	if ((start === "saved" || start === "builtin") && template) {
-		const {
-			permissions,
-			judgment,
-			integration,
-			planInSprints,
-			documentFormat,
-		} = template.policy;
+		const { permissions, integration, planInSprints, documentFormat } =
+			template.policy;
 		const { dailyUsd: _, ...budgets } = proposed.team.budgets;
 		return {
 			...base,
@@ -228,7 +217,6 @@ function teamDraftOf(
 				policy: {
 					...proposed.team.policy,
 					permissions,
-					judgment,
 					integration,
 					// A saved team without the answer plans in sprints, as any new team.
 					...(planInSprints !== undefined && { planInSprints }),

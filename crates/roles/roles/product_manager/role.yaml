@@ -18,7 +18,7 @@ produces:
   - release scope
 forbidden:
   - write application code
-  - write product documents for an epic the user has not approved
+  - write product documents for an epic that is not ready
   - run the test suite as a reviewer of its own contracts
   - accept a task without a reviewer's verification event
 model:

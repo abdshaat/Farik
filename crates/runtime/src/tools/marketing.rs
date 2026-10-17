@@ -309,10 +309,28 @@ pub(crate) fn propose_plan(
         let _ = std::fs::remove_file(&twin);
         return Err(error);
     }
+    if spends_nothing(&proposal) {
+        // ADR 0061: only money asks the owner. Catervas approves a plan that spends nothing, as no
+        // one's agent: the envelope names no agent and no session, as the owner's does.
+        crate::marketing::decide_plan(deps, &id, true, Some(FREE_PLAN_NOTE.to_string()))
+            .map_err(|error| failed(format!("{error:?}")))?;
+        return Ok(json!({
+            "plan": id,
+            "next": "Catervas approved it, since it spends nothing; end your turn: the approval starts the next session",
+        }));
+    }
     Ok(json!({
         "plan": id,
         "next": "end your turn: the owner's decision starts the next session",
     }))
+}
+
+/// What Catervas writes as the note of its approval of a plan that spends nothing.
+const FREE_PLAN_NOTE: &str = "Catervas approved it: it spends nothing (ADR 0061).";
+
+/// Whether the plan spends no money: its total, its Google Ads budget and every campaign are zero.
+fn spends_nothing(proposal: &PlanProposal) -> bool {
+    proposal.total.0 == 0 && proposal.google_ads.0 == 0 && proposal.campaigns.is_empty()
 }
 
 /// The plan of `task` that waits for the owner, when there is one.
@@ -702,6 +720,55 @@ mod tests {
 
     fn proposed_events(project: &TestProject) -> usize {
         project.events(&[EventKind::MarketingPlanProposed]).len()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn approves_a_plan_that_spends_nothing() {
+        // ADR 0061: only money asks. A plan with every budget at zero is approved by Catervas.
+        let project = a_marketing_project("tools-plan-free");
+        works_on(&project, "CTV-1");
+        let mut free = a_plan();
+        free["budget"] = json!({ "total": "0", "google_ads": "0" });
+        free["campaigns"] = json!([]);
+        free.as_object_mut()
+            .expect("an object")
+            .remove("google_ads_account");
+
+        let answer = propose(&project, "CTV-1", &free).expect("the plan is proposed");
+
+        assert_eq!(answer["plan"], "MP-1");
+        assert!(
+            answer["next"]
+                .as_str()
+                .expect("a sentence")
+                .contains("approved"),
+            "{answer}"
+        );
+        assert_eq!(proposed_events(&project), 1);
+        let approved = project.events(&[EventKind::MarketingPlanApproved]);
+        assert_eq!(approved.len(), 1);
+        let EventBody::MarketingPlanApproved(body) = &approved[0].body else {
+            panic!("a marketing plan was approved");
+        };
+        assert_eq!(body.plan.as_str(), "MP-1");
+        assert_eq!(
+            body.note,
+            "Catervas approved it: it spends nothing (ADR 0061)."
+        );
+        assert_eq!(approved[0].envelope.ids.agent_id, None);
+        assert_eq!(approved[0].envelope.ids.session_id, None);
+
+        // A plan with money in it, a 50 USD ads budget, is only proposed.
+        let paid = a_marketing_project("tools-plan-paid");
+        works_on(&paid, "CTV-1");
+        let mut plan = a_plan();
+        plan["budget"] = json!({ "total": "50", "google_ads": "50" });
+        plan["campaigns"][0]["budget"] = json!("50");
+        let answer = propose(&paid, "CTV-1", &plan).expect("the plan is proposed");
+        assert_eq!(answer["plan"], "MP-1");
+        assert_eq!(proposed_events(&paid), 1);
+        assert!(paid.events(&[EventKind::MarketingPlanApproved]).is_empty());
     }
 
     #[test]

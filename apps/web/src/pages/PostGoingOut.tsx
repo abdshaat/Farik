@@ -24,7 +24,7 @@ export type GoingOutPost = {
 	state: "scheduled" | "sent" | "missed" | "failed";
 	plan?: string;
 	slot?: string;
-	approvedBy?: "plan" | "owner";
+	approvedBy?: "plan" | "owner" | "catervas";
 	missedWhy?: "not_running" | "paused" | "undecided";
 	reason?: string;
 };
@@ -373,7 +373,9 @@ function Why({ post, now }: { post: GoingOutPost; now: Date }) {
 				: t("postHandsOverBefore");
 	return (
 		<p className={styles.why}>
-			{post.approvedBy === "owner" || !post.plan ? (
+			{post.approvedBy === "catervas" ? (
+				t("postByCatervas")
+			) : post.approvedBy === "owner" || !post.plan ? (
 				t("postAllowed")
 			) : (
 				<>

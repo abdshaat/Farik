@@ -43,8 +43,6 @@ pub mod requests;
 pub mod scan;
 /// The messages to sellers and the replies the log holds.
 pub mod seller_mail;
-/// The sites the Procurement Specialist may read.
-pub mod sites;
 /// What waits on the human.
 pub mod waiting;
 

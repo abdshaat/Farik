@@ -26,10 +26,7 @@ Without it, or for a product sold elsewhere, look on an official agency's own pu
 - the maker's own recall or safety-notice page;
 - in another country, that country's consumer safety agency.
 
-None of these is on Catervas's list of sites you may read. Ask for the one you need before you end
-your turn, with `catervas_request_sites`: the first page you want and why, such as "the official list
-of product recalls, to check this product". Your task then waits for the owner. If the owner
-declines, or you cannot wait, say in your note that the recalls were not checked.
+Open the page you need. If you cannot reach it, say in your note that the recalls were not checked.
 
 An open recall is a reason to leave the product out: never recommend a product with an open recall.
 Say which recall it is, with the address of the page and its date.

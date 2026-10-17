@@ -67,7 +67,6 @@
         "marketing_plan.list",
         "marketing_plan.get",
         "social_posts.list",
-        "sites.list",
         "purchase_orders.list",
         "purchase_order.evaluation",
         "renewals.list",
@@ -307,9 +306,6 @@
             },
             {
               "$ref": "#/$defs/socialPostsListQuery"
-            },
-            {
-              "$ref": "#/$defs/sitesListQuery"
             },
             {
               "$ref": "#/$defs/folderDocProposalsListQuery"
@@ -967,9 +963,6 @@
             "$ref": "#/$defs/effectiveAgent"
           }
         },
-        "judges": {
-          "$ref": "#/$defs/planJudges"
-        },
         "max_agents": {
           "type": "integer",
           "minimum": 1,
@@ -1177,7 +1170,6 @@
       "required": [
         "team",
         "agents",
-        "judges",
         "max_agents",
         "connectors",
         "kits",
@@ -2958,25 +2950,6 @@
         }
       }
     },
-    "sitesListQuery": {
-      "title": "Sites List Query",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "params"
-      ],
-      "properties": {
-        "name": {
-          "const": "sites.list"
-        },
-        "params": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {}
-        }
-      }
-    },
     "metricsQuery": {
       "title": "Metrics Query",
       "type": "object",
@@ -3085,7 +3058,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human: first the marketing plans whose ads Catervas could not keep within their budget or keep paused, one row each, by precedence (marketing_budget: the active plan whose ads reached a budget, titled \"Ads budget reached: <plan>\", with plan, plan_title, ends_on, currency, google_ads, the plan's Google Ads budget, spent, what Google Ads reported spent, read_at, when it was read, reason, Google's or Catervas's words when Catervas could not pause the ads, cap, the budget the row's words are about (a pause Google refused can keep it from being the newest), caps, each budget reached, campaigns, each campaign of the plan with its budget and spend, and raising, the task of a request to raise the budget that is open; marketing_ads_running: a plan whose ads Catervas could not pause, with reason, titled \"Ads still running: <plan>\"; marketing_spend_unread: the active plan whose spend Catervas cannot read, with reason and the last spend and its time, titled \"Can't read the ad spend: <plan>\"; task_id is the task of the plan's proposal and agent_id the agent that proposed it; amounts are decimal strings), then questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), then purchase orders the Procurement Specialist suggested, waiting for the owner (purchase_order, whose title is its task's and whose line is \"<agent name> set up an order from <seller>: <total> <currency>\", each with order, its number, seller, seller_contact, lines (each with item, quantity, unit, unit_price and line_total), currency, period, total, delivery, terms, url, the seller's page exactly as the agent wrote it or empty, host, the site that address names in its ASCII form, absent when url is empty, evaluation, why, at, when it was drafted, and expires_at, when Catervas closes it by itself, which only that kind carries and of which every text is the agent's own and untrusted; an order that was decided or expired is no longer listed and an order holds no task), then data pipeline requests the Product Manager passed to the owner or did not decide, waiting for the owner (data_pipeline, whose title is its task's and whose line is \"<agent name> asks for a data source: <name>\", each with pipeline, its number, name, what, the source would give, url, the source's own page exactly as the agent wrote it, host, the site that address names in its ASCII form, why, cost, one of free, paid and unknown, needs_account, sends_project_data, reason, the Product Manager's reason, absent when Catervas passed the request on after the Product Manager's three tries, at, when the agent asked, and request_text, the text of the request an approval files, which only that kind carries and of which every text but host and the labels is the agent's own and untrusted; a request that was decided is no longer listed, an open one waits on the Product Manager, and a request holds no task), approvals, other escalations, acceptances, and integrations (under manual, a folder change that waits for the owner to add it is one too, with folder_change, its number, and no task_id); then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human: first the marketing plans whose ads Catervas could not keep within their budget or keep paused, one row each, by precedence (marketing_budget: the active plan whose ads reached a budget, titled \"Ads budget reached: <plan>\", with plan, plan_title, ends_on, currency, google_ads, the plan's Google Ads budget, spent, what Google Ads reported spent, read_at, when it was read, reason, Google's or Catervas's words when Catervas could not pause the ads, cap, the budget the row's words are about (a pause Google refused can keep it from being the newest), caps, each budget reached, campaigns, each campaign of the plan with its budget and spend, and raising, the task of a request to raise the budget that is open; marketing_ads_running: a plan whose ads Catervas could not pause, with reason, titled \"Ads still running: <plan>\"; marketing_spend_unread: the active plan whose spend Catervas cannot read, with reason and the last spend and its time, titled \"Can't read the ad spend: <plan>\"; task_id is the task of the plan's proposal and agent_id the agent that proposed it; amounts are decimal strings), then questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then purchase orders the Procurement Specialist suggested, waiting for the owner (purchase_order, whose title is its task's and whose line is \"<agent name> set up an order from <seller>: <total> <currency>\", each with order, its number, seller, seller_contact, lines (each with item, quantity, unit, unit_price and line_total), currency, period, total, delivery, terms, url, the seller's page exactly as the agent wrote it or empty, host, the site that address names in its ASCII form, absent when url is empty, evaluation, why, at, when it was drafted, and expires_at, when Catervas closes it by itself, which only that kind carries and of which every text is the agent's own and untrusted; an order that was decided or expired is no longer listed and an order holds no task), then data pipeline requests the Product Manager passed to the owner or did not decide, waiting for the owner (data_pipeline, whose title is its task's and whose line is \"<agent name> asks for a data source: <name>\", each with pipeline, its number, name, what, the source would give, url, the source's own page exactly as the agent wrote it, host, the site that address names in its ASCII form, why, cost, one of free, paid and unknown, needs_account, sends_project_data, reason, the Product Manager's reason, absent when Catervas passed the request on after the Product Manager's three tries, at, when the agent asked, and request_text, the text of the request an approval files, which only that kind carries and of which every text but host and the labels is the agent's own and untrusted; a request that was decided is no longer listed, an open one waits on the Product Manager, and a request holds no task), approvals, other escalations, acceptances, and integrations (under manual, a folder change that waits for the owner to add it is one too, with folder_change, its number, and no task_id); then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -3114,7 +3087,6 @@
                   "tool_approval",
                   "marketing_plan",
                   "social_post",
-                  "site_request",
                   "purchase_order",
                   "data_pipeline",
                   "marketing_budget",
@@ -4554,64 +4526,8 @@
         "name": { "type": "string", "pattern": "^PO-[0-9]{1,20}\\.xlsx$" }
       }
     },
-    "sitesListResult": {
-      "description": "The sites the Procurement Specialist may read (docs/SPEC.md 6.10; ADR 0039): catervas is every entry of Catervas's own list in its order, with its shop, its category, on (whether the team may read it now, which it may unless the owner turned it off) and at, when the owner last turned it off or back on, absent when they never did; owner is the sites the owner allowed that are not on Catervas's list, by host, each with at, when they allowed it, and request, the number of the request their allowing answered, absent for a site they added unasked; waiting is the requests nobody decided yet, by host, each with the agent's address and reason, which are its own words and untrusted text.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["catervas", "owner", "waiting"],
-      "properties": {
-        "catervas": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["host", "shop", "category", "on"],
-            "properties": {
-              "host": { "type": "string" },
-              "shop": { "type": "string" },
-              "category": {
-                "type": "string",
-                "enum": ["general_marketplace", "office_supplies", "industrial_supplies", "packaging_and_shipping", "electronic_components", "computers_and_it", "furniture", "food_service", "printing", "software"]
-              },
-              "on": { "type": "boolean" },
-              "at": { "type": "string", "format": "date-time" }
-            }
-          }
-        },
-        "owner": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["host", "at"],
-            "properties": {
-              "host": { "type": "string" },
-              "at": { "type": "string", "format": "date-time" },
-              "request": { "type": "integer", "minimum": 1 }
-            }
-          }
-        },
-        "waiting": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["request", "host", "url", "why", "task_id", "agent_id", "at"],
-            "properties": {
-              "request": { "type": "integer", "minimum": 1 },
-              "host": { "type": "string" },
-              "url": { "type": "string" },
-              "why": { "type": "string" },
-              "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
-              "agent_id": { "type": "string" },
-              "at": { "type": "string", "format": "date-time" }
-            }
-          }
-        }
-      }
-    },
     "socialPostsListResult": {
-      "description": "The posts Today shows (docs/SPEC.md 6.5; ADR 0042): every post scheduled or sent whose time is still ahead, soonest first, then every post missed or failed in the last 24 hours, the latest first. A post stopped, one still waiting for the owner (waiting.list has it), and one whose time passed unsent are not here. at is when it goes out, in the offset it was written in; hands_over_at is when Catervas hands it to Buffer, in UTC: an hour before at, or later for a post the owner allowed later than that. approved_by is plan or owner; plan and slot are there for a plan's post. missed_why is there for a missed post and reason, Catervas's sentence then Buffer's words, for a failed one: both are shown as text, never as markup.",
+      "description": "The posts Today shows (docs/SPEC.md 6.5; ADR 0042): every post scheduled or sent whose time is still ahead, soonest first, then every post missed or failed in the last 24 hours, the latest first. A post stopped, one still waiting for the owner (waiting.list has it), and one whose time passed unsent are not here. at is when it goes out, in the offset it was written in; hands_over_at is when Catervas hands it to Buffer, in UTC: an hour before at, or later for a post the owner allowed later than that. approved_by is plan, owner or catervas (a post outside the plan, which costs nothing: ADR 0061); plan and slot are there for a plan's post. missed_why is there for a missed post and reason, Catervas's sentence then Buffer's words, for a failed one: both are shown as text, never as markup.",
       "type": "object",
       "additionalProperties": false,
       "required": ["posts"],
@@ -4648,7 +4564,7 @@
               "state": { "type": "string", "enum": ["scheduled", "sent", "missed", "failed"] },
               "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
               "slot": { "type": "string" },
-              "approved_by": { "type": "string", "enum": ["plan", "owner"] },
+              "approved_by": { "type": "string", "enum": ["plan", "owner", "catervas"] },
               "missed_why": { "type": "string", "enum": ["not_running", "paused", "undecided"] },
               "reason": { "type": "string" }
             }
@@ -5478,10 +5394,6 @@
             "$ref": "#/$defs/effectiveAgent"
           },
           "description": "The team as it would be, as team.get answers it; left out when there are errors."
-        },
-        "judges": {
-          "$ref": "#/$defs/planJudges",
-          "description": "Left out when there are errors."
         }
       },
       "required": [
@@ -5888,7 +5800,7 @@
     },
     "connectorConnectRequest": {
       "title": "Connector Connect Request",
-      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else external_effect, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
+      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else paid, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -5936,7 +5848,7 @@
               "additionalProperties": {
                 "$ref": "#/$defs/connectorTag"
               },
-              "description": "The user's label for each tool by name; a listed tool not named here is external_effect."
+              "description": "The user's label for each tool by name; a listed tool not named here is paid."
             }
           }
         }
@@ -6214,10 +6126,11 @@
       "type": "string",
       "enum": [
         "network",
+        "paid",
         "external_effect",
         "denied"
       ],
-      "description": "A connector tool's label (docs/SPEC.md 5.6): network, only reads; external_effect, changes something outside the sandbox; denied, never offered."
+      "description": "A connector tool's label (docs/SPEC.md 5.6): network, only reads; external_effect, changes something outside the sandbox and runs without asking; paid, costs money and asks (ADR 0061); denied, never offered."
     },
     "connectorDisconnectRequest": {
       "title": "Connector Disconnect Request",
@@ -6351,100 +6264,6 @@
           "items": {
             "type": "string"
           }
-        }
-      }
-    },
-    "planJudges": {
-      "title": "Plan Judges",
-      "description": "Who checks plans under each choice of policy.judgment.judge: the first active agent of the role, and under auto the one Team::judge resolves (spec 5.3); null where no active agent holds it.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "auto",
-        "architect",
-        "scrum_master"
-      ],
-      "properties": {
-        "auto": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "agent_id",
-                "display_name",
-                "role"
-              ],
-              "properties": {
-                "agent_id": {
-                  "type": "string"
-                },
-                "display_name": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                }
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "architect": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "agent_id",
-                "display_name",
-                "role"
-              ],
-              "properties": {
-                "agent_id": {
-                  "type": "string"
-                },
-                "display_name": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                }
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "scrum_master": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "agent_id",
-                "display_name",
-                "role"
-              ],
-              "properties": {
-                "agent_id": {
-                  "type": "string"
-                },
-                "display_name": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                }
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       }
     },

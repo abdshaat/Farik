@@ -360,7 +360,7 @@ describe("task detail", () => {
 		expect(told).toEqual(["Catervas filed it to document the project."]);
 	});
 
-	it("shows_the_plan_waiting_for_the_product_manager", async () => {
+	it("shows_the_designers_plan_and_who_approved_it", async () => {
 		// The plan was written the day the page is read, so the page says "today".
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-09-30T12:00:00Z"));
@@ -373,8 +373,12 @@ describe("task detail", () => {
 			"2026-09-30T09:52:00Z",
 			"iris",
 		);
-		const decided = (kind: string, reason: string, seq = 12) =>
-			event(seq, kind, { reason }, "2026-09-30T10:14:00Z", "mira");
+		const decided = (
+			kind: string,
+			reason: string,
+			seq = 12,
+			by: string | undefined = undefined,
+		) => event(seq, kind, { reason }, "2026-09-30T10:14:00Z", by);
 		const open = (
 			designPlan: object,
 			extra: object[] = [],
@@ -414,7 +418,7 @@ describe("task detail", () => {
 			return panel();
 		};
 
-		// Proposed: the Product Manager decides; the person need do nothing.
+		// Proposed: Catervas approves it at once, so the page reads as being built.
 		const first = await open({ plan: PLAN, state: "proposed" });
 		const heading = await screen.findByRole("heading", {
 			level: 1,
@@ -422,7 +426,7 @@ describe("task detail", () => {
 		});
 		expect(
 			within(heading.parentElement as HTMLElement).getByText(
-				"Waiting for Mira to approve the plan",
+				en.designBeingBuilt,
 			),
 		).toBeTruthy();
 		// The lead counts the Designer's plans, in place of the tries.
@@ -434,14 +438,10 @@ describe("task detail", () => {
 		let plan = await toPlan();
 		expect(
 			within(plan).getByText(
-				"Iris looked at your app and wrote this. Iris changes nothing until Mira approves it.",
+				"Iris looked at your app and wrote this, then changes the page as it says. The finished change is reviewed, as for any task.",
 			),
 		).toBeTruthy();
-		expect(
-			within(plan).getByText(
-				"Mira checks that the plan does what the task asks, and nothing more. You do not need to do anything.",
-			),
-		).toBeTruthy();
+		expect(within(plan).queryByText(/Mira/)).toBeNull();
 		expect(
 			within(plan).getByText("Iris wrote this plan today at 09:52"),
 		).toBeTruthy();
@@ -465,7 +465,7 @@ describe("task detail", () => {
 		).toBeTruthy();
 		cleanup();
 
-		// Approved: being built, with the Product Manager's reason.
+		// Approved by Catervas, with no agent: being built, with its reason.
 		await open(
 			{
 				plan: PLAN,
@@ -477,7 +477,7 @@ describe("task detail", () => {
 		expect(await screen.findByText(en.designBeingBuilt)).toBeTruthy();
 		plan = await toPlan();
 		expect(
-			within(plan).getByText("Mira approved the plan today at 10:14"),
+			within(plan).getByText("Catervas approved the plan today at 10:14"),
 		).toBeTruthy();
 		expect(
 			within(plan).getByText(
@@ -489,18 +489,25 @@ describe("task detail", () => {
 		).toBeTruthy();
 		fireEvent.click(screen.getByRole("tab", { name: "History" }));
 		expect(
-			within(panel()).getByText("Mira approved Iris’s plan."),
+			within(panel()).getByText("Catervas approved Iris’s plan."),
 		).toBeTruthy();
 		cleanup();
 
-		// Returned: its reason, and how many more may be sent back.
+		// Returned by Mira (an older log): its reason, and how many more may be sent back.
 		const returned = await open(
 			{
 				plan: PLAN,
 				state: "returned",
 				reason: "Keep the descriptions whole.",
 			},
-			[decided("design_plan.returned", "Keep the descriptions whole.")],
+			[
+				decided(
+					"design_plan.returned",
+					"Keep the descriptions whole.",
+					12,
+					"mira",
+				),
+			],
 		);
 		expect(await screen.findByText(en.designSentBack)).toBeTruthy();
 		plan = await toPlan();
@@ -527,15 +534,19 @@ describe("task detail", () => {
 		).toBeTruthy();
 		cleanup();
 
-		// A second plan, on a later day, with two paragraphs alike; and a paused Mira beside
-		// an active Product Manager, who is the one that decides.
+		// A second plan, on a later day, with two paragraphs alike.
 		vi.setSystemTime(new Date("2026-10-02T12:00:00Z"));
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const twice = "Same words.\n\nSame words.";
 		await open(
 			{ plan: twice, state: "proposed" },
 			[
-				decided("design_plan.returned", "Keep the descriptions whole."),
+				decided(
+					"design_plan.returned",
+					"Keep the descriptions whole.",
+					12,
+					"mira",
+				),
 				event(
 					13,
 					"design_plan.proposed",
@@ -562,9 +573,6 @@ describe("task detail", () => {
 			),
 		).toBeTruthy();
 		plan = await toPlan();
-		expect(
-			within(plan).getByText("Waiting for Pat to approve the plan"),
-		).toBeTruthy();
 		expect(
 			within(plan).getByText(
 				"Iris wrote this plan on Thursday 1 October at 09:00",
@@ -828,12 +836,58 @@ describe("task detail", () => {
 		expect(steps).toEqual([
 			"Looks at your app in a browser Done",
 			"Writes a plan Done",
-			"Mira approves the plan Now",
-			"Iris changes the page",
+			"Iris changes the page Now",
 			"Ada reviews it, as for any task",
 		]);
 		expect(within(works).getByText("0 of 3")).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("says_catervas_checks_what_no_agent_reviews", async () => {
+		// An Architect's task is not code: no one reviews it, and Catervas checks its criteria.
+		const architects = {
+			...CONTRACT,
+			assignee_role: "architect",
+			assignee: "ada",
+			reviewer: "mira",
+		};
+		const { container } = await opened(architects, [], {
+			"task.history": {
+				events: [
+					...HISTORY,
+					event(
+						11,
+						"note.written",
+						{
+							kind: "review",
+							text: "Catervas ran every criterion of this task itself; only a code change is reviewed by an agent (ADR 0061).\n\nC1: passed: 3 passed",
+							written_by: "catervas",
+						},
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+		expect(
+			screen.getByText(
+				"CTV-1 in sprint 2. Ada is doing it, and Catervas checks it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/reviews it/)).toBeNull();
+		expect(
+			within(screen.getByRole("tabpanel")).getByText("Catervas checked it"),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+		cleanup();
+
+		// A Developer's task is code: its reviewer still reviews it.
+		await opened();
+		expect(
+			await screen.findByText(
+				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+			),
+		).toBeTruthy();
 	});
 
 	it("says_what_each_risk_means", async () => {
@@ -959,11 +1013,11 @@ describe("task detail", () => {
 		});
 		cleanup();
 
-		// Accepted and being added by Catervas on its own, or through a pull request.
+		// Accepted: Catervas opens a pull request for it, whatever the team file says.
 		await opened({ ...CONTRACT, status: "accepted" });
 		expect(
 			await screen.findByText(
-				"Accepted. Catervas adds it to your project on its own.",
+				"Accepted. Catervas opens a pull request for it, for you to merge.",
 			),
 		).toBeTruthy();
 		cleanup();

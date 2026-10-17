@@ -794,7 +794,7 @@ pub enum EventBody {
     /// The human took a custom MCP server away from an agent.
     #[serde(rename = "connector.disconnected")]
     ConnectorDisconnected(ConnectorDisconnectedBody),
-    /// A connector's `external_effect` call waits for the human; its seq is the approval's id.
+    /// A connector's `paid` call waits for the human; its seq is the approval's id.
     #[serde(rename = "tool_approval.requested")]
     ToolApprovalRequested(ToolApprovalRequestedBody),
     /// The human allowed one call an agent asked about.
@@ -2574,12 +2574,12 @@ mod tests {
             EventKind::DataPipelineApproved,
             EventKind::DataPipelineDeclined,
         ] {
-            for by in ["product_manager", "human"] {
+            for by in ["product_manager", "human", "catervas"] {
                 let mut wire = an_event_wire(kind);
                 wire["body"]["by"] = json!(by);
                 event_from_value(&wire).expect("a decider");
             }
-            for by in ["auto", "catervas", "agent"] {
+            for by in ["auto", "agent"] {
                 let mut wire = an_event_wire(kind);
                 wire["body"]["by"] = json!(by);
                 assert!(!refusal(&wire).is_empty(), "{kind} by {by}");

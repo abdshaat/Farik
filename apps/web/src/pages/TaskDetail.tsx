@@ -139,6 +139,16 @@ const NOTES = [
 	["escalation", "helpExplains"],
 ] as const;
 
+/** Whether an agent reviews the contract's result: a task, not an epic, whose assignee's role
+ * changes code (`catervas_core::team::reviewed_by_an_agent`, ADR 0061). */
+export function reviewedByAnAgent(contract: Contract): boolean {
+	return (
+		contract.kind !== "epic" &&
+		(contract.assigneeRole === "software_developer" ||
+			contract.assigneeRole === "ui_ux_designer")
+	);
+}
+
 /** One task: its five tabs, what it cost, and what the user can do with it (step 09's plan). */
 export function TaskDetail() {
 	const { id = "" } = useParams();
@@ -203,7 +213,9 @@ export function TaskDetail() {
 	const assignee = contract.assignee && nameOf(contract.assignee);
 	const reviewer = contract.reviewer && nameOf(contract.reviewer);
 	const doing = assignee && t("taskDoing").replace("{name}", assignee);
-	const reviews = reviewer && t("taskReviews").replace("{name}", reviewer);
+	const reviews = reviewedByAnAgent(contract)
+		? reviewer && t("taskReviews").replace("{name}", reviewer)
+		: t("taskChecked");
 	const who = [doing, reviews].filter(Boolean).join(", and ");
 	const lead = [
 		contract.sprint
@@ -229,6 +241,9 @@ export function TaskDetail() {
 			(e.body.kind === "completion" || e.body.kind === "review"),
 	);
 	const summaryBy = agentOf(summary?.body.writtenBy);
+	// Catervas writes the review note of a task it checked itself, and no agent is that author.
+	const checkedByCatervas =
+		summary?.body.kind === "review" && summary.body.writtenBy === "catervas";
 	const approved = events.find(approvesPlan);
 	const integrated = events.findLast((e) => e.kind === "task.integrated");
 	const awaitsIntegration = waiting.waiting.some(
@@ -256,11 +271,8 @@ export function TaskDetail() {
 			e.seq > (proposal?.seq ?? 0),
 	);
 	const designer = nameOf(proposal?.agentId ?? contract.assignee);
-	const pm = nameOf(
-		decision?.agentId ??
-			agents.find((a) => a.role === "product_manager" && a.status === "active")
-				?.id,
-	);
+	// Whoever decided: Catervas when the event names no agent, else an older log's Product Manager.
+	const pm = nameOf(decision?.agentId);
 	// "today", or "on Wednesday 30 September", in UTC as the times are.
 	const when = (e?: Event) =>
 		e
@@ -284,11 +296,7 @@ export function TaskDetail() {
 	const designWord =
 		(design &&
 			contract.status === "in_progress" &&
-			(design.state === "proposed"
-				? t("designWaiting", { pm })
-				: t(
-						design.state === "approved" ? "designBeingBuilt" : "designSentBack",
-					))) ||
+			t(design.state === "returned" ? "designSentBack" : "designBeingBuilt")) ||
 		(checking && t("designChecking")) ||
 		(onDesigner && t("designOnDesigner")) ||
 		(noBrowser && t("designNoBrowser"));
@@ -302,23 +310,19 @@ export function TaskDetail() {
 		designer: iris?.displayName ?? designer,
 		reviewer: reviewer ?? "",
 		developer: assignee ?? "",
-		pm,
 	};
 	// Where the Designer's own task stands, step by step (the "How Iris works" panel).
 	const reached =
 		contract.status === "accepted"
-			? 5
+			? 4
 			: contract.status === "verifying"
-				? 4
-				: design?.state === "approved"
-					? 3
-					: design?.state === "proposed"
-						? 2
-						: 0;
+				? 3
+				: design?.state === "approved" || design?.state === "proposed"
+					? 2
+					: 0;
 	const steps = [
 		"designerStepLook",
 		"designerStepPlan",
-		"designerStepApprove",
 		"designerStepChange",
 		"designerStepReview",
 	] as const;
@@ -364,13 +368,17 @@ export function TaskDetail() {
 			<>
 				<h2>{t("taskFor")}</h2>
 				<p>{contract.intent}</p>
-				{summary && summaryBy && (
+				{summary && (summaryBy || checkedByCatervas) && (
 					<section className={own.letter} aria-labelledby="summary-signed">
 						<p id="summary-signed" className={styles.muted}>
-							{signed(
-								summary.body.kind === "review" ? "gateReviewed" : "gateWrote",
-								summaryBy,
-							)}
+							{summaryBy
+								? signed(
+										summary.body.kind === "review"
+											? "gateReviewed"
+											: "gateWrote",
+										summaryBy,
+									)
+								: t("gateChecked")}
 						</p>
 						<p>{summary.body.text?.split(/\n\s*\n/)[0]}</p>
 					</section>
@@ -431,47 +439,36 @@ export function TaskDetail() {
 				<h2>{t("tabPlan")}</h2>
 				{design && (
 					<>
-						<p className={styles.muted}>{t("designLead", { designer, pm })}</p>
+						<p className={styles.muted}>{t("designLead", { designer })}</p>
 						<article className={own.letter}>
-							{design.state === "proposed" ? (
-								<>
-									<p>
-										<strong>{t("designWaiting", { pm })}</strong>
-									</p>
-									<p>{t("designWaitingNote", { pm })}</p>
-								</>
-							) : (
-								<>
-									<p>
-										<strong>
-											{t(
-												design.state === "approved"
-													? "designApproved"
-													: "designReturned",
-												{ pm, ...when(decision) },
-											)}
-										</strong>
-									</p>
-									<p>
+							{decision && (
+								<p>
+									<strong>
 										{t(
-											design.state === "approved"
-												? "designBeingBuiltNote"
-												: "designSentBackNote",
-											{ designer },
+											design.state === "returned"
+												? "designReturned"
+												: "designApproved",
+											{ pm, ...when(decision) },
 										)}
-									</p>
-									{design.reason && <p>{`“${design.reason}”`}</p>}
-									{design.state === "returned" && (
-										<p>
-											{t(
-												limit <= NTH.length
-													? "designReturns"
-													: "designReturnsMany",
-												{ n: returns, of: limit, nth: NTH[limit - 1] ?? "" },
-											)}
-										</p>
+									</strong>
+								</p>
+							)}
+							<p>
+								{t(
+									design.state === "returned"
+										? "designSentBackNote"
+										: "designBeingBuiltNote",
+									{ designer },
+								)}
+							</p>
+							{design.reason && <p>{`“${design.reason}”`}</p>}
+							{design.state === "returned" && (
+								<p>
+									{t(
+										limit <= NTH.length ? "designReturns" : "designReturnsMany",
+										{ n: returns, of: limit, nth: NTH[limit - 1] ?? "" },
 									)}
-								</>
+								</p>
 							)}
 						</article>
 						<article className={own.letter}>
@@ -739,11 +736,7 @@ export function TaskDetail() {
 									{t(
 										contract.status !== "accepted"
 											? "taskAddNotYet"
-											: team.team.policy.integration === "auto_merge"
-												? "taskAddOnItsOwn"
-												: team.team.policy.integration === "pull_request"
-													? "taskAddByPullRequest"
-													: "taskAddByHand",
+											: "taskAddByPullRequest",
 									)}
 								</p>
 							)}

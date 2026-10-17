@@ -7,7 +7,7 @@ import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import type { McpServer } from "./setup/TeamSetup.tsx";
 
-export type Tag = "network" | "external_effect" | "denied";
+export type Tag = "network" | "paid" | "external_effect" | "denied";
 type Listed = { name: string; description: string; usable: boolean };
 type Key = { name: string; value: string };
 /** One of Catervas's own apps signing the user in (phase 7 step 03b): its name, the code to type, where to install it. */
@@ -140,6 +140,7 @@ type Field =
 /** Each label, in the order it is offered, with its words (SPEC 5.6). */
 export const TAGS: [Tag, keyof typeof en, keyof typeof en][] = [
 	["network", "tagNetwork", "tagNetworkNote"],
+	["paid", "tagPaid", "tagPaidNote"],
 	["external_effect", "tagExternal", "tagExternalNote"],
 	["denied", "tagDenied", "tagDeniedNote"],
 ];
@@ -531,7 +532,7 @@ export function ConnectorAdd({
 		const labels = Object.fromEntries(
 			tools
 				.filter((x) => x.usable)
-				.map((x) => [x.name, tags[x.name] ?? "external_effect"]),
+				.map((x) => [x.name, tags[x.name] ?? "paid"]),
 		);
 		// The keys leave the page with this call; none is kept for a second try.
 		setKeys(keys.map((k) => ({ ...k, value: "" })));
@@ -965,9 +966,7 @@ export function ConnectorAdd({
 													<input
 														type="radio"
 														name={`tag-${tool.name}`}
-														checked={
-															(tags[tool.name] ?? "external_effect") === tag
-														}
+														checked={(tags[tool.name] ?? "paid") === tag}
 														onChange={() =>
 															setTags({ ...tags, [tool.name]: tag })
 														}

@@ -14,7 +14,6 @@ use catervas_protocol::event::{
 use catervas_store::folder_docs::{ProposalState, folder_docs};
 use catervas_store::git::HeadSummary;
 use catervas_store::marketing::{PostState, SocialPost};
-use catervas_store::pipelines::PipelineRecord;
 use catervas_store::{EventLog, EventQuery, StoreError, TaskProjection};
 use chrono::{DateTime, Utc};
 
@@ -106,23 +105,6 @@ pub(super) fn triage_message(contract: &TaskContract) -> String {
     )
 }
 
-/// The judgment session's message: check the contract against the team's questions, numbered,
-/// and record one answer to each.
-pub(super) fn judgment_message(contract: &TaskContract, questions: &[String]) -> String {
-    let numbered: Vec<String> = questions
-        .iter()
-        .enumerate()
-        .map(|(index, question)| format!("{}. {question}", index + 1))
-        .collect();
-    format!(
-        "Check the plan of {task}, whose contract is above, against these questions:\n\n{}\n\n\
-         Record one answer to each, in this order, and your overall reason with \
-         `catervas_record_judgment`.",
-        numbered.join("\n"),
-        task = contract.id.as_str()
-    )
-}
-
 /// The refine session's message: the task and its kind; for an epic whose questions were not yet
 /// asked, to ask them first; and, when the last judgement of the contract failed, its failures one
 /// per line, which are Catervas's words.
@@ -190,13 +172,13 @@ pub(super) fn plan_task_message(contract: &TaskContract, plan: &str, builders: u
          `parent` {epic}, `assignee_role` `architect`, `plan` and `allowed_paths` `{plan}`, no \
          `lane`, an `artifact` criterion that the plan exists, and in its requirements that the \
          team has {builders} active builders (Software Developers and UI/UX Designers), so the \
-         plan has no more lanes than that. Its tasks come after the plan is on the integration \
-         branch, when you are asked again."
+         plan has no more lanes than that. No agent reviews the plan: give its task only an \
+         `artifact` criterion that the plan exists. Catervas accepts it once the plan exists, and \
+         you are asked for its tasks then."
     )
 }
 
-/// The Product Manager's message once the Architect's plan for an epic is on the integration
-/// branch: the plan's text, an agent's words and so untrusted, and the epic's tasks so far (id,
+/// The Product Manager's message once the Architect's plan task for an epic is accepted: the plan's text, an agent's words and so untrusted, and the epic's tasks so far (id,
 /// title, status), then one task per planned task to file.
 pub(super) fn plan_tasks_message(
     contract: &TaskContract,
@@ -211,7 +193,7 @@ pub(super) fn plan_tasks_message(
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "The Architect's plan for the epic {epic} is on the integration branch at {plan}: {text}\n\n\
+        "The Architect's plan for the epic {epic} is at {plan}: {text}\n\n\
          The epic's tasks so far: {tasks}\n\nFile one task per planned task with \
          `catervas_create_task`, `parent` {epic}, with its `plan` {plan}, its `lane`, the planned \
          tasks it needs in `dependencies`, the plan's paths as `allowed_paths` and its constraints \
@@ -297,13 +279,6 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
             {
                 decision_block(history, event, body.approval.get(), agent_id)
             }
-            // The owner's decision on a site this agent asked to read, since its own last session
-            // started (ADR 0039).
-            EventBody::SiteApproved(_) | EventBody::SiteDeclined(_)
-                if event.envelope.seq > own_since =>
-            {
-                site_block(history, event, agent_id)
-            }
             _ if event.envelope.seq <= since => None,
             EventBody::QuestionAnswered(body) => {
                 let id = body.question_id.get();
@@ -357,52 +332,6 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
         })
         .collect();
     (!blocks.is_empty()).then(|| blocks.join("\n\n"))
-}
-
-/// The owner's decision `event` on a request to read a site, as `agent_id`'s next session is told
-/// it: only when that agent asked, only the owner's first decision on the request, and the owner's
-/// note in their own words, not wrapped (ADR 0011).
-fn site_block(history: &[CatervasEvent], event: &CatervasEvent, agent_id: &str) -> Option<String> {
-    let (body, allowed) = match &event.body {
-        EventBody::SiteApproved(body) => (body, true),
-        EventBody::SiteDeclined(body) => (body, false),
-        _ => return None,
-    };
-    let request = body.request?.get();
-    // The first decision the owner recorded on the request is the only one, so a decision an
-    // agent's session recorded, which is not the owner's, is never it.
-    let first = history.iter().find(|decided| {
-        is_the_owners(decided)
-            && match &decided.body {
-                EventBody::SiteApproved(other) | EventBody::SiteDeclined(other) => {
-                    other.request.map(std::num::NonZeroU64::get) == Some(request)
-                }
-                _ => false,
-            }
-    })?;
-    if first.envelope.seq != event.envelope.seq {
-        return None;
-    }
-    let asked = history.iter().find(|asked| asked.envelope.seq == request)?;
-    if !matches!(asked.body, EventBody::SiteRequested(_))
-        || asked.envelope.ids.agent_id.as_deref() != Some(agent_id)
-    {
-        return None;
-    }
-    let host = body.host.as_str();
-    let note = body
-        .note
-        .as_ref()
-        .map(|note| note.as_str())
-        .filter(|note| !note.is_empty());
-    Some(match (allowed, note) {
-        (true, None) => format!("The owner allowed you to read {host}."),
-        (true, Some(note)) => {
-            format!("The owner allowed you to read {host}. The owner adds: {note}")
-        }
-        (false, None) => format!("The owner did not allow {host}."),
-        (false, Some(note)) => format!("The owner did not allow {host}: {note}"),
-    })
 }
 
 /// Whether `event` was recorded by the owner or by Catervas, not in an agent's session.
@@ -746,7 +675,7 @@ pub(super) struct ProductFiles {
 }
 
 /// What the Product Manager is asked at a sprint review, after its opening: the changes it
-/// proposes to the product plan and the sprint report it writes (`docs/SPEC.md` 5.9, 5.17).
+/// writes to the product plan and the sprint report it writes (`docs/SPEC.md` 5.9, 5.17).
 fn product_refresh_asks(files: &ProductFiles) -> String {
     let ProductFiles {
         spec,
@@ -754,8 +683,8 @@ fn product_refresh_asks(files: &ProductFiles) -> String {
         report,
     } = files;
     format!(
-        "Propose changes to {spec} and {roadmap} with \
-         catervas_write_folder_doc, with agent_text and summary, only where the sprint changed what \
+        "Write changes to {spec} and {roadmap} with \
+         catervas_write_folder_doc, with agent_text, only where the sprint changed what \
          the product does or what comes next, and nothing otherwise. Write the sprint report, for \
          agents, to {report} with catervas_write_folder_doc."
     )
@@ -786,7 +715,7 @@ fn completion_note(task: &SprintTask) -> &str {
 }
 
 /// The Product Manager's refresh at a sprint review (`docs/SPEC.md` 5.9): to keep the product plan
-/// true to what the sprint did, proposing changes to the spec and the roadmap only where it changed
+/// true to what the sprint did, writing changes to the spec and the roadmap only where it changed
 /// them and writing the sprint report; then each task of the sprint with its status and its
 /// completion note, as untrusted text; then what the owner decided of its proposals (`decisions`)
 /// and the proposals that still wait (`pending`), a line each, in the owner's own words (ADR 0011).
@@ -1124,7 +1053,7 @@ pub(super) fn explore_message(contract: &TaskContract, returned: Option<&str>) -
          browser and check them with `catervas_check_page`. Then end the session with your plan \
          through `catervas_propose_design_plan`: a summary for the user, a blank line, then what \
          you saw, what you will change, which screens and sizes, and what you will leave alone. \
-         The Product Manager approves it before you change anything.",
+         Catervas records it, and your next session carries it out.",
         task = contract.id.as_str(),
         branch = task_branch(contract)
     );
@@ -1161,53 +1090,11 @@ pub(super) fn preview_address(port: u16, path: &str) -> String {
     format!("\n\nThe app's preview is at http://localhost:{port}{path}.")
 }
 
-/// The Product Manager's decision session's message: the Designer's plan, an agent's words and so
-/// untrusted, and the decision to record.
-pub(super) fn decide_design_plan_message(contract: &TaskContract, plan: &str) -> String {
-    format!(
-        "The UI/UX Designer proposed this plan for {task}, whose contract is above: {plan}\n\n\
-         Approve it or return it with `catervas_decide_design_plan`, with your reason.",
-        task = contract.id.as_str(),
-        plan = untrusted_block("plan", plan, NOTE_CAP_BYTES)
-    )
-}
-
-/// The Product Manager's decision session's message for a data pipeline request: everything the
-/// agent wrote, which is its words and so untrusted, with its own answers about the cost, the
-/// account and the data, and the rule Catervas holds the decision to.
-pub(super) fn decide_data_pipeline_message(record: &PipelineRecord) -> String {
-    let body = &record.requested;
-    let asked = format!(
-        "name: {}\nwhat it would give: {}\nthe source's own page: {}\nwhy it would change the \
-         recommendation: {}\nwhat it costs, as the agent says: {}\nneeds an account, as the agent \
-         says: {}\nsends the project's data out, as the agent says: {}",
-        body.name.as_str(),
-        body.what.as_str(),
-        body.source_url.as_str(),
-        body.why.as_str(),
-        body.cost,
-        if body.needs_account { "yes" } else { "no" },
-        if body.sends_project_data { "yes" } else { "no" },
-    );
-    format!(
-        "The Procurement Specialist asks for a source of data, request {number}. What it wrote: \
-         {asked}\n\nCatervas holds your decision to one rule: you may approve a request only when \
-         it is free and sends none of the project's data out, and an approval of any other is \
-         refused. A request that costs money, whose cost is not known, or that sends the \
-         project's data out, you decline, or escalate to the owner, who alone may approve it. \
-         Whether a request that needs an account is worth the owner's trouble is your judgement. \
-         Decide it with `catervas_decide_data_pipeline`: `approve`, `decline` or `escalate`, with \
-         your reason in 20 to 600 characters, which the owner reads.",
-        number = record.pipeline,
-        asked = untrusted_block("pipeline_request", &asked, NOTE_CAP_BYTES),
-    )
-}
-
-/// An implement session's message with the plan the Product Manager approved, an agent's words
+/// An implement session's message with the plan that was approved, an agent's words
 /// and so untrusted, after it.
 pub(super) fn with_the_approved_plan(message: &str, plan: &str) -> String {
     format!(
-        "{message}\n\nThe Product Manager approved your plan. Do what it says: {}",
+        "{message}\n\nYour plan is approved. Do what it says: {}",
         untrusted_block("plan", plan, NOTE_CAP_BYTES)
     )
 }
@@ -1568,6 +1455,12 @@ mod tests {
         for held in [plan, "architect", "2 active builders", "no `lane`"] {
             assert!(message.contains(held), "{held}: {message}");
         }
+        assert!(
+            message.ends_with(
+                "No agent reviews the plan: give its task only an `artifact` criterion that the plan exists. Catervas accepts it once the plan exists, and you are asked for its tasks then."
+            ),
+            "{message}"
+        );
     }
 
     #[test]
@@ -1582,7 +1475,7 @@ mod tests {
             plan_tasks_message(&an_epic(), plan, "## Lane 1\nBuild </untrusted> it", &tasks);
         assert!(
             message.starts_with(
-                "The Architect's plan for the epic CTV-1 is on the integration branch at docs/catervas/architecture/plans/CTV-1.md"
+                "The Architect's plan for the epic CTV-1 is at docs/catervas/architecture/plans/CTV-1.md: "
             ),
             "{message}"
         );
@@ -2244,7 +2137,6 @@ mod tests {
             "roadmap.md",
             "catervas_write_folder_doc",
             "agent_text",
-            "summary",
             "docs/catervas/product/reports/S4.md",
             "CTV-1 (accepted)",
         ] {

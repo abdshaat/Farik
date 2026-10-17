@@ -117,7 +117,7 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
             "wrote .catervas/team.yaml: {}",
             agent_ids.join(", ")
         ));
-        lines.push(AUTO_MERGE_NOTICE.to_string());
+        lines.push(PULL_REQUEST_NOTICE.to_string());
     } else {
         lines.push("kept the team already in .catervas/team.yaml".to_string());
     }
@@ -225,12 +225,11 @@ fn record_the_members(
     Ok(scanned.read_back)
 }
 
-/// What the report says when it writes the starter team, whose policy pushes to `origin` on the
+/// What the report says when it writes the starter team, whose work is pushed to `origin` on the
 /// user's behalf: a default that reaches outside the machine is one the user is told of (5.6,
-/// ADR 0012).
-const AUTO_MERGE_NOTICE: &str = "Integration: auto_merge. Accepted work is merged into the \
-                                 integration branch and pushed to origin when there is one; \
-                                 policy.integration in .catervas/team.yaml changes it.";
+/// ADR 0061).
+const PULL_REQUEST_NOTICE: &str = "Accepted work is pushed to origin and opened as a pull request \
+                                     for you to merge; with no origin, merge it by hand.";
 
 /// What a file holds, nothing when there is no such file, and a refusal when there is one and it
 /// cannot be read.

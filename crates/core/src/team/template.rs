@@ -12,7 +12,8 @@ use jsonschema::error::ValidationErrorKind;
 use serde_json::{Value, json};
 
 use super::{
-    Agent, AgentStatus, PolicyDocumentFormat, Team, ValidationError, defaults, validate_team,
+    Agent, AgentStatus, Integration, PolicyDocumentFormat, Team, ValidationError, defaults,
+    validate_team,
 };
 use crate::contract::{pointer, with_integers_normalised};
 
@@ -88,7 +89,7 @@ pub fn validate_template(input: &Value) -> Result<TeamTemplate, Vec<ValidationEr
     if !errors.is_empty() {
         return Err(errors);
     }
-    let template = serde_json::from_value::<TeamTemplate>(with_integers_normalised(input))
+    let mut template = serde_json::from_value::<TeamTemplate>(with_integers_normalised(input))
         .map_err(|error| {
             vec![ValidationError {
                 path: "/".to_string(),
@@ -97,6 +98,9 @@ pub fn validate_template(input: &Value) -> Result<TeamTemplate, Vec<ValidationEr
                 ),
             }]
         })?;
+    // Catervas never merges (ADR 0061): an older template's `auto_merge` or `manual` reads as a
+    // pull request, so the team and the saved template after it say so.
+    template.policy.integration = Integration::PullRequest;
     validate_team(&team_wire(&template))?;
     Ok(template)
 }
@@ -105,7 +109,6 @@ pub fn validate_template(input: &Value) -> Result<TeamTemplate, Vec<ValidationEr
 fn team_wire(template: &TeamTemplate) -> Value {
     let mut policy = defaults().policy;
     policy.permissions = Some(template.policy.permissions.clone());
-    policy.judgment = Some(template.policy.judgment.clone());
     policy.integration = template.policy.integration;
     let agents: Vec<Value> = template
         .agents
@@ -126,7 +129,7 @@ fn team_wire(template: &TeamTemplate) -> Value {
 }
 
 /// The template of a team: its agents that are not retired, without status, grants, revokes,
-/// preauthorized tools, connectors or an uploaded picture; its permissions, plan check,
+/// preauthorized tools, connectors or an uploaded picture; its permissions,
 /// integration and whether it plans in sprints written out; its daily limit. The name is trimmed.
 ///
 /// # Errors
@@ -162,7 +165,6 @@ pub fn template_from_team(
     }
     let mut policy = json!({
         "permissions": team.permissions(),
-        "judgment": team.policy.judgment.clone().unwrap_or_default(),
         "integration": team.policy.integration,
         "plan_in_sprints": team.plans_in_sprints(),
     });
@@ -274,7 +276,6 @@ pub fn apply_template(
         team.agents.push(agent);
     }
     team.policy.permissions = Some(template.policy.permissions.clone());
-    team.policy.judgment = Some(template.policy.judgment.clone());
     team.policy.integration = template.policy.integration;
     if let Some(plan_in_sprints) = template.policy.plan_in_sprints {
         team.policy.plan_in_sprints = Some(plan_in_sprints);
@@ -419,10 +420,6 @@ mod tests {
         wire["agents"][0]["avatar"] = json!("product-manager");
         wire["agents"][0]["model"] = json!({ "id": "claude-sonnet-5", "effort": "low" });
         wire["agents"][1]["display_name"] = json!("Linus T.");
-        wire["policy"]
-            .as_object_mut()
-            .expect("the fixture's policy is an object")
-            .remove("judgment");
         assert!(wire["policy"].get("permissions").is_none());
         assert_eq!(
             template_of(&wire),
@@ -443,15 +440,7 @@ mod tests {
                 ],
                 "policy": {
                     "permissions": { "run_commands": true, "push": false },
-                    "judgment": {
-                        "required": "always",
-                        "questions": [
-                            "Does the task fit its budget?",
-                            "Would its checks notice if the work went wrong the way its intent worries about?"
-                        ],
-                        "judge": "auto"
-                    },
-                    "integration": "manual",
+                    "integration": "pull_request",
                     "plan_in_sprints": false
                 },
                 "budgets": { "daily_usd": 20.0 }
@@ -482,7 +471,6 @@ mod tests {
             [
                 "document_format",
                 "integration",
-                "judgment",
                 "permissions",
                 "plan_in_sprints"
             ]
@@ -601,19 +589,6 @@ mod tests {
 
         wire["agents"].as_array_mut().expect("agents").pop();
         validate_template(&wire).expect("seven is a template");
-    }
-
-    #[test]
-    fn refuses_a_judge_the_template_does_not_hold() {
-        let mut wire = a_template_wire();
-        wire["policy"]["judgment"]["judge"] = json!("architect");
-        assert_eq!(
-            refusals(&wire),
-            [(
-                "/policy/judgment/judge".to_string(),
-                "No active Architect can check plans. Let Catervas choose, or add one.".to_string()
-            )]
-        );
     }
 
     #[test]
@@ -1039,7 +1014,6 @@ mod tests {
         ]);
         template["policy"] = json!({
             "permissions": { "run_commands": false, "push": true },
-            "judgment": { "required": "never" },
             "integration": "manual"
         });
         template["budgets"] = json!({});
@@ -1047,11 +1021,8 @@ mod tests {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
 
         let mut expected = serde_json::to_value(team(&wire)).expect("serialises");
-        let read = validate_template(&template).expect("a template");
         expected["policy"]["permissions"] = json!({ "run_commands": false, "push": true });
-        expected["policy"]["judgment"] =
-            serde_json::to_value(&read.policy.judgment).expect("serialises");
-        expected["policy"]["integration"] = json!("manual");
+        expected["policy"]["integration"] = json!("pull_request");
         expected["budgets"]
             .as_object_mut()
             .expect("budgets")

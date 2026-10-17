@@ -1,6 +1,6 @@
 # The Marketing Specialist's kit: sixteen skills written for any business (ADR 0040) and the services it
 # signs in to (route 1, ADR 0035): two creative ones that spend the user's credits inside an allowance
-# (ADR 0037), then Buffer, whose writes are Catervas's own (the agent's posts go out through
+# (ADR 0037; their tools are tagged `paid`, the only tag that asks, ADR 0061), then Buffer, whose writes are Catervas's own (the agent's posts go out through
 # `catervas_schedule_post`, in the plan the owner approved, and Catervas calls `create_post` itself), and
 # Kit, whose email broadcasts are only drafts the human sends (ADR 0042); and Google Ads, Catervas's own
 # connector, whose seven writes run only inside the plan the owner approved (`plan_approved`, ADR 0042;
@@ -79,34 +79,34 @@ connectors:
       remove_background: { calls: 10, what: "background removals" }
       outpaint_image: { calls: 10, what: "image extensions" }
     tools:
-      generate_image: external_effect
-      generate_video: external_effect
-      generate_audio: external_effect
-      upscale_image: external_effect
-      remove_background: external_effect
-      outpaint_image: external_effect
-      generate_image_batch: external_effect
-      generate_video_batch: external_effect
-      generate_audio_batch: external_effect
-      generate_3d: external_effect
-      upscale_video: external_effect
-      reframe: external_effect
-      motion_control: external_effect
-      dubbing: external_effect
-      voice_change: external_effect
-      ads_studio_generate: external_effect
-      ads_studio_create_brand: external_effect
-      ads_studio_add_product: external_effect
-      ads_studio_update_product: external_effect
-      ads_studio_cancel_run: external_effect
-      ai_influencer_generate: external_effect
-      execute_preset: external_effect
-      media_import_url: external_effect
-      resolve_explainer_preset: external_effect
-      shorts_studio_create: external_effect
-      shorts_studio_create_preset: external_effect
-      video_analysis_create: external_effect
-      virality_predictor: external_effect
+      generate_image: paid
+      generate_video: paid
+      generate_audio: paid
+      upscale_image: paid
+      remove_background: paid
+      outpaint_image: paid
+      generate_image_batch: paid
+      generate_video_batch: paid
+      generate_audio_batch: paid
+      generate_3d: paid
+      upscale_video: paid
+      reframe: paid
+      motion_control: paid
+      dubbing: paid
+      voice_change: paid
+      ads_studio_generate: paid
+      ads_studio_create_brand: paid
+      ads_studio_add_product: paid
+      ads_studio_update_product: paid
+      ads_studio_cancel_run: paid
+      ai_influencer_generate: paid
+      execute_preset: paid
+      media_import_url: paid
+      resolve_explainer_preset: paid
+      shorts_studio_create: paid
+      shorts_studio_create_preset: paid
+      video_analysis_create: paid
+      virality_predictor: paid
       models_explore: network
       balance: network
       transactions: network
@@ -219,14 +219,14 @@ connectors:
       replace_background: { calls: 10, what: "background swaps" }
       crisp_upscale: { calls: 10, what: "image upscales" }
     tools:
-      generate_image: external_effect
-      image_to_image: external_effect
-      vectorize_image: external_effect
-      remove_background: external_effect
-      replace_background: external_effect
-      crisp_upscale: external_effect
-      creative_upscale: external_effect
-      create_style: external_effect
+      generate_image: paid
+      image_to_image: paid
+      vectorize_image: paid
+      remove_background: paid
+      replace_background: paid
+      crisp_upscale: paid
+      creative_upscale: paid
+      create_style: paid
       get_user: network
   - name: buffer
     transport: http
@@ -234,8 +234,8 @@ connectors:
     oauth: { scopes: [offline_access, posts:read, posts:write, account:read, insights:read, ideas:read] }
     title: Buffer
     about: "Schedules social posts"
-    why: "Reads your channels and past posts. Sends posts from your approved plan; asks about others."
-    setup: "Sign in with your Buffer account and allow Catervas to read and schedule posts. Catervas can reach every channel your Buffer account has. A post in a plan you approved shows on Today before it goes out, with a Stop button; Catervas asks you about any other. To remove Catervas completely, also remove it in Buffer's settings."
+    why: "Reads your channels and past posts. Sends posts, in your plan or outside it, with a Stop on Today."
+    setup: "Sign in with your Buffer account and allow Catervas to read and schedule posts. Catervas can reach every channel your Buffer account has. Every post shows on Today before it goes out, with a Stop button. To remove Catervas completely, also remove it in Buffer's settings."
     labels:
       get_account: "read the account"
       list_channels: "list channels"
@@ -271,7 +271,7 @@ connectors:
     title: Kit
     about: "Email newsletters"
     why: "Drafts emails and landing pages. You send every email."
-    setup: "Kit needs a paid plan for this. Sign in with your Kit account and allow Catervas to use it. Catervas drafts emails for you to send from Kit, asks you before changing a page or an email series, and never reads your subscribers' own details."
+    setup: "Kit needs a paid plan for this. Sign in with your Kit account and allow Catervas to use it. Catervas drafts emails for you to send from Kit, changes pages and email series as it works (every change is recorded), and never reads your subscribers' own details."
     labels:
       create_broadcast: "draft an email"
       update_broadcast: "change a draft email"
@@ -290,9 +290,6 @@ connectors:
       get_link_clicks_for_a_broadcast: "read link clicks"
       get_stats_for_a_broadcast: "read an email's results"
       list_broadcasts: "list emails"
-    allowances:
-      create_broadcast: { calls: 10, what: "email drafts" }
-      update_broadcast: { calls: 10, what: "email drafts" }
     tools:
       create_broadcast: external_effect
       update_broadcast: external_effect
@@ -402,10 +399,10 @@ connectors:
       list_accounts: network
       report: network
       keyword_ideas: network
-      create_search_campaign: external_effect
-      add_ad_group: external_effect
-      add_keywords: external_effect
-      add_negative_keywords: external_effect
-      add_responsive_search_ad: external_effect
-      set_campaign_budget: external_effect
-      set_campaign_status: external_effect
+      create_search_campaign: paid
+      add_ad_group: paid
+      add_keywords: paid
+      add_negative_keywords: paid
+      add_responsive_search_ad: paid
+      set_campaign_budget: paid
+      set_campaign_status: paid

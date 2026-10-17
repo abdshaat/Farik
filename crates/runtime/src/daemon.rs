@@ -20,7 +20,6 @@ use axum::{Extension, Json, Router};
 use catervas_core::budget::SessionLimits;
 use catervas_core::contract::TaskId;
 use catervas_core::governor::permissions::{PermissionTier, SessionConnector};
-use catervas_core::governor::sites::WebAccess;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
@@ -119,14 +118,6 @@ pub struct SessionRegistration {
     pub session_id: String,
     /// The agent the session is.
     pub agent_id: String,
-    /// How far the session's web reading reaches (5.6, 6.10): fixed when the session starts, from
-    /// its agent's role, as its connectors are. A session held to approved sites may `WebFetch`
-    /// and send a connector's `url` and `urls` only to a site the owner allowed or Catervas ships.
-    pub web: WebAccess,
-    /// What it may read of the project (5.6): fixed when the session starts, from its agent's role,
-    /// whatever the purpose. A session held to read paths is refused a read outside them, a search
-    /// that names no path, a command, and the diff of a task that is not its own.
-    pub reads: catervas_core::folders::ReadAccess,
     /// The task it works on, when it works on one.
     pub task_id: Option<TaskId>,
     /// Why it runs, which decides what kind of message it posts.
@@ -1883,8 +1874,6 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             read_roots: Vec::new(),
             session_id: "s-exec".to_string(),
-            web: catervas_core::governor::sites::WebAccess::Open,
-            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),
@@ -2209,8 +2198,6 @@ mod tests {
             state.register_session(SessionRegistration {
                 read_roots: Vec::new(),
                 session_id: id.to_string(),
-                web: catervas_core::governor::sites::WebAccess::Open,
-                reads: catervas_core::folders::ReadAccess::Open,
                 agent_id: "dev-a".to_string(),
                 task_id: None,
                 cwd: daemon.worktree.clone(),
@@ -2443,8 +2430,6 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             read_roots: Vec::new(),
             session_id: "session-custom".to_string(),
-            web: catervas_core::governor::sites::WebAccess::Open,
-            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose: SessionPurpose::Implement,
@@ -2794,8 +2779,6 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             read_roots: Vec::new(),
             session_id: "session-signed".to_string(),
-            web: catervas_core::governor::sites::WebAccess::Open,
-            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose: SessionPurpose::Implement,

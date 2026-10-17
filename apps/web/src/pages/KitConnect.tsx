@@ -448,7 +448,7 @@ export function KitConnect({
 						<strong>{t("kitDone", fill)}</strong>
 					</p>
 					{group(t("kitCan", fill), [
-						...toolsSaid(["network"]),
+						...toolsSaid(["network", "external_effect"]),
 						...(given.length > 0
 							? [
 									t("allowMakeUpTo", {
@@ -464,7 +464,7 @@ export function KitConnect({
 					{group(t("kitAsks", fill), [
 						...(given.length > 0 ? [t("allowMore")] : []),
 						...toolsSaid(
-							["external_effect"],
+							["paid"],
 							given.map((offer) => offer.tool),
 						),
 					])}

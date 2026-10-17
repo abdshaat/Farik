@@ -15,7 +15,8 @@ use crate::contract::{
 use crate::folders::{MEMBER_FOLDERS, ROLE_FOLDERS, is_plan_of, member_folder};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::team::{
-    changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
+    changes_code, plain_role, private_file_fault, private_folder, reviewed_by_an_agent,
+    task_private_folder,
 };
 use crate::text::listed;
 
@@ -27,13 +28,12 @@ pub mod fixtures;
 pub enum ReadinessRule {
     /// The intent has words in it, not only whitespace.
     IntentPresent,
-    /// A plan the human approves has the summary a human gate leads with: every epic, and every
-    /// task the team's `human_accepts_contracts` policy asks the human to approve.
-    SummaryPresent,
     /// At least one exit criterion exists.
     CriteriaPresent,
     /// Every criterion's `method` value names the shape its fields have.
     CriteriaMethodsValid,
+    /// A contract that no agent reviews has no `review` or `human` criterion (ADR 0061).
+    NoReviewOutsideCode,
     /// Every `command` and `test` criterion has a command that is not blank.
     CommandCriteriaComplete,
     /// The budget does not exceed the remaining sprint budget.
@@ -100,32 +100,6 @@ pub enum ReadinessRule {
     /// A new project plans nothing but its product plan until the plan is on the integration
     /// branch.
     ProductPlanFirst,
-    /// The judge's review is recorded when the team's policy checks plans.
-    JudgmentRecorded,
-    /// The judge answered yes to every question it was asked.
-    JudgmentAnswers,
-}
-
-/// The judge's answer to one question of the plan check.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JudgmentAnswer {
-    /// The question, as it was asked.
-    pub question: String,
-    /// Whether the plan passes it.
-    pub pass: bool,
-    /// Why.
-    pub reason: String,
-}
-
-/// The judge's check of a plan (`docs/SPEC.md` section 5.3), recorded by the runtime as a
-/// `contract.judged` event and passed in. It counts under whatever questions it answered: a
-/// change to the team's questions does not reopen a judged contract.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JudgmentReview {
-    /// One answer per question, in the order asked.
-    pub answers: Vec<JudgmentAnswer>,
-    /// The judge's overall reason.
-    pub reason: String,
 }
 
 /// Another task of an epic that has a lane: what `LanesOverlap` reads.
@@ -169,13 +143,6 @@ pub struct ReadinessContext {
     pub parent: Option<ParentState>,
     /// The team rules in force.
     pub rules: TeamRules,
-    /// Whether the team's policy checks plans, and the judge's review is then required.
-    pub requires_judgment_review: bool,
-    /// The recorded judgment review, when there is one.
-    pub judgment_review: Option<JudgmentReview>,
-    /// Whether the human approves this plan before work starts, and so reads its summary first:
-    /// the team's policy is `all`, or the contract is an epic or a `high` risk task.
-    pub human_approves: bool,
     /// Whether this is a new project whose product plan is not on the integration branch yet.
     pub awaits_the_product_plan: bool,
     /// Whether this contract is that product plan's own task.
@@ -198,9 +165,9 @@ type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
 const CHECKS: [Check; 30] = [
     intent_present,
-    summary_present,
     criteria_present,
     criteria_methods_valid,
+    no_review_outside_code,
     command_criteria_complete,
     budget_within_sprint,
     reviewer_available,
@@ -229,14 +196,9 @@ const CHECKS: [Check; 30] = [
     product_plan_first,
 ];
 
-/// The judge's review, asked of a contract only once every other rule passes, so that a
-/// contract going back for another rule is not also refused for a judgment nobody asked for yet.
-const JUDGMENT_CHECKS: [Check; 2] = [judgment_recorded, judgment_answers];
-
 /// Checks a contract against the Definition of Ready: the structural rules of `docs/SPEC.md`
-/// section 5.3, the team rules of 5.12, the parent rules of 5.16, and the judge's
-/// recorded judgment when the team checks plans, evaluated only when every other rule passes. Refuses
-/// with every rule the contract fails.
+/// section 5.3, the team rules of 5.12 and the parent rules of 5.16. Refuses with every rule the
+/// contract fails.
 ///
 /// # Errors
 ///
@@ -246,16 +208,10 @@ pub fn evaluate_readiness(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Result<(), Vec<ReadinessFailure>> {
-    let failed = |checks: &[Check]| -> Vec<ReadinessFailure> {
-        checks
-            .iter()
-            .filter_map(|check| check(contract, context))
-            .collect()
-    };
-    let mut failures = failed(&CHECKS);
-    if failures.is_empty() {
-        failures = failed(&JUDGMENT_CHECKS);
-    }
+    let failures: Vec<ReadinessFailure> = CHECKS
+        .iter()
+        .filter_map(|check| check(contract, context))
+        .collect();
     if failures.is_empty() {
         Ok(())
     } else {
@@ -263,19 +219,10 @@ pub fn evaluate_readiness(
     }
 }
 
-/// How many rules `evaluate_readiness` ran to give `result`: every rule but the judge's, and the
-/// judge's two as well once every other passed.
+/// How many rules `evaluate_readiness` runs.
 #[must_use]
-pub fn rules_evaluated(result: &Result<(), Vec<ReadinessFailure>>) -> usize {
-    let judged = result.as_ref().err().is_none_or(|failures| {
-        failures.iter().all(|failure| {
-            matches!(
-                failure.rule,
-                ReadinessRule::JudgmentRecorded | ReadinessRule::JudgmentAnswers
-            )
-        })
-    });
-    CHECKS.len() + if judged { JUDGMENT_CHECKS.len() } else { 0 }
+pub fn rules_evaluated() -> usize {
+    CHECKS.len()
 }
 
 fn failure(rule: ReadinessRule, message: String) -> ReadinessFailure {
@@ -307,20 +254,6 @@ fn intent_present(contract: &TaskContract, _: &ReadinessContext) -> Option<Readi
         ));
     }
     None
-}
-
-fn summary_present(
-    contract: &TaskContract,
-    context: &ReadinessContext,
-) -> Option<ReadinessFailure> {
-    (context.human_approves && contract.summary.is_none()).then(|| {
-        failure(
-            ReadinessRule::SummaryPresent,
-            "the plan has no summary for the user; write two or three plain sentences they can \
-             decide on"
-                .to_string(),
-        )
-    })
 }
 
 fn criteria_present(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
@@ -355,6 +288,34 @@ fn criteria_methods_valid(
         return None;
     }
     Some(failure(ReadinessRule::CriteriaMethodsValid, bad.join("; ")))
+}
+
+/// Only a code change is reviewed (ADR 0061), so a contract that no agent reviews carries no
+/// `review` criterion, which an agent would answer, and no `human` one, which waits on the owner.
+fn no_review_outside_code(
+    contract: &TaskContract,
+    _: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    if reviewed_by_an_agent(contract) {
+        return None;
+    }
+    let asked = criterion_ids(contract, |verification, _| {
+        matches!(
+            verification,
+            Verification::Review { .. } | Verification::Human { .. }
+        )
+    });
+    if asked.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::NoReviewOutsideCode,
+        format!(
+            "{} ask for a review or the human, and only a code change is reviewed (ADR 0061): use \
+             command, test or artifact criteria",
+            listed("criterion", "criteria", &asked)
+        ),
+    ))
 }
 
 fn command_criteria_complete(
@@ -540,12 +501,16 @@ fn required_criteria_present(
     let in_a_folder = task_private_folder(contract).is_some();
     // So has an epic in a project folder: it runs no command, its tasks do.
     let runs_none = in_a_folder || (context.repos.is_some() && contract.kind == Kind::Epic);
+    // Only a code change is reviewed (ADR 0061), so no other contract can hold a review or a human
+    // criterion to satisfy a rule that requires one.
+    let reviewed = reviewed_by_an_agent(contract);
     let missing: Vec<&str> = context
         .rules
         .required_criteria
         .iter()
         .map(String::as_str)
         .filter(|method| !(runs_none && matches!(*method, "command" | "test")))
+        .filter(|method| reviewed || !matches!(*method, "review" | "human"))
         .filter(|method| !methods.contains(method))
         .collect();
     if missing.is_empty() {
@@ -939,8 +904,8 @@ fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<
     });
     if !runs.is_empty() {
         reasons.push(format!(
-            "{} {} a command or a test, and there is no worktree to run one in; use artifact, \
-             review and human criteria",
+            "{} {} a command or a test, and there is no worktree to run one in; use artifact \
+             criteria",
             listed("criterion", "criteria", &runs),
             if runs.len() == 1 { "is" } else { "are" }
         ));
@@ -1194,43 +1159,9 @@ fn product_plan_first(_: &TaskContract, context: &ReadinessContext) -> Option<Re
     (context.awaits_the_product_plan && !context.is_the_product_plan).then(|| {
         failure(
             ReadinessRule::ProductPlanFirst,
-            "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec and docs/catervas/product/roadmap, as .md or .html, are on the integration branch".to_string(),
+            "this new project's product plan is not accepted yet: only its own task is planned until Catervas accepts that task".to_string(),
         )
     })
-}
-
-fn judgment_recorded(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
-    if context.requires_judgment_review && context.judgment_review.is_none() {
-        return Some(failure(
-            ReadinessRule::JudgmentRecorded,
-            "the judge's judgment review is not recorded".to_string(),
-        ));
-    }
-    None
-}
-
-fn judgment_answers(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
-    let review = context
-        .judgment_review
-        .as_ref()
-        .filter(|_| context.requires_judgment_review)?;
-    let failed: Vec<String> = review
-        .answers
-        .iter()
-        .filter(|answer| !answer.pass)
-        .map(|answer| format!("{} ({})", answer.question, answer.reason))
-        .collect();
-    if failed.is_empty() {
-        return None;
-    }
-    Some(failure(
-        ReadinessRule::JudgmentAnswers,
-        format!(
-            "the judge answered no: {}. {}",
-            failed.join("; "),
-            review.reason
-        ),
-    ))
 }
 
 #[cfg(test)]
@@ -1239,8 +1170,7 @@ mod tests {
 
     use super::fixtures::{a_contract, a_project_folder_context, a_ready_context};
     use super::{
-        JudgmentAnswer, JudgmentReview, LanedTask, ParentState, ReadinessContext,
-        ReadinessRule as R, TeamRules, evaluate_readiness,
+        LanedTask, ParentState, ReadinessContext, ReadinessRule as R, TeamRules, evaluate_readiness,
     };
     use crate::contract::fixtures::a_contract_wire;
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire, validate_contract};
@@ -1261,21 +1191,6 @@ mod tests {
             .find(|failure| failure.rule == rule)
             .map(|failure| failure.message)
             .expect("the rule failed")
-    }
-
-    fn a_review(fits_budget: bool, criteria_detect_failure: bool) -> JudgmentReview {
-        let answer = |question: &str, pass: bool| JudgmentAnswer {
-            question: question.to_string(),
-            pass,
-            reason: format!("{question} {pass}"),
-        };
-        JudgmentReview {
-            answers: vec![
-                answer("Fits?", fits_budget),
-                answer("Caught?", criteria_detect_failure),
-            ],
-            reason: "Two files, one form.".to_string(),
-        }
     }
 
     fn a_task_under(parent: ParentState) -> (TaskContract, ReadinessContext) {
@@ -1461,7 +1376,7 @@ mod tests {
     fn refuses_everything_but_the_product_plan_until_it_is_approved() {
         let mut context = a_ready_context();
         context.awaits_the_product_plan = true;
-        let message = "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec and docs/catervas/product/roadmap, as .md or .html, are on the integration branch";
+        let message = "this new project's product plan is not accepted yet: only its own task is planned until Catervas accepts that task";
         assert_eq!(failed_rules(&a_contract(), &context), [R::ProductPlanFirst]);
         assert_eq!(
             message_of(&a_contract(), &context, R::ProductPlanFirst),
@@ -1867,6 +1782,83 @@ mod tests {
         assert!(!held(&task, &a_ready_context()));
     }
 
+    #[test]
+    fn refuses_review_and_human_criteria_outside_code() {
+        let review = json!({ "method": "review", "rubric": ["Is it right?"] });
+        let human = json!({ "method": "human", "question": "Is it right?" });
+        let artifact = json!({ "method": "artifact", "path": "docs/catervas/product/spec.md" });
+        let task = |role: &str, kind: &str, paths: &[&str], methods: &[serde_json::Value]| {
+            let mut wire = a_contract_wire();
+            wire["assignee_role"] = json!(role);
+            wire["kind"] = json!(kind);
+            wire["allowed_paths"] = json!(paths);
+            wire["exit_criteria"] = methods
+                .iter()
+                .enumerate()
+                .map(|(index, verification)| {
+                    json!({
+                        "id": format!("C{}", index + 1),
+                        "text": "The thing holds up.",
+                        "verification": verification
+                    })
+                })
+                .collect();
+            validate_contract(&wire).expect("a schema-valid contract")
+        };
+        let docs = ["docs/catervas/product/spec.md"];
+        let ready = a_ready_context();
+
+        let asks = task(
+            "product_manager",
+            "task",
+            &docs,
+            std::slice::from_ref(&review),
+        );
+        assert!(failed_rules(&asks, &ready).contains(&R::NoReviewOutsideCode));
+        assert_eq!(
+            message_of(&asks, &ready, R::NoReviewOutsideCode),
+            "criterion C1 ask for a review or the human, and only a code change is reviewed (ADR 0061): use command, test or artifact criteria"
+        );
+        let epic = task(
+            "product_manager",
+            "epic",
+            &["docs/catervas/**"],
+            std::slice::from_ref(&human),
+        );
+        assert!(failed_rules(&epic, &ready).contains(&R::NoReviewOutsideCode));
+
+        let code = task(
+            "software_developer",
+            "task",
+            &["src/login/**"],
+            &[
+                json!({ "method": "test", "command": "pnpm test" }),
+                review,
+                human,
+            ],
+        );
+        assert_eq!(evaluate_readiness(&code, &ready), Ok(()));
+
+        let books = a_finance_task(
+            &[".catervas/local/finance/**"],
+            json!([{ "id": "C1", "text": "The books exist.",
+                     "verification": { "method": "artifact", "path": "books.xlsx" } }]),
+        );
+        assert_eq!(evaluate_readiness(&books, &ready), Ok(()));
+
+        let mut requires = ready.clone();
+        requires.rules.required_criteria = vec!["review".to_string()];
+        let plain = task("product_manager", "task", &docs, &[artifact]);
+        assert_eq!(evaluate_readiness(&plain, &requires), Ok(()));
+        let unreviewed_code = task(
+            "software_developer",
+            "task",
+            &["src/login/**"],
+            &[json!({ "method": "test", "command": "pnpm test" })],
+        );
+        assert!(failed_rules(&unreviewed_code, &requires).contains(&R::RequiredCriteriaPresent));
+    }
+
     /// A task for the Finance Specialist, reviewed by the Product Manager, allowed `paths`, with
     /// exactly `criteria` (wire values).
     fn a_finance_task(paths: &[&str], criteria: serde_json::Value) -> TaskContract {
@@ -1878,16 +1870,15 @@ mod tests {
         validate_contract(&wire).expect("a schema-valid contract")
     }
 
-    /// The criteria of a finance task that is ready: its books exist, a reviewer reads them, and
-    /// the user agrees.
+    /// The criteria of a finance task that is ready: its books exist, and Catervas finds each file.
     fn the_books_criteria() -> serde_json::Value {
         json!([
             { "id": "C1", "text": "The books exist.",
               "verification": { "method": "artifact", "path": "books.xlsx" } },
-            { "id": "C2", "text": "Every number names its source.",
-              "verification": { "method": "review", "rubric": ["Does every number name its source?"] } },
-            { "id": "C3", "text": "The books look right to the user.",
-              "verification": { "method": "human", "question": "Do the books look right?" } }
+            { "id": "C2", "text": "The ledger exists.",
+              "verification": { "method": "artifact", "path": "ledger.xlsx" } },
+            { "id": "C3", "text": "The summary exists.",
+              "verification": { "method": "artifact", "path": "summary.xlsx" } }
         ])
     }
 
@@ -1922,10 +1913,10 @@ mod tests {
         let evaluation = json!([
             { "id": "C1", "text": "The comparison is written.",
               "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
-            { "id": "C2", "text": "Every price names its source.",
-              "verification": { "method": "review", "rubric": ["Does every price name its source?"] } },
-            { "id": "C3", "text": "The recommendation is clear to the founder.",
-              "verification": { "method": "human", "question": "Is the recommendation clear?" } }
+            { "id": "C2", "text": "The prices are written.",
+              "verification": { "method": "artifact", "path": "evaluations/email-prices.md" } },
+            { "id": "C3", "text": "The recommendation is written.",
+              "verification": { "method": "artifact", "path": "evaluations/email-recommendation.md" } }
         ]);
         let folder = &[".catervas/local/procurement/**"];
         let task = a_procurement_task(folder, evaluation.clone());
@@ -2020,10 +2011,10 @@ mod tests {
             json!([
                 { "id": "C1", "text": "The comparison is written.",
                   "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
-                { "id": "C2", "text": "Every price names its source.",
-                  "verification": { "method": "review", "rubric": ["Does every price name its source?"] } },
-                { "id": "C3", "text": "The recommendation is clear to the founder.",
-                  "verification": { "method": "human", "question": "Is the recommendation clear?" } }
+                { "id": "C2", "text": "The prices are written.",
+                  "verification": { "method": "artifact", "path": "evaluations/email-prices.md" } },
+                { "id": "C3", "text": "The recommendation is written.",
+                  "verification": { "method": "artifact", "path": "evaluations/email-recommendation.md" } }
             ]),
         );
         // The Product Manager is accepted, for each folder.
@@ -2185,22 +2176,13 @@ mod tests {
         context.rules.required_criteria = vec!["command".to_string(), "test".to_string()];
         context.rules.require_new_tests = true;
         assert_eq!(evaluate_readiness(&task, &context), Ok(()));
-        // The exemption is for those two methods alone: a team that asks for a human or a review
-        // criterion, or any other, still gets that.
-        context.rules.required_criteria = vec!["command".to_string(), "review".to_string()];
+        // Nor does it need a review or a human criterion: only code is reviewed (ADR 0061).
+        context.rules.required_criteria = vec![
+            "command".to_string(),
+            "review".to_string(),
+            "human".to_string(),
+        ];
         assert_eq!(evaluate_readiness(&task, &context), Ok(()));
-        let artifact_only = a_finance_task(
-            &[".catervas/local/finance/**"],
-            json!([the_books_criteria()[0].clone()]),
-        );
-        assert_eq!(
-            failed_rules(&artifact_only, &context),
-            [R::RequiredCriteriaPresent]
-        );
-        assert_eq!(
-            message_of(&artifact_only, &context, R::RequiredCriteriaPresent),
-            "the team rules require a criterion with method review and the contract has none"
-        );
     }
 
     #[test]
@@ -2708,59 +2690,10 @@ mod tests {
     }
 
     #[test]
-    fn requires_the_judgment_review_only_when_the_policy_asks_for_it() {
-        let mut context = a_ready_context();
-        context.judgment_review = None;
-        assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
-        context.requires_judgment_review = false;
-        context.active_agents_by_role.remove(&Role::ScrumMaster);
-        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-        context.judgment_review = Some(a_review(false, false));
-        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-    }
-
-    #[test]
-    fn refuses_a_judgment_with_a_failed_answer_naming_each_one() {
-        let mut context = a_ready_context();
-        context.judgment_review = Some(a_review(false, true));
-        assert_eq!(
-            message_of(&a_contract(), &context, R::JudgmentAnswers),
-            "the judge answered no: Fits? (Fits? false). Two files, one form."
-        );
-        context.judgment_review = Some(a_review(false, false));
-        assert_eq!(
-            message_of(&a_contract(), &context, R::JudgmentAnswers),
-            "the judge answered no: Fits? (Fits? false); Caught? (Caught? false). Two files, \
-             one form."
-        );
-        context.judgment_review = Some(a_review(true, true));
-        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-    }
-
-    #[test]
-    fn asks_no_judgment_of_a_contract_that_fails_another_rule() {
-        let mut contract = a_contract();
-        contract.scope.out_of_scope.clear();
-        let mut context = a_ready_context();
-        context.requires_judgment_review = true;
-        context.judgment_review = None;
-        assert_eq!(failed_rules(&contract, &context), [R::OutOfScopePresent]);
-    }
-
-    #[test]
-    fn asks_the_judgment_of_an_otherwise_ready_contract() {
-        let mut context = a_ready_context();
-        context.requires_judgment_review = true;
-        context.judgment_review = None;
-        assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
-    }
-
-    #[test]
     fn reports_every_failure_in_rule_order() {
         let mut contract = a_contract();
         contract.exit_criteria.clear();
         let mut context = a_ready_context();
-        context.judgment_review = None;
         context.remaining_sprint_budget_usd = 1.0;
         context.rules.required_criteria = vec!["human".to_string()];
         assert_eq!(

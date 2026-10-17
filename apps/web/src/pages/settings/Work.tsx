@@ -6,13 +6,12 @@ import {
 	Documents,
 	Finish,
 	Planning,
-	Plans,
 	RulesTitle,
 	UiPaths,
 	useRuleParts,
 } from "../TeamRules.tsx";
 
-/** How work runs: how finished work is added, planning in sprints, the plan check, and the UI patterns. */
+/** How work runs: how finished work is added, planning in sprints, and the UI patterns. */
 export function Work() {
 	const { ready, part, key } = useRuleParts();
 	const [advanced, setAdvanced] = useState(false);
@@ -24,7 +23,6 @@ export function Work() {
 					<Finish key={key("finish")} {...part("finish")} />
 					<Planning key={key("planning")} {...part("planning")} />
 					<Documents key={key("documents")} {...part("documents")} />
-					<Plans key={key("plans")} {...part("plans")} />
 					<ShowAdvanced
 						open={advanced}
 						onToggle={() => setAdvanced(!advanced)}

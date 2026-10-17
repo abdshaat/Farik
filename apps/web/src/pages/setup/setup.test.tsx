@@ -608,10 +608,10 @@ describe("setup", () => {
 		).toBeTruthy();
 		const rows = within(offer).getAllByRole("listitem");
 		expect(rows.map((row) => row.textContent)).toEqual([
-			"Mira PM writes what your product is and what comes next, as your product plan to approve.",
+			"Mira PM writes what your product is and what comes next, as your product plan.",
 			"Ada ARCH writes how your project is put together, with diagrams.",
 			"Theo DEV writes how your project is built and worked on: its habits and rules.",
-			"Kai MKT writes your marketing plan, after you approve the product plan.",
+			"Kai MKT writes your marketing plan, after the product plan is written.",
 		]);
 		expect(within(offer).queryByText("Sol")).toBeNull();
 		expect(

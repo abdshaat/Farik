@@ -9,7 +9,10 @@ import { visibly } from "./dialogs/ToolApproval.tsx";
 import { docKey, fileRoute, isHtml } from "./files.ts";
 import type { Agent } from "./setup/TeamSetup.tsx";
 
-/** The team's integration policy, which says what approving does. */
+/**
+ * The team's integration policy. Catervas never merges (ADR 0061), so every team reads as
+ * `pull_request`; the type keeps its three values for older files and fixtures.
+ */
 export type Integration = "auto_merge" | "pull_request" | "manual";
 
 /** One card of `folder_doc_proposals.list`: an agent's changes to the product plan after one sprint review. */
@@ -27,15 +30,6 @@ export type DocumentChangesCard = {
 const NAMES: Record<string, "docNameRoadmap" | "docNameSpec"> = {
 	"product/roadmap": "docNameRoadmap",
 	"product/spec": "docNameSpec",
-};
-
-const NOTES: Record<
-	Integration,
-	"docChangesNothingYet" | "docChangesPullRequest" | "docChangesManual"
-> = {
-	auto_merge: "docChangesNothingYet",
-	pull_request: "docChangesPullRequest",
-	manual: "docChangesManual",
 };
 
 const ENTITIES: Record<string, string> = {
@@ -73,13 +67,11 @@ function plain(
  */
 export function DocumentChanges({
 	card,
-	integration,
 	name,
 	agent,
 	again,
 }: {
 	card: DocumentChangesCard;
-	integration: Integration;
 	name: string;
 	agent?: Agent | undefined;
 	again: () => void;
@@ -201,7 +193,7 @@ export function DocumentChanges({
 				<Button busy={busy} onClick={sendBack}>
 					{t("docChangesSendBack")}
 				</Button>
-				<span className={styles.policy}>{t(NOTES[integration])}</span>
+				<span className={styles.policy}>{t("docChangesPullRequest")}</span>
 			</div>
 			{refusal && (
 				<p role="alert" className={styles.alert}>

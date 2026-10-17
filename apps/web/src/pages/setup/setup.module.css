@@ -326,8 +326,7 @@
 	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
-.check small,
-.question small {
+.check small {
 	color: var(--catervas-color-ink-muted);
 }
 
@@ -391,8 +390,7 @@
 	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
-.member input[type="checkbox"],
-.question input {
+.member input[type="checkbox"] {
 	width: 22px;
 	height: 22px;
 	accent-color: var(--catervas-color-ink);
@@ -448,29 +446,6 @@
 	gap: var(--catervas-space-1);
 	padding: var(--catervas-space-3) 0;
 	border-bottom: 1px solid var(--catervas-color-rule);
-}
-
-.questions {
-	display: grid;
-	gap: var(--catervas-space-2);
-	margin: 0;
-	padding: 0;
-	border: 0;
-}
-
-.questions legend {
-	font-weight: 600;
-	margin-bottom: var(--catervas-space-2);
-}
-
-.question {
-	display: flex;
-	gap: var(--catervas-space-3);
-	align-items: flex-start;
-}
-
-.question span {
-	display: grid;
 }
 
 /* Under a member's row: how to open the app, or why the Designer cannot be on the team here. */

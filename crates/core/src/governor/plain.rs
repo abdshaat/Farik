@@ -9,10 +9,12 @@ use super::readiness::ReadinessRule;
 pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
     match rule {
         ReadinessRule::IntentPresent => "The plan does not say why the work matters to you.",
-        ReadinessRule::SummaryPresent => "The plan has no short summary for you to decide on.",
         ReadinessRule::CriteriaPresent => "The plan does not say how anyone will know it is done.",
         ReadinessRule::CriteriaMethodsValid => {
             "One of the checks for done is written in a way that cannot be run."
+        }
+        ReadinessRule::NoReviewOutsideCode => {
+            "This task asks for a review, and only code is reviewed. Check it with a command, a test or a file instead."
         }
         ReadinessRule::CommandCriteriaComplete => {
             "One of the checks for done is missing what to run."
@@ -82,8 +84,6 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::ProductPlanFirst => {
             "A new project plans nothing until the owner approves its product plan."
         }
-        ReadinessRule::JudgmentRecorded => "The plan has not been checked yet.",
-        ReadinessRule::JudgmentAnswers => "The check found the plan not ready.",
     }
 }
 
@@ -92,11 +92,11 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 32] = [
+    const EVERY_RULE: [ReadinessRule; 30] = [
         IntentPresent,
-        SummaryPresent,
         CriteriaPresent,
         CriteriaMethodsValid,
+        NoReviewOutsideCode,
         CommandCriteriaComplete,
         BudgetWithinSprint,
         ReviewerAvailable,
@@ -123,17 +123,15 @@ mod tests {
         LaneBeyondBuilders,
         LanesOverlap,
         ProductPlanFirst,
-        JudgmentRecorded,
-        JudgmentAnswers,
     ];
 
     /// Fails to compile when a rule is added and `EVERY_RULE` does not list it.
     const fn listed(rule: ReadinessRule) {
         match rule {
             IntentPresent
-            | SummaryPresent
             | CriteriaPresent
             | CriteriaMethodsValid
+            | NoReviewOutsideCode
             | CommandCriteriaComplete
             | BudgetWithinSprint
             | ReviewerAvailable
@@ -159,9 +157,7 @@ mod tests {
             | BudgetWithinParent
             | LaneBeyondBuilders
             | LanesOverlap
-            | ProductPlanFirst
-            | JudgmentRecorded
-            | JudgmentAnswers => {}
+            | ProductPlanFirst => {}
         }
     }
 

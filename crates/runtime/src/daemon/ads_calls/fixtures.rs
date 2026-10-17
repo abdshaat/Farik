@@ -27,14 +27,14 @@ pub(crate) const ACCOUNT: &str = "123-456-7890";
 pub(crate) const SESSION: &str = "session-ads";
 
 /// Kai's kit: Google Ads as `catervas connector google-ads`, signing in, its three reads
-/// `network` and its seven writes `external_effect` marked as approved by the plan.
+/// `network` and its seven writes `paid` marked as approved by the plan.
 pub(crate) fn ads_kit() -> catervas_roles::Kit {
     let mut tools = serde_json::Map::new();
     for read in crate::google_ads::READ_TOOLS {
         tools.insert(read.to_string(), json!("network"));
     }
     for write in WRITE_TOOLS {
-        tools.insert(write.to_string(), json!("external_effect"));
+        tools.insert(write.to_string(), json!("paid"));
     }
     let kit = json!({
         "role": "marketing_specialist", "skills": [],
@@ -56,8 +56,6 @@ pub(crate) fn register(harness: &Harness, connector: SessionConnector) -> String
     harness.daemon.register_session(SessionRegistration {
         read_roots: Vec::new(),
         session_id: SESSION.to_string(),
-        web: catervas_core::governor::sites::WebAccess::Open,
-        reads: catervas_core::folders::ReadAccess::Open,
         agent_id: "kai".to_string(),
         task_id: Some("CTV-1".parse().expect("a task id")),
         purpose: SessionPurpose::Implement,

@@ -212,7 +212,7 @@ fn catervas_connect_starts_nothing_when_catervas_settings_are_inside_the_project
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn catervas_connect_labels_with_tag_flags_and_defaults_to_external_effect() {
+fn catervas_connect_labels_with_tag_flags_and_defaults_to_paid() {
     let repository = a_team("connect-tags");
     let script = fixture("connect-tags");
 
@@ -228,13 +228,13 @@ fn catervas_connect_labels_with_tag_flags_and_defaults_to_external_effect() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert_eq!(
         entry(&repository, "dev-a").expect("written")["tools"],
-        json!({ "search": "network", "env": "external_effect", "delete_repo": "external_effect" })
+        json!({ "search": "network", "env": "paid", "delete_repo": "paid" })
     );
     let lines: Vec<&str> = ran.out.lines().collect();
     for said in [
         "search: network",
-        "env: external_effect",
-        "delete_repo: external_effect",
+        "env: paid",
+        "delete_repo: paid",
         "repo.delete: Catervas can't use this tool",
     ] {
         assert!(lines.contains(&said), "{said} in {}", ran.out);
@@ -1072,8 +1072,8 @@ fn a_kit_of(
         connector["tools"] =
             json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
         if allowing {
-            connector["tools"]["make"] = json!("external_effect");
-            connector["tools"]["post"] = json!("external_effect");
+            connector["tools"]["make"] = json!("paid");
+            connector["tools"]["post"] = json!("paid");
             connector["allowances"] = json!({ "make": { "calls": 20, "what": "pictures" } });
         }
     }

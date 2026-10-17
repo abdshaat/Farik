@@ -68,7 +68,10 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		await page.getByRole("button", { name: "Continue", exact: true }).click();
 
 		await expect(page).toHaveURL(/\/setup\/finish$/);
-		await page.getByLabel(/^Catervas adds it for me/).check();
+		// No choice is left: accepted work always opens a pull request for the owner to merge.
+		await expect(
+			page.getByText("Accepted work opens a pull request for you to merge."),
+		).toBeVisible();
 		await page.getByRole("button", { name: "Start the team" }).click();
 		// An existing project is offered a Catervafication; "Later" goes on to Today.
 		await expect(page).toHaveURL(/\/setup\/ready$/);
@@ -99,26 +102,16 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 			page.getByText("Nothing new starts until you resume."),
 		).toHaveCount(0);
 
-		// After setup, the same answers are changed from Settings, each effect shown first.
+		// After setup, Settings says the same, each effect shown first.
 		const finish = page.getByRole("region", {
 			name: "How finished work is added",
 		});
-		await finish.getByLabel(/^I will add each one myself/).check();
 		await expect(
-			finish.getByText("Finished work waits for you to merge it."),
+			finish.getByText("Finished work opens a pull request for you to merge."),
 		).toBeVisible();
+		await expect(finish.getByRole("radio")).toHaveCount(0);
 		await screenshots(page, "settings");
-		await finish.getByRole("button", { name: "Save changes" }).click();
-		await expect
-			.poll(() =>
-				readFileSync(join(serve.project, ".catervas/team.yaml"), "utf8"),
-			)
-			.toMatch(/integration: manual/);
-		await expect(
-			page
-				.getByRole("region", { name: "How finished work is added" })
-				.getByLabel(/^I will add each one myself/),
-		).toBeChecked();
+		expect(yaml).toMatch(/integration: pull_request/);
 
 		// The pages the team lives on, on a phone and on a desktop.
 		await page.goto(`http://127.0.0.1:${serve.port}/team`);

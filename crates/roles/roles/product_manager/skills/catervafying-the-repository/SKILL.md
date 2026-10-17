@@ -41,12 +41,10 @@ agents. The Definition of Done refuses a task whose diff changes one file of a p
 
 ## 5. Finish
 
-Commit with `catervas_git_commit`, and request `verifying`. The reviewer checks each document
-against the project; the owner then reads the plan and approves it.
+Commit with `catervas_git_commit`, and request `verifying`. Catervas checks that each document exists (only code is reviewed), and accepts the task.
 
 ## Each sprint
 
-At the sprint review, propose the changes the sprint made to the spec and the roadmap with
-`catervas_write_folder_doc`, each with its `agent_text` and a `summary` the owner can decide on, and
-write the sprint report in the same session. The owner approves a proposal before it reaches the
-project.
+At the sprint review, write the changes the sprint made to the spec and the roadmap with
+`catervas_write_folder_doc`, each with its `agent_text`, and write the sprint report in the same
+session. A change reaches the project like any other document, through a pull request.

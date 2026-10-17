@@ -540,6 +540,63 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn merges_a_branch_into_a_worktree_only() {
+    // A task that starts from another task's unmerged branch merges it inside its own worktree;
+    // the root and the integration branch stay the human's (ADR 0061).
+    let repository = TempRepo::new("merge-in");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "a"]);
+    repository.write("a.txt", "from a\n");
+    repository.commit("docs: a");
+    repository.git(&["checkout", "main"]);
+    repository.git(&["checkout", "-b", "b"]);
+    repository.write("b.txt", "from b\n");
+    repository.write("shared.txt", "b's line\n");
+    repository.commit("docs: b");
+    repository.git(&["checkout", "main"]);
+    let main_before = repository.git_output(&["rev-parse", "main"]);
+    let worktree = repository.path.join(".catervas/local/worktrees/t");
+    git.create_worktree(&worktree, "t", "a")
+        .expect("the worktree is made");
+
+    let outcome = git.merge_in(&worktree, "b", "m").expect("the merge runs");
+
+    assert!(
+        matches!(outcome, MergeOutcome::Merged { .. }),
+        "{outcome:?}"
+    );
+    assert!(worktree.join("a.txt").is_file() && worktree.join("b.txt").is_file());
+    assert_eq!(git.current_branch().expect("a branch"), "main");
+    assert_eq!(repository.git_output(&["rev-parse", "main"]), main_before);
+    assert!(
+        !repository.path.join("b.txt").exists(),
+        "the root's tree is unchanged"
+    );
+
+    // A conflict is reported by its file, and the worktree is left clean.
+    let other = repository.path.join(".catervas/local/worktrees/u");
+    git.create_worktree(&other, "u", "main")
+        .expect("the worktree is made");
+    std::fs::write(other.join("shared.txt"), "u's line\n").expect("written");
+    git_in(&other, &["add", "shared.txt"]);
+    git_in(&other, &["commit", "-m", "docs: u"]);
+    let outcome = git.merge_in(&other, "b", "m").expect("the merge runs");
+    assert_eq!(
+        outcome,
+        MergeOutcome::Conflicts(vec!["shared.txt".to_string()])
+    );
+    assert!(git.is_clean(&other).expect("the read works"));
+    git.remove_worktree(&other).expect("it is taken away");
+    git.delete_branch("u").expect("the branch goes");
+    assert!(!git.has_local_branch("u").expect("the read works"));
+    assert!(
+        git.delete_branch("main").is_err(),
+        "the checked-out branch is refused"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn commits_the_named_paths_and_returns_the_sha() {
     let repository = TempRepo::new("commit-paths");
     repository.write("named.txt", "the one to commit\n");
@@ -1713,34 +1770,6 @@ fn tells_whether_a_file_is_on_a_branch() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn reads_the_product_plan_from_the_integration_branch() {
-    use catervas_core::team::{fixtures::a_team_wire, validate_team};
-    use catervas_store::git::product_plan_on;
-
-    let team = |branch: Option<&str>| {
-        let mut wire = a_team_wire();
-        if let Some(branch) = branch {
-            wire["policy"]["integration_branch"] = serde_json::json!(branch);
-        }
-        validate_team(&wire).expect("a team")
-    };
-    let repository = TempRepo::new("product-plan-on");
-    let git = repository.adapter();
-    repository.write(SPEC, "# Bakery\n");
-    repository.commit("write the spec");
-    assert!(!product_plan_on(&git, &team(None)).expect("the read works"));
-    repository.write(ROADMAP, "# Roadmap\n");
-    repository.commit("write the roadmap");
-    assert!(product_plan_on(&git, &team(None)).expect("the read works"));
-    // The integration branch, not the default one: develop holds neither document.
-    repository.git(&["branch", "develop", "HEAD~2"]);
-    assert!(!product_plan_on(&git, &team(Some("develop"))).expect("the read works"));
-    // A branch the repository does not have is not an error: the plan is not there yet.
-    assert!(!product_plan_on(&git, &team(Some("release"))).expect("the read works"));
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
 fn knows_a_local_branch() {
     let repository = TempRepo::new("local-branch");
     let git = repository.adapter();
@@ -1816,23 +1845,6 @@ fn repairs_worktrees_after_a_move() {
     git_in(&worktree, &["status"]);
     let _ = std::fs::remove_dir_all(&worktree);
     std::fs::rename(&moved, &repository.path).expect("the repository is moved back");
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn product_plan_on_takes_either_format() {
-    use catervas_core::team::{fixtures::a_team_wire, validate_team};
-    use catervas_store::git::product_plan_on;
-
-    let team = validate_team(&a_team_wire()).expect("a team");
-    let repository = TempRepo::new("product-plan-either-format");
-    let adapter = repository.adapter();
-    repository.write("docs/catervas/product/spec.html", "<h1>Bakery</h1>\n");
-    repository.commit("write the spec");
-    assert!(!product_plan_on(&adapter, &team).expect("the read works"));
-    repository.write(ROADMAP, "# Roadmap\n");
-    repository.commit("write the roadmap");
-    assert!(product_plan_on(&adapter, &team).expect("the read works"));
 }
 
 #[test]

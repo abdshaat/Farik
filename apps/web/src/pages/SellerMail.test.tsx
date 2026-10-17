@@ -157,10 +157,10 @@ describe("Today, messages to sellers", () => {
 		);
 		// Only a name in another script carries the warning that it can pass for another.
 		expect(
-			within(idn as HTMLElement).getByText(en.siteRequestScriptWhat),
+			within(idn as HTMLElement).getByText(en.scriptWarningWhat),
 		).toBeTruthy();
 		expect(
-			within(capitals as HTMLElement).queryByText(en.siteRequestScriptWhat),
+			within(capitals as HTMLElement).queryByText(en.scriptWarningWhat),
 		).toBeNull();
 	});
 

@@ -1,12 +1,13 @@
 ---
 name: writing-mockups
-description: Use when you write a design plan and need to show the screens you will change, as annotated wireframes and screen descriptions a Product Manager can approve.
+description: Use when you write a design plan and need to show the screens you will change, as annotated wireframes and screen descriptions the reviewer of the finished change can check against.
 ---
 
 # Writing a plan's mockups
 
-The Product Manager approves your plan from its text alone. The mockups in it must let them see
-the screen before it exists, and decide.
+Catervas records your plan as approved, and the reviewer of the finished change reads it beside
+the diff. The mockups in it must let them see the screen before it exists, and judge the change
+against it.
 
 ## 1. One block per screen
 
@@ -35,4 +36,4 @@ that changes.
 
 ## 3. What you leave alone
 
-End with what you will not change, so the Product Manager knows where the work stops.
+End with what you will not change, so the reviewer knows where the work stops.

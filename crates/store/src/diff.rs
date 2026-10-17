@@ -8,7 +8,7 @@ use catervas_protocol::event::{CatervasEvent, EventBody};
 
 use crate::baseline::{baseline_of, changes_since_baseline, folder_in};
 use crate::files::ProjectFiles;
-use crate::git::Git;
+use crate::git::{Git, task_base};
 use crate::repos::task_repository;
 
 /// A diff and what it touches.
@@ -151,7 +151,10 @@ fn branch_diff(
     let words = |error: crate::GitError| error.to_string();
     match integrated(history) {
         None => git
-            .diff(&repository.integration_branch, &branch)
+            .diff(
+                &task_base(git, &repository.integration_branch, &contract.id),
+                &branch,
+            )
             .map_err(words),
         Some((sha, into)) => {
             let second_parent = format!("{sha}^2");

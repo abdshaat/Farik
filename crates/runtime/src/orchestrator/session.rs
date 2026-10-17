@@ -8,16 +8,15 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
-use catervas_core::folders::{ReadAccess, read_access, role_folder};
+use catervas_core::folders::role_folder;
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
-use catervas_core::governor::sites::{WebAccess, web_access};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::pricing::Usage;
 use catervas_core::team::{
     Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
-    private_folder, task_private_folder,
+    private_folder,
 };
 use catervas_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -33,9 +32,8 @@ use catervas_store::repos::{TaskRepositoryError, repo_present};
 use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
-use super::design::{DECIDE_TOOL, RECORD_DESIGN_REVIEW_TOOL};
+use super::design::RECORD_DESIGN_REVIEW_TOOL;
 use super::messages::{human_message, preview_address};
-use super::pipeline::DECIDE_PIPELINE_TOOL;
 use super::verify::{append, append_stamped};
 use super::{
     OrchestratorDeps, OrchestratorError, TRIAGE_MODEL, repository_refused, task_repository_of,
@@ -50,8 +48,7 @@ use crate::preview::{
     has_playwright,
 };
 use crate::prompt::{
-    CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, INTERVIEW_INSTRUCTION,
-    JUDGMENT_INSTRUCTION, MemberLine, OwnRepo, PIPELINE_DECISION_INSTRUCTION, PromptInput,
+    CEREMONY_INSTRUCTIONS, INTERVIEW_INSTRUCTION, MemberLine, OwnRepo, PromptInput,
     assemble_system_prompt,
 };
 use crate::session::{
@@ -65,17 +62,15 @@ use crate::transitions::TransitionAsk;
 
 /// The folders a session may read outside its `cwd` (5.6): every present member of a project
 /// folder but the task's own repository, by name in `repos.yaml` order, then the project folder,
-/// named `project`, unless `cwd` is it. None for a one-repository project, for a role held to read
-/// paths, for a task in a private folder, and when `repos.yaml` cannot be read: reads fail closed
-/// and the session still starts. A folder whose path cannot be written into a `Read(//<path>/...)`
+/// named `project`, unless `cwd` is it. None for a one-repository project and when `repos.yaml`
+/// cannot be read: reads fail closed and the session still starts. Every role reads them (ADR 0061). A folder whose path cannot be written into a `Read(//<path>/...)`
 /// rule is left out, since Claude Code would ignore the settings that held it.
 pub(crate) fn read_roots(
     files: &ProjectFiles,
     contract: Option<&TaskContract>,
     cwd: &Path,
-    role: Role,
 ) -> Vec<ReadRoot> {
-    let Some(repos) = members_read(files, contract, role) else {
+    let Some(repos) = members_read(files) else {
         return Vec::new();
     };
     let own = contract
@@ -105,25 +100,15 @@ pub(crate) fn read_roots(
     roots
 }
 
-/// The project's member repositories when a session of `role` on `contract` may read them: none
-/// for a one-repository project, for a role held to read paths, for a task in a private folder,
-/// and when `repos.yaml` cannot be read.
-fn members_read(
-    files: &ProjectFiles,
-    contract: Option<&TaskContract>,
-    role: Role,
-) -> Option<catervas_core::repos::Repos> {
-    if read_access(role) != ReadAccess::Open
-        || contract.is_some_and(|contract| task_private_folder(contract).is_some())
-    {
-        return None;
-    }
+/// The project's member repositories a session may read: none for a one-repository project and
+/// when `repos.yaml` cannot be read.
+fn members_read(files: &ProjectFiles) -> Option<catervas_core::repos::Repos> {
     files.read_repos().ok().flatten()
 }
 
 /// The folders `ask`'s session reads outside its working directory, for Claude Code's `--add-dir`.
-fn read_root_paths(deps: &OrchestratorDeps, ask: &SessionAsk<'_>, role: Role) -> Vec<PathBuf> {
-    read_roots(&deps.tools.files, ask.contract, &ask.cwd, role)
+fn read_root_paths(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<PathBuf> {
+    read_roots(&deps.tools.files, ask.contract, &ask.cwd)
         .into_iter()
         .map(|root| root.path)
         .collect()
@@ -136,13 +121,12 @@ fn read_root_paths(deps: &OrchestratorDeps, ask: &SessionAsk<'_>, role: Role) ->
 fn member_lines(
     deps: &OrchestratorDeps,
     ask: &SessionAsk<'_>,
-    role: Role,
 ) -> (Vec<MemberLine>, Option<OwnRepo>) {
     let files = &deps.tools.files;
-    let Some(repos) = members_read(files, ask.contract, role) else {
+    let Some(repos) = members_read(files) else {
         return (Vec::new(), None);
     };
-    let roots = read_roots(files, ask.contract, &ask.cwd, role);
+    let roots = read_roots(files, ask.contract, &ask.cwd);
     let own = ask
         .contract
         .and_then(|contract| contract.repo.as_ref())
@@ -196,10 +180,6 @@ pub(crate) fn expressible_in_a_rule(path: &Path) -> bool {
 /// The one tool a triage session is given.
 pub(super) const TRIAGE_TOOL: &str = "catervas_triage_request";
 
-/// The one tool the Scrum Master's judgment session is given; a session given it alone closes
-/// with `JUDGMENT_INSTRUCTION`.
-pub(super) const JUDGMENT_TOOL: &str = "catervas_record_judgment";
-
 /// What a rule asks a session for.
 pub(super) struct SessionAsk<'a> {
     /// The agent the session is.
@@ -218,7 +198,7 @@ pub(super) struct SessionAsk<'a> {
     /// this one alone.
     pub(super) read_only: bool,
     /// The one Catervas tool it is given, when it is given one alone and no built-in tool: triage's
-    /// `catervas_triage_request`, the judgment's `catervas_record_judgment`.
+    /// `catervas_triage_request`.
     pub(super) only_tool: Option<&'static str>,
     /// The Catervas tools it is offered, when it is offered a list of them rather than every tool:
     /// each still only when the agent's tiers allow it.
@@ -228,9 +208,6 @@ pub(super) struct SessionAsk<'a> {
     pub(super) in_reply_to: Option<u64>,
     /// A ceremony's thread, which its posts are in and its `session.started` names.
     pub(super) thread: Option<Thread>,
-    /// The data pipeline request a Product Manager's decision session decides, which its
-    /// `session.started` names and which the decision tool checks the session against.
-    pub(super) pipeline: Option<u64>,
     /// Its first message.
     pub(super) initial_prompt: String,
 }
@@ -283,25 +260,11 @@ pub(super) async fn run_session(
         Ok(None) => None,
         Err(failed) => return Ok(failed),
     };
-    // An explore or a chat session reads, whatever the agent's grants (ADR 0026). A session given the
-    // connector browses the preview, whose tools are tagged `network`: browsing before approval is
-    // for explore alone (step 11's m8), and the plan gate holds nothing at `network`.
-    let mut tiers = if matches!(ask.purpose, SessionPurpose::Explore | SessionPurpose::Chat) {
-        vec![PermissionTier::Read]
-    } else {
-        ask.agent.tiers(&team.permissions())
-    };
-    // The browser's alone: a custom connector's tag governs its calls whatever the tiers, and
-    // widening them would let `WebFetch` through for an agent without `network` (finding S2).
-    if browser.is_some() && !tiers.contains(&PermissionTier::Network) {
-        tiers.push(PermissionTier::Network);
-    }
+    let tiers = registered_tiers(&ask, team, browser.is_some());
     let (skills, skills_root) = skill_registration(deps, &spec);
     deps.daemon.register_session(SessionRegistration {
-        read_roots: read_roots(&deps.tools.files, ask.contract, &spec.cwd, role),
+        read_roots: read_roots(&deps.tools.files, ask.contract, &spec.cwd),
         session_id: spec.session_id.clone(),
-        web: web_access(role),
-        reads: read_access(role),
         agent_id: spec.agent_id.clone(),
         task_id: spec.task_id.clone(),
         purpose: ask.purpose,
@@ -323,7 +286,7 @@ pub(super) async fn run_session(
         role,
         ask.contract,
         ask.in_reply_to,
-        (ask.thread, ask.pipeline),
+        ask.thread,
         &spec,
     )
     .await;
@@ -967,16 +930,12 @@ const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
 const SCHEDULE_POST_TOOL: &str = "catervas_schedule_post";
 
 /// The Finance Specialist's tools (step 09b, `docs/SPEC.md` 6.6): the team's AI spending, which is
-/// its alone, and a private folder's workbooks, which `catervas_write_sheet` writes and
-/// `catervas_read_sheet` reads, for each role with a folder (step 10b).
+/// its alone, and the writing of a private folder's workbooks, for each role with a folder (step
+/// 10b); every role reads them (ADR 0061).
 const READ_COSTS_TOOL: &str = "catervas_read_costs";
-const READ_SHEET_TOOL: &str = "catervas_read_sheet";
 const WRITE_SHEET_TOOL: &str = "catervas_write_sheet";
 /// The tool that writes a comparison as a note, the Procurement Specialist's alone (step 10b).
 const WRITE_EVALUATION_TOOL: &str = "catervas_write_evaluation";
-/// The Procurement Specialist's request for a site, and the list of what it may read.
-const REQUEST_SITES_TOOL: &str = "catervas_request_sites";
-const READ_SITES_TOOL: &str = "catervas_read_sites";
 /// The tool that suggests a purchase order, the Procurement Specialist's alone (ADR 0039).
 const DRAFT_PURCHASE_ORDER_TOOL: &str = "catervas_draft_purchase_order";
 /// The tool that reads every purchase order: the Procurement Specialist's, in the implement session
@@ -1044,10 +1003,9 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                     && works_on_a_task(ask.purpose, ask.contract.is_some()))
         })
         // The books are the Finance Specialist's, and the register the Procurement Specialist's:
-        // a role with a private folder reads the workbooks in any session and writes one in the
-        // implement session of a task, and the costs stay the Finance Specialist's alone; a verify
-        // session about a task of a role with a private folder reads that folder's workbooks, as
-        // its reviewer and the Product Manager accepting it do (steps 09b and 10b).
+        // a role with a private folder writes one in the implement session of a task, and the
+        // costs stay the Finance Specialist's alone; every role reads the workbooks of either
+        // folder in any session (ADR 0061).
         .filter(|tool| match tool.name {
             READ_COSTS_TOOL => ask.agent.role == RoleWire::FinanceSpecialist,
             WRITE_SHEET_TOOL => {
@@ -1074,14 +1032,6 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                     && (works_on_a_task(ask.purpose, ask.contract.is_some())
                         || ask.purpose == SessionPurpose::Chat)
             }
-            // The sites are the held role's: it asks in the implement session of a task, the one
-            // session that can wait for the owner, and reads the list there and in its chat.
-            REQUEST_SITES_TOOL | READ_SITES_TOOL => {
-                let in_its_task = works_on_a_task(ask.purpose, ask.contract.is_some());
-                web_access(Role::from(ask.agent.role)) == WebAccess::ApprovedSites
-                    && (in_its_task
-                        || (tool.name == READ_SITES_TOOL && ask.purpose == SessionPurpose::Chat))
-            }
             // A folder document is written at a planning, a review or a retro (not the standup)
             // by a role that owns a folder.
             WRITE_FOLDER_DOC_TOOL => {
@@ -1092,19 +1042,7 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                     )
                     && role_folder(Role::from(ask.agent.role)).is_some()
             }
-            READ_SHEET_TOOL => {
-                private_folder(Role::from(ask.agent.role)).is_some()
-                    || (ask.purpose == SessionPurpose::Verify
-                        && ask.contract.is_some_and(|contract| {
-                            private_folder(contract.assignee_role).is_some()
-                        }))
-            }
             _ => true,
-        })
-        // The Product Manager's decision of a data pipeline request is its decision session's
-        // alone, which gives it that one tool.
-        .filter(|tool| {
-            tool.name != DECIDE_PIPELINE_TOOL || ask.only_tool == Some(DECIDE_PIPELINE_TOOL)
         })
         // The design review's answer is its session's alone, which lists it.
         .filter(|tool| tool.name != RECORD_DESIGN_REVIEW_TOOL || ask.tools.is_some())
@@ -1113,19 +1051,37 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         .collect()
 }
 
-/// The instruction that closes the system prompt of `ask`'s session: a ceremony's, or the one of
-/// the single decision a session given one tool alone ends with.
+/// The instruction that closes the system prompt of `ask`'s session: a ceremony's.
 fn closing_instruction(ask: &SessionAsk<'_>) -> Option<&'static str> {
-    match (ask.thread, ask.only_tool) {
-        (Some(thread), _) => CEREMONY_INSTRUCTIONS
+    ask.thread.and_then(|thread| {
+        CEREMONY_INSTRUCTIONS
             .iter()
             .find(|(named, _)| *named == thread)
-            .map(|(_, text)| *text),
-        (None, Some(JUDGMENT_TOOL)) => Some(JUDGMENT_INSTRUCTION),
-        (None, Some(DECIDE_TOOL)) => Some(DESIGN_DECISION_INSTRUCTION),
-        (None, Some(DECIDE_PIPELINE_TOOL)) => Some(PIPELINE_DECISION_INSTRUCTION),
-        (None, _) => None,
+            .map(|(_, text)| *text)
+    })
+}
+
+/// The tiers the hook holds `ask`'s session to. An explore or a chat session reads, whatever the
+/// agent's grants (ADR 0026), and searches and fetches if the agent holds `network` (ADR 0061). A
+/// session given the connector browses the preview, whose tools are tagged `network`: browsing
+/// before approval is for explore alone (step 11's m8), and the plan gate holds nothing at
+/// `network`. The browser's alone: a custom connector's tag governs its calls whatever the tiers,
+/// and widening them would let `WebFetch` through for an agent without `network` (finding S2).
+fn registered_tiers(ask: &SessionAsk<'_>, team: &Team, browses: bool) -> Vec<PermissionTier> {
+    let held = ask.agent.tiers(&team.permissions());
+    let mut tiers = if matches!(ask.purpose, SessionPurpose::Explore | SessionPurpose::Chat) {
+        let mut tiers = vec![PermissionTier::Read];
+        if held.contains(&PermissionTier::Network) {
+            tiers.push(PermissionTier::Network);
+        }
+        tiers
+    } else {
+        held
+    };
+    if browses && !tiers.contains(&PermissionTier::Network) {
+        tiers.push(PermissionTier::Network);
     }
+    tiers
 }
 
 /// The program's own tools `ask`'s session is given: none for a session given one tool, the read
@@ -1136,7 +1092,12 @@ fn builtins_of(ask: &SessionAsk<'_>, tiers: &BTreeSet<PermissionTier>) -> Vec<St
         return Vec::new();
     }
     if ask.read_only {
-        return allowed_builtins(&BTreeSet::from([PermissionTier::Read]));
+        // Reading, and searching and fetching the web if the agent holds `network` (ADR 0061).
+        let mut read = BTreeSet::from([PermissionTier::Read]);
+        if tiers.contains(&PermissionTier::Network) {
+            read.insert(PermissionTier::Network);
+        }
+        return allowed_builtins(&read);
     }
     let works = works_on_a_task(ask.purpose, ask.contract.is_some());
     allowed_builtins(tiers)
@@ -1268,7 +1229,7 @@ fn session_spec_without(
     let interviewing = ask.purpose == SessionPurpose::Chat
         && ask.contract.is_none()
         && role_id == Role::ProductManager
-        && deps.tools.transitions.awaits_the_product_plan(team)?;
+        && deps.tools.transitions.awaits_the_product_plan()?;
     let human = human_of(deps, ask, interviewing)?;
     let rules = team.rules();
     let permissions = team.permissions();
@@ -1283,7 +1244,7 @@ fn session_spec_without(
     let stale_twins = integration_branch(team, &deps.tools.git)
         .and_then(|branch| stale_twins(&deps.tools.git, &branch))
         .unwrap_or_default();
-    let (members, own_repo) = member_lines(deps, ask, role_id);
+    let (members, own_repo) = member_lines(deps, ask);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
@@ -1320,7 +1281,7 @@ fn session_spec_without(
     )?
     .session_limits;
     Ok(SessionSpec {
-        read_roots: read_root_paths(deps, ask, role_id),
+        read_roots: read_root_paths(deps, ask),
         session_id: deps.session_ids.session_id(),
         agent_id: ask.agent.id.to_string(),
         task_id: ask.contract.map(|contract| contract.id.clone()),
@@ -1353,7 +1314,7 @@ async fn drive(
     role: Role,
     contract: Option<&TaskContract>,
     in_reply_to: Option<u64>,
-    (thread, pipeline): (Option<Thread>, Option<u64>),
+    thread: Option<Thread>,
     spec: &SessionSpec,
 ) -> Result<SessionEnd, OrchestratorError> {
     let tools = &deps.tools;
@@ -1380,15 +1341,7 @@ async fn drive(
             clock,
         )
     };
-    record_session_started(
-        &tools.log,
-        spec,
-        in_reply_to,
-        thread,
-        pipeline,
-        &tools.ids,
-        clock,
-    )?;
+    record_session_started(&tools.log, spec, in_reply_to, thread, &tools.ids, clock)?;
     let mut costed = false;
     let mut crossed = Vec::new();
     let read = match deps.adapter.start_session(spec.clone()) {
@@ -1668,7 +1621,6 @@ mod tests {
                 in_reply_to: None,
                 thread,
                 initial_prompt: String::new(),
-                pipeline: None,
             };
             offered_tools(deps, &team, &ask)
                 .iter()
@@ -1792,7 +1744,6 @@ mod tests {
             in_reply_to: None,
             thread: None,
             initial_prompt: "Look at the app.".to_string(),
-            pipeline: None,
         }
     }
 
@@ -1823,7 +1774,6 @@ mod tests {
             in_reply_to: None,
             thread: None,
             initial_prompt: "Start.".to_string(),
-            pipeline: None,
         };
         let infra = members[1].path.canonicalize().expect("infra");
         let line = |spec: &crate::session::SessionSpec| -> String {
@@ -1859,8 +1809,6 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn knows_which_folders_a_session_reads() {
         use super::read_roots;
-        use catervas_core::contract::Role;
-
         let (harness, members) = Harness::project_folder("read-roots", &["app", "infra"]);
         harness.assigned_in("CTV-1", "iris", "ada", "app");
         let files = &harness.project.deps.files;
@@ -1873,21 +1821,11 @@ mod tests {
         let root = files.root().to_path_buf();
 
         // A task in `app` reads `infra` and the project folder, never its own repository.
-        let task = read_roots(
-            files,
-            Some(&contract),
-            &harness.worktree("CTV-1"),
-            Role::SoftwareDeveloper,
-        );
+        let task = read_roots(files, Some(&contract), &harness.worktree("CTV-1"));
         assert_eq!(task[0].path, members[1].path.canonicalize().expect("infra"));
         assert_eq!(names(task), ["infra", "project"]);
-        // The Architect planning at the project root reads every member.
-        assert_eq!(
-            names(read_roots(files, None, &root, Role::Architect)),
-            ["app", "infra"]
-        );
-        // The Marketing Specialist reads no member.
-        assert!(read_roots(files, None, &root, Role::MarketingSpecialist).is_empty());
+        // A session planning at the project root reads every member, whatever its role (ADR 0061).
+        assert_eq!(names(read_roots(files, None, &root)), ["app", "infra"]);
     }
 
     #[tokio::test]
@@ -2235,7 +2173,10 @@ mod tests {
         // too; without it every browser call is `tier_not_granted: network`.
         use crate::preview::fixtures::FakePreviews;
 
-        let mut harness = Harness::new("preview-network-tier", browsing);
+        let mut harness = Harness::new("preview-network-tier", |wire| {
+            browsing(wire);
+            wire["agents"][1]["revokes"] = json!(["network"]);
+        });
         harness.previews = Arc::new(FakePreviews::ready());
         harness.in_progress("CTV-1", "iris", "ada");
         let adapter = harness.recorded(vec![
@@ -2454,7 +2395,6 @@ mod tests {
                 in_reply_to: None,
                 thread: None,
                 initial_prompt: String::new(),
-                pipeline: None,
             },
         )
         .expect("the spec");
@@ -2502,7 +2442,6 @@ mod tests {
                     in_reply_to: None,
                     thread: None,
                     initial_prompt: String::new(),
-                    pipeline: None,
                 },
             )
             .expect("the session starts")
@@ -2563,7 +2502,6 @@ mod tests {
                     in_reply_to: None,
                     thread: None,
                     initial_prompt: String::new(),
-                    pipeline: None,
                 },
             )
             .expect("the spec")
@@ -2613,7 +2551,6 @@ mod tests {
                     in_reply_to: None,
                     thread: None,
                     initial_prompt: String::new(),
-                    pipeline: None,
                 },
             )
             .expect("the spec")
@@ -2665,20 +2602,16 @@ mod tests {
                 cwd: deps.tools.files.root().to_path_buf(),
                 executor: None,
                 read_only: false,
-                only_tool: Some("catervas_record_judgment"),
+                only_tool: Some(TRIAGE_TOOL),
                 tools: None,
                 in_reply_to: None,
                 thread: None,
                 initial_prompt: String::new(),
-                pipeline: None,
             },
         )
         .expect("the spec");
 
-        assert_eq!(
-            spec.catervas_tools,
-            vec!["catervas_record_judgment".to_string()]
-        );
+        assert_eq!(spec.catervas_tools, vec![TRIAGE_TOOL.to_string()]);
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
     }
 
@@ -2706,7 +2639,6 @@ mod tests {
                 in_reply_to: None,
                 thread: None,
                 initial_prompt: String::new(),
-                pipeline: None,
             },
         )
         .expect("the spec");
@@ -2744,7 +2676,6 @@ mod tests {
             in_reply_to: None,
             thread: None,
             initial_prompt: String::new(),
-            pipeline: None,
         }
     }
 
@@ -3049,19 +2980,15 @@ mod tests {
                 "{what}"
             );
         }
-        // The Product Manager reviewing it reads what it wrote, and writes nothing; a Developer
-        // is given neither.
-        assert_eq!(
-            offered("pm", SessionPurpose::Verify, Some(&procurement), &sheets),
-            ["catervas_read_sheet"]
-        );
+        // Every other role reads the workbooks, in any session, and writes none (ADR 0061).
         for (who, purpose) in [
+            ("pm", SessionPurpose::Verify),
             ("dev-a", SessionPurpose::Implement),
             ("pm", SessionPurpose::Chat),
         ] {
             assert_eq!(
                 offered(who, purpose, Some(&procurement), &sheets),
-                Vec::<&str>::new(),
+                ["catervas_read_sheet"],
                 "{who} {purpose:?}"
             );
         }
@@ -3207,15 +3134,11 @@ mod tests {
                 "{what}: costs and sheets are read in any session, and written in none"
             );
         }
-        // The reviewer reads a finance task's workbook, and the Product Manager at its accept.
-        for who in ["pm", "dev-b"] {
-            assert_eq!(
-                offered(who, SessionPurpose::Verify, Some(&finance)),
-                ["catervas_read_sheet"],
-                "{who}"
-            );
-        }
+        // Every other role reads the workbooks, in any session, and writes none or reads the costs
+        // (ADR 0061).
         for (who, purpose, about) in [
+            ("pm", SessionPurpose::Verify, Some(&finance)),
+            ("dev-b", SessionPurpose::Verify, Some(&finance)),
             ("pm", SessionPurpose::Verify, Some(&developers)),
             ("pm", SessionPurpose::Plan, Some(&finance)),
             ("pm", SessionPurpose::Chat, None),
@@ -3227,112 +3150,9 @@ mod tests {
         ] {
             assert_eq!(
                 offered(who, purpose, about),
-                Vec::<&str>::new(),
+                ["catervas_read_sheet"],
                 "{who} {purpose:?}"
             );
-        }
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn offers_the_site_tools_to_a_held_role() {
-        use crate::tools::fixtures::{
-            with_the_finance_specialist, with_the_marketing_specialist,
-            with_the_procurement_specialist,
-        };
-        let harness = Harness::new("session-sites-offer", |wire| {
-            with_the_finance_specialist(wire);
-            with_the_marketing_specialist(wire);
-            with_the_procurement_specialist(wire);
-        });
-        harness.procurement_task("CTV-1", Some("in_progress"));
-        harness.finance_task("CTV-2", Some("in_progress"));
-        harness.in_progress("CTV-3", "dev-a", "dev-b");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        let deps = &orchestrator.deps;
-        let team = deps.tools.files.read_team().expect("the team");
-        let read = |task: &str| {
-            deps.tools
-                .files
-                .read_contract(&task.parse().expect("an id"))
-                .expect("the contract")
-        };
-        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
-        let site_tools = ["catervas_read_sites", "catervas_request_sites"];
-        let offered = |who: &str, purpose: SessionPurpose, about| {
-            let mut ask = asked(deps, agent(&team, who), purpose, about);
-            ask.read_only = purpose == SessionPurpose::Verify;
-            let given = session_spec(deps, &team, &ask)
-                .expect("the spec")
-                .catervas_tools;
-            site_tools
-                .into_iter()
-                .filter(|tool| given.iter().any(|one| one == tool))
-                .collect::<Vec<_>>()
-        };
-
-        assert_eq!(
-            offered("proc", SessionPurpose::Implement, Some(&procurement)),
-            site_tools,
-            "its task's implement session is offered both"
-        );
-        assert_eq!(
-            offered("proc", SessionPurpose::Chat, None),
-            ["catervas_read_sites"],
-            "its chat reads the list and asks for nothing"
-        );
-        for (who, purpose, about, what) in [
-            (
-                "proc",
-                SessionPurpose::Implement,
-                None,
-                "an implement session about no task",
-            ),
-            (
-                "proc",
-                SessionPurpose::Verify,
-                Some(&procurement),
-                "a verify session",
-            ),
-            (
-                "fin",
-                SessionPurpose::Implement,
-                Some(&finance),
-                "a Finance Specialist's implement session",
-            ),
-            (
-                "fin",
-                SessionPurpose::Chat,
-                None,
-                "a Finance Specialist's chat",
-            ),
-            (
-                "kai",
-                SessionPurpose::Implement,
-                Some(&procurement),
-                "a Marketing Specialist's implement session",
-            ),
-            (
-                "kai",
-                SessionPurpose::Chat,
-                None,
-                "a Marketing Specialist's chat",
-            ),
-            (
-                "dev-a",
-                SessionPurpose::Implement,
-                Some(&developers),
-                "a Developer's implement session",
-            ),
-            ("dev-a", SessionPurpose::Chat, None, "a Developer's chat"),
-            (
-                "pm",
-                SessionPurpose::Implement,
-                Some(&procurement),
-                "the Product Manager's implement session about its task",
-            ),
-        ] {
-            assert_eq!(offered(who, purpose, about), Vec::<&str>::new(), "{what}");
         }
     }
 
@@ -3470,11 +3290,9 @@ mod tests {
             "catervas_request_data_pipeline",
             "catervas_read_data_pipelines",
         ];
-        // The decision is offered to none of them: only the Product Manager's decision session.
         let pipeline_tools = [
             "catervas_request_data_pipeline",
             "catervas_read_data_pipelines",
-            "catervas_decide_data_pipeline",
         ];
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
@@ -3545,16 +3363,6 @@ mod tests {
         ] {
             assert_eq!(offered(who, purpose, about), Vec::<&str>::new(), "{what}");
         }
-        let mut decision = asked(deps, agent(&team, "pm"), SessionPurpose::Verify, None);
-        decision.read_only = true;
-        decision.only_tool = Some("catervas_decide_data_pipeline");
-        assert_eq!(
-            session_spec(deps, &team, &decision)
-                .expect("the spec")
-                .catervas_tools,
-            ["catervas_decide_data_pipeline"],
-            "the Product Manager's decision session is given that tool alone"
-        );
     }
 
     #[test]
@@ -4051,7 +3859,6 @@ mod tests {
             in_reply_to: None,
             thread: Some(thread),
             initial_prompt: String::new(),
-            pipeline: None,
         }
     }
 
@@ -4211,7 +4018,7 @@ mod tests {
                 "credential_keys": ["API_KEY"],
                 "tools": {
                     "search_issues": "network",
-                    "create_issue": "external_effect",
+                    "create_issue": "paid",
                     "delete_repo": "denied"
                 }
             },
@@ -4289,7 +4096,6 @@ mod tests {
             in_reply_to: None,
             thread: (purpose == SessionPurpose::Ceremony).then_some(Thread::Standup),
             initial_prompt: String::new(),
-            pipeline: None,
         }
     }
 
@@ -4391,16 +4197,7 @@ mod tests {
                 "{purpose:?}"
             );
         }
-        for (purpose, only_tool) in [
-            (SessionPurpose::Triage, Some(TRIAGE_TOOL)),
-            (SessionPurpose::Refine, Some(super::JUDGMENT_TOOL)),
-            (SessionPurpose::Verify, Some(super::DECIDE_TOOL)),
-        ] {
-            assert!(
-                skills(purpose, only_tool).is_empty(),
-                "{purpose:?} {only_tool:?}"
-            );
-        }
+        assert!(skills(SessionPurpose::Triage, Some(TRIAGE_TOOL)).is_empty());
     }
 
     #[test]
@@ -4722,8 +4519,6 @@ mod tests {
         }
         for (purpose, only_tool) in [
             (SessionPurpose::Triage, Some(TRIAGE_TOOL)),
-            (SessionPurpose::Refine, Some(super::JUDGMENT_TOOL)),
-            (SessionPurpose::Verify, Some(super::DECIDE_TOOL)),
             (SessionPurpose::Ceremony, None),
             (SessionPurpose::Conversation, None),
             (SessionPurpose::Chat, None),
@@ -4867,7 +4662,7 @@ mod tests {
                 oauth: None,
             },
             credential_keys: Vec::new(),
-            tools: [("make".to_string(), ConnectorTag::ExternalEffect)].into(),
+            tools: [("make".to_string(), ConnectorTag::Paid)].into(),
             kit: true,
             allowances: [("make".to_string(), 20)].into(),
         };
@@ -4888,7 +4683,7 @@ mod tests {
                 "args": ["connector", "osv"],
                 "title": "Lookups", "about": "Looks things up.", "why": "To look.",
                 "setup": "Nothing to do.",
-                "tools": { "look": "external_effect", "read": "network" },
+                "tools": { "look": "paid", "read": "network" },
                 "plan_approved": ["look"]
             }]
         });
@@ -4928,7 +4723,7 @@ mod tests {
         let mut widened = entry_as(McpServerSource::Kit);
         widened.tools.insert(
             "read".to_string(),
-            catervas_core::governor::permissions::ConnectorTag::ExternalEffect,
+            catervas_core::governor::permissions::ConnectorTag::Paid,
         );
         assert!(
             super::session_connector(widened, Some(&kit))
@@ -5839,6 +5634,7 @@ mod tests {
 
         let mut harness = Harness::new("session-custom-tier", |wire| {
             browsing(wire);
+            wire["agents"][1]["revokes"] = json!(["network"]);
             with_custom_servers(wire);
             // The Designer has the browser and `github` both.
             let github = wire["agents"][1]["mcp_servers"][0].clone();
