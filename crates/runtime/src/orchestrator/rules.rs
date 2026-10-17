@@ -33,7 +33,7 @@ use super::messages::{
     DeliveredTask, Digest, ProductFiles, Resume, architecture_refresh_message, ceremony_message,
     delivery_review_message, implement_message, mention_message, owners_folder_lines,
     owners_folder_words, plan_message, posts_heard, product_refresh_message, retro_message,
-    task_cost, with_the_approved_plan,
+    task_cost, with_the_approved_plan, work_summary,
 };
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
@@ -66,7 +66,7 @@ pub(super) struct Waiting {
     /// Whether the team's daily budget stopped one (`spent`).
     pub(super) day_spent: bool,
     /// The earliest time a sleeping agent whose session was not started wakes, and that agent
-    /// (`asleep`).
+    /// (`unavailable`).
     pub(super) slept: Option<(DateTime<Utc>, String)>,
 }
 
@@ -161,7 +161,9 @@ pub(super) async fn tick(
     // The store gives the board in the order of the number in each task id, which is how ties
     // are broken.
     let board = deps.tools.projections.board()?;
-    let in_scope = in_scope(scope);
+    // The tasks whose sessions run: no rule acts on one (ADR 0064).
+    let busy = deps.work.busy_tasks();
+    let in_scope = in_scope(scope, &busy);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut waiting = Waiting::default();
     // The tasks each agent may work: those past its limit are "returning", and wait for a hand-over.
@@ -296,8 +298,9 @@ pub(super) async fn tick(
 /// The hand-over of a task whose wait cleared, between rules 5 and 6 (ADR 0062): a task its agent
 /// holds past its limit, because the agent began other tasks while it waited, is handed to the
 /// first free active agent of its role that is neither its holder nor its reviewer (the reviewer
-/// unless the role reviews its own work), by `Transitions::reassign`, which checks it again. A task
-/// in a lane waits for its lane's builder. With no candidate the task waits with its agent and is
+/// unless the role reviews its own work), by `Transitions::reassign`, which checks it again. A
+/// task sent back (`rejected`) waits for its author, who knows the work and the reviewer's note
+/// (ADR 0064). A task in a lane waits for its lane's builder. With no candidate the task waits with its agent and is
 /// tried on every tick; when the agent has room again the task is within its limit and goes on.
 fn resume_elsewhere(
     deps: &OrchestratorDeps,
@@ -309,14 +312,12 @@ fn resume_elsewhere(
     for row in board
         .iter()
         .filter(|row| {
-            matches!(
-                row.status,
-                TaskStatus::Assigned | TaskStatus::InProgress | TaskStatus::Rejected
-            ) && row.counts_towards_wip()
+            matches!(row.status, TaskStatus::Assigned | TaskStatus::InProgress)
+                && row.counts_towards_wip()
                 && !requests::is_epic(row)
                 && !within.contains(&row.task_id)
         })
-        .filter(in_scope(scope))
+        .filter(in_scope(scope, &deps.work.busy_tasks()))
     {
         let Some(holder) = active(team, row.assignee_id.as_deref()) else {
             continue;
@@ -417,13 +418,18 @@ fn idle(waiting: &Waiting) -> TickReport {
     }
 }
 
-/// Whether `scope` takes in a row: every row, or the one task it names.
-fn in_scope(scope: &TickScope) -> impl Fn(&&TaskProjection) -> bool + Copy + '_ {
+/// Whether `scope` takes in a row: every row, or the one task it names; never a task whose
+/// session runs (ADR 0064).
+fn in_scope<'a>(
+    scope: &'a TickScope,
+    busy: &'a BTreeSet<TaskId>,
+) -> impl Fn(&&TaskProjection) -> bool + Copy + 'a {
     move |row| {
         scope
             .task_id
             .as_ref()
             .is_none_or(|task_id| &row.task_id == task_id)
+            && !busy.contains(&row.task_id)
     }
 }
 
@@ -536,7 +542,7 @@ async fn review_and_retro(
         return Ok(None);
     };
     if day_is_spent(deps, team, Role::from(runner.role), &mut waiting.day_spent)?
-        | asleep(deps, runner, &mut waiting.slept)?
+        | unavailable(deps, runner, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -777,7 +783,7 @@ fn due_refresh<'a>(
     let cannot_be_asked = |agent: &Agent, waiting: &mut Waiting| {
         Ok::<_, OrchestratorError>(
             day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-                | asleep(deps, agent, &mut waiting.slept)?,
+                | unavailable(deps, agent, &mut waiting.slept)?,
         )
     };
     if let Some(agent) = product {
@@ -949,7 +955,7 @@ async fn chat(
     pending.sort_by_key(|(seq, _)| *seq);
     for (seq, agent) in pending {
         if day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-            | asleep(deps, agent, &mut waiting.slept)?
+            | asleep_or_chatting(deps, agent, &mut waiting.slept)?
         {
             continue;
         }
@@ -965,6 +971,7 @@ async fn chat(
                 _ => None,
             })
             .unwrap_or_default();
+        let summary = work_summary(deps, agent)?;
         let end = run_session(
             deps,
             team,
@@ -981,7 +988,7 @@ async fn chat(
                 thread: None,
                 initial_prompt: format!(
                     "{}, the user wrote to you in your one-to-one chat. Answer the newest \
-                     message.\n\n{text}",
+                     message.\n\n{summary}\n\n{text}",
                     agent.display_name.as_str()
                 ),
             },
@@ -1035,7 +1042,7 @@ async fn open_the_interview(
         });
     if began
         || day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-            | asleep(deps, agent, &mut waiting.slept)?
+            | asleep_or_chatting(deps, agent, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -1086,7 +1093,7 @@ async fn conversation(
             continue;
         };
         if day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-            | asleep(deps, agent, &mut waiting.slept)?
+            | unavailable(deps, agent, &mut waiting.slept)?
         {
             continue;
         }
@@ -1310,8 +1317,13 @@ fn budget(
     if scope.rules != TickRules::All || scope.task_id.is_some() {
         return Ok(None);
     }
+    // A task whose session runs is left to it (ADR 0064).
+    let busy = deps.work.busy_tasks();
     for row in board.iter().filter(|row| {
-        !is_terminal(row.status) && row.status != TaskStatus::Escalated && !row.waiting_on_human
+        !is_terminal(row.status)
+            && row.status != TaskStatus::Escalated
+            && !row.waiting_on_human
+            && !busy.contains(&row.task_id)
     }) {
         if let Some(report) = escalate_if_spent(deps, team, row)? {
             return Ok(Some(report));
@@ -1445,11 +1457,37 @@ pub(super) fn spent(
         .any(|scope| matches!(scope, BudgetScope::TaskUsd | BudgetScope::TaskSessions)))
 }
 
-/// Whether `agent` is asleep until its model provider's limit resets (5.5): no session of its
+/// Whether `agent` can start no session now: one of its runs in this process (ADR 0064), or it is
+/// asleep until its model provider's limit resets (5.5). No session of its
 /// starts, and no sandbox is made for it. The earliest `until` of the tick and its agent are kept
 /// in `slept`, as `spent` keeps a spent day in `day_spent`. A rule asks it with `|` beside
 /// `spent`, not `||`, so that both are kept whichever stops the session.
-pub(super) fn asleep(
+pub(super) fn unavailable(
+    deps: &OrchestratorDeps,
+    agent: &Agent,
+    slept: &mut Option<(DateTime<Utc>, String)>,
+) -> Result<bool, OrchestratorError> {
+    if deps.work.is_busy(agent.id.as_str()) {
+        return Ok(true);
+    }
+    asleep(deps, agent, slept)
+}
+
+/// Whether `agent` can start no chat fork now (ADR 0064): one of its chats runs, or it is asleep
+/// (5.5). Its running work session does not stop one. Kept in `slept` as `unavailable` keeps it.
+pub(super) fn asleep_or_chatting(
+    deps: &OrchestratorDeps,
+    agent: &Agent,
+    slept: &mut Option<(DateTime<Utc>, String)>,
+) -> Result<bool, OrchestratorError> {
+    if deps.work.is_chatting(agent.id.as_str()) {
+        return Ok(true);
+    }
+    asleep(deps, agent, slept)
+}
+
+/// Whether `agent` is asleep until its model provider's limit resets.
+fn asleep(
     deps: &OrchestratorDeps,
     agent: &Agent,
     slept: &mut Option<(DateTime<Utc>, String)>,
@@ -1494,7 +1532,7 @@ async fn in_progress(
         None
     };
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, assignee, &mut waiting.slept)?
+        | unavailable(deps, assignee, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -1777,7 +1815,7 @@ async fn ready(
     };
     // A sleeping agent is still offered as an assignee below; only its own sessions wait.
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, assigner, &mut waiting.slept)?
+        | unavailable(deps, assigner, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -1908,8 +1946,8 @@ fn assigner(team: &Team) -> Option<&Agent> {
     holding(Role::ScrumMaster).or_else(|| holding(Role::ProductManager))
 }
 
-/// Whether `agent` holds fewer tasks it works (`open_tasks`: a blocked, escalated or waiting task
-/// is not one) than the WIP limit, the epic `under` not counted.
+/// Whether `agent` holds fewer tasks it works (`open_tasks`: assigned, in progress or sent back;
+/// a task under review, blocked, escalated or waiting is not one) than the WIP limit, the epic `under` not counted.
 pub(super) fn has_room(
     team: &Team,
     board: &[TaskProjection],
@@ -3904,7 +3942,7 @@ mod tests {
         let harness = Harness::new("orch-stop", |_| {});
         harness.ready("CTV-1");
         let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
+        let orchestrator = Arc::new(harness.orchestrator(adapter.clone()));
 
         orchestrator.stop();
         orchestrator.run_until_idle().await.expect("nothing runs");
@@ -5883,8 +5921,7 @@ mod tests {
         if idle {
             // A delivery already closed: the run is about the session it starts, not the close.
             harness.settle_delivery();
-            harness
-                .orchestrator(probe.clone())
+            Arc::new(harness.orchestrator(probe.clone()))
                 .run_until_idle()
                 .await
                 .expect("the run ends idle");
@@ -6267,7 +6304,7 @@ mod tests {
             recorded.clone(),
             Arc::clone(&harness.daemon),
         ));
-        let orchestrator = harness.orchestrator(witness.clone());
+        let orchestrator = Arc::new(harness.orchestrator(witness.clone()));
         // A delivery already closed: the run is about the verify sessions, not the close.
         harness.settle_delivery();
 
@@ -9741,6 +9778,82 @@ mod tests {
             working.await,
             TaskStatus::Ready,
             "a task under way holds its agent"
+        );
+    }
+
+    /// The harness's team with `dev-c` besides, a third Software Developer.
+    fn with_a_third_developer(wire: &mut serde_json::Value) {
+        wire["agents"]
+            .as_array_mut()
+            .expect("a list of agents")
+            .push(catervas_core::team::fixtures::an_agent_wire(
+                "dev-c",
+                "software_developer",
+            ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_agent_whose_task_is_under_review_takes_the_next_task() {
+        let filled = |name: &str, ctv_1: &dyn Fn(&Harness)| {
+            let harness = Harness::new(name, with_a_third_developer);
+            ctv_1(&harness);
+            harness.in_progress("CTV-3", "dev-b", "pm");
+            harness.in_progress("CTV-4", "dev-c", "pm");
+            harness.ready("CTV-2");
+            harness
+        };
+        let planning = TickScope {
+            task_id: None,
+            rules: TickRules::Planning,
+        };
+
+        // (1) A task under review is its reviewer's work: dev-a is given CTV-2.
+        let harness = filled("wip-under-review", &|h| h.verifying("CTV-1"));
+        let adapter = harness.recorded(vec![plan_assigns_ctv_2()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator
+            .tick_within(&planning)
+            .await
+            .expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "the plan session");
+        let row = harness.row("CTV-2");
+        assert_eq!(row.status, TaskStatus::Assigned);
+        assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
+
+        // (2) A task sent back holds its author: no room, nothing is planned.
+        let harness = filled("wip-sent-back", &|h| h.rejected("CTV-1", 0, "C1 failed"));
+        let adapter = harness.recorded(vec![plan_assigns_ctv_2()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator
+            .tick_within(&planning)
+            .await
+            .expect("the tick runs");
+        assert!(adapter.started().is_empty(), "no session starts");
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Ready);
+
+        // (3) A sent-back task goes to no other developer: its author goes on with the task it
+        // has under way, which counts first.
+        let harness = Harness::new("wip-stays-with-its-author", with_a_third_developer);
+        harness.in_progress("CTV-2", "dev-a", "dev-b");
+        harness.rejected("CTV-1", 0, "C1 failed");
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            harness.events(&[EventKind::TaskReassigned]).is_empty(),
+            "nothing is handed over"
+        );
+        let row = harness.row("CTV-1");
+        assert_eq!(row.status, TaskStatus::Rejected);
+        assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].agent_id, "dev-a");
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
+        assert_eq!(
+            started[0].task_id.as_ref().map(|task| task.as_str()),
+            Some("CTV-2")
         );
     }
 

@@ -110,7 +110,7 @@ fn append(
     log.append(&event).map(|_| ())
 }
 
-fn purpose_wire(purpose: SessionPurpose) -> SessionStartedBodyPurpose {
+pub(crate) fn purpose_wire(purpose: SessionPurpose) -> SessionStartedBodyPurpose {
     match purpose {
         SessionPurpose::Triage => SessionStartedBodyPurpose::Triage,
         SessionPurpose::Refine => SessionStartedBodyPurpose::Refine,

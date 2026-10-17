@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
-use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
+use catervas_core::budget::{
+    BudgetScope, BudgetState, CHAT_SESSION_LIMITS, SessionLedger, SessionLimits, add_usage, tighter,
+};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
 use catervas_core::folders::{is_hunt, role_folder};
 use catervas_core::governor::gates::DesignerBrowser;
@@ -212,6 +214,33 @@ pub(super) struct SessionAsk<'a> {
     pub(super) initial_prompt: String,
 }
 
+/// Why a session is stopped when another's cost spends the day (ADR 0064).
+const DAY_SPENT_STOP: &str = "the team's daily budget is spent";
+
+/// When `crossed` holds the day's budget, stops the other sessions for it (ADR 0064).
+fn stop_when_the_day_is_crossed(
+    deps: &OrchestratorDeps,
+    own: &str,
+    crossed: impl IntoIterator<Item = BudgetScope>,
+) {
+    if crossed
+        .into_iter()
+        .any(|scope| scope == BudgetScope::DayUsd)
+    {
+        stop_the_others(deps, own, DAY_SPENT_STOP);
+    }
+}
+
+/// Asks every session the daemon answers for in this process, but `own`, to stop for `reason`;
+/// each ends `aborted` through its own end, its task keeping its status.
+fn stop_the_others(deps: &OrchestratorDeps, own: &str, reason: &str) {
+    for id in deps.daemon.session_ids() {
+        if id != own {
+            deps.daemon.request_stop(&id, reason);
+        }
+    }
+}
+
 /// How a session ended.
 pub(super) struct SessionEnd {
     /// The session.
@@ -233,6 +262,13 @@ pub(super) async fn run_session(
     team: &Team,
     ask: SessionAsk<'_>,
 ) -> Result<SessionEnd, OrchestratorError> {
+    // First of all: one agent has one work session at a time, and one chat fork beside it
+    // (ADR 0064).
+    let _claim = deps.work.claim(
+        ask.agent.id.as_str(),
+        ask.contract.map(|contract| &contract.id),
+        ask.purpose,
+    )?;
     let left_out = refresh_signed_in(deps, team, &ask).await;
     let mut spec = session_spec_without(deps, team, &ask, &left_out)?;
     let role = Role::from(ask.agent.role);
@@ -280,6 +316,12 @@ pub(super) async fn run_session(
         connectors,
         preview: browser.clone(),
     });
+    // From here the session runs beside the others; its end is recorded under the turn again.
+    super::work::session_runs(super::work::Started {
+        agent_id: spec.agent_id.clone(),
+        task_id: spec.task_id.clone(),
+        purpose: crate::sessions::purpose_wire(spec.purpose).to_string(),
+    });
     let ended = drive(
         deps,
         team,
@@ -290,6 +332,12 @@ pub(super) async fn run_session(
         &spec,
     )
     .await;
+    super::work::session_ran(&deps.work).await;
+    // A session a tick started on budgets read before this one's cost was recorded is registered
+    // by now, as the tick gives the turn back only after registering it: stop it too.
+    if let Ok(end) = &ended {
+        stop_when_the_day_is_crossed(deps, &spec.session_id, end.crossed.iter().copied());
+    }
     deps.daemon.end_session(&spec.session_id);
     let closed = browser.map_or(Ok(()), |browser| {
         close_preview(deps, &ids, browser.as_ref(), "the session ended")
@@ -1185,6 +1233,44 @@ fn with_the_interview(
     })
 }
 
+/// The limits of the session `ask` asks for: the budget's, and a chat's own bounds where they are
+/// tighter, so that it answers quickly (ADR 0064). The interview writes the product plan, so it
+/// keeps the team's.
+fn session_limits_of(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+    interviewing: bool,
+) -> Result<SessionLimits, OrchestratorError> {
+    let limits = budget_state(
+        &deps.tools.projections,
+        team,
+        Role::from(ask.agent.role),
+        ask.contract,
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )?
+    .session_limits;
+    Ok(if ask.purpose == SessionPurpose::Chat && !interviewing {
+        tighter(limits, CHAT_SESSION_LIMITS)
+    } else {
+        limits
+    })
+}
+
+/// The task branches the integration branch already has the work of, for the rules' line about
+/// committing: none for a chat, which commits nothing and makes no `git` call (ADR 0064).
+// ponytail: the runtime has no log to warn in, so a git error leaves the line out; warn there once
+// it has one.
+fn stale_twins_of(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<String> {
+    if ask.purpose == SessionPurpose::Chat {
+        return Vec::new();
+    }
+    integration_branch(team, &deps.tools.git)
+        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
+        .unwrap_or_default()
+}
+
 /// [`session_spec`], leaving out the custom connectors `left_out` names, as a refresh that did not
 /// finish does for this session alone.
 fn session_spec_without(
@@ -1247,9 +1333,7 @@ fn session_spec_without(
         .collect();
     // ponytail: the runtime has no log to warn in, so a git error leaves the line out; warn
     // there once it has one.
-    let stale_twins = integration_branch(team, &deps.tools.git)
-        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
-        .unwrap_or_default();
+    let stale_twins = stale_twins_of(deps, team, ask);
     let (members, own_repo) = member_lines(deps, ask);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
@@ -1277,15 +1361,7 @@ fn session_spec_without(
         own_repo,
         document_format: team.document_format(),
     })?;
-    let limits = budget_state(
-        &deps.tools.projections,
-        team,
-        role_id,
-        ask.contract,
-        &SessionLedger::default(),
-        deps.tools.clock.now(),
-    )?
-    .session_limits;
+    let limits = session_limits_of(deps, team, ask, interviewing)?;
     Ok(SessionSpec {
         read_roots: read_root_paths(deps, ask),
         session_id: deps.session_ids.session_id(),
@@ -1500,6 +1576,7 @@ async fn read_to_end(
                 }
                 let now = record(&before, &held)?;
                 crossed.extend(now.iter().map(|exhausted| exhausted.scope));
+                stop_when_the_day_is_crossed(deps, &spec.session_id, now.iter().map(|e| e.scope));
                 // A task's last session may finish (5.5): what it stops is the next session.
                 if now
                     .iter()
