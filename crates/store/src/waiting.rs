@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
+use catervas_core::folders::is_plan_task;
 use catervas_core::governor::done::result_awaits_human;
 use catervas_core::governor::permissions::ApprovalKey;
 use catervas_core::governor::sites::site_of;
@@ -466,6 +467,14 @@ pub fn waiting(
     // Catervas never merges (ADR 0061): every accepted task awaiting integration waits for the
     // human, with its pull request when one was opened since it was accepted.
     for row in board.iter().filter(|row| row.awaiting_integration) {
+        // A plan task has no pull request of its own: its tasks carry the plan, so there is
+        // nothing of it for the human to merge.
+        if files
+            .read_contract(&row.task_id)
+            .is_ok_and(|contract| is_plan_task(&contract))
+        {
+            continue;
+        }
         let events = log.read(&EventQuery {
             task_id: Some(row.task_id.clone()),
             kinds: vec![EventKind::TaskTransitioned, EventKind::PullRequestOpened],

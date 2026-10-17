@@ -162,7 +162,7 @@ Tests:
   - `integrate` answers the refusal starting `carried_by_its_tasks: `.
   - With the plan committed on `main`, the next tick records `task.integrated { into: "main", integrated_by: "governor" }`, and the task no longer awaits.
 
-- [ ] `feat(runtime): integrate a plan task once its plan reaches the integration branch`
+- [x] `feat(runtime): integrate a plan task once its plan reaches the integration branch`
 
 ## Verification
 

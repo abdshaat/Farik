@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
+use catervas_core::folders::is_plan_task;
 use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind,
@@ -368,6 +369,16 @@ fn integrate_locked(
             return escalate(tools, subject, words).map(Some);
         }
     };
+    // A task that writes an epic's plan opens no pull request: its plan reaches the integration
+    // branch with its tasks' pull requests (ADR 0061).
+    if let Subject::Task(task_id) = subject {
+        let contract = tools.files.read_contract(task_id)?;
+        if is_plan_task(&contract)
+            && let Some(plan) = &contract.plan
+        {
+            return carried_plan(tools, subject, &plan.to_string(), &target, asker);
+        }
+    }
     let integrated_before = integrations_of(tools, subject)?;
     let outcome = through_the_forge(tools, subject, &target, asker)?;
     // A folder change touches no language, toolchain, test or criterion: no scan to refresh.
@@ -385,6 +396,44 @@ fn integrate_locked(
             scan: Some(scan),
         },
         other => other,
+    }))
+}
+
+/// A plan task is integrated once its plan file is on the integration branch, carried there by its
+/// tasks' pull requests; it goes by the file, so that a squash merge counts. `None` while it is
+/// not, on a tick, and a refusal for the human's ask.
+fn carried_plan(
+    tools: &ToolDeps,
+    subject: &Subject,
+    plan: &str,
+    target: &IntegrationTarget,
+    asker: Asker,
+) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
+    let into = target.into.as_str();
+    let carried = match target.git.has_file(into, plan) {
+        Ok(carried) => carried,
+        Err(GitError::CommandFailed { .. }) => false,
+        Err(error) => return Err(error.into()),
+    };
+    if !carried {
+        return match asker {
+            Asker::Tick => Ok(None),
+            Asker::Human => Err(refused(format!(
+                "carried_by_its_tasks: {} writes an epic's plan, which reaches {into} with its \
+                 tasks' pull requests",
+                subject.name()
+            ))),
+        };
+    }
+    let head = target.git.merge_base(into, into)?;
+    let integrated_by = match asker {
+        Asker::Tick => TaskIntegratedBodyIntegratedBy::Governor,
+        Asker::Human => TaskIntegratedBodyIntegratedBy::Human,
+    };
+    record_integrated(tools, subject, &head, into, integrated_by)?;
+    Ok(Some(IntegrationOutcome::Merged {
+        sha: head,
+        scan: ScanRefresh::Unchanged,
     }))
 }
 
@@ -1632,6 +1681,72 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(integrations(&harness).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn integrates_a_plan_task_by_its_plan_not_a_pull_request() {
+        const PLAN: &str = "docs/catervas/architecture/plans/CTV-9.md";
+        let harness = under("int-plan-task", "pull_request");
+        let origin = harness.with_origin();
+        harness.verifying_with("CTV-1", true, true, |wire| {
+            wire["plan"] = json!(PLAN);
+            wire["allowed_paths"] = json!([PLAN]);
+            wire["assignee_role"] = json!("architect");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+        harness.project.moved(
+            "CTV-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        harness
+            .project
+            .deps
+            .git
+            .remove_worktree(&harness.worktree("CTV-1"))
+            .expect("the worktree goes");
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        // Its plan is on its own branch alone: no pull request, nothing on Today, and the human's
+        // ask is told that its tasks carry it.
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        assert!(opened(&harness).is_empty());
+        assert!(harness.gh.calls().is_empty(), "{:?}", harness.gh.calls());
+        assert!(harness.row("CTV-1").awaiting_integration);
+        assert!(integration_lines(&harness).is_empty());
+        let refusal = orchestrator.integrate(&task("CTV-1")).await;
+        assert!(
+            matches!(&refusal, Err(OrchestratorError::Refused { reason }) if reason.starts_with("carried_by_its_tasks: ")),
+            "{refusal:?}"
+        );
+
+        // Once the plan reaches the integration branch, with its tasks' pull requests, it is
+        // integrated.
+        std::fs::create_dir_all(
+            harness
+                .project
+                .repo
+                .path
+                .join("docs/catervas/architecture/plans"),
+        )
+        .expect("the plans folder is made");
+        harness.commit_at_root(PLAN, "# Plan for CTV-9\n", "docs: plan CTV-9");
+        orchestrator.tick().await.expect("the tick runs");
+        let integrated = integrations(&harness);
+        assert_eq!(integrated.len(), 1, "{integrated:?}");
+        assert_eq!(integrated[0].into, "main");
+        assert_eq!(
+            integrated[0].integrated_by,
+            TaskIntegratedBodyIntegratedBy::Governor
+        );
+        assert!(!harness.row("CTV-1").awaiting_integration);
+        let _ = std::fs::remove_dir_all(&origin);
     }
 
     const PULL_URL: &str = "https://github.com/o/r/pull/7";

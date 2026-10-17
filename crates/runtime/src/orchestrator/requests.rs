@@ -3984,19 +3984,7 @@ mod tests {
         an_accepted_plan_task(&harness);
         let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("the tick runs");
-        if harness
-            .project
-            .deps
-            .projections
-            .board()
-            .expect("the board")
-            .iter()
-            .any(|row| row.task_id == task("CTV-2") && row.awaiting_integration)
-        {
-            integrated(&harness, false);
-        }
-
+        // The plan task is accepted, and its plan is on no branch.
         orchestrator.tick().await.expect("the tick runs");
 
         let started = adapter.started();
