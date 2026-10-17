@@ -13,6 +13,8 @@ pub mod criteria;
 pub mod delivery;
 /// Each role's folder under `docs/catervas/`, its human documents and their agent twins.
 pub mod folders;
+/// What leaves for the forge, with no task id in it (ADR 0066).
+pub mod forge_text;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
 /// The governor: every rule of `docs/SPEC.md` section 5 as pure functions.

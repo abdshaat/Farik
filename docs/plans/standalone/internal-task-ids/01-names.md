@@ -189,7 +189,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
     - `"feat: CTV-x and ACTV-3"` is `None`;
     - `"fix: round the total"` is `None`.
 
-- [ ] `feat(core): what leaves for the forge names no task`
+- [x] `feat(core): what leaves for the forge names no task`
 
 ## Verification
 
