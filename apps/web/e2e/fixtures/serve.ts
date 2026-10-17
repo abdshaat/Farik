@@ -173,8 +173,6 @@ export async function startServe(o: {
 	team?: "pm-architect-developer" | "pm-architect-developer-designer";
 	/** How long each recorded session waits before it plays, so a page sees each state it leaves. */
 	paceMs?: number;
-	/** Whether `team`'s team plans its work in sprints (step 15); it does not by default. */
-	sprints?: boolean;
 	/**
 	 * Whether a delivery is already closed, holding no task: accepting a task then files no
 	 * changelog task, which would take an id the journey's transcripts name (ADR 0062).
@@ -208,7 +206,7 @@ export async function startServe(o: {
 		args.push("--no-keychain");
 	} else {
 		setUp(project, o.setupPending === true, docker);
-		if (o.team) writeTeam(project, docker, o.sprints === true);
+		if (o.team) writeTeam(project, docker);
 		// The Designer has no browser without Docker's sandbox (D3), so its team runs in it.
 		if (docker) {
 			args.push("--sandbox-image", SANDBOX_IMAGE);
@@ -290,9 +288,9 @@ function setUp(
 /**
  * Mira (Product Manager), Ada (Architect, who reviews Theo) and Theo (Developer),
  * and Iris (UI/UX Designer) when `designer`: with the Playwright connector and the site's
- * preview, busybox's `httpd` on port 4401. The team does not plan its work in sprints unless `sprints`, so a journey's work flows as soon as it is ready.
+ * preview, busybox's `httpd` on port 4401.
  */
-function writeTeam(project: string, designer: boolean, sprints: boolean): void {
+function writeTeam(project: string, designer: boolean): void {
 	const agent = (id: string, name: string, role: string, extra = "") =>
 		`- display_name: ${name}\n  id: ${id}\n${extra}  model:\n    effort: high\n    id: claude-opus-5-5\n  persona: ${name}.\n  role: ${role}\n  status: active\n`;
 	const path = join(project, ".catervas/team.yaml");
@@ -309,9 +307,11 @@ function writeTeam(project: string, designer: boolean, sprints: boolean): void {
 					"  mcp_servers:\n  - name: playwright\n    source: builtin\n",
 				)
 			: "");
+	// `catervas init` still writes `plan_in_sprints: true` until the daemon drops sprints (plan 5);
+	// no journey asks for it, so work flows as soon as it is ready.
 	yaml = yaml
 		.replace(/^agents:\n[\s\S]*?(?=^budgets:)/m, `agents:\n${agents}`)
-		.replace("plan_in_sprints: true", `plan_in_sprints: ${sprints}`);
+		.replace("plan_in_sprints: true", "plan_in_sprints: false");
 	if (designer) {
 		yaml = yaml.replace("    required: always\n", "    required: never\n");
 		// Alpine's own busybox leaves `httpd` out; the project carries busybox-extras' as `busybox`.

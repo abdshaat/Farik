@@ -1,14 +1,18 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { events, mergeByHand, startServe } from "./fixtures/serve.ts";
-import { screenshots, smallLinks } from "./fixtures/shots.ts";
+import { screenshots } from "./fixtures/shots.ts";
+
+/** No page the journey visits says a word about sprints. */
+const noSprint = async (page: Page) =>
+	expect(await page.locator("body").innerText()).not.toMatch(/sprint/i);
 
 /** The lanes, as the board names their headings (`lane-<lane>-title`), in the order a task moves. */
 const LANES = ["planning", "todo", "in_progress", "stuck", "review", "done"];
 
-test("a sprint runs on the board by itself, from its planning to its look back", async ({
+test("work runs on the board by itself, from its plan to the team's look back", async ({
 	page,
 }) => {
-	// Ten paced sessions and five pages photographed twice outlast the default 30 seconds.
+	// Eight paced sessions and four pages photographed twice outlast the default 30 seconds.
 	test.setTimeout(90_000);
 	const serve = await startServe({
 		team: "pm-architect-developer",
@@ -17,7 +21,6 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		transcripts: [
 			"triage_ctv_1_small_by_pm",
 			"refine_writes_task_for_theo_ctv_1",
-			"planning_ceremony_ctv_1",
 			"plan_assigns_ctv_1_to_theo",
 			"implement_finishes_ctv_1",
 			"review_writes_note",
@@ -28,31 +31,14 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 	});
 	const at = (path: string) => `http://127.0.0.1:${serve.port}${path}`;
 	try {
-		// 1. A sprint with a $20 budget; the board's sprint line opens its page.
+		// 1. No sprint anywhere: ready work would show under "To do".
 		await page.goto(serve.url);
 		await page.getByRole("link", { name: "Board" }).first().click();
-		await expect(
-			page.getByText(
-				"No sprint is running. The team works through the board in order.",
-			),
-		).toBeVisible();
-		await page.getByRole("button", { name: "Start a sprint" }).click();
-		const start = page.getByRole("dialog", { name: "Start sprint 1" });
-		await start.getByLabel("Stop handing out new work after").check();
-		await expect(start.getByLabel("Dollars")).toHaveValue("20.00");
-		await start.getByRole("button", { name: "Start sprint 1" }).click();
-		await page
-			.getByRole("link", { name: "Sprint 1 is running: 0 of 0 tasks done" })
-			.click();
-		await expect(page).toHaveURL(/\/sprints\/S1$/);
-		await expect(
-			page.getByText("$0.00 so far, of the $20.00 you set for this sprint."),
-		).toBeVisible();
-		expect(
-			events(serve.project).find((e) => e.kind === "sprint.started")?.body,
-		).toMatchObject({ sprint_id: "S1", budget_usd: 20, started_by: "human" });
+		await expect(page.getByRole("region", { name: "To do" })).toBeVisible();
+		await expect(page.getByRole("button", { name: /sprint/i })).toHaveCount(0);
+		await noSprint(page);
 
-		// 2. The request, filed on Today once the sprint is open, so its planning plans it.
+		// 2. The request, filed on Today.
 		await page.getByRole("link", { name: "Today" }).first().click();
 		await page
 			.getByLabel("What should the team do next?")
@@ -104,7 +90,7 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		await expect(page).toHaveURL(/\/tasks\/CTV-1$/);
 		await expect(
 			page.getByText(
-				"CTV-1 in sprint 1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeVisible();
 		const panel = page.getByRole("tabpanel");
@@ -151,7 +137,7 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 			page.getByRole("region", { name: "Done" }).getByText("Accepted"),
 		).toBeVisible();
 
-		// 5. The sprint ended by itself once its one task was accepted, and its meetings are listed.
+		// 5. The team's quiet closed the delivery by itself, and its review and look back ran.
 		await expect
 			.poll(
 				() =>
@@ -159,49 +145,35 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 						.length,
 			)
 			.toBe(1);
-		expect(
-			events(serve.project).find((e) => e.kind === "sprint.ended")?.body,
-		).toMatchObject({ sprint_id: "S1", ended_by: "governor" });
-		await page.getByRole("link", { name: "Board" }).first().click();
-		await expect(
-			page.getByText(
-				"No sprint is running. The team works through the board in order.",
-			),
-		).toBeVisible();
-		await page.goto(at("/sprints/S1"));
-		await expect(page.getByText(/Planned by Mira\. Ended /)).toBeVisible();
-		await expect(page.getByText(/^1 of 1 done\./)).toBeVisible();
-		const meetings = page.getByRole("list", { name: "Team meetings" });
-		await expect(meetings.getByRole("listitem")).toHaveText([
-			/^Planning2 posts on /,
-			/^Review1 post on /,
-			/^Looking back1 post on /,
-		]);
-		// On a phone each meeting's "Read it" is a 24 px target on one line (WCAG 2.2 target size).
-		await expect(meetings.getByRole("link", { name: "Read it" })).toHaveCount(
-			3,
+		const closed = events(serve.project).filter(
+			(e) => e.kind === "delivery.closed",
 		);
-		await page.setViewportSize({ width: 360, height: 780 });
-		await expect
-			.poll(() => smallLinks(page, 'a[href^="/channel#thread-"]'))
-			.toEqual([]);
-		await screenshots(page, "sprint");
+		expect(closed).toHaveLength(1);
+		expect(closed[0]?.body).toMatchObject({
+			trigger: "team_quiet",
+			task_ids: ["CTV-1"],
+		});
+		await page.goto(at("/channel"));
+		await expect(
+			page.getByRole("button", { name: /^Review, / }).first(),
+		).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: /^Looking back, / }).first(),
+		).toBeVisible();
+		await noSprint(page);
+		await page.getByRole("link", { name: "Board" }).first().click();
+		await noSprint(page);
 
 		// 6. The Costs page's row for each agent, with what Theo spent building.
-		await page.getByRole("link", { name: "See costs by agent" }).click();
-		await expect(page).toHaveURL(/\/costs$/);
+		await page.goto(at("/costs"));
 		const theo = page.getByRole("row", { name: /^Theo/ });
 		await expect(theo.getByRole("rowheader")).toHaveText(/^Theo/);
-		// The sprint has ended, and its column keeps its figures under its name.
-		await expect(
-			page.getByRole("columnheader", { name: "Sprint 1" }),
-		).toBeVisible();
 		await expect(theo.getByRole("cell")).toHaveText([
-			"$0.03",
 			"$0.03",
 			"Nothing to do right now",
 		]);
 		await expect(page.getByText("1 of 1", { exact: true })).toBeVisible();
+		await noSprint(page);
 		// On a phone no amount, and no one-word column name, breaks in the middle.
 		await page.setViewportSize({ width: 360, height: 780 });
 		await expect
@@ -235,6 +207,7 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		await expect(
 			page.getByRole("region", { name: "How finished work is added" }),
 		).toBeVisible();
+		await noSprint(page);
 		await screenshots(page, "team-rules");
 	} finally {
 		await serve.stop();

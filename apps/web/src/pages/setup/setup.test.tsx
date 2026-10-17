@@ -598,7 +598,7 @@ describe("setup", () => {
 			),
 		).toBeTruthy();
 		const offer = screen.getByRole("region", {
-			name: "Start with a Catervafication sprint",
+			name: "Start with a Catervafication",
 		});
 		expect(within(offer).getByText("Recommended")).toBeTruthy();
 		expect(

@@ -15,7 +15,7 @@ import type { Agent } from "./setup/TeamSetup.tsx";
  */
 export type Integration = "auto_merge" | "pull_request" | "manual";
 
-/** One card of `folder_doc_proposals.list`: an agent's changes to the product plan after one sprint review. */
+/** One card of `folder_doc_proposals.list`: an agent's changes to the product plan after one review. */
 export type DocumentChangesCard = {
 	sprintId: string;
 	agentId: string;

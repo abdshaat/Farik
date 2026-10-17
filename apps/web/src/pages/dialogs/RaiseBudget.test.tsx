@@ -54,7 +54,7 @@ describe("the raise of a marketing budget", () => {
 		expect(dialog.textContent).toContain("Now $150.00 USD, all of it spent.");
 		expect(within(dialog).queryByLabelText(/Pie pre-orders/)).toBeNull();
 		for (const words of [
-			"Kai writes the new version at once, from today to Sunday 22 November: it does not wait for a sprint.",
+			"Kai writes the new version at once, from today to Sunday 22 November.",
 			"It waits for you on Today, like any plan. Bakery near me stays paused until you approve it.",
 			"Once you approve it, Kai raises the budget at Google and starts Bakery near me again.",
 		])

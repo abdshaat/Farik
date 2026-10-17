@@ -416,7 +416,6 @@ export const en = {
 	accountKept:
 		"Catervas reads this key from the {variable} variable on this computer, so it cannot remove it. Remove it there, then start Catervas again.",
 	statusPlanning: "Planning",
-	statusBacklog: "Backlog",
 	statusToDo: "To do",
 	statusInProgress: "In progress",
 	statusReworked: "Being reworked",
@@ -427,7 +426,6 @@ export const en = {
 	statusHelp: "Needs your help",
 	statusCancelled: "Cancelled",
 	teamBand: "Your team",
-	sprintLine: "Sprint {n} is running: {done} of {total} tasks done",
 	requestLabel: "What should the team do next?",
 	requestHint:
 		"{name} reads every request and asks you if anything is unclear.",
@@ -721,8 +719,6 @@ export const en = {
 	refuseSameStatus: "That is already so, so nothing changed.",
 	refuseAgentRetired:
 		"This teammate has left the team, so this chat can be read but not added to.",
-	refuseSprintOpen: "A sprint is already open. End it before starting another.",
-	refuseNoSprintOpen: "No sprint is open right now.",
 	refuseTriage:
 		"Catervas could not size this request. Reload the page to see where it is now.",
 	refuseLock:
@@ -789,18 +785,10 @@ export const en = {
 	accountDisconnectYes: "Disconnect and pause the team",
 	board: "Board",
 	costs: "Costs",
-	sprintNone:
-		"No sprint is running. The team works through the board in order.",
-	sprintStart: "Start a sprint",
-	sprintEndEarly: "End the sprint early",
 	boardFilters: "Filters",
 	filterEveryone: "Everyone",
 	filterWaiting: "Only what is waiting on me",
 	filterMore: "More filters",
-	filterSprint: "Sprint",
-	filterSprintAll: "All",
-	filterSprintThis: "This sprint",
-	filterSprintNone: "No sprint",
 	filterRisk: "Risk",
 	filterRiskAny: "Any",
 	filterCancelled: "Show cancelled",
@@ -813,50 +801,7 @@ export const en = {
 	markPlanning: "Planning",
 	epicParts: "{parts} parts, {done} done",
 	epicPartsOne: "1 part, {done} done",
-	sprintStartTitle: "Start sprint {n}",
-	sprintStartWhat:
-		"A sprint is a batch of work the team finishes before it stops to look back. It ends by itself when every task in it is done.",
-	sprintStartPlanner:
-		"{name} will plan it: {name} picks from the {count} ready tasks on the board, posts the plan in the channel, and then runs a short standup each day and a review and a look back at the end.",
-	sprintLimit: "Spending limit for this sprint",
-	sprintNoLimit: "No limit",
-	sprintLimitAfter: "Stop handing out new work after",
-	sprintLimitDollars: "Dollars",
-	sprintLimitHint:
-		"When the limit is reached, work already started may finish. You can leave it empty and watch spending on the Costs page.",
-	sprintNotNow: "Not now",
-	sprintEndTitle: "End sprint {n} early?",
-	sprintEnd: "End sprint {n}",
-	sprintEndLeaves:
-		"{count} tasks are not finished. They leave the sprint and go back on the board exactly as they are. Nothing is lost, and work in progress keeps going. {name} will still run the review and the look back.",
-	sprintEndLeavesOne:
-		"1 task is not finished. It leaves the sprint and goes back on the board exactly as it is. Nothing is lost, and work in progress keeps going. {name} will still run the review and the look back.",
-	sprintKeep: "Keep it running",
-	sprintNoneBacklog:
-		"No sprint is running. Ready work waits in the Backlog until you start one.",
-	sprintMoreOne: "1 more waits in the Backlog for the next sprint.",
-	sprintMore: "{count} more wait in the Backlog for the next sprint.",
-	laneBacklogNote: "Ready work waits here until you start a sprint.",
-	laneBacklogLate: "Waits here for the next sprint.",
-	backlogReady: "Ready",
-	backlogNextSprint: "Ready. Waits for the next sprint",
-	backlogEpicReady: "Ready, broken into {count} tasks",
-	backlogEpicReadyOne: "Ready, broken into 1 task",
-	sprintStartBacklog: "Waiting in the Backlog",
-	sprintStartEpic: "Epic, {count} tasks",
-	sprintStartEpicOne: "Epic, 1 task",
-	sprintStartTask: "Task",
-	sprintStartPlansBacklog:
-		"{name} plans it: {name} picks from this work, posts the plan in Chats, under Team, and then runs a short standup each day and a review and a look back at the end. Work that becomes ready later waits for the next sprint.",
-	sprintEndBacklog:
-		"{count} tasks are not finished. They leave the sprint and wait in the Backlog for the next one. A session already running finishes. {name} will still run the review and the look back.",
-	sprintEndBacklogOne:
-		"1 task is not finished. It leaves the sprint and waits in the Backlog for the next one. A session already running finishes. {name} will still run the review and the look back.",
-	todayBacklog: "{count} pieces of work are ready and wait in the Backlog.",
-	todayBacklogOne: "1 piece of work is ready and waits in the Backlog.",
-	todayBacklogStart: "Start a sprint",
-	todayBacklogBegin: "to begin them.",
-	todayBacklogBeginOne: "to begin it.",
+	notNow: "Not now",
 	rulesDocuments: "Documents",
 	documentsHtml: "Write documents as HTML",
 	documentsHtmlNote:
@@ -870,7 +815,6 @@ export const en = {
 	refuseNothingToRewrite:
 		"Every document your team can rewrite is already HTML.",
 	taskBack: "Back to the board",
-	taskInSprint: "{id} in sprint {n}.",
 	taskDoing: "{name} is doing it",
 	taskReviews: "{name} reviews it",
 	taskChecked: "Catervas checks it",
@@ -913,7 +857,6 @@ export const en = {
 	toldRefused: "Catervas did not allow a move to {status}.",
 	toldAged: "The call for help has been waiting a while.",
 	toldPullRequest: "Catervas opened a pull request for it.",
-	toldPlanned: "{who} planned it into a sprint.",
 	toldDrift: "Catervas found its files out of step with its log.",
 	toldSaid: "{who} said something about it in the channel.",
 	toldDenied: "Catervas stopped a step {who} tried.",
@@ -972,46 +915,19 @@ export const en = {
 	taskCancelTitle: "Cancel {title}?",
 	taskCancelWhy: "Why cancel it?",
 	taskCancelKeep: "Keep it",
-	sprintTitle: "Sprint {n}",
-	sprintBack: "Back to the board",
-	sprintStartedBy: "Started {day} by {who}.",
-	sprintPlannedBy: "Planned by {name}.",
-	sprintEndedOn: "Ended {day}.",
-	sprintYou: "you",
-	sprintTasks: "In this sprint",
-	sprintTasksDone:
-		"{done} of {total} done. The sprint ends by itself when the last one is accepted or cancelled.",
-	sprintMeetings: "Team meetings",
-	sprintMeetingsLead:
-		"{name} runs these in the channel. Each one is a short post you can read in a minute.",
-	sprintNoMeetings: "No meetings yet.",
 	meetingPlanning: "Planning",
 	meetingStandup: "Standup",
 	meetingReview: "Review",
 	meetingRetro: "Looking back",
 	meetingPosts: "{posts} posts on {day}",
 	meetingPostsOne: "1 post on {day}",
-	sprintSpending: "Spending",
-	sprintSpentOf: "{spent} so far, of the {budget} you set for this sprint.",
-	sprintSpentNoLimit: "{spent} so far, with no limit set for this sprint.",
-	sprintSeeCosts: "See costs by agent",
 	costsToday: "Today the team has spent {spent}, with no daily limit set.",
 	costsTodayOf: "Today the team has spent {spent}, of {limit} a day.",
-	costsSprint: "Sprint {n} has spent {spent} of its {budget} limit.",
-	costsSprintNoLimit: "Sprint {n} has spent {spent}, with no limit.",
-	costsSprintEnded:
-		"Sprint {n} has ended. It spent {spent} of its {budget} limit.",
-	costsSprintEndedNoLimit:
-		"Sprint {n} has ended. It spent {spent}, with no limit.",
-	costsSprintEndedColumn: "Sprint {n}",
-	costsSprintWhy:
-		"Planning meetings, and work done before a task joined the sprint, count toward the day, not the sprint.",
 	costsSetLimit: "Set a daily limit",
 	limitSave: "Save the limit",
 	costsByAgent: "By agent",
 	costsAgent: "Agent",
 	costsTodayColumn: "Today",
-	costsSprintColumn: "This sprint",
 	costsNow: "Right now",
 	costsResting:
 		"Resting is not a problem. An agent whose AI account reached its usage limit stops, writes down where it was, and picks up again at the time shown. The rest of the team keeps working.",
@@ -1020,8 +936,6 @@ export const en = {
 		"Your chats with the team; they count toward the daily limit.",
 	costsHowWell: "How well the team works",
 	costsWholeProject: "Across the whole project.",
-	costsSprintOnly: "In sprint {n} only.",
-	costsShowSprint: "Show sprint {n} only",
 	metricNotYet: "Not yet: no work has been accepted",
 	metricFirstTry: "Work accepted on the first try",
 	metricFirstTryValue: "{first} of {accepted}",
@@ -1105,7 +1019,6 @@ export const en = {
 	channelMentionList: "People to mention",
 	channelMentionCount:
 		"People to mention: {n}. Use the arrow keys, then Enter.",
-	channelMeetings: "Meetings in this sprint",
 	channelMeetingLink: "{thread}, {weekday}",
 	channelMeetingGone: "That meeting is older than the channel keeps.",
 	channelEarlier: "Show earlier messages",
@@ -1114,7 +1027,6 @@ export const en = {
 	chatsNewMessages: "New messages",
 	channelPreview: "In the channel",
 	channelOpen: "Open the channel",
-	sprintReadIt: "Read it",
 	previewTitle: "How to open your app",
 	previewLead:
 		"{designer} opens your app in a browser to check its screens.\nTell Catervas the commands that start it.",
@@ -1916,7 +1828,7 @@ export const en = {
 		"The plan’s total rises by the same amount, from {from} to {to} {currency}.",
 	raiseNext: "What happens next",
 	raiseNextWrites:
-		"{agent} writes the new version at once, from today to {day}: it does not wait for a sprint.",
+		"{agent} writes the new version at once, from today to {day}.",
 	raiseNextWaits:
 		"It waits for you on Today, like any plan. {names} stays paused until you approve it.",
 	raiseNextWaitsMany:
@@ -2505,7 +2417,7 @@ export const en = {
 	readyLead:
 		"{names} have joined {team}. They know what Catervas found in your project; next, they can learn it properly.",
 	readyRecommended: "Recommended",
-	readyOfferTitle: "Start with a Catervafication sprint",
+	readyOfferTitle: "Start with a Catervafication",
 	readyOfferLead:
 		"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
 	readyPm:
@@ -2524,13 +2436,13 @@ export const en = {
 	refuseCatervaficationStarted:
 		"Your team is already documenting this project.",
 	refuseCatervaficationNewProject:
-		"A new project's documenting sprint starts by itself once its product plan is accepted.",
+		"A new project's documenting work starts by itself once its product plan is written.",
 	refuseCatervaficationNoPm:
 		"Your Product Manager is paused. Resume them on the Team page, then start.",
 	refuseCatervaficationNoWriters:
 		"No one on your team can both write and have their notes checked. Add an Architect or a Scrum Master on the Team page, then start.",
 	cardTitle: "Your team hasn’t documented this project yet",
 	cardLead:
-		"A first sprint where your team reads your project and writes down what it learns, before building anything.",
+		"A first piece of work where your team reads your project and writes down what it learns, before building anything.",
 	toldCatervafication: "Catervas filed it to document the project.",
 };

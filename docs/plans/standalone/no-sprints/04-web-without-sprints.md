@@ -166,7 +166,7 @@ lane walk (`LANES`, the cell checks) and drops every sprint step, the `/sprints/
   "Review" and a "Looking back" thread; no page visited shows text matching `/sprint/i`.
 - C3's web half, as a command (Verification).
 
-- [ ] `feat(web): no sprint words left, and the board journey without sprints`
+- [x] `feat(web): no sprint words left, and the board journey without sprints`
 
 ## Verification
 

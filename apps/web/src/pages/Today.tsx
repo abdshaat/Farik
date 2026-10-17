@@ -190,7 +190,7 @@ export function Today() {
 	const { data: posts, again: askPostsAgain } = useQuery<{
 		posts: GoingOutPost[];
 	}>("social_posts.list", {});
-	// The product plan's changes, one card for each sprint review and agent that proposed them.
+	// The product plan's changes, one card for each review and agent that proposed them.
 	const { data: planChanges, again: askPlanChangesAgain } = useQuery<{
 		cards: DocumentChangesCard[];
 	}>("folder_doc_proposals.list", {});
@@ -199,7 +199,7 @@ export function Today() {
 	// are written, the plan's acceptance row is shown as the plan itself.
 	const { data: plan } = useQuery<ProductPlanState>("product_plan.state", {});
 	const interviewing = !!plan?.newProject && !plan.approved;
-	// "Later" leaves a quiet card here until the owner starts the documenting sprint.
+	// "Later" leaves a quiet card here until the owner starts the documenting work.
 	const { data: documenting, again: askDocumentingAgain } =
 		useQuery<Catervafication>("catervafication.get", {});
 	// While the provider refuses the key the team is paused, and one row says so first.
