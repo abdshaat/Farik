@@ -13,10 +13,21 @@ import {
 	type WaitingRow,
 } from "../components/MessageText.tsx";
 import { useMedia, useWide } from "../shell/Shell.tsx";
+import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import styles from "./Channel.module.css";
-import { MEETINGS, threadAnchor } from "./SprintPage.tsx";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
+
+const MEETINGS: Record<string, keyof typeof en | undefined> = {
+	planning: "meetingPlanning",
+	standup: "meetingStandup",
+	review: "meetingReview",
+	retro: "meetingRetro",
+};
+
+/** A ceremony's block in the channel: its thread and UTC day, which "Read it" opens. */
+const threadAnchor = (thread: string, at: string) =>
+	`thread-${thread}-${at.slice(0, 10)}`;
 
 /** One message of `channel.messages`, in camelCase. */
 type Message = {

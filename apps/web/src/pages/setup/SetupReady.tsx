@@ -1,10 +1,10 @@
 import { Avatar, type AvatarKey, Button, RoleTag } from "@catervas/ui";
 import { Navigate, useNavigate } from "react-router";
+import { useCommand } from "../../app/command.ts";
 import { useQuery } from "../../app/store.ts";
 import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
 import type { Catervafication } from "../CatervaficationCard.tsx";
-import { useCommand } from "../dialogs/StartSprint.tsx";
 import styles from "./setup.module.css";
 import type { Team } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";

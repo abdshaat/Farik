@@ -1,10 +1,10 @@
 import { Button, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentChanges.module.css";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
 import { docKey, fileRoute, isHtml } from "./files.ts";
 import type { Agent } from "./setup/TeamSetup.tsx";

@@ -1,10 +1,10 @@
 import { Button, Choice, Dialog, TextField, uiStrings } from "@catervas/ui";
 import { useState } from "react";
+import { useCommand } from "../../app/command.ts";
 import { t } from "../../strings/t.ts";
 import { type OrderItem, STATUSES, statusWords, todayIso } from "../orders.ts";
 import styles from "../pages.module.css";
 import { DayField } from "./DayField.tsx";
-import { useCommand } from "./StartSprint.tsx";
 
 /** The most characters a status's note has (spec 6.10); the daemon refuses a longer one. */
 const MOST_NOTE = 300;

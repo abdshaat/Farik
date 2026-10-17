@@ -1,6 +1,6 @@
 import { Button, Dialog } from "@catervas/ui";
+import { useCommand } from "../../app/command.ts";
 import { t } from "../../strings/t.ts";
-import { useCommand } from "./StartSprint.tsx";
 
 /** Ending the sprint early: its unfinished tasks go back on the board, or wait in the Backlog when
  * the team plans in sprints, and `planner` still runs the review and the look back. */

@@ -1,13 +1,13 @@
 import { Button, DiffView, StatusWord } from "@catervas/ui";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { useQuery } from "../app/store.ts";
 import { movedWords, roleWord, statusWord } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { DesignReview, type Recorded, type Review } from "./DesignReview.tsx";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import {
 	approvesPlan,
 	dollars,

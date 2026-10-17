@@ -102,7 +102,7 @@ export type Lane = "planning" | "todo" | "in_progress" | "stuck" | "review" | "d
 Files as the map's Task 1. A move only: no behaviour, no new test; the suite is the check (stage 3
 REFACTOR). `cargo xtask check` passes before and after.
 
-- [ ] `refactor(web): move useCommand and the meeting words out of the sprint pages`
+- [x] `refactor(web): move useCommand and the meeting words out of the sprint pages`
 
 ### Task 2: the board, Today, the channel and the task page
 

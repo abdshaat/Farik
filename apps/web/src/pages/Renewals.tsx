@@ -1,9 +1,9 @@
 import { Button } from "@catervas/ui";
 import { useState } from "react";
+import { useCommand } from "../app/command.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import { AskTeam } from "./dialogs/AskTeam.tsx";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
 import { aheadDay, calendarDay, type Renewal } from "./orders.ts";
 import styles from "./Today.module.css";

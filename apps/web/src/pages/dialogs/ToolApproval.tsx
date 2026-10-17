@@ -1,10 +1,10 @@
 import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
+import { useCommand } from "../../app/command.ts";
 import { t } from "../../strings/t.ts";
 import type { AllowanceRow, Allowances } from "../allowances.tsx";
 import styles from "../pages.module.css";
-import { useCommand } from "./StartSprint.tsx";
 
 /** One connector call waiting to be allowed, as `waiting.list` gives it. */
 export type ToolAsk = {
