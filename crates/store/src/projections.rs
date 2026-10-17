@@ -3049,17 +3049,33 @@ mod tests {
         assert_eq!(counted(&projections), None);
         let a = record(&log, &projections, &moved("CTV-1", "ready", "assigned"));
         assert_eq!(counted(&projections), Some(a.envelope.seq));
-        record(&log, &projections, &moved("CTV-1", "assigned", "in_progress"));
+        record(
+            &log,
+            &projections,
+            &moved("CTV-1", "assigned", "in_progress"),
+        );
         assert_eq!(
             counted(&projections),
             Some(a.envelope.seq),
             "a move between counted statuses keeps it"
         );
-        record(&log, &projections, &moved("CTV-1", "in_progress", "blocked"));
-        let d = record(&log, &projections, &moved("CTV-1", "blocked", "in_progress"));
+        record(
+            &log,
+            &projections,
+            &moved("CTV-1", "in_progress", "blocked"),
+        );
+        let d = record(
+            &log,
+            &projections,
+            &moved("CTV-1", "blocked", "in_progress"),
+        );
         assert_eq!(counted(&projections), Some(d.envelope.seq));
 
-        let asked = record(&log, &projections, &about(EventKind::QuestionAsked, "CTV-1"));
+        let asked = record(
+            &log,
+            &projections,
+            &about(EventKind::QuestionAsked, "CTV-1"),
+        );
         assert_eq!(counted(&projections), Some(d.envelope.seq));
         let e = record(
             &log,
@@ -3089,6 +3105,9 @@ mod tests {
         assert_eq!(row.assignee_id.as_deref(), Some("dev-b"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
         assert_eq!(row.counted_seq, Some(f.envelope.seq));
-        assert!(super::counted_status(TaskStatus::Rejected) && !super::counted_status(TaskStatus::Blocked));
+        assert!(
+            super::counted_status(TaskStatus::Rejected)
+                && !super::counted_status(TaskStatus::Blocked)
+        );
     }
 }

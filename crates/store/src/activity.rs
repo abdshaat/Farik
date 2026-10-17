@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr as _;
 
-use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::marketing::{CapScope, network_name};
 use catervas_core::team::{AgentStatus, Team};
 use catervas_protocol::event::{
@@ -92,6 +92,10 @@ pub fn activity(
         })
         .unwrap_or(false);
     let titles = titles(projections)?;
+    let board = projections.board()?;
+    let limit = usize::try_from(team.policy.wip_limit_per_agent)
+        .unwrap_or(usize::MAX)
+        .max(1);
     let waiting = crate::waiting::waiting(projections, log, files, team)?;
     let proposals = folder_docs(log)?.proposals;
     let mut all = Vec::new();
@@ -137,6 +141,18 @@ pub fn activity(
                 until.format("%H:%M")
             );
             all.push(one(ActivityState::Resting, line, None, Some(until)));
+            continue;
+        }
+        // A task of its own under way keeps an agent working past a stuck one (ADR 0062): the
+        // first of its counted tasks, up to its limit and in the order they began to count, that
+        // is not yet with a reviewer. The runtime's `within_limit`, which the store cannot read.
+        if let Some(row) = under_way(&board, id, limit) {
+            all.push(one(
+                ActivityState::Working,
+                format!("Building {}", row.title),
+                Some(row.task_id.clone()),
+                None,
+            ));
             continue;
         }
         if let Some(item) = waiting
@@ -209,6 +225,32 @@ fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> Str
         ),
         (None, None) => format!("Waiting on you: {}", item.line),
     }
+}
+
+/// The task `agent` has under way without a session running: its non-epic tasks that count
+/// towards the work-in-progress limit (`TaskProjection::counts_towards_wip`), ordered by when each
+/// began to count and then by the board's order, the first `limit` of them, and of those the first
+/// `assigned`, `in_progress` or `rejected`.
+fn under_way<'a>(
+    board: &'a [crate::TaskProjection],
+    agent: &str,
+    limit: usize,
+) -> Option<&'a crate::TaskProjection> {
+    let mut held: Vec<&crate::TaskProjection> = board
+        .iter()
+        .filter(|row| {
+            row.kind != TaskKind::Epic
+                && row.counts_towards_wip()
+                && row.assignee_id.as_deref() == Some(agent)
+        })
+        .collect();
+    held.sort_by_key(|row| row.counted_seq.unwrap_or(0));
+    held.into_iter().take(limit).find(|row| {
+        matches!(
+            row.status,
+            TaskStatus::Assigned | TaskStatus::InProgress | TaskStatus::Rejected
+        )
+    })
 }
 
 /// What `agent` is doing in its session that has started and not ended, on which task, in which
@@ -1155,7 +1197,9 @@ mod tests {
             json!({ "purpose": "ceremony", "model": "claude-opus-5", "effort": "low", "thread": "standup" }),
         );
         let now = states(&board);
-        assert_eq!(now[1].2, "Nothing to do right now");
+        // Its task is still under way, so with no session it is still Building (ADR 0062).
+        assert_eq!(now[1].1, ActivityState::Working);
+        assert_eq!(now[1].2, "Building Login form");
         assert_eq!(now[3].2, "Running the standup");
         let later = activity(
             &board.log,
@@ -1241,12 +1285,13 @@ mod tests {
             "design_plan.proposed",
             json!({ "plan": "A plan." }),
         );
+        // Its task is still under way, so with no session it is still Building (ADR 0062).
         assert_eq!(
             iris(&board),
             (
-                ActivityState::Idle,
-                "Nothing to do right now".to_string(),
-                None
+                ActivityState::Working,
+                "Building A calmer menu page".to_string(),
+                Some("CTV-1".to_string())
             )
         );
     }
@@ -1773,5 +1818,66 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn an_agent_with_a_stuck_task_and_another_under_way_is_working() {
+        let board = Board::new("activity-stuck-and-working");
+        let team = five();
+        board.file("CTV-1", "Login form", |_| {});
+        board.moved(
+            at(9, 1),
+            "CTV-1",
+            ("draft", "blocked"),
+            "linus",
+            (Some("linus"), Some("grace")),
+        );
+        board.session(
+            at(9, 2),
+            Some("CTV-1"),
+            "linus",
+            "session-1",
+            "question.asked",
+            json!({ "question": "Which colour?", "asked_by": "linus" }),
+        );
+        board.file("CTV-2", "Logout page", |_| {});
+        board.moved(
+            at(9, 3),
+            "CTV-2",
+            ("draft", "in_progress"),
+            "linus",
+            (Some("linus"), Some("grace")),
+        );
+        let linus = |board: &Board| {
+            activity(
+                &board.log,
+                &board.projections,
+                &board.files,
+                &team,
+                at(12, 0),
+            )
+            .expect("the store reads")
+            .into_iter()
+            .find(|one| one.agent_id == "linus")
+            .expect("linus is on the team")
+        };
+
+        let one = linus(&board);
+        assert_eq!(one.state, ActivityState::Working);
+        assert_eq!(one.line, "Building Logout page");
+        assert_eq!(
+            one.task_id.map(|id| id.to_string()),
+            Some("CTV-2".to_string())
+        );
+        assert_eq!(one.session_id, None);
+
+        board.moved(
+            at(9, 4),
+            "CTV-2",
+            ("in_progress", "accepted"),
+            "linus",
+            (Some("linus"), Some("grace")),
+        );
+        assert_eq!(linus(&board).state, ActivityState::Waiting);
     }
 }

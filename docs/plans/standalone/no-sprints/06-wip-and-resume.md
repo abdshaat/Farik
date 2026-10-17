@@ -208,7 +208,7 @@ Files: `crates/store/src/activity.rs`.
   `dev-a`'s activity is `Working`, line `Building <CTV-2's title>`, `task_id` CTV-2, `session_id`
   `None`; with CTV-2 `accepted` instead it is `Waiting` as today.
 
-- [ ] `feat(store): an agent working past a stuck task shows as working`
+- [x] `feat(store): an agent working past a stuck task shows as working`
 
 ## Verification
 
