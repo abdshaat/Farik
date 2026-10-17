@@ -168,7 +168,7 @@ pub(crate) struct HeldAdapter { /* inner, held, starts, running */ }
 pub(crate) struct HeldStart { pub(crate) agent: String, pub(crate) task: Option<String>, pub(crate) purpose: SessionPurpose, pub(crate) alongside: Vec<String> }
 impl HeldAdapter {
     pub(crate) fn new(inner: Arc<dyn RuntimeAdapter>) -> Arc<Self>;
-    /// Starts `agent`'s held session on the inner adapter. Panics when none is held.
+    /// Starts `agent`'s oldest held session on the inner adapter. Panics when none is held.
     pub(crate) fn release(&self, agent: &str);
     pub(crate) fn starts(&self) -> Vec<HeldStart>;
     /// The agents whose sessions run now, sorted.

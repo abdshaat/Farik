@@ -33,13 +33,14 @@ These plans build on the three earlier branches and re-plan none of their work. 
 
 ## Order
 
-One executor (Sonnet 5.5) runs the plans in this order, one task at a time, each task one commit,
+One executor (Sonnet 5.5) runs the plans in this order (2b after 2), one task at a time, each task one commit,
 each task leaving `cargo xtask check` passing (it runs `pnpm check` too).
 
 | Order | Plan | What it does |
 |---|---|---|
 | 1 | `01-wip.md` | A task under review no longer counts towards its assignee's WIP; a sent-back task counts from its rejection and stays with its author (P2) |
 | 2 | `02-sessions-run-together.md` | The turn, `Work`, `Orchestrator::next`: each agent's session runs beside the others', one per agent; the founder's scenario as the test (P1, P3, P4 a and c) |
+| 2b | `02b-chat-forks.md` | A chat is a fork: it runs at once beside its agent's work session, one per agent, bounded to answer quickly, told what the agent is doing now (the founder's answer of 2026-10-16) |
 | 3 | `03-day-budget-stops-all.md` | A daily budget crossed by one session stops every other running session (P1's budgets, P4 b) |
 | 4 | `04-driving-processes.md` | `catervas run`, `serve`, `plan` and `contract new` drive through `next`, print each start, and drain on stop or failure |
 | 5 | `05-spec.md` | `docs/SPEC.md` revision 0.118 records it (hard rule 8, P5) |

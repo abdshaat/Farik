@@ -9,7 +9,8 @@ Amends:
 - **ADR 0014 and SPEC 8.2** ("Driving the team"): a driving process no longer runs one session at a time. The first Ctrl-C stops the run after every running session ends; the second aborts all of them.
 - **ADR 0053**: unchanged in what it decides (one process drives one project), but the process now runs several sessions at once.
 - **ADR 0062's plan 06** (CTV-9, `docs/plans/standalone/no-sprints/06-wip-and-resume.md`): its counted statuses lose `verifying`, its `resume_elsewhere` no longer hands over a `rejected` task, and its "no two agents" argument no longer rests on one session at a time.
-- **SPEC 5.2** (the WIP limit of `ready -> assigned`), **5.5** (a daily budget crossed while sessions run), **5.14** ("One task integrates at a time": unchanged, now beside concurrent sessions), **6.7** (a `stdio` connector's folder is the agent's, and an agent runs one session at a time).
+- **ADR 0026** (one-to-one chats): a chat session runs beside its agent's work as a bounded fork.
+- **SPEC 4.3 and 5.9** (chats), **5.2** (the WIP limit of `ready -> assigned`), **5.5** (a daily budget crossed while sessions run), **5.14** ("One task integrates at a time": unchanged, now beside concurrent sessions), **6.7** (a `stdio` connector's folder is the agent's, and an agent runs one session at a time).
 
 ## Context
 
@@ -17,7 +18,7 @@ Amends:
 
 ## Decision
 
-**Sessions run at once, one per agent.** Each active agent may have one session running while other agents' sessions run. An agent never runs two sessions at once: it is one worker. One process still drives a project (ADR 0053).
+**Sessions run at once, one per agent.** Each active agent may have one work session running while other agents' sessions run. An agent never runs two work sessions at once: it is one worker. Its chat is the one fork beside it (below). One process still drives a project (ADR 0053).
 
 **Everything but a session's run is still one at a time.** The driving process holds one *turn*. A tick takes the turn at its start and holds it while it reads the board, asks the governor, runs Catervas's own criteria, integrates, and prepares a session. It hands the turn back just before the session runs, and takes it back when the session has ended, to record the end, the cost, the notes, and whatever follows in the same tick. So every rule, every governor move, every integration and every sandbox or worktree made is serialised exactly as before; only the session's own stream of model turns and tool calls runs beside others. The tool calls of concurrent sessions reach the daemon and the governor as the human's commands always have, through the `Transitions` lock and the event log's own serialisation. The integration lock (one integration at a time, SPEC 5.14) and the worktree per task are unchanged.
 
@@ -26,6 +27,8 @@ Amends:
 **The order an idle agent takes its work in** is the order of the rules, unchanged: its chat, a mention, a review it owes (rule 5), its own work (rules 3 and 6: a sent-back task returned to it and resumed), a task assigned to it (rule 7), and only then new work (rule 8's assignment). Within a rule, tasks are taken in the board's order, among those CTV-9's `within_limit` lets through.
 
 **WIP: a task under review does not hold its assignee; a sent-back one does.** The statuses that count towards an agent's WIP limit are `assigned`, `in_progress` and `rejected` (and, from CTV-9, not while the row waits on the human). `verifying` does not count: the reviewer works on it, not the assignee. `rejected` counts from the moment of the rejection, so a Developer whose first task comes back while it works on the second is given no third: when the second goes to review, the first is the one within its limit, and rule 3 then rule 6 return it and resume it. A sent-back task never interrupts the session under way, since its assignee is busy until that session ends. CTV-9's `resume_elsewhere` does not hand a `rejected` task to another agent: the rework is its author's, who knows the work and the reviewer's note. The private folder's hold (SPEC 6.6) is unchanged and still counts a task in `verifying`.
+
+**A chat is a fork** (the founder, 2026-10-16, answering the question this ADR first left open: "The agent does not stop his current task, but it forks itself to either answer the user question or create a new task to the backlog. The process of agents answering questions must be quick."). A chat session is the one exception to one session per agent: it starts at once beside the agent's work session, which it does not touch, and it holds no task. An agent has at most one chat fork at a time; messages written while it runs are answered by the next. It stays what a chat is (no contract, the project's root, no worktree, sandbox, executor, connector or browser, the read tier and the chat's tools, the agent's model at low effort), with any chat tool ADR 0063 adds, and it is bounded to be quick: 100,000 input and 4,000 output tokens, 3 minutes and 12 tool calls, or the team's limits where smaller; the new project's interview keeps the team's limits. Its first message says what the agent is doing now (the task of its running work session, else its oldest held task: id, title, status and its last note), so it can answer about its work. It counts toward the day as a chat did, and a spent day stops it with the others.
 
 **Reviews.** A reviewer reviews while the assignee works on something else. Two reviews owed by one reviewer run one after the other.
 
@@ -50,7 +53,7 @@ Amends:
 
 - With a team of a Product Manager, an Architect and a Developer, the Architect's review of one task and the Developer's work on the next overlap, as the founder described.
 - Concurrent sessions cost at once: a day's budget is spent sooner in wall-clock time, and the daily stop now cuts running sessions short; an aborted session's unrecorded usage is the residual, as for any aborted session.
-- A chat with an agent that is working waits until its session ends, at most its wall clock (30 minutes by default), since a chat is one of its sessions. Before this change a chat waited for whichever session the whole team was running.
+- A chat is answered while its agent works, within minutes at most; before this change it waited for whichever session the whole team was running. Today a fork can answer and propose a request the owner sends; it files no task itself unless ADR 0063 gives the chat such a tool.
 - A tick busy outside a session (Catervas's own criteria, an integration) still holds the turn, so no other session starts during it; running sessions are unaffected.
 - Recorded-transcript tests that drive whole runs consume their transcripts in the order sessions start, which can now differ from the order they ended.
 - Plans: `docs/plans/standalone/parallel-agents/`. SPEC revision 0.118 records it.
