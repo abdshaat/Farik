@@ -32,6 +32,7 @@ use super::{
 use crate::channel::post_system;
 use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
+use crate::tools::folders::plain_names;
 use crate::transitions::{INTEGRATION_LOCK, integration_lock, is_move_into};
 
 /// Who asked for an integration: the tick, on the team's policy, or the human.
@@ -144,7 +145,7 @@ impl Subject {
     fn branch(&self, tools: &ToolDeps) -> Result<String, OrchestratorError> {
         Ok(match self {
             Self::Task(task_id) => task_branch(&tools.files.read_contract(task_id)?),
-            Self::FolderChange(change) => format!("docs/folder-{change}"),
+            Self::FolderChange(change) => folder_change(tools, *change)?.branch,
         })
     }
 
@@ -160,17 +161,9 @@ impl Subject {
                 ))
             }
             Self::FolderChange(change) => {
-                let paths = folder_change(tools, *change)?
-                    .paths
-                    .iter()
-                    .map(|path| {
-                        path.strip_prefix("docs/catervas/")
-                            .unwrap_or(path)
-                            .to_string()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Ok(format!("Folder change {change}: {paths}"))
+                let held = folder_change(tools, *change)?;
+                let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
+                Ok(format!("Docs: Update {}", plain_names(&paths)))
             }
         }
     }
@@ -1348,7 +1341,7 @@ mod tests {
             "{refusal:?}"
         );
         harness.merge_by_hand("CTV-1");
-        harness.merge_branch_by_hand("docs/folder-1");
+        harness.merge_branch_by_hand(&harness.folder_branch(1));
         orchestrator.tick().await.expect("the tick runs");
         orchestrator.tick().await.expect("the tick runs");
         let integrated = integrations(&harness);
@@ -2412,7 +2405,7 @@ mod tests {
 
     /// The owner merges folder change `change` by hand and asks for it to be added.
     fn adds(harness: &Harness, orchestrator: &crate::orchestrator::Orchestrator, change: u64) {
-        harness.merge_branch_by_hand(&format!("docs/folder-{change}"));
+        harness.merge_branch_by_hand(&harness.folder_branch(change));
         block_on(
             orchestrator
                 .handle(catervas_protocol::command::Command::FolderChangeIntegrate { change }),
@@ -2541,7 +2534,7 @@ mod tests {
         let harness = with_documents("int-rederive-auto", "pull_request");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let change = owner_saves(&harness, ROADMAP, "the owner's roadmap\n");
-        harness.merge_branch_by_hand(&format!("docs/folder-{change}"));
+        harness.merge_branch_by_hand(&harness.folder_branch(change));
         for _ in 0..3 {
             block_on(orchestrator.tick()).expect("the tick runs");
             if !rederives(&harness).is_empty() {
@@ -2586,6 +2579,9 @@ mod tests {
             .gh
             .answers("create", &format!("{PULL_URL}\n"), "", 0);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        // Named for the document, no number (ADR 0066).
+        let name = catervas_core::folders::document_name(CADENCE, &|_| None);
+        let branch = format!("docs/{}", catervas_core::branch::branch_slug(&name));
 
         let (change, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
 
@@ -2594,9 +2590,12 @@ mod tests {
             (1, format!("opened the pull request {PULL_URL}"))
         );
         assert_eq!(
-            git_output_in(&origin, &["rev-parse", "docs/folder-1"]),
-            at_root(&harness, &["rev-parse", "docs/folder-1"])
+            git_output_in(&origin, &["rev-parse", &branch]),
+            at_root(&harness, &["rev-parse", &branch])
         );
+        assert_eq!(harness.folder_branch(1), branch);
+        let written = folder_events(&harness, EventKind::FolderDocWritten);
+        assert_eq!(written[0]["body"]["branch"], branch.as_str());
         let create = harness
             .gh
             .calls()
@@ -2604,9 +2603,10 @@ mod tests {
             .find(|call| call.get(1).map(String::as_str) == Some("create"))
             .expect("a pull request is created");
         assert!(
-            create.contains(&"Folder change 1: delivery/cadence.md".to_string()),
+            create.contains(&format!("Docs: Update {name}")),
             "{create:?}"
         );
+        assert!(create.contains(&branch), "{create:?}");
         assert_eq!(harness.gh.stdin_of("create"), format!("{CADENCE}\n"));
         let opened = folder_events(&harness, EventKind::FolderChangeOpened);
         assert_eq!(
@@ -2615,7 +2615,7 @@ mod tests {
         );
 
         // Once the forge says merged, the next tick records it as the human's and brings main up.
-        let sha = harness.merge_branch_on_the_forge(&origin, "docs/folder-1");
+        let sha = harness.merge_branch_on_the_forge(&origin, &branch);
         harness.gh.answers(
             "view",
             &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
@@ -2867,7 +2867,7 @@ mod tests {
         a_docs_task_accepted(&harness);
         harness.folder_change(CADENCE, "a\n");
         harness.merge_by_hand("CTV-1");
-        harness.merge_branch_by_hand("docs/folder-1");
+        harness.merge_branch_by_hand(&harness.folder_branch(1));
         let before: Vec<String> = members
             .iter()
             .map(|member| member.git_output(&["rev-parse", "main"]))
@@ -2892,7 +2892,7 @@ mod tests {
         );
         assert_eq!(parents.split(' ').count(), 3, "{parents}");
         assert!(
-            at_root(&harness, &["branch", "--merged", "main"]).contains("docs/folder-1"),
+            at_root(&harness, &["branch", "--merged", "main"]).contains(&harness.folder_branch(1)),
             "the change landed in the project folder"
         );
         assert!(

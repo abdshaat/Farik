@@ -1749,6 +1749,7 @@ fn chosen_branch(
     }
     let taken = catervas_store::branches::taken_branches(
         &deps.tools.files,
+        &deps.tools.log,
         &repository.git,
         Some(&contract.id),
     )?;

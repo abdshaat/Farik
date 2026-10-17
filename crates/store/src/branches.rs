@@ -3,11 +3,13 @@
 use catervas_core::contract::TaskId;
 
 use crate::error::StoreError;
+use crate::event_log::EventLog;
 use crate::files::ProjectFiles;
+use crate::folder_docs::folder_docs;
 use crate::git::Git;
 
 /// The branch names a new task's or folder change's branch may not take: `git`'s branches and
-/// every contract's recorded `branch` but `except`'s. A contract that cannot be read is passed
+/// every folder change's `branch` and every contract's recorded `branch` but `except`'s. A contract that cannot be read is passed
 /// over.
 ///
 /// # Errors
@@ -15,6 +17,7 @@ use crate::git::Git;
 /// `StoreError::Io` with git's or the files' words.
 pub fn taken_branches(
     files: &ProjectFiles,
+    log: &EventLog,
     git: &Git,
     except: Option<&TaskId>,
 ) -> Result<Vec<String>, StoreError> {
@@ -31,5 +34,11 @@ pub fn taken_branches(
             taken.push(branch.as_str().to_string());
         }
     }
+    taken.extend(
+        folder_docs(log)?
+            .changes
+            .into_iter()
+            .map(|change| change.branch),
+    );
     Ok(taken)
 }
