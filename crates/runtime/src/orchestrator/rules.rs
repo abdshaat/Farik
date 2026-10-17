@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use catervas_core::branch::task_branch;
+use catervas_core::branch::{branch_slug, change_type, free_branch, task_branch};
 use catervas_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus};
 use catervas_core::folders::{is_hunt, with_format};
@@ -1700,7 +1700,7 @@ fn assigned(
         format!("in its private folder {folder}")
     } else {
         let worktree = worktree(deps, &row.task_id);
-        let branch = task_branch(&contract);
+        let mut branch = task_branch(&contract);
         if !worktree.is_dir() {
             let repository = match task_repository_of(deps, team, &contract) {
                 Ok(repository) => repository,
@@ -1709,6 +1709,7 @@ fn assigned(
                 Err(TaskRepositoryError::Missing { .. }) => return Ok(None),
                 Err(error) => return Err(repository_refused(&row.task_id, &error)),
             };
+            branch = chosen_branch(deps, &contract, &repository)?;
             if !start_worktree(deps, board, &contract, &repository, &worktree, &branch)? {
                 return Ok(None);
             }
@@ -1734,6 +1735,27 @@ fn assigned(
     }
 }
 
+/// The branch a task's worktree is first made on (ADR 0066): the one its contract records, else
+/// one named from its type and title that no branch of the repository or other task has, recorded
+/// in the contract before the worktree is made so that a start undone by a conflict makes the same
+/// branch on the next try.
+fn chosen_branch(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+    repository: &catervas_store::repos::TaskRepository,
+) -> Result<String, OrchestratorError> {
+    if let Some(recorded) = &contract.branch {
+        return Ok(recorded.as_str().to_string());
+    }
+    let taken = catervas_store::branches::taken_branches(
+        &deps.tools.files,
+        &repository.git,
+        Some(&contract.id),
+    )?;
+    let name = free_branch(change_type(contract), &branch_slug(&contract.title), &taken);
+    Ok(deps.tools.transitions.record_branch(&contract.id, &name)?)
+}
+
 /// Makes a task's worktree on `branch` from `requests::start_point`: the first branch it names,
 /// then each further one merged in the worktree itself (ADR 0061). The ref the task's diffs are
 /// taken from is written when it began anywhere but at the integration branch. Answers `false`,
@@ -1751,7 +1773,7 @@ fn start_worktree(
     let starts = requests::start_point(deps, board, contract, repository)?;
     git.create_worktree(worktree, branch, &starts[0])?;
     for from in &starts[1..] {
-        let message = format!("Start {} from {from}", contract.id.as_str());
+        let message = format!("chore: start from {from}");
         let merged = match git.merge_in(worktree, from, &message) {
             Ok(merged) => merged,
             Err(error) => {
@@ -3343,6 +3365,11 @@ mod tests {
     async fn starts_an_assigned_task_in_its_worktree() {
         let harness = Harness::new("orch-start", |_| {});
         harness.assigned("CTV-1", "dev-a", "dev-b");
+        // The name is taken at the root already, so the task's branch takes the next one (ADR 0066).
+        harness
+            .project
+            .repo
+            .git(&["branch", "feat/add-a-login-page", "main"]);
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -3353,8 +3380,9 @@ mod tests {
         assert!(worktree.is_dir());
         assert_eq!(
             git_output_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "feature/CTV-1"
+            "feat/add-a-login-page-2"
         );
+        assert_eq!(harness.branch("CTV-1"), "feat/add-a-login-page-2");
         assert_eq!(
             git_output_in(
                 &harness.project.repo.path,
@@ -3420,14 +3448,14 @@ mod tests {
             std::fs::canonicalize(app.path.join(".git")).expect("app's .git")
         );
         assert_eq!(
-            git_output_in(&app.path, &["rev-parse", "feature/CTV-1"]),
+            git_output_in(&app.path, &["rev-parse", &harness.branch("CTV-1")]),
             git_output_in(&app.path, &["rev-parse", "release"]),
             "the branch starts at app's integration branch, not its main"
         );
         assert_eq!(
             git_output_in(
                 &harness.project.repo.path,
-                &["branch", "--list", "feature/CTV-1"]
+                &["branch", "--list", &harness.branch("CTV-1")]
             ),
             ""
         );
@@ -3460,7 +3488,7 @@ mod tests {
         let worktree = harness.worktree("CTV-1");
         assert_eq!(
             git_output_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "docs/CTV-1"
+            "docs/add-a-login-page"
         );
         assert_eq!(
             common_dir_of(&worktree),
@@ -3619,7 +3647,7 @@ mod tests {
         assert_eq!(head.subject, "the first function");
         assert_eq!(
             head.sha,
-            git_output_in(&members[0].path, &["rev-parse", "feature/CTV-1"])
+            git_output_in(&members[0].path, &["rev-parse", &harness.branch("CTV-1")])
         );
     }
 
@@ -3657,7 +3685,7 @@ mod tests {
                 &harness.worktree("CTV-1"),
                 &["rev-parse", "--abbrev-ref", "HEAD"]
             ),
-            "docs/CTV-1"
+            "docs/add-a-login-page"
         );
     }
 

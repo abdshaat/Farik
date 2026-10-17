@@ -140,7 +140,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `starts_a_document_task_on_a_docs_branch` (changed): the worktree's `HEAD` is
   `docs/add-a-login-page`.
 
-- [ ] `feat(runtime): a task's branch is named from its title at its start and recorded`
+- [x] `feat(runtime): a task's branch is named from its title at its start and recorded`
 
 ### Task 2: a bug a hunt files is a fix
 

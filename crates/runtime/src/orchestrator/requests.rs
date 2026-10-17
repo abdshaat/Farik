@@ -3683,7 +3683,7 @@ mod tests {
         harness.file_under("CTV-5", "ready", Some("CTV-1"), |_| {});
         harness.project.moved("CTV-5", "ready", "assigned", &people);
         tick_until_started("CTV-5").await;
-        assert_eq!(git.commit_count("main", "feature/CTV-5"), Ok(0));
+        assert_eq!(git.commit_count("main", &harness.branch("CTV-5")), Ok(0));
         assert_eq!(
             catervas_store::git::task_base(git, "main", &task("CTV-5")),
             "main"
@@ -3725,7 +3725,11 @@ mod tests {
 
         assert!(!harness.worktree("CTV-4").exists());
         assert_eq!(
-            harness.project.deps.git.has_local_branch("feature/CTV-4"),
+            harness
+                .project
+                .deps
+                .git
+                .has_local_branch(&harness.branch("CTV-4")),
             Ok(false)
         );
         assert_eq!(harness.row("CTV-4").status, TaskStatus::Assigned);
@@ -3769,7 +3773,7 @@ mod tests {
         let base = catervas_store::git::task_base(git, "main", &task("CTV-3"));
         assert_eq!(base, "refs/catervas/start/CTV-3");
         assert_eq!(
-            git.changed_paths(&base, "feature/CTV-3"),
+            git.changed_paths(&base, &harness.branch("CTV-3")),
             Ok(vec!["site/b.txt".to_string()])
         );
         // The plan is outside the task's allowed paths, and not in its diff.

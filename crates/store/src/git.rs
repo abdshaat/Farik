@@ -206,6 +206,35 @@ impl Git {
             .to_string())
     }
 
+    /// Every branch name, local and remote-tracking, without `refs/heads/` or
+    /// `refs/remotes/<remote>/`; a remote's `HEAD` is left out. A name held both ways is listed
+    /// twice.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed`.
+    pub fn branch_names(&self) -> Result<Vec<String>, GitError> {
+        self.require_repository()?;
+        let listing = self.at_root(&[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ])?;
+        let mut names = Vec::new();
+        for reference in listing.lines() {
+            if let Some(local) = reference.strip_prefix("refs/heads/") {
+                names.push(local.to_string());
+            } else if let Some(remote) = reference.strip_prefix("refs/remotes/")
+                && let Some((_, name)) = remote.split_once('/')
+                && name != "HEAD"
+            {
+                names.push(name.to_string());
+            }
+        }
+        Ok(names)
+    }
+
     /// Makes a branch at `from`, without checking it out.
     ///
     /// # Errors
