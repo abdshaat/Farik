@@ -2,7 +2,7 @@
 //! contract is judged by `catervas-core`'s governor on facts read from Catervas's own store, never on
 //! evidence the requester supplies, and the answer is recorded either way.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -19,7 +19,7 @@ use catervas_core::governor::done::{CriterionResult, DesignReviewNeed, DoneEvide
 use catervas_core::governor::escalation::EscalationReason;
 use catervas_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
-    FolderWork, Rejection, WorkState,
+    FolderWork, ReassignmentInput, Rejection, WorkState, check_reassignment,
 };
 use catervas_core::governor::readiness::{LanedTask, ParentState, ReadinessContext};
 use catervas_core::governor::team_rules::is_ui_change;
@@ -34,8 +34,9 @@ use catervas_protocol::event::{
     BlockerWire, CatervasEvent, ContractEvaluatedBody, ContractEvaluatedBodyGate,
     CriterionRecordedBodyRunBy, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody,
     EventIds, EventKind, GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind, RejectionWire,
-    TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
+    TaskReassignedBody, TaskReassignedBodyReason, TaskStatusWire, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TransitionActorWire, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal, new_event,
 };
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
@@ -135,6 +136,15 @@ pub struct TransitionAsk {
     /// the folder (6.6): it has no commit to show its work, and the gate reads these from the
     /// folder.
     pub workbooks: Option<Vec<String>>,
+}
+
+/// The governor's answer to a hand-over of a task whose wait cleared.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReassignOutcome {
+    /// The task is the new agent's from now on; this is the event that says so.
+    Reassigned(Box<CatervasEvent>),
+    /// The task stayed with its holder, for these reasons; nothing was recorded.
+    Refused(Vec<String>),
 }
 
 /// The governor's answer, which is recorded either way.
@@ -357,6 +367,73 @@ impl Transitions {
                 Ok(TransitionOutcome::Refused(refusal))
             }
         }
+    }
+
+    /// Hands `task_id` to `to` after `check_reassignment` (ADR 0062): the contract's assignee is
+    /// written first, then `task.reassigned`, as a move writes the contract before it records the
+    /// move. The task's reviewer, worktree and branch are unchanged, so the new assignee's next
+    /// session resumes from the last commit and note. A refusal records nothing.
+    ///
+    /// # Errors
+    ///
+    /// Only when the store, the files or the clock's event fail; a refusal is an `Ok`.
+    pub fn reassign(
+        &self,
+        task_id: &TaskId,
+        to: &str,
+        team: &Team,
+    ) -> Result<ReassignOutcome, TransitionError> {
+        let _held = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        let board = self.projections.board()?;
+        let Some(row) = board.iter().find(|row| &row.task_id == task_id) else {
+            return Err(TransitionError::Store {
+                detail: format!("{} is not on the board", task_id.as_str()),
+            });
+        };
+        let mut contract = self.files.read_contract(task_id)?;
+        let from = row.assignee_id.clone().unwrap_or_default();
+        let candidate = team.agents.iter().find(|agent| agent.id.as_str() == to);
+        let input = ReassignmentInput {
+            kind: contract.kind,
+            status: row.status,
+            returning: row.counts_towards_wip() && !within_limit(team, &board).contains(task_id),
+            has_lane: contract.lane.is_some(),
+            from: from.clone(),
+            to: to.to_string(),
+            to_role: candidate.map_or(Role::Human, |agent| Role::from(agent.role)),
+            to_active: candidate.is_some_and(|agent| agent.status == AgentStatus::Active),
+            to_open_tasks: open_tasks(&board, to, row.parent.as_ref()),
+            wip_limit: u32::try_from(team.policy.wip_limit_per_agent).unwrap_or(u32::MAX),
+            reviewer_id: row.reviewer_id.clone(),
+        };
+        if let Err(reasons) = check_reassignment(&contract, &input) {
+            return Ok(ReassignOutcome::Refused(reasons));
+        }
+        let now = self.clock.now();
+        contract.assignee = Some(to.to_string());
+        contract.updated_at = Some(now);
+        self.files.write_contract(&contract)?;
+        let ids = EventIds {
+            task_id: Some(task_id.clone()),
+            agent_id: None,
+            session_id: None,
+            ..self.ids.clone()
+        };
+        let event = new_event(
+            EventBody::TaskReassigned(TaskReassignedBody {
+                from,
+                to: to.to_string(),
+                reason: TaskReassignedBodyReason::Resumed,
+            }),
+            now,
+            ids,
+        )
+        .map_err(|error| TransitionError::Event {
+            detail: format!("{error:?}"),
+        })?;
+        let appended = self.log.append(&event)?;
+        self.projections.apply(&appended)?;
+        Ok(ReassignOutcome::Reassigned(Box::new(appended)))
     }
 
     /// Writes the moved contract, then records the move and any escalation it raises. A move that
@@ -1405,6 +1482,45 @@ pub(crate) fn open_tasks(board: &[TaskProjection], agent_id: &str, under: Option
         })
         .count();
     u32::try_from(held).unwrap_or(u32::MAX)
+}
+
+/// The rows rules 3, 6 and 7 may work (ADR 0062): for each active agent, the first
+/// `max(wip_limit_per_agent, 1)` of the non-epic tasks it holds and works (`open_tasks`), ordered
+/// by when each last began to count (`counted_seq`, 0 for a row made before it was kept) and then
+/// by the board's order of task numbers, which `board` is in; every epic, whose assignee
+/// coordinates it and is never replaced; and every row whose holder is not an active agent, which
+/// the limit does not govern. Chose a floor of one so that a team that set the limit to 0 to stop
+/// new work still finishes the task under way. A counted row outside the set is "returning": its
+/// agent began other tasks first.
+pub(crate) fn within_limit(team: &Team, board: &[TaskProjection]) -> BTreeSet<TaskId> {
+    let limit = usize::try_from(team.policy.wip_limit_per_agent)
+        .unwrap_or(usize::MAX)
+        .max(1);
+    let mut allowed: BTreeSet<TaskId> = board
+        .iter()
+        .filter(|row| {
+            row.kind == TaskKind::Epic
+                || !row.counts_towards_wip()
+                || !team
+                    .active_agents()
+                    .any(|agent| Some(agent.id.as_str()) == row.assignee_id.as_deref())
+        })
+        .map(|row| row.task_id.clone())
+        .collect();
+    for agent in team.active_agents() {
+        let mut held: Vec<&TaskProjection> = board
+            .iter()
+            .filter(|row| {
+                row.kind != TaskKind::Epic
+                    && row.counts_towards_wip()
+                    && row.assignee_id.as_deref() == Some(agent.id.as_str())
+            })
+            .collect();
+        // A stable sort keeps the board's order of numbers among equal ranks.
+        held.sort_by_key(|row| row.counted_seq.unwrap_or(0));
+        allowed.extend(held.into_iter().take(limit).map(|row| row.task_id.clone()));
+    }
+    allowed
 }
 
 /// The failed Definition of Ready evaluations since refining last started over: the later of the

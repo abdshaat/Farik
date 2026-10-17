@@ -195,6 +195,97 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     verdict(reasons)
 }
 
+/// What the governor knows of a hand-over of a task whose wait cleared, which the runtime reads
+/// from the board and the team (ADR 0062).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReassignmentInput {
+    /// The task's kind.
+    pub kind: Kind,
+    /// The task's status.
+    pub status: TaskStatus,
+    /// Whether the task counts towards its holder's work-in-progress limit but lies outside it:
+    /// the holder began other tasks first, so this one cannot go on with them.
+    pub returning: bool,
+    /// Whether the task belongs to a lane, which one builder works in order (ADR 0051).
+    pub has_lane: bool,
+    /// The agent that holds the task.
+    pub from: String,
+    /// The agent that would hold it.
+    pub to: String,
+    /// The role of `to`.
+    pub to_role: Role,
+    /// Whether `to` is active.
+    pub to_active: bool,
+    /// How many tasks `to` holds and works.
+    pub to_open_tasks: u32,
+    /// The team's limit on work in progress per agent.
+    pub wip_limit: u32,
+    /// The task's reviewer, when it has one named.
+    pub reviewer_id: Option<String>,
+}
+
+/// The rules a hand-over of a task whose wait cleared must pass (ADR 0062): the task is
+/// `assigned`, `in_progress` or `rejected`, returning, no epic and in no lane; the candidate is
+/// active, holds the task's role, has room, is not the holder, and is not the reviewer, but where
+/// the role may review its own work (as `check_assignment` allows).
+///
+/// # Errors
+///
+/// Every rule the hand-over breaks, each saying why.
+pub fn check_reassignment(contract: &TaskContract, input: &ReassignmentInput) -> GateResult {
+    let mut reasons = Vec::new();
+    let to = input.to.trim();
+    if !matches!(
+        input.status,
+        TaskStatus::Assigned | TaskStatus::InProgress | TaskStatus::Rejected
+    ) {
+        reasons.push(format!(
+            "a task is handed over only while assigned, in progress or rejected, and this one is {}",
+            input.status
+        ));
+    }
+    if !input.returning {
+        reasons.push(format!(
+            "{} is still within its limit of work, so it goes on with this task",
+            input.from.trim()
+        ));
+    }
+    if input.kind == Kind::Epic {
+        reasons.push("an epic's assignee coordinates it and is never replaced".to_string());
+    }
+    if input.has_lane {
+        reasons.push(
+            "the task belongs to a lane, which waits for its builder rather than go to another"
+                .to_string(),
+        );
+    }
+    if !input.to_active {
+        reasons.push(format!("{to} is not active"));
+    }
+    if input.to_role != contract.assignee_role {
+        reasons.push(format!(
+            "{to} has role {} and this contract is assigned to role {}",
+            input.to_role, contract.assignee_role
+        ));
+    }
+    if input.to_open_tasks >= input.wip_limit {
+        reasons.push(format!(
+            "{to} already holds {} unfinished tasks and the limit is {}",
+            input.to_open_tasks, input.wip_limit
+        ));
+    }
+    if to == input.from.trim() {
+        reasons.push(format!("{to} already holds the task"));
+    }
+    if input.reviewer_id.as_deref().map(str::trim) == Some(to)
+        && !(contract.assignee_role == contract.reviewer_role
+            && contract.assignee_role.reviews_its_own())
+    {
+        reasons.push(format!("{to} cannot review its own work"));
+    }
+    verdict(reasons)
+}
+
 /// Why the assignee can take no more work, if it cannot: the team's limit on work in progress.
 fn over_the_limit(input: &AssignmentInput) -> Option<String> {
     (input.assignee_open_tasks >= input.wip_limit).then(|| {
@@ -1036,10 +1127,10 @@ mod tests {
         ContractWriteOutcome, ContractWriteRefusal, DependencyState, DesignerBrowser,
         FIELDS_AFTER_FREEZE, FIELDS_ALWAYS_WRITABLE, FIELDS_FIXED_AT_CREATION,
         FIELDS_OF_THE_CONTENT, FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES,
-        FIELDS_THE_STORE_OWNS, FolderWork, ParentEpic, Rejection, WorkState, check_assignment,
-        check_blocker_resolved, check_blocker_written, check_child_creation, check_children_done,
-        check_contract_write, check_criteria_recorded, check_human_triage, check_rejection_reasons,
-        check_repo_write,
+        FIELDS_THE_STORE_OWNS, FolderWork, ParentEpic, ReassignmentInput, Rejection, WorkState,
+        check_assignment, check_blocker_resolved, check_blocker_written, check_child_creation,
+        check_children_done, check_contract_write, check_criteria_recorded, check_human_triage,
+        check_reassignment, check_rejection_reasons, check_repo_write,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
@@ -3171,5 +3262,59 @@ mod tests {
             2,
             "both reasons, so a caller that fixes what it is told makes progress"
         );
+    }
+
+    type Change = fn(&mut ReassignmentInput);
+
+    fn a_reassignment() -> ReassignmentInput {
+        ReassignmentInput {
+            kind: Kind::Task,
+            status: TaskStatus::InProgress,
+            returning: true,
+            has_lane: false,
+            from: "dev-a".to_string(),
+            to: "dev-b".to_string(),
+            to_role: Role::SoftwareDeveloper,
+            to_active: true,
+            to_open_tasks: 0,
+            wip_limit: 1,
+            reviewer_id: Some("dev-c".to_string()),
+        }
+    }
+
+    #[test]
+    fn refuses_a_hand_over_that_breaks_a_rule() {
+        let contract = a_contract();
+        assert_eq!(check_reassignment(&contract, &a_reassignment()), Ok(()));
+        let refused: [(&str, Change); 9] = [
+            ("status", |i| i.status = TaskStatus::Blocked),
+            ("not returning", |i| i.returning = false),
+            ("lane", |i| i.has_lane = true),
+            ("epic", |i| i.kind = Kind::Epic),
+            ("inactive", |i| i.to_active = false),
+            ("role", |i| i.to_role = Role::Architect),
+            ("limit", |i| i.to_open_tasks = 1),
+            ("current assignee", |i| i.to = "dev-a".to_string()),
+            ("reviewer", |i| i.reviewer_id = Some("dev-b".to_string())),
+        ];
+        for (what, change) in refused {
+            let mut input = a_reassignment();
+            change(&mut input);
+            assert_eq!(
+                reasons(check_reassignment(&contract, &input)).len(),
+                1,
+                "{what}"
+            );
+        }
+        // The reviewer may be the assignee only where the role reviews its own work.
+        let mut own = a_contract();
+        own.assignee_role = Role::ProductManager;
+        own.reviewer_role = Role::ProductManager;
+        let mut input = a_reassignment();
+        input.to_role = Role::ProductManager;
+        input.reviewer_id = Some("pm-2".to_string());
+        input.to = "pm-2".to_string();
+        input.from = "pm-1".to_string();
+        assert_eq!(check_reassignment(&own, &input), Ok(()));
     }
 }

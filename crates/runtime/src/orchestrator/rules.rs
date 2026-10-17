@@ -2,6 +2,7 @@
 //! rules in order, one per state, and each rule the tasks in its state by their number; the first
 //! that acts ends the tick.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
@@ -163,6 +164,8 @@ pub(super) async fn tick(
     let in_scope = in_scope(scope);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut waiting = Waiting::default();
+    // The tasks each agent may work: those past its limit are "returning", and wait for a hand-over.
+    let within = transitions::within_limit(&team, &board);
     if let Some(report) = chat(deps, scope, &team, &mut waiting).await? {
         return Ok(report);
     }
@@ -207,7 +210,10 @@ pub(super) async fn tick(
         return Ok(report);
     }
     if runs(3) {
-        for row in waiting_on_nobody(&board, TaskStatus::Rejected).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Rejected)
+            .filter(in_scope)
+            .filter(|row| within.contains(&row.task_id))
+        {
             if let Some(report) = rejected(deps, &team, row)? {
                 return Ok(report);
             }
@@ -227,12 +233,18 @@ pub(super) async fn tick(
             }
         }
     }
+    if runs(6)
+        && let Some(report) = resume_elsewhere(deps, &team, &board, &within, scope)?
+    {
+        return Ok(report);
+    }
     // Planning runs an epic's breakdown and close-out, which are plan sessions, and no
     // implement session.
     let epics_only = scope.rules == TickRules::Planning;
     if runs(6) || epics_only {
         for row in waiting_on_nobody(&board, TaskStatus::InProgress)
             .filter(in_scope)
+            .filter(|row| within.contains(&row.task_id))
             .filter(|row| !epics_only || requests::is_epic(row))
         {
             if let Some(report) = in_progress(orchestrator, &team, row, &mut waiting).await? {
@@ -241,7 +253,10 @@ pub(super) async fn tick(
         }
     }
     if runs(7) {
-        for row in waiting_on_nobody(&board, TaskStatus::Assigned).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Assigned)
+            .filter(in_scope)
+            .filter(|row| within.contains(&row.task_id))
+        {
             if let Some(report) = assigned(deps, &team, &board, row)? {
                 return Ok(report);
             }
@@ -269,6 +284,62 @@ pub(super) async fn tick(
         }
     }
     Ok(idle(&waiting))
+}
+
+/// The hand-over of a task whose wait cleared, between rules 5 and 6 (ADR 0062): a task its agent
+/// holds past its limit, because the agent began other tasks while it waited, is handed to the
+/// first free active agent of its role that is neither its holder nor its reviewer (the reviewer
+/// unless the role reviews its own work), by `Transitions::reassign`, which checks it again. A task
+/// in a lane waits for its lane's builder. With no candidate the task waits with its agent and is
+/// tried on every tick; when the agent has room again the task is within its limit and goes on.
+fn resume_elsewhere(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    within: &BTreeSet<TaskId>,
+    scope: &TickScope,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    for row in board
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.status,
+                TaskStatus::Assigned | TaskStatus::InProgress | TaskStatus::Rejected
+            ) && row.counts_towards_wip()
+                && !requests::is_epic(row)
+                && !within.contains(&row.task_id)
+        })
+        .filter(in_scope(scope))
+    {
+        let Some(holder) = active(team, row.assignee_id.as_deref()) else {
+            continue;
+        };
+        let contract = deps.tools.files.read_contract(&row.task_id)?;
+        if contract.lane.is_some() {
+            continue;
+        }
+        for candidate in team.active_agents().filter(|agent| {
+            Role::from(agent.role) == contract.assignee_role
+                && agent.id != holder.id
+                && has_room(team, board, agent, row.parent.as_ref())
+        }) {
+            if let transitions::ReassignOutcome::Reassigned(_) =
+                deps.tools
+                    .transitions
+                    .reassign(&row.task_id, candidate.id.as_str(), team)?
+            {
+                return Ok(Some(TickReport::Acted {
+                    task_id: row.task_id.clone(),
+                    what: format!(
+                        "handed it to {}: {} has no room",
+                        candidate.id.as_str(),
+                        holder.id.as_str()
+                    ),
+                }));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// A new project's Catervafication (4.1, 5.16), between the integration rules and the budget rule:
@@ -1872,9 +1943,9 @@ mod tests {
     use crate::recorded::fixtures::{
         accept_ctv_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
         implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1, plan_assigns_ctv_2,
-        provider_limit_429,
-        provider_limit_rejected, reads_a_file, replays_catervas_read_board, reply_to_a_mention,
-        retro, review, review_answers_nothing, review_writes_note, success_with_is_error,
+        provider_limit_429, provider_limit_rejected, reads_a_file, replays_catervas_read_board,
+        reply_to_a_mention, retro, review, review_answers_nothing, review_writes_note,
+        success_with_is_error,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -3279,7 +3350,11 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_while_its_member_is_missing() {
-        let (harness, members) = Harness::project_folder("orch-member-gone", &["app", "infra"]);
+        // Room for all four tasks of dev-a: one past its limit would wait for a hand-over.
+        let (harness, members) =
+            Harness::project_folder_with("orch-member-gone", &["app", "infra"], |wire| {
+                wire["policy"]["wip_limit_per_agent"] = json!(4);
+            });
         harness.assigned_in("CTV-1", "dev-a", "dev-b", "app");
         // The same member's task in progress, and its task verifying, each with its worktree
         // made by the member.
@@ -4065,7 +4140,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn picks_a_rejected_task_before_a_verifying_one() {
-        let harness = Harness::new("orch-order-rejected-verifying", |_| {});
+        // Room for both: a task past its agent's limit waits for a hand-over before rule 6.
+        let harness = Harness::new("orch-order-rejected-verifying", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+        });
         harness.verifying("CTV-1");
         harness.rejected("CTV-2", 0, "done.txt is missing");
         let adapter = harness.recorded(vec![review_writes_note()]);
@@ -9503,10 +9581,139 @@ mod tests {
                 &json!({ "question": "Which colour?", "asked_by": "dev-a" }),
             );
         });
-        assert_eq!(asking.await, TaskStatus::Assigned, "a task awaiting an answer");
+        assert_eq!(
+            asking.await,
+            TaskStatus::Assigned,
+            "a task awaiting an answer"
+        );
         let working = ctv_2_after_a_tick_with_ctv_1("wip-working", |h| {
             h.in_progress("CTV-1", "dev-a", "dev-b");
         });
-        assert_eq!(working.await, TaskStatus::Ready, "a task under way holds its agent");
+        assert_eq!(
+            working.await,
+            TaskStatus::Ready,
+            "a task under way holds its agent"
+        );
+    }
+
+    /// A team of `dev-a`, `dev-b` and `dev-c` under a limit of one, CTV-1 held by `dev-a` and
+    /// reviewed by `dev-c`, blocked; `others` is filed after it, and then CTV-1 is moved back to
+    /// `in_progress`, the block cleared.
+    fn a_cleared_ctv_1(name: &str, others: impl FnOnce(&Harness)) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(catervas_core::team::fixtures::an_agent_wire(
+                    "dev-c",
+                    "software_developer",
+                ));
+        });
+        harness.blocked("CTV-1", "dev-a", "dev-c");
+        others(&harness);
+        harness.project.moved(
+            "CTV-1",
+            "blocked",
+            "in_progress",
+            &json!({ "actor": "human", "requested_by": "human", "assignee": "dev-a", "reviewer": "dev-c" }),
+        );
+        harness
+    }
+
+    type Pair = (String, String);
+    type Handed = (String, String, String);
+
+    /// The (agent, task) of every session started, and every `task.reassigned` recorded.
+    fn who_worked(harness: &Harness) -> (Vec<Pair>, Vec<Handed>) {
+        let sessions = harness
+            .events(&[EventKind::SessionStarted])
+            .iter()
+            .filter_map(|event| {
+                Some((
+                    event.envelope.ids.agent_id.as_ref()?.clone(),
+                    event.envelope.ids.task_id.as_ref()?.to_string(),
+                ))
+            })
+            .collect();
+        let handed = harness
+            .events(&[EventKind::TaskReassigned])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::TaskReassigned(body) => Some((
+                    event.envelope.ids.task_id.as_ref()?.to_string(),
+                    body.from.clone(),
+                    body.to.clone(),
+                )),
+                _ => None,
+            })
+            .collect();
+        (sessions, handed)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_cleared_task_resumes_with_its_agent_or_another_free_one() {
+        // (1) Nothing else is held: the task goes on with its own agent.
+        let harness = a_cleared_ctv_1("resume-own", |_| {});
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        let (sessions, handed) = who_worked(&harness);
+        assert_eq!(sessions, [("dev-a".to_string(), "CTV-1".to_string())]);
+        assert!(handed.is_empty(), "{handed:?}");
+
+        // (2) Its agent took CTV-2 meanwhile: CTV-1 goes to the first free Developer who does not
+        // review it, once, and from then on every session of each is its own holder's.
+        let harness = a_cleared_ctv_1("resume-elsewhere", |h| {
+            h.in_progress("CTV-2", "dev-a", "dev-c");
+        });
+        let adapter = harness.recorded(vec![reads_a_file(); 4]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&first), Some("CTV-1"), "{first:?}");
+        assert_eq!(
+            who_worked(&harness).1,
+            [(
+                "CTV-1".to_string(),
+                "dev-a".to_string(),
+                "dev-b".to_string()
+            )]
+        );
+        assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("dev-b"));
+        assert_eq!(harness.row("CTV-1").reviewer_id.as_deref(), Some("dev-c"));
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&"CTV-1".parse().expect("a task id"))
+            .expect("the contract file reads");
+        assert_eq!(contract.assignee.as_deref(), Some("dev-b"));
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        let (sessions, handed) = who_worked(&harness);
+        assert_eq!(handed.len(), 1, "{handed:?}");
+        assert!(!sessions.is_empty());
+        for (agent, task) in &sessions {
+            let holder = if task == "CTV-1" { "dev-b" } else { "dev-a" };
+            assert_eq!(agent, holder, "{task}: {sessions:?}");
+        }
+
+        // (3) The only other free Developer reviews CTV-1: it waits with its agent.
+        let harness = a_cleared_ctv_1("resume-nobody", |h| {
+            h.in_progress("CTV-2", "dev-a", "dev-c");
+            h.in_progress("CTV-3", "dev-b", "dev-c");
+        });
+        let adapter = harness.recorded(vec![reads_a_file(); 3]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        let (sessions, handed) = who_worked(&harness);
+        assert!(handed.is_empty(), "{handed:?}");
+        assert!(
+            sessions.iter().all(|(_, task)| task != "CTV-1"),
+            "{sessions:?}"
+        );
     }
 }

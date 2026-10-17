@@ -197,7 +197,7 @@ input.
   the reviewer, is refused with one reason; the reviewer is accepted when the role
   `reviews_its_own` and assignee and reviewer roles are the same.
 
-- [ ] `feat(runtime): a cleared task goes back to its agent, or to another free one`
+- [x] `feat(runtime): a cleared task goes back to its agent, or to another free one`
 
 ### Task 4: the team's activity
 
