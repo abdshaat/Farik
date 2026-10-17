@@ -74,6 +74,8 @@ pub struct NewChatMessage {
     pub heard: Option<Heard>,
     /// The session a reply was written in.
     pub session_id: Option<String>,
+    /// The owner sent the message as a task for the chat's agent (ADR 0063).
+    pub as_task: bool,
 }
 
 /// Why a chat message was not recorded.
@@ -183,7 +185,7 @@ pub fn post_chat(
             not_now: heard.not_now,
             works_when: heard.works_when,
         }),
-        as_task: None,
+        as_task: message.as_task.then_some(true),
     });
     let event = new_event(body, clock.now(), ids)
         .map_err(|error| refused(format!("the chat message cannot be recorded: {error:?}")))?;
@@ -263,13 +265,45 @@ fn newest_from_the_user(log: &EventLog, agent_id: &str) -> Result<Option<u64>, S
             ..EventQuery::default()
         })?;
         if let Some(found) = page.iter().find(|event| {
-            matches!(&event.body, EventBody::ChatMessagePosted(body) if body.author == HUMAN)
+            matches!(&event.body, EventBody::ChatMessagePosted(body) if awaits_a_reply(body))
         }) {
             return Ok(Some(found.envelope.seq));
         }
         match page.last() {
             Some(oldest) if page.len() == CHAT_PAGE => before_seq = Some(oldest.envelope.seq),
             _ => return Ok(None),
+        }
+    }
+}
+
+/// Whether `body` is a message of the user's that a chat session answers: the user's own, but not
+/// one sent as the agent's task (ADR 0063), which the chat does not answer.
+pub(crate) fn awaits_a_reply(body: &ChatMessagePostedBody) -> bool {
+    body.author == HUMAN && body.as_task != Some(true)
+}
+
+/// Whether the newest message of `agent_id`'s chat that is not sent as a task is the user's, read
+/// from the newest back a page at a time as `newest_from_the_user` reads.
+fn user_wrote_last(log: &EventLog, agent_id: &str) -> Result<bool, StoreError> {
+    let mut before_seq = None;
+    loop {
+        let page = log.read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            kinds: vec![EventKind::ChatMessagePosted],
+            newest_first: true,
+            before_seq,
+            limit: Some(CHAT_PAGE),
+            ..EventQuery::default()
+        })?;
+        if let Some(found) = page.iter().find_map(|event| match &event.body {
+            EventBody::ChatMessagePosted(body) if body.as_task != Some(true) => Some(body),
+            _ => None,
+        }) {
+            return Ok(found.author == HUMAN);
+        }
+        match page.last() {
+            Some(oldest) if page.len() == CHAT_PAGE => before_seq = Some(oldest.envelope.seq),
+            _ => return Ok(false),
         }
     }
 }
@@ -322,19 +356,7 @@ pub fn chat_waiting(
     agent_id: &str,
     now: DateTime<Utc>,
 ) -> Result<Option<ChatWaiting>, CostError> {
-    let newest = log
-        .read(&EventQuery {
-            agent_id: Some(agent_id.to_string()),
-            kinds: vec![EventKind::ChatMessagePosted],
-            newest_first: true,
-            limit: Some(1),
-            ..EventQuery::default()
-        })?
-        .into_iter()
-        .next();
-    let user_wrote_last = newest.is_some_and(
-        |event| matches!(&event.body, EventBody::ChatMessagePosted(body) if body.author == HUMAN),
-    );
+    let user_wrote_last = user_wrote_last(log, agent_id)?;
     let Some(agent) = team
         .agents
         .iter()
@@ -543,6 +565,7 @@ mod tests {
                 in_reply_to: None,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the message is recorded")
@@ -636,6 +659,7 @@ mod tests {
                     request: None,
                     heard: None,
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("recorded");
@@ -695,6 +719,7 @@ mod tests {
                     works_when: "Ten orders a month.".to_string(),
                 }),
                 session_id: Some("session-1".to_string()),
+                as_task: false,
             },
         )
         .expect("the reply is recorded");
@@ -733,6 +758,7 @@ mod tests {
                 in_reply_to: None,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the user's message is recorded");
@@ -751,6 +777,7 @@ mod tests {
                     text: "Add Apple Pay at checkout, beside the card form.".to_string(),
                 }),
                 session_id: Some("session-1".to_string()),
+                as_task: false,
             },
         )
         .expect("the reply is recorded");

@@ -3486,6 +3486,7 @@ pub(super) mod tests {
                     text: "Add Apple Pay to the checkout beside the card form.".to_string(),
                 }),
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the chat message is recorded")
@@ -4784,6 +4785,7 @@ pub(super) mod tests {
                 in_reply_to: None,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("recorded");

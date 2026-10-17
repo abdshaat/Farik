@@ -237,7 +237,7 @@ Files: `crates/runtime/src/chat.rs`, `crates/runtime/src/orchestrator/human.rs`.
     - for `dev` paused, with `agent_not_active: `;
     - with the text "too short", with `task_too_short: `.
 
-- [ ] `feat(runtime): the owner gives an agent a task by messaging it`
+- [x] `feat(runtime): the owner gives an agent a task by messaging it`
 
 ### Task 4: the given agent writes its contract, and only it
 

@@ -7451,6 +7451,7 @@ mod tests {
                 request: None,
                 heard: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the greeting is recorded");
@@ -8643,6 +8644,7 @@ mod tests {
                 in_reply_to,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the chat message is recorded")

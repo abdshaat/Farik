@@ -78,6 +78,7 @@ pub(super) fn chat_reply(call: &Call<'_>, input: ChatReplyInput) -> Result<Value
             request: input.request,
             heard: input.heard,
             session_id: Some(context.session_id.clone()),
+            as_task: false,
         },
     )
     .map_err(|error| match error {
@@ -118,6 +119,7 @@ mod tests {
                 in_reply_to: None,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the question is recorded");
@@ -194,6 +196,7 @@ mod tests {
                 request: None,
                 heard: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the owner's message is recorded");
@@ -270,6 +273,7 @@ mod tests {
                     in_reply_to: None,
                     request: None,
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("the question is recorded");
