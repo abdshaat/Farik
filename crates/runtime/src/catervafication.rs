@@ -81,29 +81,83 @@ pub(crate) fn catervafication_roles(
     rows
 }
 
-/// The roles that hunt for bugs in an existing repository's Catervafication, in the order they are
-/// filed (ADR 0063): an active Software Developer, then an active UI/UX Designer whose browser is
-/// ready. A new project has no code to hunt in, and a project folder's hunts are planned apart.
+/// A member of a project folder, as the bug hunts see it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HuntMember {
+    /// The member's name in `repos.yaml`.
+    pub(crate) name: String,
+    /// Whether its scan found a way to start its app (ADR 0054), which a UI hunt needs.
+    pub(crate) has_ui: bool,
+}
+
+/// One bug hunt a Catervafication files: the role that hunts and the member it hunts in, `None`
+/// for a project of one repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Hunt {
+    pub(crate) role: Role,
+    pub(crate) repo: Option<String>,
+}
+
+/// The hunts a Catervafication files, and the members that get no UI hunt for want of an app.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Hunts {
+    pub(crate) rows: Vec<Hunt>,
+    pub(crate) no_ui: Vec<String>,
+}
+
+/// The bug hunts of an existing repository's Catervafication, in the order they are filed (ADR
+/// 0063): an active Software Developer's, then an active UI/UX Designer's whose browser is ready.
+/// A project of one repository (`members` is `None`) has one of each. A project folder has them for
+/// each of `members` in turn, the Designer's only for a member with a UI (that member is listed in
+/// `no_ui` otherwise). A new project has no code to hunt in.
 #[must_use]
 pub(crate) fn catervafication_hunts(
     team: &Team,
     project: Project,
     designer_ready: bool,
-    project_folder: bool,
-) -> Vec<Role> {
-    if project != Project::Existing || project_folder {
-        return Vec::new();
+    members: Option<&[HuntMember]>,
+) -> Hunts {
+    let mut hunts = Hunts::default();
+    if project != Project::Existing {
+        return hunts;
     }
     let active = |role: Role| {
         team.active_agents()
             .any(|agent| Role::from(agent.role) == role)
     };
-    let mut hunts = Vec::new();
-    if active(Role::SoftwareDeveloper) {
-        hunts.push(Role::SoftwareDeveloper);
-    }
-    if active(Role::UiUxDesigner) && designer_ready {
-        hunts.push(Role::UiUxDesigner);
+    let developer = active(Role::SoftwareDeveloper);
+    let designer = active(Role::UiUxDesigner) && designer_ready;
+    let mut push = |role, repo: Option<&str>| {
+        hunts.rows.push(Hunt {
+            role,
+            repo: repo.map(ToString::to_string),
+        });
+    };
+    match members {
+        None => {
+            if developer {
+                push(Role::SoftwareDeveloper, None);
+            }
+            if designer {
+                push(Role::UiUxDesigner, None);
+            }
+        }
+        Some(members) => {
+            let mut no_ui = Vec::new();
+            for member in members {
+                if developer {
+                    push(Role::SoftwareDeveloper, Some(&member.name));
+                }
+                if designer {
+                    if member.has_ui {
+                        push(Role::UiUxDesigner, Some(&member.name));
+                    } else {
+                        no_ui.push(member.name.clone());
+                    }
+                }
+            }
+            hunts.no_ui = no_ui;
+        }
     }
     hunts
 }
@@ -127,7 +181,12 @@ pub(crate) fn epic_hunts(epic: &TaskContract) -> bool {
 ///
 /// If `role` is not one that hunts; `catervafication_hunts` lists no other.
 #[must_use]
-pub(crate) fn hunt_contract(role: Role, max_cost_usd: f64, format: DocumentFormat) -> Value {
+pub(crate) fn hunt_contract(
+    role: Role,
+    max_cost_usd: f64,
+    format: DocumentFormat,
+    repo: Option<&str>,
+) -> Value {
     let path = hunt_report(role, format).expect("only a Developer or a Designer hunts");
     let file_name = path.rsplit('/').next().unwrap_or(&path).to_string();
     let (title, intent, summary) = if role == Role::SoftwareDeveloper {
@@ -143,7 +202,19 @@ pub(crate) fn hunt_contract(role: Role, max_cost_usd: f64, format: DocumentForma
             "The UI/UX Designer goes through your app's screens and files each problem it finds, so the team can fix it.",
         )
     };
-    json!({
+    // A hunt in a member of a project folder names it, in its title and its summary too.
+    let (title, summary) = match repo {
+        None => (title.to_string(), summary.to_string()),
+        Some(name) if role == Role::SoftwareDeveloper => (
+            format!("Hunt for bugs in {name}'s code"),
+            summary.replace("your code", &format!("{name}'s code")),
+        ),
+        Some(name) => (
+            format!("Hunt for bugs in {name}'s screens"),
+            summary.replace("your app's screens", &format!("{name}'s screens")),
+        ),
+    };
+    let mut wire = json!({
         "title": title,
         "intent": format!("{intent} {FOLLOW_THE_SKILL}"),
         "summary": summary,
@@ -170,7 +241,11 @@ pub(crate) fn hunt_contract(role: Role, max_cost_usd: f64, format: DocumentForma
         "risk": "low",
         "budget": { "max_cost_usd": max_cost_usd },
         "allowed_paths": [path]
-    })
+    });
+    if let Some(name) = repo {
+        wire["repo"] = json!(name);
+    }
+    wire
 }
 
 /// What a role's task says.
@@ -263,13 +338,19 @@ fn row(project: Project, role: Role) -> Row {
 /// one criterion is the product plan's spec in the team's `format`, which Catervas reads itself on
 /// the integration branch (ADR 0061).
 #[must_use]
-pub(crate) fn epic_contract(project: Project, max_cost_usd: f64, format: DocumentFormat) -> Value {
+pub(crate) fn epic_contract(
+    project: Project,
+    max_cost_usd: f64,
+    format: DocumentFormat,
+    hunted: usize,
+) -> Value {
     let (title, intent, summary, tasks) = match project {
         Project::Existing => (
             "Catervafy the repository",
             "The team reads the project and writes down what it knows, each role in its own folder under docs/catervas/, while the Developer and the Designer hunt for bugs and the Marketing Specialist starts the marketing plan.",
             "Your team reads your project and writes down what it learns, looks for bugs and starts your marketing. You can read all of it in Files.",
-            7.0,
+            // The five documentation tasks, and two hunts for each place that is hunted.
+            5.0 + 2.0 * f64::from(u32::try_from(hunted).unwrap_or(u32::MAX)),
         ),
         Project::New => (
             "Catervafy the new project",
@@ -524,6 +605,7 @@ pub(crate) fn start(
             project,
             placeholder_budget_usd(&team.rules()),
             team.document_format(),
+            1,
         ),
         by,
         project,
@@ -590,14 +672,14 @@ pub(crate) fn file_due(
         }
     }
     if epic_hunts(&deps.files.read_contract(&epic.task_id)?) {
-        for role in catervafication_hunts(
-            team,
-            project,
-            designer_ready,
-            deps.files.is_project_folder(),
-        ) {
-            if !held.contains(&(role, true)) {
-                due.push((hunt_contract(role, max_cost_usd, format), role));
+        // A project folder files no hunt yet: its members are hunted in the next commit.
+        let members: Option<&[HuntMember]> = deps.files.is_project_folder().then_some(&[]);
+        for hunt in catervafication_hunts(team, project, designer_ready, members).rows {
+            if !held.contains(&(hunt.role, true)) {
+                due.push((
+                    hunt_contract(hunt.role, max_cost_usd, format, hunt.repo.as_deref()),
+                    hunt.role,
+                ));
             }
         }
     }
@@ -636,8 +718,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        Project, catervafication_hunts, catervafication_of, catervafication_roles, epic_contract,
-        epic_hunts, hunt_contract, task_contract,
+        Hunt, HuntMember, Project, catervafication_hunts, catervafication_of,
+        catervafication_roles, epic_contract, epic_hunts, hunt_contract, task_contract,
     };
     use crate::tools::fixtures::with_the_suggested_six;
 
@@ -773,6 +855,7 @@ mod tests {
                 project,
                 20.0,
                 catervas_core::folders::DocumentFormat::Markdown,
+                1,
             );
             assert!(
                 (wire["budget"]["max_cost_usd"].as_f64().expect("a budget") - 20.0 * count).abs()
@@ -821,9 +904,13 @@ mod tests {
                     "{project:?} {role:?}"
                 );
             }
-            for role in catervafication_hunts(&six, project, true, false) {
-                let wire =
-                    hunt_contract(role, 20.0, catervas_core::folders::DocumentFormat::Markdown);
+            for role in hunt_roles(&six, project, true, None) {
+                let wire = hunt_contract(
+                    role,
+                    20.0,
+                    catervas_core::folders::DocumentFormat::Markdown,
+                    None,
+                );
                 let task = validate_contract(&filed(wire, "CTV-2", "draft", Some("CTV-1")))
                     .unwrap_or_else(|errors| panic!("{project:?} {role:?} hunt: {errors:?}"));
                 assert_eq!(
@@ -857,6 +944,7 @@ mod tests {
                 project,
                 20.0,
                 catervas_core::folders::DocumentFormat::Markdown,
+                1,
             );
             assert_eq!(wire["summary"], summary, "{project:?}");
             // Catervas runs the epic's one criterion itself (ADR 0061): the spec is there.
@@ -872,7 +960,7 @@ mod tests {
                     "<h1",
                 ),
             ] {
-                let wire = epic_contract(project, 20.0, format);
+                let wire = epic_contract(project, 20.0, format, 1);
                 assert_eq!(
                     wire["exit_criteria"][0]["verification"],
                     json!({ "method": "artifact", "path": spec, "must_contain": [heading] }),
@@ -1078,22 +1166,22 @@ mod tests {
         use catervas_core::folders::DocumentFormat::{Html, Markdown};
         let six = the_suggested_six();
         assert_eq!(
-            catervafication_hunts(&six, Project::Existing, true, false),
+            hunt_roles(&six, Project::Existing, true, None),
             [SoftwareDeveloper, UiUxDesigner]
         );
         assert_eq!(
-            catervafication_hunts(&six, Project::Existing, false, false),
+            hunt_roles(&six, Project::Existing, false, None),
             [SoftwareDeveloper]
         );
-        assert!(catervafication_hunts(&six, Project::New, true, false).is_empty());
-        assert!(catervafication_hunts(&six, Project::Existing, true, true).is_empty());
+        assert!(hunt_roles(&six, Project::New, true, None).is_empty());
+        assert!(hunt_roles(&six, Project::Existing, true, Some(&[])).is_empty());
         let two = a_team(&[("pm", "product_manager"), ("dev", "software_developer")]);
         assert_eq!(
-            catervafication_hunts(&two, Project::Existing, true, false),
+            hunt_roles(&two, Project::Existing, true, None),
             [SoftwareDeveloper]
         );
 
-        let wire = hunt_contract(SoftwareDeveloper, 20.0, Html);
+        let wire = hunt_contract(SoftwareDeveloper, 20.0, Html, None);
         assert_eq!(wire["title"], "Hunt for bugs in the code");
         assert_eq!(
             wire["allowed_paths"],
@@ -1110,7 +1198,7 @@ mod tests {
         let contract = validate_contract(&filed_wire).expect("a contract");
         assert!(catervas_core::folders::is_hunt(&contract));
 
-        let wire = hunt_contract(UiUxDesigner, 20.0, Markdown);
+        let wire = hunt_contract(UiUxDesigner, 20.0, Markdown, None);
         assert_eq!(
             wire["allowed_paths"],
             json!(["docs/catervas/design/ui-bug-hunt.md"])
@@ -1121,7 +1209,7 @@ mod tests {
         );
 
         let epic = |project, format| {
-            let wire = epic_contract(project, 20.0, format);
+            let wire = epic_contract(project, 20.0, format, 1);
             let mut as_epic = filed(wire.clone(), "CTV-1", "draft", None);
             as_epic["kind"] = json!("epic");
             (wire, validate_contract(&as_epic).expect("an epic"))
@@ -1131,6 +1219,100 @@ mod tests {
         assert!((wire["budget"]["max_cost_usd"].as_f64().expect("a budget") - 140.0).abs() < 1e-9);
         assert_eq!(wire["exit_criteria"][0]["satisfies"], json!(["R1", "R2"]));
         assert!(!epic_hunts(&epic(Project::New, Markdown).1));
+    }
+
+    fn hunt_roles(
+        team: &Team,
+        project: Project,
+        designer_ready: bool,
+        members: Option<&[HuntMember]>,
+    ) -> Vec<Role> {
+        catervafication_hunts(team, project, designer_ready, members)
+            .rows
+            .iter()
+            .map(|hunt| hunt.role)
+            .collect()
+    }
+
+    #[test]
+    fn hunts_each_member_of_a_project_folder() {
+        use Role::{SoftwareDeveloper, UiUxDesigner};
+        use catervas_core::folders::DocumentFormat::Html;
+        let six = the_suggested_six();
+        let member = |name: &str, has_ui| HuntMember {
+            name: name.to_string(),
+            has_ui,
+        };
+        let members = [member("api", false), member("web", true)];
+        let hunt = |role, repo: &str| Hunt {
+            role,
+            repo: Some(repo.to_string()),
+        };
+        let hunts = catervafication_hunts(&six, Project::Existing, true, Some(&members));
+        assert_eq!(
+            hunts.rows,
+            [
+                hunt(SoftwareDeveloper, "api"),
+                hunt(SoftwareDeveloper, "web"),
+                hunt(UiUxDesigner, "web"),
+            ]
+        );
+        assert_eq!(hunts.no_ui, ["api"]);
+        let unready = catervafication_hunts(&six, Project::Existing, false, Some(&members));
+        assert_eq!(
+            unready.rows,
+            [
+                hunt(SoftwareDeveloper, "api"),
+                hunt(SoftwareDeveloper, "web")
+            ]
+        );
+        assert!(unready.no_ui.is_empty());
+
+        let wire = hunt_contract(SoftwareDeveloper, 20.0, Html, Some("api"));
+        assert_eq!(wire["repo"], "api");
+        assert_eq!(wire["title"], "Hunt for bugs in api's code");
+        assert_eq!(
+            wire["allowed_paths"],
+            json!(["docs/catervas/engineering/bug-hunt.html"])
+        );
+        let designer = hunt_contract(UiUxDesigner, 20.0, Html, Some("web"));
+        assert_eq!(designer["title"], "Hunt for bugs in web's screens");
+        let mut filed_wire = filed(wire, "CTV-2", "draft", Some("CTV-1"));
+        filed_wire["kind"] = json!("task");
+        let contract = validate_contract(&filed_wire).expect("a contract");
+        assert!(catervas_core::folders::is_hunt(&contract));
+
+        let (_, epic) = {
+            let wire = epic_contract(Project::Existing, 20.0, Html, 2);
+            let mut as_epic = filed(wire.clone(), "CTV-1", "draft", None);
+            as_epic["kind"] = json!("epic");
+            (wire, validate_contract(&as_epic).expect("an epic"))
+        };
+        let mut context = a_ready_context();
+        context.repos = Some(vec!["api".to_string(), "web".to_string()]);
+        context.parent = Some(ParentState {
+            status: catervas_core::contract::TaskStatus::InProgress,
+            allowed_paths: epic.allowed_paths.clone(),
+            remaining_budget_usd: epic.budget.max_cost_usd,
+            lanes: Vec::new(),
+        });
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+        assert!(
+            (epic_contract(Project::Existing, 20.0, Html, 2)["budget"]["max_cost_usd"]
+                .as_f64()
+                .expect("a budget")
+                - 180.0)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (epic_contract(Project::Existing, 20.0, Html, 1)["budget"]["max_cost_usd"]
+                .as_f64()
+                .expect("a budget")
+                - 140.0)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]

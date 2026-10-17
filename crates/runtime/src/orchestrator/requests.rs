@@ -1989,6 +1989,7 @@ mod tests {
                 Project::New,
                 2.0,
                 catervas_core::folders::DocumentFormat::Markdown,
+                1,
             ),
             "catervas",
             Project::New,

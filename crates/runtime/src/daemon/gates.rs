@@ -630,14 +630,19 @@ fn catervafication_get(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
         ready,
     );
     // A role that hunts for bugs is listed too, once, after the roles that write documents.
-    for role in crate::catervafication::catervafication_hunts(
+    // A project folder files no hunt yet: its members are hunted in the next commit.
+    let members: Option<&[crate::catervafication::HuntMember]> =
+        deps.files.is_project_folder().then_some(&[]);
+    for hunt in crate::catervafication::catervafication_hunts(
         team,
         crate::catervafication::Project::Existing,
         ready,
-        deps.files.is_project_folder(),
-    ) {
-        if roles.iter().all(|(listed, _)| *listed != role) {
-            roles.push((role, catervas_core::contract::Role::ProductManager));
+        members,
+    )
+    .rows
+    {
+        if roles.iter().all(|(listed, _)| *listed != hunt.role) {
+            roles.push((hunt.role, catervas_core::contract::Role::ProductManager));
         }
     }
     let begun = crate::catervafication::started(&deps.log)

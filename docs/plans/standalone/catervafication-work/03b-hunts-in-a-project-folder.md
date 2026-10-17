@@ -133,7 +133,7 @@ Update plan 3's tests to the new signatures; their assertions stay.
   - `epic_contract(Existing, 20.0, Html, 2)`'s budget is 180, and `(Existing, 20.0, Html, 1)`'s
     is 140.
 
-- [ ] `feat(runtime): a project folder's Catervafication hunts each member`
+- [x] `feat(runtime): a project folder's Catervafication hunts each member`
 
 ### Task 2: filed in the first tick, with the note
 
