@@ -183,6 +183,7 @@ pub fn post_chat(
             not_now: heard.not_now,
             works_when: heard.works_when,
         }),
+        as_task: None,
     });
     let event = new_event(body, clock.now(), ids)
         .map_err(|error| refused(format!("the chat message cannot be recorded: {error:?}")))?;

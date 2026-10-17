@@ -2562,6 +2562,20 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_chat_message_sent_as_a_task_and_the_task_given_to_an_agent() {
+        let mut posted = an_event_wire(EventKind::ChatMessagePosted);
+        posted["body"]["as_task"] = json!(true);
+        let event = event_from_value(&posted).expect("an as_task message reads");
+        assert_eq!(event_to_value(&event), posted);
+        posted["body"]["as_task"] = json!(false);
+        assert!(!refusal(&posted).is_empty());
+        let mut created = an_event_wire(EventKind::TaskCreated);
+        created["body"]["given_to"] = json!("dev");
+        let event = event_from_value(&created).expect("a given task reads");
+        assert_eq!(event_to_value(&event), created);
+    }
+
+    #[test]
     fn reads_a_task_created_that_rederives() {
         let mut wire = an_event_wire(EventKind::TaskCreated);
         wire["body"]["rederives"] = json!("docs/catervas/product/roadmap.agent.md");

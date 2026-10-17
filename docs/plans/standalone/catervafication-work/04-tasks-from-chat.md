@@ -199,7 +199,7 @@ Files: the two schemas, `crates/protocol/src/command.rs`, `crates/protocol/src/e
     one with `as_task: false` is refused;
   - `task.created` with `given_to: "dev"` reads.
 
-- [ ] `feat(protocol): a chat message may be sent as the agent's task`
+- [x] `feat(protocol): a chat message may be sent as the agent's task`
 
 ### Task 2: filing the task
 

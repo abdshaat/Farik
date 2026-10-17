@@ -154,7 +154,11 @@ pub(super) async fn handle(
         Command::ProductPlanDraft => draft_product_plan(tools),
         Command::CatervaficationStart => catervafication_start(tools),
         Command::MessagePost { text } => post_message(tools, text),
-        Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
+        Command::ChatMessagePost {
+            agent_id,
+            text,
+            as_task: _,
+        } => post_chat_message(tools, &agent_id, text),
         Command::ConnectorConnect {
             agent,
             server,
@@ -4609,6 +4613,7 @@ mod tests {
         let chat = |agent: &str, text: String| Command::ChatMessagePost {
             agent_id: agent.to_string(),
             text,
+            as_task: false,
         };
 
         for (agent, text) in [

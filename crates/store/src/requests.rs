@@ -975,6 +975,7 @@ fn creation_bodies(
             })
             .transpose()?,
         filed_as: filed_as.map(|(kind, _)| kind),
+        given_to: None,
         found_by: found_by
             .map(|hunt| {
                 hunt.as_str()
