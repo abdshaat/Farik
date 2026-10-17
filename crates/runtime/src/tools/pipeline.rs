@@ -40,7 +40,7 @@ const MOST_OPEN: usize = 3;
 /// The most bytes of the Product Manager's reason an answer repeats.
 const REASON_CAP_BYTES: usize = 2_048;
 /// What an agent whose request was recorded is told to do.
-const NEXT: &str = "go on with the sites you may read: Catervas has filed a free source at once, and \
+const NEXT: &str = "go on with the pages you can open: Catervas has filed a free source at once, and \
     the owner decides one that costs money, whose cost is not known or that sends the project's \
     data out; read the outcome with catervas_read_data_pipelines";
 

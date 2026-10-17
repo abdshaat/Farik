@@ -124,7 +124,7 @@ Tests:
   - A Developer's read with no `folder`, in a session about no task, answers `sheet_refused`, and a `path` of `../settings.yaml` with `folder: finance` answers `private_path_refused`.
   - Writing either still answers `sheet_refused` for any role but the owner.
 
-- [ ] `feat(runtime): let every role read the private workbooks`
+- [x] `feat(runtime): let every role read the private workbooks`
 
 ## Verification
 

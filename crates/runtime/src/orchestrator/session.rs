@@ -934,10 +934,9 @@ const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
 const SCHEDULE_POST_TOOL: &str = "catervas_schedule_post";
 
 /// The Finance Specialist's tools (step 09b, `docs/SPEC.md` 6.6): the team's AI spending, which is
-/// its alone, and a private folder's workbooks, which `catervas_write_sheet` writes and
-/// `catervas_read_sheet` reads, for each role with a folder (step 10b).
+/// its alone, and the writing of a private folder's workbooks, for each role with a folder (step
+/// 10b); every role reads them (ADR 0061).
 const READ_COSTS_TOOL: &str = "catervas_read_costs";
-const READ_SHEET_TOOL: &str = "catervas_read_sheet";
 const WRITE_SHEET_TOOL: &str = "catervas_write_sheet";
 /// The tool that writes a comparison as a note, the Procurement Specialist's alone (step 10b).
 const WRITE_EVALUATION_TOOL: &str = "catervas_write_evaluation";
@@ -1008,10 +1007,9 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                     && works_on_a_task(ask.purpose, ask.contract.is_some()))
         })
         // The books are the Finance Specialist's, and the register the Procurement Specialist's:
-        // a role with a private folder reads the workbooks in any session and writes one in the
-        // implement session of a task, and the costs stay the Finance Specialist's alone; a verify
-        // session about a task of a role with a private folder reads that folder's workbooks, as
-        // its reviewer and the Product Manager accepting it do (steps 09b and 10b).
+        // a role with a private folder writes one in the implement session of a task, and the
+        // costs stay the Finance Specialist's alone; every role reads the workbooks of either
+        // folder in any session (ADR 0061).
         .filter(|tool| match tool.name {
             READ_COSTS_TOOL => ask.agent.role == RoleWire::FinanceSpecialist,
             WRITE_SHEET_TOOL => {
@@ -1047,13 +1045,6 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                         Some(Thread::Planning | Thread::Review | Thread::Retro)
                     )
                     && role_folder(Role::from(ask.agent.role)).is_some()
-            }
-            READ_SHEET_TOOL => {
-                private_folder(Role::from(ask.agent.role)).is_some()
-                    || (ask.purpose == SessionPurpose::Verify
-                        && ask.contract.is_some_and(|contract| {
-                            private_folder(contract.assignee_role).is_some()
-                        }))
             }
             _ => true,
         })
@@ -2999,19 +2990,15 @@ mod tests {
                 "{what}"
             );
         }
-        // The Product Manager reviewing it reads what it wrote, and writes nothing; a Developer
-        // is given neither.
-        assert_eq!(
-            offered("pm", SessionPurpose::Verify, Some(&procurement), &sheets),
-            ["catervas_read_sheet"]
-        );
+        // Every other role reads the workbooks, in any session, and writes none (ADR 0061).
         for (who, purpose) in [
+            ("pm", SessionPurpose::Verify),
             ("dev-a", SessionPurpose::Implement),
             ("pm", SessionPurpose::Chat),
         ] {
             assert_eq!(
                 offered(who, purpose, Some(&procurement), &sheets),
-                Vec::<&str>::new(),
+                ["catervas_read_sheet"],
                 "{who} {purpose:?}"
             );
         }
@@ -3157,15 +3144,11 @@ mod tests {
                 "{what}: costs and sheets are read in any session, and written in none"
             );
         }
-        // The reviewer reads a finance task's workbook, and the Product Manager at its accept.
-        for who in ["pm", "dev-b"] {
-            assert_eq!(
-                offered(who, SessionPurpose::Verify, Some(&finance)),
-                ["catervas_read_sheet"],
-                "{who}"
-            );
-        }
+        // Every other role reads the workbooks, in any session, and writes none or reads the costs
+        // (ADR 0061).
         for (who, purpose, about) in [
+            ("pm", SessionPurpose::Verify, Some(&finance)),
+            ("dev-b", SessionPurpose::Verify, Some(&finance)),
             ("pm", SessionPurpose::Verify, Some(&developers)),
             ("pm", SessionPurpose::Plan, Some(&finance)),
             ("pm", SessionPurpose::Chat, None),
@@ -3177,7 +3160,7 @@ mod tests {
         ] {
             assert_eq!(
                 offered(who, purpose, about),
-                Vec::<&str>::new(),
+                ["catervas_read_sheet"],
                 "{who} {purpose:?}"
             );
         }

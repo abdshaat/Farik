@@ -1055,6 +1055,7 @@ pub(super) const CHAT_TOOLS: &[&str] = &[
     "catervas_read_seller_messages",
     "catervas_read_seller_replies",
     "catervas_chat_reply",
+    "catervas_read_sheet",
 ];
 
 /// The chat rule alone, as a paused team runs it (ADR 0026): a chat is answered while the team is
@@ -6073,10 +6074,10 @@ mod tests {
         let spec = &adapter.started()[0];
         let tiers = default_tiers(Role::ProductManager);
         // The Designer's page check and design review are offered in its own sessions alone, a
-        // chat's reply in a chat alone, the books' tools to the Finance Specialist and, to read
-        // a workbook, a verify session about a finance task, an evaluation and the sites to the
-        // Procurement Specialist in an implement session, and a post to the Marketing Specialist
-        // in one; a folder document is written in a ceremony alone.
+        // chat's reply in a chat alone, the books' tools to the Finance Specialist, an evaluation
+        // to the Procurement Specialist in an implement session, and a post to the Marketing
+        // Specialist in one; every role reads a workbook, and a folder document is written in a
+        // ceremony alone.
         let expected: Vec<String> = tool_descriptors()
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
@@ -6089,7 +6090,6 @@ mod tests {
                     "catervas_chat_reply",
                     "catervas_read_costs",
                     "catervas_write_sheet",
-                    "catervas_read_sheet",
                     "catervas_write_evaluation",
                     "catervas_draft_purchase_order",
                     "catervas_read_purchase_orders",
@@ -9585,6 +9585,7 @@ mod tests {
                 "catervas_read_seller_messages",
                 "catervas_read_seller_replies",
                 "catervas_chat_reply",
+                "catervas_read_sheet",
             ])
         );
     }
