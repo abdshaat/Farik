@@ -539,6 +539,55 @@ describe("chats", () => {
 		);
 	});
 
+	it("sends_a_message_as_a_task", async () => {
+		const { s } = await chats("/channel/mira");
+		const box = (await screen.findByRole("textbox", {
+			name: "Message Mira",
+		})) as HTMLTextAreaElement;
+		const text = "Add a dark mode switch to the settings page";
+		fireEvent.change(box, { target: { value: text } });
+		fireEvent.click(screen.getByRole("button", { name: en.chatsSendTask }));
+		const sent = await waitFor(() => {
+			const f = s.calls("command")[0];
+			if (!f) throw new Error("no command was sent");
+			return f;
+		});
+		expect(sent.params).toEqual({
+			command: {
+				command: "chat_message_post",
+				body: { agent_id: "mira", text, as_task: true },
+			},
+		});
+		await s.reply(sent, {
+			said: "given to Mira as CTV-7",
+			events: [9, 10, 11],
+		});
+		await waitFor(() => expect(box.value).toBe(""));
+
+		// What it does is behind the info button.
+		const info = screen.getByRole("button", { name: "More about this" });
+		expect(info.getAttribute("aria-describedby")).toBe("chat-task-info");
+		fireEvent.click(info);
+		expect(info.getAttribute("aria-expanded")).toBe("true");
+		expect(document.getElementById("chat-task-info")?.textContent).toBe(
+			en.chatsTaskInfo.replace("{name}", "Mira"),
+		);
+
+		// A refusal reads in plain words.
+		fireEvent.change(box, { target: { value: "too short" } });
+		fireEvent.click(screen.getByRole("button", { name: en.chatsSendTask }));
+		await waitFor(() => expect(s.calls("command")).toHaveLength(2));
+		await s.reply(s.calls("command")[1] as never, {
+			error: {
+				kind: "refused",
+				detail: "task_too_short: say a little more: at least 20 characters",
+			},
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.refuseTaskTooShort,
+		);
+	});
+
 	it("shows_no_such_teammate", async () => {
 		const { s } = await chats("/channel/nobody");
 		expect(await screen.findByText(en.chatsNoSuch)).toBeTruthy();

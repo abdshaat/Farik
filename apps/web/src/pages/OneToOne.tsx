@@ -1,5 +1,5 @@
 import type { Event } from "@catervas/protocol-client";
-import { Avatar, type AvatarKey, Button, RoleTag } from "@catervas/ui";
+import { Avatar, type AvatarKey, Button, InfoTip, RoleTag } from "@catervas/ui";
 import {
 	type FormEvent,
 	type ReactNode,
@@ -517,8 +517,7 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 	const [text, setText] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
-	const post = async (e: FormEvent) => {
-		e.preventDefault();
+	const send = async (asTask: boolean) => {
 		if (!client) return;
 		// Counted in code points, as the runtime's `chars().count()`.
 		const length = [...text].length;
@@ -528,7 +527,9 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 		try {
 			const reply = await client.command({
 				command: "chat_message_post",
-				body: { agentId: agent.id, text },
+				body: asTask
+					? { agentId: agent.id, text, asTask: true }
+					: { agentId: agent.id, text },
 			});
 			if ("error" in reply) setRefusal(sentence(reply.error.detail));
 			else setText("");
@@ -537,6 +538,10 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 		} finally {
 			setBusy(false);
 		}
+	};
+	const post = (e: FormEvent) => {
+		e.preventDefault();
+		void send(false);
 	};
 	return (
 		<form className={channel.composer} onSubmit={post}>
@@ -559,6 +564,17 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 				<Button kind="primary" type="submit" busy={busy}>
 					{t("chatsSend")}
 				</Button>
+				<Button
+					kind="secondary"
+					type="button"
+					busy={busy}
+					onClick={() => void send(true)}
+				>
+					{t("chatsSendTask")}
+				</Button>
+				<InfoTip id="chat-task-info">
+					{t("chatsTaskInfo", { name: agent.displayName })}
+				</InfoTip>
 			</div>
 			<p id="chat-enter" className={wide ? channel.muted : channel.hidden}>
 				{t("chatsEnterSends")}

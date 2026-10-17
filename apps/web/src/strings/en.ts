@@ -718,6 +718,9 @@ export const en = {
 	refuseExtraTries:
 		"More tries come only with sending the work back to be done, for a task that used up its tries.",
 	refuseSameStatus: "That is already so, so nothing changed.",
+	refuseAgentNotActive:
+		"This teammate is paused. Resume them on the Team page to give them a task.",
+	refuseTaskTooShort: "Say a little more: a task needs at least 20 characters.",
 	refuseAgentRetired:
 		"This teammate has left the team, so this chat can be read but not added to.",
 	refuseTriage:
@@ -965,6 +968,9 @@ export const en = {
 	chatsNoSuch: "No such teammate",
 	chatsLabel: "Message {name}",
 	chatsSend: "Send",
+	chatsSendTask: "Send as a task",
+	chatsTaskInfo:
+		"{name} turns your message into a task, plans it and starts on it. Changes to code are still checked before they reach you.",
 	chatsEnterSends: "Enter sends, Shift+Enter for a new line",
 	chatsTooLong:
 		"A message is at most 4000 characters, and this one is {length}.",

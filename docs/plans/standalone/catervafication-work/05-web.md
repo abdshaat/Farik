@@ -102,7 +102,7 @@ Files: `apps/web/src/pages/OneToOne.tsx` (`Composer`), `apps/web/src/app/refusal
   - the next send, answered `{ error: { kind: "refused", detail: "task_too_short: say a little
     more: at least 20 characters" } }`, shows an alert whose text is `en.refuseTaskTooShort`.
 
-- [ ] `feat(web): send a chat message to an agent as its task`
+- [x] `feat(web): send a chat message to an agent as its task`
 
 ### Task 2: the message shows its task
 
