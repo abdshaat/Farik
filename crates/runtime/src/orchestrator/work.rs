@@ -17,6 +17,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use super::OrchestratorError;
+use crate::session::SessionPurpose;
 
 /// Which agents have a session running in this process, and the task each is about, and the turn.
 #[derive(Debug, Default)]
@@ -25,6 +26,8 @@ pub struct Work {
     turn: Arc<AsyncMutex<()>>,
     /// Each agent with a session, and the task it is about.
     busy: Mutex<BTreeMap<String, Option<TaskId>>>,
+    /// Each agent with a chat fork running beside its work (ADR 0064).
+    chats: Mutex<BTreeSet<String>>,
 }
 
 impl Work {
@@ -37,7 +40,22 @@ impl Work {
         self.busy.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Whether `agent_id` has a session running.
+    fn chats(&self) -> std::sync::MutexGuard<'_, BTreeSet<String>> {
+        self.chats.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether `agent_id` has a chat fork running.
+    pub(crate) fn is_chatting(&self, agent_id: &str) -> bool {
+        self.chats().contains(agent_id)
+    }
+
+    /// The task of `agent_id`'s running work session, `None` when it runs none or one about no
+    /// task.
+    pub(crate) fn work_task_of(&self, agent_id: &str) -> Option<TaskId> {
+        self.busy().get(agent_id).cloned().flatten()
+    }
+
+    /// Whether `agent_id` has a work session running.
     pub(crate) fn is_busy(&self, agent_id: &str) -> bool {
         self.busy().contains_key(agent_id)
     }
@@ -47,26 +65,40 @@ impl Work {
         self.busy().values().flatten().cloned().collect()
     }
 
-    /// Records that `agent_id` has a session about `task_id`, until the claim is dropped.
+    /// Records that `agent_id` has a session about `task_id`, until the claim is dropped. A chat
+    /// fork is recorded apart from a work session, so that each runs beside the other.
     ///
     /// # Errors
     ///
-    /// `Refused` with `agent_busy: <agent> has a session running` when `agent_id` holds one.
+    /// `Refused` with `agent_busy: <agent> has a session running` when `agent_id` holds a work
+    /// session and `purpose` is not a chat, and `chat_busy: <agent> is answering its chat` when
+    /// it holds a chat fork and `purpose` is one.
     pub(crate) fn claim(
         &self,
         agent_id: &str,
         task_id: Option<&TaskId>,
+        purpose: SessionPurpose,
     ) -> Result<Claim<'_>, OrchestratorError> {
-        let mut busy = self.busy();
-        if busy.contains_key(agent_id) {
-            return Err(OrchestratorError::Refused {
-                reason: format!("agent_busy: {agent_id} has a session running"),
-            });
+        let chat = purpose == SessionPurpose::Chat;
+        if chat {
+            if !self.chats().insert(agent_id.to_string()) {
+                return Err(OrchestratorError::Refused {
+                    reason: format!("chat_busy: {agent_id} is answering its chat"),
+                });
+            }
+        } else {
+            let mut busy = self.busy();
+            if busy.contains_key(agent_id) {
+                return Err(OrchestratorError::Refused {
+                    reason: format!("agent_busy: {agent_id} has a session running"),
+                });
+            }
+            busy.insert(agent_id.to_string(), task_id.cloned());
         }
-        busy.insert(agent_id.to_string(), task_id.cloned());
         Ok(Claim {
             work: self,
             agent_id: agent_id.to_string(),
+            chat,
         })
     }
 }
@@ -75,11 +107,16 @@ impl Work {
 pub(crate) struct Claim<'a> {
     work: &'a Work,
     agent_id: String,
+    chat: bool,
 }
 
 impl Drop for Claim<'_> {
     fn drop(&mut self) {
-        self.work.busy().remove(&self.agent_id);
+        if self.chat {
+            self.work.chats().remove(&self.agent_id);
+        } else {
+            self.work.busy().remove(&self.agent_id);
+        }
     }
 }
 

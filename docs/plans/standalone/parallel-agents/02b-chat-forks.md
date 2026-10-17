@@ -149,7 +149,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   limits and `CHAT_SESSION_LIMITS` is `CHAT_SESSION_LIMITS`; of a cap with a larger wall clock
   keeps the limits' wall clock.
 
-- [ ] `feat(runtime): a chat forks beside its agent's work, briefly`
+- [x] `feat(runtime): a chat forks beside its agent's work, briefly`
 
 ## Verification
 

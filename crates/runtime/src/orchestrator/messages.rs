@@ -17,6 +17,7 @@ use catervas_store::marketing::{PostState, SocialPost};
 use catervas_store::{EventLog, EventQuery, StoreError, TaskProjection};
 use chrono::{DateTime, Utc};
 
+use super::{OrchestratorDeps, OrchestratorError};
 use crate::ceremonies::OpenEscalation;
 use crate::prompt::untrusted_block;
 
@@ -28,6 +29,71 @@ const RESULTS_CAP_BYTES: usize = 32 * 1024;
 const DIFF_CAP_BYTES: usize = 64 * 1024;
 /// How much of a question the human's message repeats.
 const QUESTION_CAP_BYTES: usize = 4 * 1024;
+
+/// How much of an agent's last note a chat's first message carries, in code points.
+const WORK_NOTE_CAP_CHARS: usize = 600;
+
+/// What `agent` is doing now, for the first message of its chat fork (ADR 0064): the task of its
+/// running work session, else the task it holds longest (assigned, in progress or sent back, the
+/// lowest `counted_seq`, then the lowest number), with its title, its status in the pages' words
+/// and the agent's last note on it.
+pub(super) fn work_summary(
+    deps: &OrchestratorDeps,
+    agent: &Agent,
+) -> Result<String, OrchestratorError> {
+    let board = deps.tools.projections.board()?;
+    let running = deps.work.work_task_of(agent.id.as_str());
+    let task = match running.and_then(|id| board.iter().find(|row| row.task_id == id)) {
+        Some(row) => Some(row),
+        None => board
+            .iter()
+            .filter(|row| {
+                row.assignee_id.as_deref() == Some(agent.id.as_str()) && row.counts_towards_wip()
+            })
+            .min_by_key(|row| {
+                let number: u64 = row
+                    .task_id
+                    .as_str()
+                    .trim_start_matches("CTV-")
+                    .parse()
+                    .unwrap_or_default();
+                (row.counted_seq.unwrap_or(0), number)
+            }),
+    };
+    let Some(row) = task else {
+        return Ok("What you are doing now: no task is under way.".to_string());
+    };
+    let note = deps
+        .tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            agent_id: Some(agent.id.to_string()),
+            kinds: vec![EventKind::NoteWritten],
+            limit: Some(1),
+            newest_first: true,
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find_map(|event| match event.body {
+            EventBody::NoteWritten(body) => Some(body.text),
+            _ => None,
+        });
+    let note = match note {
+        Some(text) if text.chars().count() > WORK_NOTE_CAP_CHARS => {
+            let cut: String = text.chars().take(WORK_NOTE_CAP_CHARS).collect();
+            format!("Your last note on it: {cut}…")
+        }
+        Some(text) => format!("Your last note on it: {text}"),
+        None => "You have written no note on it yet.".to_string(),
+    };
+    Ok(format!(
+        "What you are doing now: {} \"{}\" ({}). {note}",
+        row.task_id.as_str(),
+        row.title,
+        catervas_store::activity::status_in_words(row.status),
+    ))
+}
 
 /// Where an implement session picks up: the branch's last commit past its base, and the last note
 /// written since the task last moved into `in_progress`, as its kind and text.
