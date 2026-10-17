@@ -128,6 +128,19 @@ pub fn plan_stem(epic: &str) -> String {
     format!("docs/catervas/architecture/plans/{epic}")
 }
 
+/// Whether the task writes an epic's plan: its `plan` is set and its `allowed_paths` are exactly
+/// that.
+#[must_use]
+pub fn is_plan_task(contract: &crate::contract::TaskContract) -> bool {
+    contract.plan.as_ref().is_some_and(|own| {
+        contract
+            .allowed_paths
+            .iter()
+            .map(ToString::to_string)
+            .eq([own.to_string()])
+    })
+}
+
 /// Whether the path is the Architect's plan for the epic, in either format.
 #[must_use]
 pub fn is_plan_of(path: &str, epic: &str) -> bool {

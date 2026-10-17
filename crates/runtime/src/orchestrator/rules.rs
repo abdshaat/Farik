@@ -21,7 +21,7 @@ use catervas_protocol::event::{
     SessionStartedBodyPurpose, Thread, new_event,
 };
 use catervas_store::baseline::{copy_baseline, folder_in};
-use catervas_store::git::held_document;
+use catervas_store::git::{held_document, task_base};
 use catervas_store::marketing::{marketing_plans, social_posts};
 use catervas_store::product_plan::{new_project, product_plan_tasks};
 use catervas_store::repos::TaskRepositoryError;
@@ -262,7 +262,7 @@ pub(super) async fn tick(
             .filter(in_scope)
             .filter(goes_on)
         {
-            if let Some(report) = assigned(deps, &team, row)? {
+            if let Some(report) = assigned(deps, &team, &board, row)? {
                 return Ok(report);
             }
         }
@@ -1748,10 +1748,10 @@ fn resume(
             Err(TaskRepositoryError::Missing { .. }) => return Ok(None),
             Err(error) => return Err(repository_refused(task_id, &error)),
         };
-        if repository
-            .git
-            .commit_count(&repository.integration_branch, &task_branch(contract))?
-            > 0
+        if repository.git.commit_count(
+            &task_base(&repository.git, &repository.integration_branch, task_id),
+            &task_branch(contract),
+        )? > 0
         {
             Git::open(worktree).head_summary()?
         } else {
@@ -1834,6 +1834,7 @@ fn posts_heard_by(
 fn assigned(
     deps: &OrchestratorDeps,
     team: &Team,
+    board: &[TaskProjection],
     row: &TaskProjection,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if requests::is_epic(row) {
@@ -1865,9 +1866,9 @@ fn assigned(
                 Err(TaskRepositoryError::Missing { .. }) => return Ok(None),
                 Err(error) => return Err(repository_refused(&row.task_id, &error)),
             };
-            repository
-                .git
-                .create_worktree(&worktree, &branch, &repository.integration_branch)?;
+            if !start_worktree(deps, board, &contract, &repository, &worktree, &branch)? {
+                return Ok(None);
+            }
         }
         format!("in its worktree on {branch}")
     };
@@ -1888,6 +1889,49 @@ fn assigned(
         })),
         TransitionOutcome::Refused(_) => Ok(None),
     }
+}
+
+/// Makes a task's worktree on `branch` from `requests::start_point`: the first branch it names,
+/// then each further one merged in the worktree itself (ADR 0061). The ref the task's diffs are
+/// taken from is written when it began anywhere but at the integration branch. Answers `false`,
+/// with the worktree and the branch gone, when a merge conflicts: the task waits, and the next tick
+/// tries again, a conflicting dependency having been integrated by then.
+fn start_worktree(
+    deps: &OrchestratorDeps,
+    board: &[TaskProjection],
+    contract: &TaskContract,
+    repository: &catervas_store::repos::TaskRepository,
+    worktree: &std::path::Path,
+    branch: &str,
+) -> Result<bool, OrchestratorError> {
+    let git = &repository.git;
+    let starts = requests::start_point(deps, board, contract, repository)?;
+    git.create_worktree(worktree, branch, &starts[0])?;
+    for from in &starts[1..] {
+        let message = format!("Start {} from {from}", contract.id.as_str());
+        let merged = match git.merge_in(worktree, from, &message) {
+            Ok(merged) => merged,
+            Err(error) => {
+                undo_start(git, worktree, branch);
+                return Err(error.into());
+            }
+        };
+        if matches!(merged, catervas_store::MergeOutcome::Conflicts(_)) {
+            undo_start(git, worktree, branch);
+            return Ok(false);
+        }
+    }
+    if starts != [repository.integration_branch.clone()] {
+        let start = git.merge_base(branch, branch)?;
+        git.set_ref(&catervas_store::git::task_start_ref(&contract.id), &start)?;
+    }
+    Ok(true)
+}
+
+/// Takes back a worktree and its branch that could not be started.
+fn undo_start(git: &Git, worktree: &std::path::Path, branch: &str) {
+    let _ = git.remove_worktree(worktree);
+    let _ = git.delete_branch(branch);
 }
 
 /// The team's agent of that id, when it is active.

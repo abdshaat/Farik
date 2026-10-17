@@ -760,6 +760,31 @@ impl Git {
         }
     }
 
+    /// Writes the ref `name` (`refs/...`) at `rev`.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn set_ref(&self, name: &str, rev: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.at_root(&["update-ref", name, rev])?;
+        Ok(())
+    }
+
+    /// Whether the ref `name` (`refs/...`) exists.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, or `NotInstalled` when git cannot be run.
+    pub fn has_ref(&self, name: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        match self.at_root(&["rev-parse", "--verify", "--quiet", name]) {
+            Ok(_) => Ok(true),
+            Err(GitError::CommandFailed { .. }) => Ok(false),
+            Err(other) => Err(other),
+        }
+    }
+
     /// Deletes the local branch `name` (`git branch -D`), which no worktree may have checked out.
     ///
     /// # Errors
@@ -1152,6 +1177,30 @@ fn paths_of(listed: &str) -> Vec<String> {
         .filter(|path| !path.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+/// The ref that remembers where a task's worktree began, when it did not begin at the integration
+/// branch (`task_base`).
+#[must_use]
+pub fn task_start_ref(task_id: &catervas_core::contract::TaskId) -> String {
+    format!("refs/catervas/start/{}", task_id.as_str())
+}
+
+/// What a task's diff, commit count and changed paths are taken from: the ref written where its
+/// worktree began, when it began from other tasks' unmerged branches (ADR 0061), else
+/// `integration_branch`.
+#[must_use]
+pub fn task_base(
+    git: &Git,
+    integration_branch: &str,
+    task_id: &catervas_core::contract::TaskId,
+) -> String {
+    let reference = task_start_ref(task_id);
+    if git.has_ref(&reference).unwrap_or(false) {
+        reference
+    } else {
+        integration_branch.to_string()
+    }
 }
 
 /// The branch a task's work is measured against and merges into: the team's

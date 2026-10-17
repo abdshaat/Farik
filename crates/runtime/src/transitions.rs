@@ -48,8 +48,8 @@ use catervas_protocol::event::{
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use catervas_store::git::integration_branch;
-use catervas_store::git::product_plan_on;
 use catervas_store::git::stale_twins;
+use catervas_store::git::{product_plan_on, task_base};
 use catervas_store::product_plan::{is_the_product_plan, new_project};
 use catervas_store::repos::{TaskRepositoryError, task_repository};
 
@@ -814,8 +814,8 @@ impl Transitions {
             }
             Err(error) => return Err(error.into()),
         };
-        let base = &repository.integration_branch;
         let git = &repository.git;
+        let base = &task_base(git, &repository.integration_branch, &contract.id);
         let branch = task_branch(contract);
         let work = WorkState {
             commits: git.commit_count(base, &branch)?,

@@ -138,7 +138,7 @@ Tests:
   - With CTV-3 and the plan changing one file differently, CTV-4 has no worktree after the tick and stays `assigned`.
   - A lane task CTV-3 started from the plan's branch, whose `allowed_paths` exclude the plan, commits its own file and moves to `verifying`. Its Definition of Done context's `changed_paths` holds only that file (`refs/catervas/start/CTV-3` exists).
 
-- [ ] `feat(runtime): start a task from its unmerged dependencies and its plan`
+- [x] `feat(runtime): start a task from its unmerged dependencies and its plan`
 
 ### Task 4: the plan's tasks follow its acceptance
 

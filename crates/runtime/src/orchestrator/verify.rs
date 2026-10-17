@@ -21,6 +21,7 @@ use catervas_protocol::event::{
     NoteWrittenBody, NoteWrittenBodyKind, ReviewRecordedBody, new_event,
 };
 use catervas_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline, folder_in};
+use catervas_store::git::task_base;
 use catervas_store::repos::TaskRepositoryError;
 use catervas_store::{EventQuery, Git, TaskProjection};
 
@@ -319,7 +320,11 @@ async fn run_what_catervas_runs(
         Err(TaskRepositoryError::Missing { .. }) => return Ok(CatervasRan::MemberMissing),
         Err(error) => return Err(repository_refused(&contract.id, &error)),
     };
-    let base = repository.integration_branch.clone();
+    let base = task_base(
+        &repository.git,
+        &repository.integration_branch,
+        &contract.id,
+    );
     for criterion in &pending {
         let mut alone = contract.clone();
         alone.exit_criteria = vec![(*criterion).clone()];
@@ -537,9 +542,14 @@ async fn design_review_first(
         Err(TaskRepositoryError::Missing { .. }) => return Ok(Some(ran_criteria(row, ran))),
         Err(error) => return Err(repository_refused(&row.task_id, &error)),
     };
-    let diff = repository
-        .git
-        .diff(&repository.integration_branch, &task_branch(contract))?;
+    let diff = repository.git.diff(
+        &task_base(
+            &repository.git,
+            &repository.integration_branch,
+            &contract.id,
+        ),
+        &task_branch(contract),
+    )?;
     let end = run_session(
         deps,
         team,
@@ -635,9 +645,14 @@ async fn review(
             Err(TaskRepositoryError::Missing { .. }) => return Ok(ran_criteria(row, ran)),
             Err(error) => return Err(repository_refused(&row.task_id, &error)),
         };
-        diff = repository
-            .git
-            .diff(&repository.integration_branch, &task_branch(&contract))?;
+        diff = repository.git.diff(
+            &task_base(
+                &repository.git,
+                &repository.integration_branch,
+                &contract.id,
+            ),
+            &task_branch(&contract),
+        )?;
         Changes::Diff(&diff)
     };
     let initial_prompt = review_message(&ReviewBrief {

@@ -3,16 +3,17 @@
 
 use std::sync::Arc;
 
+use catervas_core::branch::task_branch;
 use catervas_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
-use catervas_core::folders::{plan_stem, with_format};
+use catervas_core::folders::{is_plan_task, plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
 use catervas_core::governor::gates::fits_the_open_sprint;
 use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
-use catervas_core::team::{Agent, Team, changes_code};
+use catervas_core::team::{Agent, Team, changes_code, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy,
     EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody,
@@ -21,6 +22,7 @@ use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
 use catervas_store::git::{GitError, held_document};
 use catervas_store::product_plan::is_the_product_plan;
+use catervas_store::repos::TaskRepository;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
@@ -109,7 +111,7 @@ pub(super) async fn draft(
         return Ok(None);
     }
     let outcome = deps.tools.transitions.request(
-        &TransitionRequest {
+        &catervas_core::governor::transition::TransitionRequest {
             task_id: row.task_id.clone(),
             to: TaskStatus::Refining,
             actor: TransitionActor::ProductManager,
@@ -251,7 +253,7 @@ fn judge(
 ) -> Result<TickReport, OrchestratorError> {
     let ask = |to: TaskStatus| {
         deps.tools.transitions.request(
-            &TransitionRequest {
+            &catervas_core::governor::transition::TransitionRequest {
                 task_id: row.task_id.clone(),
                 to,
                 actor: TransitionActor::Governor,
@@ -411,10 +413,10 @@ pub(super) fn assigned_epic(
         return Ok(None);
     }
     let outcome = deps.tools.transitions.request(
-        &TransitionRequest {
+        &catervas_core::governor::transition::TransitionRequest {
             task_id: row.task_id.clone(),
             to: TaskStatus::InProgress,
-            actor: TransitionActor::Assignee,
+            actor: catervas_core::governor::transition_table::TransitionActor::Assignee,
             agent_id: Some(assignee.id.to_string()),
         },
         &TransitionAsk::default(),
@@ -469,6 +471,83 @@ fn epic_step(children: &[Child]) -> EpicStep {
     }
 }
 
+/// The branches a task's worktree is made from, the first being its base (ADR 0061): each
+/// dependency that is accepted and still awaiting integration, in the order the contract lists
+/// them, then, for a task of an epic's plan, the plan task's branch while the plan is not on the
+/// integration branch. A branch that does not exist, or that is listed twice, is left out. With
+/// nothing unmerged to start from, the integration branch.
+///
+/// # Errors
+///
+/// What reading a contract or git refuses.
+pub(super) fn start_point(
+    deps: &OrchestratorDeps,
+    board: &[TaskProjection],
+    contract: &TaskContract,
+    repository: &TaskRepository,
+) -> Result<Vec<String>, OrchestratorError> {
+    let mine = |theirs: &TaskContract| theirs.repo == contract.repo;
+    let mut branches = Vec::new();
+    for dependency in &contract.dependencies {
+        let Some(row) = board
+            .iter()
+            .find(|row| row.task_id.as_str() == dependency.as_str())
+        else {
+            continue;
+        };
+        if row.status != TaskStatus::Accepted || !row.awaiting_integration {
+            continue;
+        }
+        let theirs = match deps.tools.files.read_contract(&row.task_id) {
+            Ok(theirs) => theirs,
+            Err(FilesError::NotFound { .. }) => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if task_private_folder(&theirs).is_none() && mine(&theirs) {
+            branches.push(task_branch(&theirs));
+        }
+    }
+    if let (Some(plan), Some(parent)) = (&contract.plan, &contract.parent)
+        && !is_plan_task(contract)
+    {
+        let mut plan_branch = None;
+        for row in board.iter().filter(|row| {
+            row.parent
+                .as_ref()
+                .is_some_and(|own| own.to_string() == parent.to_string())
+                && row.status == TaskStatus::Accepted
+        }) {
+            let theirs = match deps.tools.files.read_contract(&row.task_id) {
+                Ok(theirs) => theirs,
+                Err(FilesError::NotFound { .. }) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if is_plan_task(&theirs) && theirs.plan.as_ref() == Some(plan) && mine(&theirs) {
+                plan_branch = Some(task_branch(&theirs));
+            }
+        }
+        if let Some(branch) = plan_branch {
+            let on_the_branch = repository
+                .git
+                .has_file(&repository.integration_branch, &plan.to_string())
+                .unwrap_or(false);
+            if !on_the_branch {
+                branches.push(branch);
+            }
+        }
+    }
+    let mut starts: Vec<String> = Vec::new();
+    for branch in branches {
+        if !starts.contains(&branch) && repository.git.has_local_branch(&branch)? {
+            starts.push(branch);
+        }
+    }
+    if starts.is_empty() {
+        starts.push(repository.integration_branch.clone());
+    }
+    Ok(starts)
+}
+
 /// What each of `tasks`, the tasks under an epic, says of the epic's progress.
 fn children_of_epic(
     deps: &OrchestratorDeps,
@@ -478,13 +557,7 @@ fn children_of_epic(
         .iter()
         .map(|task| {
             let plan_task = match deps.tools.files.read_contract(&task.task_id) {
-                Ok(theirs) => theirs.plan.as_ref().is_some_and(|own| {
-                    theirs
-                        .allowed_paths
-                        .iter()
-                        .map(ToString::to_string)
-                        .eq([own.to_string()])
-                }),
+                Ok(theirs) => is_plan_task(&theirs),
                 Err(FilesError::NotFound { .. }) => false,
                 Err(error) => return Err(error.into()),
             };
@@ -3613,6 +3686,252 @@ mod tests {
                 .contains("<untrusted source=\"plan\">\n<h1>Plan for CTV-1: Add done.txt</h1>"),
             "{}",
             spec.initial_prompt
+        );
+    }
+
+    /// Commits `files` on a new branch `branch` made from `from`, in a worktree of its own that is
+    /// removed again: the branch is left holding the work.
+    fn branch_with(harness: &Harness, branch: &str, from: &str, files: &[(&str, &str)]) {
+        let git = &harness.project.deps.git;
+        let path = harness
+            .project
+            .repo
+            .path
+            .join(".catervas/local/worktrees")
+            .join(format!("scratch-{}", branch.replace('/', "-")));
+        git.create_worktree(&path, branch, from)
+            .expect("the scratch worktree is made");
+        let mut paths = Vec::new();
+        for (file, text) in files {
+            let target = path.join(file);
+            std::fs::create_dir_all(target.parent().expect("a folder")).expect("made");
+            std::fs::write(target, text).expect("written");
+            paths.push((*file).to_string());
+        }
+        git.commit(&path, "The branch's work", &paths)
+            .expect("committed");
+        git.remove_worktree(&path)
+            .expect("the scratch worktree goes");
+    }
+
+    const THE_PLAN: &str = "docs/catervas/architecture/plans/CTV-1.md";
+
+    /// CTV-`n` under the epic CTV-1, a Software Developer's task of the plan's lane `lane`,
+    /// `dev-a`'s, assigned, depending on `needs`.
+    fn a_lane_task_assigned(harness: &Harness, n: u32, lane: u32, needs: &[&str]) {
+        let id = format!("CTV-{n}");
+        harness.file_under(&id, "ready", Some("CTV-1"), |wire| {
+            wire["plan"] = json!(THE_PLAN);
+            wire["lane"] = json!(lane);
+            wire["allowed_paths"] = json!(["site/**"]);
+            wire["dependencies"] = json!(needs);
+        });
+        harness.project.moved(
+            &id,
+            "ready",
+            "assigned",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_task_starts_from_its_unmerged_dependencies_and_its_plan() {
+        let harness = Harness::new("epic-start-points", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task(&harness);
+        branch_with(
+            &harness,
+            "docs/CTV-2",
+            "main",
+            &[(THE_PLAN, "# Plan for CTV-1\n")],
+        );
+        let git = &harness.project.deps.git;
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let tick_until_started = |id: &'static str| {
+            let harness = &harness;
+            let orchestrator = &orchestrator;
+            async move {
+                for _ in 0..4 {
+                    orchestrator.tick().await.expect("the tick runs");
+                    if harness.worktree(id).is_dir() {
+                        return;
+                    }
+                }
+            }
+        };
+
+        // A lane task starts from the plan's branch, the plan being on no integration branch.
+        a_lane_task_assigned(&harness, 3, 1, &[]);
+        tick_until_started("CTV-3").await;
+        assert!(harness.worktree("CTV-3").join(THE_PLAN).is_file());
+
+        // A task that depends on an accepted, unmerged task starts from its branch.
+        std::fs::create_dir_all(harness.worktree("CTV-3").join("site")).expect("made");
+        std::fs::write(harness.worktree("CTV-3").join("site/a.txt"), "a\n").expect("written");
+        git.commit(
+            &harness.worktree("CTV-3"),
+            "Add site/a.txt",
+            &["site/a.txt".to_string()],
+        )
+        .expect("committed");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.record_by(
+            Some("dev-a"),
+            at(),
+            "CTV-3",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "ok",
+                     "run_by": "assignee", "recorded_by": "dev-a" }),
+        );
+        harness
+            .project
+            .moved("CTV-3", "in_progress", "verifying", &people);
+        harness
+            .project
+            .moved("CTV-3", "verifying", "accepted", &people);
+        assert!(harness.row("CTV-3").awaiting_integration);
+        a_lane_task_assigned(&harness, 4, 2, &["CTV-3"]);
+        tick_until_started("CTV-4").await;
+        assert!(harness.worktree("CTV-4").join("site/a.txt").is_file());
+        assert!(harness.worktree("CTV-4").join(THE_PLAN).is_file());
+
+        // A task with nothing unmerged starts from the integration branch.
+        harness
+            .project
+            .moved("CTV-4", "in_progress", "verifying", &people);
+        harness
+            .project
+            .moved("CTV-4", "verifying", "accepted", &people);
+        harness.file_under("CTV-5", "ready", Some("CTV-1"), |_| {});
+        harness.project.moved("CTV-5", "ready", "assigned", &people);
+        tick_until_started("CTV-5").await;
+        assert_eq!(git.commit_count("main", "feature/CTV-5"), Ok(0));
+        assert_eq!(
+            catervas_store::git::task_base(git, "main", &task("CTV-5")),
+            "main"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_task_that_conflicts_with_its_start_waits_without_a_worktree() {
+        let harness = Harness::new("epic-start-conflict", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task(&harness);
+        branch_with(
+            &harness,
+            "docs/CTV-2",
+            "main",
+            &[(THE_PLAN, "the plan's line\n")],
+        );
+        // CTV-3 was built from `main` and changed the plan's file differently.
+        harness.file_under("CTV-3", "ready", Some("CTV-1"), |wire| {
+            wire["allowed_paths"] = json!(["site/**"]);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
+            harness.project.moved("CTV-3", pair[0], pair[1], &people);
+        }
+        branch_with(
+            &harness,
+            "feature/CTV-3",
+            "main",
+            &[(THE_PLAN, "another line\n")],
+        );
+        a_lane_task_assigned(&harness, 4, 2, &["CTV-3"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert!(!harness.worktree("CTV-4").exists());
+        assert_eq!(
+            harness.project.deps.git.has_local_branch("feature/CTV-4"),
+            Ok(false)
+        );
+        assert_eq!(harness.row("CTV-4").status, TaskStatus::Assigned);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_lane_task_is_judged_by_its_own_work_not_the_plans() {
+        let harness = Harness::new("epic-start-diff", with_a_scrum_master_and_an_architect);
+        a_scrum_masters_epic_in_progress(&harness);
+        an_accepted_plan_task(&harness);
+        branch_with(
+            &harness,
+            "docs/CTV-2",
+            "main",
+            &[(THE_PLAN, "# Plan for CTV-1\n")],
+        );
+        a_lane_task_assigned(&harness, 3, 1, &[]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick runs");
+        let worktree = harness.worktree("CTV-3");
+        let git = &harness.project.deps.git;
+        std::fs::create_dir_all(worktree.join("site")).expect("made");
+        std::fs::write(worktree.join("site/b.txt"), "b\n").expect("written");
+        git.commit(&worktree, "Add site/b.txt", &["site/b.txt".to_string()])
+            .expect("committed");
+        harness.project.record(
+            "CTV-3",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Added it.", "written_by": "dev-a" }),
+        );
+        harness.project.record_by(
+            Some("dev-a"),
+            at(),
+            "CTV-3",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "ok",
+                     "run_by": "assignee", "recorded_by": "dev-a" }),
+        );
+
+        let base = catervas_store::git::task_base(git, "main", &task("CTV-3"));
+        assert_eq!(base, "refs/catervas/start/CTV-3");
+        assert_eq!(
+            git.changed_paths(&base, "feature/CTV-3"),
+            Ok(vec!["site/b.txt".to_string()])
+        );
+        // The plan is outside the task's allowed paths, and not in its diff.
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        let request = catervas_core::governor::transition::TransitionRequest {
+            task_id: task("CTV-3"),
+            to: TaskStatus::Verifying,
+            actor: catervas_core::governor::transition_table::TransitionActor::Assignee,
+            agent_id: Some("dev-a".to_string()),
+        };
+        let context = harness
+            .project
+            .deps
+            .transitions
+            .context(
+                &request,
+                &crate::transitions::TransitionAsk::default(),
+                &team,
+            )
+            .expect("the context reads");
+        assert_eq!(context.done.changed_paths, vec!["site/b.txt".to_string()]);
+        let outcome = harness
+            .project
+            .deps
+            .transitions
+            .request(
+                &request,
+                &crate::transitions::TransitionAsk::default(),
+                &team,
+            )
+            .expect("the governor answers");
+        assert!(
+            matches!(outcome, crate::transitions::TransitionOutcome::Moved(_)),
+            "{outcome:?}"
         );
     }
 
