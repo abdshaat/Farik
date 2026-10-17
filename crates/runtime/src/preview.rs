@@ -38,6 +38,12 @@ pub const OWNER_ORIGINS: [&str; 2] = [
     "https://host.docker.internal:*",
 ];
 
+/// What stands for a value of that file in a text Catervas records.
+pub const HIDDEN: &str = "[hidden]";
+
+/// The shortest value `PreviewEnv::hide` hides: a shorter one (`1`, `on`, a port) is no secret.
+const HIDDEN_FROM: usize = 4;
+
 /// The owner's environment file for the preview, from the project folder (ADR 0067).
 pub const PREVIEW_ENV: &str = ".catervas/local/preview.env";
 
@@ -69,6 +75,21 @@ impl PreviewEnv {
             })
             .unwrap_or_default();
         Some(Self { path, values })
+    }
+
+    /// `text` with every value of the file of at least four characters replaced by `HIDDEN`,
+    /// the longest first so that a value holding another is hidden whole.
+    #[must_use]
+    pub fn hide(&self, text: &str) -> String {
+        let mut values: Vec<&String> = self
+            .values
+            .iter()
+            .filter(|value| value.chars().count() >= HIDDEN_FROM)
+            .collect();
+        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+        values.into_iter().fold(text.to_string(), |hidden, value| {
+            hidden.replace(value.as_str(), HIDDEN)
+        })
     }
 
     /// Where the file is, absolute.
@@ -711,6 +732,8 @@ pub(crate) mod fixtures {
     pub(crate) struct FakePreviews {
         pub(crate) fails: Option<PreviewError>,
         pub(crate) prepared: Mutex<Vec<Option<String>>>,
+        /// The path of the environment file each `start` was asked with.
+        pub(crate) envs: Mutex<Vec<Option<std::path::PathBuf>>>,
     }
 
     impl FakePreviews {
@@ -718,6 +741,7 @@ pub(crate) mod fixtures {
             Self {
                 fails: None,
                 prepared: Mutex::new(Vec::new()),
+                envs: Mutex::new(Vec::new()),
             }
         }
 
@@ -725,6 +749,7 @@ pub(crate) mod fixtures {
             Self {
                 fails: Some(error),
                 prepared: Mutex::new(Vec::new()),
+                envs: Mutex::new(Vec::new()),
             }
         }
     }
@@ -741,8 +766,9 @@ pub(crate) mod fixtures {
             _worktree: &Path,
             preview: &Preview,
             _tree: &str,
-            _env: Option<&PreviewEnv>,
+            env: Option<&PreviewEnv>,
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
+            crate::locked(&self.envs).push(env.map(|env| env.path().to_path_buf()));
             crate::locked(&self.prepared).push(preview.prepare.clone());
             match &self.fails {
                 Some(error) => Err(error.clone()),
