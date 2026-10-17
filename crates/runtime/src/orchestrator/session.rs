@@ -919,6 +919,9 @@ pub(super) const CHECK_PAGE_TOOL: &str = "catervas_check_page";
 
 /// The one tool that writes in a chat, offered in a chat session alone.
 const CHAT_REPLY_TOOL: &str = "catervas_chat_reply";
+/// The tool that takes the owner's request as the agent's own task, offered in a chat session
+/// alone (ADR 0063).
+const TAKE_TASK_TOOL: &str = "catervas_take_task";
 
 /// The tool that proposes a marketing plan, offered in the Marketing Specialist's implement
 /// session about a task alone (ADR 0042).
@@ -996,6 +999,7 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         .filter(|tool| tool.name != WRITE_MEMORY_TOOL || !reviews_its_own_task(ask))
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
+        .filter(|tool| tool.name != TAKE_TASK_TOOL || ask.purpose == SessionPurpose::Chat)
         // A bug is filed in the implement session of a hunt (ADR 0063).
         .filter(|tool| {
             tool.name != FILE_BUG_TOOL
@@ -3414,7 +3418,9 @@ mod tests {
         ] {
             let given = tools(asked(deps, who, purpose, about));
             assert!(
-                !given.iter().any(|tool| tool == "catervas_chat_reply"),
+                !given
+                    .iter()
+                    .any(|tool| tool == "catervas_chat_reply" || tool == "catervas_take_task"),
                 "{purpose:?}: {given:?}"
             );
         }

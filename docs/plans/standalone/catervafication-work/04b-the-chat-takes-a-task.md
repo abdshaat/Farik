@@ -162,7 +162,7 @@ before `"catervas_chat_reply"`), `crates/runtime/src/prompt.rs`.
 
   Any existing test that pins the chat's tool list or its instruction is updated to the new text.
 
-- [ ] `feat(runtime): the chat session takes work its role does and answers the rest`
+- [x] `feat(runtime): the chat session takes work its role does and answers the rest`
 
 ## Verification
 

@@ -905,6 +905,7 @@ pub(super) const CHAT_TOOLS: &[&str] = &[
     "catervas_read_data_pipelines",
     "catervas_read_seller_messages",
     "catervas_read_seller_replies",
+    "catervas_take_task",
     "catervas_chat_reply",
     "catervas_read_sheet",
 ];
@@ -5734,6 +5735,39 @@ mod tests {
         assert_eq!(started[0].purpose, SessionPurpose::Implement);
     }
 
+    #[test]
+    fn a_chat_session_may_take_a_task() {
+        use crate::prompt::CLOSING_INSTRUCTIONS;
+
+        let position = |tool: &str| super::CHAT_TOOLS.iter().position(|name| *name == tool);
+        let take = position("catervas_take_task").expect("the chat is offered it");
+        assert_eq!(Some(take + 1), position("catervas_chat_reply"));
+        let closing = |wanted: SessionPurpose| {
+            CLOSING_INSTRUCTIONS
+                .iter()
+                .find(|(purpose, _)| *purpose == wanted)
+                .map(|(_, text)| *text)
+                .expect("an entry")
+        };
+        let chat = closing(SessionPurpose::Chat);
+        assert!(
+            chat.contains(
+                "take it with `catervas_take_task` and reply in one line naming the task"
+            ),
+            "{chat}"
+        );
+        assert!(
+            chat.contains("When it asks for work another role does"),
+            "{chat}"
+        );
+        for (purpose, text) in CLOSING_INSTRUCTIONS {
+            assert!(
+                purpose == SessionPurpose::Chat || !text.contains("catervas_take_task"),
+                "{purpose:?}: {text}"
+            );
+        }
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assigns_a_given_task_to_its_agent_first_without_a_session() {
@@ -6180,7 +6214,7 @@ mod tests {
         let spec = &adapter.started()[0];
         let tiers = default_tiers(Role::ProductManager);
         // The Designer's page check and design review are offered in its own sessions alone, a
-        // chat's reply in a chat alone, the books' tools to the Finance Specialist, an evaluation
+        // chat's reply and its task in a chat alone, the books' tools to the Finance Specialist, an evaluation
         // to the Procurement Specialist in an implement session, and a post to the Marketing
         // Specialist in one; every role reads a workbook, and a folder document is written in a
         // ceremony alone.
@@ -6194,6 +6228,7 @@ mod tests {
                     "catervas_check_page",
                     "catervas_record_design_review",
                     "catervas_chat_reply",
+                    "catervas_take_task",
                     "catervas_read_costs",
                     "catervas_write_sheet",
                     "catervas_write_evaluation",
@@ -8994,6 +9029,7 @@ mod tests {
         assert_eq!(
             given,
             BTreeSet::from([
+                "catervas_take_task",
                 "catervas_read_task",
                 "catervas_read_board",
                 "catervas_read_rules",
