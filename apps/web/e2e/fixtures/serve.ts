@@ -175,6 +175,11 @@ export async function startServe(o: {
 	paceMs?: number;
 	/** Whether `team`'s team plans its work in sprints (step 15); it does not by default. */
 	sprints?: boolean;
+	/**
+	 * Whether a delivery is already closed, holding no task: accepting a task then files no
+	 * changelog task, which would take an id the journey's transcripts name (ADR 0062).
+	 */
+	deliveryClosed?: boolean;
 }): Promise<{
 	url: string;
 	port: number;
@@ -226,6 +231,7 @@ export async function startServe(o: {
 	if (o.transcripts.length > 0)
 		args.push("--transcripts", o.transcripts.join(","));
 	if (o.paceMs) args.push("--pace", String(o.paceMs));
+	if (o.deliveryClosed) args.push("--delivery-closed");
 	const server = spawn(join(target, "catervas-e2e-serve"), args, {
 		cwd: project,
 		env: serveEnv,

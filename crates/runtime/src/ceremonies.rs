@@ -239,84 +239,6 @@ pub fn standup_moves(
         .collect())
 }
 
-/// The sprint a review and a retro are about (5.9): the latest that ended, while no newer one has
-/// started.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EndedSprint {
-    /// Its id.
-    pub sprint_id: String,
-    /// The seq of its `sprint.started`: its events come after it.
-    pub started_seq: u64,
-    /// The seq of its `sprint.ended`: its events come before it, and its ceremonies after.
-    pub ended_seq: u64,
-    /// Whether its review has run, under the ceremonies' bound (`has_run`).
-    pub reviewed: bool,
-    /// Each agent with a review session that has run since its end, under the same bound, by the
-    /// session's agent on its envelope, in the order their first sessions started.
-    pub reviewed_by: Vec<String>,
-    /// Whether its retro has run, under the same bound, or has appended, however its session
-    /// ended: a sprint gets one retro.
-    pub retro_held: bool,
-    /// Whether a `retro.appended` has been recorded since its end.
-    pub retro_appended: bool,
-}
-
-/// The sprint of the log's last `sprint.ended`, when no `sprint.started` follows it, with whether
-/// its review and its retro have run since that end, and whether its retro has appended. A sprint followed at once by another has
-/// none: the log keeps what happened.
-///
-/// # Errors
-///
-/// When the log cannot be read.
-pub fn ended_sprint(log: &EventLog) -> Result<Option<EndedSprint>, StoreError> {
-    let events = log.read(&EventQuery {
-        kinds: vec![
-            EventKind::SprintStarted,
-            EventKind::SprintEnded,
-            EventKind::SessionStarted,
-            EventKind::SessionEnded,
-            EventKind::RetroAppended,
-        ],
-        ..EventQuery::default()
-    })?;
-    let Some(last) = events.iter().rposition(|event| {
-        matches!(
-            event.body,
-            EventBody::SprintStarted(_) | EventBody::SprintEnded(_)
-        )
-    }) else {
-        return Ok(None);
-    };
-    let EventBody::SprintEnded(ended) = &events[last].body else {
-        return Ok(None);
-    };
-    let started_seq = events[..last]
-        .iter()
-        .rev()
-        .find_map(|event| match &event.body {
-            EventBody::SprintStarted(body)
-                if body.sprint_id.as_str() == ended.sprint_id.as_str() =>
-            {
-                Some(event.envelope.seq)
-            }
-            _ => None,
-        })
-        .unwrap_or(0);
-    let after = &events[last + 1..];
-    let retro_appended = after
-        .iter()
-        .any(|event| matches!(event.body, EventBody::RetroAppended(_)));
-    Ok(Some(EndedSprint {
-        sprint_id: ended.sprint_id.as_str().to_string(),
-        started_seq,
-        ended_seq: events[last].envelope.seq,
-        reviewed: has_run(after, |event| in_thread(event, Thread::Review)),
-        reviewed_by: reviewed_by(after),
-        retro_held: retro_appended || has_run(after, |event| in_thread(event, Thread::Retro)),
-        retro_appended,
-    }))
-}
-
 /// Each agent with a review session among `events` that `has_run`, in the order their first
 /// review sessions started.
 pub(crate) fn reviewed_by(events: &[CatervasEvent]) -> Vec<String> {
@@ -341,24 +263,29 @@ pub(crate) fn reviewed_by(events: &[CatervasEvent]) -> Vec<String> {
         .collect()
 }
 
-/// Each event about `task_id` recorded while `sprint` was open, oldest first.
+/// Each `budget.exhausted` of the day's dollars after `after_seq`, with when it was recorded: what
+/// a delivery's review is told besides the open escalations.
 ///
 /// # Errors
 ///
 /// When the log cannot be read.
-pub fn sprint_events(
+pub fn day_budgets_spent_after(
     log: &EventLog,
-    sprint: &EndedSprint,
-    task_id: &TaskId,
-) -> Result<Vec<CatervasEvent>, StoreError> {
+    after_seq: u64,
+) -> Result<Vec<(BudgetExhaustedBodyScope, DateTime<Utc>)>, StoreError> {
     Ok(log
         .read(&EventQuery {
-            task_id: Some(task_id.clone()),
-            after_seq: Some(sprint.started_seq),
+            kinds: vec![EventKind::BudgetExhausted],
+            after_seq: Some(after_seq),
             ..EventQuery::default()
         })?
         .into_iter()
-        .take_while(|event| event.envelope.seq < sprint.ended_seq)
+        .filter_map(|event| match &event.body {
+            EventBody::BudgetExhausted(body) if body.scope == BudgetExhaustedBodyScope::DayUsd => {
+                Some((body.scope, event.envelope.recorded_at))
+            }
+            _ => None,
+        })
         .collect())
 }
 
@@ -382,7 +309,7 @@ mod tests {
     use chrono::Duration;
     use serde_json::json;
 
-    use super::{ended_sprint, open_escalations};
+    use super::open_escalations;
     use crate::tools::fixtures::{TestProject, a_team_of_three, at};
 
     #[test]
@@ -454,53 +381,5 @@ mod tests {
             ]
         );
         assert_eq!(open[0].title, "Add a login page");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn knows_who_has_reviewed_an_ended_sprint() {
-        let project = TestProject::new("ceremonies-reviewed-by", &a_team_of_three(|_| {}));
-        project.open_sprint("S1", None, &[]);
-        project.record(
-            "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
-        );
-        let start = |agent: &str, session: &str| {
-            project.record_in(
-                Some(agent),
-                Some(session),
-                "",
-                "session.started",
-                &json!({
-                    "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
-                    "thread": "review"
-                }),
-            );
-        };
-        let end = |agent: &str, session: &str| {
-            project.record_in(
-                Some(agent),
-                Some(session),
-                "",
-                "session.ended",
-                &json!({ "reason": "completed", "detail": "" }),
-            );
-        };
-        start("sm", "s-1");
-        end("sm", "s-1");
-        start("pm", "s-2");
-
-        let sprint = ended_sprint(&project.deps.log)
-            .expect("the log reads")
-            .expect("S1 ended");
-        assert_eq!(sprint.reviewed_by, ["sm"]);
-
-        end("pm", "s-2");
-
-        let sprint = ended_sprint(&project.deps.log)
-            .expect("the log reads")
-            .expect("S1 ended");
-        assert_eq!(sprint.reviewed_by, ["sm", "pm"]);
     }
 }

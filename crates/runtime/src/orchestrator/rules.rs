@@ -25,16 +25,16 @@ use catervas_store::git::{held_document, task_base};
 use catervas_store::marketing::{marketing_plans, social_posts};
 use catervas_store::product_plan::new_project;
 use catervas_store::repos::TaskRepositoryError;
-use catervas_store::{CostScope, EventQuery, Git, GitError, TaskProjection};
+use catervas_store::{EventQuery, Git, GitError, TaskProjection};
 use chrono::{DateTime, Utc};
 
 use super::design::{self, Stage};
 use super::integrate::{awaiting, awaiting_folder_changes, cleanup};
 use super::messages::{
-    Digest, ProductFiles, Resume, SprintTask, architecture_refresh_message, ceremony_message,
-    implement_message, mention_message, owners_folder_lines, owners_folder_words, plan_message,
-    planning_message, posts_heard, product_refresh_message, retro_message, sprint_review_message,
-    standup_message, with_the_approved_plan,
+    DeliveredTask, Digest, ProductFiles, Resume, architecture_refresh_message, ceremony_message,
+    delivery_review_message, implement_message, mention_message, owners_folder_lines,
+    owners_folder_words, plan_message, planning_message, posts_heard, product_refresh_message,
+    retro_message, standup_message, task_cost, with_the_approved_plan,
 };
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
@@ -44,12 +44,13 @@ use super::{
     repository_refused, session_dir, task_repository_of, worktree,
 };
 use crate::ceremonies::{
-    EndedSprint, budgets_spent_since_planning, ended_sprint, open_escalations, sprint_events,
-    standup_moves,
+    budgets_spent_since_planning, day_budgets_spent_after, open_escalations, standup_moves,
 };
 use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
-use crate::deliveries::{close_delivery, due_delivery};
+use crate::deliveries::{
+    ClosedDelivery, close_delivery, closed_delivery, delivery_events, due_delivery,
+};
 use crate::exec::Executor;
 use crate::marketing::{hold_plans, record_plan_end};
 use crate::session::{EndReason, SessionPurpose};
@@ -487,16 +488,16 @@ fn delivery_to_rewrite(
         .any(|entry| DocumentFormat::of(&entry.path) == Some(DocumentFormat::Markdown)))
 }
 
-/// The latest ended sprint's review, then its retro (5.9), under `All` alone in a tick scoped to no
-/// task, while no newer sprint has started (`ended_sprint`): the ceremony runner gets one
-/// `ceremony` session in the `review` thread until the review has run, then one in the `retro`
-/// thread until the retro has. Their tasks are the sprint file's, and their facts the events about
-/// those tasks while the sprint was open. The review is told each task's status, cost, and
-/// completion note, and the sprint's budget and spent; the retro the sprint's rejections,
-/// escalations, blocks, and iterations, and the last retros, and is offered `catervas_append_retro`.
-/// Between them (`due_refresh`), the Product Manager and the Architect each get one `review`
-/// session that refreshes the product plan and the architecture notes. Passed over for a sprint
-/// whose file lists no task, with no runner, or on a spent day.
+/// The last closed delivery's review, then its retro (5.9, ADR 0062), under `All` alone in a tick
+/// scoped to no task: the ceremony runner gets one `ceremony` session in the `review` thread until
+/// the review has run, then one in the `retro` thread until the retro has. Their tasks are the
+/// delivery's, and their facts the events about those tasks since the delivery started. The review
+/// is told each task's status, cost, and completion note, what the delivery spent, and the digest
+/// of the open escalations and the day's budgets spent; the retro the delivery's rejections,
+/// escalations, blocks, and iterations, and the last retros, and is offered
+/// `catervas_append_retro`. Between them (`due_refresh`), the Product Manager and the Architect
+/// each get one `review` session that refreshes the product plan and the architecture notes.
+/// Passed over for a delivery that holds no task, with no runner, or on a spent day.
 #[allow(
     clippy::too_many_lines,
     reason = "the review, the retro and the refresh, side by side"
@@ -512,14 +513,10 @@ async fn review_and_retro(
         return Ok(None);
     }
     let tools = &deps.tools;
-    let Some(sprint) = ended_sprint(&tools.log)? else {
+    let Some(delivery) = closed_delivery(&tools.log)? else {
         return Ok(None);
     };
-    if sprint.reviewed && sprint.retro_held {
-        return Ok(None);
-    }
-    let file = tools.files.read_sprint(&sprint.sprint_id)?;
-    if file.task_ids.is_empty() {
+    if (delivery.reviewed && delivery.retro_held) || delivery.task_ids.is_empty() {
         return Ok(None);
     }
     let Some(runner) = assigner(team) else {
@@ -530,22 +527,25 @@ async fn review_and_retro(
     {
         return Ok(None);
     }
-    let tasks = sprint_tasks(tools, board, &sprint, &file)?;
-    let refresh = if sprint.reviewed {
-        due_refresh(deps, team, &sprint, &tasks, waiting)?
+    let tasks = delivery_tasks(tools, board, &delivery)?;
+    let refresh = if delivery.reviewed {
+        due_refresh(deps, team, &delivery, &tasks, waiting)?
     } else {
         Refresh::None
     };
     let (agent, thread, facts, offered, name) = match refresh {
         Refresh::Wait => return Ok(None),
         Refresh::Ask(agent, facts, name) => (agent, Thread::Review, facts, CEREMONY_TOOLS, name),
-        Refresh::None if sprint.reviewed => {
+        Refresh::None if delivery.reviewed => {
             let retro = tools.files.read_retro()?;
-            // The Scrum Master writes the cadence at the retro of the sprint that documented the
+            // The Scrum Master writes the cadence at the retro of the delivery that documented the
             // project (ADR 0051).
             let cadence = (Role::from(runner.role) == Role::ScrumMaster
                 && crate::catervafication::started(&tools.log)?.is_some_and(|epic| {
-                    file.task_ids.iter().any(|id| id.as_str() == epic.as_str())
+                    delivery
+                        .task_ids
+                        .iter()
+                        .any(|id| id.as_str() == epic.as_str())
                 }))
             .then_some(team.document_format());
             // After the owner's rewrite, it rewrites `delivery/`, which no task reaches.
@@ -555,7 +555,7 @@ async fn review_and_retro(
                 runner,
                 Thread::Retro,
                 retro_message(
-                    &sprint.sprint_id,
+                    &delivery.delivery_id,
                     &tasks,
                     retro.as_deref(),
                     cadence,
@@ -567,18 +567,18 @@ async fn review_and_retro(
         }
         Refresh::None => {
             // A Product Manager that runs the review makes its refresh in it.
-            let refresh_in_review = review_refresh(deps, team, runner, &sprint.sprint_id)?;
-            let spent = tools
-                .projections
-                .costs(CostScope::Sprint)?
-                .into_iter()
-                .find(|cost| cost.key == sprint.sprint_id)
-                .map_or(0.0, |cost| cost.usd);
-            let mut facts = sprint_review_message(
-                &sprint.sprint_id,
+            let refresh_in_review = review_refresh(deps, team, runner, &delivery.delivery_id)?;
+            let spent: f64 = tasks.iter().map(task_cost).sum();
+            let digest = Digest {
+                escalations: open_escalations(&tools.log, &tools.projections)?,
+                spent: day_budgets_spent_after(&tools.log, delivery.since_seq)?,
+                now: tools.clock.now(),
+            };
+            let mut facts = delivery_review_message(
+                &delivery.delivery_id,
                 &tasks,
-                file.budget_usd,
                 spent,
+                &digest,
                 refresh_in_review.as_ref(),
             );
             // What the owner decided of the runner's documents since its last review.
@@ -613,32 +613,30 @@ async fn review_and_retro(
         },
     )
     .await?;
-    Ok(Some(TickReport::Sprint {
-        sprint_id: sprint.sprint_id,
+    Ok(Some(TickReport::Delivery {
+        delivery_id: delivery.delivery_id,
         what: ran(agent, name, &end),
     }))
 }
 
-/// The tasks of `sprint`, as its review and retro are told them: each of `file`'s on the board,
-/// with the events about it while the sprint was open.
-fn sprint_tasks(
+/// The tasks of `delivery`, as its review and retro are told them: each of its task ids on the
+/// board, with the events about it since the delivery started.
+fn delivery_tasks(
     tools: &crate::tools::ToolDeps,
     board: &[TaskProjection],
-    sprint: &EndedSprint,
-    file: &catervas_core::sprint::Sprint,
-) -> Result<Vec<SprintTask>, OrchestratorError> {
+    delivery: &ClosedDelivery,
+) -> Result<Vec<DeliveredTask>, OrchestratorError> {
     let mut tasks = Vec::new();
-    for row in board.iter().filter(|row| {
-        file.task_ids
-            .iter()
-            .any(|id| id.as_str() == row.task_id.as_str())
-    }) {
-        tasks.push(SprintTask {
+    for row in board
+        .iter()
+        .filter(|row| delivery.task_ids.contains(&row.task_id))
+    {
+        tasks.push(DeliveredTask {
             task_id: row.task_id.clone(),
             title: row.title.clone(),
             status: row.status,
             iteration: row.iteration,
-            events: sprint_events(&tools.log, sprint, &row.task_id)?,
+            events: delivery_events(&tools.log, delivery, &row.task_id)?,
         });
     }
     Ok(tasks)
@@ -661,12 +659,12 @@ fn review_refresh(
     deps: &OrchestratorDeps,
     team: &Team,
     runner: &Agent,
-    sprint_id: &str,
+    delivery_id: &str,
 ) -> Result<Option<ProductFiles>, OrchestratorError> {
     if Role::from(runner.role) == Role::ProductManager
         && held_on_the_integration_branch(deps, team, PRODUCT_SPEC)?.is_some()
     {
-        return Ok(Some(product_files(deps, team, sprint_id)?));
+        return Ok(Some(product_files(deps, team, delivery_id)?));
     }
     Ok(None)
 }
@@ -682,25 +680,25 @@ fn document_on_the_integration_branch(
 }
 
 /// The product plan's files as a refresh names them: the spec and the roadmap where the
-/// integration branch holds them, else in the team's format, and the sprint's report, a new file,
+/// integration branch holds them, else in the team's format, and the delivery's report, a new file,
 /// in the team's format.
 fn product_files(
     deps: &OrchestratorDeps,
     team: &Team,
-    sprint_id: &str,
+    delivery_id: &str,
 ) -> Result<ProductFiles, OrchestratorError> {
     let format = team.document_format();
     Ok(ProductFiles {
         spec: document_on_the_integration_branch(deps, team, PRODUCT_SPEC)?,
         roadmap: document_on_the_integration_branch(deps, team, PRODUCT_ROADMAP)?,
         report: with_format(
-            &format!("docs/catervas/product/reports/{sprint_id}"),
+            &format!("docs/catervas/product/reports/{delivery_id}"),
             format,
         ),
     })
 }
 
-/// What the sprint review's refreshes ask of the tick (`due_refresh`).
+/// What the delivery review's refreshes ask of the tick (`due_refresh`).
 enum Refresh<'a> {
     /// No refresh is owed: the retro, or the review, is next.
     None,
@@ -729,16 +727,16 @@ fn held_on_the_integration_branch(
     }
 }
 
-/// The refresh the reviewed `sprint` owes next, once per sprint under the ceremonies' bound
+/// The refresh the reviewed `delivery` owes next, once per delivery under the ceremonies' bound
 /// (`reviewed_by`): the Product Manager's, when its `spec` (either format) is on the integration branch and it
 /// has not reviewed (a Product Manager that ran the review has: its review was its refresh); then
-/// the Architect's, when its `structure` (either format) is and a task of the sprint was integrated after the
-/// sprint started, read from the log. Passed over on a spent day or while the agent sleeps, as the review is.
+/// the Architect's, when its `structure` (either format) is and a task of the delivery was integrated after the
+/// delivery started, read from the log. Passed over on a spent day or while the agent sleeps, as the review is.
 fn due_refresh<'a>(
     deps: &OrchestratorDeps,
     team: &'a Team,
-    sprint: &EndedSprint,
-    tasks: &[SprintTask],
+    delivery: &ClosedDelivery,
+    tasks: &[DeliveredTask],
     waiting: &mut Waiting,
 ) -> Result<Refresh<'a>, OrchestratorError> {
     let tools = &deps.tools;
@@ -749,7 +747,11 @@ fn due_refresh<'a>(
         else {
             return Ok(None);
         };
-        if sprint.reviewed_by.iter().any(|id| id == agent.id.as_str()) {
+        if delivery
+            .reviewed_by
+            .iter()
+            .any(|id| id == agent.id.as_str())
+        {
             return Ok(None);
         }
         Ok(held_on_the_integration_branch(deps, team, stem)?.map(|_| agent))
@@ -773,11 +775,11 @@ fn due_refresh<'a>(
         return Ok(Refresh::Ask(
             agent,
             product_refresh_message(
-                &sprint.sprint_id,
+                &delivery.delivery_id,
                 tasks,
                 &decisions,
                 &pending,
-                &product_files(deps, team, &sprint.sprint_id)?,
+                &product_files(deps, team, &delivery.delivery_id)?,
             ),
             "product refresh session",
         ));
@@ -789,13 +791,13 @@ fn due_refresh<'a>(
         .log
         .read(&EventQuery {
             kinds: vec![EventKind::TaskIntegrated],
-            after_seq: Some(sprint.started_seq),
+            after_seq: Some(delivery.since_seq),
             ..EventQuery::default()
         })?
         .into_iter()
         .filter_map(|event| event.envelope.ids.task_id)
         .collect();
-    let integrated: Vec<SprintTask> = tasks
+    let integrated: Vec<DeliveredTask> = tasks
         .iter()
         .filter(|task| integrated_ids.contains(&task.task_id))
         .cloned()
@@ -813,7 +815,7 @@ fn due_refresh<'a>(
     ];
     Ok(Refresh::Ask(
         agent,
-        architecture_refresh_message(&sprint.sprint_id, &integrated, &architecture_files),
+        architecture_refresh_message(&delivery.delivery_id, &integrated, &architecture_files),
         "architecture refresh session",
     ))
 }
@@ -5783,8 +5785,11 @@ mod tests {
             seen: std::sync::Mutex::new(Vec::new()),
         });
         if idle {
+            // A delivery already closed: the run is about the session it starts, not the close.
+            harness.settle_delivery();
             harness
-                .run_until_idle_past_the_changelog(&harness.orchestrator(probe.clone()))
+                .orchestrator(probe.clone())
+                .run_until_idle()
                 .await
                 .expect("the run ends idle");
         } else {
@@ -6165,9 +6170,11 @@ mod tests {
             Arc::clone(&harness.daemon),
         ));
         let orchestrator = harness.orchestrator(witness.clone());
+        // A delivery already closed: the run is about the verify sessions, not the close.
+        harness.settle_delivery();
 
-        harness
-            .run_until_idle_past_the_changelog(&orchestrator)
+        orchestrator
+            .run_until_idle()
             .await
             .expect("the run ends idle");
 
@@ -8170,12 +8177,25 @@ mod tests {
         assert_eq!(harness.events(&[EventKind::EscalationAged]).len(), 0);
     }
 
-    /// The Scrum Master, and S1 holding CTV-1, accepted, its completion note written and $1.25
-    /// spent on it while the sprint was open: the sprint the first tick ends.
-    fn a_finished_sprint(name: &str) -> Harness {
+    /// The first tick, which closes the delivery and files its changelog task; the task is
+    /// cancelled so that the tests of the ceremonies play only those.
+    async fn close_the_delivery(
+        harness: &Harness,
+        orchestrator: &crate::orchestrator::Orchestrator,
+    ) {
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&report, TickReport::Delivery { what, .. } if what.contains("closed it")),
+            "{report:?}"
+        );
+        harness.cancel_changelogs();
+    }
+
+    /// The Scrum Master, and CTV-1 accepted, its completion note written and $1.25 spent on it:
+    /// the delivery the first tick closes.
+    fn a_closed_delivery(name: &str) -> Harness {
         let harness = Harness::new(name, with_a_scrum_master);
-        harness.accepted("CTV-1");
-        harness.open_sprint("S1", &["CTV-1"]);
+        harness.accepted_awaiting_delivery("CTV-1");
         harness.project.record(
             "CTV-1",
             "note.written",
@@ -8199,8 +8219,7 @@ mod tests {
                     with_a_scrum_master(wire);
                 }
             });
-            harness.accepted("CTV-1");
-            harness.open_sprint("S1", &["CTV-1"]);
+            harness.accepted_awaiting_delivery("CTV-1");
             harness.project.record(
                 "CTV-1",
                 "catervafication.started",
@@ -8221,7 +8240,8 @@ mod tests {
         ] {
             let (harness, adapter) = retro_prompt(name, scrum_master);
             let orchestrator = harness.orchestrator(adapter.clone());
-            for _ in 0..3 {
+            close_the_delivery(&harness, &orchestrator).await;
+            for _ in 0..2 {
                 orchestrator.tick().await.expect("the tick runs");
             }
             let started = adapter.started();
@@ -8249,8 +8269,7 @@ mod tests {
                     wire["policy"]["document_format"] = json!("markdown");
                 }
             });
-            harness.accepted("CTV-1");
-            harness.open_sprint("S1", &["CTV-1"]);
+            harness.accepted_awaiting_delivery("CTV-1");
             harness.project.record(
                 "CTV-1",
                 "note.written",
@@ -8269,8 +8288,8 @@ mod tests {
             let orchestrator = harness.orchestrator(adapter.clone());
             async move {
                 // The project lives as long as the ticks.
-                let _harness = harness;
-                for _ in 0..3 {
+                close_the_delivery(&harness, &orchestrator).await;
+                for _ in 0..2 {
                     orchestrator.tick().await.expect("the tick runs");
                 }
                 let started = adapter.started();
@@ -8632,21 +8651,17 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn reviews_an_ended_sprint() {
-        let harness = a_finished_sprint("orch-review");
+    async fn reviews_a_closed_delivery() {
+        let harness = a_closed_delivery("orch-review");
         let adapter = harness.recorded(vec![review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        let ended = orchestrator.tick().await.expect("the tick runs");
-        assert!(
-            matches!(&ended, TickReport::Sprint { what, .. } if what.contains("ended it")),
-            "{ended:?}"
-        );
+        close_the_delivery(&harness, &orchestrator).await;
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
-            matches!(&report, TickReport::Sprint { sprint_id, what }
-                if sprint_id == "S1" && what.contains("review")),
+            matches!(&report, TickReport::Delivery { delivery_id, what }
+                if delivery_id == "D1" && what.contains("review")),
             "{report:?}"
         );
         assert_eq!(ceremonies(&harness), vec![Thread::Review]);
@@ -8656,7 +8671,13 @@ mod tests {
             (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
             ("sm", SessionPurpose::Ceremony, None)
         );
-        for fact in ["CTV-1", "accepted", "The login page is done.", "$1.25"] {
+        for fact in [
+            "delivery 1",
+            "CTV-1",
+            "accepted",
+            "The login page is done.",
+            "$1.25",
+        ] {
             assert!(
                 spec.initial_prompt.contains(fact),
                 "{fact}: {}",
@@ -8676,8 +8697,8 @@ mod tests {
         let next = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
-            matches!(&next, TickReport::Sprint { sprint_id, what }
-                if sprint_id == "S1" && what.contains("retro")),
+            matches!(&next, TickReport::Delivery { delivery_id, what }
+                if delivery_id == "D1" && what.contains("retro")),
             "{next:?}"
         );
         assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
@@ -8686,7 +8707,7 @@ mod tests {
         retro_tools.insert("catervas_write_folder_doc");
         assert_eq!(tools_of(&adapter.started()[1]), retro_tools);
         let after = orchestrator.tick().await.expect("the tick runs");
-        assert!(!matches!(after, TickReport::Sprint { .. }), "{after:?}");
+        assert!(!matches!(after, TickReport::Delivery { .. }), "{after:?}");
     }
 
     /// Every answer a replay's Catervas tool calls were given: the tool's full name and the answer.
@@ -8721,7 +8742,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn appends_the_retro() {
-        let harness = a_finished_sprint("orch-retro");
+        let harness = a_closed_delivery("orch-retro");
         harness.project.record(
             "CTV-1",
             "escalation.raised",
@@ -8735,14 +8756,13 @@ mod tests {
         .expect("the last retro is written");
         let (adapter, answers) = answered(&harness, vec![review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        for _ in 0..2 {
-            orchestrator.tick().await.expect("the tick runs");
-        }
+        close_the_delivery(&harness, &orchestrator).await;
+        orchestrator.tick().await.expect("the review runs");
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
-            matches!(&report, TickReport::Sprint { what, .. } if what.contains("retro")),
+            matches!(&report, TickReport::Delivery { what, .. } if what.contains("retro")),
             "{report:?}"
         );
         let prompt = &adapter.started()[1].initial_prompt;
@@ -8751,7 +8771,7 @@ mod tests {
         }
         assert_eq!(
             std::fs::read_to_string(&retro_file).expect("the retro reads"),
-            "# Retro\n\n## S0 (2026-09-01)\n\nAsk the human sooner.\n\n## S1 (2026-09-22)\n\n\
+            "# Retro\n\n## S0 (2026-09-01)\n\nAsk the human sooner.\n\n## D1 (2026-09-22)\n\n\
              Keep the tasks small: CTV-1 passed its review the first time.\n"
         );
         let appended = harness.events(&[EventKind::RetroAppended]);
@@ -8761,7 +8781,7 @@ mod tests {
         };
         assert_eq!(
             (
-                body.sprint_id
+                body.delivery_id
                     .as_ref()
                     .map(|id| id.as_str())
                     .unwrap_or_default(),
@@ -8769,7 +8789,7 @@ mod tests {
                 body.appended_by.as_str()
             ),
             (
-                "S1",
+                "D1",
                 "Keep the tasks small: CTV-1 passed its review the first time.",
                 "sm"
             )
@@ -8783,7 +8803,7 @@ mod tests {
             .map(|(_, answer)| answer.clone())
             .collect();
         assert_eq!(retros.len(), 2, "{retros:?}");
-        assert_eq!(retros[0]["sprint_id"], "S1", "{retros:?}");
+        assert_eq!(retros[0]["delivery_id"], "D1", "{retros:?}");
         assert!(
             retros[1]["error"]
                 .as_str()
@@ -8795,16 +8815,17 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn retries_a_retro_that_hit_a_limit() {
-        let harness = a_finished_sprint("orch-retro-limit");
+        let harness = a_closed_delivery("orch-retro-limit");
         let until = at() + chrono::Duration::hours(2);
         let adapter = harness.recorded(vec![review(), refused_until(until), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        for _ in 0..3 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..2 {
             orchestrator.tick().await.expect("the tick runs");
         }
         assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
         let asleep = orchestrator.tick().await.expect("the tick runs");
-        assert!(!matches!(asleep, TickReport::Sprint { .. }), "{asleep:?}");
+        assert!(!matches!(asleep, TickReport::Delivery { .. }), "{asleep:?}");
 
         let report = harness
             .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
@@ -8813,7 +8834,7 @@ mod tests {
             .expect("the tick runs");
 
         assert!(
-            matches!(&report, TickReport::Sprint { what, .. } if what.contains("retro")),
+            matches!(&report, TickReport::Delivery { what, .. } if what.contains("retro")),
             "{report:?}"
         );
         assert_eq!(
@@ -8826,7 +8847,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_no_second_retro_once_one_appended() {
-        let harness = a_finished_sprint("orch-retro-appended");
+        let harness = a_closed_delivery("orch-retro-appended");
         let until = at() + chrono::Duration::hours(2);
         // The retro appends, then its provider refuses it at a limit before it ends.
         let appends_then_sleeps = Transcript::from_jsonl(
@@ -8839,7 +8860,8 @@ mod tests {
         );
         let adapter = harness.recorded(vec![review(), appends_then_sleeps, retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        for _ in 0..3 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..2 {
             orchestrator.tick().await.expect("the tick runs");
         }
         assert_eq!(
@@ -8854,28 +8876,28 @@ mod tests {
             .await
             .expect("the tick runs");
 
-        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(!matches!(report, TickReport::Delivery { .. }), "{report:?}");
         assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
         assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
         let file =
             std::fs::read_to_string(harness.project.repo.path.join(".catervas/team/retro.md"))
                 .expect("the retro reads");
-        assert_eq!(file.matches("## S1 ").count(), 1, "{file}");
+        assert_eq!(file.matches("## D1 ").count(), 1, "{file}");
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_no_review_or_retro_on_a_spent_day() {
-        let harness = a_finished_sprint("orch-review-day");
+        let harness = a_closed_delivery("orch-review-day");
         let clock = Arc::new(MovableClock::new(at()));
         let adapter = harness.recorded(vec![review(), retro()]);
         let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
-        orchestrator.tick().await.expect("the sprint ends");
+        close_the_delivery(&harness, &orchestrator).await;
         day_spent_at(&harness, at());
 
         let spent = orchestrator.tick().await.expect("the tick runs");
 
-        assert!(!matches!(spent, TickReport::Sprint { .. }), "{spent:?}");
+        assert!(!matches!(spent, TickReport::Delivery { .. }), "{spent:?}");
         assert!(
             ceremonies(&harness).is_empty(),
             "{:?}",
@@ -8887,17 +8909,17 @@ mod tests {
         assert_eq!(ceremonies(&harness), vec![Thread::Review]);
         day_spent_at(&harness, next_day);
         let spent = orchestrator.tick().await.expect("the tick runs");
-        assert!(!matches!(spent, TickReport::Sprint { .. }), "{spent:?}");
+        assert!(!matches!(spent, TickReport::Delivery { .. }), "{spent:?}");
         assert_eq!(ceremonies(&harness), vec![Thread::Review]);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_no_review_or_retro_outside_a_full_tick() {
-        let harness = a_finished_sprint("orch-review-scoped");
+        let harness = a_closed_delivery("orch-review-scoped");
         let adapter = harness.recorded(vec![review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("the sprint ends");
+        close_the_delivery(&harness, &orchestrator).await;
 
         // Before the review, then before the retro.
         for held in [vec![], vec![Thread::Review]] {
@@ -8919,56 +8941,11 @@ mod tests {
                     .tick_within(&scope)
                     .await
                     .expect("the tick runs");
-                assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+                assert!(!matches!(report, TickReport::Delivery { .. }), "{report:?}");
             }
             assert_eq!(ceremonies(&harness), held);
             orchestrator.tick().await.expect("the tick runs");
         }
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_no_review_or_retro_of_a_sprint_that_held_no_task() {
-        let harness = Harness::new("orch-review-empty", with_a_scrum_master);
-        harness.open_sprint("S1", &[]);
-        harness.project.record(
-            "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
-        );
-        let adapter = harness.recorded(vec![review(), retro()]);
-
-        let report = harness
-            .orchestrator(adapter.clone())
-            .tick()
-            .await
-            .expect("the tick runs");
-
-        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
-        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_no_review_once_a_new_sprint_started() {
-        let harness = a_finished_sprint("orch-review-next-sprint");
-        let adapter = harness.recorded(vec![review(), retro()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("the sprint ends");
-        harness.project.record(
-            "",
-            "sprint.started",
-            &json!({ "sprint_id": "S2", "budget_usd": null, "started_by": "human" }),
-        );
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
-        assert!(
-            ceremonies(&harness).is_empty(),
-            "{:?}",
-            ceremonies(&harness)
-        );
     }
 
     #[tokio::test]
@@ -8978,7 +8955,14 @@ mod tests {
         const SPEC: &str = "docs/catervas/product/spec.md";
         // No Scrum Master: the Product Manager runs the ceremonies and proposes its documents.
         let harness = Harness::new("orch-review-owner-words", |_| {});
-        let adapter = harness.recorded(vec![review(), review(), review()]);
+        let adapter = harness.recorded(vec![
+            review(),
+            retro(),
+            review(),
+            retro(),
+            review(),
+            retro(),
+        ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let propose = |path: &str| {
             harness
@@ -8997,16 +8981,16 @@ mod tests {
                 .envelope
                 .seq
         };
-        // A sprint of a task, ended by the tick, and its review.
-        let review_of = |sprint: &str, task: &str| {
-            harness.accepted(task);
-            harness.open_sprint(sprint, &[task]);
+        // A delivery of a task, closed by the tick, and its review and retro.
+        let review_of = |task: &str| {
+            harness.accepted_awaiting_delivery(task);
             async {
-                orchestrator.tick().await.expect("the sprint ends");
+                close_the_delivery(&harness, &orchestrator).await;
                 orchestrator.tick().await.expect("the review runs");
+                orchestrator.tick().await.expect("the retro runs");
             }
         };
-        review_of("S1", "CTV-1").await;
+        review_of("CTV-1").await;
         assert!(
             !adapter.started()[0].initial_prompt.contains("The owner"),
             "the first review has nothing to hear"
@@ -9018,9 +9002,10 @@ mod tests {
             &json!({ "proposals": [roadmap], "reason": "Keep gift cards in Now" }),
         );
 
-        review_of("S2", "CTV-2").await;
+        // CTV-2 is the changelog task the first delivery filed.
+        review_of("CTV-3").await;
 
-        let prompt = outside_the_untrusted_blocks(&adapter.started()[1].initial_prompt);
+        let prompt = outside_the_untrusted_blocks(&adapter.started()[2].initial_prompt);
         assert!(
             prompt.contains(&format!(
                 "The owner sent back your changes to {ROADMAP}: Keep gift cards in Now"
@@ -9039,9 +9024,10 @@ mod tests {
             &json!({ "proposals": [spec], "note": "Thanks" }),
         );
 
-        review_of("S3", "CTV-3").await;
+        // CTV-4 is the second delivery's.
+        review_of("CTV-5").await;
 
-        let prompt = outside_the_untrusted_blocks(&adapter.started()[2].initial_prompt);
+        let prompt = outside_the_untrusted_blocks(&adapter.started()[4].initial_prompt);
         assert!(
             prompt.contains(&format!(
                 "The owner approved your changes to {SPEC}. The owner adds: Thanks"
@@ -9074,15 +9060,10 @@ mod tests {
         harness.commit_at_root(path, "# A document\n", "Add a document");
     }
 
-    /// S1 holding CTV-1, which `delivered` says how it ended: accepted, with its note, and
-    /// integrated after the sprint started, or cancelled.
-    fn a_sprint_of_one_task(harness: &Harness, integrated: bool) {
-        if integrated {
-            harness.accepted("CTV-1");
-        } else {
-            harness.project.filed("CTV-1", "cancelled", "task", None);
-        }
-        harness.open_sprint("S1", &["CTV-1"]);
+    /// CTV-1 accepted, the delivery the first tick closes: with its note, and integrated, or, when
+    /// `integrated` is false, accepted and not integrated.
+    fn a_delivery_of_one_task(harness: &Harness, integrated: bool) {
+        harness.accepted_awaiting_delivery("CTV-1");
         if integrated {
             harness.project.record(
                 "CTV-1",
@@ -9124,13 +9105,14 @@ mod tests {
             with_a_scrum_master_and_an_architect(wire);
             wire["policy"]["document_format"] = json!("markdown");
         });
-        a_sprint_of_one_task(&harness, true);
+        a_delivery_of_one_task(&harness, true);
         on_main(&harness, SPEC);
         on_main(&harness, STRUCTURE);
         let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        for _ in 0..6 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..5 {
             orchestrator.tick().await.expect("the tick runs");
         }
 
@@ -9147,7 +9129,7 @@ mod tests {
         let (pm, ada) = (&started[1], &started[2]);
         assert!(
             pm.initial_prompt.starts_with(
-                "The sprint 1 review is done. Keep the product plan true to what the sprint did."
+                "The delivery 1 review is done. Keep the product plan true to what the delivery did."
             ),
             "{}",
             pm.initial_prompt
@@ -9155,7 +9137,7 @@ mod tests {
         assert!(tools_of(pm).contains("catervas_write_folder_doc"));
         assert!(
             ada.initial_prompt.starts_with(
-                "Bring docs/catervas/architecture/features.md, jobs.md and structure.md up to date with what sprint 1 added to the project."
+                "Bring docs/catervas/architecture/features.md, jobs.md and structure.md up to date with what delivery 1 added to the project."
             ),
             "{}",
             ada.initial_prompt
@@ -9171,17 +9153,111 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_delivery_runs_its_review_refreshes_and_retro_once() {
+        let harness = Harness::new(
+            "orch-delivery-ceremonies",
+            with_a_scrum_master_and_an_architect,
+        );
+        on_main(&harness, "docs/catervas/product/spec.html");
+        on_main(&harness, "docs/catervas/architecture/structure.html");
+        // The epic CTV-1 and its task CTV-2 accepted, CTV-2 integrated; CTV-3, with no parent,
+        // escalated.
+        harness.project.filed("CTV-1", "in_progress", "epic", None);
+        harness
+            .project
+            .moved("CTV-1", "in_progress", "accepted", &json!({}));
+        harness.accepted_awaiting_delivery("CTV-2");
+        harness.project.record(
+            "CTV-2",
+            "note.written",
+            &json!({
+                "kind": "completion",
+                "text": "The login page is done.",
+                "written_by": "dev-a"
+            }),
+        );
+        harness.project.record(
+            "CTV-2",
+            "task.integrated",
+            &json!({ "sha": "abc123", "into": "main", "integrated_by": "governor" }),
+        );
+        harness.escalated_hours_ago("CTV-3", "iterations", 0);
+        let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let closed = harness.events(&[EventKind::DeliveryClosed]);
+        assert_eq!(closed.len(), 1, "{closed:?}");
+        let EventBody::DeliveryClosed(body) = &closed[0].body else {
+            panic!("a delivery.closed");
+        };
+        assert_eq!(
+            serde_json::to_value(body).expect("the body is a value")["trigger"],
+            "epic_accepted"
+        );
+        assert_eq!(
+            who_held(&harness),
+            vec![
+                ("sm".to_string(), Thread::Review),
+                ("pm".to_string(), Thread::Review),
+                ("ada".to_string(), Thread::Review),
+                ("sm".to_string(), Thread::Retro),
+            ]
+        );
+        let started = adapter.started();
+        for fact in ["delivery 1", "CTV-2", "CTV-3 (", "iterations"] {
+            assert!(
+                started[0].initial_prompt.contains(fact),
+                "{fact}: {}",
+                started[0].initial_prompt
+            );
+        }
+        assert!(
+            started[1]
+                .initial_prompt
+                .contains("docs/catervas/product/reports/D1.html"),
+            "{}",
+            started[1].initial_prompt
+        );
+        assert!(
+            started[2].initial_prompt.contains("CTV-2"),
+            "{}",
+            started[2].initial_prompt
+        );
+        let appended = harness.events(&[EventKind::RetroAppended]);
+        assert_eq!(appended.len(), 1, "{appended:?}");
+        assert!(
+            matches!(&appended[0].body, EventBody::RetroAppended(body)
+                if body.delivery_id.as_ref().is_some_and(|id| id.as_str() == "D1")),
+            "{appended:?}"
+        );
+
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert_eq!(who_held(&harness).len(), 4);
+        assert_eq!(adapter.started().len(), 4);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_refresh_is_owed_for_an_html_spec() {
         let harness = Harness::new(
             "orch-refresh-html-spec",
             with_a_scrum_master_and_an_architect,
         );
-        a_sprint_of_one_task(&harness, true);
+        a_delivery_of_one_task(&harness, true);
         on_main(&harness, "docs/catervas/product/spec.html");
         let adapter = harness.recorded(vec![review(), review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        for _ in 0..5 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..4 {
             orchestrator.tick().await.expect("the tick runs");
         }
 
@@ -9203,12 +9279,13 @@ mod tests {
             "orch-refresh-files-there",
             with_a_scrum_master_and_an_architect,
         );
-        a_sprint_of_one_task(&harness, true);
+        a_delivery_of_one_task(&harness, true);
         on_main(&harness, "docs/catervas/product/spec.md");
         let adapter = harness.recorded(vec![review(), review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        for _ in 0..5 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..4 {
             orchestrator.tick().await.expect("the tick runs");
         }
 
@@ -9220,7 +9297,7 @@ mod tests {
             "{ask}"
         );
         assert!(
-            ask.contains("to docs/catervas/product/reports/S1.html with catervas_write_folder_doc"),
+            ask.contains("to docs/catervas/product/reports/D1.html with catervas_write_folder_doc"),
             "{ask}"
         );
     }
@@ -9233,19 +9310,20 @@ mod tests {
             "orch-refresh-architect-files",
             with_a_scrum_master_and_an_architect,
         );
-        a_sprint_of_one_task(&harness, true);
+        a_delivery_of_one_task(&harness, true);
         on_main(&harness, STRUCTURE);
         let adapter = harness.recorded(vec![review(), review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        for _ in 0..5 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..4 {
             orchestrator.tick().await.expect("the tick runs");
         }
 
         let ask = adapter.started()[1].initial_prompt.clone();
         assert!(
             ask.starts_with(
-                "Bring docs/catervas/architecture/features.html, jobs.html and structure.md up to date with what sprint 1 added to the project."
+                "Bring docs/catervas/architecture/features.html, jobs.html and structure.md up to date with what delivery 1 added to the project."
             ),
             "{ask}"
         );
@@ -9255,7 +9333,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_product_managers_refresh_hears_the_owner() {
         let harness = Harness::new("orch-refresh-owner", with_a_scrum_master_and_an_architect);
-        a_sprint_of_one_task(&harness, true);
+        a_delivery_of_one_task(&harness, true);
         on_main(&harness, SPEC);
         on_main(&harness, STRUCTURE);
         let proposal = harness
@@ -9281,7 +9359,8 @@ mod tests {
         let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        for _ in 0..4 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..3 {
             orchestrator.tick().await.expect("the tick runs");
         }
 
@@ -9302,8 +9381,7 @@ mod tests {
             with_a_scrum_master_and_an_architect(wire);
             wire["policy"]["integration"] = json!("auto_merge");
         });
-        harness.accepted("CTV-1");
-        harness.open_sprint("S1", &["CTV-1"]);
+        harness.accepted_awaiting_delivery("CTV-1");
         on_main(&harness, SPEC);
         on_main(&harness, STRUCTURE);
         harness.project.record(
@@ -9313,7 +9391,7 @@ mod tests {
         );
         let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("the sprint ends");
+        close_the_delivery(&harness, &orchestrator).await;
         orchestrator.tick().await.expect("the review runs");
 
         orchestrator
@@ -9333,7 +9411,7 @@ mod tests {
         // (name, integrated, spec on main, structure on main, who holds the review thread)
         for (name, integrated, spec, structure, held) in [
             (
-                "orch-refresh-cancelled",
+                "orch-refresh-not-integrated",
                 false,
                 true,
                 true,
@@ -9349,7 +9427,7 @@ mod tests {
             ("orch-refresh-no-spec", true, false, true, vec!["sm", "ada"]),
         ] {
             let harness = Harness::new(name, with_a_scrum_master_and_an_architect);
-            a_sprint_of_one_task(&harness, integrated);
+            a_delivery_of_one_task(&harness, integrated);
             if spec {
                 on_main(&harness, SPEC);
             }
@@ -9387,13 +9465,14 @@ mod tests {
                     "architect",
                 ));
         });
-        a_sprint_of_one_task(&harness, true);
+        a_delivery_of_one_task(&harness, true);
         on_main(&harness, SPEC);
         on_main(&harness, STRUCTURE);
         let adapter = harness.recorded(vec![review(), review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        for _ in 0..6 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..5 {
             orchestrator.tick().await.expect("the tick runs");
         }
 
@@ -9407,10 +9486,10 @@ mod tests {
         );
         let review_of_pm = &adapter.started()[0].initial_prompt;
         let facts = review_of_pm
-            .find("The review of S1")
+            .find("The review of delivery 1")
             .expect("the review's facts");
         let asks = review_of_pm
-            .find("docs/catervas/product/reports/S1.md")
+            .find("docs/catervas/product/reports/D1.md")
             .expect("the refresh's asks");
         assert!(facts < asks, "{review_of_pm}");
     }
@@ -9420,20 +9499,21 @@ mod tests {
     async fn the_product_managers_review_is_its_refresh_for_an_html_spec() {
         // No Scrum Master, the default (HTML) team, and the spec is a page on main.
         let harness = Harness::new("orch-refresh-pm-runs-html", |_| {});
-        a_sprint_of_one_task(&harness, true);
+        a_delivery_of_one_task(&harness, true);
         on_main(&harness, "docs/catervas/product/spec.html");
         let adapter = harness.recorded(vec![review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        for _ in 0..4 {
+        close_the_delivery(&harness, &orchestrator).await;
+        for _ in 0..3 {
             orchestrator.tick().await.expect("the tick runs");
         }
 
         let review_of_pm = &adapter.started()[0].initial_prompt;
         for named in [
-            "Then keep the product plan true to what the sprint did.",
+            "Then keep the product plan true to what the delivery did.",
             "docs/catervas/product/spec.html",
-            "docs/catervas/product/reports/S1.html",
+            "docs/catervas/product/reports/D1.html",
         ] {
             assert!(review_of_pm.contains(named), "{named}: {review_of_pm}");
         }
@@ -10412,7 +10492,7 @@ mod tests {
         harness.rejected("CTV-2", 1, "done.txt is missing");
         harness.in_progress("CTV-3", "dev-b", "dev-a");
         harness.open_sprint("S1", &["CTV-1", "CTV-2", "CTV-3"]);
-        let adapter = harness.recorded(vec![review(), retro()]);
+        let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         let deps = &harness.project.deps;
 
@@ -10427,11 +10507,8 @@ mod tests {
             body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
             ["CTV-1", "CTV-2", "CTV-3"]
         );
-        // S1's review and look back run; then nothing, until a sprint plans what S1 left.
-        for _ in 0..2 {
-            let report = orchestrator.tick().await.expect("the tick runs");
-            assert!(matches!(report, TickReport::Sprint { .. }), "{report:?}");
-        }
+        // An ended sprint holds no review or retro (they come with a delivery); nothing runs
+        // until a sprint plans what S1 left.
         for _ in 0..2 {
             let report = orchestrator.tick().await.expect("the tick runs");
             assert_idle_waiting_for_a_sprint(&report);
@@ -10439,13 +10516,7 @@ mod tests {
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
         assert_eq!(harness.row("CTV-2").status, TaskStatus::Rejected);
         assert_eq!(harness.row("CTV-3").status, TaskStatus::InProgress);
-        assert_eq!(
-            sessions(&adapter),
-            vec![
-                ("pm".to_string(), SessionPurpose::Ceremony),
-                ("pm".to_string(), SessionPurpose::Ceremony)
-            ]
-        );
+        assert_eq!(sessions(&adapter), Vec::new());
 
         start_sprint(deps, None, "human").expect("S2 starts");
         plan_sprint(

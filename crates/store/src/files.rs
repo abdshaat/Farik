@@ -539,8 +539,8 @@ impl ProjectFiles {
         }
     }
 
-    /// Appends sprint `sprint_id`'s retro, written on `date`, to `team/retro.md`: a section
-    /// `## <sprint id> (<date>)` and the text, below what is there, or below a `# Retro` title in
+    /// Appends the retro headed `heading_id` (a delivery's `D<n>`, or a sprint's `S<n>` in an older
+    /// log), written on `date`, to `team/retro.md`: a section `## <heading id> (<date>)` and the text, below what is there, or below a `# Retro` title in
     /// a file made for it.
     ///
     /// # Errors
@@ -548,7 +548,7 @@ impl ProjectFiles {
     /// `Io` when the file cannot be read or written.
     pub fn append_retro(
         &self,
-        sprint_id: &str,
+        heading_id: &str,
         date: NaiveDate,
         text: &str,
     ) -> Result<(), FilesError> {
@@ -558,7 +558,7 @@ impl ProjectFiles {
         // A file edited by hand may not end its last line.
         let end = if before.ends_with('\n') { "" } else { "\n" };
         let retro = format!(
-            "{before}{end}\n## {sprint_id} ({})\n\n{}\n",
+            "{before}{end}\n## {heading_id} ({})\n\n{}\n",
             date.format("%Y-%m-%d"),
             text.trim_end()
         );

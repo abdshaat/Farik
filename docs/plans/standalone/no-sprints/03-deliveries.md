@@ -238,7 +238,7 @@ a retro uses a closed delivery instead (its first tick closes D1); delete
   session; the log holds one `retro.appended` with `delivery_id: "D1"`; four more ticks start no
   session.
 
-- [ ] `feat(runtime): each delivery gets its review, refreshes and retro once`
+- [x] `feat(runtime): each delivery gets its review, refreshes and retro once`
 
 ### Task 5: what the owner reads about a review
 

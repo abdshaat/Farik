@@ -356,3 +356,60 @@ pub fn delivery_events(
         .take_while(|event| event.envelope.seq < delivery.closed_seq)
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::closed_delivery;
+    use crate::tools::fixtures::{TestProject, a_team_of_three};
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn knows_who_has_reviewed_a_closed_delivery() {
+        let project = TestProject::new("deliveries-reviewed-by", &a_team_of_three(|_| {}));
+        project.record(
+            "",
+            "delivery.closed",
+            &json!({
+                "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": ["CTV-1"]
+            }),
+        );
+        let start = |agent: &str, session: &str| {
+            project.record_in(
+                Some(agent),
+                Some(session),
+                "",
+                "session.started",
+                &json!({
+                    "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                    "thread": "review"
+                }),
+            );
+        };
+        let end = |agent: &str, session: &str| {
+            project.record_in(
+                Some(agent),
+                Some(session),
+                "",
+                "session.ended",
+                &json!({ "reason": "completed", "detail": "" }),
+            );
+        };
+        start("sm", "s-1");
+        end("sm", "s-1");
+        start("pm", "s-2");
+
+        let delivery = closed_delivery(&project.deps.log)
+            .expect("the log reads")
+            .expect("D1 closed");
+        assert_eq!(delivery.reviewed_by, ["sm"]);
+
+        end("pm", "s-2");
+
+        let delivery = closed_delivery(&project.deps.log)
+            .expect("the log reads")
+            .expect("D1 closed");
+        assert_eq!(delivery.reviewed_by, ["sm", "pm"]);
+    }
+}

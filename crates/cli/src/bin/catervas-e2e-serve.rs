@@ -1,6 +1,9 @@
 //! `catervas serve` on recorded sessions, for the browser suites: `catervas-e2e-serve --port <p>
 //! [--transcripts <name>,...] [--pace <ms>] [--no-keychain] [--sandbox-image <image>]
-//! [--preview]`, run in a project directory, or anywhere else for the first-run wizard.
+//! [--delivery-closed] [--preview]`, run in a project directory, or anywhere else for the first-run wizard.
+//! `--delivery-closed` starts the project with a delivery already closed and holding no task, so
+//! that a journey that accepts a task and files another does not meet the changelog task the
+//! governor files at a close (ADR 0062), which would take an id the journey's transcripts name.
 //! `--no-keychain` keeps the credential in the state folder's file alone. `--sandbox-image` runs
 //! Docker's sandbox and the preview in `<image>`. `--preview` serves as a project's preview, which
 //! a code-free browser at `http://localhost:<p>` is let into (step 12, D1): it implies
@@ -83,8 +86,12 @@ fn transcript(name: &str) -> Option<Transcript> {
 fn main() -> std::process::ExitCode {
     let mut arguments = std::env::args().skip(1);
     let (mut port, mut names, mut keychain, mut pace) = (None, String::new(), true, 0);
-    let (mut preview, mut sandbox_image) = (false, None);
+    let (mut preview, mut sandbox_image, mut delivery_closed) = (false, None, false);
     while let Some(flag) = arguments.next() {
+        if flag == "--delivery-closed" {
+            delivery_closed = true;
+            continue;
+        }
         if flag == "--no-keychain" {
             keychain = false;
             continue;
@@ -144,6 +151,11 @@ fn main() -> std::process::ExitCode {
         own = Some(Removed(project, state));
     }
 
+    if delivery_closed && let Err(error) = close_a_delivery(&cwd) {
+        eprintln!("the delivery cannot be closed: {error}");
+        return std::process::ExitCode::from(1);
+    }
+
     let mut io = CliIo::new(
         cwd,
         Box::new(std::io::stdout()),
@@ -168,6 +180,47 @@ fn main() -> std::process::ExitCode {
     drop(io);
     drop(own);
     std::process::ExitCode::from(u8::try_from(code).unwrap_or(1))
+}
+
+/// Records `delivery.closed` for a delivery of no task in the project at `project`, with its
+/// retro yet to be held, so that no delivery closes after it until a retro does.
+fn close_a_delivery(project: &std::path::Path) -> Result<(), String> {
+    use catervas_protocol::clock::Clock;
+    use catervas_protocol::event::{NewEvent, event_from_value};
+    use catervas_store::{EventQuery, open_event_log};
+
+    let now = SystemClock.now();
+    let log = open_event_log(&project.join(".catervas/local/catervas.db"), now)
+        .map_err(|error| error.to_string())?;
+    let first = log
+        .read(&EventQuery {
+            limit: Some(1),
+            ..EventQuery::default()
+        })
+        .map_err(|error| error.to_string())?;
+    let ids = &first
+        .first()
+        .ok_or("the project's log is empty")?
+        .envelope
+        .ids;
+    let event = event_from_value(&serde_json::json!({
+        "seq": 1,
+        "recorded_at": now.to_rfc3339(),
+        "team_id": ids.team_id,
+        "project_id": ids.project_id,
+        "kind": "delivery.closed",
+        "body": {
+            "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": []
+        },
+    }))
+    .map_err(|error| format!("{error:?}"))?;
+    log.append(&NewEvent {
+        recorded_at: event.envelope.recorded_at,
+        ids: event.envelope.ids,
+        body: event.body,
+    })
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 /// The preview's own project and state folder, both removed when it is dropped.
@@ -249,7 +302,7 @@ impl RuntimeAdapter for ThenWaits {
 fn usage() -> std::process::ExitCode {
     eprintln!(
         "usage: catervas-e2e-serve --port <p> [--transcripts <name>,...] [--pace <ms>] [--no-keychain] \
-         [--sandbox-image <image>] [--preview]"
+         [--sandbox-image <image>] [--delivery-closed] [--preview]"
     );
     std::process::ExitCode::from(2)
 }

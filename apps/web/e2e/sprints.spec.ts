@@ -55,9 +55,7 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 			// CTV-4, the late request, ready during sprint 1.
 			"triage_ctv_1_small_by_pm",
 			"refine_writes_task_for_theo_ctv_1",
-			// Sprint 1 ended early: its review and look back; then, with the policy off, Theo builds.
-			"review",
-			"retro",
+			// Sprint 1 ended early, which holds no ceremony; then, with the policy off, Theo builds.
 			"implement_finishes_ctv_1",
 		],
 	});
@@ -211,11 +209,6 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 				backlog: true,
 				left: ["CTV-1", "CTV-2", "CTV-3"],
 			});
-		await expect
-			.poll(() => log().filter((e) => e.kind === "retro.appended").length, {
-				timeout: 30_000,
-			})
-			.toBe(1);
 		await answer(page, "Theo");
 		await expect
 			.poll(() => log().filter((e) => e.kind === "question.answered").length)

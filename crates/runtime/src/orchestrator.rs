@@ -846,7 +846,8 @@ mod tests {
     use crate::recorded::fixtures::{
         accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1, plan_assigns_ctv_2,
         plan_breaks_down_ctv_1, plan_closes_epic_ctv_1, refine_asks_ctv_1,
-        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, review_writes_note, triage_ctv_1_large,
+        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, retro, review, review_writes_note,
+        triage_ctv_1_large,
     };
     use crate::tools::fixtures::at;
 
@@ -936,6 +937,8 @@ mod tests {
             implement_finishes_ctv_1(),
             review_writes_note(),
             accept_ctv_1(),
+            review(),
+            retro(),
         ]);
         let orchestrator = std::sync::Arc::new(harness.orchestrator_at(adapter.clone(), at()));
 
@@ -952,6 +955,9 @@ mod tests {
                 (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
                 (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+                // The delivery the acceptance closed: its review, then its retro.
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
             ]
         );
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
@@ -1040,6 +1046,10 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one journey, every fact asserted in order"
+    )]
     async fn takes_one_task_from_ready_to_accepted() {
         let harness = Harness::new("orch-one-task", |wire| {
             wire["policy"]["integration"] = serde_json::json!("auto_merge");
@@ -1050,6 +1060,8 @@ mod tests {
             implement_finishes_ctv_1(),
             review_writes_note(),
             accept_ctv_1(),
+            review(),
+            retro(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let base = git_output_in(&harness.project.repo.path, &["rev-parse", "main"]);
@@ -1081,6 +1093,9 @@ mod tests {
                 (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
                 (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+                // The delivery the acceptance closed: its review, then its retro.
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
             ]
         );
         assert_eq!(
@@ -1120,14 +1135,18 @@ mod tests {
             "{reviews:?}"
         );
         let costs = harness.events(&[EventKind::CostRecorded]);
-        assert_eq!(costs.len(), 4, "{costs:?}");
-        for cost in &costs {
+        // The task's four sessions are charged to it; the delivery's review and retro are not.
+        let (own, ceremonies): (Vec<_>, Vec<_>) = costs
+            .iter()
+            .partition(|cost| cost.envelope.ids.task_id.is_some());
+        assert_eq!((own.len(), ceremonies.len()), (4, 2), "{costs:?}");
+        for cost in &own {
             assert_eq!(
                 cost.envelope.ids.task_id.as_ref().map(|task| task.as_str()),
                 Some("CTV-1")
             );
         }
-        assert_eq!(adapter.started().len(), 4);
+        assert_eq!(adapter.started().len(), 6);
         assert_eq!(adapter.transcripts_left(), 0);
         let integrated = harness.events(&[EventKind::TaskIntegrated]);
         assert!(
@@ -1170,6 +1189,8 @@ mod tests {
             implement_finishes_ctv_1(),
             review_writes_note(),
             accept_ctv_1(),
+            review(),
+            retro(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -1187,6 +1208,9 @@ mod tests {
                 (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
                 (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+                // The delivery the acceptance closed: its review, then its retro.
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
             ]
         );
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
@@ -1317,6 +1341,8 @@ mod tests {
             review_writes_note(),
             accept_ctv_1(),
             plan_closes_epic_ctv_1(),
+            review(),
+            retro(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let epic: TaskId = "CTV-1".parse().expect("a task id");
@@ -1352,6 +1378,9 @@ mod tests {
             (SessionStartedBodyPurpose::Verify, "dev-b", "CTV-2"),
             (SessionStartedBodyPurpose::Verify, "pm", "CTV-2"),
             (SessionStartedBodyPurpose::Plan, "pm", "CTV-1"),
+            // The delivery the epic's acceptance closed: its review, then its retro.
+            (SessionStartedBodyPurpose::Ceremony, "pm", ""),
+            (SessionStartedBodyPurpose::Ceremony, "pm", ""),
         ]
         .into_iter()
         .map(|(purpose, agent, task)| (purpose, agent.to_string(), task.to_string()))
