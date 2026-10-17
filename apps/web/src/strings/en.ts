@@ -951,10 +951,7 @@ export const en = {
 	toldDesignApproved: "{who} approved {designer}’s plan.",
 	toldDesignReturned: "{who} sent {designer}’s plan back.",
 	designLead:
-		"{designer} looked at your app and wrote this. {designer} changes nothing until {pm} approves it.",
-	designWaiting: "Waiting for {pm} to approve the plan",
-	designWaitingNote:
-		"{pm} checks that the plan does what the task asks, and nothing more. You do not need to do anything.",
+		"{designer} looked at your app and wrote this, then changes the page as it says. The finished change is reviewed, as for any task.",
 	designBeingBuilt: "Being built",
 	designBeingBuiltNote:
 		"{designer} is changing the page now, as the plan says.",
@@ -1524,7 +1521,6 @@ export const en = {
 	designerWorks: "How {designer} works",
 	designerStepLook: "Looks at your app in a browser",
 	designerStepPlan: "Writes a plan",
-	designerStepApprove: "{pm} approves the plan",
 	designerStepChange: "{designer} changes the page",
 	designerStepReview: "{reviewer} reviews it, as for any task",
 	stepDone: "Done",

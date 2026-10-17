@@ -94,7 +94,7 @@ Tests:
   - No axe violations.
 - `shows_how_the_designer_works_beside_its_task` (changed): with a proposed plan the steps read "Looks at your app in a browser Done", "Writes a plan Done", "Iris changes the page Now", "Ada reviews it, as for any task".
 
-- [ ] `feat(web): show a Designer's plan as approved by Catervas`
+- [x] `feat(web): show a Designer's plan as approved by Catervas`
 
 ## Verification
 

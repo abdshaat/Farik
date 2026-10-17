@@ -271,11 +271,8 @@ export function TaskDetail() {
 			e.seq > (proposal?.seq ?? 0),
 	);
 	const designer = nameOf(proposal?.agentId ?? contract.assignee);
-	const pm = nameOf(
-		decision?.agentId ??
-			agents.find((a) => a.role === "product_manager" && a.status === "active")
-				?.id,
-	);
+	// Whoever decided: Catervas when the event names no agent, else an older log's Product Manager.
+	const pm = nameOf(decision?.agentId);
 	// "today", or "on Wednesday 30 September", in UTC as the times are.
 	const when = (e?: Event) =>
 		e
@@ -299,11 +296,7 @@ export function TaskDetail() {
 	const designWord =
 		(design &&
 			contract.status === "in_progress" &&
-			(design.state === "proposed"
-				? t("designWaiting", { pm })
-				: t(
-						design.state === "approved" ? "designBeingBuilt" : "designSentBack",
-					))) ||
+			t(design.state === "returned" ? "designSentBack" : "designBeingBuilt")) ||
 		(checking && t("designChecking")) ||
 		(onDesigner && t("designOnDesigner")) ||
 		(noBrowser && t("designNoBrowser"));
@@ -317,23 +310,19 @@ export function TaskDetail() {
 		designer: iris?.displayName ?? designer,
 		reviewer: reviewer ?? "",
 		developer: assignee ?? "",
-		pm,
 	};
 	// Where the Designer's own task stands, step by step (the "How Iris works" panel).
 	const reached =
 		contract.status === "accepted"
-			? 5
+			? 4
 			: contract.status === "verifying"
-				? 4
-				: design?.state === "approved"
-					? 3
-					: design?.state === "proposed"
-						? 2
-						: 0;
+				? 3
+				: design?.state === "approved" || design?.state === "proposed"
+					? 2
+					: 0;
 	const steps = [
 		"designerStepLook",
 		"designerStepPlan",
-		"designerStepApprove",
 		"designerStepChange",
 		"designerStepReview",
 	] as const;
@@ -450,47 +439,36 @@ export function TaskDetail() {
 				<h2>{t("tabPlan")}</h2>
 				{design && (
 					<>
-						<p className={styles.muted}>{t("designLead", { designer, pm })}</p>
+						<p className={styles.muted}>{t("designLead", { designer })}</p>
 						<article className={own.letter}>
-							{design.state === "proposed" ? (
-								<>
-									<p>
-										<strong>{t("designWaiting", { pm })}</strong>
-									</p>
-									<p>{t("designWaitingNote", { pm })}</p>
-								</>
-							) : (
-								<>
-									<p>
-										<strong>
-											{t(
-												design.state === "approved"
-													? "designApproved"
-													: "designReturned",
-												{ pm, ...when(decision) },
-											)}
-										</strong>
-									</p>
-									<p>
+							{decision && (
+								<p>
+									<strong>
 										{t(
-											design.state === "approved"
-												? "designBeingBuiltNote"
-												: "designSentBackNote",
-											{ designer },
+											design.state === "returned"
+												? "designReturned"
+												: "designApproved",
+											{ pm, ...when(decision) },
 										)}
-									</p>
-									{design.reason && <p>{`“${design.reason}”`}</p>}
-									{design.state === "returned" && (
-										<p>
-											{t(
-												limit <= NTH.length
-													? "designReturns"
-													: "designReturnsMany",
-												{ n: returns, of: limit, nth: NTH[limit - 1] ?? "" },
-											)}
-										</p>
+									</strong>
+								</p>
+							)}
+							<p>
+								{t(
+									design.state === "returned"
+										? "designSentBackNote"
+										: "designBeingBuiltNote",
+									{ designer },
+								)}
+							</p>
+							{design.reason && <p>{`“${design.reason}”`}</p>}
+							{design.state === "returned" && (
+								<p>
+									{t(
+										limit <= NTH.length ? "designReturns" : "designReturnsMany",
+										{ n: returns, of: limit, nth: NTH[limit - 1] ?? "" },
 									)}
-								</>
+								</p>
 							)}
 						</article>
 						<article className={own.letter}>
