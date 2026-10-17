@@ -231,7 +231,7 @@ impl Drop for Removed {
 
 /// Makes `project` a Catervas project, as `startServe` in the browser suites does for step 08's
 /// journeys: `catervas init`, sandboxing off, and Mira (Product Manager), Ada (Architect) and Theo
-/// (Developer) as the team, which does not plan its work in sprints.
+/// (Developer) as the team.
 fn recorded_team(
     project: &TempRepo,
     env: &std::collections::BTreeMap<String, String>,
@@ -263,8 +263,7 @@ fn recorded_team(
         agent("theo", "Theo", "software_developer"),
     ]
     .concat();
-    let team = format!("{}agents:\n{agents}{}", &yaml[..start], &yaml[end + 1..])
-        .replace("plan_in_sprints: true", "plan_in_sprints: false");
+    let team = format!("{}agents:\n{agents}{}", &yaml[..start], &yaml[end + 1..]);
     std::fs::write(&path, team).map_err(|error| error.to_string())
 }
 

@@ -231,9 +231,8 @@ fn makes_a_project_out_of_a_repository() {
         panic!("a team.updated first");
     };
     assert_eq!(
-        updated.plan_in_sprints,
-        Some(true),
-        "the starter team plans in sprints, and its team.updated says so (SPEC 8.5)"
+        updated.plan_in_sprints, None,
+        "the starter team names no sprint policy (ADR 0062)"
     );
     assert!(
         repository.path.join(".catervas/local/.gitignore").is_file(),

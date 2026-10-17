@@ -307,11 +307,7 @@ function writeTeam(project: string, designer: boolean): void {
 					"  mcp_servers:\n  - name: playwright\n    source: builtin\n",
 				)
 			: "");
-	// `catervas init` still writes `plan_in_sprints: true` until the daemon drops sprints (plan 5);
-	// no journey asks for it, so work flows as soon as it is ready.
-	yaml = yaml
-		.replace(/^agents:\n[\s\S]*?(?=^budgets:)/m, `agents:\n${agents}`)
-		.replace("plan_in_sprints: true", "plan_in_sprints: false");
+	yaml = yaml.replace(/^agents:\n[\s\S]*?(?=^budgets:)/m, `agents:\n${agents}`);
 	if (designer) {
 		yaml = yaml.replace("    required: always\n", "    required: never\n");
 		// Alpine's own busybox leaves `httpd` out; the project carries busybox-extras' as `busybox`.

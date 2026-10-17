@@ -2475,7 +2475,6 @@ mod tests {
             "folder-backlog",
             a_team(|wire| {
                 wire["policy"]["wip_limit_per_agent"] = json!(2);
-                wire["policy"]["plan_in_sprints"] = json!(true);
                 for id in ["fin-1", "fin-2"] {
                     wire["agents"]
                         .as_array_mut()

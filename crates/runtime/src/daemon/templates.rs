@@ -986,7 +986,6 @@ mod tests {
                 "agent_ids": ["pm", "dev-a", "dev-b", "noor"],
                 "updated_by": "human",
                 "template": "Pair",
-                "plan_in_sprints": false,
             })
         );
         assert!(

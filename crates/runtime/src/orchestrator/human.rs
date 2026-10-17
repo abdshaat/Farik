@@ -2761,7 +2761,6 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn drafts_the_product_plan_on_the_owners_word() {
         let harness = a_new_project("human-product-plan", |wire| {
-            wire["policy"]["plan_in_sprints"] = json!(true);
             wire["agents"].as_array_mut().expect("agents").push(
                 catervas_core::team::fixtures::an_agent_wire("sam", "scrum_master"),
             );

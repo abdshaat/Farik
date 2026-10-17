@@ -115,7 +115,7 @@ fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
                 && matches!(&event.body, EventBody::MessagePosted(body) if body.kind == MessageKind::Ambient)
         })
         .count();
-    let allowance = usize::try_from(call.team.policy.ambient_messages_per_sprint).unwrap_or(0);
+    let allowance = usize::try_from(call.team.ambient_messages_per_day()).unwrap_or(0);
     if spent >= allowance {
         return Err(Refusal::ChannelLimit {
             detail: format!(

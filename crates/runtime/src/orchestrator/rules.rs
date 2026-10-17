@@ -9312,11 +9312,6 @@ mod tests {
         );
     }
 
-    /// The harness's team, planning its work in sprints (ADR 0028).
-    fn in_sprints(wire: &mut serde_json::Value) {
-        wire["policy"]["plan_in_sprints"] = json!(true);
-    }
-
     #[test]
     fn ranks_why_an_idle_tick_waits() {
         let woken = at() + chrono::Duration::hours(1);
@@ -9337,31 +9332,6 @@ mod tests {
         assert_eq!(why(true, false), super::DAY_SPENT);
         assert_eq!(why(false, true), asleep);
         assert_eq!(why(false, false), NOTHING_TO_DO);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn runs_review_and_integration_outside_a_sprint() {
-        let harness = Harness::new("orch-sprints-review", |wire| {
-            in_sprints(wire);
-            wire["policy"]["integration"] = json!("auto_merge");
-        });
-        harness.verifying("CTV-1");
-        harness.accepted("CTV-2");
-        harness.merge_by_hand("CTV-2");
-        let adapter = harness.recorded(vec![review_writes_note()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        let integrated = orchestrator.tick().await.expect("the tick runs");
-        let reviewed = orchestrator.tick().await.expect("the tick runs");
-
-        assert_eq!(acted_on(&integrated), Some("CTV-2"), "{integrated:?}");
-        assert_eq!(harness.events(&[EventKind::TaskIntegrated]).len(), 1);
-        assert_eq!(acted_on(&reviewed), Some("CTV-1"), "{reviewed:?}");
-        assert_eq!(
-            sessions(&adapter),
-            vec![("dev-b".to_string(), SessionPurpose::Verify)]
-        );
     }
 
     #[tokio::test]

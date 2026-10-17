@@ -123,6 +123,39 @@ fn drops_the_judgment_policy_when_it_writes_the_team() {
 }
 
 #[test]
+fn an_old_team_file_loads_and_forgets_its_sprint_keys_when_written() {
+    // ADR 0062: a team file made before it may carry `policy.plan_in_sprints` and
+    // `policy.ambient_messages_per_sprint`. It loads, and a file written after it has neither.
+    let project = TempProject::new("old-sprint-keys");
+    let files = project.files();
+    files.write_team(&a_team()).expect("the team is written");
+    let path = project.root.join(".catervas/team.yaml");
+    let text = std::fs::read_to_string(&path).expect("the file");
+    let old = text.replacen(
+        "\npolicy:\n",
+        "\npolicy:\n  plan_in_sprints: true\n  ambient_messages_per_sprint: 3\n",
+        1,
+    );
+    assert_ne!(
+        old, text,
+        "the file has a policy to add the old keys to: {text}"
+    );
+    std::fs::write(&path, old).expect("an older file");
+
+    let read = files.read_team().expect("the old file loads");
+    assert_eq!(read.ambient_messages_per_day(), 3);
+    files.write_team(&read).expect("the team is written");
+
+    let written = std::fs::read_to_string(&path).expect("the file");
+    assert!(written.contains("ambient_messages_per_day: 3"), "{written}");
+    assert!(!written.contains("plan_in_sprints"), "{written}");
+    assert!(
+        !written.contains("ambient_messages_per_sprint"),
+        "{written}"
+    );
+}
+
+#[test]
 fn reads_back_the_team_it_wrote() {
     let project = TempProject::new("round-trip-team");
     let files = project.files();

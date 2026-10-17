@@ -102,7 +102,8 @@ pub(super) fn query(
             let mut answer = effective(deps, &team)?;
             answer["connectors"] = json!(connector_states(state, deps, &team));
             answer["kits"] = json!(kits_of(deps, &team, state.registered_apps())?);
-            answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
+            answer["team"] =
+                serde_json::to_value(team.without_old_keys()).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(catervas_core::team::MAX_AGENTS);
             answer["sandboxed"] = json!(deps.transitions.sandboxed());
             answer["hidden_suggestions"] = json!(
@@ -1338,14 +1339,14 @@ pub(super) fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failu
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))
 }
 
-/// `team.propose`: the team as it is, with the six in place of its agents and planning in sprints,
-/// and the criteria. The Designer comes with its Playwright connector on, and is listed
+/// `team.propose`: the team as it is, with the six in place of its agents, and the criteria. The Designer comes with its Playwright connector on, and is listed
 /// `unavailable` where it cannot have its browser for want of Docker's sandbox, which the page
 /// shows unticked (D3).
 fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     let current = deps.files.read_team().map_err(|e| internal(&e))?;
     let no_sandbox = deps.transitions.designer_browser(&current) == DesignerBrowser::NoSandbox;
-    let mut team = serde_json::to_value(current).map_err(|e| internal(&e))?;
+    let mut team =
+        serde_json::to_value(current.clone().without_old_keys()).map_err(|e| internal(&e))?;
     let agents = suggested()?;
     let unavailable: Vec<Value> = agents
         .iter()
@@ -1353,8 +1354,6 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
         .map(|agent| json!({ "agent_id": agent.id, "reason": "designer_needs_sandbox" }))
         .collect();
     team["agents"] = serde_json::to_value(agents).map_err(|e| internal(&e))?;
-    // Setup only ever makes a new team, and a new team plans in sprints (ADR 0028).
-    team["policy"]["plan_in_sprints"] = json!(true);
     // A team with no preview is proposed the one the scan found, if it found one (ADR 0054); a scan
     // that fails proposes none.
     let found = scan_project(&deps.git, deps.clock.now())
@@ -1805,7 +1804,7 @@ pub(super) fn team_updated(team: &Team, template: Option<&str>) -> EventBody {
             .collect(),
         updated_by: HUMAN.to_string(),
         template: template.map(str::to_string),
-        plan_in_sprints: Some(team.plans_in_sprints()),
+        plan_in_sprints: None,
     })
 }
 
@@ -2886,10 +2885,8 @@ pub(super) mod tests {
             ]
         );
         // The rest is the team as it is, and the checks the form edits beside it.
-        let mut team = team_file(&harness);
+        let team = team_file(&harness);
         assert_eq!(proposed["team"]["name"], team["name"]);
-        // Planning in sprints, as every new team does (ADR 0028).
-        team["policy"]["plan_in_sprints"] = json!(true);
         assert_eq!(proposed["team"]["policy"], team["policy"]);
         catervas_core::team::validate_team(&proposed["team"]).expect("a team");
         assert_eq!(
@@ -3716,8 +3713,7 @@ pub(super) mod tests {
         assert!(ads.store.load(&ads.at).expect("reads").is_none());
     }
 
-    /// Switching "Plan work in sprints" off frees the Backlog's work at once, not at the next
-    /// minute's look (the step 15 journey).
+    /// Saving the team wakes the team at once, not at the next minute's look.
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn wakes_the_team_when_the_team_is_saved() {
@@ -3820,8 +3816,7 @@ pub(super) mod tests {
             json!({
                 "team_name": "Catervas",
                 "agent_ids": ["pm", "dev-a", "dev-b"],
-                "updated_by": "human",
-                "plan_in_sprints": false
+                "updated_by": "human"
             })
         );
     }
@@ -4528,11 +4523,9 @@ pub(super) mod tests {
                 "blocked_limit_hours": 24,
                 "max_iterations": 3,
                 "integration": "pull_request",
-                "ambient_messages_per_sprint": 1,
                 "escalation_age_hours": 24,
                 "memory_cap_tokens": 8000,
-                "permissions": { "run_commands": true, "push": false },
-                "plan_in_sprints": true
+                "permissions": { "run_commands": true, "push": false }
             })
         );
     }

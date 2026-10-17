@@ -178,15 +178,15 @@ impl ProjectFiles {
         validate_team(&value).map_err(|errors| refused(TEAM, &errors))
     }
 
-    /// Writes the team, after holding it to the same rules. It writes no `policy.judgment`: no
-    /// agent judges a contract (ADR 0061), and an older file's key is dropped here.
+    /// Writes the team, after holding it to the same rules, without the keys earlier versions
+    /// wrote (`Team::without_old_keys`): no agent judges a contract (ADR 0061) and nothing is
+    /// planned in sprints (ADR 0062), and an older file's keys are dropped here.
     ///
     /// # Errors
     ///
     /// `Invalid` when the team is not one `validate_team` accepts, `Io` when it cannot be written.
     pub fn write_team(&self, team: &Team) -> Result<(), FilesError> {
-        let mut team = team.clone();
-        team.policy.judgment = None;
+        let team = team.clone().without_old_keys();
         let value = as_wire(TEAM, &team)?;
         validate_team(&value).map_err(|errors| refused(TEAM, &errors))?;
         self.write_yaml(TEAM, &value)

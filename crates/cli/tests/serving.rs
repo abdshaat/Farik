@@ -944,7 +944,7 @@ fn admits_a_local_browser_without_a_code_in_preview_mode() {
     assert!(interrupted.success());
     // What a serve that Ctrl-C ended exits with.
     assert_eq!(status.code(), Some(130), "{status:?}");
-    assert!(team.contains("plan_in_sprints: false"), "{team}");
+    assert!(!team.contains("plan_in_sprints"), "{team}");
 }
 
 #[cfg(not(feature = "e2e"))]

@@ -250,7 +250,7 @@ allowance reads `Team::ambient_messages_per_day()`. `team.rs`'s assertions that
   team that has no `plan_in_sprints`, and the applied team's `policy.plan_in_sprints` is `None`; `team-template.schema.json` has
   no `plan_in_sprints` (C3's schema half, also checked as a command below).
 
-- [ ] `feat(core): old team files and templates load, and lose their sprint keys`
+- [x] `feat(core): old team files and templates load, and lose their sprint keys`
 
 ## Verification
 

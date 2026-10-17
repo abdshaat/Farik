@@ -70,6 +70,13 @@ pub fn template_slug(name: &str) -> Option<String> {
 ///
 /// Every schema violation at its own pointer; or, when the schema passes, `validate_team`'s.
 pub fn validate_template(input: &Value) -> Result<TeamTemplate, Vec<ValidationError>> {
+    // A template saved before ADR 0062 may carry `policy.plan_in_sprints`, which is ignored, so the
+    // key is dropped before the schema, which no longer names it, sees the value.
+    let mut current = input.clone();
+    if let Some(policy) = current.get_mut("policy").and_then(Value::as_object_mut) {
+        policy.remove("plan_in_sprints");
+    }
+    let input = &current;
     let mut errors = Vec::new();
     for error in VALIDATOR.iter_errors(input) {
         let path = error.instance_path().to_string();
@@ -166,7 +173,6 @@ pub fn template_from_team(
     let mut policy = json!({
         "permissions": team.permissions(),
         "integration": team.policy.integration,
-        "plan_in_sprints": team.plans_in_sprints(),
     });
     if let Some(document_format) = team.policy.document_format {
         policy["document_format"] = json!(document_format);
@@ -277,9 +283,6 @@ pub fn apply_template(
     }
     team.policy.permissions = Some(template.policy.permissions.clone());
     team.policy.integration = template.policy.integration;
-    if let Some(plan_in_sprints) = template.policy.plan_in_sprints {
-        team.policy.plan_in_sprints = Some(plan_in_sprints);
-    }
     if let Some(document_format) = template.policy.document_format {
         team.policy.document_format = Some(match document_format {
             TemplatePolicyDocumentFormat::Html => PolicyDocumentFormat::Html,
@@ -440,8 +443,7 @@ mod tests {
                 ],
                 "policy": {
                     "permissions": { "run_commands": true, "push": false },
-                    "integration": "pull_request",
-                    "plan_in_sprints": false
+                    "integration": "pull_request"
                 },
                 "budgets": { "daily_usd": 20.0 }
             })
@@ -468,14 +470,9 @@ mod tests {
         );
         assert_eq!(
             keys(&template["policy"]),
-            [
-                "document_format",
-                "integration",
-                "permissions",
-                "plan_in_sprints"
-            ]
-            .map(str::to_string)
-            .into(),
+            ["document_format", "integration", "permissions"]
+                .map(str::to_string)
+                .into(),
             "no integration branch or other policy key"
         );
         assert_eq!(
@@ -1069,27 +1066,23 @@ mod tests {
     }
 
     #[test]
-    fn carries_the_policy_in_a_template() {
-        let mut wire = a_team_wire();
-        wire["policy"]["plan_in_sprints"] = json!(true);
-        assert_eq!(template_of(&wire)["policy"]["plan_in_sprints"], json!(true));
-
-        let without = a_template_wire();
-        assert!(without["policy"].get("plan_in_sprints").is_none());
-        validate_template(&without).expect("a template without the key is one");
-
-        let mut project = a_full_team_wire();
-        project["policy"]["plan_in_sprints"] = json!(true);
-        let mut template = template_with(&[
+    fn a_template_saved_with_plan_in_sprints_still_applies() {
+        // ADR 0062: a template saved before it carries `policy.plan_in_sprints`, which is read and
+        // ignored; the team it makes has none, and the schema no longer names the key.
+        let mut saved = template_with(&[
             joining("ada", "Ada", "product_manager"),
             joining("linus", "Linus", "software_developer"),
         ]);
-        assert!(
-            applied(&project, &template, &[]).team.plans_in_sprints(),
-            "the key absent keeps the project's"
-        );
-        template["policy"]["plan_in_sprints"] = json!(false);
-        assert!(!applied(&project, &template, &[]).team.plans_in_sprints());
+        saved["policy"]["plan_in_sprints"] = json!(false);
+        validate_template(&saved).expect("an older template is one");
+
+        let project = a_full_team_wire();
+        assert!(project["policy"].get("plan_in_sprints").is_none());
+        let team = applied(&project, &saved, &[]).team;
+        assert_eq!(team.policy.plan_in_sprints, None);
+
+        let schema = include_str!("../../../../docs/schemas/team-template.schema.json");
+        assert!(!schema.contains("plan_in_sprints"));
     }
 
     #[test]
