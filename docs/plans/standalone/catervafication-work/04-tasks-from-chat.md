@@ -217,7 +217,7 @@ Files: `crates/store/src/requests.rs`. Tests in its `mod tests`, on a temporary 
   - filing from `dev`'s own reply is refused "links to message <seq>, which is not the owner's
     message in dev's chat".
 
-- [ ] `feat(store): file the task the owner gave an agent in its chat`
+- [x] `feat(store): file the task the owner gave an agent in its chat`
 
 ### Task 3: the command, and the chat that does not answer it
 
