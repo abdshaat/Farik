@@ -80,7 +80,7 @@ Tests:
   - `escalates_after_too_many_returns` and `explores_again_once_the_human_grants_more_tries` are unchanged.
 - `says_a_designer_explores_then_waits_for_its_plans_decision` (`activity.rs`) becomes `says_a_designer_explores_then_rests`: after `design_plan.proposed`, Iris's line is "Nothing to do right now".
 
-- [ ] `feat(runtime): approve a Designer's plan at once`
+- [x] `feat(runtime): approve a Designer's plan at once`
 
 ### Task 2: the task page says Catervas approved it
 

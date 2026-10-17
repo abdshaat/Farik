@@ -296,11 +296,6 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "End your explore session with your plan for the task: a summary for the user, a blank line, then what you saw, what you will change, which screens and sizes, and what you will leave alone.",
         ),
-        tool::<design::DecideDesignPlanInput>(
-            "catervas_decide_design_plan",
-            Read,
-            "Approve the Designer's plan for this session's task, or return it, with your reason.",
-        ),
         tool::<design::CheckPageInput>(
             "catervas_check_page",
             Read,
@@ -524,7 +519,6 @@ pub async fn call_tool(
         "catervas_write_decision" => memory::write_decision(&call, &parse(input)?),
         "catervas_read_decisions" => memory::read_decisions(&call, &parse(input)?),
         "catervas_propose_design_plan" => design::propose(&call, parse(input)?),
-        "catervas_decide_design_plan" => design::decide(&call, parse(input)?),
         "catervas_check_page" => design::check(&call, parse(input)?).await,
         "catervas_record_design_review" => design::record_review(&call, parse(input)?),
         "catervas_chat_reply" => chat::chat_reply(&call, parse(input)?),
@@ -848,7 +842,6 @@ mod tests {
             "catervas_write_decision",
             "catervas_read_decisions",
             "catervas_propose_design_plan",
-            "catervas_decide_design_plan",
             "catervas_check_page",
             "catervas_record_design_review",
             "catervas_chat_reply",
@@ -891,7 +884,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..41] {
+        for tool in &tools[..40] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

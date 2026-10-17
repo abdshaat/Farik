@@ -1,6 +1,6 @@
 //! The UI/UX Designer's plan gate (ADR 0026): `catervas_propose_design_plan`, which ends the
-//! Designer's explore session with its plan, and `catervas_decide_design_plan`, the Product Manager's
-//! approval or return of it. Both only write the log. Where a task's plan stands is read back from
+//! Designer's explore session with its plan. Catervas records the approval itself (ADR 0061); the
+//! tool only writes the log. Where a task's plan stands is read back from
 //! the log by the governor's checks, the orchestrator, and the browser.
 
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use catervas_core::governor::permissions::{PermissionTier, check_design_plan};
 use catervas_core::team::Team;
 use catervas_protocol::event::{
     CatervasEvent, DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, EventBody,
-    EventKind, PageCheckedBody, ReasonBody,
+    EventKind, PageCheckedBody,
 };
 use catervas_roles::builtin_connector;
 use catervas_store::waiting::last_move_into;
@@ -41,21 +41,11 @@ pub(crate) struct ProposeDesignPlanInput {
     plan: String,
 }
 
-/// `catervas_decide_design_plan`'s input.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct DecideDesignPlanInput {
-    /// True to approve the plan, false to return it to the Designer.
-    approve: bool,
-    /// Why, which a returned plan's next exploration is given.
-    reason: String,
-}
-
 /// Where a task's latest design plan stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum PlanState {
-    /// Waiting for the Product Manager.
+    /// Proposed: Catervas approves it at once.
     Proposed,
     /// Approved: the Designer implements it.
     Approved,
@@ -189,45 +179,6 @@ pub(super) fn propose(call: &Call<'_>, input: ProposeDesignPlanInput) -> Result<
     let event = call.append(
         Some(task),
         EventBody::DesignPlanProposed(DesignPlanProposedBody { plan: input.plan }),
-    )?;
-    Ok(json!({ "seq": event.envelope.seq }))
-}
-
-/// Records `design_plan.approved` or `design_plan.returned`, from the Product Manager's verify
-/// session of the task, with a reason, while the task's latest plan waits for a decision.
-pub(super) fn decide(call: &Call<'_>, input: DecideDesignPlanInput) -> Result<Value, ToolError> {
-    let task = match &call.context.task_id {
-        Some(task)
-            if call.role() == Role::ProductManager
-                && call.context.purpose == SessionPurpose::Verify =>
-        {
-            task
-        }
-        _ => {
-            return Err(refused(
-                "only the Product Manager decides a design plan, in its verify session of the task",
-            ));
-        }
-    };
-    if input.reason.trim().is_empty() {
-        return Err(Refusal::BlankReason.into());
-    }
-    let waiting = read_design_plan(&call.deps().log, task)
-        .map_err(super::failed)?
-        .is_some_and(|plan| plan.state == PlanState::Proposed);
-    if !waiting {
-        return Err(refused("the task has no plan waiting for a decision"));
-    }
-    let body = ReasonBody {
-        reason: input.reason,
-    };
-    let event = call.append(
-        Some(task),
-        if input.approve {
-            EventBody::DesignPlanApproved(body)
-        } else {
-            EventBody::DesignPlanReturned(body)
-        },
     )?;
     Ok(json!({ "seq": event.envelope.seq }))
 }
@@ -557,22 +508,6 @@ mod tests {
             purpose,
             "catervas_propose_design_plan",
             json!({ "plan": plan }),
-        )
-    }
-
-    fn decide(
-        project: &TestProject,
-        agent: &str,
-        task: Option<&str>,
-        purpose: SessionPurpose,
-    ) -> Result<Value, ToolError> {
-        call(
-            project,
-            agent,
-            task,
-            purpose,
-            "catervas_decide_design_plan",
-            json!({ "approve": true, "reason": "It keeps to the task's screens." }),
         )
     }
 
@@ -962,87 +897,5 @@ mod tests {
         assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("CTV-1"));
         assert_eq!(ids.agent_id.as_deref(), Some("iris"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_the_decision_but_from_the_product_manager() {
-        let project = a_project("tools-design-decide");
-        project.record(
-            "CTV-1",
-            "design_plan.proposed",
-            &json!({ "plan": a_plan(40, 400) }),
-        );
-        let outside = "design_plan_refused: only the Product Manager decides a design plan, in \
-                       its verify session of the task";
-        assert_eq!(
-            refused(decide(
-                &project,
-                "ada",
-                Some("CTV-1"),
-                SessionPurpose::Verify
-            )),
-            outside
-        );
-        // The Designer never decides its own plan, in whatever session.
-        for purpose in [SessionPurpose::Explore, SessionPurpose::Verify] {
-            assert_eq!(
-                refused(decide(&project, "iris", Some("CTV-1"), purpose)),
-                outside
-            );
-        }
-        assert_eq!(
-            refused(decide(
-                &project,
-                "pm",
-                Some("CTV-1"),
-                SessionPurpose::Implement
-            )),
-            outside
-        );
-        assert_eq!(
-            refused(decide(&project, "pm", None, SessionPurpose::Verify)),
-            outside
-        );
-        assert!(project.events(&[EventKind::DesignPlanApproved]).is_empty());
-
-        decide(&project, "pm", Some("CTV-1"), SessionPurpose::Verify)
-            .expect("the Product Manager decides, in its verify session of the task");
-        let approved = project.events(&[EventKind::DesignPlanApproved]);
-        assert_eq!(approved.len(), 1);
-        let EventBody::DesignPlanApproved(body) = &approved[0].body else {
-            panic!("a design_plan.approved");
-        };
-        assert_eq!(body.reason, "It keeps to the task's screens.");
-        assert_eq!(approved[0].envelope.ids.agent_id.as_deref(), Some("pm"));
-
-        // A plan is decided once: the next decision waits for the next plan.
-        assert_eq!(
-            refused(decide(
-                &project,
-                "pm",
-                Some("CTV-1"),
-                SessionPurpose::Verify
-            )),
-            "design_plan_refused: the task has no plan waiting for a decision"
-        );
-        // With the next plan waiting, a blank reason is still refused.
-        project.record(
-            "CTV-1",
-            "design_plan.proposed",
-            &json!({ "plan": a_plan(40, 400) }),
-        );
-        assert_eq!(
-            refused(call(
-                &project,
-                "pm",
-                Some("CTV-1"),
-                SessionPurpose::Verify,
-                "catervas_decide_design_plan",
-                json!({ "approve": false, "reason": " " }),
-            )),
-            "blank_reason: a reason is recorded, and the log is where somebody reads it back"
-        );
-        assert!(project.events(&[EventKind::DesignPlanReturned]).is_empty());
     }
 }

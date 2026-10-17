@@ -19,14 +19,7 @@ use crate::marketing::{
     post_moves,
 };
 use crate::waiting::name_of;
-use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
-
-/// The events that say where a Designer's plan stands.
-const DESIGN_PLAN_KINDS: [EventKind; 3] = [
-    EventKind::DesignPlanProposed,
-    EventKind::DesignPlanApproved,
-    EventKind::DesignPlanReturned,
-];
+use crate::{EventLog, EventQuery, Projections, StoreError};
 
 /// What an agent is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,11 +92,6 @@ pub fn activity(
         })
         .unwrap_or(false);
     let titles = titles(projections)?;
-    let board = projections.board()?;
-    let plans = log.read(&EventQuery {
-        kinds: DESIGN_PLAN_KINDS.to_vec(),
-        ..EventQuery::default()
-    })?;
     let waiting = crate::waiting::waiting(projections, log, files, team)?;
     let proposals = folder_docs(log)?.proposals;
     let mut all = Vec::new();
@@ -172,10 +160,6 @@ pub fn activity(
             all.push(one(ActivityState::Waiting, line, None, None));
             continue;
         }
-        if let Some((task, line)) = plan_waiting(&plans, &board, team, id) {
-            all.push(one(ActivityState::Idle, line, Some(task), None));
-            continue;
-        }
         all.push(one(
             ActivityState::Idle,
             "Nothing to do right now".to_string(),
@@ -230,37 +214,6 @@ fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> Str
         ),
         (None, None, None) => format!("Waiting on you: {}", item.line),
     }
-}
-
-/// The task in progress whose latest design plan `agent` proposed and nobody decided yet, with
-/// the line that says who it waits for.
-fn plan_waiting(
-    plans: &[CatervasEvent],
-    board: &[TaskProjection],
-    team: &Team,
-    agent: &str,
-) -> Option<(TaskId, String)> {
-    let task = board
-        .iter()
-        .filter(|row| row.status == TaskStatus::InProgress)
-        .find(|row| {
-            plans
-                .iter()
-                .rev()
-                .find(|event| event.envelope.ids.task_id.as_ref() == Some(&row.task_id))
-                .is_some_and(|latest| {
-                    latest.body.kind() == EventKind::DesignPlanProposed
-                        && latest.envelope.ids.agent_id.as_deref() == Some(agent)
-                })
-        })?;
-    let pm = team
-        .active_agents()
-        .find(|agent| Role::from(agent.role) == Role::ProductManager)
-        .map_or("the Product Manager", |agent| agent.display_name.as_str());
-    Some((
-        task.task_id.clone(),
-        format!("Waiting for {pm} to approve a plan"),
-    ))
 }
 
 /// What `agent` is doing in its session that has started and not ended, on which task, in which
@@ -1181,7 +1134,7 @@ mod tests {
     }
 
     #[test]
-    fn says_a_designer_explores_then_waits_for_its_plans_decision() {
+    fn says_a_designer_explores_then_rests() {
         let board = Board::new("activity-designer");
         let mut wire = catervas_core::team::fixtures::a_team_wire();
         wire["agents"] = json!([
@@ -1241,19 +1194,10 @@ mod tests {
             iris(&board),
             (
                 ActivityState::Idle,
-                "Waiting for Mira to approve a plan".to_string(),
-                Some("CTV-1".to_string())
+                "Nothing to do right now".to_string(),
+                None
             )
         );
-        // Once decided, the plan waits no more.
-        board.put(
-            at(9, 4),
-            Some("CTV-1"),
-            Some("mira"),
-            "design_plan.returned",
-            json!({ "reason": "Not yet." }),
-        );
-        assert_eq!(iris(&board).1, "Nothing to do right now");
     }
 
     #[test]

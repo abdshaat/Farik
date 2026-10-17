@@ -33,7 +33,7 @@ use catervas_store::repos::{TaskRepositoryError, repo_present};
 use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
-use super::design::{DECIDE_TOOL, RECORD_DESIGN_REVIEW_TOOL};
+use super::design::RECORD_DESIGN_REVIEW_TOOL;
 use super::messages::{human_message, preview_address};
 use super::pipeline::DECIDE_PIPELINE_TOOL;
 use super::verify::{append, append_stamped};
@@ -50,9 +50,8 @@ use crate::preview::{
     has_playwright,
 };
 use crate::prompt::{
-    CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, INTERVIEW_INSTRUCTION,
-    JUDGMENT_INSTRUCTION, MemberLine, OwnRepo, PIPELINE_DECISION_INSTRUCTION, PromptInput,
-    assemble_system_prompt,
+    CEREMONY_INSTRUCTIONS, INTERVIEW_INSTRUCTION, JUDGMENT_INSTRUCTION, MemberLine, OwnRepo,
+    PIPELINE_DECISION_INSTRUCTION, PromptInput, assemble_system_prompt,
 };
 use crate::session::{
     EndReason, McpServerConfig, McpTransport, SessionEvent, SessionHandle, SessionPurpose,
@@ -1122,7 +1121,6 @@ fn closing_instruction(ask: &SessionAsk<'_>) -> Option<&'static str> {
             .find(|(named, _)| *named == thread)
             .map(|(_, text)| *text),
         (None, Some(JUDGMENT_TOOL)) => Some(JUDGMENT_INSTRUCTION),
-        (None, Some(DECIDE_TOOL)) => Some(DESIGN_DECISION_INSTRUCTION),
         (None, Some(DECIDE_PIPELINE_TOOL)) => Some(PIPELINE_DECISION_INSTRUCTION),
         (None, _) => None,
     }
@@ -4394,7 +4392,6 @@ mod tests {
         for (purpose, only_tool) in [
             (SessionPurpose::Triage, Some(TRIAGE_TOOL)),
             (SessionPurpose::Refine, Some(super::JUDGMENT_TOOL)),
-            (SessionPurpose::Verify, Some(super::DECIDE_TOOL)),
         ] {
             assert!(
                 skills(purpose, only_tool).is_empty(),
@@ -4723,7 +4720,6 @@ mod tests {
         for (purpose, only_tool) in [
             (SessionPurpose::Triage, Some(TRIAGE_TOOL)),
             (SessionPurpose::Refine, Some(super::JUDGMENT_TOOL)),
-            (SessionPurpose::Verify, Some(super::DECIDE_TOOL)),
             (SessionPurpose::Ceremony, None),
             (SessionPurpose::Conversation, None),
             (SessionPurpose::Chat, None),

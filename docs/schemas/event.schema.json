@@ -859,7 +859,7 @@
     },
     "reasonBody": {
       "title": "Reason Body",
-      "description": "The body of design_plan.approved, design_plan.returned and preview.stopped, which share one shape, so the one branch of the body choice serves all three and the event's kind says which it is. For design_plan.approved and design_plan.returned: the Product Manager's decision on the task's latest design plan, through catervas_decide_design_plan (ADR 0026), and why; the envelope names the task, the Product Manager and the session, and a returned plan starts a new explore session with reason. For preview.stopped: Catervas stopped the task's preview and its browser, and why, in plain words: the session ended, or the preview failed, with the output's last 40 lines (step 12's plan).",
+      "description": "The body of design_plan.approved, design_plan.returned and preview.stopped, which share one shape, so the one branch of the body choice serves all three and the event's kind says which it is. For design_plan.approved and design_plan.returned: the decision on the task's latest design plan, and why. Since ADR 0061 the approval is Catervas's, recorded with no agent and no session, and the envelope names only the task; before it, it was the Product Manager's decision through catervas_decide_design_plan (ADR 0026), and a returned plan, which only older logs hold, starts a new explore session with reason. For preview.stopped: Catervas stopped the task's preview and its browser, and why, in plain words: the session ended, or the preview failed, with the output's last 40 lines (step 12's plan).",
       "type": "object",
       "additionalProperties": false,
       "required": ["reason"],

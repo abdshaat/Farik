@@ -135,8 +135,8 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
         SessionPurpose::Explore,
         "This session explores the task before anything changes: work out what its screens show \
          now and what should change, and change nothing. End the session by calling \
-         `catervas_propose_design_plan` with your plan; the Product Manager approves it before you \
-         change anything.",
+         `catervas_propose_design_plan` with your plan; Catervas records it, and your next session carries \
+         it out.",
     ),
     (
         SessionPurpose::Implement,
@@ -228,13 +228,6 @@ pub const JUDGMENT_INSTRUCTION: &str = "This session checks the plan of the cont
      End the session by calling `catervas_record_judgment` with one answer to each question, in the \
      order they are numbered, and your overall reason, which the Product Manager rewrites from \
      when any answer is no.";
-
-/// The closing of the Product Manager's session given `catervas_decide_design_plan` alone.
-pub const DESIGN_DECISION_INSTRUCTION: &str = "This session decides the UI/UX Designer's plan \
-     for the task above, which the message you were given holds. Approve it when it keeps to the \
-     contract and says what it will change and what it leaves alone; return it otherwise, saying \
-     what to change. End the session by calling `catervas_decide_design_plan` with your decision \
-     and your reason.";
 
 /// The closing of the Product Manager's session given `catervas_decide_data_pipeline` alone.
 pub const PIPELINE_DECISION_INSTRUCTION: &str = "This session decides one request of the \

@@ -419,24 +419,6 @@ pub fn explore_plans_ctv_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/explore_plans_ctv_1.jsonl"))
 }
 
-/// The Product Manager's decision on CTV-1's plan: `catervas_decide_design_plan` approving it, "The
-/// plan keeps to the sign-in page and says what it leaves alone.". Hand-written.
-#[must_use]
-pub fn decide_design_plan_approves_ctv_1() -> Transcript {
-    Transcript::from_jsonl(include_str!(
-        "transcripts/decide_design_plan_approves_ctv_1.jsonl"
-    ))
-}
-
-/// The Product Manager's decision on CTV-1's plan: `catervas_decide_design_plan` returning it, "Say
-/// what the page looks like in the dark theme too.". Hand-written.
-#[must_use]
-pub fn decide_design_plan_returns_ctv_1() -> Transcript {
-    Transcript::from_jsonl(include_str!(
-        "transcripts/decide_design_plan_returns_ctv_1.jsonl"
-    ))
-}
-
 /// The Product Manager's decision session of data pipeline request number `pipeline`:
 /// `catervas_decide_data_pipeline` with `decision` (`approve`, `decline` or `escalate`) and `reason`.
 /// Hand-written.

@@ -1124,7 +1124,7 @@ pub(super) fn explore_message(contract: &TaskContract, returned: Option<&str>) -
          browser and check them with `catervas_check_page`. Then end the session with your plan \
          through `catervas_propose_design_plan`: a summary for the user, a blank line, then what \
          you saw, what you will change, which screens and sizes, and what you will leave alone. \
-         The Product Manager approves it before you change anything.",
+         Catervas records it, and your next session carries it out.",
         task = contract.id.as_str(),
         branch = task_branch(contract)
     );
@@ -1161,17 +1161,6 @@ pub(super) fn preview_address(port: u16, path: &str) -> String {
     format!("\n\nThe app's preview is at http://localhost:{port}{path}.")
 }
 
-/// The Product Manager's decision session's message: the Designer's plan, an agent's words and so
-/// untrusted, and the decision to record.
-pub(super) fn decide_design_plan_message(contract: &TaskContract, plan: &str) -> String {
-    format!(
-        "The UI/UX Designer proposed this plan for {task}, whose contract is above: {plan}\n\n\
-         Approve it or return it with `catervas_decide_design_plan`, with your reason.",
-        task = contract.id.as_str(),
-        plan = untrusted_block("plan", plan, NOTE_CAP_BYTES)
-    )
-}
-
 /// The Product Manager's decision session's message for a data pipeline request: everything the
 /// agent wrote, which is its words and so untrusted, with its own answers about the cost, the
 /// account and the data, and the rule Catervas holds the decision to.
@@ -1203,11 +1192,11 @@ pub(super) fn decide_data_pipeline_message(record: &PipelineRecord) -> String {
     )
 }
 
-/// An implement session's message with the plan the Product Manager approved, an agent's words
+/// An implement session's message with the plan that was approved, an agent's words
 /// and so untrusted, after it.
 pub(super) fn with_the_approved_plan(message: &str, plan: &str) -> String {
     format!(
-        "{message}\n\nThe Product Manager approved your plan. Do what it says: {}",
+        "{message}\n\nYour plan is approved. Do what it says: {}",
         untrusted_block("plan", plan, NOTE_CAP_BYTES)
     )
 }

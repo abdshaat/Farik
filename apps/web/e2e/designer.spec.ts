@@ -32,7 +32,6 @@ test("a Designer's task and a design review run through the real server and brow
 			"refine_writes_page_task_for_iris_ctv_1",
 			"plan_assigns_ctv_1_to_iris",
 			"explore_checks_and_plans_ctv_1",
-			"decide_design_plan_approves_ctv_1",
 			"implement_by_iris_page_ctv_1",
 			"review_answers_the_rubric_ctv_1",
 			"accept_ctv_1",
@@ -75,7 +74,7 @@ test("a Designer's task and a design review run through the real server and brow
 			),
 		).toBe(true);
 
-		// 3 and 4. The plan waits for Mira and is approved; Iris implements, Ada reviews, and it is
+		// 3 and 4. Catervas approves the plan at once; Iris implements, Ada reviews, and it is
 		// accepted.
 		await expect
 			.poll(() => logOf(serve.project, "CTV-1"), { timeout: 120_000 })
@@ -83,11 +82,11 @@ test("a Designer's task and a design review run through the real server and brow
 		const log = logOf(serve.project, "CTV-1");
 		const at = (entry: string) => log.indexOf(entry);
 		expect(at("design_plan.proposed iris")).toBeGreaterThan(-1);
-		expect(at("design_plan.approved mira")).toBeGreaterThan(
+		expect(at("design_plan.approved")).toBeGreaterThan(
 			at("design_plan.proposed iris"),
 		);
 		expect(at("review.recorded ada")).toBeGreaterThan(
-			at("design_plan.approved mira"),
+			at("design_plan.approved"),
 		);
 		await expect
 			.poll(
