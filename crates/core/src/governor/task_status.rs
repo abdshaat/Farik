@@ -21,13 +21,23 @@ pub fn is_terminal(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::Accepted | TaskStatus::Cancelled)
 }
 
+/// Whether a task in `status` counts towards its assignee's WIP limit (ADR 0064): assigned, in
+/// progress, or sent back. Not `verifying`, which is its reviewer's work.
+#[must_use]
+pub fn counts_towards_wip(status: TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Assigned | TaskStatus::InProgress | TaskStatus::Rejected
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
     use serde_json::Value;
 
-    use super::{TASK_STATUSES, is_terminal};
+    use super::{TASK_STATUSES, counts_towards_wip, is_terminal};
     use crate::contract::TaskStatus;
 
     #[test]
@@ -55,5 +65,21 @@ mod tests {
             .filter(|status| is_terminal(*status))
             .collect();
         assert_eq!(terminal, [TaskStatus::Accepted, TaskStatus::Cancelled]);
+    }
+
+    #[test]
+    fn counts_assigned_in_progress_and_rejected_towards_wip() {
+        let counted: Vec<TaskStatus> = TASK_STATUSES
+            .into_iter()
+            .filter(|status| counts_towards_wip(*status))
+            .collect();
+        assert_eq!(
+            counted,
+            [
+                TaskStatus::Assigned,
+                TaskStatus::InProgress,
+                TaskStatus::Rejected
+            ]
+        );
     }
 }

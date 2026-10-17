@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use catervas_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
+use catervas_core::governor::task_status::{TASK_STATUSES, counts_towards_wip};
 use catervas_protocol::event::{
     CatervasEvent, ContractSummary, ContractSummaryKind, ContractSummaryRisk,
     ContractSummaryStatus, CostRecordedBody, EscalationRaisedBodyReason, EventBody,
@@ -85,25 +86,31 @@ pub struct TaskProjection {
     /// `raises`, the request that raises a marketing plan's budget. It is never held for a sprint.
     pub skips_sprints: bool,
     /// The sequence number of the event that last made the task count towards its assignee's
-    /// work-in-progress limit (ADR 0062): a move into `assigned`, `in_progress`, `verifying` or
-    /// `rejected` from another status, the event that cleared the last wait on the human while
+    /// work-in-progress limit (ADR 0062): a move into `assigned`, `in_progress` or
+    /// `rejected` from another status (`counts_towards_wip`, ADR 0064), the event that cleared the last wait on the human while
     /// the task is in one of them, or a `task.reassigned`. `None` for a row made before it was
     /// kept, which ranks as 0. It orders an agent's tasks: the first up to the limit go on.
     pub counted_seq: Option<u64>,
 }
 
-/// Whether a task in this status counts towards its assignee's work-in-progress limit (ADR 0062):
-/// it is under way, or waits for the agent's next session. `blocked`, `escalated` and every other
-/// status leave the agent free.
+/// Whether a task in this status counts towards its assignee's work-in-progress limit (ADR 0062,
+/// ADR 0064): it is under way, or sent back and waits for the agent's next session. A task under
+/// review (`verifying`) is its reviewer's work; `blocked`, `escalated` and every other status
+/// leave the agent free. Reads the core's one definition.
 #[must_use]
 pub fn counted_status(status: TaskStatus) -> bool {
-    matches!(
-        status,
-        TaskStatus::Assigned
-            | TaskStatus::InProgress
-            | TaskStatus::Verifying
-            | TaskStatus::Rejected
-    )
+    counts_towards_wip(status)
+}
+
+/// The counted statuses as a SQL list, built from `counted_status` so that the projection's SQL
+/// and the Rust rule cannot drift.
+fn counted_sql() -> String {
+    TASK_STATUSES
+        .into_iter()
+        .filter(|status| counted_status(*status))
+        .map(|status| format!("'{status}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl TaskProjection {
@@ -821,23 +828,25 @@ fn apply_move(
     let has_a_branch = !body
         .effects
         .contains(&TaskTransitionedBodyEffectsItem::NothingToIntegrate);
+    let counted = counted_sql();
     update(
         transaction,
         // Nothing leaves `accepted` (5.2), so only a move into it touches the flag; the
         // row's kind and the move's effects say whether there is a branch to integrate.
-        "UPDATE task_projections
+        &format!(
+            "UPDATE task_projections
          SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
              updated_seq = ?6, awaiting_approval = 0,
-             counted_seq = CASE WHEN ?2 IN ('assigned', 'in_progress', 'verifying', 'rejected')
-                                 AND status NOT IN ('assigned', 'in_progress', 'verifying',
-                                                    'rejected')
+             counted_seq = CASE WHEN ?2 IN ({counted})
+                                 AND status NOT IN ({counted})
                                 THEN ?6 ELSE counted_seq END,
              awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task' AND ?8
                                          ELSE awaiting_integration END,
              verifications = verifications + (?2 = 'verifying'),
              rejections = rejections + (?2 = 'rejected'),
              interventions = interventions + ?7
-         WHERE task_id = ?1",
+         WHERE task_id = ?1"
+        ),
         (
             id,
             to.to_string(),
@@ -877,8 +886,11 @@ fn apply_waiting(
         // The last wait cleared: a task in a counted status counts again from here (ADR 0062).
         update(
             transaction,
-            "UPDATE task_projections SET counted_seq = ?2
-             WHERE task_id = ?1 AND status IN ('assigned', 'in_progress', 'verifying', 'rejected')",
+            &format!(
+                "UPDATE task_projections SET counted_seq = ?2
+                 WHERE task_id = ?1 AND status IN ({})",
+                counted_sql()
+            ),
             (id, seq),
         )?;
     }
@@ -3041,6 +3053,29 @@ mod tests {
                 row(CostScope::Purpose, "implement", (2.0, 1, 1, 1)),
             ]
         );
+    }
+
+    #[test]
+    fn counts_a_task_again_from_its_rejection_not_while_under_review() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        let counted = |projections: &Projections| row_of(projections, "CTV-1").counted_seq;
+        record(&log, &projections, &moved("CTV-1", "ready", "assigned"));
+        record(
+            &log,
+            &projections,
+            &moved("CTV-1", "assigned", "in_progress"),
+        );
+        let first = counted(&projections);
+        record(
+            &log,
+            &projections,
+            &moved("CTV-1", "in_progress", "verifying"),
+        );
+        assert_eq!(counted(&projections), first, "review does not restart it");
+        let rejected = record(&log, &projections, &moved("CTV-1", "verifying", "rejected"));
+        assert_eq!(counted(&projections), Some(rejected.envelope.seq));
+        assert!(!super::counted_status(TaskStatus::Verifying));
     }
 
     #[test]
