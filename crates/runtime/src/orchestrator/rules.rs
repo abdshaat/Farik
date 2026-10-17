@@ -6094,6 +6094,7 @@ mod tests {
                     "catervas_read_seller_replies",
                     "catervas_schedule_post",
                     "catervas_write_folder_doc",
+                    "catervas_file_bug",
                 ]
                 .contains(&tool.name)
             })
