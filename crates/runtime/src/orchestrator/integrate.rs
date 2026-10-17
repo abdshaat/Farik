@@ -1366,6 +1366,7 @@ mod tests {
             "accepted",
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
         );
+        harness.settle_delivery();
         harness.merge_by_hand("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -1518,6 +1519,7 @@ mod tests {
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "fin",
                      "reviewer": "pm", "effects": ["nothing_to_integrate"] }),
         );
+        harness.settle_delivery();
         assert!(!harness.row("CTV-1").awaiting_integration);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -1701,6 +1703,7 @@ mod tests {
             "accepted",
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
         );
+        harness.settle_delivery();
         harness
             .project
             .deps
@@ -2048,6 +2051,7 @@ mod tests {
             "accepted",
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
         );
+        harness.settle_delivery();
         harness
             .project
             .deps
@@ -2728,6 +2732,7 @@ mod tests {
             "accepted",
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "ada", "reviewer": "pm" }),
         );
+        harness.settle_delivery();
         harness
             .project
             .deps

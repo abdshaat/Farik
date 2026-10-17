@@ -28,7 +28,6 @@ use crate::preview::PreviewFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
 use crate::sleep::Sleeper;
-use crate::sprints::SprintError;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
 
@@ -189,18 +188,6 @@ impl From<ForgeError> for OrchestratorError {
     }
 }
 
-impl From<SprintError> for OrchestratorError {
-    fn from(error: SprintError) -> Self {
-        match error {
-            SprintError::Files(error) => Self::Files(error),
-            SprintError::Store(error) => Self::Store(error),
-            other => Self::Refused {
-                reason: other.to_string(),
-            },
-        }
-    }
-}
-
 impl From<ChannelError> for OrchestratorError {
     fn from(error: ChannelError) -> Self {
         match error {
@@ -235,10 +222,10 @@ pub enum TickReport {
         /// What was done.
         what: String,
     },
-    /// Something was done about the open sprint.
-    Sprint {
-        /// The sprint.
-        sprint_id: String,
+    /// Something was done about a delivery.
+    Delivery {
+        /// The delivery.
+        delivery_id: String,
         /// What was done.
         what: String,
     },
@@ -535,7 +522,7 @@ impl Orchestrator {
                 }
                 TickReport::Idle { until: None, .. } => break,
                 TickReport::Acted { .. }
-                | TickReport::Sprint { .. }
+                | TickReport::Delivery { .. }
                 | TickReport::Conversation { .. }
                 | TickReport::Chat { .. }
                 | TickReport::FolderChange { .. } => {}
@@ -834,11 +821,12 @@ mod tests {
     use catervas_protocol::command::{Command, RequestSize};
     use catervas_protocol::event::EscalationRaisedBodyReason;
 
-    use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
+    use crate::orchestrator::fixtures::Harness;
     use crate::recorded::fixtures::{
         accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1, plan_assigns_ctv_2,
         plan_breaks_down_ctv_1, plan_closes_epic_ctv_1, refine_asks_ctv_1,
-        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, review_writes_note, triage_ctv_1_large,
+        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, retro, review, review_writes_note,
+        triage_ctv_1_large,
     };
     use crate::tools::fixtures::at;
 
@@ -857,11 +845,20 @@ mod tests {
             .collect()
     }
 
-    /// Each move, as `from -> to`, in order.
+    /// Each move of CTV-1, as `from -> to`, in order: the changelog task a closed delivery files is
+    /// another task's.
     fn moves(harness: &Harness) -> Vec<String> {
         harness
             .events(&[EventKind::TaskTransitioned])
             .iter()
+            .filter(|event| {
+                event
+                    .envelope
+                    .ids
+                    .task_id
+                    .as_ref()
+                    .is_some_and(|task| task.as_str() == "CTV-1")
+            })
             .map(|event| match &event.body {
                 EventBody::TaskTransitioned(body) => format!("{} -> {}", body.from, body.to),
                 other => panic!("a task.transitioned, got {other:?}"),
@@ -919,10 +916,14 @@ mod tests {
             implement_finishes_ctv_1(),
             review_writes_note(),
             accept_ctv_1(),
+            review(),
+            retro(),
         ]);
         let orchestrator = std::sync::Arc::new(harness.orchestrator_at(adapter.clone(), at()));
 
-        run_until_idle_within_ten_seconds(std::sync::Arc::clone(&orchestrator))
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
+            .await
             .expect("the run ends idle");
 
         assert_eq!(orchestrator.deps.tools.clock.now(), until);
@@ -933,6 +934,9 @@ mod tests {
                 (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
                 (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+                // The delivery the acceptance closed: its review, then its retro.
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
             ]
         );
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
@@ -1021,6 +1025,10 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one journey, every fact asserted in order"
+    )]
     async fn takes_one_task_from_ready_to_accepted() {
         let harness = Harness::new("orch-one-task", |wire| {
             wire["policy"]["integration"] = serde_json::json!("auto_merge");
@@ -1031,19 +1039,21 @@ mod tests {
             implement_finishes_ctv_1(),
             review_writes_note(),
             accept_ctv_1(),
+            review(),
+            retro(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let base = git_output_in(&harness.project.repo.path, &["rev-parse", "main"]);
 
-        orchestrator
-            .run_until_idle()
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
             .await
             .expect("the run ends idle");
         // Catervas never merges: the run waits for the owner, who merges the branch by hand.
         assert!(harness.row("CTV-1").awaiting_integration);
         harness.merge_by_hand("CTV-1");
-        orchestrator
-            .run_until_idle()
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
             .await
             .expect("the run ends idle");
 
@@ -1062,6 +1072,9 @@ mod tests {
                 (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
                 (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+                // The delivery the acceptance closed: its review, then its retro.
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
             ]
         );
         assert_eq!(
@@ -1101,14 +1114,18 @@ mod tests {
             "{reviews:?}"
         );
         let costs = harness.events(&[EventKind::CostRecorded]);
-        assert_eq!(costs.len(), 4, "{costs:?}");
-        for cost in &costs {
+        // The task's four sessions are charged to it; the delivery's review and retro are not.
+        let (own, ceremonies): (Vec<_>, Vec<_>) = costs
+            .iter()
+            .partition(|cost| cost.envelope.ids.task_id.is_some());
+        assert_eq!((own.len(), ceremonies.len()), (4, 2), "{costs:?}");
+        for cost in &own {
             assert_eq!(
                 cost.envelope.ids.task_id.as_ref().map(|task| task.as_str()),
                 Some("CTV-1")
             );
         }
-        assert_eq!(adapter.started().len(), 4);
+        assert_eq!(adapter.started().len(), 6);
         assert_eq!(adapter.transcripts_left(), 0);
         let integrated = harness.events(&[EventKind::TaskIntegrated]);
         assert!(
@@ -1151,11 +1168,13 @@ mod tests {
             implement_finishes_ctv_1(),
             review_writes_note(),
             accept_ctv_1(),
+            review(),
+            retro(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        orchestrator
-            .run_until_idle()
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
             .await
             .expect("the run ends idle");
 
@@ -1168,6 +1187,9 @@ mod tests {
                 (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
                 (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+                // The delivery the acceptance closed: its review, then its retro.
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
+                (SessionStartedBodyPurpose::Ceremony, "pm".to_string()),
             ]
         );
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
@@ -1255,7 +1277,10 @@ mod tests {
     /// Runs until idle, answers the one question, runs, and runs again, as the human at a
     /// terminal would: Catervas accepts the epic's result on its criteria (ADR 0061).
     async fn drive_one_request(harness: &Harness, orchestrator: &super::Orchestrator) {
-        orchestrator.run_until_idle().await.expect("the run idles");
+        harness
+            .run_until_idle_past_the_changelog(orchestrator)
+            .await
+            .expect("the run idles");
         let question = harness.events(&[EventKind::QuestionAsked]);
         assert_eq!(question.len(), 1, "one question is asked");
         orchestrator
@@ -1265,11 +1290,17 @@ mod tests {
             })
             .await
             .expect("the human answers");
-        orchestrator.run_until_idle().await.expect("the run idles");
+        harness
+            .run_until_idle_past_the_changelog(orchestrator)
+            .await
+            .expect("the run idles");
         // No contract waits for the owner (ADR 0061), so the epic is ready and runs on.
         // Catervas never merges: the owner merges the task's branch, and the epic goes on.
         harness.merge_by_hand("CTV-2");
-        orchestrator.run_until_idle().await.expect("the run idles");
+        harness
+            .run_until_idle_past_the_changelog(orchestrator)
+            .await
+            .expect("the run idles");
     }
 
     #[tokio::test]
@@ -1289,6 +1320,8 @@ mod tests {
             review_writes_note(),
             accept_ctv_1(),
             plan_closes_epic_ctv_1(),
+            review(),
+            retro(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let epic: TaskId = "CTV-1".parse().expect("a task id");
@@ -1324,6 +1357,9 @@ mod tests {
             (SessionStartedBodyPurpose::Verify, "dev-b", "CTV-2"),
             (SessionStartedBodyPurpose::Verify, "pm", "CTV-2"),
             (SessionStartedBodyPurpose::Plan, "pm", "CTV-1"),
+            // The delivery the epic's acceptance closed: its review, then its retro.
+            (SessionStartedBodyPurpose::Ceremony, "pm", ""),
+            (SessionStartedBodyPurpose::Ceremony, "pm", ""),
         ]
         .into_iter()
         .map(|(purpose, agent, task)| (purpose, agent.to_string(), task.to_string()))

@@ -134,6 +134,9 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::EscalationResolved
         | EventKind::MessagePosted
         | EventKind::ChatMessagePosted => a_human_body_wire(kind),
+        EventKind::TaskRoomGranted => {
+            json!({ "sessions": 4, "cost_usd": 5.0, "granted_by": "human" })
+        }
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
         EventKind::TeamPaused | EventKind::TeamResumed => json!({ "by": "human" }),
         EventKind::DesignPlanProposed
@@ -326,6 +329,12 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "path": "/home/me/Code/shop-api"
         }),
         EventKind::DocumentRewriteStarted => json!({ "tasks": ["CTV-1", "CTV-2"] }),
+        EventKind::TaskReassigned => {
+            json!({ "from": "dev-a", "to": "dev-b", "reason": "resumed" })
+        }
+        EventKind::DeliveryClosed => json!({
+            "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": ["CTV-1"]
+        }),
         EventKind::ProjectStarted => json!({
             "name": "little-oak-cakes",
             "description": "A bakery that sells cakes online and bakes to order."

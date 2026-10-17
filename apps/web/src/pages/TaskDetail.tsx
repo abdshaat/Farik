@@ -1,13 +1,13 @@
 import { Button, DiffView, StatusWord } from "@catervas/ui";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { useQuery } from "../app/store.ts";
 import { movedWords, roleWord, statusWord } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { DesignReview, type Recorded, type Review } from "./DesignReview.tsx";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import {
 	approvesPlan,
 	dollars,
@@ -24,7 +24,6 @@ import page from "./TaskDetail.module.css";
 
 /** The contract fields this page reads beyond the plan pages'. */
 type Detail = Contract & {
-	sprint?: string;
 	assignee?: string;
 	reviewer?: string;
 	change?: "feature" | "fix";
@@ -96,7 +95,6 @@ const TOLD: Record<string, keyof typeof en> = {
 	"transition.refused": "toldRefused",
 	"escalation.aged": "toldAged",
 	"pull_request.opened": "toldPullRequest",
-	"sprint.planned": "toldPlanned",
 	"drift.detected": "toldDrift",
 	"message.posted": "toldSaid",
 	"tool.denied": "toldDenied",
@@ -218,11 +216,7 @@ export function TaskDetail() {
 		: t("taskChecked");
 	const who = [doing, reviews].filter(Boolean).join(", and ");
 	const lead = [
-		contract.sprint
-			? t("taskInSprint")
-					.replace("{id}", id)
-					.replace("{n}", contract.sprint.slice(1))
-			: `${id}.`,
+		`${id}.`,
 		who && `${who}.`,
 		plans
 			? plans <= NTH.length

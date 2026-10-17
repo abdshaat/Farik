@@ -344,7 +344,7 @@ pub fn file_rederive_request(
 
 /// Files the request that raises the budget of marketing plan `plan` (ADR 0042, step 08g), as
 /// `file_request` files one for `created_by`: `task.created` names the plan in `raises`, so that
-/// the sprint policy never holds it, and `request.triaged { small }` follows at once, by `catervas`,
+/// nothing holds it, and `request.triaged { small }` follows at once, by `catervas`,
 /// so that no triage session runs.
 ///
 /// # Errors
@@ -424,7 +424,7 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64, format: DocumentF
 }
 
 /// Files the contract `product_plan_request` makes, as the owner's word: `created_by` is `human`,
-/// `task.created` has `product_plan`, which skips the sprint queue and has the contract judged as
+/// `task.created` has `product_plan`, which has the contract judged as
 /// filed, and `request.triaged { small }` follows at once, by `catervas`, so that no triage
 /// session runs.
 ///
@@ -622,6 +622,63 @@ pub fn rewrite_request(
         "risk": "low",
         "budget": { "max_cost_usd": max_cost_usd },
         "allowed_paths": [format!("{folder}/**")]
+    })
+}
+
+/// The whole contract of the Product Manager's task that adds delivery `delivery_id` (`D<n>`) to
+/// `CHANGELOG.md` (ADR 0062): its intent lists each of `tasks` as `CTV-n: <title>`. Nothing in it
+/// is reviewed by an agent (ADR 0061), so it carries only criteria Catervas runs: the file exists
+/// and says the delivery's number. `reviewer` is the role the contract names and never runs.
+#[must_use]
+pub fn changelog_request(
+    delivery_id: &str,
+    tasks: &[(TaskId, String)],
+    reviewer: Role,
+    max_cost_usd: f64,
+) -> Value {
+    let number = delivery_id.strip_prefix('D').unwrap_or(delivery_id);
+    let listed = tasks
+        .iter()
+        .map(|(id, title)| format!("{}: {title}", id.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    json!({
+        "title": format!("Add delivery {number} to the changelog"),
+        "intent": format!(
+            "The team closed delivery {number}. Add a section for it at the top of CHANGELOG.md, \
+             in the user's words, saying what each of its tasks changed:\n\n{listed}"
+        ),
+        "scope": { "in_scope": ["CHANGELOG.md"], "out_of_scope": ["Every other file"] },
+        "requirements": [{
+            "id": "R1",
+            "text": format!(
+                "CHANGELOG.md has a section for delivery {number} at its top saying, in the \
+                 user's words, what each of its tasks changed"
+            )
+        }],
+        "exit_criteria": [
+            {
+                "id": "C1",
+                "text": "CHANGELOG.md exists.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "CHANGELOG.md" }
+            },
+            {
+                "id": "C2",
+                "text": format!("CHANGELOG.md names delivery {number}."),
+                "satisfies": ["R1"],
+                "verification": {
+                    "method": "command",
+                    "command": format!("grep -qi 'delivery {number}' CHANGELOG.md"),
+                    "expect": {}
+                }
+            }
+        ],
+        "assignee_role": Role::ProductManager.to_string(),
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": ["CHANGELOG.md"]
     })
 }
 
@@ -1134,7 +1191,7 @@ pub fn contract_write(refusal: &ContractWriteRefusal) -> String {
         }
         ContractWriteRefusal::ContractFrozen { fields } => format!(
             "the contract is frozen: once a task leaves refining only its status, assignee, \
-             reviewer, iteration, sprint and notes change (5.11), and this would change {}",
+             reviewer, iteration and notes change (5.11), and this would change {}",
             listed(fields)
         ),
         ContractWriteRefusal::TaskTerminal { status } => format!(

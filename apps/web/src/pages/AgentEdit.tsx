@@ -15,12 +15,7 @@ import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
-import {
-	type AllowanceRow,
-	type Allowances,
-	countSaid,
-	useAllowances,
-} from "./allowances.tsx";
+import { type AllowanceRow, countSaid, useAllowances } from "./allowances.tsx";
 import { ConnectorAdd, hostOf, labelsSaid } from "./ConnectorAdd.tsx";
 import { ConnectorAllowance } from "./dialogs/ConnectorAllowance.tsx";
 import { type Editing, SkillEdit } from "./dialogs/SkillEdit.tsx";
@@ -563,7 +558,6 @@ function Editor({
 										provider={stateOf(service.name)?.provider}
 										name={name}
 										made={allowanceRows(service.name)}
-										period={allowances?.period}
 										onChange={() => setChanging(service.name)}
 										onConnect={() =>
 											setAdding({ ...(held && { again: held }), kit: service })
@@ -900,7 +894,6 @@ function KitRow({
 	provider,
 	name,
 	made,
-	period,
 	onChange,
 	onConnect,
 	onRemove,
@@ -914,7 +907,6 @@ function KitRow({
 	name: string;
 	/** What the agent has made of this service's spending tools this period. */
 	made: AllowanceRow[];
-	period: Allowances["period"] | undefined;
 	onChange: () => void;
 	onConnect: () => void;
 	onRemove: () => void;
@@ -951,7 +943,7 @@ function KitRow({
 			)}
 			{connected && made.length > 0 && (
 				<p>
-					{t(period?.kind === "day" ? "allowRowDay" : "allowRowSprint", {
+					{t("allowRowDay", {
 						list: made.map(countSaid).join(", "),
 					})}
 				</p>

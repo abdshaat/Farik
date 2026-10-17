@@ -121,7 +121,7 @@ const read = (more: Record<string, unknown> = {}) => ({
 	),
 	twin: version(
 		`${ROOT}product/roadmap.agent.md`,
-		"## Now: sprint 5\n\n- CTV-21 Pie pre-orders",
+		"## Now: week 5\n\n- CTV-21 Pie pre-orders",
 		MIRA_FIVE_DAYS,
 	),
 	stale: false,
@@ -223,7 +223,7 @@ describe("Files", () => {
 		expect(screen.getByRole("button", { name: en.filesEdit })).toBeTruthy();
 
 		fireEvent.click(forTeam);
-		expect(screen.getByText("Now: sprint 5")).toBeTruthy();
+		expect(screen.getByText("Now: week 5")).toBeTruthy();
 		expect(
 			screen.getByText(
 				"This is how your team reads the roadmap. To change it, change the version for you; Mira keeps this one in step.",

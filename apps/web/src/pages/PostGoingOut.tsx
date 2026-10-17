@@ -1,10 +1,10 @@
 import { Button, Dialog } from "@catervas/ui";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { useConnection } from "../app/connection.tsx";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import { channelName } from "./marketing.ts";
 import styles from "./PostGoingOut.module.css";
 import type { Agent } from "./setup/TeamSetup.tsx";

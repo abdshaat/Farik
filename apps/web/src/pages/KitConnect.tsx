@@ -78,7 +78,7 @@ export function KitConnect({
 		storedIn: "keychain" | "file";
 		tools: Record<string, Tag>;
 		signedIn: boolean;
-		/** The calls each sprint the user gave each spending tool. */
+		/** The calls each day the user gave each spending tool. */
 		allowed: Record<string, number>;
 	}>();
 	// A kit that gives spending tools a number asks how many between the key or sign-in and done.

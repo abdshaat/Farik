@@ -204,7 +204,7 @@
           "additionalProperties": {
             "$ref": "#/$defs/allowance"
           },
-          "description": "A tool tagged paid to the calls per sprint a user may pre-approve (allowance_not_paid otherwise). Step 05b reads it."
+          "description": "A tool tagged paid to the calls per day a user may pre-approve (allowance_not_paid otherwise). Step 05b reads it."
         },
         "plan_approved": {
           "type": "array",

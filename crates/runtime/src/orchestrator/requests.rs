@@ -9,7 +9,6 @@ use catervas_core::contract::{
 };
 use catervas_core::folders::{is_plan_task, plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
-use catervas_core::governor::gates::fits_the_open_sprint;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Agent, Team, changes_code, task_private_folder};
@@ -279,8 +278,8 @@ pub(super) fn is_epic(row: &TaskProjection) -> bool {
 /// Rule 8 for an epic `ready`: with an active Scrum Master, assigned to it on its behalf with the
 /// Product Manager as reviewer; without one, to the Product Manager on its behalf with no reviewer
 /// (the human reviews it). No session, and only when the assignee holds fewer open tasks than the
-/// WIP limit, counted as the assignment gate counts them, and the open sprint, if any, holds the
-/// epic and can pay for it, by the gate's own predicates; otherwise passed over, so that the run
+/// WIP limit, counted as the assignment gate counts them, and every dependency is accepted;
+/// otherwise passed over, so that the run
 /// idles rather than being refused on every tick.
 pub(super) fn ready_epic(
     deps: &OrchestratorDeps,
@@ -295,9 +294,7 @@ pub(super) fn ready_epic(
         Some(sm) => (sm, TransitionActor::ScrumMaster, Some(pm.id.to_string())),
         None => (pm, TransitionActor::ProductManager, None),
     };
-    let open = deps.tools.projections.open_sprint()?;
-    let open = open.as_ref().map(|sprint| sprint.sprint_id.as_str());
-    if !has_room(team, open, board, assignee, None)
+    if !has_room(team, board, assignee, None)
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
@@ -315,10 +312,14 @@ pub(super) fn ready_epic(
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     let context = deps.tools.transitions.context(&request, &ask, team)?;
-    if !context
-        .assignment
-        .is_some_and(|assignment| fits_the_open_sprint(&contract, &assignment))
-    {
+    if !context.assignment.is_some_and(|assignment| {
+        !assignment.private_folder_busy
+            && assignment.dependencies.len() == contract.dependencies.len()
+            && assignment
+                .dependencies
+                .iter()
+                .all(|state| state.status == TaskStatus::Accepted)
+    }) {
         return Ok(None);
     }
     let outcome = deps.tools.transitions.request(&request, &ask, team)?;
@@ -1079,10 +1080,9 @@ mod tests {
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
     use crate::recorded::fixtures::{
         accept_ctv_1, chat_answers_with_a_request, implement_finishes_ctv_1, plan_assigns_ctv_1,
-        plan_assigns_ctv_2, plan_breaks_down_ctv_1, plan_closes_epic_ctv_1,
-        planning_ceremony_ctv_1_ctv_3, refine_asks_ctv_1, refine_writes_epic_ctv_1,
-        refine_writes_task_ctv_1, replays_catervas_read_board, review_epic_ctv_1,
-        review_epic_fails_ctv_1, triage_by_sm_ctv_1, triage_ctv_1_large,
+        plan_assigns_ctv_2, plan_breaks_down_ctv_1, plan_closes_epic_ctv_1, refine_asks_ctv_1,
+        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, replays_catervas_read_board,
+        review_epic_ctv_1, review_epic_fails_ctv_1, triage_by_sm_ctv_1, triage_ctv_1_large,
     };
     use crate::session::SessionPurpose;
     use crate::tools::fixtures::at;
@@ -2084,7 +2084,7 @@ mod tests {
         for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5", "CTV-6"] {
             let row = harness.row(id);
             assert_eq!(row.parent, Some(task("CTV-1")), "{id}");
-            assert_eq!(row.sprint.as_deref(), Some("S1"), "{id}");
+            assert_eq!(row.sprint, None, "{id}");
             let created = harness
                 .events(&[EventKind::TaskCreated])
                 .into_iter()
@@ -2575,32 +2575,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn passes_over_an_epic_outside_the_open_sprint() {
-        let harness = Harness::new("epic-outside-sprint", |_| {});
-        an_epic(&harness, "CTV-1", "ready", |_| {});
-        harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(Vec::new());
-        let orchestrator = harness.orchestrator(adapter.clone());
-        let scope = crate::orchestrator::TickScope {
-            task_id: Some(task("CTV-1")),
-            ..crate::orchestrator::TickScope::default()
-        };
-
-        for _ in 0..2 {
-            let report = orchestrator
-                .tick_within(&scope)
-                .await
-                .expect("the tick runs");
-            assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
-        }
-
-        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
-        assert!(adapter.started().is_empty());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_to_assign_a_second_epic_while_the_first_is_open() {
         let harness = Harness::new("epic-wip", |_| {});
         an_epic(&harness, "CTV-1", "ready", |_| {});
@@ -2941,6 +2915,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Add the missing file.".to_string(),
                 extra_tries: None,
+                extra_room: false,
             })
             .await
             .expect("the human sends it back");
@@ -3020,6 +2995,7 @@ mod tests {
                 .moved(id, "assigned", "in_progress", &people);
             harness.project.moved(id, "in_progress", last, &people);
         }
+        harness.settle_delivery();
         an_epic(&harness, "CTV-4", "ready", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -4206,107 +4182,5 @@ mod tests {
         harness.asleep("pm", in_an_hour());
 
         waits_for(&orchestrator, "pm", in_an_hour()).await;
-    }
-
-    /// A team with the Scrum Master `sam`, planning its work in sprints (ADR 0028).
-    fn in_sprints_with_a_scrum_master(wire: &mut Value) {
-        with_a_scrum_master(wire);
-        wire["policy"]["plan_in_sprints"] = json!(true);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn breaks_an_epic_down_outside_a_sprint() {
-        let harness = Harness::new("epic-sprints-breakdown", in_sprints_with_a_scrum_master);
-        a_scrum_masters_epic(&harness);
-        let adapter = harness.recorded(vec![plan_breaks_down_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        let assigned = orchestrator.tick().await.expect("the tick runs");
-        let started = orchestrator.tick().await.expect("the tick runs");
-        let broken_down = orchestrator.tick().await.expect("the tick runs");
-        for (from, to) in [("draft", "refining"), ("refining", "ready")] {
-            harness.project.moved("CTV-2", from, to, &json!({}));
-        }
-        let later = [
-            orchestrator.tick().await.expect("the tick runs"),
-            orchestrator.tick().await.expect("the tick runs"),
-        ];
-
-        for report in [&assigned, &started, &broken_down] {
-            assert!(
-                matches!(report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
-                "{report:?}"
-            );
-        }
-        assert_eq!(
-            moves_of(&harness, "CTV-1"),
-            ["ready -> assigned", "assigned -> in_progress"]
-        );
-        assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("sam"));
-        let spec = &adapter.started()[0];
-        // The Scrum Master holds the epic; the Product Manager breaks it down.
-        assert_eq!(
-            (spec.agent_id.as_str(), spec.purpose),
-            ("pm", SessionPurpose::Plan)
-        );
-        assert_eq!(harness.row("CTV-2").parent, Some(task("CTV-1")));
-        for report in &later {
-            assert_eq!(
-                report,
-                &TickReport::Idle {
-                    why: "the ready work waits for a sprint".to_string(),
-                    until: None
-                }
-            );
-        }
-        let child = harness.row("CTV-2");
-        assert_eq!((child.status, child.assignee_id), (TaskStatus::Ready, None));
-        assert_eq!(adapter.started().len(), 1);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn plans_both_on_the_first_tick_of_the_sprint() {
-        let harness = Harness::new("epic-sprints-plans-both", in_sprints_with_a_scrum_master);
-        a_scrum_masters_epic_in_progress(&harness);
-        a_child(&harness, "ready");
-        harness.ready("CTV-3");
-        let adapter = harness.recorded(vec![planning_ceremony_ctv_1_ctv_3()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        let waiting = orchestrator.tick().await.expect("the tick runs");
-        assert!(is_idle(&waiting), "{waiting:?}");
-        crate::sprints::start_sprint(&harness.project.deps, None, "human").expect("S1 starts");
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Sprint { sprint_id, .. } if sprint_id == "S1"),
-            "{report:?}"
-        );
-        let spec = &adapter.started()[0];
-        assert_eq!(
-            (spec.agent_id.as_str(), spec.purpose),
-            ("sam", SessionPurpose::Ceremony)
-        );
-        let prompt = &spec.initial_prompt;
-        assert!(prompt.contains("each waiting in the Backlog"), "{prompt}");
-        assert!(
-            prompt
-                .lines()
-                .any(|line| line.contains("CTV-1") && line.contains("1 task under it")),
-            "{prompt}"
-        );
-        assert!(prompt.contains("CTV-3"), "{prompt}");
-        // The epic's task is planned with its epic, not offered on its own.
-        assert!(
-            !prompt
-                .lines()
-                .any(|line| line.contains("CTV-2") && !line.contains("CTV-1")),
-            "{prompt}"
-        );
-        for id in ["CTV-1", "CTV-2", "CTV-3"] {
-            assert_eq!(harness.row(id).sprint.as_deref(), Some("S1"), "{id}");
-        }
     }
 }

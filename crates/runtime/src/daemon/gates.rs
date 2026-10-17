@@ -4,7 +4,6 @@
 //! this module answers what they ask.
 
 use std::fmt::Display;
-use std::str::FromStr as _;
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
@@ -46,6 +45,7 @@ use serde_json::{Value, json};
 
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
+use crate::choices::offer_for;
 use crate::cost::extra_tries;
 use crate::marketing::ads::{ads_rows, open_raise, spend_and_pauses};
 use crate::marketing::{going_out, kinds_made, known_spend, list_row, states_today, whole};
@@ -324,8 +324,6 @@ pub(super) fn query(
         "social_posts.list" => Ok(json!({
             "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
         })),
-        "sprint.current" => sprint_current(deps),
-        "backlog.summary" => backlog_summary(deps, &team()?),
         "product_plan.state" => product_plan_state(deps, &team()?),
         "catervafication.get" => catervafication_get(deps, &team()?),
         "questions.list" => questions(deps, params["task_id"].as_str()),
@@ -576,33 +574,6 @@ fn task_checks(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, 
     Ok(json!({ "checks": checks }))
 }
 
-/// `sprint.current`: the open sprint and how many of its tasks are accepted or cancelled.
-fn sprint_current(deps: &ToolDeps) -> Result<Value, Failure> {
-    let Some(open) = deps.projections.open_sprint().map_err(|e| internal(&e))? else {
-        return Ok(Value::Null);
-    };
-    let board = deps.projections.board().map_err(|e| internal(&e))?;
-    let tasks: Vec<_> = board
-        .iter()
-        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
-        .collect();
-    let done = tasks
-        .iter()
-        .filter(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
-        .count();
-    Ok(json!({ "sprint_id": open.sprint_id, "done": done, "total": tasks.len() }))
-}
-
-/// `backlog.summary`: whether `team` plans in sprints, and how many of the Backlog's rows have no
-/// parent, so an epic counts once.
-fn backlog_summary(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
-    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
-    let open = open.as_ref().map(|open| open.sprint_id.as_str());
-    let board = deps.projections.board().map_err(|e| internal(&e))?;
-    let count = crate::sprints::backlog(team, open, &board).count();
-    Ok(json!({ "plan_in_sprints": team.plans_in_sprints(), "count": count }))
-}
-
 /// `product_plan.state`: a new project's name, whether its plan is approved, the newest task that
 /// still drafts it, and, while that task is verifying, the two documents as its branch has them.
 fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
@@ -712,34 +683,17 @@ fn questions(deps: &ToolDeps, task: Option<&str>) -> Result<Value, Failure> {
     Ok(json!({ "questions": listed }))
 }
 
-/// `escalation.choices`: what the human may do about the task's escalation, or nothing when it
-/// is not escalated.
+/// `escalation.choices`: what the human may do about the task's open escalation (ADR 0062), or
+/// nothing when it has none. An accepted task whose integration failed has one.
 fn escalation_choices(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, Failure> {
-    if row(deps, task_id)?.status != TaskStatus::Escalated {
-        return Ok(json!({ "choices": [] }));
-    }
-    let events = history(deps, task_id)?;
-    let reason = events
-        .iter()
-        .rev()
-        .find_map(|event| match &event.body {
-            EventBody::EscalationRaised(body) => Some(body.reason.to_string()),
-            _ => None,
-        })
+    let offered = offer_for(&deps.log, &deps.projections, &deps.files, team, task_id)
+        .map_err(|e| internal(&e))?
         .unwrap_or_default();
-    let before =
-        last_move_into(&events, TaskStatus::Escalated).and_then(|event| match &event.body {
-            EventBody::TaskTransitioned(body) => TaskStatus::from_str(&body.from.to_string()).ok(),
-            _ => None,
-        });
-    let product_manager = team
-        .active_agents()
-        .find(|agent| Role::from(agent.role) == Role::ProductManager)
-        .map_or_else(
-            || "the Product Manager".to_string(),
-            |agent| name_of(team, agent.id.as_str()),
-        );
-    Ok(json!({ "choices": choices(task_id.as_str(), &reason, before, &product_manager) }))
+    let wire: Vec<Value> = offered
+        .iter()
+        .map(|choice| choice.wire(task_id.as_str()))
+        .collect();
+    Ok(json!({ "choices": wire }))
 }
 
 /// The gates' methods, whose params the schema already passed.
@@ -1042,8 +996,8 @@ fn raise_words(plan_id: &str, currency: &str, raised: &Raised) -> (String, Strin
 /// `marketing_budget.raise`: the owner raises the budget of the active marketing plan whose ads
 /// reached it. The plan must be the active one and have a `marketing_budget.reached`, no raise of
 /// it may be open, and the amounts must pass `check_raise` (`raise_refused`, `raise_open`). Files
-/// the request for a new version of the plan as a request of the human's that skips triage and the
-/// sprint queue (`file_raise_request`), and answers its task.
+/// the request for a new version of the plan as a request of the human's that skips triage
+/// (`file_raise_request`), and answers its task.
 fn raise_budget(deps: &ToolDeps, spent: &PlanSpend, params: &Value) -> Result<Value, Failure> {
     let plan_id = params["plan"].as_str().unwrap_or_default();
     let (plan, reached) = plan_to_raise(deps, plan_id)?;
@@ -1098,6 +1052,7 @@ async fn save(state: &DaemonState, deps: &Arc<ToolDeps>, params: &Value) -> Resu
             to: TaskStatus::Refining,
             message: EDITED.to_string(),
             extra_tries: None,
+            extra_room: false,
         };
         if let CommandReply::Error { detail, .. } = super::handled(state, command).await {
             return Err(Failure::new(REFUSED, detail));
@@ -1212,46 +1167,6 @@ fn schema_words(errors: &[catervas_core::contract::ValidationError]) -> String {
         .join("; ")
 }
 
-/// The choices a task escalated for `reason` offers the human (ADR 0024): the label, and the
-/// command the page sends, to which it adds the message. `before` is the status the task held
-/// before it escalated, and `product_manager` the name the plan's writer goes by.
-pub(crate) fn choices(
-    task_id: &str,
-    reason: &str,
-    before: Option<TaskStatus>,
-    product_manager: &str,
-) -> Vec<Value> {
-    let resolve = |to: String| json!({ "command": "escalation_resolve", "body": { "task_id": task_id, "to": to } });
-    let choice = |label: &str, body: Value| json!({ "label": label, "body": body });
-    let cancel = choice("Cancel the task", resolve("cancelled".to_string()));
-    let change = || choice("Change the plan", resolve("refining".to_string()));
-    match reason {
-        "iterations" => {
-            let mut more = resolve("in_progress".to_string());
-            more["body"]["extra_tries"] = json!(2);
-            vec![
-                choice("Give 2 more tries", more),
-                choice(
-                    &format!("Ask {product_manager} to change the plan"),
-                    resolve("refining".to_string()),
-                ),
-                cancel,
-            ]
-        }
-        // Spec 5.7 raises these again on a resume, so only the plan's budget changing helps.
-        "budget" | "sessions" => vec![change(), cancel],
-        "blocker_age" | "permission" | "readiness_failures" | "explicit_request" => {
-            let mut offered = Vec::new();
-            if let Some(before) = before {
-                offered.push(choice("Carry on", resolve(before.to_string())));
-            }
-            offered.extend([change(), cancel]);
-            offered
-        }
-        _ => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 pub(super) mod tests {
     use std::sync::Arc;
@@ -1260,7 +1175,6 @@ pub(super) mod tests {
     use catervas_protocol::event::EventKind;
     use serde_json::{Value, json};
 
-    use super::choices;
     use crate::daemon::DaemonState;
     use crate::orchestrator::fixtures::Harness;
     use crate::orchestrator::{Waited, command_handler};
@@ -3050,7 +2964,7 @@ pub(super) mod tests {
         })
     }
 
-    /// `pm`'s proposal of `path` at the sprint review `sprint`, and its number.
+    /// `pm`'s proposal of `path` at the review `sprint`, and its number.
     fn pm_proposes(harness: &Harness, sprint: &str, path: &str, text: &str, summary: &str) -> u64 {
         harness
             .project
@@ -3154,7 +3068,7 @@ pub(super) mod tests {
             "folderDocProposalsListResult",
         );
         let cards = listed["cards"].as_array().expect("cards");
-        assert_eq!(cards.len(), 2, "one card for each sprint review: {listed}");
+        assert_eq!(cards.len(), 2, "one card for each review: {listed}");
         assert_eq!(cards[0]["sprint_id"], "S3");
         assert_eq!(
             cards[0]["documents"].as_array().expect("documents").len(),
@@ -3211,12 +3125,12 @@ pub(super) mod tests {
             [
                 json!({
                     "kind": "integration", "folder_change": 1, "agent_id": "pm",
-                    "title": "Roadmap and Product description from the sprint 4 review",
+                    "title": "Roadmap and Product description from review 4",
                     "line": "You approved it; it waits for you to merge it"
                 }),
                 json!({
                     "kind": "integration", "folder_change": 2, "agent_id": "sm",
-                    "title": "Sprint rhythm by Sol",
+                    "title": "Delivery rhythm by Sol",
                     "line": "Sol wrote it; it waits for you to merge it"
                 }),
             ]
@@ -3255,7 +3169,7 @@ pub(super) mod tests {
             integration_rows(&harness),
             [json!({
                 "kind": "integration", "folder_change": 1, "agent_id": "sm",
-                "title": "Sprint rhythm by Sol",
+                "title": "Delivery rhythm by Sol",
                 "line": "Its pull request waits for you to merge it"
             })]
         );
@@ -3791,7 +3705,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-1", "contract": draft }),
             "contractCheckResult",
         );
-        assert_eq!(checked["total"], 31, "{checked}");
+        assert_eq!(checked["total"], 30, "{checked}");
         let failures = checked["failures"].as_array().expect("failures");
         assert_eq!(failures.len(), 1, "{checked}");
         assert_eq!(failures[0]["rule"], "reviewer_available");
@@ -4389,7 +4303,7 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn answers_tries_and_the_sprint() {
+    fn answers_tries() {
         let harness = driven("gates-tries");
         harness.rejected("CTV-1", 3, "C1 still fails");
         harness.project.moved(
@@ -4434,13 +4348,6 @@ pub(super) mod tests {
         assert!(reply["result"]["said"].is_string(), "{reply}");
         assert_eq!(tries("CTV-1"), json!({ "try": 5, "of": 6 }));
 
-        let none = query(
-            &harness.daemon,
-            "sprint.current",
-            &json!({}),
-            "sprintCurrentResult",
-        );
-        assert_eq!(none, Value::Null);
         harness.accepted("CTV-2");
         harness.ready("CTV-3");
         // Nothing sent back yet: the first try.
@@ -4450,17 +4357,6 @@ pub(super) mod tests {
         harness
             .project
             .moved("CTV-5", "refining", "cancelled", &json!({}));
-        harness
-            .project
-            .open_sprint("S1", Some(50.0), &["CTV-2", "CTV-3", "CTV-5"]);
-        let sprint = query(
-            &harness.daemon,
-            "sprint.current",
-            &json!({}),
-            "sprintCurrentResult",
-        );
-        assert_eq!(sprint, json!({ "sprint_id": "S1", "done": 2, "total": 3 }));
-
         let contract = harness.project.file("CTV-3");
         let checked = query(
             &harness.daemon,
@@ -4468,7 +4364,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-3", "contract": contract }),
             "contractCheckResult",
         );
-        assert_eq!(checked, json!({ "failures": [], "total": 31 }));
+        assert_eq!(checked, json!({ "failures": [], "total": 30 }));
 
         // The activity and what moved answer in their shapes.
         query(
@@ -4487,22 +4383,6 @@ pub(super) mod tests {
             !moved["moved"].as_array().expect("moved").is_empty(),
             "{moved}"
         );
-    }
-
-    /// A ready task CTV-1, and an epic CTV-2 broken down into the ready CTV-3, CTV-4 and CTV-5,
-    /// on a team that plans in sprints when `on`.
-    fn a_backlog(name: &str, on: bool) -> Harness {
-        let harness = Harness::new(name, |wire| {
-            if on {
-                wire["policy"]["plan_in_sprints"] = json!(true);
-            }
-        });
-        harness.ready("CTV-1");
-        harness.project.filed("CTV-2", "in_progress", "epic", None);
-        for task in ["CTV-3", "CTV-4", "CTV-5"] {
-            harness.project.filed(task, "ready", "task", Some("CTV-2"));
-        }
-        harness
     }
 
     #[test]
@@ -4689,28 +4569,6 @@ pub(super) mod tests {
         assert_eq!(line(&harness, "dev-a"), "Nothing to do right now");
     }
 
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn summarises_the_backlog() {
-        let summary = |harness: &Harness| {
-            query(
-                &harness.daemon,
-                "backlog.summary",
-                &json!({}),
-                "backlogSummaryResult",
-            )
-        };
-        // The epic counts once, its tasks with it.
-        assert_eq!(
-            summary(&a_backlog("gates-backlog-on", true)),
-            json!({ "plan_in_sprints": true, "count": 2 })
-        );
-        assert_eq!(
-            summary(&a_backlog("gates-backlog-off", false)),
-            json!({ "plan_in_sprints": false, "count": 0 })
-        );
-    }
-
     /// `harness` with its daemon taking commands through its orchestrator.
     fn driven_by(harness: Harness) -> Harness {
         let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
@@ -4783,96 +4641,90 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn leaves_the_backlog_out_of_waiting() {
-        let harness = a_backlog("gates-backlog-waiting", true);
-        let waiting = query(
-            &harness.daemon,
-            "waiting.list",
-            &json!({}),
-            "waitingListResult",
-        );
-        // The Backlog waits for a sprint, which Today says in the team band (answer 2).
-        assert_eq!(waiting["waiting"], json!([]), "{waiting}");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn offers_to_carry_on_where_the_task_was() {
-        let harness = driven("gates-carry-on");
-        harness.file("CTV-4", "refining", |_| {});
+    fn answers_the_choice_of_an_integration_waiting_on_an_accepted_task() {
+        let harness = driven("gates-integration-choice");
+        let choices = |id: &str| {
+            query(
+                &harness.daemon,
+                "escalation.choices",
+                &json!({ "task_id": id }),
+                "escalationChoicesResult",
+            )
+        };
+        let name = |id: &str| {
+            let team = harness.project.deps.files.read_team().expect("the team");
+            catervas_store::waiting::name_of(&team, id)
+        };
+        harness.file("CTV-1", "ready", |_| {});
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
         harness
             .project
-            .moved("CTV-4", "refining", "escalated", &json!({}));
+            .moved("CTV-1", "assigned", "in_progress", &people);
+        harness
+            .project
+            .moved("CTV-1", "in_progress", "verifying", &people);
+        harness
+            .project
+            .moved("CTV-1", "verifying", "accepted", &people);
         harness.project.record(
-            "CTV-4",
+            "CTV-1",
             "escalation.raised",
-            &json!({ "reason": "explicit_request", "detail": "the PM asks" }),
+            &json!({ "reason": "integration", "detail": "the push failed" }),
         );
-        let offered = query(
-            &harness.daemon,
-            "escalation.choices",
-            &json!({ "task_id": "CTV-4" }),
-            "escalationChoicesResult",
-        );
+
+        let offered = choices("CTV-1");
+        assert_eq!(offered["choices"].as_array().map(Vec::len), Some(1));
         assert_eq!(
-            offered["choices"][0],
-            json!({ "label": "Carry on", "body": resolve("refining") })
+            offered["choices"][0]["body"],
+            json!({ "command": "task_integrate", "body": { "task_id": "CTV-1" } })
         );
-    }
+        assert_eq!(offered["choices"][0]["kind"], "command");
+        assert_eq!(offered["choices"][0]["suggested"], true);
 
-    fn resolve(to: &str) -> Value {
-        json!({ "command": "escalation_resolve", "body": { "task_id": "CTV-4", "to": to } })
-    }
-
-    #[test]
-    fn offers_the_choices_for_each_reason() {
-        let cancel = json!({ "label": "Cancel the task", "body": resolve("cancelled") });
-        let change = json!({ "label": "Change the plan", "body": resolve("refining") });
-        let offered = |reason| choices("CTV-4", reason, Some(TaskStatus::InProgress), "Ada");
-
-        let mut more = resolve("in_progress");
-        more["body"]["extra_tries"] = json!(2);
-        assert_eq!(
-            offered("iterations"),
-            vec![
-                json!({ "label": "Give 2 more tries", "body": more }),
-                json!({ "label": "Ask Ada to change the plan", "body": resolve("refining") }),
-                cancel.clone(),
-            ]
+        harness.project.record(
+            "CTV-1",
+            "task.integrated",
+            &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
         );
-        for reason in ["budget", "sessions"] {
-            assert_eq!(
-                offered(reason),
-                vec![change.clone(), cancel.clone()],
-                "{reason}"
+        assert_eq!(choices("CTV-1"), json!({ "choices": [] }));
+
+        // The words are composed when read: they name whoever holds the task then.
+        harness.file("CTV-2", "ready", |_| {});
+        let escalate = |holder: &str| {
+            let people = json!({ "assignee": holder, "reviewer": "dev-b" });
+            harness
+                .project
+                .moved("CTV-2", "assigned", "in_progress", &people);
+            harness
+                .project
+                .moved("CTV-2", "in_progress", "escalated", &people);
+            harness.project.record(
+                "CTV-2",
+                "escalation.raised",
+                &json!({ "reason": "iterations", "detail": "three tries" }),
             );
-        }
-        for reason in [
-            "blocker_age",
-            "permission",
-            "readiness_failures",
-            "explicit_request",
-        ] {
-            assert_eq!(
-                offered(reason),
-                vec![
-                    json!({ "label": "Carry on", "body": resolve("in_progress") }),
-                    change.clone(),
-                    cancel.clone(),
-                ],
-                "{reason}"
-            );
-        }
-        // Carrying on goes back to where the task was.
-        assert_eq!(
-            choices("CTV-4", "blocker_age", Some(TaskStatus::Blocked), "Ada")[0]["body"],
-            resolve("blocked")
+        };
+        harness.project.moved(
+            "CTV-2",
+            "ready",
+            "assigned",
+            &json!({ "assignee": "dev-a" }),
         );
-        // A plan to approve is the plan page's, and is no help case.
-        assert!(offered("approval").is_empty());
-        // Integration is no escalation of a task: an accepted task waits to be added (5.7).
-        assert!(offered("integration").is_empty());
-        assert!(offered("risk_gate").is_empty());
+        escalate("dev-a");
+        let first = choices("CTV-2");
+        let next = first["choices"][0]["next"].as_str().expect("words");
+        assert!(next.starts_with(&name("dev-a")), "{next}");
+        harness.project.moved(
+            "CTV-2",
+            "escalated",
+            "assigned",
+            &json!({ "assignee": "dev-b" }),
+        );
+        escalate("dev-b");
+        let second = choices("CTV-2");
+        let next = second["choices"][0]["next"].as_str().expect("words");
+        assert!(next.starts_with(&name("dev-b")), "{next}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

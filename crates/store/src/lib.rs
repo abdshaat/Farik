@@ -51,7 +51,7 @@ pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 pub use git::{CommitOutcome, Git, GitError, HeadSummary, MergeOutcome};
 pub use metrics::{CostSplit, HarnessMetrics, MetricsError};
 pub use projections::{
-    CostProjection, CostScope, CostWindow, Projections, SprintProjection, TaskProjection,
+    CostProjection, CostScope, CostWindow, Projections, TaskProjection, counted_status,
     open_projections,
 };
 pub use reconcile::{Drift, ReconcileError, reconcile};

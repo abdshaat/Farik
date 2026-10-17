@@ -43,8 +43,8 @@ agents. The Definition of Done refuses a task whose diff changes one file of a p
 
 Commit with `catervas_git_commit`, and request `verifying`. Catervas checks that each document exists (only code is reviewed), and accepts the task.
 
-## Each sprint
+## Each delivery
 
-At the sprint review, write the changes the sprint made to the spec and the roadmap with
-`catervas_write_folder_doc`, each with its `agent_text`, and write the sprint report in the same
+At each delivery's review, write the changes the delivery made to the spec and the roadmap with
+`catervas_write_folder_doc`, each with its `agent_text`, and write the delivery report in the same
 session. A change reaches the project like any other document, through a pull request.

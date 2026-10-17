@@ -36,7 +36,7 @@ mod describe;
 mod template;
 
 pub use defaults::{SMALL_ENOUGH_QUESTION, TeamDefaults, defaults};
-pub use describe::{MODEL_FAMILIES, SprintWork, describe_change};
+pub use describe::{MODEL_FAMILIES, describe_change};
 pub use template::{
     TeamTemplate, TemplateAgent, TemplateApplied, apply_template, template_from_team,
     template_slug, validate_template,
@@ -1120,11 +1120,29 @@ impl Team {
         })
     }
 
-    /// Whether the team plans its work in sprints (ADR 0028): its `policy.plan_in_sprints`, off
-    /// when left out, so no team file written before the key changes how it works.
+    /// How many unprompted messages each agent may post in the channel per UTC day: its
+    /// `policy.ambient_messages_per_day`, else the older `ambient_messages_per_sprint` of a team
+    /// made before ADR 0062, else one.
     #[must_use]
-    pub fn plans_in_sprints(&self) -> bool {
-        self.policy.plan_in_sprints == Some(true)
+    pub fn ambient_messages_per_day(&self) -> u64 {
+        self.policy
+            .ambient_messages_per_day
+            .or(self.policy.ambient_messages_per_sprint)
+            .map_or(1, |per| u64::try_from(per).unwrap_or(0))
+    }
+
+    /// The team without the keys earlier versions wrote and this one does not: `policy.judgment`
+    /// (ADR 0061), `policy.plan_in_sprints` (ADR 0062), and `policy.ambient_messages_per_sprint`,
+    /// whose value moves to `ambient_messages_per_day` when that is absent.
+    #[must_use]
+    pub fn without_old_keys(mut self) -> Team {
+        self.policy.judgment = None;
+        self.policy.plan_in_sprints = None;
+        if self.policy.ambient_messages_per_day.is_none() {
+            self.policy.ambient_messages_per_day = self.policy.ambient_messages_per_sprint;
+        }
+        self.policy.ambient_messages_per_sprint = None;
+        self
     }
 
     /// The format new documents are written in: its `policy.document_format`, HTML when left out.
@@ -1924,8 +1942,8 @@ mod tests {
 
     #[test]
     fn defaults_the_ambient_allowance() {
-        // 5.9: each agent has one unprompted message per sprint unless the team says otherwise.
-        assert_eq!(team(&a_team_wire()).policy.ambient_messages_per_sprint, 1);
+        // 5.9: each agent has one unprompted message per day unless the team says otherwise.
+        assert_eq!(team(&a_team_wire()).ambient_messages_per_day(), 1);
     }
 
     #[test]
@@ -1975,11 +1993,18 @@ mod tests {
     }
 
     #[test]
-    fn reads_an_absent_policy_as_off() {
+    fn reads_the_older_sprint_keys_and_forgets_them() {
         let mut wire = a_team_wire();
-        assert!(!team(&wire).plans_in_sprints());
         wire["policy"]["plan_in_sprints"] = json!(true);
-        assert!(team(&wire).plans_in_sprints());
+        wire["policy"]["ambient_messages_per_sprint"] = json!(3);
+        let old = team(&wire);
+        assert_eq!(old.ambient_messages_per_day(), 3);
+        wire["policy"]["ambient_messages_per_day"] = json!(2);
+        assert_eq!(team(&wire).ambient_messages_per_day(), 2);
+        let kept = old.without_old_keys();
+        assert_eq!(kept.policy.plan_in_sprints, None);
+        assert_eq!(kept.policy.ambient_messages_per_sprint, None);
+        assert_eq!(kept.policy.ambient_messages_per_day, Some(3));
         wire["policy"]["plan_in_sprints"] = json!("yes");
         assert_eq!(paths(&wire), ["/policy/plan_in_sprints"]);
     }
@@ -2169,12 +2194,11 @@ mod tests {
             defaults.policy,
             TeamPolicy {
                 permissions: Some(TeamPermissions::default()),
-                plan_in_sprints: Some(true),
                 ..starter.policy
             },
-            "the starter values, with the permissions and sprint planning written out"
+            "the starter values, with the permissions written out"
         );
-        assert_eq!(defaults.policy.ambient_messages_per_sprint, 1);
+        assert_eq!(defaults.policy.ambient_messages_per_day, None);
         assert_eq!(defaults.policy.escalation_age_hours.get(), 24);
         assert_eq!(defaults.policy.memory_cap_tokens, 8000);
         assert_eq!(

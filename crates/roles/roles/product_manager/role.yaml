@@ -13,7 +13,7 @@ produces:
   - epic contracts and standalone task contracts
   - the questions it asks the user
   - product decisions
-  - the product's spec and roadmap in docs/catervas/product/, each with its agent version, and sprint reports, in its docs tasks
+  - the product's spec and roadmap in docs/catervas/product/, each with its agent version, and delivery reports, in its docs tasks
   - task contracts under an approved epic, from the Architect's plan
   - release scope
 forbidden:

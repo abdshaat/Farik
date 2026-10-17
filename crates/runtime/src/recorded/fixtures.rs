@@ -262,46 +262,12 @@ pub fn plan_closes_epic_ctv_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_closes_epic_ctv_1.jsonl"))
 }
 
-/// The Scrum Master's planning ceremony of the open sprint: two posts, the plan and the
-/// escalation digest, then `catervas_plan_sprint` of CTV-1, then "S1 holds CTV-1, within its
-/// budget.". Hand-written.
-#[must_use]
-pub fn planning_ceremony_ctv_1() -> Transcript {
-    Transcript::from_jsonl(include_str!("transcripts/planning_ceremony_ctv_1.jsonl"))
-}
-
-/// The assigner's planning ceremony of S1 under the policy "plan work in sprints": one post, then
-/// `catervas_plan_sprint` of the epic CTV-1, which brings its task CTV-2, and the task CTV-3, then
-/// "S1 holds CTV-1, its task CTV-2, and CTV-3.". Hand-written.
-#[must_use]
-pub fn planning_ceremony_ctv_1_ctv_3() -> Transcript {
-    Transcript::from_jsonl(include_str!(
-        "transcripts/planning_ceremony_ctv_1_ctv_3.jsonl"
-    ))
-}
-
 /// As `plan_breaks_down_ctv_1`, of the epic CTV-2 for the step 15 browser journey: one task,
 /// CTV-3, "Write the run's date into done.txt", within the epic's allowed paths, for a Developer
 /// reviewed by the Architect, `low` risk, with a summary and a budget of 2 dollars. Hand-written.
 #[must_use]
 pub fn plan_breaks_down_ctv_2() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_breaks_down_ctv_2.jsonl"))
-}
-
-/// As `planning_ceremony_ctv_1_ctv_3`, for the step 15 browser journey: `catervas_plan_sprint` of the
-/// task CTV-1 and the epic CTV-2, which brings its task CTV-3. Hand-written.
-#[must_use]
-pub fn planning_ceremony_ctv_1_ctv_2() -> Transcript {
-    Transcript::from_jsonl(include_str!(
-        "transcripts/planning_ceremony_ctv_1_ctv_2.jsonl"
-    ))
-}
-
-/// The Scrum Master's standup: one post, "Standup: CTV-1 moved from assigned to `in_progress`.
-/// …", then "The standup is posted.". Hand-written.
-#[must_use]
-pub fn standup() -> Transcript {
-    Transcript::from_jsonl(include_str!("transcripts/standup.jsonl"))
 }
 
 /// The Scrum Master's review of S1: one post, "Review of S1: CTV-1, the login page, was
@@ -342,6 +308,15 @@ pub fn ask_with_choices_ctv_1() -> Transcript {
 pub fn refine_writes_task_for_theo_ctv_1() -> Transcript {
     Transcript::from_jsonl(include_str!(
         "transcripts/refine_writes_task_for_theo_ctv_1.jsonl"
+    ))
+}
+
+/// Mira writes CTV-1's plan for Theo, allowing four sessions: as `refine_writes_task_for_theo_ctv_1`
+/// with a budget of 5 dollars and 4 sessions. Hand-written.
+#[must_use]
+pub fn refine_writes_four_session_task_for_theo_ctv_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/refine_writes_four_session_task_for_theo_ctv_1.jsonl"
     ))
 }
 

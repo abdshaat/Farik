@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use catervas_core::governor::permissions::MAX_ALLOWANCE;
 use catervas_protocol::event::{EventBody, EventKind};
 use catervas_roles::{Kit, KitConnector};
-use catervas_store::{EventLog, EventQuery, Projections, StoreError};
+use catervas_store::{EventLog, EventQuery, StoreError};
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde_json::Value;
 
@@ -76,68 +76,19 @@ pub fn asked_allowances(value: &Value) -> Result<BTreeMap<String, u32>, String> 
         .collect()
 }
 
-/// The span a call is counted in (ADR 0037).
+/// The span a call is counted in: the UTC day (ADR 0037, amended by ADR 0062).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AllowancePeriod {
-    /// The open sprint: the calls after its `sprint.started`.
-    Sprint {
-        /// The sprint.
-        sprint_id: String,
-        /// The sequence number of its `sprint.started`.
-        started_seq: u64,
-    },
-    /// With no sprint open: the calls since the later of the UTC day's start and the last
-    /// `sprint.ended`.
-    Day {
-        /// The UTC day.
-        day: NaiveDate,
-        /// The sequence number of the last `sprint.ended`, when it falls on that day.
-        from_seq: Option<u64>,
-    },
+pub struct AllowancePeriod {
+    /// The UTC day, counted from its start.
+    pub day: NaiveDate,
 }
 
-/// The period `now` is in: the open sprint's, or the day's.
-///
-/// # Errors
-///
-/// The log or the projections could not be read.
-pub fn allowance_period(
-    log: &EventLog,
-    projections: &Projections,
-    now: DateTime<Utc>,
-) -> Result<AllowancePeriod, StoreError> {
-    if let Some(open) = projections.open_sprint()? {
-        let started = log
-            .read(&EventQuery {
-                kinds: vec![EventKind::SprintStarted],
-                newest_first: true,
-                ..EventQuery::default()
-            })?
-            .into_iter()
-            .find(|event| {
-                matches!(&event.body, EventBody::SprintStarted(body)
-                    if body.sprint_id.as_str() == open.sprint_id)
-            })
-            // ponytail: a sprint the log does not start counts from the beginning, so a call asks
-            // rather than runs; it cannot happen while the projection is built from the log.
-            .map_or(0, |event| event.envelope.seq);
-        return Ok(AllowancePeriod::Sprint {
-            sprint_id: open.sprint_id,
-            started_seq: started,
-        });
+/// The period `now` is in: its UTC day.
+#[must_use]
+pub fn allowance_period(now: DateTime<Utc>) -> AllowancePeriod {
+    AllowancePeriod {
+        day: now.date_naive(),
     }
-    let day = now.date_naive();
-    let from_seq = log
-        .read(&EventQuery {
-            kinds: vec![EventKind::SprintEnded],
-            newest_first: true,
-            limit: Some(1),
-            ..EventQuery::default()
-        })?
-        .first()
-        .filter(|ended| ended.envelope.recorded_at >= day_start(day))
-        .map(|ended| ended.envelope.seq);
-    Ok(AllowancePeriod::Day { day, from_seq })
 }
 
 fn day_start(day: NaiveDate) -> DateTime<Utc> {
@@ -159,17 +110,13 @@ pub fn calls_in_period(
     period: &AllowancePeriod,
 ) -> Result<u32, StoreError> {
     const PAGE: usize = 500;
-    let (after_seq, floor) = match period {
-        AllowancePeriod::Sprint { started_seq, .. } => (Some(*started_seq), None),
-        AllowancePeriod::Day { day, from_seq } => (*from_seq, Some(day_start(*day))),
-    };
+    let floor = day_start(period.day);
     let full = format!("mcp__{server}__{tool}");
     let (mut count, mut before_seq) = (0_u32, None);
     loop {
         let page = log.read(&EventQuery {
             agent_id: Some(agent.to_string()),
             kinds: vec![EventKind::ToolCalled],
-            after_seq,
             before_seq,
             limit: Some(PAGE),
             newest_first: true,
@@ -177,8 +124,8 @@ pub fn calls_in_period(
         })?;
         for event in &page {
             // ponytail: a day's start is found by walking back from the newest call, which
-            // assumes the log's times rise with its sequence; the sprint's span needs no time.
-            if floor.is_some_and(|start| event.envelope.recorded_at < start) {
+            // assumes the log's times rise with its sequence.
+            if event.envelope.recorded_at < floor {
                 return Ok(count);
             }
             if matches!(&event.body, EventBody::ToolCalled(body)

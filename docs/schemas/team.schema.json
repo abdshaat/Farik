@@ -180,7 +180,7 @@
             "minimum": 0,
             "maximum": 1000
           },
-          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags paid (allowance_not_paid; an older team file may still give one for an external_effect tool), how many calls each sprint the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
+          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags paid (allowance_not_paid; an older team file may still give one for an external_effect tool), how many calls each day the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
         },
         "oauth": {
           "type": "object",
@@ -369,7 +369,7 @@
         "daily_usd": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "What the team may spend in a day before it pauses (spec 5.5). Left out, the day has no dollar limit: Catervas ships none (ADR 0015). A sprint's own budget belongs to the sprint, not here."
+          "description": "What the team may spend in a day before it pauses (spec 5.5). Left out, the day has no dollar limit: Catervas ships none (ADR 0015)."
         },
         "session": {
           "$ref": "#/$defs/sessionLimits"
@@ -455,12 +455,17 @@
           "maxLength": 200,
           "description": "The branch accepted work integrates into. Left out, it is the repository's default branch (spec 5.14)."
         },
+        "ambient_messages_per_day": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "description": "How many unprompted messages each agent may post in the channel per UTC day (spec 5.9). Left out, one, or the older key's value."
+        },
         "ambient_messages_per_sprint": {
           "type": "integer",
           "minimum": 0,
           "maximum": 20,
-          "default": 1,
-          "description": "How many unprompted messages each agent may post in the channel per sprint, or per UTC day while no sprint is open (spec 5.9). Left out, one."
+          "description": "Read from teams made before ADR 0062 as ambient_messages_per_day, when that is absent. Catervas no longer writes it."
         },
         "escalation_age_hours": {
           "type": "integer",
@@ -478,7 +483,7 @@
         },
         "plan_in_sprints": {
           "type": "boolean",
-          "description": "Whether the team plans its work in sprints (ADR 0028): ready tasks wait in the Backlog until a sprint plans them, and no task is assigned outside the open sprint. Left out, false, so a team file written before the key works as it did; setup and catervas init write true."
+          "description": "Read from teams made before ADR 0062 and ignored; Catervas no longer writes it."
         },
         "document_format": {
           "type": "string",

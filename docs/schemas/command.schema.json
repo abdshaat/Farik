@@ -27,8 +27,6 @@
         "agent_update",
         "session_stop",
         "run_stop",
-        "sprint_start",
-        "sprint_end",
         "message_post",
         "chat_message_post",
         "team_pause",
@@ -78,7 +76,6 @@
         { "$ref": "#/$defs/taskIdBody" },
         { "$ref": "#/$defs/agentUpdateBody" },
         { "$ref": "#/$defs/sessionStopBody" },
-        { "$ref": "#/$defs/sprintStartBody" },
         { "$ref": "#/$defs/messagePostBody" },
         { "$ref": "#/$defs/chatMessagePostBody" },
         { "$ref": "#/$defs/connectorConnectBody" },
@@ -157,7 +154,7 @@
     },
     "escalationResolveBody": {
       "title": "Escalation Resolve Body",
-      "description": "The human resolves an escalation (docs/SPEC.md section 5.7) by moving the task to a status, with a message the next session about it is given. extra_tries grants that many more attempts, counting the one the resolve starts; only an iterations escalation takes it (ADR 0024).",
+      "description": "The human resolves an escalation (docs/SPEC.md section 5.7) by moving the task to a status, with a message the next session about it is given. extra_tries grants that many more attempts, counting the one the resolve starts; only an iterations escalation takes it (ADR 0024). extra_room gives a task whose dollars or sessions are spent the contract's own budget again; only a budget or sessions escalation takes it, and not together with extra_tries (ADR 0062).",
       "type": "object",
       "additionalProperties": false,
       "required": ["task_id", "to", "message"],
@@ -165,7 +162,8 @@
         "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
         "to": { "$ref": "#/$defs/taskStatus" },
         "message": { "type": "string" },
-        "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 }
+        "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "extra_room": { "type": "boolean" }
       }
     },
     "humanSendBackBody": {
@@ -221,16 +219,6 @@
       "required": ["session_id"],
       "properties": {
         "session_id": { "type": "string", "minLength": 1 }
-      }
-    },
-    "sprintStartBody": {
-      "title": "Sprint Start Body",
-      "description": "The human starts a sprint (docs/SPEC.md sections 3 and 5.5): what it may spend, or null for no budget of its own (ADR 0015). budget_usd is required so that this body matches no other branch.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["budget_usd"],
-      "properties": {
-        "budget_usd": { "type": ["number", "null"], "exclusiveMinimum": 0 }
       }
     },
     "messagePostBody": {
@@ -422,7 +410,7 @@
     },
     "folderDocDecideBody": {
       "title": "Folder Doc Decide Body",
-      "description": "The owner approves (decision approve: Catervas makes one folder change of both files of each proposal) or sends back (decision return: the agent's next sprint review reads note as the owner's own words) the proposals of one card on Today, proposals being their numbers, 1 to 20 (docs/SPEC.md 5.7). note is at most 600 characters; return requires one. folder_doc.approved or folder_doc.returned is appended. Refused unknown_folder_doc, folder_doc_decided, folder_doc_superseded, folder_doc_mixed, folder_doc_reason_needed, folder_doc_busy, folder_doc_link and folder_doc_waiting; all or nothing.",
+      "description": "The owner approves (decision approve: Catervas makes one folder change of both files of each proposal) or sends back (decision return: the agent's next review reads note as the owner's own words) the proposals of one card on Today, proposals being their numbers, 1 to 20 (docs/SPEC.md 5.7). note is at most 600 characters; return requires one. folder_doc.approved or folder_doc.returned is appended. Refused unknown_folder_doc, folder_doc_decided, folder_doc_superseded, folder_doc_mixed, folder_doc_reason_needed, folder_doc_busy, folder_doc_link and folder_doc_waiting; all or nothing.",
       "type": "object",
       "additionalProperties": false,
       "required": ["proposals", "decision"],
@@ -553,7 +541,7 @@
     },
     "emptyBody": {
       "title": "Empty Body",
-      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, team_resume, product_plan_draft, and catervafication_start.",
+      "description": "The body of a command that carries nothing: run_stop, team_pause, team_resume, product_plan_draft, and catervafication_start.",
       "type": "object",
       "additionalProperties": false,
       "properties": {}

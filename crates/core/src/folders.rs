@@ -409,7 +409,7 @@ pub const DOCUMENT_STEMS: [(&str, &str); 12] = [
     ("docs/catervas/engineering/conventions", "Conventions"),
     ("docs/catervas/engineering/workflow", "Workflow"),
     ("docs/catervas/design/ui-inventory", "UI inventory"),
-    ("docs/catervas/delivery/cadence", "Sprint rhythm"),
+    ("docs/catervas/delivery/cadence", "Delivery rhythm"),
     ("docs/catervas/marketing/brand/brand-kit", "Brand kit"),
     ("docs/catervas/marketing/brand/persona", "Brand persona"),
 ];
@@ -935,7 +935,7 @@ mod tests {
         assert_eq!(name("product/spec.md"), "Product description");
         assert_eq!(name("architecture/jobs.md"), "Scheduled jobs");
         assert_eq!(name("marketing/brand/persona.md"), "Brand persona");
-        assert_eq!(name("delivery/cadence.md"), "Sprint rhythm");
+        assert_eq!(name("delivery/cadence.md"), "Delivery rhythm");
         assert_eq!(name("design/ui-inventory.md"), "UI inventory");
         assert_eq!(name("delivery/ceremony-notes.md"), "Ceremony notes");
         assert_eq!(name("engineering/how_we_test.md"), "How we test");

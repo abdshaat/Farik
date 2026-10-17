@@ -29,7 +29,7 @@ export function DailyLimit({
 			onClose={onClose}
 			actions={
 				<>
-					<Button onClick={onClose}>{t("sprintNotNow")}</Button>
+					<Button onClick={onClose}>{t("notNow")}</Button>
 					<Button kind="primary" busy={busy} disabled={blocked} onClick={save}>
 						{t("limitSave")}
 					</Button>

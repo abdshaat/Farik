@@ -4,7 +4,6 @@
 use catervas_runtime::claude::CredentialKind;
 use catervas_runtime::credential::Source;
 use catervas_runtime::orchestrator::{TickReport, TickRules, TickScope};
-use catervas_runtime::sprints::backlog;
 use catervas_store::files::Sandbox;
 use serde_json::{Value, json};
 
@@ -230,11 +229,11 @@ pub(crate) async fn ticks(
                 );
                 after(printer);
             }
-            Ok(TickReport::Sprint { sprint_id, what }) => {
+            Ok(TickReport::Delivery { delivery_id, what }) => {
                 last_idle = None;
                 printer.line(
-                    &format!("{sprint_id}: {what}"),
-                    &json!({ "sprint_id": sprint_id, "what": what }),
+                    &format!("{delivery_id}: {what}"),
+                    &json!({ "delivery_id": delivery_id, "what": what }),
                 );
                 after(printer);
             }
@@ -322,17 +321,6 @@ pub(crate) async fn finish(
             code = 1;
         }
     }
-    match backlog_now(project) {
-        Ok(0) => {}
-        Ok(count) => printer.line(
-            &format!("start a sprint: {count} waits in the Backlog (`catervas sprint start`)"),
-            &json!({ "backlog": { "count": count } }),
-        ),
-        Err(error) => {
-            report_error(printer, &error);
-            code = 1;
-        }
-    }
     if let Err(error) = driver.finish().await {
         report_error(printer, &error);
         code = 1;
@@ -363,26 +351,6 @@ pub(crate) fn waiting_now(project: &Project) -> Result<Vec<Waiting>, String> {
         .map_err(|error| error.to_string())?;
     let projections = project.projections()?;
     waiting(&project.log, &projections, &project.files, &team)
-}
-
-/// How much work waits in the Backlog for a sprint to start (ADR 0028): the Backlog's rows with no
-/// parent while no sprint is open, so an epic counts once; none while a sprint is open, since its
-/// Backlog waits for the next one rather than for the human.
-fn backlog_now(project: &Project) -> Result<usize, String> {
-    let team = project
-        .files
-        .read_team()
-        .map_err(|error| error.to_string())?;
-    let projections = project.projections()?;
-    if projections
-        .open_sprint()
-        .map_err(|error| error.to_string())?
-        .is_some()
-    {
-        return Ok(0);
-    }
-    let board = projections.board().map_err(|error| error.to_string())?;
-    Ok(backlog(&team, None, &board).count())
 }
 
 /// Prints what waits on the human: a person's lines, or one `{"waiting_on_you"}` object.

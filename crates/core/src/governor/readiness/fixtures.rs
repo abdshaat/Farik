@@ -18,12 +18,11 @@ pub fn a_contract() -> TaskContract {
     A_CONTRACT.clone()
 }
 
-/// A context in which `a_contract()` is ready: a sprint with a hundred dollars left, one active
+/// A context in which `a_contract()` is ready: one active
 /// agent of every launch role, the default team rules, and no parent.
 #[must_use]
 pub fn a_ready_context() -> ReadinessContext {
     ReadinessContext {
-        remaining_sprint_budget_usd: 100.0,
         dependency_statuses: BTreeMap::new(),
         active_agents_by_role: [
             (Role::ProductManager, 1),
