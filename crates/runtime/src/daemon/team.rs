@@ -112,6 +112,8 @@ pub(super) fn query(
                     .map(|(agent, server)| json!({ "agent": agent, "server": server }))
                     .collect::<Vec<_>>()
             );
+            answer["preview_env_present"] =
+                json!(crate::preview::PreviewEnv::read(deps.files.root()).is_some());
             answer["requested_connections"] = json!(
                 crate::connectors::requested_connections(&deps.log)
                     .map_err(|e| internal(&e))?

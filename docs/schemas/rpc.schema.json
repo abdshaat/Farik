@@ -1025,6 +1025,10 @@
             }
           }
         },
+        "preview_env_present": {
+          "type": "boolean",
+          "description": "Whether the owner's `.catervas/local/preview.env` is there for the preview (ADR 0067). Never its names or values."
+        },
         "hidden_suggestions": {
           "type": "array",
           "description": "The kit services the user said Not now to on Today, kept on this computer; Today leaves each pair out of its suggestions.",
@@ -1173,6 +1177,7 @@
         "kits",
         "sandboxed",
         "hidden_suggestions",
+        "preview_env_present",
         "requested_connections"
       ]
     },

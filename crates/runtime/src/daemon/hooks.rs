@@ -1773,6 +1773,104 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn no_agent_reads_the_preview_environment_file() {
+        use crate::daemon::{ReadRoot, SessionRegistration};
+
+        let daemon = TestDaemon::new("hook-preview-env", |_| {});
+        let project = daemon
+            .project
+            .repo
+            .path
+            .canonicalize()
+            .expect("the project folder");
+        let file = project.join(crate::preview::PREVIEW_ENV);
+        std::fs::write(&file, "SUPABASE_SERVICE_ROLE=service-role-secret-0123\n").expect("written");
+        let absolute = file.display().to_string();
+        let session = |id: &str, cwd: std::path::PathBuf, task: bool, roots: Vec<ReadRoot>| {
+            daemon.state.register_session(SessionRegistration {
+                read_roots: roots,
+                session_id: id.to_string(),
+                agent_id: "dev-a".to_string(),
+                task_id: task.then(|| "CTV-1".parse().expect("a task id")),
+                purpose: if task {
+                    crate::session::SessionPurpose::Implement
+                } else {
+                    crate::session::SessionPurpose::Chat
+                },
+                in_reply_to: None,
+                thread: None,
+                skills: Vec::new(),
+                skills_root: None,
+                cwd,
+                executor: None,
+                limits: DEFAULT_SESSION_LIMITS,
+                catervas_tools: Vec::new(),
+                tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+                connectors: Vec::new(),
+                preview: None,
+            });
+        };
+        let hook = |id: &str, tool: &str, input: Value| {
+            decide_pre_tool_use(&daemon.call(id, tool, &input), &daemon.state)
+        };
+
+        // A task's session, in its worktree: the file is outside it.
+        denied_for(
+            &decide_pre_tool_use(
+                &daemon.dev_call("Read", &json!({ "file_path": absolute })),
+                &daemon.state,
+            ),
+            "path_outside_workspace",
+        );
+        denied_for(
+            &decide_pre_tool_use(
+                &daemon.dev_call(
+                    "Grep",
+                    &json!({ "pattern": "x", "path": project.join(".catervas/local").display().to_string() }),
+                ),
+                &daemon.state,
+            ),
+            "path_outside_workspace",
+        );
+        // A session in the project folder.
+        session("session-chat", project.clone(), false, Vec::new());
+        for path in [crate::preview::PREVIEW_ENV, absolute.as_str()] {
+            denied_for(
+                &hook("session-chat", "Read", json!({ "file_path": path })),
+                "path_protected",
+            );
+        }
+        // A task session that reads the project folder as a root.
+        session(
+            "session-root",
+            daemon.worktree.clone(),
+            true,
+            vec![ReadRoot {
+                name: "project".to_string(),
+                path: project.clone(),
+            }],
+        );
+        denied_for(
+            &hook("session-root", "Read", json!({ "file_path": absolute })),
+            "path_protected",
+        );
+
+        // The web learns only that the file is there.
+        let got = crate::daemon::gates::tests::query(
+            &daemon.state,
+            "team.get",
+            &json!({}),
+            "teamGetResult",
+        );
+        assert_eq!(got["preview_env_present"], json!(true));
+        assert!(
+            !got.to_string().contains("service-role-secret-0123"),
+            "{got}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_session_reads_the_other_members_and_nothing_protected_in_them() {
         use crate::daemon::{ReadRoot, SessionRegistration};
 
