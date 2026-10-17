@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/parallel-agents` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 8.2 ("Driving the team"); recorded by plan 5 (revision 0.118)
 Depends on: plans 2 and 3 of this folder (committed on this branch)
-Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16 (one round, against `docs/standards/workflow.md` stage 2)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -20,8 +20,9 @@ shuts down. Out of scope: the web app (no change, README), `catervas_runtime`'s 
 ## Decisions
 
 - **One loop.** The three drivers already share `crates/cli/src/run.rs` `ticks`; only it changes.
-  It calls `driver.orchestrator.next(scope)` where it called `tick_within(scope)`, still under the
-  same `select!` with `driver.interrupts`. The `is_stopped()` check at the top of the loop goes:
+  It calls `orchestrator.next(scope)`, on the `Arc` clone of `driver.orchestrator` it already
+  takes, where it called `tick_within(scope)`, still under the same `select!` with
+  `driver.interrupts`, the `next` future pinned and polled until it answers, as the tick is now. The `is_stopped()` check at the top of the loop goes:
   `next` answers `None` once stopped and drained, and that is what prints `stopped` and answers
   `Ended::Stopped`.
 - **What each answer does.**
@@ -78,7 +79,8 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   status?"])` exits 0; `UsageThenWaitAdapter::waiting(Usage::default())` as the engine and an
   interrupt channel, `catervas run` on a thread as `exits_130_after_one_ctrl_c_once_the_session_ends`
   runs it. `wait_for(&repository, EventKind::SessionStarted, 2)`; then no `session.ended` is in the
-  log. One interrupt; after 300 ms `adapter.aborts()` is 0 and the run's thread has not finished;
+  log. One interrupt; after 300 ms `adapter.aborts()` is 0 and the run's thread has not finished
+  (`JoinHandle::is_finished` is false);
   `adapter.complete()`; the run exits 130; its standard output has the line `stopped`, the line
   `dev-a: started its conversation session` and the line `<task>: pm started its refine session`;
   `adapter.started().len()` is 2.
