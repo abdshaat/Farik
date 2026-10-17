@@ -319,7 +319,7 @@ pub fn ended_sprint(log: &EventLog) -> Result<Option<EndedSprint>, StoreError> {
 
 /// Each agent with a review session among `events` that `has_run`, in the order their first
 /// review sessions started.
-fn reviewed_by(events: &[CatervasEvent]) -> Vec<String> {
+pub(crate) fn reviewed_by(events: &[CatervasEvent]) -> Vec<String> {
     let mut agents: Vec<&str> = Vec::new();
     for event in events {
         if let Some(agent) = event.envelope.ids.agent_id.as_deref()
@@ -363,7 +363,7 @@ pub fn sprint_events(
 }
 
 /// Whether `event` is the start of a ceremony session in `thread`.
-fn in_thread(event: &CatervasEvent, thread: Thread) -> bool {
+pub(crate) fn in_thread(event: &CatervasEvent, thread: Thread) -> bool {
     matches!(&event.body, EventBody::SessionStarted(body) if body.thread == Some(thread))
 }
 

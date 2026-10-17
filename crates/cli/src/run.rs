@@ -238,6 +238,14 @@ pub(crate) async fn ticks(
                 );
                 after(printer);
             }
+            Ok(TickReport::Delivery { delivery_id, what }) => {
+                last_idle = None;
+                printer.line(
+                    &format!("{delivery_id}: {what}"),
+                    &json!({ "delivery_id": delivery_id, "what": what }),
+                );
+                after(printer);
+            }
             Ok(
                 TickReport::Conversation { agent_id, what } | TickReport::Chat { agent_id, what },
             ) => {

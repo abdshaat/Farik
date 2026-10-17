@@ -201,7 +201,7 @@ Then run `cargo xtask check --integration` and fix each orchestrator, CLI or bro
 its expected events or sessions, or end its loop earlier; never drop an assertion about anything
 else. Name each changed test in the commit body.
 
-- [ ] `feat(runtime): close a delivery and file its changelog task`
+- [x] `feat(runtime): close a delivery and file its changelog task`
 
 ### Task 4: the ceremonies run per delivery
 

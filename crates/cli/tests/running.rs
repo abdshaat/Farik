@@ -92,6 +92,18 @@ fn a_small_request(repository: &TempRepo) -> String {
     task
 }
 
+/// A delivery already closed with no task in it, and its retro yet to be held: a run that accepts
+/// the test's task closes no delivery of its own, and files no changelog task for the recorded
+/// adapter to play (ADR 0062).
+fn with_a_delivery_closed(repository: &TempRepo) {
+    record(
+        repository,
+        "",
+        "delivery.closed",
+        &json!({ "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": [] }),
+    );
+}
+
 /// The warning every start in no-sandbox mode prints.
 fn warned(err: &str) -> bool {
     err.contains("~/.git-credentials")
@@ -355,6 +367,7 @@ fn passes_over_a_claude_that_is_not_executable() {
 fn runs_a_task_to_acceptance_and_says_what_waits() {
     let repository = a_team("run-to-acceptance");
     let task = a_small_request(&repository);
+    with_a_delivery_closed(&repository);
 
     let ran = run_with(&repository.path, &["run"], |io| {
         io.engine = recorded(vec![
@@ -578,6 +591,7 @@ fn stops_a_plan_through_catervas_stop() {
 fn prints_the_wait() {
     let repository = a_team("run-wait");
     let task = a_small_request(&repository);
+    with_a_delivery_closed(&repository);
     walked(&repository, &task, &["refining", "ready"]);
     let until = at() + chrono::Duration::hours(1);
     record_as(

@@ -325,7 +325,6 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::DataPipelineRequested
             | EventKind::SellerMessageDrafted
             | EventKind::CatervaficationStarted
-            | EventKind::DeliveryClosed
     )
 }
 

@@ -242,6 +242,13 @@ pub enum TickReport {
         /// What was done.
         what: String,
     },
+    /// Something was done about a delivery.
+    Delivery {
+        /// The delivery.
+        delivery_id: String,
+        /// What was done.
+        what: String,
+    },
     /// An agent answered what it was asked in the channel.
     Conversation {
         /// The agent.
@@ -536,6 +543,7 @@ impl Orchestrator {
                 TickReport::Idle { until: None, .. } => break,
                 TickReport::Acted { .. }
                 | TickReport::Sprint { .. }
+                | TickReport::Delivery { .. }
                 | TickReport::Conversation { .. }
                 | TickReport::Chat { .. }
                 | TickReport::FolderChange { .. } => {}
@@ -834,7 +842,7 @@ mod tests {
     use catervas_protocol::command::{Command, RequestSize};
     use catervas_protocol::event::EscalationRaisedBodyReason;
 
-    use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
+    use crate::orchestrator::fixtures::Harness;
     use crate::recorded::fixtures::{
         accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1, plan_assigns_ctv_2,
         plan_breaks_down_ctv_1, plan_closes_epic_ctv_1, refine_asks_ctv_1,
@@ -857,11 +865,20 @@ mod tests {
             .collect()
     }
 
-    /// Each move, as `from -> to`, in order.
+    /// Each move of CTV-1, as `from -> to`, in order: the changelog task a closed delivery files is
+    /// another task's.
     fn moves(harness: &Harness) -> Vec<String> {
         harness
             .events(&[EventKind::TaskTransitioned])
             .iter()
+            .filter(|event| {
+                event
+                    .envelope
+                    .ids
+                    .task_id
+                    .as_ref()
+                    .is_some_and(|task| task.as_str() == "CTV-1")
+            })
             .map(|event| match &event.body {
                 EventBody::TaskTransitioned(body) => format!("{} -> {}", body.from, body.to),
                 other => panic!("a task.transitioned, got {other:?}"),
@@ -922,7 +939,9 @@ mod tests {
         ]);
         let orchestrator = std::sync::Arc::new(harness.orchestrator_at(adapter.clone(), at()));
 
-        run_until_idle_within_ten_seconds(std::sync::Arc::clone(&orchestrator))
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
+            .await
             .expect("the run ends idle");
 
         assert_eq!(orchestrator.deps.tools.clock.now(), until);
@@ -1035,15 +1054,15 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
         let base = git_output_in(&harness.project.repo.path, &["rev-parse", "main"]);
 
-        orchestrator
-            .run_until_idle()
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
             .await
             .expect("the run ends idle");
         // Catervas never merges: the run waits for the owner, who merges the branch by hand.
         assert!(harness.row("CTV-1").awaiting_integration);
         harness.merge_by_hand("CTV-1");
-        orchestrator
-            .run_until_idle()
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
             .await
             .expect("the run ends idle");
 
@@ -1154,8 +1173,8 @@ mod tests {
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        orchestrator
-            .run_until_idle()
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
             .await
             .expect("the run ends idle");
 
@@ -1255,7 +1274,10 @@ mod tests {
     /// Runs until idle, answers the one question, runs, and runs again, as the human at a
     /// terminal would: Catervas accepts the epic's result on its criteria (ADR 0061).
     async fn drive_one_request(harness: &Harness, orchestrator: &super::Orchestrator) {
-        orchestrator.run_until_idle().await.expect("the run idles");
+        harness
+            .run_until_idle_past_the_changelog(orchestrator)
+            .await
+            .expect("the run idles");
         let question = harness.events(&[EventKind::QuestionAsked]);
         assert_eq!(question.len(), 1, "one question is asked");
         orchestrator
@@ -1265,11 +1287,17 @@ mod tests {
             })
             .await
             .expect("the human answers");
-        orchestrator.run_until_idle().await.expect("the run idles");
+        harness
+            .run_until_idle_past_the_changelog(orchestrator)
+            .await
+            .expect("the run idles");
         // No contract waits for the owner (ADR 0061), so the epic is ready and runs on.
         // Catervas never merges: the owner merges the task's branch, and the epic goes on.
         harness.merge_by_hand("CTV-2");
-        orchestrator.run_until_idle().await.expect("the run idles");
+        harness
+            .run_until_idle_past_the_changelog(orchestrator)
+            .await
+            .expect("the run idles");
     }
 
     #[tokio::test]

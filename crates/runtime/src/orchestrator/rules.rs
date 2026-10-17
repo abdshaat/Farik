@@ -49,12 +49,14 @@ use crate::ceremonies::{
 };
 use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
+use crate::deliveries::{close_delivery, due_delivery};
 use crate::exec::Executor;
 use crate::marketing::{hold_plans, record_plan_end};
 use crate::session::{EndReason, SessionPurpose};
 use crate::sleep::asleep_until;
 use crate::sprints::{EndedBy, end_sprint, planning_session_spent, sprint_hold};
 use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
+use catervas_core::delivery::{DeliveryTrigger, TASKS_PER_DELIVERY};
 
 /// What a tick says when no rule matched.
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
@@ -381,6 +383,9 @@ async fn sprint_rules(
     board: &[TaskProjection],
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
+    if let Some(report) = close_a_delivery(deps, scope, team)? {
+        return Ok(Some(report));
+    }
     if let Some(report) = finished_sprint(deps, scope, board)? {
         return Ok(Some(report));
     }
@@ -391,6 +396,39 @@ async fn sprint_rules(
         return Ok(Some(report));
     }
     standup(deps, scope, team, board, waiting).await
+}
+
+/// The delivery that closes by itself (ADR 0062): the first time since the previous one that an
+/// epic is accepted, five tasks with no parent are accepted, or the team runs out of work, the
+/// governor closes it and files the changelog task. It is about no one task, so it runs only in a
+/// tick scoped to none, under `All` or `Planning`.
+fn close_a_delivery(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if !sprint_rules_run(scope) {
+        return Ok(None);
+    }
+    let tools = &deps.tools;
+    let Some(due) = due_delivery(&tools.log, &tools.projections, team)? else {
+        return Ok(None);
+    };
+    let filed = close_delivery(tools, team, &due).map_err(|error| OrchestratorError::Refused {
+        reason: format!("delivery_failed: {error}"),
+    })?;
+    let why = match due.trigger {
+        DeliveryTrigger::EpicAccepted => "an epic was accepted".to_string(),
+        DeliveryTrigger::TasksAccepted => format!("{TASKS_PER_DELIVERY} tasks were accepted"),
+        DeliveryTrigger::TeamQuiet => "the team has no work left".to_string(),
+    };
+    let changelog = filed.map_or_else(String::new, |id| {
+        format!("; filed {} for its changelog", id.as_str())
+    });
+    Ok(Some(TickReport::Delivery {
+        delivery_id: due.delivery_id,
+        what: format!("closed it: {why}{changelog}"),
+    }))
 }
 
 /// The sprint that ends by itself (5.5): the open sprint, once it holds a task and every task in it
@@ -2128,6 +2166,7 @@ mod tests {
             TickReport::Acted { task_id, .. } => Some(task_id.as_str()),
             TickReport::Idle { .. }
             | TickReport::Sprint { .. }
+            | TickReport::Delivery { .. }
             | TickReport::Conversation { .. }
             | TickReport::Chat { .. }
             | TickReport::FolderChange { .. } => None,
@@ -5745,8 +5784,7 @@ mod tests {
         });
         if idle {
             harness
-                .orchestrator(probe.clone())
-                .run_until_idle()
+                .run_until_idle_past_the_changelog(&harness.orchestrator(probe.clone()))
                 .await
                 .expect("the run ends idle");
         } else {
@@ -6128,8 +6166,8 @@ mod tests {
         ));
         let orchestrator = harness.orchestrator(witness.clone());
 
-        orchestrator
-            .run_until_idle()
+        harness
+            .run_until_idle_past_the_changelog(&orchestrator)
             .await
             .expect("the run ends idle");
 
@@ -8369,6 +8407,7 @@ mod tests {
             "task.integrated",
             &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
         );
+        harness.settle_delivery();
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
@@ -8510,6 +8549,85 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn closes_a_delivery_when_the_team_runs_quiet_and_files_its_changelog_once() {
+        let harness = Harness::new("orch-delivery-quiet", with_a_scrum_master);
+        harness.accepted_awaiting_delivery("CTV-1");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Delivery { delivery_id, .. } if delivery_id == "D1"),
+            "{report:?}"
+        );
+        let closed = harness.events(&[EventKind::DeliveryClosed]);
+        assert_eq!(closed.len(), 1, "{closed:?}");
+        let EventBody::DeliveryClosed(body) = &closed[0].body else {
+            panic!("a delivery.closed");
+        };
+        assert_eq!(
+            serde_json::to_value(body).expect("the body is a value"),
+            json!({
+                "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0,
+                "task_ids": ["CTV-1"]
+            })
+        );
+        let filed: Vec<_> = harness
+            .events(&[EventKind::TaskCreated])
+            .into_iter()
+            .filter(|event| {
+                matches!(&event.body, EventBody::TaskCreated(body)
+                    if body.filed_as.is_some())
+            })
+            .collect();
+        assert_eq!(filed.len(), 1, "{filed:?}");
+        let EventBody::TaskCreated(created) = &filed[0].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(
+            (created.filed_as, created.created_by.as_str()),
+            (
+                Some(catervas_protocol::event::TaskCreatedBodyFiledAs::Changelog),
+                "catervas"
+            )
+        );
+        let changelog_id = filed[0]
+            .envelope
+            .ids
+            .task_id
+            .clone()
+            .expect("the changelog task");
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&changelog_id)
+            .expect("the contract is read");
+        assert_eq!(contract.allowed_paths, ["CHANGELOG.md"]);
+        assert_eq!(contract.assignee_role.to_string(), "product_manager");
+        harness
+            .project
+            .deps
+            .projections
+            .catch_up()
+            .expect("the board catches up");
+        let row = harness.row(changelog_id.as_str());
+        harness.project.moved(
+            changelog_id.as_str(),
+            &row.status.to_string(),
+            "accepted",
+            &json!({}),
+        );
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert_eq!(harness.events(&[EventKind::DeliveryClosed]).len(), 1);
     }
 
     #[tokio::test]

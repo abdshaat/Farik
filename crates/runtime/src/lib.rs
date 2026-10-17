@@ -33,6 +33,8 @@ pub mod criteria;
 /// The local service: the hooks around every tool call, and Catervas's tools over MCP.
 #[cfg(unix)]
 pub mod daemon;
+/// Closing a delivery and the changelog task it files (ADR 0062).
+pub mod deliveries;
 /// Catervas's own server over eBay's Browse API (ADR 0038, ADR 0043).
 pub mod ebay;
 /// Commands run on an agent's behalf, and what came of them.

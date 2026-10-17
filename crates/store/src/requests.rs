@@ -625,6 +625,63 @@ pub fn rewrite_request(
     })
 }
 
+/// The whole contract of the Product Manager's task that adds delivery `delivery_id` (`D<n>`) to
+/// `CHANGELOG.md` (ADR 0062): its intent lists each of `tasks` as `CTV-n: <title>`. Nothing in it
+/// is reviewed by an agent (ADR 0061), so it carries only criteria Catervas runs: the file exists
+/// and says the delivery's number. `reviewer` is the role the contract names and never runs.
+#[must_use]
+pub fn changelog_request(
+    delivery_id: &str,
+    tasks: &[(TaskId, String)],
+    reviewer: Role,
+    max_cost_usd: f64,
+) -> Value {
+    let number = delivery_id.strip_prefix('D').unwrap_or(delivery_id);
+    let listed = tasks
+        .iter()
+        .map(|(id, title)| format!("{}: {title}", id.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    json!({
+        "title": format!("Add delivery {number} to the changelog"),
+        "intent": format!(
+            "The team closed delivery {number}. Add a section for it at the top of CHANGELOG.md, \
+             in the user's words, saying what each of its tasks changed:\n\n{listed}"
+        ),
+        "scope": { "in_scope": ["CHANGELOG.md"], "out_of_scope": ["Every other file"] },
+        "requirements": [{
+            "id": "R1",
+            "text": format!(
+                "CHANGELOG.md has a section for delivery {number} at its top saying, in the \
+                 user's words, what each of its tasks changed"
+            )
+        }],
+        "exit_criteria": [
+            {
+                "id": "C1",
+                "text": "CHANGELOG.md exists.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "CHANGELOG.md" }
+            },
+            {
+                "id": "C2",
+                "text": format!("CHANGELOG.md names delivery {number}."),
+                "satisfies": ["R1"],
+                "verification": {
+                    "method": "command",
+                    "command": format!("grep -qi 'delivery {number}' CHANGELOG.md"),
+                    "expect": {}
+                }
+            }
+        ],
+        "assignee_role": Role::ProductManager.to_string(),
+        "reviewer_role": reviewer.to_string(),
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": ["CHANGELOG.md"]
+    })
+}
+
 /// The tasks the last `document_rewrite.started` filed, none before the first.
 ///
 /// # Errors

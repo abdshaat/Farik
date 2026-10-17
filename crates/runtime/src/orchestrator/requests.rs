@@ -3021,6 +3021,7 @@ mod tests {
                 .moved(id, "assigned", "in_progress", &people);
             harness.project.moved(id, "in_progress", last, &people);
         }
+        harness.settle_delivery();
         an_epic(&harness, "CTV-4", "ready", |_| {});
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 

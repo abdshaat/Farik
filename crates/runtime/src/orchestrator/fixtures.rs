@@ -563,8 +563,16 @@ impl Harness {
 
     /// `task` accepted in the repository at `member`, the member `repo` of the project folder when
     /// one is named: its worktree made by `member`'s git from `main` with `done.txt` committed,
-    /// and left in place.
+    /// and left in place. The delivery it would close is already closed, with no task in it, so
+    /// that a test about something else is not preempted by the governor's close; a test of the
+    /// delivery itself uses `accepted_awaiting_delivery`.
     pub(crate) fn accepted_in(&self, task: &str, member: &Path, repo: Option<&str>) {
+        self.accepted_in_awaiting_delivery(task, member, repo);
+        self.settle_delivery();
+    }
+
+    /// `accepted_in`, with the delivery it would close left for the governor to close.
+    fn accepted_in_awaiting_delivery(&self, task: &str, member: &Path, repo: Option<&str>) {
         self.verifying_in(
             task,
             true,
@@ -581,9 +589,79 @@ impl Harness {
         );
     }
 
+    /// Cancels each changelog task the governor has filed that is still open, as a test about the
+    /// work before a delivery does so as not to play the Product Manager's work on it.
+    pub(crate) fn cancel_changelogs(&self) {
+        let deps = &self.project.deps;
+        deps.projections.catch_up().expect("the board catches up");
+        for id in crate::deliveries::changelog_tasks(&deps.log).expect("the log reads") {
+            let row = deps
+                .projections
+                .task(&id)
+                .expect("the board reads")
+                .expect("the changelog task is on the board");
+            if !matches!(
+                row.status,
+                catervas_core::contract::TaskStatus::Accepted
+                    | catervas_core::contract::TaskStatus::Cancelled
+            ) {
+                self.project.moved(
+                    id.as_str(),
+                    &row.status.to_string(),
+                    "cancelled",
+                    &json!({}),
+                );
+            }
+        }
+    }
+
+    /// `Orchestrator::run_until_idle`, cancelling each changelog task at the tick that files it
+    /// (`cancel_changelogs`); at most 500 ticks, so that a run that never idles fails the test.
+    pub(crate) async fn run_until_idle_past_the_changelog(
+        &self,
+        orchestrator: &Orchestrator,
+    ) -> Result<(), OrchestratorError> {
+        for _ in 0..500 {
+            match orchestrator.tick().await? {
+                TickReport::Idle {
+                    until: Some(until), ..
+                } => {
+                    orchestrator.wait_until(until).await;
+                }
+                TickReport::Idle { until: None, .. } => return Ok(()),
+                TickReport::Delivery { .. } => self.cancel_changelogs(),
+                _ => {}
+            }
+        }
+        panic!("no idle tick in 500");
+    }
+
+    /// Records a `delivery.closed` with no task, as the next delivery after those closed so far.
+    pub(crate) fn settle_delivery(&self) {
+        let closed = self.events(&[EventKind::DeliveryClosed]).len();
+        self.project.record(
+            "",
+            "delivery.closed",
+            &json!({
+                "delivery_id": format!("D{}", closed + 1), "trigger": "team_quiet",
+                "since_seq": 0, "task_ids": []
+            }),
+        );
+    }
+
     /// `accepted_with_worktree`, with the worktree removed, so that no cleanup is left to do.
     pub(crate) fn accepted(&self, task: &str) {
         self.accepted_with_worktree(task);
+        self.project
+            .deps
+            .git
+            .remove_worktree(&self.worktree(task))
+            .expect("the task's worktree is removed");
+    }
+
+    /// `accepted`, with the delivery it would close left for the governor to close.
+    pub(crate) fn accepted_awaiting_delivery(&self, task: &str) {
+        self.accepted_in_awaiting_delivery(task, self.project.repo.path.as_path(), None);
         self.project
             .deps
             .git
@@ -649,6 +727,7 @@ impl Harness {
             "task.integrated",
             &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
         );
+        self.settle_delivery();
     }
 
     /// A bare repository beside the project, added to it as `origin`, with `main` pushed there.
