@@ -61,13 +61,10 @@ session, as soon as the agent has room. Its code is reviewed as any code is. Out
 
   `chat_history`'s line keeps `HUMAN`: an `as_task` message reads as the user's. So the chat shows
   no "thinking", and no chat session proposes the same work.
-- **Rule 9** (`requests::refining`): the product-plan wait and the governor's `judge` of a
-  written contract are unchanged (after ADR 0061 plan 7 there is no judgment session).
-  The writer is then chosen from `Given`:
-  `Active(agent)`: the refine session is that agent's, its `initial_prompt` from
-  `given_task_message`; `Waits`: `Ok(None)`; `No`: the Product Manager, as today.
-
-  The spent-day and asleep checks use the writer.
+- **Rule 9** (`requests::refining`): the product-plan wait and the governor's `judge` are
+  unchanged. The writer comes from `Given`: `Active(agent)`, that agent's refine session, its
+  `initial_prompt` from `given_task_message`; `Waits`, `Ok(None)`; `No`, the Product Manager. The
+  spent-day and asleep checks use the writer.
 - **`GIVEN_TASK_LEAD`** (in `messages.rs`), `{name}` the agent's display name and `{role}` its
   role's wire name:
 
@@ -87,9 +84,13 @@ session, as soon as the agent has room. Its code is reviewed as any code is. Out
 
   `check_contract_write` then allows content in those statuses alone, as for the Product Manager.
   Chosen over a new actor kind, which every row and gate would have to learn for one case.
-- **The role and the words stay.** `write_contract` refuses an agent's write to a given task
+- **The roles and the words stay.** `write_contract` refuses an agent's write to a given task
   - leaving `assignee_role` other than the given agent's role: `given_task_role_fixed: <id> was
     given to <agent> in its chat, so its assignee_role stays <role>`;
+  - leaving `reviewer_role` other than `catervas_roles::default_reviewer_role(team,
+    TaskKind::Task, <role>)`, or the role it was filed with when that is `None`:
+    `given_task_reviewer_fixed: <id> was given to <agent> in its chat, so its reviewer_role stays
+    <reviewer role>`. The doer never picks its reviewer; it matters for code alone (ADR 0061);
   - changing `intent`: `given_task_intent_fixed: <id> was given to <agent> in its chat, so its
     intent stays the owner's words`.
 
@@ -115,9 +116,7 @@ session, as soon as the agent has room. Its code is reviewed as any code is. Out
     - the ask is `TransitionAsk { assignee_id, reviewer_id, .. }`;
     - moved, it reports `Acted { what: "assigned it to <agent id>, who was given it in its chat" }`.
   - A full agent's task waits, and is assigned in the first tick the agent has room, before the
-    second pass offers that agent anything else (the founder: "Next in his queue"; ADR 0063). This
-    plan does not change what counts as busy. ADR 0064, landing later, stops a task under review
-    counting.
+    second pass offers it anything else ("Next in his queue"). What counts as busy is unchanged.
 
 ## File map
 
@@ -137,13 +136,13 @@ crates/runtime/src/orchestrator/rules.rs        modifies: tick's rule 8 passes, 
 ```
 
 Every `Command::ChatMessagePost` and `NewChatMessage` not setting it gains `as_task: false`. The
-web client's types are generated from the schemas at build time (`packages/protocol-client/src/generate.ts`); nothing there is edited.
+web client's types are generated from the schemas; nothing there is edited.
 
 ## Interfaces
 
 Consumes: `post_chat`, `NewChatMessage`, `HUMAN`, `chat_waiting` (`catervas-runtime` chat);
 `file`, `Filing`, `FILING`, `request_from_text`, `placeholder_budget_usd`, `TOO_SHORT`
-(`catervas-store` requests); `reviewer_for`, `Role::reviews_its_own` (`catervas-roles`,
+(`catervas-store` requests); `reviewer_for`, `default_reviewer_role`, `Role::reviews_its_own` (`catervas-roles`,
 `catervas-core`); `check_contract_write`, `ContractWriteActor`, `TransitionActor`;
 `refine_message`, `refused_since_entering`, `has_room`, `assignable`, `assigner`, `active`,
 `run_session`, `SessionAsk`; `Harness`, `with_the_suggested_six`, `recorded`, `who`; transcript
@@ -255,6 +254,8 @@ and no parent, its `task.created` body also `given_to`), `crates/runtime/src/too
     `given_task_role_fixed: CTV-1 was given to dev-a in its chat, so its assignee_role stays
     software_developer`;
   - `pm` setting it to `architect` is refused the same way;
+  - `dev-a` setting `reviewer_role` to `product_manager` is refused with `given_task_reviewer_fixed:
+    CTV-1 was given to dev-a in its chat, so its reviewer_role stays software_developer`;
   - `dev-a` changing `intent` is refused with `given_task_intent_fixed: CTV-1 was given to dev-a
     in its chat, so its intent stays the owner's words`;
   - once `CTV-1` is `ready`, `dev-a`'s write of `scope` is refused as `NotAContractWriter`: its

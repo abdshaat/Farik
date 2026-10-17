@@ -65,7 +65,8 @@ theirs. The plans' ticks and statuses are brought up to date. Nothing else chang
   - **Requests.** A request given in a chat is refined by its agent, not the Product Manager. That
     agent writes its contract with the Product Manager's standing while it is `draft` or
     `refining`, and no writer but the human may change its `assignee_role`
-    (`given_task_role_fixed`) or its intent, the owner's words (`given_task_intent_fixed`). A bug a hunt files is triaged small by Catervas
+    (`given_task_role_fixed`), its `reviewer_role`, the default reviewer of that role
+    (`given_task_reviewer_fixed`), or its intent, the owner's words (`given_task_intent_fixed`). A bug a hunt files is triaged small by Catervas
     (`request.triaged { reason: "a bug <hunt> found", triaged_by: "catervas" }`) and refined by
     the Product Manager like any request.
   - **The Catervafication's epic.** For an existing repository:
