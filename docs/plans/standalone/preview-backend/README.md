@@ -1,6 +1,6 @@
 # Standalone: the preview reaches the app's backend
 
-Status: ready
+Status: done
 Branch: `feat/preview-backend` (work outside a phase, one pull request to `main`)
 Decision: ADR 0067 (`docs/decisions/0067-the-preview-reaches-the-apps-backend.md`)
 Depends on: `feat/parallel-agents` (ADRs 0061 to 0064, SPEC 0.118), from which this branch was cut, and
