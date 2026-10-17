@@ -85,7 +85,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   `dev-a: started its conversation session` and the line `<task>: pm started its refine session`;
   `adapter.started().len()` is 2.
 
-- [ ] `feat(cli): drive agents at once and say when each session starts`
+- [x] `feat(cli): drive agents at once and say when each session starts`
 
 ## Verification
 

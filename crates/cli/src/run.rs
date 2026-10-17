@@ -3,7 +3,7 @@
 
 use catervas_runtime::claude::CredentialKind;
 use catervas_runtime::credential::Source;
-use catervas_runtime::orchestrator::{TickReport, TickRules, TickScope};
+use catervas_runtime::orchestrator::{Progress, TickReport, TickRules, TickScope};
 use catervas_store::files::Sandbox;
 use serde_json::{Value, json};
 
@@ -15,7 +15,7 @@ use crate::{CliIo, say};
 /// The exit code after Ctrl-C, as a shell reports a process that SIGINT ended.
 pub(crate) const INTERRUPTED: i32 = 130;
 /// What the first Ctrl-C says.
-const STOPPING: &str = "stopping after the current session; Ctrl-C again aborts it";
+const STOPPING: &str = "stopping after the running sessions; Ctrl-C again aborts them";
 /// Why the second Ctrl-C stops the running sessions.
 const INTERRUPTED_BY: &str = "interrupted by Ctrl-C";
 
@@ -180,27 +180,42 @@ pub(crate) async fn ticks(
     let mut last_wait: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
     let mut last_idle: Option<String> = None;
     loop {
-        if driver.orchestrator.is_stopped() {
-            printer.line("stopped", &json!({ "stopped": true }));
-            return Ended::Stopped;
-        }
         let orchestrator = std::sync::Arc::clone(&driver.orchestrator);
-        let tick = orchestrator.tick_within(scope);
-        tokio::pin!(tick);
-        let report = loop {
+        let next = orchestrator.next(scope);
+        tokio::pin!(next);
+        let progress = loop {
             tokio::select! {
-                report = &mut tick => break report,
+                progress = &mut next => break progress,
                 Some(()) = driver.interrupts.recv() => {
                     *presses += 1;
                     interrupted(driver, printer, *presses);
                 }
             }
         };
+        let report = match progress {
+            None => {
+                printer.line("stopped", &json!({ "stopped": true }));
+                return Ended::Stopped;
+            }
+            Some(Err(error)) => {
+                return drain(driver, printer, presses, scope, error.to_string()).await;
+            }
+            Some(Ok(Progress::Started {
+                agent_id,
+                task_id,
+                purpose,
+            })) => {
+                last_idle = None;
+                print_started(printer, &agent_id, task_id.as_ref(), &purpose);
+                continue;
+            }
+            Some(Ok(Progress::Ticked(report))) => report,
+        };
         match report {
-            Ok(TickReport::Idle {
+            TickReport::Idle {
                 why,
                 until: Some(until),
-            }) => {
+            } => {
                 if last_wait.as_ref() != Some(&(why.clone(), until)) {
                     printer.line(
                         &why,
@@ -210,7 +225,7 @@ pub(crate) async fn ticks(
                 }
                 wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
-            Ok(TickReport::Idle { why, until: None }) => {
+            TickReport::Idle { why, until: None } => {
                 if last_idle.as_ref() != Some(&why) || matches!(on_idle, OnIdle::Return) {
                     printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
                     last_idle = Some(why.clone());
@@ -221,41 +236,97 @@ pub(crate) async fn ticks(
                 let until = printer.io.clock.now() + IDLE_WAIT;
                 wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
-            Ok(TickReport::Acted { task_id, what }) => {
+            acted => {
                 last_idle = None;
-                printer.line(
-                    &format!("{}: {what}", task_id.as_str()),
-                    &json!({ "task_id": task_id.as_str(), "what": what }),
-                );
+                print_acted(printer, &acted);
                 after(printer);
             }
-            Ok(TickReport::Delivery { delivery_id, what }) => {
-                last_idle = None;
-                printer.line(
-                    &format!("{delivery_id}: {what}"),
-                    &json!({ "delivery_id": delivery_id, "what": what }),
-                );
-                after(printer);
+        }
+    }
+}
+
+/// Says that a session started, and for what.
+fn print_started(
+    printer: &mut Printer<'_, '_>,
+    agent_id: &str,
+    task_id: Option<&catervas_core::contract::TaskId>,
+    purpose: &str,
+) {
+    let text = match task_id {
+        Some(task) => format!(
+            "{}: {agent_id} started its {purpose} session",
+            task.as_str()
+        ),
+        None => format!("{agent_id}: started its {purpose} session"),
+    };
+    printer.line(
+        &text,
+        &json!({
+            "started": purpose,
+            "agent_id": agent_id,
+            "task_id": task_id.map(|task| task.as_str()),
+        }),
+    );
+}
+
+/// Says what a tick that did something did; an idle one says nothing here.
+fn print_acted(printer: &mut Printer<'_, '_>, report: &TickReport) {
+    match report {
+        TickReport::Acted { task_id, what } => printer.line(
+            &format!("{}: {what}", task_id.as_str()),
+            &json!({ "task_id": task_id.as_str(), "what": what }),
+        ),
+        TickReport::Delivery { delivery_id, what } => printer.line(
+            &format!("{delivery_id}: {what}"),
+            &json!({ "delivery_id": delivery_id, "what": what }),
+        ),
+        TickReport::Conversation { agent_id, what } | TickReport::Chat { agent_id, what } => {
+            printer.line(
+                &format!("{agent_id}: {what}"),
+                &json!({ "agent_id": agent_id, "what": what }),
+            );
+        }
+        TickReport::FolderChange { change, what } => printer.line(
+            &format!("folder-{change}: {what}"),
+            &json!({ "folder_change": change, "what": what }),
+        ),
+        TickReport::Idle { .. } => {}
+    }
+}
+
+/// A tick failed (`error`): stops the run as the first Ctrl-C does and lets the running sessions
+/// end, printing what they do, so that no session is left running when the daemon shuts down
+/// (ADR 0064). Ctrl-C is heard meanwhile.
+async fn drain(
+    driver: &mut Driver,
+    printer: &mut Printer<'_, '_>,
+    presses: &mut u32,
+    scope: &TickScope,
+    error: String,
+) -> Ended {
+    driver.orchestrator.stop();
+    let orchestrator = std::sync::Arc::clone(&driver.orchestrator);
+    loop {
+        let next = orchestrator.next(scope);
+        tokio::pin!(next);
+        let progress = loop {
+            tokio::select! {
+                progress = &mut next => break progress,
+                Some(()) = driver.interrupts.recv() => {
+                    *presses += 1;
+                    interrupted(driver, printer, *presses);
+                }
             }
-            Ok(
-                TickReport::Conversation { agent_id, what } | TickReport::Chat { agent_id, what },
-            ) => {
-                last_idle = None;
-                printer.line(
-                    &format!("{agent_id}: {what}"),
-                    &json!({ "agent_id": agent_id, "what": what }),
-                );
-                after(printer);
-            }
-            Ok(TickReport::FolderChange { change, what }) => {
-                last_idle = None;
-                printer.line(
-                    &format!("folder-{change}: {what}"),
-                    &json!({ "folder_change": change, "what": what }),
-                );
-                after(printer);
-            }
-            Err(error) => return Ended::Failed(error.to_string()),
+        };
+        match progress {
+            None => return Ended::Failed(error),
+            Some(Err(again)) => report_error(printer, &again.to_string()),
+            Some(Ok(Progress::Started {
+                agent_id,
+                task_id,
+                purpose,
+            })) => print_started(printer, &agent_id, task_id.as_ref(), &purpose),
+            Some(Ok(Progress::Ticked(report))) => print_acted(printer, &report),
         }
     }
 }
@@ -292,7 +363,7 @@ pub(crate) fn interrupted(driver: &Driver, printer: &mut Printer<'_, '_>, presse
             for session in driver.daemon.session_ids() {
                 driver.daemon.request_stop(&session, INTERRUPTED_BY);
             }
-            printer.note("aborting the current session");
+            printer.note("aborting the running sessions");
         }
         _ => printer.note("already stopping"),
     }
