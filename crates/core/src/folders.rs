@@ -141,6 +141,36 @@ pub fn is_plan_task(contract: &crate::contract::TaskContract) -> bool {
     })
 }
 
+/// The report a role's bug hunt writes, in this format (ADR 0063): the Developer's
+/// `docs/catervas/engineering/bug-hunt.<x>` and the UI/UX Designer's
+/// `docs/catervas/design/ui-bug-hunt.<x>`; no other role hunts.
+#[must_use]
+pub fn hunt_report(role: Role, format: DocumentFormat) -> Option<String> {
+    let stem = match role {
+        Role::SoftwareDeveloper => "docs/catervas/engineering/bug-hunt",
+        Role::UiUxDesigner => "docs/catervas/design/ui-bug-hunt",
+        _ => return None,
+    };
+    Some(with_format(stem, format))
+}
+
+/// Whether the contract is a bug hunt: a task whose `allowed_paths` are exactly its assignee's
+/// hunt report, in either format. No agent reviews it; the governor checks its criteria.
+#[must_use]
+pub fn is_hunt(contract: &crate::contract::TaskContract) -> bool {
+    contract.kind == crate::contract::TaskKind::Task
+        && [DocumentFormat::Markdown, DocumentFormat::Html]
+            .into_iter()
+            .filter_map(|format| hunt_report(contract.assignee_role, format))
+            .any(|report| {
+                contract
+                    .allowed_paths
+                    .iter()
+                    .map(ToString::to_string)
+                    .eq([report])
+            })
+}
+
 /// Whether the path is the Architect's plan for the epic, in either format.
 #[must_use]
 pub fn is_plan_of(path: &str, epic: &str) -> bool {
@@ -784,8 +814,9 @@ mod tests {
     use super::{
         DocumentFormat, FolderDocPathRefusal, FormatRefusal, OWNER_ACCEPTED_STEMS, ROLE_FOLDERS,
         agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
-        folder_doc_message, folder_of, folders_line, format_line, human_of_twin, is_human_document,
-        is_plan_of, pair_changed_alone, plan_stem, role_folder, stem_of, with_format,
+        folder_doc_message, folder_of, folders_line, format_line, human_of_twin, hunt_report,
+        is_human_document, is_hunt, is_plan_of, pair_changed_alone, plan_stem, role_folder,
+        stem_of, with_format,
     };
     use super::{LineChange, ShownLine, artifact_marks, changed_lines, is_heading};
     use super::{
@@ -793,6 +824,48 @@ mod tests {
         plain_name, stale_line, twin_is_stale,
     };
     use crate::team::Role;
+
+    #[test]
+    fn knows_a_hunt_by_its_report_alone() {
+        use super::DocumentFormat::{Html, Markdown};
+        use crate::contract::TaskKind;
+        use crate::governor::readiness::fixtures::a_contract;
+        use crate::team::reviewed_by_an_agent;
+
+        assert_eq!(
+            hunt_report(Role::SoftwareDeveloper, Html).as_deref(),
+            Some("docs/catervas/engineering/bug-hunt.html")
+        );
+        assert_eq!(
+            hunt_report(Role::UiUxDesigner, Markdown).as_deref(),
+            Some("docs/catervas/design/ui-bug-hunt.md")
+        );
+        assert_eq!(hunt_report(Role::Architect, Html), None);
+
+        let mut hunt = a_contract();
+        hunt.kind = TaskKind::Task;
+        hunt.assignee_role = Role::SoftwareDeveloper;
+        hunt.allowed_paths = vec!["docs/catervas/engineering/bug-hunt.html".to_string()];
+        assert!(is_hunt(&hunt));
+        assert!(!reviewed_by_an_agent(&hunt));
+
+        let mut more = hunt.clone();
+        more.allowed_paths.push("src/**".to_string());
+        assert!(!is_hunt(&more));
+        assert!(reviewed_by_an_agent(&more));
+
+        let mut glob = hunt.clone();
+        glob.allowed_paths = vec!["docs/catervas/engineering/**".to_string()];
+        assert!(!is_hunt(&glob));
+
+        let mut epic = hunt.clone();
+        epic.kind = TaskKind::Epic;
+        assert!(!is_hunt(&epic));
+
+        let mut designer = hunt;
+        designer.assignee_role = Role::UiUxDesigner;
+        assert!(!is_hunt(&designer));
+    }
 
     #[test]
     fn names_an_epics_plan() {

@@ -180,7 +180,7 @@ Files: `crates/core/src/folders.rs` (the two functions; `mod tests`), `crates/co
     - the first contract as an `epic` is not a hunt;
     - a `ui_ux_designer` task with the engineering report is not a hunt.
 
-- [ ] `feat(core): know a bug hunt by its report, which no agent reviews`
+- [x] `feat(core): know a bug hunt by its report, which no agent reviews`
 
 ### Task 2: a bug is a request linked to its hunt
 
