@@ -134,7 +134,7 @@ the replacement says "(changed in 0.116)".
   superseded 2026-10-16 by ADR 0062: there are no sprints."
 - The revision note of the Decisions.
 
-- [ ] `docs(spec): roles, architecture and requirements without sprints; revision 0.116`
+- [x] `docs(spec): roles, architecture and requirements without sprints; revision 0.116`
 
 ## Verification
 
