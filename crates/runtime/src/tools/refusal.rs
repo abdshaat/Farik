@@ -55,6 +55,8 @@ pub(crate) enum Refusal {
     GateFailed { details: Vec<String> },
     /// The store would not file the request.
     RequestRefused { reason: String },
+    /// A write would change what stays as the owner gave it with a task in a chat (ADR 0063).
+    GivenTaskFixed { kind: &'static str, detail: String },
     /// The caller is none of the actors the move's rows name.
     ActorNotAllowed { detail: String },
     /// The caller is neither the assignee nor the reviewer.
@@ -200,6 +202,7 @@ impl Refusal {
             ),
             Self::GateFailed { details } => ("gate_failed", details.join("; ")),
             Self::RequestRefused { reason } => ("request_refused", format!("the request {reason}")),
+            Self::GivenTaskFixed { kind, detail } => (*kind, detail.clone()),
             Self::ActorNotAllowed { detail } => ("actor_not_allowed", detail.clone()),
             Self::NotTheRunner { agent_id } => (
                 "not_the_runner",

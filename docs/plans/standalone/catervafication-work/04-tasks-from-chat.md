@@ -261,7 +261,7 @@ and no parent, its `task.created` body also `given_to`), `crates/runtime/src/too
   - once `CTV-1` is `ready`, `dev-a`'s write of `scope` is refused as `NotAContractWriter`: its
     standing ended with `refining`.
 
-- [ ] `feat(runtime): an agent writes the contract of the task it was given`
+- [x] `feat(runtime): an agent writes the contract of the task it was given`
 
 ### Task 5: rule 9 gives the refine session to that agent
 
