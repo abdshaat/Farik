@@ -113,7 +113,7 @@ Tests:
 - `assigns_a_task_once_every_dependency_is_accepted` (renames `assigns_a_task_only_once_every_dependency_is_accepted_and_integrated`, `gates.rs:1872`): a dependency `accepted` and still awaiting integration lets the assignment through; one `verifying` refuses it with exactly `CTV-2 is verifying and a dependency is assigned only once it is accepted`.
 - `rules.rs`'s `waits_for_a_dependency_to_be_integrated` and `waits_for_an_accepted_dependency_until_it_is_integrated` become `plans_a_task_whose_dependency_is_accepted`, asserting that the ready task gets its plan session while its dependency is accepted and not integrated.
 
-- [ ] `feat(core): count a dependency once it is accepted`
+- [x] `feat(core): count a dependency once it is accepted`
 
 ### Task 2: merge into a task's own worktree
 

@@ -1899,7 +1899,7 @@ pub(super) fn active<'a>(team: &'a Team, agent_id: Option<&str>) -> Option<&'a A
 
 /// Rule 8: a standalone task that is `ready` gets a plan session of its assigner (the active Scrum
 /// Master, else the Product Manager), when an agent of its assignee role has room for it, the open
-/// sprint, if any, holds it and can pay for it, and every dependency is accepted and integrated.
+/// sprint, if any, holds it and can pay for it, and every dependency is accepted.
 async fn ready(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -2009,7 +2009,7 @@ pub(super) fn has_room(
 /// Whether the governor would let `candidate` be assigned the task on the rules the orchestrator
 /// checks before asking, read from the governor's own context for the assignment: the open sprint's
 /// membership and budget, by the gate's own predicates, that no other task holds the assignee's
-/// private folder, and every dependency accepted and integrated. A task that fails them is passed
+/// private folder, and every dependency accepted. A task that fails them is passed
 /// over, so that it is not asked about on every tick.
 fn assignable(
     deps: &OrchestratorDeps,
@@ -2046,7 +2046,7 @@ fn assignable(
         && states.len() == contract.dependencies.len()
         && states
             .iter()
-            .all(|state| state.status == TaskStatus::Accepted && state.integrated))
+            .all(|state| state.status == TaskStatus::Accepted))
 }
 
 /// What a tick that ran a session says.
@@ -2880,7 +2880,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn waits_for_a_dependency_to_be_integrated() {
+    async fn waits_for_a_dependency_to_be_accepted() {
         // CTV-1's assignee is paused, so that no rule works CTV-1 and the tick reaches CTV-2.
         let harness = Harness::new("orch-plan-dependency", |wire| {
             wire["agents"][1]["status"] = json!("paused");
@@ -2906,7 +2906,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn waits_for_an_accepted_dependency_until_it_is_integrated() {
+    async fn plans_a_task_whose_dependency_is_accepted() {
         let harness = Harness::new("orch-plan-dependency-integrated", |_| {});
         harness.verifying("CTV-1");
         harness.project.moved(
@@ -2928,28 +2928,13 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string(),
-                until: None,
-            }
-        );
-        assert!(adapter.started().is_empty());
-
-        harness.project.record(
-            "CTV-1",
-            "task.integrated",
-            &json!({ "sha": "abc", "into": "main", "integrated_by": "human" }),
-        );
-        let report = orchestrator.tick().await.expect("the tick runs");
         assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert_eq!(adapter.started().len(), 1);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn waits_for_a_dependency_in_another_repository() {
+    async fn plans_a_task_whose_dependency_is_accepted_in_another_repository() {
         let (harness, members) =
             Harness::project_folder_with("orch-plan-dependency-repo", &["app", "infra"], |wire| {
                 wire["policy"]["integration"] = json!("pull_request");
@@ -2966,22 +2951,6 @@ mod tests {
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string(),
-                until: None,
-            }
-        );
-        assert!(adapter.started().is_empty());
-
-        members[0].git(&["merge", "--no-ff", "-m", "By hand", "feature/CTV-1"]);
-        orchestrator
-            .integrate(&"CTV-1".parse().expect("a task id"))
-            .await
-            .expect("the human integrates it into app");
-        assert!(!harness.row("CTV-1").awaiting_integration);
         let report = orchestrator.tick().await.expect("the tick runs");
         assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert_eq!(adapter.started().len(), 1);

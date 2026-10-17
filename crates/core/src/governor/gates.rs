@@ -55,8 +55,6 @@ pub struct DependencyState {
     pub task_id: String,
     /// Its status.
     pub status: TaskStatus,
-    /// Whether its branch has been integrated (`docs/SPEC.md` section 5.14).
-    pub integrated: bool,
 }
 
 /// Whether the UI/UX Designer can open the project's app (the founder's D3 and D4): the team
@@ -238,7 +236,7 @@ fn the_sprint_pays(contract: &TaskContract, input: &AssignmentInput) -> bool {
 /// ask, whether the pair of agents fits the contract, whether the agent has room, whether the
 /// sprint can pay for it, whether a UI/UX Designer can open the app (`preview_not_set`,
 /// `designer_needs_sandbox`), whether another task holds the assignee's private folder
-/// (`private_folder_busy`), and whether every dependency is accepted and integrated.
+/// (`private_folder_busy`), and whether every dependency is accepted.
 ///
 /// # Errors
 ///
@@ -438,22 +436,19 @@ fn unready_dependencies(contract: &TaskContract, input: &AssignmentInput) -> Vec
         .into_iter()
         .filter_map(|id| {
             if id == contract.id.to_string() {
-                return Some(format!(
-                    "{id} depends on itself, which nothing can satisfy"
-                ));
+                return Some(format!("{id} depends on itself, which nothing can satisfy"));
             }
             match input
                 .dependencies
                 .iter()
                 .find(|state| state.task_id.trim() == id)
             {
-                None => Some(format!("the runtime reported nothing about {id}, which this task depends on")),
+                None => Some(format!(
+                    "the runtime reported nothing about {id}, which this task depends on"
+                )),
                 Some(state) if state.status != TaskStatus::Accepted => Some(format!(
                     "{id} is {} and a dependency is assigned only once it is accepted",
                     state.status
-                )),
-                Some(state) if !state.integrated => Some(format!(
-                    "{id} is accepted but not integrated, and this task's branch starts from the integration branch"
                 )),
                 Some(_) => None,
             }
@@ -1869,7 +1864,7 @@ mod tests {
     }
 
     #[test]
-    fn assigns_a_task_only_once_every_dependency_is_accepted_and_integrated() {
+    fn assigns_a_task_once_every_dependency_is_accepted() {
         let contract = a_depending_contract();
         let mut input = an_assignment();
         assert_eq!(
@@ -1884,7 +1879,6 @@ mod tests {
             input.dependencies = vec![DependencyState {
                 task_id: "CTV-2".to_string(),
                 status,
-                integrated: true,
             }];
             assert_eq!(
                 reasons(check_assignment(&contract, &input)),
@@ -1897,20 +1891,13 @@ mod tests {
         input.dependencies = vec![DependencyState {
             task_id: "CTV-2".to_string(),
             status: TaskStatus::Verifying,
-            integrated: false,
         }];
         assert_eq!(
             reasons(check_assignment(&contract, &input)),
             ["CTV-2 is verifying and a dependency is assigned only once it is accepted"]
         );
         input.dependencies[0].status = TaskStatus::Accepted;
-        assert_eq!(
-            reasons(check_assignment(&contract, &input)),
-            [
-                "CTV-2 is accepted but not integrated, and this task's branch starts from the integration branch"
-            ]
-        );
-        input.dependencies[0].integrated = true;
+        // Accepted and still awaiting integration is enough (ADR 0061).
         assert_eq!(check_assignment(&contract, &input), Ok(()));
         // Two dependencies in two different states are both reported, in the order the contract
         // lists them: an agent sent back learns everything it has to wait for at once.
@@ -1921,26 +1908,20 @@ mod tests {
             DependencyState {
                 task_id: "CTV-2".to_string(),
                 status: TaskStatus::Verifying,
-                integrated: false,
             },
             DependencyState {
                 task_id: "CTV-3".to_string(),
                 status: TaskStatus::Accepted,
-                integrated: false,
             },
         ];
         assert_eq!(
             reasons(check_assignment(&two, &input)),
-            [
-                "CTV-2 is verifying and a dependency is assigned only once it is accepted",
-                "CTV-3 is accepted but not integrated, and this task's branch starts from the integration branch"
-            ]
+            ["CTV-2 is verifying and a dependency is assigned only once it is accepted"]
         );
         // A padded dependency id is the same dependency.
         input.dependencies = vec![DependencyState {
             task_id: " CTV-2 ".to_string(),
             status: TaskStatus::Accepted,
-            integrated: true,
         }];
         assert_eq!(check_assignment(&contract, &input), Ok(()));
     }
@@ -1969,12 +1950,10 @@ mod tests {
             DependencyState {
                 task_id: "CTV-2".to_string(),
                 status: TaskStatus::Accepted,
-                integrated: true,
             },
             DependencyState {
                 task_id: "CTV-2".to_string(),
                 status: TaskStatus::InProgress,
-                integrated: false,
             },
         ];
         assert_eq!(
@@ -1984,7 +1963,6 @@ mod tests {
         input.dependencies.push(DependencyState {
             task_id: " CTV-2 ".to_string(),
             status: TaskStatus::Blocked,
-            integrated: false,
         });
         assert_eq!(
             reasons(check_assignment(&contract, &input)),
@@ -1997,12 +1975,10 @@ mod tests {
             DependencyState {
                 task_id: "CTV-99".to_string(),
                 status: TaskStatus::Accepted,
-                integrated: true,
             },
             DependencyState {
                 task_id: "CTV-99".to_string(),
                 status: TaskStatus::Draft,
-                integrated: false,
             },
         ];
         assert_eq!(check_assignment(&a_contract(), &unrelated), Ok(()));
@@ -2016,7 +1992,6 @@ mod tests {
         input.dependencies = vec![DependencyState {
             task_id: contract.id.to_string(),
             status: TaskStatus::Accepted,
-            integrated: true,
         }];
         assert_eq!(
             reasons(check_assignment(&contract, &input)),

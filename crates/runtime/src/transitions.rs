@@ -1245,9 +1245,7 @@ fn row_of<'a>(
         })
 }
 
-/// The contract's dependencies the board holds. One is integrated once it is accepted and no
-/// longer awaiting integration (5.14): an accepted epic never awaits, its children carrying the
-/// branches.
+/// The contract's dependencies the board holds. One counts once it is accepted (ADR 0061).
 fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<DependencyState> {
     contract
         .dependencies
@@ -1259,7 +1257,6 @@ fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<D
                 .map(|row| DependencyState {
                     task_id: dependency.to_string(),
                     status: row.status,
-                    integrated: row.status == TaskStatus::Accepted && !row.awaiting_integration,
                 })
         })
         .collect()
@@ -2532,12 +2529,13 @@ mod tests {
             );
             project.context(&request, &assigning("proc-2", "maya"))
         };
-        assert!(
-            !assigning_second()
+        assert_eq!(
+            assigning_second()
                 .assignment
                 .expect("an assignment")
                 .dependencies[0]
-                .integrated
+                .status,
+            TaskStatus::Verifying
         );
 
         // Accepted, it is finished: nothing is integrated, and its dependant may be assigned.
@@ -2553,7 +2551,11 @@ mod tests {
             [catervas_core::governor::transition::TransitionEffect::NothingToIntegrate]
         );
         let after = assigning_second().assignment.expect("an assignment");
-        assert!(after.dependencies[0].integrated, "{after:?}");
+        assert_eq!(
+            after.dependencies[0].status,
+            TaskStatus::Accepted,
+            "{after:?}"
+        );
         assert!(!after.private_folder_busy);
     }
 
@@ -3437,7 +3439,6 @@ mod tests {
             vec![DependencyState {
                 task_id: "CTV-2".to_string(),
                 status: TaskStatus::InProgress,
-                integrated: false,
             }]
         );
 
@@ -3474,7 +3475,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn reads_a_dependency_as_integrated_once_merged() {
+    fn reads_a_dependency_once_accepted() {
         let project = Project::new("dependency-integrated", a_team(|_| {}), at(12));
         project.file("CTV-2", |wire| wire["dependencies"] = json!(["CTV-1"]));
         project.created("CTV-1", "verifying");
@@ -3498,22 +3499,6 @@ mod tests {
             vec![DependencyState {
                 task_id: "CTV-1".to_string(),
                 status: TaskStatus::Accepted,
-                integrated: false,
-            }]
-        );
-
-        project.record(
-            "CTV-1",
-            "task.integrated",
-            &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
-            at(11),
-        );
-        assert_eq!(
-            dependencies(&project),
-            vec![DependencyState {
-                task_id: "CTV-1".to_string(),
-                status: TaskStatus::Accepted,
-                integrated: true,
             }]
         );
     }
@@ -5127,7 +5112,7 @@ mod tests {
             project.context(&request, &assigning("fin-2", "maya"))
         };
         let before = assigning_second().assignment.expect("an assignment");
-        assert!(!before.dependencies[0].integrated);
+        assert_eq!(before.dependencies[0].status, TaskStatus::Verifying);
 
         let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
 
@@ -5152,7 +5137,11 @@ mod tests {
         assert!(!row.awaiting_integration);
         // It counts as integrated, holds the folder no longer, and its dependant may be assigned.
         let after = assigning_second().assignment.expect("an assignment");
-        assert!(after.dependencies[0].integrated, "{after:?}");
+        assert_eq!(
+            after.dependencies[0].status,
+            TaskStatus::Accepted,
+            "{after:?}"
+        );
         assert!(!after.private_folder_busy);
         assert!(matches!(
             project.ask(
