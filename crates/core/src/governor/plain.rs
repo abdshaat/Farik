@@ -14,6 +14,9 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::CriteriaMethodsValid => {
             "One of the checks for done is written in a way that cannot be run."
         }
+        ReadinessRule::NoReviewOutsideCode => {
+            "This task asks for a review, and only code is reviewed. Check it with a command, a test or a file instead."
+        }
         ReadinessRule::CommandCriteriaComplete => {
             "One of the checks for done is missing what to run."
         }
@@ -92,11 +95,12 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 32] = [
+    const EVERY_RULE: [ReadinessRule; 33] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
         CriteriaMethodsValid,
+        NoReviewOutsideCode,
         CommandCriteriaComplete,
         BudgetWithinSprint,
         ReviewerAvailable,
@@ -134,6 +138,7 @@ mod tests {
             | SummaryPresent
             | CriteriaPresent
             | CriteriaMethodsValid
+            | NoReviewOutsideCode
             | CommandCriteriaComplete
             | BudgetWithinSprint
             | ReviewerAvailable

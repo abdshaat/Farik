@@ -1360,6 +1360,7 @@ mod tests {
                 "CTV-2 integrated",
                 "CTV-1 in_progress -> verifying",
                 "CTV-1 C1 run by the governor",
+                "CTV-1 C2 run by the governor",
                 "human.accepted result",
                 "CTV-1 verifying -> accepted",
             ]

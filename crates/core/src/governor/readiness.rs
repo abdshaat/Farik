@@ -15,7 +15,8 @@ use crate::contract::{
 use crate::folders::{MEMBER_FOLDERS, ROLE_FOLDERS, is_plan_of, member_folder};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::team::{
-    changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
+    changes_code, plain_role, private_file_fault, private_folder, reviewed_by_an_agent,
+    task_private_folder,
 };
 use crate::text::listed;
 
@@ -34,6 +35,8 @@ pub enum ReadinessRule {
     CriteriaPresent,
     /// Every criterion's `method` value names the shape its fields have.
     CriteriaMethodsValid,
+    /// A contract that no agent reviews has no `review` or `human` criterion (ADR 0061).
+    NoReviewOutsideCode,
     /// Every `command` and `test` criterion has a command that is not blank.
     CommandCriteriaComplete,
     /// The budget does not exceed the remaining sprint budget.
@@ -196,11 +199,12 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 30] = [
+const CHECKS: [Check; 31] = [
     intent_present,
     summary_present,
     criteria_present,
     criteria_methods_valid,
+    no_review_outside_code,
     command_criteria_complete,
     budget_within_sprint,
     reviewer_available,
@@ -355,6 +359,34 @@ fn criteria_methods_valid(
         return None;
     }
     Some(failure(ReadinessRule::CriteriaMethodsValid, bad.join("; ")))
+}
+
+/// Only a code change is reviewed (ADR 0061), so a contract that no agent reviews carries no
+/// `review` criterion, which an agent would answer, and no `human` one, which waits on the owner.
+fn no_review_outside_code(
+    contract: &TaskContract,
+    _: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    if reviewed_by_an_agent(contract) {
+        return None;
+    }
+    let asked = criterion_ids(contract, |verification, _| {
+        matches!(
+            verification,
+            Verification::Review { .. } | Verification::Human { .. }
+        )
+    });
+    if asked.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::NoReviewOutsideCode,
+        format!(
+            "{} ask for a review or the human, and only a code change is reviewed (ADR 0061): use \
+             command, test or artifact criteria",
+            listed("criterion", "criteria", &asked)
+        ),
+    ))
 }
 
 fn command_criteria_complete(
@@ -540,12 +572,16 @@ fn required_criteria_present(
     let in_a_folder = task_private_folder(contract).is_some();
     // So has an epic in a project folder: it runs no command, its tasks do.
     let runs_none = in_a_folder || (context.repos.is_some() && contract.kind == Kind::Epic);
+    // Only a code change is reviewed (ADR 0061), so no other contract can hold a review or a human
+    // criterion to satisfy a rule that requires one.
+    let reviewed = reviewed_by_an_agent(contract);
     let missing: Vec<&str> = context
         .rules
         .required_criteria
         .iter()
         .map(String::as_str)
         .filter(|method| !(runs_none && matches!(*method, "command" | "test")))
+        .filter(|method| reviewed || !matches!(*method, "review" | "human"))
         .filter(|method| !methods.contains(method))
         .collect();
     if missing.is_empty() {
@@ -939,8 +975,8 @@ fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<
     });
     if !runs.is_empty() {
         reasons.push(format!(
-            "{} {} a command or a test, and there is no worktree to run one in; use artifact, \
-             review and human criteria",
+            "{} {} a command or a test, and there is no worktree to run one in; use artifact \
+             criteria",
             listed("criterion", "criteria", &runs),
             if runs.len() == 1 { "is" } else { "are" }
         ));
@@ -1867,6 +1903,83 @@ mod tests {
         assert!(!held(&task, &a_ready_context()));
     }
 
+    #[test]
+    fn refuses_review_and_human_criteria_outside_code() {
+        let review = json!({ "method": "review", "rubric": ["Is it right?"] });
+        let human = json!({ "method": "human", "question": "Is it right?" });
+        let artifact = json!({ "method": "artifact", "path": "docs/catervas/product/spec.md" });
+        let task = |role: &str, kind: &str, paths: &[&str], methods: &[serde_json::Value]| {
+            let mut wire = a_contract_wire();
+            wire["assignee_role"] = json!(role);
+            wire["kind"] = json!(kind);
+            wire["allowed_paths"] = json!(paths);
+            wire["exit_criteria"] = methods
+                .iter()
+                .enumerate()
+                .map(|(index, verification)| {
+                    json!({
+                        "id": format!("C{}", index + 1),
+                        "text": "The thing holds up.",
+                        "verification": verification
+                    })
+                })
+                .collect();
+            validate_contract(&wire).expect("a schema-valid contract")
+        };
+        let docs = ["docs/catervas/product/spec.md"];
+        let ready = a_ready_context();
+
+        let asks = task(
+            "product_manager",
+            "task",
+            &docs,
+            std::slice::from_ref(&review),
+        );
+        assert!(failed_rules(&asks, &ready).contains(&R::NoReviewOutsideCode));
+        assert_eq!(
+            message_of(&asks, &ready, R::NoReviewOutsideCode),
+            "criterion C1 ask for a review or the human, and only a code change is reviewed (ADR 0061): use command, test or artifact criteria"
+        );
+        let epic = task(
+            "product_manager",
+            "epic",
+            &["docs/catervas/**"],
+            std::slice::from_ref(&human),
+        );
+        assert!(failed_rules(&epic, &ready).contains(&R::NoReviewOutsideCode));
+
+        let code = task(
+            "software_developer",
+            "task",
+            &["src/login/**"],
+            &[
+                json!({ "method": "test", "command": "pnpm test" }),
+                review,
+                human,
+            ],
+        );
+        assert_eq!(evaluate_readiness(&code, &ready), Ok(()));
+
+        let books = a_finance_task(
+            &[".catervas/local/finance/**"],
+            json!([{ "id": "C1", "text": "The books exist.",
+                     "verification": { "method": "artifact", "path": "books.xlsx" } }]),
+        );
+        assert_eq!(evaluate_readiness(&books, &ready), Ok(()));
+
+        let mut requires = ready.clone();
+        requires.rules.required_criteria = vec!["review".to_string()];
+        let plain = task("product_manager", "task", &docs, &[artifact]);
+        assert_eq!(evaluate_readiness(&plain, &requires), Ok(()));
+        let unreviewed_code = task(
+            "software_developer",
+            "task",
+            &["src/login/**"],
+            &[json!({ "method": "test", "command": "pnpm test" })],
+        );
+        assert!(failed_rules(&unreviewed_code, &requires).contains(&R::RequiredCriteriaPresent));
+    }
+
     /// A task for the Finance Specialist, reviewed by the Product Manager, allowed `paths`, with
     /// exactly `criteria` (wire values).
     fn a_finance_task(paths: &[&str], criteria: serde_json::Value) -> TaskContract {
@@ -1878,16 +1991,15 @@ mod tests {
         validate_contract(&wire).expect("a schema-valid contract")
     }
 
-    /// The criteria of a finance task that is ready: its books exist, a reviewer reads them, and
-    /// the user agrees.
+    /// The criteria of a finance task that is ready: its books exist, and Catervas finds each file.
     fn the_books_criteria() -> serde_json::Value {
         json!([
             { "id": "C1", "text": "The books exist.",
               "verification": { "method": "artifact", "path": "books.xlsx" } },
-            { "id": "C2", "text": "Every number names its source.",
-              "verification": { "method": "review", "rubric": ["Does every number name its source?"] } },
-            { "id": "C3", "text": "The books look right to the user.",
-              "verification": { "method": "human", "question": "Do the books look right?" } }
+            { "id": "C2", "text": "The ledger exists.",
+              "verification": { "method": "artifact", "path": "ledger.xlsx" } },
+            { "id": "C3", "text": "The summary exists.",
+              "verification": { "method": "artifact", "path": "summary.xlsx" } }
         ])
     }
 
@@ -1922,10 +2034,10 @@ mod tests {
         let evaluation = json!([
             { "id": "C1", "text": "The comparison is written.",
               "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
-            { "id": "C2", "text": "Every price names its source.",
-              "verification": { "method": "review", "rubric": ["Does every price name its source?"] } },
-            { "id": "C3", "text": "The recommendation is clear to the founder.",
-              "verification": { "method": "human", "question": "Is the recommendation clear?" } }
+            { "id": "C2", "text": "The prices are written.",
+              "verification": { "method": "artifact", "path": "evaluations/email-prices.md" } },
+            { "id": "C3", "text": "The recommendation is written.",
+              "verification": { "method": "artifact", "path": "evaluations/email-recommendation.md" } }
         ]);
         let folder = &[".catervas/local/procurement/**"];
         let task = a_procurement_task(folder, evaluation.clone());
@@ -2020,10 +2132,10 @@ mod tests {
             json!([
                 { "id": "C1", "text": "The comparison is written.",
                   "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
-                { "id": "C2", "text": "Every price names its source.",
-                  "verification": { "method": "review", "rubric": ["Does every price name its source?"] } },
-                { "id": "C3", "text": "The recommendation is clear to the founder.",
-                  "verification": { "method": "human", "question": "Is the recommendation clear?" } }
+                { "id": "C2", "text": "The prices are written.",
+                  "verification": { "method": "artifact", "path": "evaluations/email-prices.md" } },
+                { "id": "C3", "text": "The recommendation is written.",
+                  "verification": { "method": "artifact", "path": "evaluations/email-recommendation.md" } }
             ]),
         );
         // The Product Manager is accepted, for each folder.
@@ -2185,22 +2297,13 @@ mod tests {
         context.rules.required_criteria = vec!["command".to_string(), "test".to_string()];
         context.rules.require_new_tests = true;
         assert_eq!(evaluate_readiness(&task, &context), Ok(()));
-        // The exemption is for those two methods alone: a team that asks for a human or a review
-        // criterion, or any other, still gets that.
-        context.rules.required_criteria = vec!["command".to_string(), "review".to_string()];
+        // Nor does it need a review or a human criterion: only code is reviewed (ADR 0061).
+        context.rules.required_criteria = vec![
+            "command".to_string(),
+            "review".to_string(),
+            "human".to_string(),
+        ];
         assert_eq!(evaluate_readiness(&task, &context), Ok(()));
-        let artifact_only = a_finance_task(
-            &[".catervas/local/finance/**"],
-            json!([the_books_criteria()[0].clone()]),
-        );
-        assert_eq!(
-            failed_rules(&artifact_only, &context),
-            [R::RequiredCriteriaPresent]
-        );
-        assert_eq!(
-            message_of(&artifact_only, &context, R::RequiredCriteriaPresent),
-            "the team rules require a criterion with method review and the contract has none"
-        );
     }
 
     #[test]

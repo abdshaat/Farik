@@ -3779,15 +3779,28 @@ mod tests {
         assert!(not.starts_with("not_awaiting_approval"), "{not}");
     }
 
+    /// A `human` criterion, the one thing that leaves a code task's result to the human (ADR 0061).
+    fn with_a_human_criterion(wire: &mut Value) {
+        wire["exit_criteria"]
+            .as_array_mut()
+            .expect("a list of criteria")
+            .push(json!({
+                "id": "C2",
+                "text": "The founder read it.",
+                "satisfies": ["R1"],
+                "verification": { "method": "human", "question": "Is it right?" }
+            }));
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn accepts_a_task_result_only_where_the_human_is_asked() {
         let harness = Harness::new("human-accept-result", |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(4);
         });
-        harness.verifying_with("CTV-1", true, true, |wire| wire["risk"] = json!("high"));
+        harness.verifying_with("CTV-1", true, true, with_a_human_criterion);
         harness.verifying("CTV-2");
-        harness.file("CTV-3", "in_progress", |wire| wire["risk"] = json!("high"));
+        harness.file("CTV-3", "in_progress", with_a_human_criterion);
         harness.verifying_with("CTV-4", true, true, |wire| {
             wire["exit_criteria"]
                 .as_array_mut()
@@ -3820,7 +3833,7 @@ mod tests {
         assert!(again.starts_with("already_accepted"), "{again}");
         let low = refused(&orchestrator, accept("CTV-2")).await;
         assert!(low.starts_with("not_waiting_for_the_human"), "{low}");
-        // A high-risk task waits for the human only once it is verifying.
+        // A task with a human criterion waits for the human only once it is verifying.
         let working = refused(&orchestrator, accept("CTV-3")).await;
         assert!(
             working.starts_with("not_waiting_for_the_human"),
@@ -5119,7 +5132,7 @@ mod tests {
         let harness = Harness::new("human-send-back", |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(4);
         });
-        harness.verifying_with("CTV-1", true, true, |wire| wire["risk"] = json!("high"));
+        harness.verifying_with("CTV-1", true, true, with_a_human_criterion);
         harness.verifying("CTV-2");
         let orchestrator = an_orchestrator(&harness);
         let back = send_back("CTV-1", AcceptSubject::Result, &["C1"]);
@@ -5184,8 +5197,18 @@ mod tests {
         )
         .await;
         assert!(low.starts_with("not_waiting_for_the_human"), "{low}");
-        // An epic is the human's to review, so it goes back with no reviewer's review.
-        an_epic(&harness, "CTV-3", "verifying", a_command_criterion());
+        // An older epic that keeps a review criterion is the human's to review, so it goes back
+        // with no reviewer's review.
+        an_epic(
+            &harness,
+            "CTV-3",
+            "verifying",
+            json!([{
+                "id": "C1",
+                "text": "The plan reads well.",
+                "verification": { "method": "review", "rubric": ["Does the plan read well?"] }
+            }]),
+        );
         handled(
             &orchestrator,
             send_back("CTV-3", AcceptSubject::Result, &[]),

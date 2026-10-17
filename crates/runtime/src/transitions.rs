@@ -5051,9 +5051,18 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn accepts_a_high_risk_task_once_the_human_has() {
-        let project = Project::new("high-risk-accept", a_team(|_| {}), at(12));
-        project.file("CTV-1", |wire| wire["risk"] = json!("high"));
+    fn accepts_a_task_with_a_human_criterion_once_the_human_has() {
+        let project = Project::new("human-criterion-accept", a_team(|_| {}), at(12));
+        project.file("CTV-1", |wire| {
+            wire["exit_criteria"]
+                .as_array_mut()
+                .expect("criteria")
+                .push(json!({
+                    "id": "C2",
+                    "text": "The founder has opened done.txt.",
+                    "verification": { "method": "human", "question": "Did you open done.txt?" }
+                }));
+        });
         project.created("CTV-1", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
@@ -5070,7 +5079,7 @@ mod tests {
         assert!(
             super::refusal_details(&refusal)
                 .iter()
-                .any(|detail| detail.contains("a high risk task is accepted by the human")),
+                .any(|detail| detail.contains("the human has not answered criterion C2")),
             "{refusal:?}"
         );
 

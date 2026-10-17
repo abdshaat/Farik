@@ -1524,10 +1524,6 @@ mod tests {
         assert_eq!(contract.assignee_role, Role::ProductManager);
         assert_eq!(contract.allowed_paths, paths);
         assert_eq!(evaluate_readiness(&contract, &a_ready_context()), Ok(()));
-        // The owner reads and accepts the result.
-        assert!(catervas_core::governor::done::result_needs_the_human(
-            &contract
-        ));
         // The words the owner reads are plain, and these are the ones they get.
         assert_eq!(
             contract.scope.in_scope,

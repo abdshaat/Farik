@@ -165,7 +165,7 @@ Tests:
   - with team rules requiring `review`, the Product Manager's docs task with only an `artifact` criterion passes `RequiredCriteriaPresent`, and a Developer's task with no `review` criterion still fails it.
 - `accepts_an_epic_and_a_high_risk_task_without_the_human` (`done.rs`): an epic, a `high` risk task and a task whose `allowed_paths` name `docs/catervas/product/spec.md`, each with passing evidence and `human_accepted: false`, pass `evaluate_done`.
 
-- [ ] `feat(core): review only code, and let no result wait on the human`
+- [x] `feat(core): review only code, and let no result wait on the human`
 
 ### Task 4: Catervas verifies a task and an epic with no session
 

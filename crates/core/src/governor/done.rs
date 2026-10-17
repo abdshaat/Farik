@@ -3,10 +3,7 @@
 //! contract and the evidence gathered for it.
 
 use crate::contract::{ExitCriterion, TaskContract, TaskStatus, wire_method};
-use crate::folders::{
-    agent_twin, human_of_twin, may_change_an_owner_document,
-    pair_changed_alone as pairs_changed_alone,
-};
+use crate::folders::{agent_twin, human_of_twin, pair_changed_alone as pairs_changed_alone};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::paths::{
@@ -100,8 +97,6 @@ pub enum DoneRule {
     ReviewNotePresent,
     /// A UI change has the UI/UX Designer's pass since the task last entered `verifying`.
     DesignReviewPassed,
-    /// The human accepted, which a `high` risk task and every epic require.
-    HumanAccepted,
 }
 
 /// One rule the task fails, with a message that says what is missing.
@@ -113,9 +108,9 @@ pub struct DoneFailure {
     pub message: String,
 }
 
-/// Whether the human must accept the finished result before the task is accepted: the contract's
-/// risk is `high`, or it is an epic (`docs/SPEC.md` section 5.4 item 5 and section 5.16 item 4).
-/// No team policy touches this.
+/// Whether the contract itself needs the human's acceptance before work starts: its risk is
+/// `high`, or it is an epic (`docs/SPEC.md` section 5.16 item 2). No result waits on the human any
+/// more (ADR 0061), so only the contract gate asks this, until the contract's approval goes.
 ///
 /// This is not the human's approval of the contract before work starts, which spec 5.2's
 /// `refining -> escalated` gate asks and the team policy `human_accepts_contracts` widens to every
@@ -125,21 +120,16 @@ pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
     contract.risk == Risk::High || contract.kind == Kind::Epic
 }
 
-/// Whether the human must accept the finished result: [`requires_human_acceptance`], or a task
-/// (not an epic) that may change the product's `spec.md` or `roadmap.md`, which the owner accepts
-/// (5.4 item 5, 5.7).
-#[must_use]
-pub fn result_needs_the_human(contract: &TaskContract) -> bool {
-    requires_human_acceptance(contract) || may_change_an_owner_document(&contract.allowed_paths)
-}
-
-/// Whether the task's result waits on the human's acceptance (5.4): it is `verifying`, and it is an
-/// epic, risk `high`, may change the product plan, or has a `human` criterion. The status is the contract's, which the caller
-/// takes from the board.
+/// Whether the task's result waits on the human (5.4): it is `verifying`, Catervas does not verify
+/// it alone (ADR 0061), and it is an epic or has a `human` criterion. That is a code task's
+/// `human` criterion, an older non-code contract that still carries one, and an older epic that
+/// takes the old path. A `high` risk task and a task that may change the product plan no longer
+/// wait. The status is the contract's, which the caller takes from the board.
 #[must_use]
 pub fn result_awaits_human(contract: &TaskContract) -> bool {
     contract.status == TaskStatus::Verifying
-        && (result_needs_the_human(contract)
+        && !catervas_verifies_alone(contract)
+        && (contract.kind == Kind::Epic
             || contract
                 .exit_criteria
                 .iter()
@@ -163,7 +153,7 @@ pub fn catervas_verifies_alone(contract: &TaskContract) -> bool {
 
 type Check = fn(&TaskContract, &DoneEvidence) -> Option<DoneFailure>;
 
-const CHECKS: [Check; 11] = [
+const CHECKS: [Check; 10] = [
     criterion_run_by_reviewer,
     criterion_passed,
     human_criterion_accepted,
@@ -174,7 +164,6 @@ const CHECKS: [Check; 11] = [
     completion_note_present,
     review_note_present,
     design_review_passed,
-    human_accepted,
 ];
 
 /// Checks a task against the Definition of Done (`docs/SPEC.md` section 5.4): every exit
@@ -452,30 +441,13 @@ fn design_review_passed(_: &TaskContract, evidence: &DoneEvidence) -> Option<Don
     })
 }
 
-fn human_accepted(contract: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
-    if !result_needs_the_human(contract) || evidence.human_accepted {
-        return None;
-    }
-    let why = if contract.kind == Kind::Epic {
-        "an epic"
-    } else if contract.risk == Risk::High {
-        "a high risk task"
-    } else {
-        "a task that may change the product's spec or roadmap"
-    };
-    Some(failure(
-        DoneRule::HumanAccepted,
-        format!("{why} is accepted by the human, and the human has not accepted"),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::{
         CriterionResult, DesignReviewNeed, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
-        requires_human_acceptance, result_awaits_human,
+        result_awaits_human,
     };
     use crate::contract::{ExitCriterion, Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
@@ -898,70 +870,46 @@ mod tests {
     }
 
     #[test]
-    fn the_human_accepts_a_task_that_may_change_the_product_plan() {
-        let mut contract = a_contract();
-        contract.status = TaskStatus::Verifying;
-        contract.allowed_paths = vec!["docs/catervas/product/**".to_string()];
-        let mut evidence = an_evidence();
-        evidence.changed_paths = vec!["docs/catervas/product/notes.md".to_string()];
-        assert!(result_awaits_human(&contract));
-        assert!(!requires_human_acceptance(&contract));
-        assert_eq!(failed_rules(&contract, &evidence), [R::HumanAccepted]);
-        assert_eq!(
-            message_of(&contract, &evidence, R::HumanAccepted),
-            "a task that may change the product's spec or roadmap is accepted by the human, and the human has not accepted"
-        );
-        evidence.human_accepted = true;
-        assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
-
-        contract.allowed_paths = vec!["docs/catervas/product/reports/**".to_string()];
-        let mut evidence = an_evidence();
-        evidence.changed_paths = vec!["docs/catervas/product/reports/q3.md".to_string()];
-        assert!(!result_awaits_human(&contract));
-        assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
-
-        let mut epic = a_contract();
-        epic.status = TaskStatus::Verifying;
-        epic.kind = Kind::Epic;
-        epic.allowed_paths = vec!["docs/catervas/product/**".to_string()];
-        assert!(result_awaits_human(&epic));
-        assert_eq!(
-            message_of(&epic, &an_evidence(), R::HumanAccepted),
-            "an epic is accepted by the human, and the human has not accepted"
-        );
+    fn accepts_an_epic_and_a_high_risk_task_without_the_human() {
+        // ADR 0061: no result waits on the human, whatever its risk, its kind or its paths.
         let mut risky = a_contract();
         risky.risk = Risk::High;
-        risky.allowed_paths = vec!["docs/catervas/product/**".to_string()];
-        assert_eq!(
-            message_of(&risky, &an_evidence(), R::HumanAccepted),
-            "a high risk task is accepted by the human, and the human has not accepted"
-        );
-    }
-
-    #[test]
-    fn needs_the_human_for_a_high_risk_task_and_for_every_epic() {
-        let contract = a_contract();
-        assert!(!requires_human_acceptance(&contract));
-        let mut risky = a_contract();
-        risky.risk = Risk::High;
-        assert!(requires_human_acceptance(&risky));
-        assert_eq!(failed_rules(&risky, &an_evidence()), [R::HumanAccepted]);
-        assert_eq!(
-            message_of(&risky, &an_evidence(), R::HumanAccepted),
-            "a high risk task is accepted by the human, and the human has not accepted"
-        );
         let mut epic = a_contract();
         epic.kind = Kind::Epic;
-        assert!(requires_human_acceptance(&epic));
-        assert_eq!(failed_rules(&epic, &an_evidence()), [R::HumanAccepted]);
-        assert_eq!(
-            message_of(&epic, &an_evidence(), R::HumanAccepted),
-            "an epic is accepted by the human, and the human has not accepted"
-        );
-        let mut evidence = an_evidence();
-        evidence.human_accepted = true;
-        assert_eq!(evaluate_done(&risky, &evidence), Ok(()));
-        assert_eq!(evaluate_done(&epic, &evidence), Ok(()));
+        let mut plan = a_contract();
+        plan.allowed_paths = vec!["docs/catervas/product/**".to_string()];
+        let mut plan_evidence = an_evidence();
+        plan_evidence.changed_paths = vec![
+            "docs/catervas/product/spec.md".to_string(),
+            "docs/catervas/product/spec.agent.md".to_string(),
+        ];
+        for (contract, evidence) in [
+            (&risky, an_evidence()),
+            (&epic, an_evidence()),
+            (&plan, plan_evidence),
+        ] {
+            assert!(!evidence.human_accepted);
+            assert_eq!(evaluate_done(contract, &evidence), Ok(()));
+            let mut verifying = contract.clone();
+            verifying.status = TaskStatus::Verifying;
+            assert!(!result_awaits_human(&verifying) || verifying.kind == Kind::Epic);
+        }
+        // An epic whose criteria Catervas runs alone does not wait; a human criterion still does.
+        let mut mechanical = epic.clone();
+        mechanical.status = TaskStatus::Verifying;
+        mechanical.exit_criteria[0].verification = VerificationWire::Variant2 {
+            method: json!("artifact"),
+            must_contain: Vec::new(),
+            path: "docs/catervas/product/spec.md".to_string(),
+        };
+        assert!(!result_awaits_human(&mechanical));
+        let mut asked = a_contract();
+        asked.status = TaskStatus::Verifying;
+        asked.exit_criteria[0].verification = VerificationWire::Variant4 {
+            method: json!("human"),
+            question: "Did you sign in successfully?".to_string(),
+        };
+        assert!(result_awaits_human(&asked));
     }
 
     #[test]
@@ -1011,8 +959,7 @@ mod tests {
                 R::NoCatervasPathChanged,
                 R::PairChangedAlone,
                 R::CompletionNotePresent,
-                R::ReviewNotePresent,
-                R::HumanAccepted
+                R::ReviewNotePresent
             ]
         );
         assert_eq!(

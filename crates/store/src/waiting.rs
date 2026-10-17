@@ -1048,7 +1048,11 @@ mod tests {
     fn lists_a_result_once_its_review_passed() {
         let board = Board::new("waiting-reviewed");
         let people = (Some("linus"), Some("grace"));
-        let high = |wire: &mut serde_json::Value| wire["risk"] = json!("high");
+        // Only a `human` criterion leaves a code task's result to the owner (ADR 0061).
+        let high = |wire: &mut serde_json::Value| {
+            wire["exit_criteria"][0]["verification"] =
+                json!({ "method": "human", "question": "Does it look right?" });
+        };
         board.file("CTV-1", "Unreviewed work", high);
         board.moved(at(9, 1), "CTV-1", ("draft", "verifying"), "linus", people);
         // A pass from before the task went back to work is not this verification's.
@@ -1069,8 +1073,13 @@ mod tests {
             "linus",
             people,
         );
-        // An epic's result is the human's to review, so it waits on no reviewer.
-        board.file("CTV-3", "An epic", |wire| wire["kind"] = json!("epic"));
+        // An older epic that keeps a review criterion is the human's to review, so it waits on no
+        // reviewer.
+        board.file("CTV-3", "An epic", |wire| {
+            wire["kind"] = json!("epic");
+            wire["exit_criteria"][0]["verification"] =
+                json!({ "method": "review", "rubric": ["Is it right?"] });
+        });
         board.moved(
             at(9, 5),
             "CTV-3",
@@ -1094,7 +1103,8 @@ mod tests {
     }
 
     #[test]
-    fn lists_a_product_plan_task_for_the_owner_to_accept() {
+    fn lists_no_product_plan_task_for_the_owner_to_accept() {
+        // ADR 0061: no result waits on the owner for the paths it changes.
         let board = Board::new("waiting-product-plan");
         let people = (Some("linus"), Some("grace"));
         board.file("CTV-1", "Reword the roadmap", |wire| {
@@ -1102,35 +1112,10 @@ mod tests {
         });
         board.moved(at(9, 1), "CTV-1", ("draft", "verifying"), "linus", people);
         reviewed(&board, "CTV-1");
-        board.file("CTV-2", "Write a report", |wire| {
-            wire["allowed_paths"] = json!(["docs/catervas/product/reports/**"]);
-        });
-        board.moved(at(9, 2), "CTV-2", ("draft", "verifying"), "linus", people);
-        reviewed(&board, "CTV-2");
 
         let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
             .expect("the store reads");
-        let seen: Vec<(&str, WaitingKind, Option<&str>, &str)> = listed
-            .iter()
-            .map(|item| {
-                (
-                    item.task_id.as_str(),
-                    item.kind,
-                    item.agent_id.as_deref(),
-                    item.line.as_str(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            seen,
-            vec![(
-                "CTV-1",
-                WaitingKind::Acceptance,
-                // The row names the task's assignee, who wrote the plan: the card shows its author.
-                Some("linus"),
-                "Linus finished it and Grace reviewed it"
-            )]
-        );
+        assert!(listed.is_empty(), "{listed:?}");
     }
 
     #[test]
