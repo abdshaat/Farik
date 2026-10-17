@@ -48,7 +48,8 @@ it committed. Every task is one commit and leaves `cargo xtask check` passing.
 |---|---|---|
 | 1 | `01-asking-for-connections.md` | `catervas_request_connection` and `connection.requested`; `team.get` answers `requested_connections`; Today's suggestions list a requested pair first, with the agent's reason |
 | 2 | `02-filing-bugs.md` | `is_hunt` and `hunt_report` in core, a hunt not reviewed by an agent; `task.created.found_by`; `catervas_file_bug`, bounded and deduplicated |
-| 3 | `03-catervafication-creates-work.md` | The two hunts and the Marketing task filed in the first tick; the kickoff document; a Designer's hunt skips explore; the skills; the propose answer once approved at once |
+| 3 | `03-catervafication-creates-work.md` | The two hunts and the Marketing task filed in the first tick, with no dependency; the kickoff document; the epic's hunts requirement and budget |
+| 3a | `03a-hunts-run-and-marketing-starts.md` | A Designer's hunt skips explore and passes the plan gate; the propose answer once approved at once; the skills |
 | 3b | `03b-hunts-in-a-project-folder.md` | A project folder hunts each present member: hunts name `repo`; a member has a UI when its scan finds an app start, else a note on the epic says why; the epic's budget counts two hunts per member |
 | 4 | `04-tasks-from-chat.md` | `chat_message_post { as_task }`, `chat_message.posted.as_task` and `task.created.given_to`; the agent refines and is assigned its own task, its role fixed; the chat does not answer it |
 | 4b | `04b-the-chat-takes-a-task.md` | The chat session decides: it answers a question, or takes work its role does with `catervas_take_task` (chat sessions only), filing the same given task, and replies in one line naming it |

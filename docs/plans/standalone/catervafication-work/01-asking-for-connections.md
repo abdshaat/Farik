@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 6.5, 6.7 ("Suggested connections on Today"), 8.5, F9
 Depends on: the README's "Before the first task"
-Readiness confirmed by: pending
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
 
@@ -140,7 +140,10 @@ Files: `docs/schemas/event.schema.json`, `crates/protocol/src/event.rs`,
 Files: created `crates/runtime/src/tools/connections.rs`; modified `crates/runtime/src/tools.rs`
 (`mod connections;`, the `TOOLS` entry after `catervas_ask_human` with the description "Ask the
 owner to connect a service your kit offers that your work needs, and why. The owner sees it on
-Today; carry on without it.", the dispatch arm). Consumes Task 1.
+Today; carry on without it.", the dispatch arm). Consumes Task 1. `lists_every_tool_with_its_tier` (`tools.rs`) changes here: it
+lists `catervas_request_connection` right after `catervas_ask_human`, and the count of leading
+`Read` tools it checks (`tools[..41]` on `main`, fewer once ADR 0061 and 0062 removed theirs)
+grows by one.
 
 - `requests_a_connection_the_kit_offers` (`tools/connections.rs` `mod tests`), on
   `TestProject::new` of `a_team_of_three(|_| {})` with `set_kit(a_developer_kit(&[],
@@ -173,8 +176,9 @@ tests are. Consumes Task 1.
     enough" then "second reason, long enough", and one by `dev-a` for `other`, it answers
     `[{ agent: "dev-a", server: "fixture", why: "second reason, long enough" }, { agent: "dev-a",
     server: "other", why: "third reason, long enough" }]`, in that order. The events are
-    recorded with `harness.project.record_by(Some("dev-a"), at(), "CTV-1",
-    "connection.requested", &body)`; `requested_connections` reads them whatever their task.
+    recorded in that order with `harness.project.record_by(Some("dev-a"), at(), "CTV-1",
+    "connection.requested", &body)`, the third with the why "third reason, long enough";
+    `requested_connections` reads them whatever their task.
 
 - [ ] `feat(runtime): answer the connections agents asked for`
 

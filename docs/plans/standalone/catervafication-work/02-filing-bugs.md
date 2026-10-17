@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.1, 5.16, 6.4, 6.8, 8.5, F5
 Depends on: plan 1 of this branch
-Readiness confirmed by: pending
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
 
@@ -21,7 +21,8 @@ session its assignee can file each bug it finds with `catervas_file_bug`:
 
 Out of scope here:
 - filing the hunts themselves (plan 3);
-- any web change: the bug is a request on the board like any other.
+- any other web change: the bug is a request on the board like any other. The task page only
+  says "Catervas checks it" for a hunt, as for any task no agent reviews (Task 4).
 
 ## Decisions
 
@@ -50,6 +51,13 @@ Out of scope here:
 - The bug's contract is `request_from_brief(title, intent, placeholder_budget_usd(rules))`. Its
   `assignee_role` and every other placeholder are the Product Manager's to rewrite, as for any
   request. The tool sets no `risk` from the severity: risk is the contract's.
+- `catervas_file_bug` is offered only to the implement session of a task that `is_hunt`
+  (`offered_tools`, `crates/runtime/src/orchestrator/session.rs`, beside the marketing tools'
+  filter), so no other session is shown it. The refusals below still hold for a call.
+- The task page's `reviewedByAnAgent` (`apps/web/src/pages/TaskDetail.tsx`, ADR 0061 plan 1) is
+  false for a hunt too: a contract whose `allowedPaths` is exactly one path, equal to
+  `docs/catervas/engineering/bug-hunt.md` or `.html` for `software_developer`, or
+  `docs/catervas/design/ui-bug-hunt.md` or `.html` for `ui_ux_designer` (`isHunt`).
 - `catervas_file_bug`, tier `Read`, input `FileBugInput` with `deny_unknown_fields`. Each length
   is in code points of the trimmed text:
 
@@ -105,7 +113,10 @@ docs/schemas/event.schema.json                modifies: taskCreatedBody.found_by
 crates/protocol/src/event.rs                  modifies: as generated (Task 2)
 crates/store/src/requests.rs                  modifies: Filing.found_by, file_bug, bugs_found, mod tests (Task 2)
 crates/runtime/src/tools/bugs.rs              creates:  FileBugInput, BugSeverity, MAX_BUGS_PER_HUNT, file_bug, bug_intent, mod tests (Task 3)
-crates/runtime/src/tools.rs                   modifies: `mod bugs`, TOOLS entry, dispatch arm (Task 3)
+crates/runtime/src/tools.rs                   modifies: `mod bugs`, TOOLS entry, dispatch arm, its tool list test (Task 3)
+crates/runtime/src/orchestrator/session.rs    modifies: offered_tools's filter, mod tests (Task 3)
+apps/web/src/pages/TaskDetail.tsx             modifies: isHunt, reviewedByAnAgent (Task 4)
+apps/web/src/pages/TaskDetail.test.tsx        tests:    a hunt's lead (Task 4)
 ```
 
 ## Interfaces
@@ -115,7 +126,8 @@ Consumes (on the branch): `TaskContract`, `TaskKind`, `Role`, `DocumentFormat`, 
 `file_request`'s `file` and `Filing`, `request_from_brief`, `placeholder_budget_usd`,
 `RequestTriagedBody` (`catervas-store`); `Call`, `call.row`, `call.deps()`, `call.ids`,
 `call.team`, `TOOLS` (`catervas-runtime` tools); `TestProject`, `filed_with`, `moved`, `call_in`,
-`a_team_of_three` (`tools::fixtures`); `a_contract` (`governor::readiness::fixtures`).
+`a_team_of_three` (`tools::fixtures`); `session_spec`, `asked`, `agent`, `offered_tools`
+(`orchestrator::session` and its `mod tests`); `a_contract` (`governor::readiness::fixtures`).
 
 Produces:
 
@@ -141,6 +153,11 @@ pub(crate) struct FileBugInput { title: String, #[serde(rename = "where")] place
     steps: Vec<String>, expected: String, actual: String, severity: BugSeverity, evidence: Vec<String> }
 pub(super) fn file_bug(call: &Call<'_>, input: &FileBugInput) -> Result<Value, ToolError>;
 fn bug_intent(input: &FileBugInput, hunter: &str, hunt: &TaskId) -> String;
+```
+
+```ts
+// apps/web/src/pages/TaskDetail.tsx
+export function isHunt(contract: Contract): boolean;
 ```
 
 ## Tasks
@@ -172,7 +189,8 @@ hunt that found this bug (ADR 0063); written by catervas_file_bug alone."),
 `crates/protocol/src/event.rs`, `crates/store/src/requests.rs`. The tests are in
 `requests.rs`'s `mod tests`, which file into a temporary project as the other filing tests do.
 
-- `files_a_bug_triaged_small_and_linked_to_its_hunt`:
+- `files_a_bug_triaged_small_and_linked_to_its_hunt`, with a request filed first by
+  `file_request` as `CTV-1`, standing in for the hunt:
   - `file_bug` with `request_from_brief("The save button does nothing", <an intent of 40
     characters>, 20.0)`, created by `dev-a`, found by `CTV-1`, files `CTV-2` as a `draft`
     `task`;
@@ -180,7 +198,7 @@ hunt that found this bug (ADR 0063); written by catervas_file_bug alone."),
   - the next event is `request.triaged { size: small, reason: "a bug CTV-1 found", triaged_by:
     "catervas" }` about `CTV-2`;
   - `bugs_found` answers `[(CTV-2, CTV-1)]`;
-  - a request filed with `file_request` is not in `bugs_found`.
+  - `CTV-1`, filed with `file_request`, is not in `bugs_found`.
 
 - [ ] `feat(store): file a bug as a request its hunt is named on`
 
@@ -190,7 +208,10 @@ Files: created `crates/runtime/src/tools/bugs.rs`; modified `crates/runtime/src/
 (`mod bugs;`, the `TOOLS` entry after `catervas_request_connection` with the description "In a
 bug hunt: file one bug you found, with where it is, the steps, what you expected, what happened,
 its severity and the evidence. It goes to the Product Manager as a request. At most 10 per hunt.",
-the dispatch arm). Consumes Tasks 1 and 2.
+the dispatch arm; `lists_every_tool_with_its_tier` lists it right after
+`catervas_request_connection`, and its count of leading `Read` tools grows by one), and
+`crates/runtime/src/orchestrator/session.rs` (`offered_tools`: `catervas_file_bug` only when
+`ask.purpose == Implement` and `ask.contract.is_some_and(is_hunt)`). Consumes Tasks 1 and 2.
 
 The fixture is a `TestProject` of `a_team_of_three(|_| {})`. `CTV-1` is filed with `filed_with(
 "CTV-1", "assigned", "task", None, …)`, its contract's `assignee_role` `software_developer`
@@ -206,7 +227,8 @@ assignee by `moved("CTV-1", "assigned", "in_progress", &json!({ "assignee": "dev
   - `CTV-2`'s contract has that title, and an intent equal, character for character, to the
     Decisions' format filled with those parts, the hunter's display name and `CTV-1`;
   - its `task.created` names `found_by` `CTV-1` and `created_by` `dev-a`.
-- `holds_a_hunt_to_its_bugs` (the bound, the duplicate rule and the gate, one guarantee):
+- `holds_a_hunt_to_its_bugs` (the bound, the duplicate rule and the gate, one guarantee). It
+  first files the bug of `files_a_bug_with_its_evidence`, as `CTV-2`. In this order:
   - the same title as `"  the SAVE button   does nothing "` is refused with `bug_already_filed:
     CTV-2 is open with this title`;
   - once `CTV-2` is `cancelled`, that title is filed;
@@ -215,15 +237,37 @@ assignee by `moved("CTV-1", "assigned", "in_progress", &json!({ "assignee": "dev
   - each of these is refused with `bug_refused: `:
     - `dev-b` on `CTV-1`;
     - `dev-a` from a `refine` session (`call_in`);
-    - `dev-a` on a `CTV-20` whose `allowed_paths` are `["src/**"]`;
+    - `dev-a` on a `CTV-20` whose `allowed_paths` are `["src/**"]`, filed and moved to
+      `in_progress` with `dev-a` as assignee only now, after the bound, since a new id is taken
+      past the highest contract;
   - `steps: []` is refused with `bug_out_of_bounds: steps`;
   - no `task.created` follows any refusal.
+- `offers_file_bug_to_a_hunts_implement_session_alone` (`session.rs` `mod tests`, ignored, as
+  `offers_the_seller_tools_to_procurement_alone` is, and built the same way with
+  `session_spec(..).catervas_tools`): `dev-a`'s implement session of a hunt contract (the one
+  above) is given `catervas_file_bug`; its refine session of that contract, and its implement
+  session of a contract whose `allowed_paths` are `["src/**"]`, are not.
 
 - [ ] `feat(runtime): a hunt files the bugs it finds, ten at most and none twice`
+
+### Task 4: the task page says Catervas checks a hunt
+
+Files: `apps/web/src/pages/TaskDetail.tsx` (`isHunt`, and `reviewedByAnAgent` false when it
+holds), tested by `apps/web/src/pages/TaskDetail.test.tsx`. Consumes ADR 0061 plan 1's
+`reviewedByAnAgent` and its strings `taskChecked` and `gateChecked`.
+
+- `says_catervas_checks_a_hunt`: a Developer's task whose `allowedPaths` are
+  `["docs/catervas/engineering/bug-hunt.html"]` has a lead holding "Catervas checks it" and no
+  "reviews it"; with `["docs/catervas/engineering/bug-hunt.html", "src/**"]` the lead holds "Ada
+  reviews it", as ADR 0061's test sets the reviewer.
+
+- [ ] `feat(web): say Catervas checks a bug hunt`
 
 ## Verification
 
 ```
 cargo xtask check
 # expected: xtask check: ok
+cargo xtask check --integration
+# expected: xtask check: ok   (Task 3's ignored session test among them)
 ```

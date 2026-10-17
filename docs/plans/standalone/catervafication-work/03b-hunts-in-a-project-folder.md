@@ -3,8 +3,8 @@
 Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.16 ("Its tasks"), 6.4, 6.8; ADR 0057
-Depends on: plans 1 to 3 of this branch
-Readiness confirmed by: pending
+Depends on: plans 1 to 3a of this branch
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
 
@@ -43,7 +43,7 @@ Out of scope:
   preview it opens is the team's one preview, run in the member's worktree, as for any Designer
   task naming that member.
 - **The note.** For each member that would get a UI hunt but has no UI (an active, ready Designer),
-  Catervas records on the epic, once, `note.written { kind: progress, text: "No UI bug hunt for
+  under an epic that `epic_hunts`, Catervas records on the epic, once, `note.written { kind: progress, text: "No UI bug hunt for
   <name>: Catervas found no way to start its app.", written_by: "catervas" }`. "Once" means no
   `note.written` of that text in the epic's history.
 - **Missing members.** Only members present when the tick runs (`repo_present`) are hunted. A
@@ -80,8 +80,8 @@ Out of scope:
 
 ```
 crates/runtime/src/catervafication.rs        modifies: HuntMember, Hunt, Hunts, hunt_members, catervafication_hunts, hunt_contract's repo, epic_contract's hunted, start, file_due, mod tests (Tasks 1, 2)
-crates/runtime/src/daemon/gates.rs           modifies: catervafication_get (Task 2)
-crates/runtime/src/orchestrator/requests.rs  tests:    the folder's first tick (Task 2)
+crates/runtime/src/daemon/gates.rs           modifies: catervafication_get (Tasks 1, 2)
+crates/runtime/src/orchestrator/requests.rs  tests:    epic_contract's caller (Task 1); the folder's first tick (Task 2)
 ```
 
 ## Interfaces
@@ -109,7 +109,15 @@ pub(crate) fn hunt_members(deps: &ToolDeps) -> Result<Option<Vec<HuntMember>>, C
 ### Task 1: the rows of a folder
 
 Files: `crates/runtime/src/catervafication.rs` (types, `catervafication_hunts`, `hunt_contract`,
-`epic_contract`; `mod tests`). Update plan 3's tests to the new signatures; their assertions stay.
+`epic_contract`; `mod tests`), and the callers the new signatures break, which keep today's
+behaviour until Task 2:
+- `file_due` and `catervafication_get` (`daemon/gates.rs`) pass `members: None` for one
+  repository and `Some(&[])` for a project folder, so a folder still files no hunt;
+- `start` passes `hunted: 1`;
+- every test caller of `epic_contract`, in `catervafication.rs` and in `orchestrator/requests.rs`
+  (`judges_the_catervafication_epic_as_filed_whole`), passes `1`.
+
+Update plan 3's tests to the new signatures; their assertions stay.
 
 - `hunts_each_member_of_a_project_folder`:
   - For the suggested six, `Existing`, ready, and members `[api (no UI), web (UI)]`, the rows
@@ -129,13 +137,15 @@ Files: `crates/runtime/src/catervafication.rs` (types, `catervafication_hunts`, 
 
 ### Task 2: filed in the first tick, with the note
 
-Files: `crates/runtime/src/catervafication.rs` (`hunt_members`, `start`, `file_due`),
-`crates/runtime/src/daemon/gates.rs`, tested in `crates/runtime/src/orchestrator/requests.rs`
+Files: `crates/runtime/src/catervafication.rs` (`hunt_members`; `start` passes its count, or 1
+for `None`; `file_due` passes `hunt_members(deps)?` and holds by member),
+`crates/runtime/src/daemon/gates.rs` (passes `hunt_members(deps)?`), tested in `crates/runtime/src/orchestrator/requests.rs`
 `mod tests` (ignored, needs git, as its neighbours are).
 
 - `files_a_hunt_per_member_in_the_first_tick`. Set-up:
   - `Harness::project_folder_with("req-catervafication-folder", &["api", "web"],
-    with_the_suggested_six)`, its previews `FakePreviews::ready()`;
+    crate::tools::fixtures::with_the_suggested_six)`, its `previews` set to
+    `Arc::new(FakePreviews::ready())` as `Harness::with_the_suggested_six` sets them;
   - `web` holds a committed `package.json` with `{ "scripts": { "dev": "vite" } }`; `api` holds
     none.
 

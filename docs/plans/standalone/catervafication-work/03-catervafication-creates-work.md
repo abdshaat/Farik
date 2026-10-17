@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.16 ("The Catervafication's epic", "Its tasks"), 6.4, 6.5, 6.8, 5.17
 Depends on: plans 1 and 2 of this branch
-Readiness confirmed by: pending
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16 (its Tasks 3 to 5 split into plan 3a)
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
 
@@ -17,9 +17,9 @@ An existing repository's Catervafication files every task in its first breakdown
 - a UI bug hunt for an active UI/UX Designer whose browser is ready.
 
 A new project's Catervafication files its three tasks, the Marketing one being the new one, and no
-hunt. A Designer's hunt starts in its implement session, with no explore or design plan. The
-Marketing Specialist's propose answer tells it to start at once when Catervas approved the plan.
-The skills say how. Out of scope:
+hunt. Out of scope:
+- how the hunts and the marketing run: a Designer's hunt skipping the design plan, the propose
+  answer and the skills (plan 3a);
 - hunts in a project folder (plan 3b) and for a new project (none, ADR 0063);
 - the web's words (plan 5).
 
@@ -77,11 +77,16 @@ The skills say how. Out of scope:
     (exit 0), kept; then C2, the kickoff's artifact, whose `must_contain` adds `"MP-"` after the
     heading mark.
 
-  `Row` gains `also_contains: &'static [&'static str]` (`&[]` elsewhere); `task_contract`'s
-  `paths.is_empty()` branch goes, since every row has a document now.
+  `Row` gains `also_contains: &'static [&'static str]` (`&[]` elsewhere), added to each of the
+  row's artifacts' `must_contain` after `artifact_marks`. `task_contract`'s `paths.is_empty()`
+  branch goes, since every row has a document now. For the Marketing Specialist alone,
+  `task_contract` puts ADR 0061's command first, as C1, and numbers the documents' artifacts after
+  it, so the kickoff is C2; every other row numbers its artifacts from C1 as today.
 - **Marketing goes alongside.** `catervafication_roles` drops the clause that lists the
   Marketing Specialist only after a Product Manager's row. `file_due` files the Marketing task
-  with no `dependencies`, removing the line ADR 0061's plan 5 added. Its doc comment says so.
+  with no `dependencies`, for an existing repository and a new project alike, removing the line
+  ADR 0061's plan 5 added (a new project's product plan task is accepted before its
+  Catervafication starts, so nothing waits on it). Its doc comment says so.
 - **Only an epic that asks for hunts gets them.** The existing repository's `epic_contract`
   changes:
   - It gains requirement R2, text `HUNTS_REQUIREMENT` = "The Software Developer and the UI/UX
@@ -105,47 +110,12 @@ The skills say how. Out of scope:
   A task under the epic is held as `(assignee_role, is_hunt(&contract))`. A documentation row
   is due when no held task is `(role, false)`, and a hunt when none is `(role, true)`, whatever
   the status, as today. Its report stays "filed the Catervafication's tasks: <ids>".
-- **The Designer's stage** (`rules.rs` `in_progress`): the design stage runs only for a Designer's
-  task that is not a hunt (`!is_hunt(&contract)`). A hunt goes straight to its implement session,
-  which `offered_connector` already gives the browser.
 - **`catervafication.get`'s `roles`**: `catervafication_roles`'s roles, then each role of
   `catervafication_hunts(team, Existing, ready, deps.files.is_project_folder())` not already
   listed. `offered` is unchanged.
 - **`DOCUMENT_STEMS`** grows to 15: `("docs/catervas/engineering/bug-hunt", "Bug hunt")` after
   `workflow`, `("docs/catervas/design/ui-bug-hunt", "UI bug hunt")` after `ui-inventory`, and
   `("docs/catervas/marketing/kickoff", "Marketing kickoff")` after `persona`.
-- **The propose answer.** When `catervas_propose_marketing_plan` has recorded
-  `marketing_plan.approved` at once (ADR 0061), its `next` is "<MP-n> is approved: it spends
-  nothing. Start on it now: schedule its first posts with catervas_schedule_post, then write
-  your kickoff document and commit it." Otherwise it stays "end your turn: the owner's decision
-  starts the next session".
-- **The skills.** Each role's `catervafying-the-repository` gains a section on the new work and
-  stays under 6 KiB. ADR 0061's edits to these files are kept where they do not contradict the
-  text below.
-  - Developer, "## Hunting for bugs": its one allowed path is
-    `docs/catervas/engineering/bug-hunt` in the team's format, and it changes no code. It reads
-    the code and runs the project's tests and checks with `catervas_exec`. It files each real bug
-    with `catervas_file_bug`, with evidence (the command and the lines of output, or the file and
-    line): at most 10, never the same one twice, and a failing test only when the code, not the
-    test, is wrong. It removes anything the commands left in the worktree. Its report says what it
-    checked, then a section headed "Bugs filed" with each id and title, or "None found". It
-    commits with `catervas_git_commit`.
-  - Designer, "## Hunting for bugs in the screens": its one path is
-    `docs/catervas/design/ui-bug-hunt`, and it changes no code. It goes through every screen of
-    the preview with the browser at 375 and 1280 pixels wide, and runs `catervas_check_page`. It
-    looks for broken layout, console errors, controls that do nothing, cut-off text, low contrast
-    and anything a keyboard cannot reach. Its evidence is the address, the width, what the
-    snapshot shows and the console's lines. It files with `catervas_file_bug`, and reports as the
-    Developer does.
-  - Marketing, rewritten whole: it reads the whole project, then writes and proposes the plan.
-    When the answer says the plan is approved, it schedules the first posts with
-    `catervas_schedule_post` now; a plan with money waits for the owner, and it ends its turn. It
-    asks for each missing service the plan needs with `catervas_request_connection` and carries
-    on. It writes `docs/catervas/marketing/kickoff`, naming `MP-<n>`, the posts scheduled and the
-    connections asked for, and commits it. The description becomes "Use when a task of the
-    project's Catervafication asks you to write the marketing plan and start on it."
-  - The Developer's and the Designer's descriptions end "…, or to hunt for bugs in its code" and
-    "…, or to hunt for bugs in its screens".
 
 ## File map
 
@@ -153,12 +123,8 @@ The skills say how. Out of scope:
 crates/core/src/folders.rs                       modifies: DOCUMENT_STEMS (Task 1)
 crates/runtime/src/catervafication.rs            modifies: rows, hunts, epic, mod tests (Task 1); file_due (Task 2)
 crates/runtime/src/orchestrator/requests.rs      tests:    the first tick (Task 2)
+crates/runtime/src/orchestrator/rules.rs         tests:    a new project's Marketing task (Task 2)
 crates/runtime/src/daemon/gates.rs               modifies: catervafication_get, mod tests (Task 2)
-crates/runtime/src/orchestrator/rules.rs         modifies: in_progress's design stage (Task 3)
-crates/runtime/src/orchestrator/design.rs        tests:    a hunt skips it (Task 3)
-crates/runtime/src/tools/marketing.rs            modifies: propose_plan's answer, mod tests (Task 4)
-crates/roles/roles/{software_developer,ui_ux_designer,marketing_specialist}/skills/catervafying-the-repository/SKILL.md   modifies (Task 5)
-crates/roles/src/kit.rs                          tests:    the skills (Task 5)
 ```
 
 ## Interfaces
@@ -168,8 +134,7 @@ Consumes: `hunt_report`, `is_hunt` (plan 2); `catervas_file_bug` (plan 2) and
 `role_folder`, `DocumentFormat` (`catervas-core`); `file_request`, `placeholder_budget_usd`,
 `ProjectFiles::is_project_folder` (`catervas-store`); `Harness::with_the_suggested_six`,
 `a_catervafication_in_progress`, `roles_under_the_epic` (`orchestrator::requests::tests`);
-`a_designers_task`, `ticked`, `who`, transcript `implement_by_iris_ctv_1`
-(`orchestrator::design::tests`); `load_kit` (`catervas-roles`).
+`ProjectFiles::write_contract` (`catervas-store`).
 
 Produces:
 
@@ -189,7 +154,9 @@ Files: `crates/core/src/folders.rs` (`DOCUMENT_STEMS`), `crates/runtime/src/cate
 (the rows, `hunt_contract`, `catervafication_hunts`, `HUNTS_REQUIREMENT`, `epic_hunts`,
 `epic_contract`, `catervafication_roles`'s Marketing clause; `mod tests`). Update the module's
 existing tests to the new rows:
-- the Marketing row's title, documents and marks in `writes_each_template_as_the_table_says`;
+- the Marketing row's title, documents and marks in `writes_each_template_as_the_table_says`,
+  and the existing repository's epic summary in `the_epic_is_worded_for_its_owner`, which it
+  calls;
 - the 7.0 count in `every_template_passes_the_definition_of_ready`, which also runs each
   `hunt_contract` through `validate_contract` and `evaluate_readiness` and expects `Ok(())`;
 - `lists_the_roles_that_get_a_task_with_their_reviewers`'s cases, which no longer depend on the
@@ -219,13 +186,23 @@ existing tests to the new rows:
 
 Files: `crates/runtime/src/catervafication.rs` (`file_due`), `crates/runtime/src/orchestrator/
 requests.rs` (`mod tests`), `crates/runtime/src/daemon/gates.rs` (`catervafication_get`; `mod
-tests`). Tests `#[ignore = "needs the git program: cargo xtask check --integration"]`, as their
+tests`), `crates/runtime/src/orchestrator/rules.rs` (`mod tests`). Tests `#[ignore = "needs the git program: cargo xtask check --integration"]`, as their
 neighbours are.
 
 Delete each test that asserts the Marketing task waits for, or depends on, the Product Manager's
 task. On `main` those are `files_the_marketing_task_once_the_product_plan_is_in` and
 `files_no_marketing_task_for_a_cancelled_product_plan`, or whatever ADR 0061's plan 5 renamed them
 to. Their behaviour is removed by ADR 0063.
+
+Two more tests change to the new rows here:
+- `files_no_task_twice` (`requests.rs`), whatever ADR 0061 left it as: with the Designer paused
+  the first tick files `[product_manager, architect, software_developer, marketing_specialist,
+  software_developer]` (CTV-2 to CTV-6); after the Architect's task is cancelled nothing is
+  filed and five stay; once the Designer is active, the tick files its documentation task and its
+  hunt, reporting "filed the Catervafication's tasks: CTV-7, CTV-8", and the last role is
+  `ui_ux_designer`.
+- ADR 0061 plan 5's `a_new_project_plans_once_its_product_plan_task_is_accepted` (`rules.rs`):
+  its Marketing task is asserted to have no `dependencies`, in place of naming the plan task.
 
 - `files_every_task_in_the_first_tick` replaces `files_one_task_per_role_with_a_folder`, with
   the same harness:
@@ -238,56 +215,13 @@ to. Their behaviour is removed by ADR 0063.
   - The unready harness files `[product_manager, architect, software_developer,
     marketing_specialist, software_developer]`.
 - `an_epic_without_the_hunts_requirement_files_no_hunt`. In the same set-up, before the
-  breakdown tick, write CTV-1's contract again without R2 (`requirements` R1 alone, C1 satisfying
-  `["R1"]`). The tick then files five tasks, none a hunt.
+  breakdown tick, write CTV-1's contract again (`ProjectFiles::write_contract`) without R2
+  (`requirements` R1 alone, C1 satisfying `["R1"]`). The tick then files five tasks, none a hunt.
 - `offers_the_hunts_among_the_roles` (`gates.rs`). For a Product Manager and one Developer,
   `catervafication.get` answers `roles: ["product_manager", "software_developer"]` and `offered:
   true`.
 
 - [ ] `feat(runtime): a Catervafication files its hunts and its marketing in its first tick`
-
-### Task 3: a Designer's hunt skips the design plan
-
-Files: `crates/runtime/src/orchestrator/rules.rs` (`in_progress`), tested in
-`crates/runtime/src/orchestrator/design.rs` `mod tests` (ignored, as its neighbours are).
-
-- `a_hunt_starts_in_its_implement_session`. In `a_designers_task("design-hunt", …)` the change
-  sets `allowed_paths` to `["docs/catervas/design/ui-bug-hunt.html"]` and the one criterion to
-  that artifact. `ticked` with `vec![implement_by_iris_ctv_1()]` once gives:
-  - `who` is `[("iris", SessionPurpose::Implement)]`;
-  - no `design_plan.proposed` is recorded.
-
-- [ ] `feat(runtime): a Designer hunts without proposing a design plan`
-
-### Task 4: the plan says to start now
-
-Files: `crates/runtime/src/tools/marketing.rs` (`propose_plan`'s answer; `mod tests`).
-
-- `answers_start_now_when_the_plan_spends_nothing`:
-  - a proposal whose every budget is zero answers `next` exactly "MP-1 is approved: it spends
-    nothing. Start on it now: schedule its first posts with catervas_schedule_post, then write
-    your kickoff document and commit it.";
-  - a proposal with a total budget of 100 answers `next` "end your turn: the owner's decision
-    starts the next session".
-
-- [ ] `feat(runtime): a marketing plan approved at once is started in the same session`
-
-### Task 5: the skills
-
-Files: the three `SKILL.md` of the File map; `crates/roles/src/kit.rs` `mod tests`.
-
-- `catervafying_skills_name_the_new_work`:
-  - the Software Developer's text contains `` `catervas_file_bug` ``, `bug-hunt` and `Bugs filed`;
-  - the UI/UX Designer's contains `` `catervas_file_bug` ``, `ui-bug-hunt`, `Bugs filed` and
-    `` `catervas_check_page` ``;
-  - the Marketing Specialist's contains `` `catervas_request_connection` ``,
-    `` `catervas_schedule_post` `` and `docs/catervas/marketing/kickoff`, and not "and only that";
-  - each description starts "Use when".
-
-  `every_owner_carries_catervafying_the_repository` still passes: each under 6 KiB, each naming
-  its folder.
-
-- [ ] `docs(roles): the skills say how to hunt and how to start the marketing`
 
 ## Verification
 
@@ -295,5 +229,5 @@ Files: the three `SKILL.md` of the File map; `crates/roles/src/kit.rs` `mod test
 cargo xtask check
 # expected: xtask check: ok
 cargo xtask check --integration
-# expected: xtask check: ok   (Tasks 2 and 3's ignored tests among them)
+# expected: xtask check: ok   (Task 2's ignored tests among them)
 ```
