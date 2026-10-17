@@ -112,7 +112,7 @@ the replacement says "(changed in 0.116)".
   the delivery report at `docs/catervas/product/reports/D<n>`; the Catervafication opens no sprint;
   the changelog task Catervas files.
 
-- [ ] `docs(spec): the harness without sprints`
+- [x] `docs(spec): the harness without sprints`
 
 ### Task 3: roles, requirements, architecture, the rest, and the revision note
 
