@@ -130,7 +130,7 @@ Files: `apps/web/src/strings/en.ts`, `apps/web/src/pages/TaskDetail.tsx`; tested
 
 Update `offers_the_catervafication_at_the_end_of_setup`'s expected words to the new values.
 
-- [ ] `feat(web): the offer says the team hunts for bugs and starts the marketing`
+- [x] `feat(web): the offer says the team hunts for bugs and starts the marketing`
 
 ## Verification
 

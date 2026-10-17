@@ -372,7 +372,7 @@ describe("today", () => {
 		expect(start.getAttribute("aria-describedby")).toBe(title.id);
 		expect(
 			screen.getByText(
-				"A first piece of work where your team reads your project and writes down what it learns, before building anything.",
+				"A first piece of work where your team reads your project, writes down what it learns, looks for bugs and starts your marketing.",
 			),
 		).toBeTruthy();
 		// It follows the request box, and is no "Waiting on you" item.

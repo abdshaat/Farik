@@ -55,11 +55,11 @@ const OFFER = {
 };
 
 /** The offer page at the end of setup, with its two queries answered. */
-async function theOffer(offer: unknown = OFFER) {
+async function theOffer(offer: unknown = OFFER, team: unknown = TEAM) {
 	const rendered = await renderApp("/setup/ready");
 	const s = rendered.socket as FakeSocket;
 	await answerQuery(s, "catervafication.get", offer);
-	await answerQuery(s, "team.get", { team: TEAM });
+	await answerQuery(s, "team.get", { team });
 	return { ...rendered, s };
 }
 
@@ -603,20 +603,20 @@ describe("setup", () => {
 		expect(within(offer).getByText("Recommended")).toBeTruthy();
 		expect(
 			within(offer).getByText(
-				"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
+				"Your team reads your project, writes down what it learns, looks for bugs and starts your marketing. You can read all of it in Files.",
 			),
 		).toBeTruthy();
 		const rows = within(offer).getAllByRole("listitem");
 		expect(rows.map((row) => row.textContent)).toEqual([
 			"Mira PM writes what your product is and what comes next, as your product plan.",
 			"Ada ARCH writes how your project is put together, with diagrams.",
-			"Theo DEV writes how your project is built and worked on: its habits and rules.",
-			"Kai MKT writes your marketing plan, after the product plan is written.",
+			"Theo DEV writes how your project is built and worked on, and looks for bugs in the code.",
+			"Kai MKT writes your marketing plan and starts on it; anything that costs money waits for you.",
 		]);
 		expect(within(offer).queryByText("Sol")).toBeNull();
 		expect(
 			within(offer).getByText(
-				"Your team only adds its notes; nothing else in your project changes.",
+				"Your team adds its notes and files each bug it finds as a request; nothing in your code changes yet.",
 			),
 		).toBeTruthy();
 		expect(within(offer).getByText("Later keeps this on Today.")).toBeTruthy();
@@ -627,6 +627,42 @@ describe("setup", () => {
 		expect(steps).toHaveLength(8);
 		for (const step of steps) expect(step.textContent).toContain(", done");
 		await expectNoAxeViolations(container);
+	});
+
+	it("the_offer_says_the_team_hunts_and_markets", async () => {
+		const team = {
+			...TEAM,
+			agents: [
+				...TEAM.agents,
+				agent("iris", "Iris", "ui_ux_designer", "designer"),
+			],
+		};
+		await theOffer(
+			{
+				offered: true,
+				roles: [
+					"product_manager",
+					"software_developer",
+					"ui_ux_designer",
+					"marketing_specialist",
+				],
+			},
+			team,
+		);
+		const offer = await screen.findByRole("region", {
+			name: "Start with a Catervafication",
+		});
+		expect(
+			within(offer).getByText(
+				"Your team reads your project, writes down what it learns, looks for bugs and starts your marketing. You can read all of it in Files.",
+			),
+		).toBeTruthy();
+		const rows = within(offer)
+			.getAllByRole("listitem")
+			.map((row) => row.textContent);
+		expect(rows).toContain(
+			"Iris UX writes down every screen your project has, and looks for what is broken on them.",
+		);
 	});
 
 	it("starts_or_leaves_it_for_later", async () => {

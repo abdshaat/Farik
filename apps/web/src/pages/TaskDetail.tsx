@@ -102,6 +102,7 @@ const TOLD: Record<string, keyof typeof en> = {
 	"design_plan.approved": "toldDesignApproved",
 	"design_plan.returned": "toldDesignReturned",
 	"catervafication.started": "toldCatervafication",
+	"connection.requested": "toldConnectionRequested",
 };
 
 /** The body fields that name who did it, one per kind that has one. */
