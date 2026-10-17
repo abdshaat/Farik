@@ -104,6 +104,7 @@ async function today(fields: {
 	catervafication?: unknown;
 	kits?: unknown[];
 	hiddenSuggestions?: unknown[];
+	requestedConnections?: unknown[];
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -113,6 +114,9 @@ async function today(fields: {
 		...(fields.kits && { kits: fields.kits }),
 		...(fields.hiddenSuggestions && {
 			hidden_suggestions: fields.hiddenSuggestions,
+		}),
+		...(fields.requestedConnections && {
+			requested_connections: fields.requestedConnections,
 		}),
 	});
 	await answerQuery(s, "team.activity", fields.activity ?? ACTIVITY);
@@ -2375,6 +2379,45 @@ describe("suggested connections", () => {
 		const describedBy = connect.getAttribute("aria-describedby") ?? "";
 		expect(document.getElementById(describedBy)?.textContent).toBe("Notion");
 		expect(within(row).queryByRole("img", { name: "Mira" })).toBeNull();
+	});
+
+	it("lists_an_asked_connection_first_with_its_reason", async () => {
+		const asked = {
+			agent: "mira",
+			server: "linear",
+			why: "I need it to track the bugs the team files.",
+		};
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+			requestedConnections: [asked],
+		});
+		const [first, second] = items() as [HTMLElement, HTMLElement];
+		expect(first.textContent).toContain("Linear");
+		expect(first.textContent).toContain(
+			"Mira asks: I need it to track the bugs the team files.",
+		);
+		expect(
+			within(first)
+				.getByRole("link", { name: en.suggestionsConnect })
+				.getAttribute("href"),
+		).toBe("/team/mira?connect=linear");
+		expect(second.textContent).toContain("Notion");
+		expect(second.textContent).toContain(KIT_NOTION.about);
+	});
+
+	it("keeps_a_requested_connection_hidden_when_the_user_said_not_now", async () => {
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+			requestedConnections: [
+				{ agent: "mira", server: "linear", why: "I need it to track bugs." },
+			],
+			hiddenSuggestions: [{ agent: "mira", server: "linear" }],
+		});
+		expect(items()).toHaveLength(1);
+		expect(items()[0]?.textContent).toContain("Notion");
+		expect(screen.queryByText(/Linear/)).toBeNull();
 	});
 
 	it("does_not_suggest_what_is_held_at_launch_hidden_or_a_paused_agents", async () => {

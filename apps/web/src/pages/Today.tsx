@@ -159,6 +159,7 @@ export function Today() {
 		team: Team;
 		kits?: RoleKit[];
 		hiddenSuggestions?: { agent: string; server: string }[];
+		requestedConnections?: { agent: string; server: string; why: string }[];
 	}>("team.get", {});
 	// What agents made on other services, for a call that waits past its allowance.
 	const allowances = useAllowances();
@@ -338,6 +339,7 @@ export function Today() {
 					team={team.team}
 					kits={team.kits ?? []}
 					hidden={team.hiddenSuggestions ?? []}
+					requested={team.requestedConnections ?? []}
 				/>
 			)}
 			<SellerMailSections

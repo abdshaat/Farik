@@ -199,7 +199,7 @@ Consumes Task 3's wire.
   - the second item holds "Notion" and KIT_NOTION's `about`;
   - with `hidden_suggestions: [{ agent: "mira", server: "linear" }]` added, Linear is not listed.
 
-- [ ] `feat(web): put the connections an agent asked for first on Today`
+- [x] `feat(web): put the connections an agent asked for first on Today`
 
 ## Verification
 

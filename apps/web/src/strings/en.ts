@@ -438,6 +438,7 @@ export const en = {
 	suggestionsShowAll: "Show all {count}",
 	suggestionsShowFewer: "Show fewer",
 	suggestionsLine: "{agent} · {about}",
+	suggestionsAsked: "{agent} asks: {why}",
 	waitingTitle: "Waiting on you ({count})",
 	waitingList: "Waiting on you",
 	waitingNone: "Nothing waits on you.",
