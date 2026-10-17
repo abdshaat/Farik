@@ -86,7 +86,7 @@ the replacement says "(changed in 0.116)".
   "Delivery: the work accepted since the last one, closed by an accepted epic, five accepted
   standalone tasks or a team with no work left, and reviewed once (3)."
 
-- [ ] `docs(spec): concepts and journeys without sprints, revision 0.116`
+- [x] `docs(spec): concepts and journeys without sprints, revision 0.116`
 
 ### Task 2: the harness (section 5)
 
