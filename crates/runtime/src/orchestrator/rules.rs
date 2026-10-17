@@ -8643,7 +8643,10 @@ mod tests {
         };
         assert_eq!(
             (
-                body.sprint_id.as_str(),
+                body.sprint_id
+                    .as_ref()
+                    .map(|id| id.as_str())
+                    .unwrap_or_default(),
                 body.text.as_str(),
                 body.appended_by.as_str()
             ),

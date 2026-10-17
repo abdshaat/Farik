@@ -20,8 +20,8 @@ pub use crate::generated::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk,
     ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody, CostRecordedBody,
     CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DecisionWrittenBody, DesignPlanProposedBody, DesignReviewCheck,
-    DesignReviewRecordedBody, DocumentRewriteStartedBody, DriftDetectedBody,
+    CriterionRecordedBodyRunBy, DecisionWrittenBody, DeliveryClosedBody, DesignPlanProposedBody,
+    DesignReviewCheck, DesignReviewRecordedBody, DocumentRewriteStartedBody, DriftDetectedBody,
     DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
     EscalationResolvedBody, EventKind, Heard, HumanAcceptedBody, HumanAcceptedBodySubject,
     JudgmentAnswer, MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope,
@@ -265,6 +265,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::RepoRemoved => "repoRemovedBody",
         EventKind::RepoMoved => "repoMovedBody",
         EventKind::DocumentRewriteStarted => "documentRewriteStartedBody",
+        EventKind::DeliveryClosed => "deliveryClosedBody",
     }
 }
 
@@ -324,6 +325,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::DataPipelineRequested
             | EventKind::SellerMessageDrafted
             | EventKind::CatervaficationStarted
+            | EventKind::DeliveryClosed
     )
 }
 
@@ -474,13 +476,14 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::RepoAdded(_)
         | EventBody::RepoRemoved(_)
         | EventBody::RepoMoved(_)
-        | EventBody::DocumentRewriteStarted(_) => None,
+        | EventBody::DocumentRewriteStarted(_)
+        | EventBody::DeliveryClosed(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 116] = [
+pub const EVERY_KIND: [EventKind; 117] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -597,6 +600,7 @@ pub const EVERY_KIND: [EventKind; 116] = [
     EventKind::RepoRemoved,
     EventKind::RepoMoved,
     EventKind::DocumentRewriteStarted,
+    EventKind::DeliveryClosed,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -986,6 +990,9 @@ pub enum EventBody {
     /// The owner asked the team to rewrite its Markdown documents as HTML: the tasks filed.
     #[serde(rename = "document_rewrite.started")]
     DocumentRewriteStarted(DocumentRewriteStartedBody),
+    /// The governor closed a delivery.
+    #[serde(rename = "delivery.closed")]
+    DeliveryClosed(DeliveryClosedBody),
 }
 
 impl EventBody {
@@ -1110,6 +1117,7 @@ impl EventBody {
             Self::RepoRemoved(_) => EventKind::RepoRemoved,
             Self::RepoMoved(_) => EventKind::RepoMoved,
             Self::DocumentRewriteStarted(_) => EventKind::DocumentRewriteStarted,
+            Self::DeliveryClosed(_) => EventKind::DeliveryClosed,
         }
     }
 }
@@ -2130,7 +2138,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 116);
+        assert_eq!(EVERY_KIND.len(), 117);
     }
 
     #[test]
@@ -2159,7 +2167,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 116);
+        assert_eq!(EVERY_KIND.len(), 117);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2547,7 +2555,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 116);
+        assert_eq!(EVERY_KIND.len(), 117);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2688,7 +2696,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 116);
+        assert_eq!(EVERY_KIND.len(), 117);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3003,7 +3011,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 116);
+        assert_eq!(EVERY_KIND.len(), 117);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

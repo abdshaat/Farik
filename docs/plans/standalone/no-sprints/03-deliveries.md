@@ -160,7 +160,7 @@ writes today, behaviour unchanged. The new kind follows `catervafication.started
   `crates/protocol/src/event.rs`) — watched to fail once the fixture names `delivery.closed`, before
   the schema and the enum have it; then passes for it.
 
-- [ ] `feat(protocol): the delivery.closed event and changelog filings`
+- [x] `feat(protocol): the delivery.closed event and changelog filings`
 
 ### Task 2: when a delivery closes
 
