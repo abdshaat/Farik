@@ -1,6 +1,6 @@
 # Standalone catervafication-work, plan 3b: a project folder hunts each member
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.16 ("Its tasks"), 6.4, 6.8; ADR 0057
 Depends on: plans 1 to 3a of this branch

@@ -1,6 +1,6 @@
 # Standalone catervafication-work, plan 4b: the chat decides to take a task
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 4.3, 5.1 ("Chat is not command"), F8
 Depends on: plans 1 to 4 of this branch

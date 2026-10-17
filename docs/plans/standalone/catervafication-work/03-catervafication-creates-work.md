@@ -1,6 +1,6 @@
 # Standalone catervafication-work, plan 3: the Catervafication creates work
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.16 ("The Catervafication's epic", "Its tasks"), 6.4, 6.5, 6.8, 5.17
 Depends on: plans 1 and 2 of this branch

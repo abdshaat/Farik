@@ -1,6 +1,6 @@
 # Standalone catervafication-work, plan 6: the record
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md`, the sections below (hard rule 8)
 Depends on: plans 1 to 5 of this branch (3b and 4b included)
@@ -128,7 +128,7 @@ Files: as the File map. A docs task carries no test (hard rule 1 covers producti
 check is the full check, plus a reading against "What each section says": every bullet above has
 its sentence in the spec.
 
-- [ ] `docs(spec): the Catervafication creates work and a chat message becomes a task, revision 0.117`
+- [x] `docs(spec): the Catervafication creates work and a chat message becomes a task, revision 0.117`
 
 ## Verification
 

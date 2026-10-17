@@ -1,6 +1,6 @@
 # Standalone catervafication-work, plan 5: the web app
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 4.1 (the offer), 4.3, F8
 Depends on: plans 1 to 4 of this branch (3b and 4b included)

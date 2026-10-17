@@ -1,6 +1,6 @@
 # Standalone catervafication-work, plan 2: a hunter files bugs
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.1, 5.16, 6.4, 6.8, 8.5, F5
 Depends on: plan 1 of this branch

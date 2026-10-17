@@ -1,6 +1,6 @@
 # Standalone: the Catervafication creates work, and a chat message can be a task
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase, one pull request to `main`)
 Decision: ADR 0063 (`docs/decisions/0063-catervafication-creates-work-and-chats-create-tasks.md`)
 Depends on: `origin/main` at `74b4a5af` (#45 merged), then `fix/plans-need-no-review` (ADR 0061,

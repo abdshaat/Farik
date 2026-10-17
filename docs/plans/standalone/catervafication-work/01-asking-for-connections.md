@@ -1,6 +1,6 @@
 # Standalone catervafication-work, plan 1: an agent asks for a connection
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 6.5, 6.7 ("Suggested connections on Today"), 8.5, F9
 Depends on: the README's "Before the first task"

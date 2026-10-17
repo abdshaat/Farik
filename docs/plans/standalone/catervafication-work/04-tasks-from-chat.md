@@ -1,6 +1,6 @@
 # Standalone catervafication-work, plan 4: a chat message becomes the agent's task
 
-Status: draft
+Status: done
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 4.3, 5.1 ("Chat is not command"), 5.2, 5.16, 8.5, F8
 Depends on: plans 1 to 3b of this branch
