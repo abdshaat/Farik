@@ -12,7 +12,7 @@ use catervas_protocol::event::{
     TransitionActorWire,
 };
 use chrono::NaiveDate;
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::error::StoreError;
 use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
@@ -84,6 +84,35 @@ pub struct TaskProjection {
     /// Whether the task skips the sprint queue (ADR 0028, ADR 0042): set by a `task.created` with
     /// `raises`, the request that raises a marketing plan's budget. It is never held for a sprint.
     pub skips_sprints: bool,
+    /// The sequence number of the event that last made the task count towards its assignee's
+    /// work-in-progress limit (ADR 0062): a move into `assigned`, `in_progress`, `verifying` or
+    /// `rejected` from another status, the event that cleared the last wait on the human while
+    /// the task is in one of them, or a `task.reassigned`. `None` for a row made before it was
+    /// kept, which ranks as 0. It orders an agent's tasks: the first up to the limit go on.
+    pub counted_seq: Option<u64>,
+}
+
+/// Whether a task in this status counts towards its assignee's work-in-progress limit (ADR 0062):
+/// it is under way, or waits for the agent's next session. `blocked`, `escalated` and every other
+/// status leave the agent free.
+#[must_use]
+pub fn counted_status(status: TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Assigned
+            | TaskStatus::InProgress
+            | TaskStatus::Verifying
+            | TaskStatus::Rejected
+    )
+}
+
+impl TaskProjection {
+    /// Whether the task counts towards its assignee's work-in-progress limit: in a counted
+    /// status, and not waiting on the human. The one place the rule is written (ADR 0062).
+    #[must_use]
+    pub fn counts_towards_wip(&self) -> bool {
+        counted_status(self.status) && !self.waiting_on_human
+    }
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -413,7 +442,7 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  (open_questions > 0 OR open_approvals > 0 OR open_plans > 0), \
                                  awaiting_approval, verifications, \
                                  rejections, interventions, sprint, \
-                                 left_for_the_backlog, skips_sprints \
+                                 left_for_the_backlog, skips_sprints, counted_seq \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `CTV-10` sorts before
@@ -457,6 +486,7 @@ type ProjectedRow = (
     Option<String>,
     bool,
     bool,
+    Option<i64>,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -483,6 +513,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(19)?,
         row.get(20)?,
         row.get(21)?,
+        row.get(22)?,
     ))
 }
 
@@ -516,6 +547,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         sprint,
         left_for_the_backlog,
         skips_sprints,
+        counted_seq,
     ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
@@ -551,6 +583,9 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         sprint,
         left_for_the_backlog,
         skips_sprints,
+        counted_seq: counted_seq
+            .map(|seq| u64::try_from(seq).map_err(|_| refuse("counted sequence", &seq.to_string())))
+            .transpose()?,
     })
 }
 
@@ -618,6 +653,12 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         EventBody::ContractLocked(_) => set_locked(transaction, &id, true, seq),
         EventBody::ContractUnlocked(_) => set_locked(transaction, &id, false, seq),
         EventBody::TaskTransitioned(body) => apply_move(transaction, &id, body, seq),
+        EventBody::TaskReassigned(body) => update(
+            transaction,
+            "UPDATE task_projections SET assignee_id = ?2, counted_seq = ?3, updated_seq = ?3
+             WHERE task_id = ?1",
+            (&id, body.to.as_str(), seq),
+        ),
         EventBody::TaskIntegrated(_) => update(
             transaction,
             "UPDATE task_projections SET awaiting_integration = 0, updated_seq = ?2
@@ -785,6 +826,10 @@ fn apply_move(
         "UPDATE task_projections
          SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
              updated_seq = ?6, awaiting_approval = 0,
+             counted_seq = CASE WHEN ?2 IN ('assigned', 'in_progress', 'verifying', 'rejected')
+                                 AND status NOT IN ('assigned', 'in_progress', 'verifying',
+                                                    'rejected')
+                                THEN ?6 ELSE counted_seq END,
              awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task' AND ?8
                                          ELSE awaiting_integration END,
              verifications = verifications + (?2 = 'verifying'),
@@ -808,6 +853,37 @@ fn apply_move(
 /// approval of a connector's call (ADR 0031), an open marketing plan (ADR 0042), an open request
 /// for a site (ADR 0039), and an approval of a contract (5.16 item 2).
 fn apply_waiting(
+    transaction: &Transaction<'_>,
+    id: &str,
+    body: &EventBody,
+    seq: i64,
+) -> Result<(), StoreError> {
+    let waiting = |transaction: &Transaction<'_>| -> Result<bool, StoreError> {
+        let waiting: Option<bool> = transaction
+            .query_row(
+                "SELECT (open_questions > 0 OR open_approvals > 0 OR open_plans > 0)
+                 FROM task_projections WHERE task_id = ?1",
+                (id,),
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(waiting.unwrap_or(false))
+    };
+    let was_waiting = waiting(transaction)?;
+    apply_wait_counts(transaction, id, body, seq)?;
+    if was_waiting && !waiting(transaction)? {
+        // The last wait cleared: a task in a counted status counts again from here (ADR 0062).
+        update(
+            transaction,
+            "UPDATE task_projections SET counted_seq = ?2
+             WHERE task_id = ?1 AND status IN ('assigned', 'in_progress', 'verifying', 'rejected')",
+            (id, seq),
+        )?;
+    }
+    Ok(())
+}
+
+fn apply_wait_counts(
     transaction: &Transaction<'_>,
     id: &str,
     body: &EventBody,
@@ -1191,6 +1267,7 @@ mod tests {
                 sprint: None,
                 left_for_the_backlog: false,
                 skips_sprints: false,
+                counted_seq: None,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -1239,6 +1316,7 @@ mod tests {
                 sprint: None,
                 left_for_the_backlog: false,
                 skips_sprints: false,
+                counted_seq: None,
             }
         );
     }
@@ -1464,7 +1542,7 @@ mod tests {
         );
         assert_eq!(
             migrations::known_versions(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         );
     }
 
@@ -2961,5 +3039,56 @@ mod tests {
                 row(CostScope::Purpose, "implement", (2.0, 1, 1, 1)),
             ]
         );
+    }
+
+    #[test]
+    fn keeps_when_a_task_last_began_to_count() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        let counted = |projections: &Projections| row_of(projections, "CTV-1").counted_seq;
+        assert_eq!(counted(&projections), None);
+        let a = record(&log, &projections, &moved("CTV-1", "ready", "assigned"));
+        assert_eq!(counted(&projections), Some(a.envelope.seq));
+        record(&log, &projections, &moved("CTV-1", "assigned", "in_progress"));
+        assert_eq!(
+            counted(&projections),
+            Some(a.envelope.seq),
+            "a move between counted statuses keeps it"
+        );
+        record(&log, &projections, &moved("CTV-1", "in_progress", "blocked"));
+        let d = record(&log, &projections, &moved("CTV-1", "blocked", "in_progress"));
+        assert_eq!(counted(&projections), Some(d.envelope.seq));
+
+        let asked = record(&log, &projections, &about(EventKind::QuestionAsked, "CTV-1"));
+        assert_eq!(counted(&projections), Some(d.envelope.seq));
+        let e = record(
+            &log,
+            &projections,
+            &with_body(
+                EventKind::QuestionAnswered,
+                "CTV-1",
+                json!({
+                    "question_id": asked.envelope.seq,
+                    "answer": "Yes.",
+                    "answered_by": "human"
+                }),
+            ),
+        );
+        assert_eq!(counted(&projections), Some(e.envelope.seq));
+
+        let f = record(
+            &log,
+            &projections,
+            &with_body(
+                EventKind::TaskReassigned,
+                "CTV-1",
+                json!({ "from": "dev-a", "to": "dev-b", "reason": "resumed" }),
+            ),
+        );
+        let row = row_of(&projections, "CTV-1");
+        assert_eq!(row.assignee_id.as_deref(), Some("dev-b"));
+        assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
+        assert_eq!(row.counted_seq, Some(f.envelope.seq));
+        assert!(super::counted_status(TaskStatus::Rejected) && !super::counted_status(TaskStatus::Blocked));
     }
 }

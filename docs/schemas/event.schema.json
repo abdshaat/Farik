@@ -173,7 +173,8 @@
         "repo.removed",
         "repo.moved",
         "document_rewrite.started",
-        "delivery.closed"
+        "delivery.closed",
+        "task.reassigned"
       ]
     },
     "eventBodyWire": {
@@ -286,7 +287,8 @@
         { "$ref": "#/$defs/repoRemovedBody" },
         { "$ref": "#/$defs/repoMovedBody" },
         { "$ref": "#/$defs/documentRewriteStartedBody" },
-        { "$ref": "#/$defs/deliveryClosedBody" }
+        { "$ref": "#/$defs/deliveryClosedBody" },
+        { "$ref": "#/$defs/taskReassignedBody" }
       ]
     },
     "contractSummary": {
@@ -1947,6 +1949,18 @@
           "type": "array",
           "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
         }
+      }
+    },
+    "taskReassignedBody": {
+      "title": "Task Reassigned Body",
+      "description": "The governor handed a task whose wait had cleared from one agent to another (ADR 0062, docs/SPEC.md 5.2): from is the agent that held it, to the agent that holds it from now on, reason why (resumed: the previous holder had no room when the wait cleared, so the first free agent of the role took the task). The reviewer is unchanged. It is about one task and names no actor: the governor reassigns.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "reason"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "reason": { "type": "string", "enum": ["resumed"] }
       }
     },
     "connectorTag": {

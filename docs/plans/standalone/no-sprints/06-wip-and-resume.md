@@ -149,7 +149,7 @@ task (as the Decisions say); its fixture body `{ "from": "dev-a", "to": "dev-b",
   then its `question.answered` at e sets it to `Some(e)`; `task.reassigned { to: "dev-b" }` at f sets
   `assignee_id` to `dev-b` and `counted_seq` to `Some(f)`, and the reviewer is unchanged.
 
-- [ ] `feat(store): task.reassigned, and when a task last began to count`
+- [x] `feat(store): task.reassigned, and when a task last began to count`
 
 ### Task 2: a stuck task frees its agent
 
