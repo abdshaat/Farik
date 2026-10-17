@@ -276,7 +276,7 @@ Files: `crates/runtime/src/orchestrator/messages.rs`, `crates/runtime/src/orches
     `software_developer`.
   - With `dev` paused, a fresh harness's tick starts no session.
 
-- [ ] `feat(runtime): the agent given a task refines it, not the Product Manager`
+- [x] `feat(runtime): the agent given a task refines it, not the Product Manager`
 
 ### Task 6: rule 8 assigns it to that agent first
 

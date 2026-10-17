@@ -11,7 +11,7 @@ use catervas_core::folders::{is_plan_task, plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
-use catervas_core::team::{Agent, Team, changes_code, task_private_folder};
+use catervas_core::team::{Agent, AgentStatus, Team, changes_code, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy,
     EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody,
@@ -24,7 +24,7 @@ use catervas_store::repos::TaskRepository;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
-    plan_task_message, plan_tasks_message, refine_message, triage_message,
+    given_task_message, plan_task_message, plan_tasks_message, refine_message, triage_message,
 };
 use super::rules::{Waiting, acted, active, asleep, has_room, refused_since_entering, spent};
 use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
@@ -137,10 +137,11 @@ pub(super) async fn refining(
     row: &TaskProjection,
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    let Some(pm) = product_manager(team) else {
-        return Ok(None);
-    };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let given = given_agent(deps, team, &contract)?;
+    if matches!(given, Given::No) && product_manager(team).is_none() {
+        return Ok(None);
+    }
     let history = history(deps, &row.task_id)?;
     // A new project plans nothing but its product plan until the plan is approved (5.3): the
     // contract waits, with no session and no governor ask to spend an attempt or escalate.
@@ -151,7 +152,18 @@ pub(super) async fn refining(
     if is_to_be_judged(&contract, &history, began) {
         return judge(deps, team, row).map(Some);
     }
-    if spent(deps, team, &contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    // The agent a task was given to in its chat writes its contract (ADR 0063); a paused one's
+    // task waits.
+    let (writer, lead) = match given {
+        Given::Active(agent) => (agent, Some(agent)),
+        Given::Waits => return Ok(None),
+        Given::No => match product_manager(team) {
+            Some(pm) => (pm, None),
+            None => return Ok(None),
+        },
+    };
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, writer, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -159,11 +171,15 @@ pub(super) async fn refining(
         .iter()
         .any(|event| event.envelope.seq > began && event.body.kind() == EventKind::QuestionAsked);
     let failures = last_readiness_failures(&history, began);
+    let initial_prompt = match lead {
+        Some(agent) => given_task_message(&contract, agent, !asked, &failures),
+        None => refine_message(&contract, !asked, &failures),
+    };
     let end = run_session(
         deps,
         team,
         SessionAsk {
-            agent: pm,
+            agent: writer,
             contract: Some(&contract),
             purpose: SessionPurpose::Refine,
             cwd: deps.tools.files.root().to_path_buf(),
@@ -173,11 +189,48 @@ pub(super) async fn refining(
             tools: None,
             in_reply_to: None,
             thread: None,
-            initial_prompt: refine_message(&contract, !asked, &failures),
+            initial_prompt,
         },
     )
     .await?;
-    Ok(Some(acted(row, pm, "refine", &end)))
+    Ok(Some(acted(row, writer, "refine", &end)))
+}
+
+/// Whose task a contract is, when the owner gave it to an agent in its chat (ADR 0063).
+pub(super) enum Given<'a> {
+    /// Not given to an agent, or no longer: the agent is not on the team or has retired, or the
+    /// human changed the contract's assignee role.
+    No,
+    /// Given to this active agent.
+    Active(&'a Agent),
+    /// Given to a paused agent, whose task waits.
+    Waits,
+}
+
+/// Whose task `contract` is: the agent its `task.created` names in `given_to`, while that agent is
+/// on the team, has not retired, and is still the contract's assignee role.
+pub(super) fn given_agent<'a>(
+    deps: &OrchestratorDeps,
+    team: &'a Team,
+    contract: &TaskContract,
+) -> Result<Given<'a>, OrchestratorError> {
+    let Some(given) = catervas_store::requests::given_to(&deps.tools.log, &contract.id)? else {
+        return Ok(Given::No);
+    };
+    let Some(agent) = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == given && agent.status != AgentStatus::Retired)
+    else {
+        return Ok(Given::No);
+    };
+    if Role::from(agent.role) != contract.assignee_role {
+        return Ok(Given::No);
+    }
+    Ok(match agent.status {
+        AgentStatus::Active => Given::Active(agent),
+        _ => Given::Waits,
+    })
 }
 
 /// Asks the governor to judge a contract: `escalated` first, because asking for `ready` on a
@@ -1207,6 +1260,54 @@ mod tests {
         )
         .await
         .expect("the schema allows the write");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_given_agent_refines_its_own_task() {
+        use crate::orchestrator::messages::GIVEN_TASK_LEAD;
+        use crate::recorded::fixtures::implement_stops_early;
+
+        let harness = Harness::with_the_suggested_six("req-given-refine");
+        harness.file_given("CTV-1", "refining", "dev", |_| {});
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        let who: Vec<_> = started
+            .iter()
+            .map(|spec| (spec.agent_id.as_str(), spec.purpose))
+            .collect();
+        assert_eq!(who, [("dev", SessionPurpose::Refine)]);
+        let lead = GIVEN_TASK_LEAD
+            .replace("{name}", "dev")
+            .replace("{role}", "software_developer");
+        assert!(
+            started[0].initial_prompt.starts_with(&lead),
+            "{}",
+            started[0].initial_prompt
+        );
+
+        // A paused agent's task waits: no session starts.
+        let harness = Harness::with_the_suggested_six("req-given-refine-paused");
+        harness.file_given("CTV-1", "refining", "dev", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(vec![implement_stops_early()]));
+        orchestrator
+            .handle(Command::AgentUpdate {
+                agent_id: "dev".to_string(),
+                status: AgentStatus::Paused,
+            })
+            .await
+            .expect("the agent is paused");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
     }
 
     #[tokio::test]
