@@ -90,12 +90,12 @@ pub struct AssignmentInput {
     pub reviewer_id: String,
     /// The proposed reviewer's role.
     pub reviewer_role: Role,
-    /// How many tasks the proposed assignee already holds and has not finished: every task of its
-    /// that is neither `accepted` nor `cancelled`. Counting only the started ones would let an
-    /// agent be assigned any number of tasks and start none, because `assigned -> in_progress` has
-    /// no gate; counting only the assigned, in-progress and blocked ones would let the limit be
-    /// walked through `verifying` and `rejected`, and `rejected -> in_progress` hands a task
-    /// straight back to the same agent.
+    /// How many tasks the proposed assignee already holds and works, as the runtime's
+    /// `transitions::open_tasks` counts them: assigned, in progress, verifying or rejected, and
+    /// not waiting on the human (ADR 0062). Counting only the started ones would let an agent be
+    /// assigned any number of tasks and start none, because `assigned -> in_progress` has no
+    /// gate, and counting fewer statuses would let the limit be walked through `verifying` and
+    /// `rejected`. A blocked or escalated task leaves its agent free.
     pub assignee_open_tasks: u32,
     /// The team's limit on work in progress per agent.
     pub wip_limit: u32,

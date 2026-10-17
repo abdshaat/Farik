@@ -1754,8 +1754,8 @@ fn assigner(team: &Team) -> Option<&Agent> {
     holding(Role::ScrumMaster).or_else(|| holding(Role::ProductManager))
 }
 
-/// Whether `agent` holds fewer open tasks, neither accepted nor cancelled, than the WIP limit, the
-/// epic `under` not counted (`open_tasks`).
+/// Whether `agent` holds fewer tasks it works (`open_tasks`: a blocked, escalated or waiting task
+/// is not one) than the WIP limit, the epic `under` not counted.
 pub(super) fn has_room(
     team: &Team,
     board: &[TaskProjection],
@@ -1871,7 +1871,8 @@ mod tests {
     use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
         accept_ctv_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
-        implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1, provider_limit_429,
+        implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1, plan_assigns_ctv_2,
+        provider_limit_429,
         provider_limit_rejected, reads_a_file, replays_catervas_read_board, reply_to_a_mention,
         retro, review, review_answers_nothing, review_writes_note, success_with_is_error,
     };
@@ -2321,12 +2322,19 @@ mod tests {
     async fn waits_for_a_free_assignee() {
         let harness = Harness::new("orch-plan-no-room", |_| {});
         harness.ready("CTV-1");
-        harness.blocked("CTV-2", "dev-a", "dev-b");
-        harness.blocked("CTV-3", "dev-b", "dev-a");
+        harness.in_progress("CTV-2", "dev-a", "dev-b");
+        harness.in_progress("CTV-3", "dev-b", "dev-a");
         let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        let report = orchestrator.tick().await.expect("the tick runs");
+        // Scoped to CTV-1: the two tasks under way would otherwise run their own sessions.
+        let report = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("CTV-1".parse().expect("a task id")),
+                rules: TickRules::All,
+            })
+            .await
+            .expect("the tick runs");
 
         assert_eq!(
             report,
@@ -6449,13 +6457,19 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn still_assigns_work_to_a_sleeping_agent() {
         let harness = Harness::new("orch-sleep-assign", with_a_scrum_master);
-        harness.blocked("CTV-2", "dev-b", "dev-a");
+        harness.in_progress("CTV-2", "dev-b", "dev-a");
         harness.ready("CTV-3");
         harness.asleep("dev-a", at() + chrono::Duration::hours(1));
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        let report = orchestrator.tick().await.expect("the tick runs");
+        let report = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("CTV-3".parse().expect("a task id")),
+                rules: TickRules::All,
+            })
+            .await
+            .expect("the tick runs");
 
         assert_eq!(acted_on(&report), Some("CTV-3"), "{report:?}");
         let started = adapter.started();
@@ -9437,5 +9451,62 @@ mod tests {
             "no session starts: {report:?}"
         );
         assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+    }
+
+    /// A team of `dev-a` and `dev-b` with `dev-b` busy on CTV-3, `dev-a` holding CTV-1 as
+    /// `stuck` leaves it, and CTV-2 ready; the tick scoped to CTV-2 runs, and the status CTV-2 is
+    /// in after it answers.
+    async fn ctv_2_after_a_tick_with_ctv_1(name: &str, stuck: impl FnOnce(&Harness)) -> TaskStatus {
+        let harness = Harness::new(name, |_| {});
+        harness.in_progress("CTV-3", "dev-b", "dev-a");
+        stuck(&harness);
+        harness.ready("CTV-2");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_2()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("CTV-2".parse().expect("a task id")),
+                rules: TickRules::All,
+            })
+            .await
+            .expect("the tick runs");
+        let row = harness.row("CTV-2");
+        if row.status == TaskStatus::Assigned {
+            assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
+        } else {
+            assert!(adapter.started().is_empty(), "no session starts");
+        }
+        row.status
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_agent_whose_task_is_blocked_or_escalated_takes_the_next_ready_task() {
+        let blocked =
+            ctv_2_after_a_tick_with_ctv_1("wip-blocked", |h| h.blocked("CTV-1", "dev-a", "dev-b"));
+        assert_eq!(blocked.await, TaskStatus::Assigned, "a blocked task");
+        let escalated = ctv_2_after_a_tick_with_ctv_1("wip-escalated", |h| {
+            h.in_progress("CTV-1", "dev-a", "dev-b");
+            h.project.moved(
+                "CTV-1",
+                "in_progress",
+                "escalated",
+                &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+            );
+        });
+        assert_eq!(escalated.await, TaskStatus::Assigned, "an escalated task");
+        let asking = ctv_2_after_a_tick_with_ctv_1("wip-asking", |h| {
+            h.in_progress("CTV-1", "dev-a", "dev-b");
+            h.project.record(
+                "CTV-1",
+                "question.asked",
+                &json!({ "question": "Which colour?", "asked_by": "dev-a" }),
+            );
+        });
+        assert_eq!(asking.await, TaskStatus::Assigned, "a task awaiting an answer");
+        let working = ctv_2_after_a_tick_with_ctv_1("wip-working", |h| {
+            h.in_progress("CTV-1", "dev-a", "dev-b");
+        });
+        assert_eq!(working.await, TaskStatus::Ready, "a task under way holds its agent");
     }
 }

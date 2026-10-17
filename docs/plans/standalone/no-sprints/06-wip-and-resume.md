@@ -170,7 +170,7 @@ body names each.
   CTV-2 goes to `dev-a`. With CTV-1 `in_progress` and no wait, the same scoped tick starts no
   session and CTV-2 stays `ready`.
 
-- [ ] `feat(runtime): a blocked, escalated or waiting task leaves its agent free`
+- [x] `feat(runtime): a blocked, escalated or waiting task leaves its agent free`
 
 ### Task 3: a cleared task resumes, or is handed over
 

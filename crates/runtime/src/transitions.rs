@@ -1390,15 +1390,18 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
         .map_or(Role::Human, |agent| Role::from(agent.role))
 }
 
-/// The tasks an agent holds that are neither accepted nor cancelled (5.2), leaving out the epic
-/// `under`, when one is named: an epic does not hold its own tasks back from its assignee.
+/// The tasks an agent holds and works: assigned, in progress, verifying or rejected, and not
+/// waiting on the human (`TaskProjection::counts_towards_wip`, ADR 0062), leaving out the epic
+/// `under`, when one is named: an epic does not hold its own tasks back from its assignee. A
+/// blocked or escalated task, or one that waits on the human, leaves its agent free. The one place
+/// the limit is counted: `has_room` and the governor's `assignee_open_tasks` both read it.
 pub(crate) fn open_tasks(board: &[TaskProjection], agent_id: &str, under: Option<&TaskId>) -> u32 {
     let held = board
         .iter()
         .filter(|row| {
             row.assignee_id.as_deref() == Some(agent_id)
                 && under != Some(&row.task_id)
-                && !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
+                && row.counts_towards_wip()
         })
         .count();
     u32::try_from(held).unwrap_or(u32::MAX)
@@ -2312,7 +2315,9 @@ mod tests {
                 .assignment
                 .expect("an assignment");
             assert!(assignment.private_folder_busy, "{held}");
-            assert_eq!(assignment.assignee_open_tasks, 1, "{held}");
+            // A blocked or escalated task keeps the folder busy but leaves its agent free.
+            let works = u32::from(!matches!(held, "blocked" | "escalated"));
+            assert_eq!(assignment.assignee_open_tasks, works, "{held}");
             assert_eq!(assignment.wip_limit, 2, "{held}");
             let TransitionOutcome::Refused(refusal) = project.ask(&request, &second) else {
                 panic!("{held}: the second task was assigned");
