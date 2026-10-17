@@ -294,7 +294,7 @@ describe("today", () => {
 					kind: "integration",
 					folder_change: 1,
 					agent_id: "mira",
-					title: "Roadmap and Product description from the sprint 4 review",
+					title: "Roadmap and Product description from review 4",
 					line: "You approved it; it waits for you to add it",
 				},
 				{
@@ -312,7 +312,7 @@ describe("today", () => {
 		) as HTMLElement[];
 		expect(
 			within(folder as HTMLElement).getByText(
-				"Add Roadmap and Product description from the sprint 4 review to your project",
+				"Add Roadmap and Product description from review 4 to your project",
 			),
 		).toBeTruthy();
 		expect(
@@ -333,7 +333,7 @@ describe("today", () => {
 		const describedBy = add.getAttribute("aria-describedby");
 		expect(describedBy).toBeTruthy();
 		expect(document.getElementById(describedBy as string)?.textContent).toBe(
-			"Add Roadmap and Product description from the sprint 4 review to your project",
+			"Add Roadmap and Product description from review 4 to your project",
 		);
 		fireEvent.click(add);
 		const sent = await sentCommand(s);

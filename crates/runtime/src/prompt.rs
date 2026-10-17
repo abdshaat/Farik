@@ -199,8 +199,8 @@ pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 2] = [
     (
         Thread::Retro,
         "This session is the delivery's retro. Post the retro, what to keep and what to change, with \
-         `catervas_post_message`, in at most three messages, then record what the next planning should \
-         know with `catervas_append_retro`, and end the session. Mention no one: the channel is read \
+         `catervas_post_message`, in at most three messages, then record what the team should \
+         remember with `catervas_append_retro`, and end the session. Mention no one: the channel is read \
          by all.",
     ),
 ];

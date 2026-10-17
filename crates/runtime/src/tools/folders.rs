@@ -1,9 +1,9 @@
 //! `catervas_write_folder_doc` (`docs/SPEC.md` 5.17) and the folder change it makes (5.14): at a
-//! sprint ceremony an agent keeps a small recurring document of its own folder under
+//! delivery's ceremony an agent keeps a small recurring document of its own folder under
 //! `docs/catervas/`. A document for agents is committed by Catervas on a branch of its own, and the
 //! team's integration policy adds it to the project as it does an accepted task's branch. The
 //! product's spec and roadmap, which the owner edits, are written the same way, both files and their
-//! agent versions as one change, at the sprint review (ADR 0061).
+//! agent versions as one change, at the review (ADR 0061).
 
 use catervas_core::contract::{TaskId, TaskStatus};
 use catervas_core::folders::{
@@ -269,7 +269,7 @@ fn plain_names(paths: &[&str]) -> String {
 }
 
 /// `folder_doc_proposals.list` (`docs/SPEC.md` 5.7): the team's integration policy and the
-/// proposals still pending as one card for each sprint review and agent, ordered by its first
+/// proposals still pending as one card for each review and agent, ordered by its first
 /// proposal, each document with its lines changed from the integration branch's file.
 pub(crate) fn proposals_list(deps: &ToolDeps, team: &Team) -> Result<Value, StoreError> {
     let io = |error: &dyn std::fmt::Display| StoreError::Io {
@@ -359,7 +359,7 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
             (
                 first.agent_id.clone(),
                 format!(
-                    "{} from the sprint {} review",
+                    "{} from review {}",
                     plain_names(&paths),
                     first.sprint_id.trim_start_matches('S')
                 ),
@@ -404,7 +404,7 @@ struct Checked<'a> {
 }
 
 /// Writes a document of the caller's folder as a folder change, a human document and its agent
-/// version together at the sprint review (`docs/SPEC.md` 5.17). Holds the integration lock from its checks to its event,
+/// version together at the review (`docs/SPEC.md` 5.17). Holds the integration lock from its checks to its event,
 /// so that a write, an approval and an integration never interleave on the root's checkout.
 ///
 // ponytail: the lock is taken on the async thread, as `git::commit` already runs git there;
@@ -502,7 +502,7 @@ fn check_input<'a>(
     if target.owner_accepted && call.context.thread != Some(Thread::Review) {
         return Err(refused(
             "folder_doc_at_review",
-            format!("{path} is written at the sprint review, not at another ceremony"),
+            format!("{path} is written at the review, not at another ceremony"),
         ));
     }
     let text = checked_text("text", &input.text)?;

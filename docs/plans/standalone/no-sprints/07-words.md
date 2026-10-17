@@ -120,7 +120,7 @@ Files as the map's Task 2. `lists_every_tool_with_its_tier` keeps passing (names
   `tool_descriptors()` description and no `CEREMONY_INSTRUCTIONS` text matches `(?i)sprint` or
   `(?i)standup`.
 
-- [ ] `docs(runtime): tools and prompts speak of deliveries`
+- [x] `docs(runtime): tools and prompts speak of deliveries`
 
 ### Task 3: help, README, and what is left
 

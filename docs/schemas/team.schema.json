@@ -180,7 +180,7 @@
             "minimum": 0,
             "maximum": 1000
           },
-          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags paid (allowance_not_paid; an older team file may still give one for an external_effect tool), how many calls each sprint the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
+          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags paid (allowance_not_paid; an older team file may still give one for an external_effect tool), how many calls each day the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
         },
         "oauth": {
           "type": "object",

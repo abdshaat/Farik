@@ -310,7 +310,7 @@
     },
     "taskCreatedBody": {
       "title": "Task Created Body",
-      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request skips the sprint queue and is worked on at once, outside any sprint (ADR 0028's exception).",
+      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request is worked on as filed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["summary", "created_by"],
@@ -322,7 +322,7 @@
         "product_plan": {
           "type": "boolean",
           "const": true,
-          "description": "This request is a new project's product plan task, filed by the owner's word (docs/SPEC.md 4.3); such a request skips the sprint queue as a raise does, and is judged as filed. Only Catervas writes it."
+          "description": "This request is a new project's product plan task, filed by the owner's word (docs/SPEC.md 4.3); such a request is worked on as filed. Only Catervas writes it."
         },
         "rederives": {
           "type": "string",
@@ -1768,7 +1768,7 @@
     "folderChangeNumber": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
     "folderDocWrittenBody": {
       "title": "Folder Doc Written Body",
-      "description": "An agent wrote a document of its own folder at a sprint ceremony through catervas_write_folder_doc (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha; the team's integration policy then adds it to the project. The envelope names the agent and its session and no task.",
+      "description": "An agent wrote a document of its own folder at a delivery's ceremony through catervas_write_folder_doc (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha; the team's integration policy then adds it to the project. The envelope names the agent and its session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "written_by", "change", "sha"],
@@ -1781,7 +1781,7 @@
     },
     "folderDocProposedBody": {
       "title": "Folder Doc Proposed Body",
-      "description": "An agent proposed a change to a document the owner approves, at the sprint review (docs/SPEC.md 5.7, 5.17): text is the version for people, agent_text its .agent.md version, summary what changed and why, for the owner, and sprint_id the sprint the review was about. The event's seq is the proposal's number. Nothing is written until the owner approves. The envelope names the agent and its session and no task.",
+      "description": "An agent proposed a change to a document the owner approves, at a delivery's review (docs/SPEC.md 5.7, 5.17): text is the version for people, agent_text its .agent.md version, summary what changed and why, for the owner, and sprint_id the number of the review it was made at (an older log's sprint, S4; the field is read and no longer written). The event's seq is the proposal's number. Nothing is written until the owner approves. The envelope names the agent and its session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "text", "agent_text", "summary", "sprint_id", "proposed_by"],
@@ -1809,7 +1809,7 @@
     },
     "folderDocReturnedBody": {
       "title": "Folder Doc Returned Body",
-      "description": "The owner sent proposals back (docs/SPEC.md 5.7): reason is the owner's own words, which the agent's next sprint review reads as the owner's, not as untrusted text. The envelope names no agent, no session and no task.",
+      "description": "The owner sent proposals back (docs/SPEC.md 5.7): reason is the owner's own words, which the agent's next review reads as the owner's, not as untrusted text. The envelope names no agent, no session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["proposals", "reason"],

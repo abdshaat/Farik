@@ -779,7 +779,7 @@ pub(super) fn ceremony_message(facts: &str, summary: &str) -> String {
     )
 }
 
-/// What the owner decided of `agent_id`'s folder document proposals since its last sprint review
+/// What the owner decided of `agent_id`'s folder document proposals since its last review
 /// began, oldest first, then each proposal of its that still waits (docs/SPEC.md 5.7): a line
 /// each, the owner's words not wrapped, as they are the human's own (ADR 0011). Empty when there is
 /// nothing to say.

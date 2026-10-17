@@ -2964,7 +2964,7 @@ pub(super) mod tests {
         })
     }
 
-    /// `pm`'s proposal of `path` at the sprint review `sprint`, and its number.
+    /// `pm`'s proposal of `path` at the review `sprint`, and its number.
     fn pm_proposes(harness: &Harness, sprint: &str, path: &str, text: &str, summary: &str) -> u64 {
         harness
             .project
@@ -3068,7 +3068,7 @@ pub(super) mod tests {
             "folderDocProposalsListResult",
         );
         let cards = listed["cards"].as_array().expect("cards");
-        assert_eq!(cards.len(), 2, "one card for each sprint review: {listed}");
+        assert_eq!(cards.len(), 2, "one card for each review: {listed}");
         assert_eq!(cards[0]["sprint_id"], "S3");
         assert_eq!(
             cards[0]["documents"].as_array().expect("documents").len(),
@@ -3125,12 +3125,12 @@ pub(super) mod tests {
             [
                 json!({
                     "kind": "integration", "folder_change": 1, "agent_id": "pm",
-                    "title": "Roadmap and Product description from the sprint 4 review",
+                    "title": "Roadmap and Product description from review 4",
                     "line": "You approved it; it waits for you to merge it"
                 }),
                 json!({
                     "kind": "integration", "folder_change": 2, "agent_id": "sm",
-                    "title": "Sprint rhythm by Sol",
+                    "title": "Delivery rhythm by Sol",
                     "line": "Sol wrote it; it waits for you to merge it"
                 }),
             ]
@@ -3169,7 +3169,7 @@ pub(super) mod tests {
             integration_rows(&harness),
             [json!({
                 "kind": "integration", "folder_change": 1, "agent_id": "sm",
-                "title": "Sprint rhythm by Sol",
+                "title": "Delivery rhythm by Sol",
                 "line": "Its pull request waits for you to merge it"
             })]
         );

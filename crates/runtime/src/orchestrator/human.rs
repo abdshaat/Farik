@@ -1838,7 +1838,7 @@ pub(crate) fn folder_doc_decide(
     if !approve && said.is_empty() {
         return Err(order_refusal(
             "folder_doc_reason_needed",
-            "say why: the agent reads it at its next sprint review",
+            "say why: the agent reads it at its next review",
         ));
     }
     let _lock = crate::transitions::integration_lock(tools.files.root()).map_err(failed)?;
@@ -1883,7 +1883,7 @@ pub(crate) fn folder_doc_decide(
             .map_err(failed)?;
         let seq = append(tools, None, EventBody::FolderDocReturned(body))?;
         return Ok(CommandReport {
-            said: "Sent back. The agent reads your words at its next sprint review.".to_string(),
+            said: "Sent back. The agent reads your words at its next review.".to_string(),
             events: vec![seq],
         });
     }
@@ -6516,7 +6516,7 @@ mod tests {
         })
     }
 
-    /// `agent`'s proposal of `path` at the sprint review, in its session, and its number.
+    /// `agent`'s proposal of `path` at the review, in its session, and its number.
     fn proposed_by(harness: &Harness, agent: &str, path: &str, text: &str) -> u64 {
         harness
             .project

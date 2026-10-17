@@ -254,7 +254,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<folders::WriteFolderDocInput>(
             "catervas_write_folder_doc",
             Read,
-            "At a review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. Name a document with its extension: write a new one in the format the Team rules say, and a document that is already there in the format it has. The product's spec and roadmap are written at the sprint review, with agent_text (their agent version), as one change like any other document; the summary is not needed.",
+            "At a delivery's review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. Name a document with its extension: write a new one in the format the Team rules say, and a document that is already there in the format it has. The product's spec and roadmap are written at the review, with agent_text (their agent version), as one change like any other document; the summary is not needed.",
         ),
         tool::<channel::PostMessageInput>(
             "catervas_post_message",
@@ -264,7 +264,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<retro::AppendRetroInput>(
             "catervas_append_retro",
             Read,
-            "Record in team/retro.md what the next sprint's planning should know from this retro.",
+            "Record in team/retro.md what the team should remember from this retro.",
         ),
         tool::<memory::WriteMemoryInput>(
             "catervas_write_memory",
@@ -783,6 +783,28 @@ mod tests {
             &json!({ "paths": [], "removed": ["x"] }),
         );
         assert_eq!(only, ["x"]);
+    }
+
+    /// Deliveries replace sprints (ADR 0062): what an agent is told of its tools and of a
+    /// ceremony never mentions a sprint or a standup.
+    #[test]
+    fn no_tool_or_instruction_speaks_of_sprints() {
+        let mut texts: Vec<(String, &str)> = tool_descriptors()
+            .iter()
+            .map(|tool| (tool.name.to_string(), tool.description))
+            .collect();
+        for (thread, text) in crate::prompt::CEREMONY_INSTRUCTIONS {
+            texts.push((format!("{thread:?}"), text));
+        }
+        let hits: Vec<&str> = texts
+            .iter()
+            .filter(|(_, text)| {
+                let lower = text.to_lowercase();
+                lower.contains("sprint") || lower.contains("standup")
+            })
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert!(hits.is_empty(), "{hits:?}");
     }
 
     #[test]
