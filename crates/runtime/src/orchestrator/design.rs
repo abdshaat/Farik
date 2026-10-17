@@ -168,7 +168,6 @@ async fn explore(
             in_reply_to: None,
             thread: None,
             initial_prompt: explore_message(contract, returned.as_deref()),
-            pipeline: None,
         },
     )
     .await?;

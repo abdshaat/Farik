@@ -229,17 +229,6 @@ pub const JUDGMENT_INSTRUCTION: &str = "This session checks the plan of the cont
      order they are numbered, and your overall reason, which the Product Manager rewrites from \
      when any answer is no.";
 
-/// The closing of the Product Manager's session given `catervas_decide_data_pipeline` alone.
-pub const PIPELINE_DECISION_INSTRUCTION: &str = "This session decides one request of the \
-     Procurement Specialist for a source of data, which the message you were given holds. \
-     Approve it only when it would change a decision the team makes this sprint or the next, it \
-     costs nothing, and it sends none of the project's data out: Catervas refuses an approval \
-     otherwise. Decline what the team can do without, saying what to use instead. Pass to the \
-     owner, by escalating, what costs money or sends data out and still seems worth asking, \
-     and what needs an account the team does not have. End the session by calling \
-     `catervas_decide_data_pipeline` with your decision and your reason in one line the owner can \
-     read.";
-
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///
 /// # Errors

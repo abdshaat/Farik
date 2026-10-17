@@ -36,7 +36,6 @@ use super::messages::{
     planning_message, posts_heard, product_refresh_message, retro_message, sprint_review_message,
     standup_message, with_the_approved_plan,
 };
-use super::pipeline::decide_pipelines;
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
@@ -214,9 +213,6 @@ pub(super) async fn tick(
         return Ok(report);
     }
     if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
-        return Ok(report);
-    }
-    if let Some(report) = decide_pipelines(deps, scope, &team, &mut waiting).await? {
         return Ok(report);
     }
     if runs(3) {
@@ -576,7 +572,6 @@ async fn review_and_retro(
             in_reply_to: None,
             thread: Some(thread),
             initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
-            pipeline: None,
         },
     )
     .await?;
@@ -902,7 +897,6 @@ async fn sprint_planning(
             in_reply_to: None,
             thread: Some(Thread::Planning),
             initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
-            pipeline: None,
         },
     )
     .await?;
@@ -998,7 +992,6 @@ async fn standup(
             in_reply_to: None,
             thread: Some(Thread::Standup),
             initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
-            pipeline: None,
         },
     )
     .await?;
@@ -1139,7 +1132,6 @@ async fn chat(
                      message.\n\n{text}",
                     agent.display_name.as_str()
                 ),
-                pipeline: None,
             },
         )
         .await?;
@@ -1214,7 +1206,6 @@ async fn open_the_interview(
                  one-to-one chat: greet them and ask your first question.",
                 agent.display_name.as_str()
             ),
-            pipeline: None,
         },
     )
     .await?;
@@ -1263,7 +1254,6 @@ async fn conversation(
                 in_reply_to: Some(latest.envelope.seq),
                 thread: None,
                 initial_prompt: mention_message(agent, &pending, &summary),
-                pipeline: None,
             },
         )
         .await?;
@@ -1686,7 +1676,6 @@ async fn in_progress(
                 Some(plan) => with_the_approved_plan(&message, plan),
                 None => message,
             },
-            pipeline: None,
         },
     )
     .await?;
@@ -1979,7 +1968,6 @@ async fn ready(
                 &reviewers,
                 lane_builder.as_deref(),
             ),
-            pipeline: None,
         },
     )
     .await?;
@@ -5987,7 +5975,6 @@ mod tests {
                     "catervas_update_purchase_order",
                     "catervas_request_data_pipeline",
                     "catervas_read_data_pipelines",
-                    "catervas_decide_data_pipeline",
                     "catervas_draft_seller_message",
                     "catervas_read_seller_messages",
                     "catervas_read_seller_replies",

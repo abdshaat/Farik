@@ -14,7 +14,6 @@ use catervas_protocol::event::{
 use catervas_store::folder_docs::{ProposalState, folder_docs};
 use catervas_store::git::HeadSummary;
 use catervas_store::marketing::{PostState, SocialPost};
-use catervas_store::pipelines::PipelineRecord;
 use catervas_store::{EventLog, EventQuery, StoreError, TaskProjection};
 use chrono::{DateTime, Utc};
 
@@ -1159,37 +1158,6 @@ pub(super) fn design_review_message(contract: &TaskContract, diff: &str) -> Stri
 /// What a browsing session is told once the preview answers: where the app is.
 pub(super) fn preview_address(port: u16, path: &str) -> String {
     format!("\n\nThe app's preview is at http://localhost:{port}{path}.")
-}
-
-/// The Product Manager's decision session's message for a data pipeline request: everything the
-/// agent wrote, which is its words and so untrusted, with its own answers about the cost, the
-/// account and the data, and the rule Catervas holds the decision to.
-pub(super) fn decide_data_pipeline_message(record: &PipelineRecord) -> String {
-    let body = &record.requested;
-    let asked = format!(
-        "name: {}\nwhat it would give: {}\nthe source's own page: {}\nwhy it would change the \
-         recommendation: {}\nwhat it costs, as the agent says: {}\nneeds an account, as the agent \
-         says: {}\nsends the project's data out, as the agent says: {}",
-        body.name.as_str(),
-        body.what.as_str(),
-        body.source_url.as_str(),
-        body.why.as_str(),
-        body.cost,
-        if body.needs_account { "yes" } else { "no" },
-        if body.sends_project_data { "yes" } else { "no" },
-    );
-    format!(
-        "The Procurement Specialist asks for a source of data, request {number}. What it wrote: \
-         {asked}\n\nCatervas holds your decision to one rule: you may approve a request only when \
-         it is free and sends none of the project's data out, and an approval of any other is \
-         refused. A request that costs money, whose cost is not known, or that sends the \
-         project's data out, you decline, or escalate to the owner, who alone may approve it. \
-         Whether a request that needs an account is worth the owner's trouble is your judgement. \
-         Decide it with `catervas_decide_data_pipeline`: `approve`, `decline` or `escalate`, with \
-         your reason in 20 to 600 characters, which the owner reads.",
-        number = record.pipeline,
-        asked = untrusted_block("pipeline_request", &asked, NOTE_CAP_BYTES),
-    )
 }
 
 /// An implement session's message with the plan that was approved, an agent's words

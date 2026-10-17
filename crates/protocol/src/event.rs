@@ -2574,12 +2574,12 @@ mod tests {
             EventKind::DataPipelineApproved,
             EventKind::DataPipelineDeclined,
         ] {
-            for by in ["product_manager", "human"] {
+            for by in ["product_manager", "human", "catervas"] {
                 let mut wire = an_event_wire(kind);
                 wire["body"]["by"] = json!(by);
                 event_from_value(&wire).expect("a decider");
             }
-            for by in ["auto", "catervas", "agent"] {
+            for by in ["auto", "agent"] {
                 let mut wire = an_event_wire(kind);
                 wire["body"]["by"] = json!(by);
                 assert!(!refusal(&wire).is_empty(), "{kind} by {by}");

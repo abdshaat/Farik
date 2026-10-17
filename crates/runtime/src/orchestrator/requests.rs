@@ -101,7 +101,6 @@ pub(super) async fn draft(
                 in_reply_to: None,
                 thread: None,
                 initial_prompt: triage_message(&contract),
-                pipeline: None,
             },
         )
         .await?;
@@ -183,7 +182,6 @@ pub(super) async fn refining(
                 in_reply_to: None,
                 thread: None,
                 initial_prompt: judgment_message(&contract, &team.judgment().questions),
-                pipeline: None,
             },
         )
         .await?;
@@ -212,7 +210,6 @@ pub(super) async fn refining(
             in_reply_to: None,
             thread: None,
             initial_prompt: refine_message(&contract, !asked, &failures),
-            pipeline: None,
         },
     )
     .await?;
@@ -735,7 +732,6 @@ pub(super) async fn in_progress_epic(
             in_reply_to: None,
             thread: None,
             initial_prompt,
-            pipeline: None,
         },
     )
     .await?;

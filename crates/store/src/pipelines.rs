@@ -49,6 +49,8 @@ pub enum DecidedBy {
     ProductManager,
     /// The owner.
     Human,
+    /// Catervas, at once, for a request that costs nothing and sends nothing out (ADR 0061).
+    Catervas,
 }
 
 impl DecidedBy {
@@ -58,6 +60,7 @@ impl DecidedBy {
         match self {
             Self::ProductManager => "product_manager",
             Self::Human => "human",
+            Self::Catervas => "catervas",
         }
     }
 }
@@ -67,6 +70,7 @@ impl From<DataPipelineDecidedBy> for DecidedBy {
         match by {
             DataPipelineDecidedBy::ProductManager => Self::ProductManager,
             DataPipelineDecidedBy::Human => Self::Human,
+            DataPipelineDecidedBy::Catervas => Self::Catervas,
         }
     }
 }
@@ -239,6 +243,16 @@ fn decide(
     // refuses the rest, and the fold does not count what the tool would have refused.
     let counts = match by {
         DecidedBy::Human => is_unattended(event) && record.state == PipelineState::Escalated,
+        // Catervas files a request at once, on an open one that needs no owner, and only approves.
+        DecidedBy::Catervas => {
+            is_unattended(event)
+                && record.state == PipelineState::Open
+                && state == PipelineState::Approved
+                && !pipeline_needs_owner(
+                    cost_of(record.requested.cost),
+                    record.requested.sends_project_data,
+                )
+        }
         DecidedBy::ProductManager => {
             is_its_deciding_session(record, event)
                 && record.state == PipelineState::Open

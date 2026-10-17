@@ -2434,14 +2434,12 @@ describe("a data pipeline waiting on the owner", () => {
 				.textContent,
 		).toContain("It sends your data to Shippo.The Product Manager asks you:");
 		expect(within(shippo).queryByText("It costs money.")).toBeNull();
-		// Three tries: Catervas says so, and there is no reason to show.
+		// Catervas passed it on at once: the cost says why, and there is no reason to show.
 		const undecided = await rowOf("Azure prices");
 		const unclear = within(undecided).getByRole("group", {
 			name: "Why it comes to you",
 		});
-		expect(unclear.textContent).toBe(
-			"Its cost is not known.The Product Manager did not decide.",
-		);
+		expect(unclear.textContent).toBe("Its cost is not known.");
 		expect(within(undecided).queryByText(en.pipelineAsks)).toBeNull();
 	});
 

@@ -5,10 +5,10 @@
 
 use catervas_core::contract::Role;
 use catervas_core::governor::sites::site_of;
-use catervas_core::pipeline::pipeline_needs_owner;
+use catervas_core::pipeline::{PipelineCost, pipeline_needs_owner};
 use catervas_protocol::event::{
-    DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineDeclinedBody,
-    DataPipelineEscalatedBody, DataPipelineRequestedBody, EventBody,
+    DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineEscalatedBody,
+    DataPipelineRequestedBody, EventBody,
 };
 use catervas_store::pipelines::{
     DecidedBy, PipelineRecord, PipelineState, cost_of, data_pipelines,
@@ -31,6 +31,8 @@ const MOST_NAME: usize = 100;
 const LEAST_TEXT: usize = 20;
 /// The most characters what and why have.
 const MOST_TEXT: usize = 600;
+/// What Catervas files a free source's request as.
+const CATERVAS: &str = "catervas";
 /// The most characters an address has.
 const MOST_URL: usize = 2_000;
 /// The most requests that are open in a project at once: neither approved nor declined.
@@ -38,9 +40,9 @@ const MOST_OPEN: usize = 3;
 /// The most bytes of the Product Manager's reason an answer repeats.
 const REASON_CAP_BYTES: usize = 2_048;
 /// What an agent whose request was recorded is told to do.
-const NEXT: &str = "go on with the sites you may read: the Product Manager decides, and the owner \
-    when it is theirs to; read the outcome with catervas_read_data_pipelines, and ask for the \
-    source's site with catervas_request_sites if you must read it";
+const NEXT: &str = "go on with the sites you may read: Catervas has filed a free source at once, and \
+    the owner decides one that costs money, whose cost is not known or that sends the project's \
+    data out; read the outcome with catervas_read_data_pipelines";
 
 /// What a source costs to use, as the agent says.
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
@@ -62,32 +64,6 @@ impl From<CostInput> for DataPipelineCost {
             CostInput::Unknown => Self::Unknown,
         }
     }
-}
-
-/// What the Product Manager decides about a request.
-#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum PipelineDecision {
-    /// Ask the team to set the source up. Refused for a request that costs money, whose cost is
-    /// not known, or that sends the project's data out.
-    Approve,
-    /// Do not set it up; say what to use instead.
-    Decline,
-    /// Pass it to the owner, who decides.
-    Escalate,
-}
-
-/// `catervas_decide_data_pipeline`'s input.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct DecidePipelineInput {
-    /// The request's number, as the message you were given says.
-    pipeline: u64,
-    /// `approve`, `decline` or `escalate`.
-    decision: PipelineDecision,
-    /// Why, 20 to 600 characters on one line the owner can read; a decline names what to use
-    /// instead.
-    reason: String,
 }
 
 /// `catervas_request_data_pipeline`'s input.
@@ -267,166 +243,85 @@ pub(super) fn request_data_pipeline(
         needs_account: input.needs_account,
         sends_project_data: input.sends_project_data,
     };
-    let event = call.append(Some(&task), EventBody::DataPipelineRequested(body))?;
-    Ok(json!({ "pipeline": event.envelope.seq, "state": "open", "next": NEXT }))
-}
-
-/// `catervas_decide_data_pipeline`: records the Product Manager's decision of a request, from the
-/// decision session Catervas started for it. An approval files an ordinary request in the Product
-/// Manager's name, then records `approved` naming it, under the lock; nothing is recorded when the
-/// filing fails. A decline files nothing; an escalation passes the request to the owner with the
-/// reason on the Product Manager's envelope. An approval of what costs money, whose cost is not
-/// known or that sends the project's data out is refused: the owner's alone (ADR 0039).
-///
-/// # Errors
-///
-/// `pipeline_decision_refused` for any role but the Product Manager and any session but the one
-/// that was asked to decide this request, `unknown_pipeline` for a number that is no request,
-/// `pipeline_decided` for a request approved, declined or passed on already,
-/// `pipeline_reason_invalid`, `pipeline_needs_owner`, `pipeline_not_filed` when the request could
-/// not be filed; `Failed` when the log cannot be read or written.
-pub(super) fn decide_data_pipeline(
-    call: &Call<'_>,
-    input: &DecidePipelineInput,
-) -> Result<Value, ToolError> {
-    if call.role() != Role::ProductManager {
-        return Err(refused(
-            "pipeline_decision_refused",
-            "only the Product Manager decides a data pipeline request, in the session Catervas started \
-             to decide it",
-        ));
-    }
-    let _held = crate::locked(&PIPELINES);
-    let deps = call.deps();
-    let records = data_pipelines(&deps.log).map_err(failed)?;
-    let record = its_open_request(call, &records, input.pipeline)?;
-    let reason = reason_of(&input.reason)?;
-    let number = std::num::NonZeroU64::new(record.pipeline)
-        .map(Into::into)
-        .ok_or_else(|| failed("a request is numbered from 1"))?;
-    let by = DataPipelineDecidedBy::ProductManager;
-    let (event, state) = match input.decision {
-        PipelineDecision::Approve => {
-            let filed = file_the_approved(call, record)?;
-            (
-                EventBody::DataPipelineApproved(DataPipelineApprovedBody {
-                    pipeline: number,
-                    by,
-                    reason: reason.to_string().try_into().map_err(failed)?,
-                    request: filed.as_str().to_string().try_into().map_err(failed)?,
-                }),
-                PipelineState::Approved,
-            )
-        }
-        PipelineDecision::Decline => (
-            EventBody::DataPipelineDeclined(DataPipelineDeclinedBody {
-                pipeline: number,
-                by,
-                reason: reason.to_string().try_into().map_err(failed)?,
-            }),
-            PipelineState::Declined,
-        ),
-        PipelineDecision::Escalate => (
-            EventBody::DataPipelineEscalated(DataPipelineEscalatedBody {
-                pipeline: number,
-                reason: reason.to_string().try_into().map_err(failed)?,
-            }),
-            PipelineState::Escalated,
-        ),
-    };
-    let recorded = call.append(None, event)?;
-    let mut answer = json!({
-        "seq": recorded.envelope.seq,
-        "pipeline": record.pipeline,
-        "state": state.as_str(),
-    });
-    if let EventBody::DataPipelineApproved(approved) = &recorded.body {
-        answer["request"] = json!(approved.request.as_str());
+    let event = call.append(Some(&task), EventBody::DataPipelineRequested(body.clone()))?;
+    let (state, request) = settle(call, event.envelope.seq, &body)?;
+    let mut answer =
+        json!({ "pipeline": event.envelope.seq, "state": state.as_str(), "next": NEXT });
+    if let Some(request) = request {
+        answer["request"] = json!(request);
     }
     Ok(answer)
 }
 
-/// The request `pipeline` of `records`, when the calling session was asked to decide it and it is
-/// still open.
-fn its_open_request<'a>(
+/// What Catervas writes when it passes a request to the owner, and why: it costs money or its cost
+/// is not known, or it is free and sends the project's data to a third party (ADR 0061).
+fn reason_for_the_owner(body: &DataPipelineRequestedBody) -> &'static str {
+    if cost_of(body.cost) == PipelineCost::Free {
+        "It sends your project's data to another service, so you decide (ADR 0061)."
+    } else {
+        "It costs money, or its cost is not known, so you decide (ADR 0061)."
+    }
+}
+
+/// Settles the request just recorded, as Catervas, under the lock: a request that costs money, whose
+/// cost is not known or that sends the project's data out is passed to the owner at once
+/// (`data_pipeline.escalated`); any other is filed as an ordinary request in Catervas's name and
+/// approved (`data_pipeline.approved`), neither with an agent or a session on the envelope. A
+/// request that cannot be filed goes to the owner too, with the reason. Answers the state, and the
+/// request filed.
+fn settle(
     call: &Call<'_>,
-    records: &'a [PipelineRecord],
     pipeline: u64,
-) -> Result<&'a PipelineRecord, ToolError> {
-    let Some(record) = records.iter().find(|record| record.pipeline == pipeline) else {
-        return Err(refused(
-            "unknown_pipeline",
-            format!("there is no data pipeline request {pipeline}"),
-        ));
+    body: &DataPipelineRequestedBody,
+) -> Result<(PipelineState, Option<String>), ToolError> {
+    let deps = call.deps();
+    let number = || {
+        std::num::NonZeroU64::new(pipeline)
+            .map(Into::into)
+            .ok_or_else(|| failed("a request is numbered from 1"))
     };
-    if !record
-        .tries
-        .iter()
-        .any(|session| session == &call.context.session_id)
-    {
-        return Err(refused(
-            "pipeline_decision_refused",
-            format!(
-                "this session was not asked to decide request {pipeline}: only the session Catervas \
-                 started for it does"
-            ),
-        ));
-    }
-    if !matches!(record.state, PipelineState::Open) {
-        return Err(refused(
-            "pipeline_decided",
-            format!("request {pipeline} is {} already", record.state.as_str()),
-        ));
-    }
-    Ok(record)
-}
-
-/// The reason, trimmed: 20 to 600 characters on one line.
-fn reason_of(text: &str) -> Result<&str, ToolError> {
-    let reason = text.trim();
-    let length = reason.chars().count();
-    if !(LEAST_TEXT..=MOST_TEXT).contains(&length) || reason.chars().any(char::is_control) {
-        return Err(refused(
-            "pipeline_reason_invalid",
-            format!(
-                "the reason is {LEAST_TEXT} to {MOST_TEXT} characters on one line, and this one is \
-                 {length}"
-            ),
-        ));
-    }
-    Ok(reason)
-}
-
-/// Files the ordinary request an approval of `record` asks for, in the Product Manager's name, and
-/// answers its id; refused `pipeline_needs_owner` when the owner alone may approve the request.
-fn file_the_approved(
-    call: &Call<'_>,
-    record: &PipelineRecord,
-) -> Result<catervas_core::contract::TaskId, ToolError> {
-    let body = &record.requested;
+    let pass_on = |reason: String| -> Result<(PipelineState, Option<String>), ToolError> {
+        crate::marketing::append(
+            deps,
+            None,
+            EventBody::DataPipelineEscalated(DataPipelineEscalatedBody {
+                pipeline: number()?,
+                reason: reason.try_into().map_err(failed)?,
+            }),
+        )
+        .map_err(failed)?;
+        Ok((PipelineState::Escalated, None))
+    };
     if pipeline_needs_owner(cost_of(body.cost), body.sends_project_data) {
-        return Err(refused(
-            "pipeline_needs_owner",
-            format!(
-                "request {} {}: only the owner approves it, so decline it, or escalate it to the \
-                 owner with your reason",
-                record.pipeline,
-                if body.sends_project_data {
-                    "sends the project's data out"
-                } else {
-                    "costs money or its cost is not known"
-                }
-            ),
-        ));
+        return pass_on(reason_for_the_owner(body).to_string());
     }
-    file_pipeline_request(
-        call.deps(),
-        &call.team,
-        record,
-        call.agent_id(),
-        &call.ids(None),
+    let records = data_pipelines(&deps.log).map_err(failed)?;
+    let record = records
+        .iter()
+        .find(|record| record.pipeline == pipeline)
+        .ok_or_else(|| failed("the request was recorded and is not in the log"))?;
+    let filed = match file_pipeline_request(deps, &call.team, record, CATERVAS, &deps.ids) {
+        Ok(filed) => filed,
+        Err(why) => {
+            let words: String = format!("Catervas could not set it up ({why}), so you decide.")
+                .chars()
+                .take(MOST_TEXT)
+                .collect();
+            return pass_on(words);
+        }
+    };
+    crate::marketing::append(
+        deps,
+        None,
+        EventBody::DataPipelineApproved(DataPipelineApprovedBody {
+            pipeline: number()?,
+            by: DataPipelineDecidedBy::Catervas,
+            reason: String::new().try_into().map_err(failed)?,
+            request: filed.as_str().to_string().try_into().map_err(failed)?,
+        }),
     )
-    .map_err(|why| refused("pipeline_not_filed", why))
+    .map_err(failed)?;
+    Ok((PipelineState::Approved, Some(filed.as_str().to_string())))
 }
 
 /// One request as `catervas_read_data_pipelines` words it: what the agent wrote, its state, and how
@@ -460,6 +355,7 @@ fn row(record: &PipelineRecord) -> Value {
             DecidedBy::ProductManager => {
                 json!({ "by": "product_manager", "reason": theirs(words) })
             }
+            DecidedBy::Catervas => json!({ "by": "catervas" }),
         };
     }
     if let Some(request) = &record.request {
@@ -595,8 +491,7 @@ mod tests {
         }
     }
 
-    /// The Product Manager's decision session for `pipeline` started: the only session that
-    /// decides it.
+    /// The Product Manager's decision session for `pipeline` started, as an older log holds one.
     fn pm_session_started(project: &TestProject, session: &str, pipeline: u64) {
         project.record_in(
             Some("pm"),
@@ -609,41 +504,6 @@ mod tests {
             }),
         );
     }
-
-    /// A context of `agent` in its decision session `session`, which started naming `pipeline`.
-    fn deciding(
-        project: &TestProject,
-        agent: &str,
-        session: &str,
-        pipeline: Option<u64>,
-    ) -> crate::tools::ToolContext {
-        let mut body = json!({ "purpose": "verify", "model": "claude-opus-5-5", "effort": "high" });
-        if let Some(pipeline) = pipeline {
-            body["pipeline"] = json!(pipeline);
-        }
-        project.record_in(Some(agent), Some(session), "", "session.started", &body);
-        let mut context = project.context(agent, None);
-        context.session_id = session.to_string();
-        context.purpose = SessionPurpose::Verify;
-        context
-    }
-
-    /// `catervas_decide_data_pipeline` in `context`.
-    fn decide(
-        context: &crate::tools::ToolContext,
-        pipeline: u64,
-        decision: &str,
-        reason: &str,
-    ) -> Result<Value, ToolError> {
-        run(
-            context,
-            "catervas_decide_data_pipeline",
-            json!({ "pipeline": pipeline, "decision": decision, "reason": reason }),
-        )
-    }
-
-    /// A reason of a good length.
-    const REASON: &str = "The plain pages answer this question, so the team needs no more.";
 
     /// The number a request was recorded under.
     fn number_of(answer: Result<Value, ToolError>) -> u64 {
@@ -671,8 +531,52 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn approve_is_refused_for_what_needs_the_owner() {
-        let project = a_project("pipeline-needs-owner");
+    fn files_a_free_source_at_once_and_asks_the_owner_about_a_paid_one() {
+        let project = a_project("pipeline-files-at-once");
+        let answer = ask(&project, &azure()).expect("a free request");
+
+        assert_eq!(answer["state"], "approved", "{answer}");
+        let approved = project.events(&[EventKind::DataPipelineApproved]);
+        assert_eq!(approved.len(), 1);
+        let EventBody::DataPipelineApproved(body) = &approved[0].body else {
+            panic!("a data_pipeline.approved body");
+        };
+        assert_eq!(
+            body.pipeline.get(),
+            answer["pipeline"].as_u64().expect("a number")
+        );
+        assert_eq!(body.by.to_string(), "catervas");
+        assert_eq!(body.reason.as_str(), "");
+        assert_eq!(answer["request"], body.request.as_str());
+        let ids = &approved[0].envelope.ids;
+        assert_eq!(
+            (ids.agent_id.as_deref(), ids.session_id.as_deref()),
+            (None, None)
+        );
+        assert!(
+            project
+                .events(&[EventKind::DataPipelineEscalated])
+                .is_empty()
+        );
+        // The request filed is an ordinary one, in Catervas's name.
+        let filed = project
+            .deps
+            .files
+            .read_contract(&body.request.as_str().parse().expect("a task id"))
+            .expect("the request's contract");
+        assert_eq!(
+            filed.title.as_str(),
+            "Set up Azure retail prices for the Procurement Specialist."
+        );
+        assert_eq!(filed.created_by.as_deref(), Some("catervas"));
+        assert_eq!(
+            filed_by(&project, "catervas"),
+            [body.request.as_str().to_string()]
+        );
+        assert_eq!(filed.status.to_string(), "draft");
+
+        // A paid source, one whose cost is unknown, and a free one that sends the project's data
+        // out each go to the owner, with a reason and nothing filed.
         let paid = number_of(ask(&project, &firecrawl()));
         let unknown = number_of(ask(
             &project,
@@ -690,95 +594,42 @@ mod tests {
                 json!(true),
             ),
         ));
-        let tasks = project.events(&[EventKind::TaskCreated]).len();
-        for (pipeline, session) in [(paid, "s-paid"), (unknown, "s-unknown"), (sends, "s-sends")] {
-            let context = deciding(&project, "pm", session, Some(pipeline));
-            let reason = refusal_of(decide(&context, pipeline, "approve", REASON));
-            assert!(reason.starts_with("pipeline_needs_owner: "), "{reason}");
-            assert!(
-                reason.contains("decline") && reason.contains("escalate"),
-                "it tells the Product Manager what to do: {reason}"
+        let escalated = project.events(&[EventKind::DataPipelineEscalated]);
+        assert_eq!(escalated.len(), 3);
+        for (event, pipeline, reason) in [
+            (
+                &escalated[0],
+                paid,
+                "It costs money, or its cost is not known, so you decide (ADR 0061).",
+            ),
+            (
+                &escalated[1],
+                unknown,
+                "It costs money, or its cost is not known, so you decide (ADR 0061).",
+            ),
+            (
+                &escalated[2],
+                sends,
+                "It sends your project's data to another service, so you decide (ADR 0061).",
+            ),
+        ] {
+            let EventBody::DataPipelineEscalated(body) = &event.body else {
+                panic!("a data_pipeline.escalated body");
+            };
+            assert_eq!(body.pipeline.get(), pipeline);
+            assert_eq!(body.reason.as_str(), reason);
+            let ids = &event.envelope.ids;
+            assert_eq!(
+                (ids.agent_id.as_deref(), ids.session_id.as_deref()),
+                (None, None)
             );
         }
-        assert!(
-            project
-                .events(&[EventKind::DataPipelineApproved])
-                .is_empty()
-        );
-        assert_eq!(
-            project.events(&[EventKind::TaskCreated]).len(),
-            tasks,
-            "nothing is filed"
-        );
-
-        // The Product Manager may decline a paid one without the owner, and escalate the others.
-        let paid_session = deciding(&project, "pm", "s-paid-2", Some(paid));
-        decide(&paid_session, paid, "decline", REASON).expect("a paid request may be declined");
-        let sends_session = deciding(&project, "pm", "s-sends-2", Some(sends));
-        decide(&sends_session, sends, "escalate", REASON).expect("it may be escalated");
-
-        // One that needs an account alone can be approved: that is the manager's judgement.
-        let account = number_of(ask(
-            &project,
-            &with(
-                with(azure(), "name", json!("Account source")),
-                "needs_account",
-                json!(true),
-            ),
-        ));
-        let context = deciding(&project, "pm", "s-account", Some(account));
-        decide(&context, account, "approve", REASON).expect("a free one with an account");
         assert_eq!(project.events(&[EventKind::DataPipelineApproved]).len(), 1);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn a_free_request_can_be_approved() {
-        let project = a_project("pipeline-approve");
-        let pipeline = number_of(ask(&project, &azure()));
-        // Its task is accepted meanwhile: an approval files a request, which needs no open task.
-        project.moved("CTV-1", "in_progress", "accepted", &json!({}));
-        let context = deciding(&project, "pm", "s-pm", Some(pipeline));
-
-        let answer = decide(&context, pipeline, "approve", REASON).expect("an approval");
-
-        let approved = project.events(&[EventKind::DataPipelineApproved]);
-        assert_eq!(approved.len(), 1);
-        let EventBody::DataPipelineApproved(body) = &approved[0].body else {
-            panic!("a data_pipeline.approved body");
-        };
-        assert_eq!(body.pipeline.get(), pipeline);
-        assert_eq!(body.by.to_string(), "product_manager");
-        assert_eq!(body.reason.as_str(), REASON);
-        assert_eq!(answer["request"], body.request.as_str());
-        let ids = &approved[0].envelope.ids;
-        assert_eq!(ids.agent_id.as_deref(), Some("pm"));
-        assert_eq!(ids.session_id.as_deref(), Some("s-pm"));
-        assert_eq!(ids.task_id, None);
-
-        // The request filed is an ordinary one, in the Product Manager's name.
-        let filed = project
-            .deps
-            .files
-            .read_contract(&body.request.as_str().parse().expect("a task id"))
-            .expect("the request's contract");
         assert_eq!(
-            filed.title.as_str(),
-            "Set up Azure retail prices for the Procurement Specialist."
+            filed_by(&project, "catervas").len(),
+            1,
+            "nothing more is filed"
         );
-        assert_eq!(
-            filed.intent.as_str(),
-            "Set up Azure retail prices for the Procurement Specialist.\n\
-             What it gives: The list prices of Azure's services, one row for each service and region.\n\
-             Source: https://prices.azure.com/api/retail/prices\n\
-             Asked because: The page says the price list is free to read and needs no account at all."
-        );
-        assert_eq!(filed.created_by.as_deref(), Some("pm"));
-        assert_eq!(
-            filed_by(&project, "pm"),
-            [body.request.as_str().to_string()]
-        );
-        assert_eq!(filed.status.to_string(), "draft");
     }
 
     #[test]
@@ -797,9 +648,7 @@ mod tests {
         {
             // A project for each: an approved name is not asked for again.
             let project = a_project(&format!("pipeline-kit-connector-{index}"));
-            let pipeline = number_of(ask(&project, &with(azure(), "name", json!(named))));
-            let context = deciding(&project, "pm", &format!("s-{index}"), Some(pipeline));
-            let answer = decide(&context, pipeline, "approve", REASON).expect("an approval");
+            let answer = ask(&project, &with(azure(), "name", json!(named))).expect("filed");
             let filed = project
                 .deps
                 .files
@@ -821,9 +670,7 @@ mod tests {
         }
         // A source that is none of the kit's has no such line.
         let project = a_project("pipeline-kit-connector-other");
-        let other = number_of(ask(&project, &with(azure(), "name", json!("Open prices"))));
-        let context = deciding(&project, "pm", "s-other", Some(other));
-        let answer = decide(&context, other, "approve", REASON).expect("an approval");
+        let answer = ask(&project, &with(azure(), "name", json!("Open prices"))).expect("filed");
         let filed = project
             .deps
             .files
@@ -842,7 +689,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn puts_what_the_agent_wrote_on_one_line_each_in_the_request() {
         let project = a_project("pipeline-lines");
-        let pipeline = number_of(ask(
+        let answer = ask(
             &project,
             &with(
                 with(
@@ -853,9 +700,8 @@ mod tests {
                 "why",
                 json!("The page says it is free\nto read, and needs no account."),
             ),
-        ));
-        let context = deciding(&project, "pm", "s-pm", Some(pipeline));
-        let answer = decide(&context, pipeline, "approve", REASON).expect("an approval");
+        )
+        .expect("filed");
         let filed = project
             .deps
             .files
@@ -876,211 +722,6 @@ mod tests {
         assert_eq!(
             lines[3],
             "Asked because: The page says it is free to read, and needs no account."
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn escalate_and_decline_record_their_events() {
-        let project = a_project("pipeline-escalate");
-        let first = number_of(ask(&project, &firecrawl()));
-        let second = number_of(ask(&project, &azure()));
-        let tasks = project.events(&[EventKind::TaskCreated]).len();
-
-        let context = deciding(&project, "pm", "s-first", Some(first));
-        for reason in ["x".repeat(19), "x".repeat(601)] {
-            for decision in ["approve", "decline", "escalate"] {
-                let refused = refusal_of(decide(&context, first, decision, &reason));
-                assert!(
-                    refused.starts_with("pipeline_reason_invalid: "),
-                    "{refused}"
-                );
-            }
-        }
-        // The reason is one line, and counted after trimming.
-        for reason in [
-            format!("{}\n{}", "a".repeat(30), "b".repeat(30)),
-            format!("  {}  ", "x".repeat(19)),
-        ] {
-            for decision in ["approve", "decline", "escalate"] {
-                let refused = refusal_of(decide(&context, first, decision, &reason));
-                assert!(
-                    refused.starts_with("pipeline_reason_invalid: "),
-                    "{refused}"
-                );
-            }
-        }
-        decide(
-            &context,
-            first,
-            "escalate",
-            &format!(" {} ", "x".repeat(20)),
-        )
-        .expect("20 characters are enough, kept trimmed");
-        let escalated = project.events(&[EventKind::DataPipelineEscalated]);
-        assert_eq!(escalated.len(), 1);
-        let EventBody::DataPipelineEscalated(body) = &escalated[0].body else {
-            panic!("a data_pipeline.escalated body");
-        };
-        assert_eq!(body.pipeline.get(), first);
-        assert_eq!(body.reason.as_str(), "x".repeat(20));
-        let ids = &escalated[0].envelope.ids;
-        assert_eq!(ids.agent_id.as_deref(), Some("pm"));
-        assert_eq!(ids.session_id.as_deref(), Some("s-first"));
-        assert_eq!(ids.task_id, None);
-
-        let context = deciding(&project, "pm", "s-second", Some(second));
-        decide(&context, second, "decline", &"y".repeat(600)).expect("600 characters are allowed");
-        let declined = project.events(&[EventKind::DataPipelineDeclined]);
-        assert_eq!(declined.len(), 1);
-        let EventBody::DataPipelineDeclined(body) = &declined[0].body else {
-            panic!("a data_pipeline.declined body");
-        };
-        assert_eq!(
-            (body.pipeline.get(), body.by.to_string()),
-            (second, "product_manager".to_string())
-        );
-        assert_eq!(
-            project.events(&[EventKind::TaskCreated]).len(),
-            tasks,
-            "a decline files nothing"
-        );
-        assert!(
-            project
-                .events(&[EventKind::DataPipelineApproved])
-                .is_empty()
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn only_its_decision_session_decides() {
-        let project = a_project("pipeline-session");
-        let first = number_of(ask(&project, &azure()));
-        let second = number_of(ask(
-            &project,
-            &with(azure(), "name", json!("Second source")),
-        ));
-        let before = project.events(&[EventKind::DataPipelineApproved]).len();
-
-        // The Product Manager's verify session of a task: its session.started names no pipeline.
-        let verifying = deciding(&project, "pm", "s-verify", None);
-        // Its decision session of another request.
-        let other = deciding(&project, "pm", "s-other", Some(second));
-        // A Scrum Master's session that names the request, which it was never asked to decide.
-        let scrum_master = deciding(&project, "sam", "s-sam", Some(first));
-        // The Product Manager's session that never started.
-        let mut unstarted = project.context("pm", None);
-        unstarted.session_id = "s-unstarted".to_string();
-        unstarted.purpose = SessionPurpose::Verify;
-        // The agent that asked, in its own session.
-        let mut asker = project.context("proc", Some("CTV-1"));
-        asker.session_id = "s-asker".to_string();
-        for (context, what) in [
-            (&verifying, "a verify session of a task"),
-            (&other, "a session for another request"),
-            (&scrum_master, "a Scrum Master"),
-            (&unstarted, "a session that never started"),
-            (&asker, "the Procurement Specialist"),
-        ] {
-            for decision in ["approve", "decline", "escalate"] {
-                let refused = refusal_of(decide(context, first, decision, REASON));
-                assert!(
-                    refused.starts_with("pipeline_decision_refused: "),
-                    "{what}, {decision}: {refused}"
-                );
-            }
-        }
-        assert_eq!(
-            project.events(&[EventKind::DataPipelineApproved]).len(),
-            before
-        );
-        assert!(
-            project
-                .events(&[EventKind::DataPipelineDeclined])
-                .is_empty()
-        );
-        assert!(
-            project
-                .events(&[EventKind::DataPipelineEscalated])
-                .is_empty()
-        );
-
-        // A number that is no request, from a session that names it.
-        let ghost = deciding(&project, "pm", "s-ghost", Some(9_999));
-        assert!(
-            refusal_of(decide(&ghost, 9_999, "decline", REASON)).starts_with("unknown_pipeline: ")
-        );
-        // The deciding session decides once.
-        let own = deciding(&project, "pm", "s-own", Some(first));
-        decide(&own, first, "decline", REASON).expect("the deciding session decides");
-        for decision in ["approve", "decline", "escalate"] {
-            let refused = refusal_of(decide(&own, first, decision, REASON));
-            assert!(
-                refused.starts_with("pipeline_decided: "),
-                "{decision}: {refused}"
-            );
-        }
-        // Nor does the owner's decision of an escalated request leave it to the manager.
-        let third = number_of(ask(&project, &with(azure(), "name", json!("Third source"))));
-        let session = deciding(&project, "pm", "s-third", Some(third));
-        decide(&session, third, "escalate", REASON).expect("escalated");
-        project.record(
-            "",
-            "data_pipeline.approved",
-            &json!({ "pipeline": third, "by": "human", "reason": "", "request": "CTV-9" }),
-        );
-        assert!(
-            refusal_of(decide(&session, third, "decline", REASON))
-                .starts_with("pipeline_decided: ")
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn two_decisions_at_once_record_one() {
-        let project = a_project("pipeline-race");
-        let pipeline = number_of(ask(&project, &azure()));
-        let context = deciding(&project, "pm", "s-pm", Some(pipeline));
-        // A decision takes the lock before it reads, so it waits for whoever holds it.
-        let answer = waits_for_the_lock(&PIPELINES, &project, || {
-            decide(&context, pipeline, "approve", REASON)
-        });
-        answer.expect("the decision is recorded once the lock is let go");
-        assert!(
-            refusal_of(decide(&context, pipeline, "approve", REASON))
-                .starts_with("pipeline_decided: ")
-        );
-
-        let second = number_of(ask(
-            &project,
-            &with(azure(), "name", json!("Second source")),
-        ));
-        let (one, other) = (
-            deciding(&project, "pm", "s-race-1", Some(second)),
-            deciding(&project, "pm", "s-race-2", Some(second)),
-        );
-        let answers: Vec<Result<Value, ToolError>> = std::thread::scope(|scope| {
-            let first = scope.spawn(|| decide(&one, second, "approve", REASON));
-            let next = scope.spawn(|| decide(&other, second, "approve", REASON));
-            vec![first.join().expect("ends"), next.join().expect("ends")]
-        });
-        assert_eq!(
-            answers.iter().filter(|answer| answer.is_ok()).count(),
-            1,
-            "{answers:?}"
-        );
-        let refused: Vec<String> = answers
-            .into_iter()
-            .filter_map(Result::err)
-            .map(|error| refusal_of(Err(error)))
-            .collect();
-        assert!(refused[0].starts_with("pipeline_decided: "), "{refused:?}");
-        assert_eq!(project.events(&[EventKind::DataPipelineApproved]).len(), 2);
-        assert_eq!(
-            filed_by(&project, "pm").len(),
-            2,
-            "one request for each approved"
         );
     }
 
@@ -1338,7 +979,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_fourth_open_request_and_a_repeated_name() {
         let project = a_project("pipeline-limits");
-        let named = |name: &str| with(azure(), "name", json!(name));
+        // A paid source goes to the owner, so it stays open; a free one is filed at once.
+        let named = |name: &str| with(firecrawl(), "name", json!(name));
         let first = ask(&project, &firecrawl()).expect("the first")["pipeline"]
             .as_u64()
             .expect("a number");
@@ -1357,12 +999,7 @@ mod tests {
             "a name in lower case in any alphabet"
         );
         ask(&project, &named("Shippo rates")).expect("the third");
-        // One of the three is escalated, and still open.
-        project.record(
-            "",
-            "data_pipeline.escalated",
-            &json!({ "pipeline": first, "reason": "The Product Manager did not decide" }),
-        );
+        // Each of the three is escalated to the owner, and still open.
         let reason = refusal_of(ask(&project, &named("Open Meteo")));
         assert!(reason.starts_with("pipeline_limit_reached: "), "{reason}");
         // A repeated name is named as one, not as the limit.
@@ -1382,11 +1019,6 @@ mod tests {
         // Approved, it is not open either (the owner decides an escalated request).
         let open = project.events(&[EventKind::DataPipelineRequested]);
         let second = open[1].envelope.seq;
-        project.record(
-            "",
-            "data_pipeline.escalated",
-            &json!({ "pipeline": second, "reason": "The Product Manager did not decide" }),
-        );
         project.record(
             "",
             "data_pipeline.approved",
@@ -1412,14 +1044,22 @@ mod tests {
     )]
     fn reads_each_request_and_its_state() {
         let project = a_project("pipeline-read");
-        let number = |answer: Result<Value, ToolError>| {
-            answer.expect("a request")["pipeline"]
-                .as_u64()
-                .expect("a number")
+        // Requests as an older log holds them, open until a decision: the agent's own record.
+        let old = |body: Value| {
+            project
+                .record_in(
+                    Some("proc"),
+                    Some("s-proc"),
+                    "CTV-1",
+                    "data_pipeline.requested",
+                    &body,
+                )
+                .envelope
+                .seq
         };
-        let a = number(ask(&project, &firecrawl()));
-        let b = number(ask(&project, &with(azure(), "name", json!("B source"))));
-        let c = number(ask(&project, &with(azure(), "name", json!("C source"))));
+        let a = old(firecrawl());
+        let b = old(with(azure(), "name", json!("B source")));
+        let c = old(with(azure(), "name", json!("C source")));
 
         // B: the Product Manager passes it on, with its reason.
         pm_session_started(&project, "pm-b", b);
@@ -1442,13 +1082,10 @@ mod tests {
             &json!({ "pipeline": c, "by": "human", "reason": "Go, but only prices.", "request": "CTV-9" }),
         );
         // D: asked after C was decided, and declined by the Product Manager.
-        let d = number(ask(
-            &project,
-            &with(
-                with(azure(), "name", json!("D source")),
-                "cost",
-                json!("unknown"),
-            ),
+        let d = old(with(
+            with(azure(), "name", json!("D source")),
+            "cost",
+            json!("unknown"),
         ));
         pm_session_started(&project, "pm-d", d);
         project.record_in(
@@ -1459,6 +1096,11 @@ mod tests {
             &json!({ "pipeline": d, "by": "product_manager", "reason": "The plain pages answer this." }),
         );
 
+        // A free source asked for now is filed and approved by Catervas at once.
+        let filed =
+            ask(&project, &with(azure(), "name", json!("E source"))).expect("filed")["pipeline"]
+                .as_u64()
+                .expect("a number");
         let read = project
             .call(
                 "proc",
@@ -1466,18 +1108,21 @@ mod tests {
                 "catervas_read_data_pipelines",
                 json!({}),
             )
-            .expect("the requests are read");
+            .expect("the requests are read again");
         let rows = read["pipelines"].as_array().expect("a list");
         let order: Vec<u64> = rows
             .iter()
             .map(|row| row["pipeline"].as_u64().unwrap_or(0))
             .collect();
-        assert_eq!(order, [a, b, c, d], "oldest first");
+        assert_eq!(order, [a, b, c, d, filed], "oldest first");
         let states: Vec<&str> = rows
             .iter()
             .map(|row| row["state"].as_str().unwrap_or(""))
             .collect();
-        assert_eq!(states, ["open", "escalated", "approved", "declined"]);
+        assert_eq!(
+            states,
+            ["open", "escalated", "approved", "declined", "approved"]
+        );
         assert_eq!(rows[0]["name"], "Firecrawl");
         assert_eq!(rows[0]["cost"], "paid");
         assert_eq!(rows[0]["needs_account"], true);
@@ -1518,6 +1163,8 @@ mod tests {
             "{words}"
         );
         assert!(rows[3].get("request").is_none());
+        assert_eq!(rows[4]["decision"], json!({ "by": "catervas" }));
+        assert!(rows[4]["request"].as_str().is_some());
 
         // The role reads them in its chat too, and nobody else reads them anywhere.
         let mut chat = project.context("proc", None);

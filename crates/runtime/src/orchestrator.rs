@@ -43,7 +43,6 @@ pub(crate) use human::{
 };
 mod integrate;
 mod messages;
-mod pipeline;
 mod recover;
 mod requests;
 mod rules;

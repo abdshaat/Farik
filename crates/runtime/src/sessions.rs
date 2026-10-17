@@ -5,8 +5,8 @@ use std::num::NonZeroU64;
 use catervas_core::team::Effort;
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{
-    DataPipelineNumber, EventBody, EventIds, SessionEndedBody, SessionEndedBodyReason,
-    SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyPurpose, Thread, new_event,
+    EventBody, EventIds, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
+    SessionStartedBodyEffort, SessionStartedBodyPurpose, Thread, new_event,
 };
 use catervas_store::{EventLog, StoreError};
 
@@ -27,7 +27,6 @@ pub fn record_session_started(
     spec: &SessionSpec,
     in_reply_to: Option<u64>,
     thread: Option<Thread>,
-    pipeline: Option<u64>,
     ids: &EventIds,
     clock: &dyn Clock,
 ) -> Result<(), StoreError> {
@@ -55,9 +54,7 @@ pub fn record_session_started(
             }
             _ => None,
         },
-        pipeline: pipeline
-            .and_then(NonZeroU64::new)
-            .map(DataPipelineNumber::from),
+        pipeline: None,
     };
     let ids = EventIds {
         task_id: spec.task_id.clone(),
@@ -180,36 +177,11 @@ mod tests {
     }
 
     #[test]
-    fn names_the_request_only_a_decision_session_decides() {
-        let log = a_log();
-        let spec = SessionSpec {
-            task_id: None,
-            ..spec()
-        };
-        let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
-        record_session_started(&log, &spec, None, None, Some(7), &ids(&spec), &clock)
-            .expect("recorded");
-        record_session_started(&log, &spec, None, None, None, &ids(&spec), &clock)
-            .expect("recorded");
-        let named: Vec<Option<u64>> = everything(&log)
-            .iter()
-            .map(|event| match &event.body {
-                EventBody::SessionStarted(body) => {
-                    body.pipeline.as_ref().map(|number| number.get())
-                }
-                other => panic!("expected session.started, got {other:?}"),
-            })
-            .collect();
-        assert_eq!(named, [Some(7), None]);
-    }
-
-    #[test]
     fn records_a_session_starting_and_ending() {
         let log = a_log();
         let spec = spec();
         let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
-        record_session_started(&log, &spec, None, None, None, &ids(&spec), &clock)
-            .expect("recorded");
+        record_session_started(&log, &spec, None, None, &ids(&spec), &clock).expect("recorded");
         record_session_ended(
             &log,
             &spec.session_id,
@@ -282,8 +254,7 @@ mod tests {
                 effort,
                 ..spec()
             };
-            record_session_started(&log, &spec, None, None, None, &ids(&spec), &clock)
-                .expect("recorded");
+            record_session_started(&log, &spec, None, None, &ids(&spec), &clock).expect("recorded");
             record_session_ended(&log, &spec.session_id, reason, "", &ids(&spec), &clock)
                 .expect("recorded");
             expected.push((purpose_wire, effort_wire, reason_wire));

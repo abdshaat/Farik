@@ -197,7 +197,6 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "prioritising-the-backlog",
             "scoping-a-release",
             "using-product-sources",
-            "deciding-data-pipelines",
             "catervafying-the-repository",
         ),
         Role::ScrumMaster => embedded!("scrum_master":
@@ -2258,40 +2257,6 @@ mod tests {
         }
     }
 
-    /// Step 10e: after its five the Product Manager's kit carries the skill of deciding a data
-    /// pipeline request, which says what Catervas refuses, what to do then, and that an approval
-    /// only files a request.
-    #[test]
-    fn product_manager_kit_carries_deciding_data_pipelines() {
-        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
-        assert_eq!(kit.skills.len(), 7);
-        assert_eq!(kit.skills[5].name, "deciding-data-pipelines");
-        assert_eq!(kit.skills[6].name, "catervafying-the-repository");
-        assert_eq!(kit.skills[4].name, "using-product-sources");
-        let (description, text) = kit_skill(Role::ProductManager, "deciding-data-pipelines");
-        assert!(description.starts_with("Use when"), "{description}");
-        for phrase in [
-            "`catervas_decide_data_pipeline`",
-            "`pipeline_needs_owner`",
-            "decline or escalate",
-            "a decline names what to use instead",
-            "approves no site",
-        ] {
-            assert!(text.contains(phrase), "lacks \"{phrase}\":\n{text}");
-        }
-        // §3: an account is escalated unless the team has it already (the sentence wraps).
-        let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(
-            flat.contains("Escalate it unless the team has the account already"),
-            "lacks the account rule:\n{text}"
-        );
-        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
-        assert!(!text.contains(" @"), "no @ after a space");
-    }
-
-    /// ADR 0051: every role that owns a folder carries `catervafying-the-repository`, listed last
-    /// (the Developer's last but one, before the recommended workflow), under 6 KiB, naming its
-    /// folder and the tool that commits its documents.
     #[test]
     fn every_owner_carries_catervafying_the_repository() {
         for (role, folder) in catervas_core::folders::ROLE_FOLDERS {
@@ -2349,7 +2314,7 @@ mod tests {
             assert!(kit.skills.len() <= 20, "{role}");
         }
         for (role, count) in [
-            (Role::ProductManager, 7),
+            (Role::ProductManager, 6),
             (Role::ScrumMaster, 4),
             (Role::Architect, 7),
             (Role::SoftwareDeveloper, 8),

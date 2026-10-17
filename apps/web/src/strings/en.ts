@@ -2103,7 +2103,6 @@ export const en = {
 	pipelinePaid: "It costs money.",
 	pipelineUnknown: "Its cost is not known.",
 	pipelineSendsData: "It sends your data to {source}.",
-	pipelineUndecided: "The Product Manager did not decide.",
 	pipelineAsks: "The Product Manager asks you:",
 	pipelineWhat: "What it would give {name}",
 	pipelineWhy: "Why, in {name}’s words",

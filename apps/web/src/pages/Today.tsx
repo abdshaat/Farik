@@ -902,9 +902,7 @@ function PipelineRow({
 					{ask.cost === "paid" && <p>{t("pipelinePaid")}</p>}
 					{ask.cost === "unknown" && <p>{t("pipelineUnknown")}</p>}
 					{ask.sendsProjectData && <p>{t("pipelineSendsData", { source })}</p>}
-					{ask.reason === undefined ? (
-						<p>{t("pipelineUndecided")}</p>
-					) : (
+					{ask.reason !== undefined && (
 						<>
 							<span id={ids("asks")}>{t("pipelineAsks")}</span>
 							<fieldset

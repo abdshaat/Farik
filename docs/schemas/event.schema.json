@@ -1551,8 +1551,8 @@
     },
     "dataPipelineDecidedBy": {
       "type": "string",
-      "enum": ["product_manager", "human"],
-      "description": "Who decided a request: the Product Manager, in the session that was asked to, or the owner. Under auto (phase 9 step 01) a third word joins them."
+      "enum": ["product_manager", "human", "catervas"],
+      "description": "Who decided a request: the owner, Catervas (a request that costs nothing and sends nothing out, filed at once: ADR 0061), or, in an older log, the Product Manager, in the session that was asked to."
     },
     "dataPipelineRequestedBody": {
       "title": "Data Pipeline Requested Body",
@@ -1572,7 +1572,7 @@
     },
     "dataPipelineEscalatedBody": {
       "title": "Data Pipeline Escalated Body",
-      "description": "A request goes to the owner (docs/SPEC.md 6.10; ADR 0039): the Product Manager passed it on, with its reason on one line of its own words (the envelope names the Product Manager and its decision session), or Catervas did after three decision sessions ended without a word (the reason is Catervas's sentence and the envelope names no agent and no session). pipeline is the request's number. About the request and no task of its own.",
+      "description": "A request goes to the owner (docs/SPEC.md 6.10; ADR 0039): Catervas passed it on at once, since it costs money, its cost is not known or it sends the project's data out (ADR 0061): the reason is Catervas's sentence and the envelope names no agent and no session. In an older log the Product Manager passed it on, with its reason on one line of its own words (the envelope names the Product Manager and its decision session), or Catervas did after three decision sessions ended without a word. pipeline is the request's number. About the request and no task of its own.",
       "type": "object",
       "additionalProperties": false,
       "required": ["pipeline", "reason"],
@@ -1583,7 +1583,7 @@
     },
     "dataPipelineApprovedBody": {
       "title": "Data Pipeline Approved Body",
-      "description": "A request was approved, and the team was asked to set the source up (docs/SPEC.md 6.10; ADR 0039): by the Product Manager, from the decision session of this request, or by the owner, whose envelope names no agent and no session. reason is the Product Manager's reason or the owner's note, empty when the owner said nothing; request is the id of the ordinary request that was filed, the only thing an approval does. About the request and no task of its own.",
+      "description": "A request was approved, and the team was asked to set the source up (docs/SPEC.md 6.10; ADR 0039): by Catervas, at once, for a request that costs nothing and sends nothing out (ADR 0061), or by the owner, whose envelope names no agent and no session; in an older log by the Product Manager, from the decision session of this request. reason is the Product Manager's reason or the owner's note, empty when the owner or Catervas said nothing; request is the id of the ordinary request that was filed, the only thing an approval does. About the request and no task of its own.",
       "type": "object",
       "additionalProperties": false,
       "required": ["pipeline", "by", "reason", "request"],

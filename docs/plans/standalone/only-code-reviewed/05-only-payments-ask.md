@@ -185,7 +185,7 @@ Tests:
   - The free requests record `data_pipeline.approved { by: "catervas", reason: "" }` with no `agent_id`.
   - A `paid` request, an `unknown` one, and a free one with `sends_project_data`, each record `data_pipeline.escalated` with its reason of Decisions and no `agent_id`, and file nothing.
 
-- [ ] `feat(runtime): file a free data source at once, ask the owner about one that costs or sends data`
+- [x] `feat(runtime): file a free data source at once, ask the owner about one that costs or sends data`
 
 ## Verification
 
