@@ -154,7 +154,7 @@ allowing four sessions"), `crates/cli/src/bin/catervas-e2e-serve.rs` (`transcrip
   Today; within 60 s the log holds a `task.transitioned` of CTV-1 to `accepted` and only the one
   `escalation.raised`. Screenshot `escalation` with `screenshots(page, "escalation")`.
 
-- [ ] `test(web): answer an escalation from Today in one action, through the real server`
+- [x] `test(web): answer an escalation from Today in one action, through the real server`
 
 ## Verification
 

@@ -345,6 +345,15 @@ pub fn refine_writes_task_for_theo_ctv_1() -> Transcript {
     ))
 }
 
+/// Mira writes CTV-1's plan for Theo, allowing four sessions: as `refine_writes_task_for_theo_ctv_1`
+/// with a budget of 5 dollars and 4 sessions. Hand-written.
+#[must_use]
+pub fn refine_writes_four_session_task_for_theo_ctv_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/refine_writes_four_session_task_for_theo_ctv_1.jsonl"
+    ))
+}
+
 /// As `refine_writes_task_for_theo_ctv_1`, but `high` risk, so the human approves the plan.
 /// Hand-written.
 #[must_use]

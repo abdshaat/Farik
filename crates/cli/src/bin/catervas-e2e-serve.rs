@@ -22,10 +22,11 @@ use catervas_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_ctv_1, ask_with_choices_ctv_1, chat_answers_with_a_request,
     design_review_passes_ctv_2, explore_checks_and_plans_ctv_1, explore_plans_ctv_1,
     implement_after_send_back_ctv_1, implement_by_iris_page_ctv_1, implement_css_ctv_2,
-    implement_finishes_ctv_1, plan_assigns_ctv_1_to_iris, plan_assigns_ctv_1_to_theo,
-    plan_assigns_ctv_2_to_theo, plan_breaks_down_ctv_1, plan_breaks_down_ctv_2,
-    planning_ceremony_ctv_1, planning_ceremony_ctv_1_ctv_2, refine_writes_css_task_for_theo_ctv_2,
-    refine_writes_epic_ctv_1, refine_writes_high_risk_ctv_1,
+    implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1_to_iris,
+    plan_assigns_ctv_1_to_theo, plan_assigns_ctv_2_to_theo, plan_breaks_down_ctv_1,
+    plan_breaks_down_ctv_2, planning_ceremony_ctv_1, planning_ceremony_ctv_1_ctv_2,
+    refine_writes_css_task_for_theo_ctv_2, refine_writes_epic_ctv_1,
+    refine_writes_four_session_task_for_theo_ctv_1, refine_writes_high_risk_ctv_1,
     refine_writes_page_task_for_iris_ctv_1, refine_writes_task_for_iris_ctv_1,
     refine_writes_task_for_theo_ctv_1, reply_to_a_mention, retro, review,
     review_answers_the_rubric_ctv_1, review_answers_the_rubric_ctv_2, review_writes_note,
@@ -43,6 +44,10 @@ fn transcript(name: &str) -> Option<Transcript> {
         "triage_ctv_1_small_by_pm" => Some(triage_ctv_1_small_by_pm()),
         "ask_with_choices_ctv_1" => Some(ask_with_choices_ctv_1()),
         "refine_writes_task_for_theo_ctv_1" => Some(refine_writes_task_for_theo_ctv_1()),
+        "refine_writes_four_session_task_for_theo_ctv_1" => {
+            Some(refine_writes_four_session_task_for_theo_ctv_1())
+        }
+        "implement_stops_early" => Some(implement_stops_early()),
         "refine_writes_task_for_iris_ctv_1" => Some(refine_writes_task_for_iris_ctv_1()),
         "plan_assigns_ctv_1_to_iris" => Some(plan_assigns_ctv_1_to_iris()),
         "explore_plans_ctv_1" => Some(explore_plans_ctv_1()),
