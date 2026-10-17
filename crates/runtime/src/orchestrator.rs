@@ -48,6 +48,8 @@ mod session;
 pub(crate) use session::read_roots;
 mod spend;
 mod verify;
+mod work;
+pub use work::Work;
 
 pub use crate::session::TRIAGE_MODEL;
 
@@ -69,6 +71,9 @@ pub struct OrchestratorDeps {
     pub forge: Arc<Forge>,
     /// What a run waits on while every agent with work is asleep.
     pub sleeper: Arc<dyn Sleeper>,
+    /// Which agents have a session running in this process, and the turn every tick holds but
+    /// while its session runs (ADR 0064).
+    pub work: Arc<Work>,
 }
 
 /// Why a tick could not finish. Something the governor refused is not one of these: it is an
@@ -252,6 +257,63 @@ pub enum TickReport {
     },
 }
 
+/// What the ticks driving a project did next (ADR 0064).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Progress {
+    /// A tick started a session, which runs on while the next ticks go on; its tick reports when
+    /// it ends.
+    Started {
+        /// The agent the session is of.
+        agent_id: String,
+        /// The task it is about, when there is one.
+        task_id: Option<TaskId>,
+        /// What it is for, as `session.started` records it.
+        purpose: String,
+    },
+    /// A tick ended, and said this.
+    Ticked(TickReport),
+}
+
+/// The ticks of a driving process: the running ones, and the sessions they started that `next`
+/// has not told of yet.
+struct Ticks {
+    set: tokio::task::JoinSet<Result<TickReport, OrchestratorError>>,
+    started: tokio::sync::mpsc::UnboundedReceiver<work::Started>,
+    sender: tokio::sync::mpsc::UnboundedSender<work::Started>,
+}
+
+impl Ticks {
+    fn new() -> Self {
+        let (sender, started) = tokio::sync::mpsc::unbounded_channel();
+        Ticks {
+            set: tokio::task::JoinSet::new(),
+            started,
+            sender,
+        }
+    }
+
+    /// A session started that `next` has not told of yet.
+    fn started(&mut self) -> Option<Progress> {
+        self.started
+            .try_recv()
+            .ok()
+            .map(work::Started::into_progress)
+    }
+}
+
+/// What a tick that ended answered; `None` when the set was empty.
+fn ended(
+    joined: Option<Result<Result<TickReport, OrchestratorError>, tokio::task::JoinError>>,
+) -> Option<Result<TickReport, OrchestratorError>> {
+    joined.map(|joined| joined.unwrap_or_else(|error| Err(tick_failed(&error))))
+}
+
+fn tick_failed(error: &tokio::task::JoinError) -> OrchestratorError {
+    OrchestratorError::Refused {
+        reason: format!("tick_failed: {error}"),
+    }
+}
+
 /// How a wait for a sleeping agent ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Waited {
@@ -423,13 +485,12 @@ pub struct RecoveryReport {
     pub tasks_resumed: u32,
 }
 
-/// Catervas running a project's team. ponytail: one session at a time, a session pool when a team
-/// outgrows a WIP limit of one.
+/// Catervas running a project's team.
 pub struct Orchestrator {
     deps: OrchestratorDeps,
     /// Each task's sandbox, made the first time a session of the task needs one in this process.
     sandboxes: Mutex<BTreeMap<TaskId, Arc<dyn Sandbox>>>,
-    /// Read before each tick of `run_until_idle`.
+    /// Read before each tick `next` starts.
     stopped: AtomicBool,
     /// Notified by `stop`, so that a wait for a sleeping agent ends at once.
     stops: tokio::sync::Notify,
@@ -437,6 +498,8 @@ pub struct Orchestrator {
     /// it. One permit is kept when nobody waits: a command handled during a tick ends the wait
     /// after it at once, which costs one tick.
     commands: tokio::sync::Notify,
+    /// The ticks `next` has started (ADR 0064). Locked for the whole of a call of `next`.
+    ticks: tokio::sync::Mutex<Ticks>,
 }
 
 impl Orchestrator {
@@ -449,6 +512,7 @@ impl Orchestrator {
             stopped: AtomicBool::new(false),
             stops: tokio::sync::Notify::new(),
             commands: tokio::sync::Notify::new(),
+            ticks: tokio::sync::Mutex::new(Ticks::new()),
         }
     }
 
@@ -500,35 +564,147 @@ impl Orchestrator {
         rules::tick(self, scope).await
     }
 
+    /// The next thing the ticks driving the project did (ADR 0064): a session started, which runs
+    /// on while the next ticks go on, or a tick ended and said what it did. `None` once `stop`
+    /// was called and no tick runs.
+    ///
+    /// A tick takes the turn (`Work`), does everything but run its session, hands the turn back
+    /// to run the session, and takes it again to record its end; `next` starts a fresh tick
+    /// whenever it is called, so that an agent without a session finds work while others work.
+    /// Only a fresh tick's idleness with no tick running is ever answered, so a driver never ends
+    /// while sessions run.
+    ///
+    /// # Errors
+    ///
+    /// The error a tick ended with; a tick that panicked is `Refused` as `tick_failed`.
+    pub async fn next(
+        self: &Arc<Self>,
+        scope: &TickScope,
+    ) -> Option<Result<Progress, OrchestratorError>> {
+        let mut guard = self.ticks.lock().await;
+        let ticks = &mut *guard;
+        loop {
+            if let Some(started) = ticks.started() {
+                return Some(Ok(started));
+            }
+            if self.is_stopped() {
+                if ticks.set.is_empty() {
+                    return None;
+                }
+                let joined = ticks.set.join_next().await;
+                match ended(joined) {
+                    Some(Ok(TickReport::Idle { .. })) | None => {}
+                    Some(report) => return Some(report.map(Progress::Ticked)),
+                }
+                continue;
+            }
+            let turn = self.deps.work.turn().lock_owned().await;
+            let me = Arc::clone(self);
+            let owned = scope.clone();
+            let spawned = ticks.set.spawn(work::holding_the_turn(
+                turn,
+                ticks.sender.clone(),
+                async move { me.tick_within(&owned).await },
+            ));
+            let spawned = spawned.id();
+            let report = loop {
+                tokio::select! {
+                    biased;
+                    Some(started) = ticks.started.recv() => {
+                        return Some(Ok(started.into_progress()));
+                    }
+                    joined = ticks.set.join_next_with_id() => {
+                        let Some(joined) = joined else { break None };
+                        let (id, result) = match joined {
+                            Ok((id, report)) => (id, report),
+                            Err(error) => (error.id(), Err(tick_failed(&error))),
+                        };
+                        match result {
+                            Ok(TickReport::Idle { .. }) if id != spawned => {}
+                            other => break Some((id == spawned, other)),
+                        }
+                    }
+                }
+            };
+            match report {
+                None => {}
+                Some((true, Ok(TickReport::Idle { why, until }))) => {
+                    if ticks.set.is_empty() {
+                        return Some(Ok(Progress::Ticked(TickReport::Idle { why, until })));
+                    }
+                    if let Some(report) = self.wait_for_a_tick(ticks, until).await {
+                        return Some(report);
+                    }
+                }
+                Some((_, other)) => return Some(other.map(Progress::Ticked)),
+            }
+        }
+    }
+
+    /// After a fresh tick was idle while others run: waits for a running tick to end (answered,
+    /// unless idle), a session to start, a command, a filed request, a stop, or the time the
+    /// first sleeping agent wakes, at most `RECHECK`; answers nothing for the last four.
+    async fn wait_for_a_tick(
+        &self,
+        ticks: &mut Ticks,
+        until: Option<DateTime<Utc>>,
+    ) -> Option<Result<Progress, OrchestratorError>> {
+        // Taken before the stop is read, so that a stop between the two still ends the wait.
+        let stopped = self.stops.notified();
+        tokio::pin!(stopped);
+        stopped.as_mut().enable();
+        if self.is_stopped() {
+            return None;
+        }
+        let now = self.deps.tools.clock.now();
+        let capped = until.map_or(now + RECHECK, |until| until.min(now + RECHECK));
+        tokio::select! {
+            Some(started) = ticks.started.recv() => Some(Ok(started.into_progress())),
+            joined = ticks.set.join_next() => match ended(joined) {
+                Some(Ok(TickReport::Idle { .. })) | None => None,
+                Some(report) => Some(report.map(Progress::Ticked)),
+            },
+            () = self.deps.sleeper.sleep_until(capped) => None,
+            () = stopped => None,
+            () = self.commands.notified() => None,
+            () = self.deps.daemon.wakes().notified() => None,
+        }
+    }
+
     /// Whether `stop` was called.
     #[must_use]
     pub fn is_stopped(&self) -> bool {
         self.stopped.load(Ordering::SeqCst)
     }
 
-    /// Ticks until a tick is idle with no agent to wait for, or `stop` was called. A tick idle
-    /// while an agent sleeps is waited out (`wait_until`), and the ticks go on.
+    /// Drives the ticks (`next`) until one is idle with no session running and no agent to wait
+    /// for, or `stop` was called. A tick idle while an agent sleeps is waited out (`wait_until`),
+    /// and the ticks go on. On an error, stops and lets every running session end before
+    /// returning it.
     ///
     /// # Errors
     ///
     /// The first error a tick returns.
-    pub async fn run_until_idle(&self) -> Result<(), OrchestratorError> {
-        while !self.is_stopped() {
-            match self.tick().await? {
-                TickReport::Idle {
+    pub async fn run_until_idle(self: &Arc<Self>) -> Result<(), OrchestratorError> {
+        let scope = TickScope::default();
+        loop {
+            match self.next(&scope).await {
+                None | Some(Ok(Progress::Ticked(TickReport::Idle { until: None, .. }))) => {
+                    return Ok(());
+                }
+                Some(Err(error)) => {
+                    self.stop();
+                    while self.next(&scope).await.is_some() {}
+                    return Err(error);
+                }
+                Some(Ok(Progress::Ticked(TickReport::Idle {
                     until: Some(until), ..
-                } => {
+                }))) => {
                     self.wait_until(until).await;
                 }
-                TickReport::Idle { until: None, .. } => break,
-                TickReport::Acted { .. }
-                | TickReport::Delivery { .. }
-                | TickReport::Conversation { .. }
-                | TickReport::Chat { .. }
-                | TickReport::FolderChange { .. } => {}
+                Some(Ok(_)) => {}
             }
         }
-        Ok(())
     }
 
     /// Waits until `until`, `RECHECK` from now, `stop` is called, or a command the human gave
@@ -623,8 +799,8 @@ impl Orchestrator {
         recover::recover(self)
     }
 
-    /// Stops `run_until_idle` before its next tick, and ends a wait at once. A session already
-    /// running runs to its end.
+    /// Stops `next` and `run_until_idle` from ticking again, and ends a wait at once. Sessions
+    /// already running run to their end.
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
         self.stops.notify_waiters();
@@ -1487,5 +1663,208 @@ mod tests {
         for outcome in outcomes {
             assert_eq!(result_of(reply_of(outcome.clone())), outcome);
         }
+    }
+
+    /// The team of `pm`, `dev-a` and `arch`, an Architect, with a WIP limit of one.
+    fn a_developer_and_an_architect(wire: &mut serde_json::Value) {
+        use catervas_core::team::fixtures::an_agent_wire;
+        wire["agents"] = serde_json::json!([
+            an_agent_wire("pm", "product_manager"),
+            an_agent_wire("dev-a", "software_developer"),
+            an_agent_wire("arch", "architect"),
+        ]);
+    }
+
+    /// A task of a Developer that an Architect reviews, whose change may touch `done.txt` and
+    /// `site/style.css`.
+    fn reviewed_by_the_architect(wire: &mut serde_json::Value) {
+        wire["reviewer_role"] = serde_json::json!("architect");
+        wire["allowed_paths"] = serde_json::json!(["done.txt", "site/style.css"]);
+    }
+
+    /// The next progress of `orchestrator`, within ten seconds.
+    async fn next_progress(orchestrator: &std::sync::Arc<super::Orchestrator>) -> super::Progress {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            orchestrator.next(&super::TickScope::default()),
+        )
+        .await
+        .expect("the next progress came within ten seconds")
+        .expect("the orchestrator was not stopped")
+        .expect("the tick ran")
+    }
+
+    /// Progresses until one matches, at most ten; every one seen, the match last.
+    async fn until(
+        orchestrator: &std::sync::Arc<super::Orchestrator>,
+        matches: impl Fn(&super::Progress) -> bool,
+    ) -> Vec<super::Progress> {
+        let mut seen = Vec::new();
+        for _ in 0..10 {
+            let progress = next_progress(orchestrator).await;
+            let done = matches(&progress);
+            seen.push(progress);
+            if done {
+                return seen;
+            }
+        }
+        panic!("no progress matched in ten: {seen:?}");
+    }
+
+    /// Whether `progress` is a start of `agent`'s `purpose` session about `task`.
+    fn started_of(
+        progress: &super::Progress,
+        agent: &str,
+        task: Option<&str>,
+        purpose: &str,
+    ) -> bool {
+        matches!(progress, super::Progress::Started { agent_id, task_id, purpose: what }
+            if agent_id == agent && task_id.as_ref().map(|task| task.as_str()) == task && what == purpose)
+    }
+
+    /// Whether `progress` is a tick that acted on `task`, and said something starting `said`.
+    fn acted_on(progress: &super::Progress, task: &str, said: &str) -> bool {
+        matches!(progress, super::Progress::Ticked(super::TickReport::Acted { task_id, what })
+            if task_id.as_str() == task && what.starts_with(said))
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn reviews_one_task_while_its_developer_builds_the_next() {
+        use crate::orchestrator::fixtures::HeldAdapter;
+        use crate::recorded::fixtures::implement_css_ctv_2;
+        use crate::tools::fixtures::at;
+        use catervas_store::activity::{ActivityState, activity};
+
+        let harness = Harness::new("parallel-scenario", a_developer_and_an_architect);
+        harness.in_progress_with("CTV-1", "dev-a", "arch", reviewed_by_the_architect);
+        harness.assigned_with("CTV-2", "dev-a", "arch", reviewed_by_the_architect);
+        let adapter = HeldAdapter::new(harness.recorded(vec![
+            implement_css_ctv_2(),
+            review_writes_note(),
+            implement_finishes_ctv_1(),
+        ]));
+        let orchestrator = std::sync::Arc::new(harness.orchestrator(adapter.clone()));
+
+        // (a) The Developer builds CTV-1 and sends it to review.
+        until(&orchestrator, |p| {
+            started_of(p, "dev-a", Some("CTV-1"), "implement")
+        })
+        .await;
+        adapter.release("dev-a");
+        until(&orchestrator, |p| acted_on(p, "CTV-1", "")).await;
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
+
+        // (b) The Architect reviews CTV-1 while the Developer builds CTV-2.
+        until(&orchestrator, |p| {
+            started_of(p, "arch", Some("CTV-1"), "verify")
+        })
+        .await;
+        until(&orchestrator, |p| {
+            started_of(p, "dev-a", Some("CTV-2"), "implement")
+        })
+        .await;
+        assert_eq!(adapter.running(), ["arch", "dev-a"]);
+        assert_eq!(
+            adapter.starts().last().expect("a start").alongside,
+            ["arch"]
+        );
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        let now = activity(&deps.log, &deps.projections, &deps.files, &team, at())
+            .expect("the activity reads");
+        let of = |agent: &str| {
+            now.iter()
+                .find(|row| row.agent_id == agent)
+                .unwrap_or_else(|| panic!("{agent} has an activity"))
+        };
+        let (dev, arch) = (of("dev-a"), of("arch"));
+        assert_eq!(dev.state, ActivityState::Working);
+        assert_eq!(
+            dev.task_id.as_ref().map(|task| task.as_str()),
+            Some("CTV-2")
+        );
+        assert_eq!(dev.line, format!("Building {}", harness.row("CTV-2").title));
+        assert_eq!(arch.state, ActivityState::Working);
+        assert_eq!(
+            arch.task_id.as_ref().map(|task| task.as_str()),
+            Some("CTV-1")
+        );
+        assert_eq!(
+            arch.line,
+            format!("Reviewing {}", harness.row("CTV-1").title)
+        );
+
+        // (c) The review ends: CTV-1 is sent back while the Developer still builds CTV-2.
+        adapter.release("arch");
+        until(&orchestrator, |p| {
+            acted_on(p, "CTV-1", "rejected it for C1")
+        })
+        .await;
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Rejected);
+        assert_eq!(adapter.running(), ["dev-a"]);
+        assert_eq!(adapter.starts().len(), 3);
+
+        // (d) The Developer finishes CTV-2, and reworks CTV-1 while the Architect reviews CTV-2.
+        adapter.release("dev-a");
+        let seen = until(&orchestrator, |p| {
+            started_of(p, "dev-a", Some("CTV-1"), "implement")
+        })
+        .await;
+        assert!(
+            seen.iter()
+                .any(|p| started_of(p, "arch", Some("CTV-2"), "verify")),
+            "the Architect reviews CTV-2: {seen:?}"
+        );
+        assert_eq!(adapter.running(), ["arch", "dev-a"]);
+        assert_eq!(
+            adapter.starts().last().expect("a start").alongside,
+            ["arch"]
+        );
+        assert_eq!(harness.row("CTV-1").iteration, 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_one_session_per_agent_at_a_time() {
+        use crate::orchestrator::fixtures::HeldAdapter;
+        use crate::recorded::fixtures::reads_a_file;
+
+        let harness = Harness::new("parallel-one-each", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = serde_json::json!(2);
+        });
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-2", "dev-a", "dev-b");
+        harness.in_progress("CTV-3", "dev-b", "dev-a");
+        let adapter = HeldAdapter::new(harness.recorded(vec![reads_a_file()]));
+        let orchestrator = std::sync::Arc::new(harness.orchestrator(adapter.clone()));
+
+        let first = next_progress(&orchestrator).await;
+        assert!(
+            started_of(&first, "dev-a", Some("CTV-1"), "implement"),
+            "{first:?}"
+        );
+        let second = next_progress(&orchestrator).await;
+        assert!(
+            started_of(&second, "dev-b", Some("CTV-3"), "implement"),
+            "{second:?}"
+        );
+        adapter.release("dev-a");
+        until(&orchestrator, |p| acted_on(p, "CTV-1", "")).await;
+        until(
+            &orchestrator,
+            |p| matches!(p, super::Progress::Started { agent_id, .. } if agent_id == "dev-a"),
+        )
+        .await;
+        let starts = adapter.starts();
+        assert_eq!(starts.len(), 3, "{starts:?}");
+        for start in &starts {
+            assert!(!start.alongside.contains(&start.agent), "{start:?}");
+        }
+        assert_eq!(
+            harness.events(&[EventKind::SessionStarted]).len(),
+            3,
+            "three sessions were recorded as started"
+        );
     }
 }

@@ -26,7 +26,7 @@ use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
     given_task_message, plan_task_message, plan_tasks_message, refine_message, triage_message,
 };
-use super::rules::{Waiting, acted, active, asleep, has_room, refused_since_entering, spent};
+use super::rules::{Waiting, acted, active, has_room, refused_since_entering, spent, unavailable};
 use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
     GOVERNOR, append, context, decide_alone, escalate, failed, fails_the_criterion,
@@ -80,7 +80,7 @@ pub(super) async fn draft(
         let triager = triager(team).unwrap_or(pm);
         let contract = deps.tools.files.read_contract(&row.task_id)?;
         if spent(deps, team, &contract, &mut waiting.day_spent)?
-            | asleep(deps, triager, &mut waiting.slept)?
+            | unavailable(deps, triager, &mut waiting.slept)?
         {
             return Ok(None);
         }
@@ -163,7 +163,7 @@ pub(super) async fn refining(
         },
     };
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, writer, &mut waiting.slept)?
+        | unavailable(deps, writer, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -707,7 +707,7 @@ pub(super) async fn in_progress_epic(
         }
     };
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, agent, &mut waiting.slept)?
+        | unavailable(deps, agent, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -830,7 +830,8 @@ pub(super) async fn verifying_epic(
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    if spent(deps, team, contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    if spent(deps, team, contract, &mut waiting.day_spent)?
+        | unavailable(deps, pm, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -885,7 +886,8 @@ async fn reviewed_by_the_product_manager(
             (!unanswered.is_empty()).then_some(unanswered)
         }
     };
-    if spent(deps, team, contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    if spent(deps, team, contract, &mut waiting.day_spent)?
+        | unavailable(deps, pm, &mut waiting.slept)?
     {
         return Ok(None);
     }

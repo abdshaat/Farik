@@ -150,6 +150,7 @@ impl Harness {
             session_ids,
             forge: Arc::new(forge),
             sleeper: Arc::new(NeverWakes),
+            work: Arc::default(),
         })
     }
 
@@ -209,6 +210,7 @@ impl Harness {
             session_ids: Arc::new(LaterIds(SequentialIds::new())),
             forge: Arc::new(self.gh.forge(&self.project.repo.path)),
             sleeper,
+            work: Arc::default(),
         })
     }
 
@@ -444,7 +446,18 @@ impl Harness {
 
     /// Files `task` `ready` and moves it to `assigned` to `assignee`, reviewed by `reviewer`.
     pub(crate) fn assigned(&self, task: &str, assignee: &str, reviewer: &str) {
-        self.ready(task);
+        self.assigned_with(task, assignee, reviewer, |_| {});
+    }
+
+    /// `assigned` with `change` applied to the contract's wire, as `file` applies it.
+    pub(crate) fn assigned_with(
+        &self,
+        task: &str,
+        assignee: &str,
+        reviewer: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.file(task, "ready", change);
         self.project.moved(
             task,
             "ready",
@@ -470,7 +483,18 @@ impl Harness {
     /// Files `task` and moves it through `assigned` to `in_progress`, held by `assignee` and
     /// reviewed by `reviewer`, with its worktree made on its branch from `main`.
     pub(crate) fn in_progress(&self, task: &str, assignee: &str, reviewer: &str) {
-        self.assigned(task, assignee, reviewer);
+        self.in_progress_with(task, assignee, reviewer, |_| {});
+    }
+
+    /// `in_progress` with `change` applied to the contract's wire, its worktree made.
+    pub(crate) fn in_progress_with(
+        &self,
+        task: &str,
+        assignee: &str,
+        reviewer: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.assigned_with(task, assignee, reviewer, change);
         self.project.moved(
             task,
             "assigned",
@@ -1658,5 +1682,221 @@ impl FakeGh {
     /// What the last call of `sub` was given on its standard input.
     pub(crate) fn stdin_of(&self, sub: &str) -> String {
         std::fs::read_to_string(self.dir.join(format!("{sub}.stdin"))).unwrap_or_default()
+    }
+}
+
+/// One start `HeldAdapter` was asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HeldStart {
+    /// The agent the session is of.
+    pub(crate) agent: String,
+    /// The task it is about, when there is one.
+    pub(crate) task: Option<String>,
+    /// What it is for.
+    pub(crate) purpose: crate::session::SessionPurpose,
+    /// The agents whose sessions were running when it started, sorted.
+    pub(crate) alongside: Vec<String>,
+}
+
+/// A session of `HeldAdapter` that is not released yet.
+struct Held {
+    agent: String,
+    spec: SessionSpec,
+    state: Arc<HeldState>,
+}
+
+/// What a held session and its handle share.
+#[derive(Default)]
+struct HeldState {
+    /// Whether the inner adapter started the session.
+    released: std::sync::atomic::AtomicBool,
+    /// Whether the session was aborted before its release.
+    aborted: std::sync::atomic::AtomicBool,
+    /// Asks the forwarding task to abort the inner session.
+    abort: tokio::sync::Notify,
+}
+
+/// A `RuntimeAdapter` over an inner one whose every session is held, unstarted, until the test
+/// releases it by agent (ADR 0064). `release` starts it on the inner adapter then and forwards
+/// every inner event, so it plays as the inner adapter plays it. A held session aborted before its
+/// release ends `aborted` at once; abort after release reaches the inner session. `resume` goes to
+/// the inner adapter, unheld. A session runs from its start until its `Ended` event is delivered.
+pub(crate) struct HeldAdapter {
+    inner: Arc<dyn RuntimeAdapter>,
+    held: Mutex<
+        Vec<(
+            Held,
+            tokio::sync::mpsc::Sender<crate::session::SessionEvent>,
+        )>,
+    >,
+    starts: Mutex<Vec<HeldStart>>,
+    running: Arc<Mutex<Vec<String>>>,
+}
+
+impl HeldAdapter {
+    pub(crate) fn new(inner: Arc<dyn RuntimeAdapter>) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            held: Mutex::new(Vec::new()),
+            starts: Mutex::new(Vec::new()),
+            running: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    /// Starts `agent`'s oldest held session on the inner adapter. Panics when none is held.
+    pub(crate) fn release(&self, agent: &str) {
+        let (held, sender) = {
+            let mut held = self.held.lock().expect("no test panics holding it");
+            let at = held
+                .iter()
+                .position(|(held, _)| held.agent == agent)
+                .unwrap_or_else(|| panic!("{agent} has no held session"));
+            held.remove(at)
+        };
+        held.state
+            .released
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut inner = self
+            .inner
+            .start_session(held.spec)
+            .expect("the inner adapter starts the held session");
+        let running = Arc::clone(&self.running);
+        let agent = held.agent;
+        let state = held.state;
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    event = inner.events().recv() => {
+                        let ended = matches!(
+                            event,
+                            Some(crate::session::SessionEvent::Ended { .. }) | None
+                        );
+                        if ended {
+                            forget(&running, &agent);
+                        }
+                        if let Some(event) = event {
+                            let _ = sender.send(event).await;
+                        }
+                        if ended {
+                            break;
+                        }
+                    }
+                    () = state.abort.notified() => {
+                        let _ = inner.abort();
+                    }
+                }
+            }
+        });
+    }
+
+    /// Every start, in order.
+    pub(crate) fn starts(&self) -> Vec<HeldStart> {
+        self.starts
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
+    }
+
+    /// The agents whose sessions run now, sorted.
+    pub(crate) fn running(&self) -> Vec<String> {
+        let mut running = self
+            .running
+            .lock()
+            .expect("no test panics holding it")
+            .clone();
+        running.sort();
+        running
+    }
+}
+
+fn forget(running: &Mutex<Vec<String>>, agent: &str) {
+    let mut running = running.lock().expect("no test panics holding it");
+    if let Some(at) = running.iter().position(|running| running == agent) {
+        running.remove(at);
+    }
+}
+
+impl RuntimeAdapter for HeldAdapter {
+    fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        let alongside = self.running();
+        let agent = spec.agent_id.clone();
+        self.running
+            .lock()
+            .expect("no test panics holding it")
+            .push(agent.clone());
+        self.starts
+            .lock()
+            .expect("no test panics holding it")
+            .push(HeldStart {
+                agent: agent.clone(),
+                task: spec.task_id.as_ref().map(|task| task.as_str().to_string()),
+                purpose: spec.purpose,
+                alongside,
+            });
+        let (sender, receiver) = tokio::sync::mpsc::channel(256);
+        let state = Arc::new(HeldState::default());
+        let session_id = spec.session_id.clone();
+        self.held.lock().expect("no test panics holding it").push((
+            Held {
+                agent: agent.clone(),
+                spec,
+                state: Arc::clone(&state),
+            },
+            sender.clone(),
+        ));
+        Ok(Box::new(HeldSession {
+            session_id,
+            agent,
+            receiver,
+            sender,
+            state,
+            running: Arc::clone(&self.running),
+        }))
+    }
+
+    fn resume(
+        &self,
+        session_id: &str,
+        prompt: &str,
+    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        self.inner.resume(session_id, prompt)
+    }
+}
+
+struct HeldSession {
+    session_id: String,
+    agent: String,
+    receiver: tokio::sync::mpsc::Receiver<crate::session::SessionEvent>,
+    sender: tokio::sync::mpsc::Sender<crate::session::SessionEvent>,
+    state: Arc<HeldState>,
+    running: Arc<Mutex<Vec<String>>>,
+}
+
+impl SessionHandle for HeldSession {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    fn events(&mut self) -> &mut tokio::sync::mpsc::Receiver<crate::session::SessionEvent> {
+        &mut self.receiver
+    }
+
+    fn send(&self, _text: &str) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn abort(&self) -> Result<(), RuntimeError> {
+        use std::sync::atomic::Ordering;
+        if self.state.released.load(Ordering::SeqCst) {
+            self.state.abort.notify_one();
+        } else if !self.state.aborted.swap(true, Ordering::SeqCst) {
+            forget(&self.running, &self.agent);
+            let _ = self.sender.try_send(crate::session::SessionEvent::Ended {
+                reason: crate::session::EndReason::Aborted,
+                detail: "aborted".to_string(),
+                resets_at: None,
+            });
+        }
+        Ok(())
     }
 }

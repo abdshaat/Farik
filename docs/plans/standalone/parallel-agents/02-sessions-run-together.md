@@ -229,7 +229,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   `Started` of `dev-a`. Over `starts()`, no start's `alongside` holds its own agent; no start is
   `dev-a`'s about CTV-2 before the third; `harness.events(&[EventKind::SessionStarted])` count 3.
 
-- [ ] `feat(runtime): each agent's session runs beside the others', one per agent`
+- [x] `feat(runtime): each agent's session runs beside the others', one per agent`
 
 ## Verification
 
