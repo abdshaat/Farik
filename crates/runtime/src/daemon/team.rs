@@ -4662,7 +4662,7 @@ pub(super) mod tests {
                 "wip_limit_per_agent": 1,
                 "blocked_limit_hours": 24,
                 "max_iterations": 3,
-                "integration": "auto_merge",
+                "integration": "pull_request",
                 "ambient_messages_per_sprint": 1,
                 "escalation_age_hours": 24,
                 "memory_cap_tokens": 8000,

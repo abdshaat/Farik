@@ -275,7 +275,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     if !errors.is_empty() {
         return Err(errors);
     }
-    let team =
+    let mut team =
         serde_json::from_value::<Team>(with_integers_normalised(input)).map_err(|error| {
             vec![ValidationError {
                 path: "/".to_string(),
@@ -356,6 +356,9 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             });
         }
     }
+    // Catervas never merges (ADR 0061): `auto_merge` and `manual` still load, and read as a pull
+    // request.
+    team.policy.integration = Integration::PullRequest;
     if errors.is_empty() {
         Ok(team)
     } else {
@@ -1442,7 +1445,7 @@ mod tests {
             team.policy.human_accepts_contracts,
             HumanAcceptsContracts::HighRisk
         );
-        assert_eq!(team.policy.integration, Integration::Manual);
+        assert_eq!(team.policy.integration, Integration::PullRequest);
         assert!(
             team.policy.integration_branch.is_none(),
             "the repository's default branch stands (5.14)"
@@ -1483,7 +1486,29 @@ mod tests {
                 .map(|branch| branch.to_string()),
             Some("trunk".to_string())
         );
-        assert_eq!(team.policy.integration, Integration::AutoMerge);
+        assert_eq!(team.policy.integration, Integration::PullRequest);
+    }
+
+    #[test]
+    fn reads_every_integration_policy_as_a_pull_request() {
+        // Catervas never merges (ADR 0061): older files load, and read as a pull request.
+        for written in ["auto_merge", "manual", "pull_request"] {
+            let mut wire = a_team_wire();
+            wire["policy"]["integration"] = json!(written);
+            assert_eq!(
+                team(&wire).policy.integration,
+                Integration::PullRequest,
+                "{written}"
+            );
+        }
+        let mut template = crate::team::fixtures::a_template_wire();
+        template["policy"]["integration"] = json!("manual");
+        let read = super::validate_template(&template).expect("a template");
+        assert_eq!(read.policy.integration, Integration::PullRequest);
+        assert_eq!(
+            serde_json::to_value(super::defaults().policy.integration).expect("serialises"),
+            json!("pull_request")
+        );
     }
 
     #[test]

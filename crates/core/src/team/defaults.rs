@@ -33,7 +33,7 @@ pub fn defaults() -> TeamDefaults {
         "wip_limit_per_agent": 1,
         "blocked_limit_hours": 24,
         "max_iterations": 3,
-        "integration": "auto_merge"
+        "integration": "pull_request"
     }))
     .expect("the starter policy is one the team schema accepts");
     policy.judgment = Some(Judgment::default());

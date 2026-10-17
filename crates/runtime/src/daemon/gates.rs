@@ -3146,7 +3146,10 @@ pub(super) mod tests {
             &json!({}),
             "folderDocProposalsListResult",
         );
-        assert_eq!(listed, json!({ "integration": "manual", "cards": [] }));
+        assert_eq!(
+            listed,
+            json!({ "integration": "pull_request", "cards": [] })
+        );
 
         let harness = folders_integrating("gates-folder-doc-two-reviews", "pull_request");
         let third = pm_proposes(&harness, "S3", ROADMAP, "# Roadmap\n", "Roadmap.");

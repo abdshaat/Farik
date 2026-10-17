@@ -601,7 +601,6 @@ mod tests {
                 "Ada's model changes from the role's model to the everyday model.",
                 "Ada now works quickly.",
                 "The team has no daily spending limit.",
-                "Finished work opens a pull request for you.",
                 "Developers and Architects may no longer run commands.",
                 "Catervas still runs every check itself; the agents cannot run commands.",
                 "Developers may now push their work and open pull requests."

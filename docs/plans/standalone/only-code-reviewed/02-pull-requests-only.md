@@ -119,7 +119,7 @@ Files: the core and CLI files of the File map. In `team.rs`, the tests at 1437 a
 Tests:
 - `reads_every_integration_policy_as_a_pull_request` (`team.rs`): a team wire with `integration` of `auto_merge`, of `manual`, and with none, each validates with `policy.integration == Integration::PullRequest`; so does a template wire with `manual` (`validate_template`); `team::defaults`' wire holds `"pull_request"`.
 
-- [ ] `feat(core): read every integration policy as a pull request`
+- [x] `feat(core): read every integration policy as a pull request`
 
 ### Task 3: setup and settings stop offering a merge
 

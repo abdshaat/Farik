@@ -49,9 +49,9 @@ pub fn describe_change(old: &Team, new: &Team, work: &SprintWork<'_>) -> Vec<Str
     if old.policy.integration != new.policy.integration {
         said.push(
             match new.policy.integration {
-                Integration::AutoMerge => "Finished work is merged on its own.",
-                Integration::PullRequest => "Finished work opens a pull request for you.",
-                Integration::Manual => "Finished work waits for you to merge it.",
+                Integration::PullRequest | Integration::AutoMerge | Integration::Manual => {
+                    "Finished work opens a pull request for you to merge."
+                }
             }
             .to_string(),
         );
@@ -357,6 +357,7 @@ mod tests {
         new["agents"][1]["grants"] = json!(["network"]);
         new["agents"][0]["revokes"] = json!(["network"]);
         new["budgets"]["daily_usd"] = json!(10);
+        // Every team integrates by pull request (ADR 0061): a change of the answer says nothing.
         new["policy"]["integration"] = json!("auto_merge");
         new["policy"]["permissions"] = json!({ "run_commands": false, "push": true });
         new["policy"]["judgment"] = json!({ "required": "always", "judge": "architect", "questions": ["Does the task fit its budget?"] });
@@ -369,7 +370,6 @@ mod tests {
                 "Linus now works carefully.",
                 "Linus may now use the internet.",
                 "The team may spend up to $10 a day.",
-                "Finished work is merged on its own.",
                 "Developers and Architects may no longer run commands.",
                 "Catervas still runs every check itself; the agents cannot run commands.",
                 "Developers may now push their work and open pull requests.",
@@ -400,7 +400,6 @@ mod tests {
                 "Ada may now use the internet.",
                 "Linus now works as its role usually does.",
                 "The team may spend up to $20.50 a day.",
-                "Finished work opens a pull request for you.",
                 "Developers and Architects may run commands.",
                 "Developers may no longer push their work or open pull requests.",
                 "Plans are no longer checked before work starts.",
@@ -425,7 +424,6 @@ mod tests {
             [
                 "Linus's model changes from the everyday model to the role's model.",
                 "The team has no daily spending limit.",
-                "Finished work waits for you to merge it.",
                 "Every plan is checked before work starts.",
                 "The Architect checks every plan, or the Scrum Master when there is none, or \
                  else the Product Manager.",

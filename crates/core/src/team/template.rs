@@ -12,7 +12,8 @@ use jsonschema::error::ValidationErrorKind;
 use serde_json::{Value, json};
 
 use super::{
-    Agent, AgentStatus, PolicyDocumentFormat, Team, ValidationError, defaults, validate_team,
+    Agent, AgentStatus, Integration, PolicyDocumentFormat, Team, ValidationError, defaults,
+    validate_team,
 };
 use crate::contract::{pointer, with_integers_normalised};
 
@@ -88,7 +89,7 @@ pub fn validate_template(input: &Value) -> Result<TeamTemplate, Vec<ValidationEr
     if !errors.is_empty() {
         return Err(errors);
     }
-    let template = serde_json::from_value::<TeamTemplate>(with_integers_normalised(input))
+    let mut template = serde_json::from_value::<TeamTemplate>(with_integers_normalised(input))
         .map_err(|error| {
             vec![ValidationError {
                 path: "/".to_string(),
@@ -97,6 +98,9 @@ pub fn validate_template(input: &Value) -> Result<TeamTemplate, Vec<ValidationEr
                 ),
             }]
         })?;
+    // Catervas never merges (ADR 0061): an older template's `auto_merge` or `manual` reads as a
+    // pull request, so the team and the saved template after it say so.
+    template.policy.integration = Integration::PullRequest;
     validate_team(&team_wire(&template))?;
     Ok(template)
 }
@@ -451,7 +455,7 @@ mod tests {
                         ],
                         "judge": "auto"
                     },
-                    "integration": "manual",
+                    "integration": "pull_request",
                     "plan_in_sprints": false
                 },
                 "budgets": { "daily_usd": 20.0 }
@@ -1051,7 +1055,7 @@ mod tests {
         expected["policy"]["permissions"] = json!({ "run_commands": false, "push": true });
         expected["policy"]["judgment"] =
             serde_json::to_value(&read.policy.judgment).expect("serialises");
-        expected["policy"]["integration"] = json!("manual");
+        expected["policy"]["integration"] = json!("pull_request");
         expected["budgets"]
             .as_object_mut()
             .expect("budgets")
