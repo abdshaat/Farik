@@ -43,11 +43,15 @@ the standup and the sprint commands (plan 5); the words of roles and skills (pla
   number of `delivery.closed` in the log; about no task (no task id on the envelope); its body names
   no actor (the governor closes it).
 - The changelog task is filed in the same tick, right after `delivery.closed`, as a whole contract
-  through `file_small_request` with a new `filed_as` value `changelog` (judged as filed, no refine
+  through `file_small_request` with a new `filed_as` value `changelog` (filed whole, no refine
   session, as `owner_change` is): title `Add delivery <n> to the changelog`; assignee role
   `product_manager`; reviewer role `catervas_roles::reviewer_for(team, Role::ProductManager)`;
   risk low; budget `placeholder_budget_usd(&team.rules())`; `allowed_paths: ["CHANGELOG.md"]`; its
-  intent lists each task of the delivery as `CTV-n: <title>`. It is not filed when the team has no
+  intent lists each task of the delivery as `CTV-n: <title>`. Since ADR 0061 a task that changes no
+  code carries only criteria Catervas runs (`no_review_outside_code`), and the governor accepts it
+  alone: C1 `{ "method": "artifact", "path": "CHANGELOG.md" }` and C2 `{ "method": "command",
+  "command": "grep -qi 'delivery <n>' CHANGELOG.md" }`. The reviewer role is still filled, as ADR
+  0061 keeps it, and never runs. It is not filed when the team has no
   active Product Manager or `reviewer_for` answers `None`; the delivery closes anyway. Correction
   to Ada's order (review, refresh, changelog, retro): filing at the close is deterministic and once
   by construction; the task's own sessions still come after the ceremonies, whose rules run before
@@ -60,13 +64,15 @@ the standup and the sprint commands (plan 5); the words of roles and skills (pla
   `since_seq`. `due_refresh` and `product_files` take the delivery; the report is
   `docs/catervas/product/reports/D<n>` in the team's format. The Architect's refresh lists the
   delivery's tasks integrated after `since_seq`.
-- `retro.appended` and `folder_doc.proposed` gain an optional `delivery_id` (`^D[1-9][0-9]{0,5}$`),
-  and their `sprint_id` becomes optional, so old logs read and new events carry `delivery_id`
-  alone. `team/retro.md`'s new sections are headed `## D<n> (<date>)`. Refusals change words:
-  `retro_refused: no delivery has closed since the last retro` and `folder_doc_at_review: no
-  delivery has closed, so there is no review to propose at`.
-- `folder_doc_proposals.list`'s card field `sprint_id` becomes `review_id` (the proposal's
-  `delivery_id`, or an old proposal's `sprint_id`); the page's line becomes "From {name}, after the
+- `retro.appended` gains an optional `delivery_id` (`^D[1-9][0-9]{0,5}$`), and its `sprint_id`
+  becomes optional, so old logs read and new events carry `delivery_id` alone. `folder_doc.proposed`
+  is unchanged: since ADR 0061 the refreshes write `spec` and `roadmap` as folder changes and no new
+  proposal is recorded; older proposals keep their `sprint_id`. `team/retro.md`'s new sections are headed `## D<n> (<date>)`. The retro tool's refusal says
+  `retro_refused: no delivery has closed since the last retro`; whatever of `tools/folders.rs`'s
+  review check survives ADR 0061 reads `closed_delivery` in place of `ended_sprint` and says "no
+  delivery has closed".
+- `folder_doc_proposals.list`'s cards now come only from proposals an older log holds; the wire is
+  unchanged (its `sprint_id` is an old log's), and the page's line becomes "From {name}, after the
   team's review" (no number). Today's "What moved" lines become "{name} proposed a change to the
   product plan at the team's review." (and "{n} changes"), "{name} brought the architecture notes
   up to date after the team's review" and "{name} sent the architecture notes as a pull request
@@ -79,10 +85,10 @@ the standup and the sprint commands (plan 5); the words of roles and skills (pla
 ## File map
 
 ```
-docs/schemas/event.schema.json                 modifies: delivery.closed, deliveryClosedBody; filed_as changelog; delivery_id on retroAppendedBody, folderDocProposedBody (Task 1)
+docs/schemas/event.schema.json                 modifies: delivery.closed, deliveryClosedBody; filed_as changelog; delivery_id on retroAppendedBody (Task 1)
 crates/protocol/src/lib.rs, src/event.rs, src/event/fixtures.rs   modifies: the kind, its body, its fixture (Task 1)
 crates/store/src/projections.rs                modifies: DeliveryClosed in the about-no-task arm (Task 1)
-crates/store/src/folder_docs.rs, src/files.rs, crates/runtime/src/tools/{retro,folders}.rs  modifies: sprint_id read as Option (Task 1)
+crates/store/src/files.rs, crates/runtime/src/tools/retro.rs  modifies: sprint_id read as Option (Task 1)
 crates/core/src/delivery.rs, src/lib.rs        creates: the trigger (Task 2)
 crates/runtime/src/deliveries.rs, src/lib.rs   creates: due_delivery, close_delivery, closed_delivery, delivery_start, delivery_events, changelog_tasks (Task 3; closed_delivery, delivery_events Task 4)
 crates/store/src/requests.rs                   modifies: changelog_request (Task 3)
@@ -92,8 +98,8 @@ crates/runtime/src/orchestrator/messages.rs, src/prompt.rs   modifies: review, r
 crates/runtime/src/ceremonies.rs               modifies: EndedSprint, ended_sprint, sprint_events deleted (Task 4)
 crates/runtime/src/tools/retro.rs, tools/folders.rs, crates/store/src/files.rs   modifies: per delivery (Task 4)
 crates/runtime/src/recorded/transcripts/review.jsonl, retro.jsonl   modifies: "S1" words become "delivery 1" (Task 4)
-docs/schemas/rpc.schema.json, crates/store/src/folder_docs.rs, src/activity.rs, crates/runtime/src/daemon/gates.rs   modifies: review_id, lines (Task 5)
-apps/web/src/pages/DocumentChanges.tsx, Today.tsx, strings/en.ts, test/folderDocs.ts   modifies: review_id, docChangesFrom (Task 5)
+crates/store/src/activity.rs                   modifies: the lines (Task 5)
+apps/web/src/pages/DocumentChanges.tsx, strings/en.ts   modifies: docChangesFrom (Task 5)
 ```
 
 ## Interfaces
@@ -227,19 +233,16 @@ a retro uses a closed delivery instead (its first tick closes D1); delete
 
 ### Task 5: what the owner reads about a review
 
-Files: `rpc.schema.json` (`folderDocProposalsListResult` card: `review_id`, pattern
-`^[DS][1-9][0-9]{0,5}$`, required, in place of `sprint_id`), `folder_docs.rs` (the proposal's
-`review_id`), `daemon/gates.rs` (the card), `activity.rs` (the lines of the Decisions),
-`DocumentChanges.tsx` (`reviewId`; `docChangesFrom` = "From {name}, after the team's review"),
-`Today.tsx` (the card key `plan-${card.reviewId}-${card.agentId}`), `en.ts`,
-`apps/web/src/test/folderDocs.ts`, and the tests that pin the old words
+Files: `activity.rs` (the lines of the Decisions), `DocumentChanges.tsx` (`docChangesFrom` = "From
+{name}, after the team's review"), `en.ts`; the tests that pin the old words
 (`says_who_proposed_changes_to_the_product_plan`, `says_the_architecture_notes_were_brought_up_to_date`,
 `DocumentChanges.test.tsx`'s `shows_the_changes_line_by_line`) take the new ones.
 
-- `says_what_a_delivery_review_proposed` (activity.rs `mod tests`) — Ada's two `folder_doc.proposed`
-  with `delivery_id: "D2"` and one with an old `sprint_id: "S4"`, all after `since`: `moved_since`
-  holds "Ada proposed 3 changes to the product plan at the team's review." and no line contains
-  "sprint".
+- `says_what_a_review_did_without_naming_a_sprint` (activity.rs `mod tests`) — two older
+  `folder_doc.proposed` of Ada's with `sprint_id: "S4"` after `since`, and an Architect `review`
+  session after a `delivery.closed` that wrote a folder document: `moved_since` holds "Ada proposed
+  2 changes to the product plan at the team's review." and "<the Architect> brought the
+  architecture notes up to date after the team's review", and no line contains "sprint".
 
 - [ ] `feat(web): a review's proposals and notes say nothing of sprints`
 

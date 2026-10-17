@@ -123,7 +123,8 @@ stay), `apps/web/src/pages/Today.test.tsx` (`lists_what_waits_on_you` expects "A
 ### Task 2: the journey from Today
 
 Files: created the transcript (copy, then change only the `budget` object and the ids, as the
-Decisions say) and `apps/web/e2e/escalation.spec.ts`; modified
+Decisions say; ADR 0061's plan 7 removed `judge_ctv_1_by_architect`, so no judging session runs
+between the refine and the plan sessions) and `apps/web/e2e/escalation.spec.ts`; modified
 `crates/runtime/src/recorded/fixtures.rs` (the function, doc "Mira writes CTV-1's plan for Theo,
 allowing one session"), `crates/cli/src/bin/catervas-e2e-serve.rs` (`transcript()` names
 `refine_writes_one_session_task_for_theo_ctv_1` and `implement_stops_early`). The journey runs under
@@ -131,7 +132,7 @@ allowing one session"), `crates/cli/src/bin/catervas-e2e-serve.rs` (`transcript(
 
 - `an escalation is answered from Today in one action` (Playwright, `startServe({ team:
   "pm-architect-developer", transcripts: ["triage_ctv_1_small_by_pm",
-  "refine_writes_one_session_task_for_theo_ctv_1", "judge_ctv_1_by_architect",
+  "refine_writes_one_session_task_for_theo_ctv_1",
   "plan_assigns_ctv_1_to_theo", "implement_stops_early"] })`, timeout 90 s) — the request "Add a
   done.txt at the root, so a run can be checked for it" is sent from Today; within 60 s Today's
   "Waiting on you" list has a row "Theo needs your help"; its link "Answer" leads to

@@ -43,8 +43,11 @@ retro run by themselves. Epic C3's web half holds: no `SprintPage.tsx`, no `spri
   deleted with their branches.
 - Settings and setup: the "Planning work" part (`TeamRules.tsx`'s `Planning`, `Work.tsx`'s use of
   it), `SetupAdvanced.tsx`'s `SprintsSwitch` and its card, `SetupFinish.tsx`'s sprints box, and
-  `planInSprints` in `TeamSetup.tsx`, `SavedTeams.tsx` and `draftOf` go; `sectionWorkSummary` =
-  "Plan checks and finished work"; `rulesPlanning`, `planInSprints`, `planInSprintsNote`,
+  `planInSprints` in `TeamSetup.tsx`, `SavedTeams.tsx` and `draftOf` go. After ADR 0061's plans 2
+  and 7 (the integration choice in `SetupFinish.tsx` and `TeamRules.tsx`'s `Finish`, the plan check
+  in `SetupAdvanced.tsx` and `TeamRules.tsx`'s `Plans`, already gone when this runs), "How work
+  runs" holds `Documents` and, under Advanced, `UiPaths`: `sectionWorkSummary` = "How documents are
+  written"; `rulesPlanning`, `planInSprints`, `planInSprintsNote`,
   `finishSprints*` deleted. The pages stop sending `plan_in_sprints`.
 - Copy that named sprints: `cardLead` "A first piece of work where your team reads your project and
   writes down what it learns, before building anything."; `planGate` "Nothing else is planned until
@@ -133,8 +136,8 @@ Files as the map's Task 3. `allowances.test.tsx`'s `sprintPeriod` fixture become
 
 Files as the map's Task 4. Deleted tests: `team.test.tsx`'s `reads_an_old_team_as_not_planning_in_sprints`
 and `switches_planning_in_sprints`; `setup/team.test.tsx`'s `starts_a_team_that_plans_in_sprints`;
-`keeps_each_rules_draft_until_it_is_saved_or_cancelled` uses the plan check's switch in place of
-the sprints switch; `splits_the_rules_across_three_sections`
+`keeps_each_rules_draft_until_it_is_saved_or_cancelled` uses the `Documents` part's choice in
+place of the sprints switch (as ADR 0061 left that test); `splits_the_rules_across_three_sections`
 expects no "Planning work" heading.
 
 - `setup_and_settings_never_ask_about_sprints` (`setup/team.test.tsx`) — through setup with
@@ -147,13 +150,14 @@ expects no "Planning work" heading.
 
 Files as the map's Task 5. `board.spec.ts`'s one test becomes `work runs on the board by itself,
 from its plan to the team's look back`: transcripts `triage_ctv_1_small_by_pm`,
-`refine_writes_task_for_theo_ctv_1`, `judge_ctv_1_by_architect`, `plan_assigns_ctv_1_to_theo`,
+`refine_writes_task_for_theo_ctv_1`, `plan_assigns_ctv_1_to_theo`,
 `implement_finishes_ctv_1`, `review_writes_note`, `accept_ctv_1`, `review`, `retro`; it keeps the
 lane walk (`LANES`, the cell checks) and drops every sprint step, the `/sprints/S1` page and the
 "Sprint 1" cost column.
 
 - `work runs on the board by itself, from its plan to the team's look back` (Playwright) — the
-  request sent from Today reaches "Done" with no click on the Board; the log then holds one
+  request sent from Today reaches "Done" with no click on the Board (accepted, its branch waiting
+  for a merge by hand, as ADR 0061 has it with no `origin`); the log then holds one
   `delivery.closed` with `trigger: "team_quiet"` and `task_ids: ["CTV-1"]`; the Team chat shows a
   "Review" and a "Looking back" thread; no page visited shows text matching `/sprint/i`.
 - C3's web half, as a command (Verification).

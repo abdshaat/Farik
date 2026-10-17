@@ -66,8 +66,8 @@ Ada's section 4 is the contract for old projects, with these corrections and add
   (integer 0 to 20, no schema default) is added and `ambient_messages_per_sprint` loses its default
   and is described "Read from teams made before ADR 0062 as ambient_messages_per_day, when that is
   absent." `Team::ambient_messages_per_day()` answers `per_day`, else `per_sprint`, else 1.
-  `ProjectFiles::write_team` writes the team through `Team::without_old_keys()`, which clears
-  `plan_in_sprints` and moves `ambient_messages_per_sprint` into `ambient_messages_per_day` when that
+  `ProjectFiles::write_team` writes the team through `Team::without_old_keys()`, which, beside ADR
+  0061's drop of `policy.judgment` there, clears `plan_in_sprints` and moves `ambient_messages_per_sprint` into `ambient_messages_per_day` when that
   is absent. Defaults (`team/defaults.rs`), `catervas init`, `carry.rs`, `team.propose` and
   `team.updated` write neither key. `describe_change` loses `SprintWork` and the switch's lines.
 - Templates: `plan_in_sprints` leaves `team-template.schema.json` (epic C3); `template.rs` drops the
@@ -137,7 +137,7 @@ pub struct AllowancePeriod { pub day: NaiveDate }
 
 Files as the map's Task 1. `transitions::open_tasks` loses `team` and `open_sprint` (it still counts
 every row neither accepted nor cancelled; plan 6 changes that). `rules::assignable` checks the
-private folder and the dependencies only. The idle tick says `nothing on the board needs doing`.
+private folder and the dependencies (accepted, as ADR 0061 counts them) only. The idle tick says `nothing on the board needs doing`.
 What still uses the hold or the sprint budget until Task 2 removes it is cut to compile: the
 planning ceremony's candidates are the `ready` rows with no parent and in no sprint, and
 `sprints::fits` no longer checks a budget.

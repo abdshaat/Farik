@@ -20,6 +20,11 @@ commit's body (epic C5's first question).
 
 ## Decisions
 
+- After the rebase, ADR 0061's plan 1 Task 4 has already rewritten review sentences in several of
+  these files (`scrum_master/system.md`, `keeping-work-flowing`, the Product Manager's
+  `writing-task-contracts` and `catervafying-the-repository`, the Architect's and the Marketing
+  Specialist's `catervafying-the-repository`): this plan changes only their sprint, standup and
+  sprint-budget words and keeps ADR 0061's.
 - The Scrum Master's kit loses `planning-a-sprint` (its folder, its `kit.yaml` entry, its
   `include_str!` in `crates/roles/src/kit.rs`): chose deleting it over rewriting it, because nothing
   is planned any more. `running-ceremonies` keeps its name and covers "the review and the retro of

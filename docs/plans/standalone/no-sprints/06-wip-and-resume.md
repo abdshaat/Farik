@@ -20,6 +20,11 @@ the private folder's hold (`private_folder_busy` keeps counting a blocked task, 
 
 ## Decisions
 
+A later change, ADR 0064 (agents work in parallel, in concurrent sessions; `verifying` stops
+counting towards the WIP limit; rejected work waits for a free assignee and then goes first),
+amends this plan's `open_tasks` and the rule order after it lands. This plan is executed as written;
+ADR 0064's own plans change what it counts.
+
 Ada's section 5, with these corrections and additions:
 
 - Counted: a task an agent holds (`assignee_id`) in `assigned`, `in_progress`, `verifying` or

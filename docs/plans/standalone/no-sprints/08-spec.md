@@ -54,6 +54,11 @@ docs/SPEC.md        modifies: the sections of Tasks 1 to 3, and the revision not
 
 ## Tasks
 
+The text is the spec as revision 0.115 (ADR 0061) left it: a paragraph marked "(changed in 0.115;
+ADR 0061)" keeps that mark and gains "(changed in 0.116)" only where this plan changes it. In
+5.7 the choices of `approval` and `risk_gate` are said to be for escalations an older log left open,
+and `integration`'s choice opens the pull request again (Catervas never merges).
+
 Each task reads its sections through, replaces every sprint, standup, sprint budget, sprint
 planning and Backlog-as-a-hold sentence with what the code now does (plans 1 to 7 are the source;
 ADR 0062 the reason), and keeps every other sentence. Where a sentence was "(added in 0.NN)",

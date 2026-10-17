@@ -42,8 +42,8 @@ view (plan 2), changing any escalation reason or limit.
   | `blocker_age` | "Answer and carry on", resolve `in_progress`, "{who} reads your answer and carries on with {id}." · change · Cancel |
   | `permission`, `explicit_request` | "Carry on", resolve `{before}`, "{id} goes back to {before} and {who} is told what you wrote." (only when `before` is known and is neither `refining` nor `escalated`) · change · Cancel |
   | `readiness_failures` | "Ask {pm} to try the plan again", resolve `refining`, "{pm} writes the plan of {id} again with your note." · Cancel |
-  | `approval`, `risk_gate` | "Review the plan", open `/tasks/{id}/plan`, "You read the plan and approve it or send it back." · Cancel |
-  | `integration` | "Add it to the project now", command `task_integrate`, "Catervas adds the work of {id} to your project now." (alone) |
+  | `approval`, `risk_gate` (only in logs made before ADR 0061, which no longer raises them) | "Review the plan", open `/tasks/{id}/plan`, "You read the plan and approve it or send it back." · Cancel |
+  | `integration` (a push or a forge failure; ADR 0061: Catervas never merges) | "Open the pull request again", command `task_integrate`, "Catervas pushes the branch of {id} and opens its pull request again, for you to merge." (alone) |
   | `preview` | "Fix how your app opens", open `/settings/your-app`, "You tell Catervas in Settings how to start your app; then come back here and choose Carry on." · "Carry on", resolve `{before}`, "{id} goes back to {before} and {who} opens your app again." · Cancel |
   | any other | change · Cancel |
 
@@ -52,8 +52,14 @@ view (plan 2), changing any escalation reason or limit.
   table: `blocker_age`'s carry-on went back to `blocked` (today's `before`), which helps nobody, so
   it resolves to `in_progress`; `readiness_failures` offered "Carry on" and "Change the plan", both
   to `refining`, so it keeps one; an accepted task cannot be cancelled (nothing leaves `accepted`,
-  5.2), so `integration` offers its one choice; `preview` needs a resolve after Settings, so it adds
+  5.2), and since ADR 0061 Catervas never merges, so `integration` offers one choice, to try the
+  pull request again (Ada's "Add it to the project now" and its merge are gone); `preview` needs a resolve after Settings, so it adds
   Carry on.
+- After the rebase onto ADR 0061 these reasons still arise: `iterations`, `budget`, `sessions`,
+  `blocker_age`, `permission`, `readiness_failures` (now also for a `review` criterion outside code,
+  `no_review_outside_code`), `integration` (a failed push or pull request), `explicit_request`,
+  `preview`. `approval` and `risk_gate` are kept for escalations an older log left open, which
+  `human_accept` still resolves (ADR 0061 keeps it for them).
 - `escalation.choices` answers the integration choice for an accepted task whose integration
   escalation is open (`ceremonies::open_escalations` holds it), and for an escalated task as today;
   anything else answers `{ "choices": [] }`: chose this over a second query because the row on Today
@@ -124,7 +130,8 @@ modified `docs/decisions/0028-plan-work-in-sprints.md` (the status line only),
 
 The ADR: title `# 0062. Deliveries replace sprints`; `Date: 2026-10-16`; `Status: accepted (the
 founder's approval of the epic CTV-9, question 34: "Remove sprints from the product entirely")`;
-then the line `Supersedes ADR 0028.`, and `Amends ADR 0037 (allowances count per UTC day), ADR 0042
+then the line `Supersedes ADR 0028.`, the line `Builds on ADR 0061 (only code is reviewed, only
+payments ask, Catervas never merges), which lands first.`, and `Amends ADR 0037 (allowances count per UTC day), ADR 0042
 (the raise's exception to the sprint hold has nothing left to except) and ADR 0027 (the incident
 fix's exception likewise; a deploy is no longer approved by a sprint's start, which phase 13 re-plans).`
 Context: the four frictions of CTV-9's intent, and the options Ada ruled out (a timer, a delivery per
@@ -137,7 +144,8 @@ the WIP, resume and hand-over rules (from plan 6's); the escalation choices (thi
 start; a ready task goes to the first free agent), harder (no batching of work for a review by the
 user's choice; a delivery's review costs a session after every epic or five tasks; the founder's
 milestone runs, phase 11 step 03, lose "one sprint carrying two requests" and are re-planned there;
-phase 13's DevOps plans lose "a sprint's start approves its deploys" and re-plan it).
+phase 13's DevOps plans lose "a sprint's start approves its deploys"; the founder deferred how a
+deploy is approved to phase 13's planning, 2026-10-16).
 
 - [ ] `docs(decisions): deliveries replace sprints (ADR 0062)`
 
@@ -160,7 +168,7 @@ Decisions). Consumes Task 1's ADR only as text.
   "Mira rewrites the plan of CTV-14; it is assigned again once it is ready." (resolve
   `refining`), "Cancel the task" / "CTV-14 stops for good. Its branch is kept, and nothing is
   merged." (resolve `cancelled`); `blocker_age`'s first resolves to `in_progress`; `integration`
-  has one choice, `Integrate`; `approval` and `preview` start with an `Open` of `/tasks/CTV-14/plan`
+  has one choice, `Integrate`, labelled "Open the pull request again"; `approval` and `preview` start with an `Open` of `/tasks/CTV-14/plan`
   and `/settings/your-app`; `permission` with `before: Some(Refining)` has no "Carry on". Each
   `wire` of the lists conforms to `escalationChoicesResult`'s item.
 - `answers_the_choice_of_an_integration_waiting_on_an_accepted_task` (in `daemon/gates.rs`

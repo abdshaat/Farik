@@ -6,10 +6,18 @@ Architect's accepted plan for it (task CTV-12, "Plan for CTV-9"), adopted by the
 the corrections each plan's Decisions section names. The decision is ADR 0062,
 `docs/decisions/0062-deliveries-replace-sprints.md`, which supersedes ADR 0028.
 
-Rebase first: this branch is rebased onto `fix/plans-need-no-review` (ADR 0061, SPEC 0.115) before
-the first task runs. The plans name files and symbols of `main`; where a line number has moved,
-find the symbol by name. No plan here touches the Product Manager's review of an Architect's plan
-task, the lane tasks' filing, or the Designer's plan approval, which ADR 0061 changes.
+Rebase first: this branch is rebased onto `fix/plans-need-no-review` (ADR 0061 and its eight plans,
+SPEC 0.115) after that branch's plans are executed and before the first task here runs. These plans
+assume what ADR 0061 leaves: only code is reviewed by an agent (other tasks are accepted by the
+governor on criteria it runs, so the changelog task carries only such criteria); the human is asked
+only before payments and before project data leaves; no contract approval, product plan approval,
+result acceptance by the human or contract judging (so no `judge_*` transcript, and no plan-check
+or integration choice in setup and Settings); Catervas never merges (the `integration`
+escalation's one choice opens the pull request again); work starts from unmerged dependency
+branches; the Designer's plan approves itself. The plans name files and symbols of `main`; where a
+line number has moved, find the symbol by name.
+
+A later change, ADR 0064 (agents work in parallel), amends plan 6's `open_tasks` after it lands.
 
 One executor (Sonnet 5.5) runs the plans in this order, one task at a time, each task one commit,
 and each task leaves `cargo xtask check` passing (it runs `pnpm check` too). Before the first task:
