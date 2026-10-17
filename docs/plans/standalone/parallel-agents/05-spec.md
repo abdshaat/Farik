@@ -119,7 +119,7 @@ Consumes: plans 1, 2, 2b, 3 and 4's behaviour as their Decisions state it. Produ
 Files as the map. No test (documents only); the check is the full check and a read of each
 changed paragraph against plans 1, 2, 2b, 3 and 4.
 
-- [ ] `docs(spec): agents work in parallel, revision 0.118`
+- [x] `docs(spec): agents work in parallel, revision 0.118`
 
 ## Verification
 
