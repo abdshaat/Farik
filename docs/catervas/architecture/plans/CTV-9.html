@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan for CTV-9</title>
+<style>
+body { font-family: system-ui, sans-serif; line-height: 1.5; margin: 0 auto; padding: 1rem; max-width: 52rem; color: #1d1d1f; background: #fff; }
+h1 { font-size: 1.6rem; line-height: 1.25; }
+h2 { font-size: 1.3rem; margin-top: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 0.2rem; }
+h3 { font-size: 1.1rem; margin-top: 1.5rem; }
+code { font-family: ui-monospace, monospace; font-size: 0.9em; background: #f2f2f2; padding: 0 0.2em; overflow-wrap: anywhere; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { border: 1px solid #ccc; padding: 0.35rem; text-align: left; vertical-align: top; }
+th { background: #f2f2f2; }
+.wrap { overflow-x: auto; max-width: 100%; }
+svg { width: 100%; max-width: 100%; height: auto; }
+dl.task { margin: 0.5rem 0 1rem; }
+dl.task dt { font-weight: 600; margin-top: 0.4rem; }
+dl.task dd { margin: 0 0 0 1rem; }
+.note { background: #f6f6f6; border-left: 4px solid #888; padding: 0.5rem 0.8rem; }
+</style>
+</head>
+<body>
+<h1>Plan for CTV-9: no sprints, clear escalations, stuck agents move on, and a UX walkthrough</h1>
+<p>Written by Ada, the Architect, for task CTV-12. It splits the approved epic CTV-9 into nine tasks in two lanes: lane 1 for Theo, the Software Developer, and lane 2 for Iris, the UI/UX Designer. A builder who has read their task here and the rules below knows what to build and where to stop.</p>
+<p class="note">Short version: sprints leave the product. In their place a <strong>delivery</strong> closes when an epic is accepted, when five standalone tasks have been accepted, or when the team runs out of work. Each delivery runs the review, the plan refresh, the changelog and the retro the sprint used to run. A blocked, escalated or waiting task stops counting towards its agent's WIP limit. When it clears, it goes back to that agent if they have room, else to the first free agent of its role. A decision that supersedes ADR 0028 records all this.</p>
+
+<h2>1. Lanes at a glance</h2>
+<p>Each lane is done by one builder, in order. An arrow between lanes means the later task waits until the earlier one is accepted and integrated.</p>
+<div class="wrap">
+<svg viewBox="0 0 640 300" role="img" aria-labelledby="lanes-title">
+<title id="lanes-title">Lane 1 has tasks 1.1 to 1.6 in order. Lane 2 has 2.1, 2.2 and 2.3. Task 1.3 waits for 2.1, task 2.2 waits for 1.2, and 2.3 waits for every other task.</title>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#444"/></marker></defs>
+<text x="20" y="40" font-size="14" font-weight="600">Lane 1: Theo, software_developer</text>
+<rect x="20" y="55" width="90" height="45" rx="6" fill="#e8eef8" stroke="#345"/>
+<text x="65" y="76" font-size="12" text-anchor="middle">1.1</text>
+<text x="65" y="92" font-size="10" text-anchor="middle">decision</text>
+<rect x="120" y="55" width="90" height="45" rx="6" fill="#e8eef8" stroke="#345"/>
+<text x="165" y="76" font-size="12" text-anchor="middle">1.2</text>
+<text x="165" y="92" font-size="10" text-anchor="middle">escalation choices</text>
+<rect x="220" y="55" width="90" height="45" rx="6" fill="#e8eef8" stroke="#345"/>
+<text x="265" y="76" font-size="12" text-anchor="middle">1.3</text>
+<text x="265" y="92" font-size="10" text-anchor="middle">sprints out</text>
+<rect x="320" y="55" width="90" height="45" rx="6" fill="#e8eef8" stroke="#345"/>
+<text x="365" y="76" font-size="12" text-anchor="middle">1.4</text>
+<text x="365" y="92" font-size="10" text-anchor="middle">deliveries</text>
+<rect x="420" y="55" width="90" height="45" rx="6" fill="#e8eef8" stroke="#345"/>
+<text x="465" y="76" font-size="12" text-anchor="middle">1.5</text>
+<text x="465" y="92" font-size="10" text-anchor="middle">WIP and resume</text>
+<rect x="520" y="55" width="90" height="45" rx="6" fill="#e8eef8" stroke="#345"/>
+<text x="565" y="76" font-size="12" text-anchor="middle">1.6</text>
+<text x="565" y="92" font-size="10" text-anchor="middle">words and docs</text>
+<line x1="110" y1="77" x2="120" y2="77" stroke="#444" marker-end="url(#arrow)"/>
+<line x1="210" y1="77" x2="220" y2="77" stroke="#444" marker-end="url(#arrow)"/>
+<line x1="310" y1="77" x2="320" y2="77" stroke="#444" marker-end="url(#arrow)"/>
+<line x1="410" y1="77" x2="420" y2="77" stroke="#444" marker-end="url(#arrow)"/>
+<line x1="510" y1="77" x2="520" y2="77" stroke="#444" marker-end="url(#arrow)"/>
+<text x="20" y="190" font-size="14" font-weight="600">Lane 2: Iris, ui_ux_designer</text>
+<rect x="120" y="205" width="90" height="45" rx="6" fill="#eef6ea" stroke="#354"/>
+<text x="165" y="226" font-size="12" text-anchor="middle">2.1</text>
+<text x="165" y="242" font-size="10" text-anchor="middle">sprints out of web</text>
+<rect x="320" y="205" width="90" height="45" rx="6" fill="#eef6ea" stroke="#354"/>
+<text x="365" y="226" font-size="12" text-anchor="middle">2.2</text>
+<text x="365" y="242" font-size="10" text-anchor="middle">escalation view</text>
+<rect x="520" y="205" width="90" height="45" rx="6" fill="#eef6ea" stroke="#354"/>
+<text x="565" y="226" font-size="12" text-anchor="middle">2.3</text>
+<text x="565" y="242" font-size="10" text-anchor="middle">walkthrough</text>
+<line x1="210" y1="227" x2="320" y2="227" stroke="#444" marker-end="url(#arrow)"/>
+<line x1="410" y1="227" x2="520" y2="227" stroke="#444" marker-end="url(#arrow)"/>
+<line x1="185" y1="205" x2="250" y2="102" stroke="#a33" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+<line x1="180" y1="100" x2="345" y2="203" stroke="#a33" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+<line x1="565" y1="100" x2="565" y2="203" stroke="#a33" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+<text x="20" y="285" font-size="11">Dashed red: a wait across lanes. 2.3 also waits for 1.1 to 1.5, which 1.6 already follows.</text>
+</svg>
+</div>
+<div class="wrap">
+<table>
+<tr><th>Lane</th><th>Builder</th><th>Role</th><th>Every path the lane may touch</th></tr>
+<tr><td>1</td><td>Theo</td><td><code>software_developer</code></td><td><code>crates/**</code>, <code>packages/protocol-client/**</code>, <code>docs/schemas/**</code>, <code>docs/decisions/**</code>, <code>docs/SPEC.md</code>, <code>README.md</code>, <code>CONTRIBUTING.md</code></td></tr>
+<tr><td>2</td><td>Iris</td><td><code>ui_ux_designer</code></td><td><code>apps/**</code>, <code>packages/ui/**</code>, <code>docs/design/**</code>, <code>docs/catervas/design/**</code></td></tr>
+</table>
+</div>
+<p>The two lanes part before their first wildcard: <code>crates/</code>, <code>packages/protocol-client/</code>, <code>docs/schemas/</code> and <code>docs/decisions/</code> against <code>apps/</code>, <code>packages/ui/</code>, <code>docs/design/</code> and <code>docs/catervas/design/</code>, plus three exact files only lane 1 names. No file can be reached by both lanes. Everything Rust, every wire type and the schemas belong to lane 1. Everything the browser draws, its tests and its Playwright journeys belong to lane 2. That includes <code>apps/web/e2e/fixtures/serve.ts</code>, while its Rust half, <code>crates/cli/src/bin/catervas-e2e-serve.rs</code>, is lane 1's.</p>
+
+<h2>2. Requirements to tasks</h2>
+<div class="wrap">
+<table>
+<tr><th>Epic requirement</th><th>Planned tasks</th></tr>
+<tr><td>R1: sprints are gone; a ready task goes to the first free agent</td><td>1.3 (engine, CLI, wire, schemas), 2.1 (web app), 1.6 (roles, skills, templates, setup words, SPEC, README, CONTRIBUTING), 1.1 (the decision)</td></tr>
+<tr><td>R2: existing projects keep working</td><td>1.3 (old <code>team.yaml</code>, sprint events and the Backlog mark), 1.1 (the decision records the rules); section 4 below</td></tr>
+<tr><td>R3: the ceremonies' outputs happen with no sprint</td><td>1.1 (the decision that supersedes ADR 0028 and names the trigger), 1.4 (deliveries); section 3 below</td></tr>
+<tr><td>R4: answering an escalation is obvious</td><td>1.2 (choices that say what each does, a suggested choice, CLI commands at the end of a run), 2.2 (the escalation view, Today's row, the Playwright journey)</td></tr>
+<tr><td>R5: a stuck agent moves on</td><td>1.5 (WIP counting, resume, hand-over); section 5 below</td></tr>
+<tr><td>R6: Iris's walkthrough</td><td>2.3, the last task, depending on 1.1 to 1.6, 2.1 and 2.2</td></tr>
+</table>
+</div>
+<p>The epic's exit criteria land as follows. C2's new tests (a), (b) and (c) come from 1.3 and 1.5, and (d) from 2.2. C3 is met by 2.1 (the page, the journey, the strings) and 1.3 (<code>team-template.schema.json</code>). C4 is met by 1.1, C5's five questions by 1.6, 1.4, 1.2 with 2.2, 1.5 and 1.3, and C6 by 2.3.</p>
+
+<h2>3. The trigger that replaces the sprint ceremonies (R3)</h2>
+<p>The trigger is a <strong>delivery</strong>. Catervas closes one, as the governor, in a tick scoped to no task under the <code>All</code> rules, the first time one of these holds since the previous delivery closed:</p>
+<ol>
+<li><strong>An epic is accepted.</strong></li>
+<li><strong>Five standalone tasks</strong> (tasks with no parent) have been accepted. The count is a constant, <code>TASKS_PER_DELIVERY = 5</code>, not a setting.</li>
+<li><strong>The team runs out of work.</strong> At least one task was accepted, and no task is left in <code>ready</code>, <code>assigned</code>, <code>in_progress</code>, <code>verifying</code> or <code>rejected</code>. Blocked, escalated, draft and refining tasks do not hold a delivery open.</li>
+</ol>
+<p>A delivery holds every task accepted since the previous one closed. It is recorded as a new event, <code>delivery.closed</code>, with <code>delivery_id</code> <code>D&lt;n&gt;</code>, <code>trigger</code> (<code>epic_accepted</code>, <code>tasks_accepted</code> or <code>team_quiet</code>) and <code>task_ids</code>. Each closed delivery then gets, once and in this order, what an ended sprint got:</p>
+<ul>
+<li><strong>The review</strong>, run by the assigner (the active Scrum Master, else the Product Manager). It is told each task's status, cost and completion note, what the delivery spent, and <strong>the digest of open escalations</strong> (<code>ceremonies::open_escalations</code> with the <code>Digest</code> the planning ceremony used to get).</li>
+<li><strong>The Product Manager's refresh</strong>: its proposed changes to the spec and roadmap, and its report at <code>docs/catervas/product/reports/D&lt;n&gt;</code>. After it, the Architect's refresh, both under today's <code>due_refresh</code> rules.</li>
+<li><strong>The CHANGELOG entry.</strong> Catervas itself files a small docs task for the Product Manager, "Changelog for D&lt;n&gt;", with <code>allowed_paths: [CHANGELOG.md]</code>, so it flows through refining and assignment like any request. Today the Product Manager's prompt asks it to file this task at each sprint review, but no ceremony session is offered <code>catervas_create_task</code> (<code>CEREMONY_TOOLS</code> in <code>crates/runtime/src/orchestrator/rules.rs</code>), so it never could. A deterministic filing is the only way it happens "with no action from the user".</li>
+<li><strong>The retro</strong>, run by the assigner, offered <code>catervas_append_retro</code>.</li>
+</ul>
+<p><strong>Why this trigger.</strong> An epic is the unit the owner approved, so its acceptance is the natural moment for a changelog line and a plan refresh. Standalone work has no such moment. Five tasks keep a changelog entry readable and keep the review, refresh and retro sessions, which are paid, from running after every small task. The quiet rule makes sure a small project's last work still gets its changelog and retro. None of the three asks the user for anything.</p>
+<p><strong>Ruled out.</strong> A timer, such as weekly, would close empty deliveries and is a sprint by another name. A delivery after every accepted task would cost a review, a refresh and a retro per task. A "close delivery" button would bring back the user action that question 34 removed. The daily standup is dropped without a replacement: the digest moves into the review, and the existing aged-escalation rule (<code>aged</code>, <code>escalation.aged</code>) keeps reminding about old escalations.</p>
+<p><strong>The decision.</strong> Task <strong>1.1</strong> records this in a new decision, <code>docs/decisions/0061-deliveries-replace-sprints.md</code> (or the next free number when it lands), whose header says <em>Supersedes ADR 0028</em>.</p>
+
+<h2>4. How old projects keep working (R2)</h2>
+<ul>
+<li><strong><code>team.yaml</code>.</strong> <code>policy.plan_in_sprints</code> (true or false) stays in <code>docs/schemas/team.schema.json</code> as an accepted key that nothing reads. Its description says it is read from projects made before the new decision and ignored. <code>Team::plans_in_sprints</code> (<code>crates/core/src/team.rs</code>) is deleted. When Catervas next writes <code>team.yaml</code>, it leaves the key out. <code>policy.ambient_messages_per_sprint</code> becomes <code>ambient_messages_per_day</code>, and the old key is read as its value when the new one is absent. The period was already a UTC day whenever no sprint was open.</li>
+<li><strong>Team templates.</strong> <code>plan_in_sprints</code> leaves <code>docs/schemas/team-template.schema.json</code> (epic C3). <code>crates/core/src/team/template.rs</code> drops the key from a saved template before validating it, so a template a user saved earlier still loads.</li>
+<li><strong>Contracts.</strong> The optional <code>sprint</code> field stays in <code>task-contract.schema.json</code>, read and ignored. Catervas never writes it again.</li>
+<li><strong>Sprint files.</strong> <code>.catervas/sprints/*</code> are left where they are. Nothing reads them, writes them or deletes them.</li>
+<li><strong>Sprint events.</strong> <code>sprint.started</code>, <code>sprint.planned</code>, <code>sprint.ended</code> (with its <code>backlog</code> mark and <code>left</code> tasks) and ceremony sessions in the <code>planning</code> and <code>standup</code> threads stay in <code>docs/schemas/event.schema.json</code> and in <code>catervas-protocol</code>'s event kinds and threads, so an old log parses. The store may go on applying them to its sprint tables (migrations <code>0008</code> to <code>0010</code> and <code>0015</code> stay; a migration is never removed). No rule, gate, query or page reads them. The one exception is the first delivery's starting point, below.</li>
+<li><strong>The Backlog hold.</strong> <code>waits_for_a_sprint</code>, <code>in_the_backlog</code>, <code>in_the_open_sprint</code>, <code>the_sprint_pays</code> and <code>SprintHold</code> (<code>crates/core/src/governor/gates.rs</code>) are deleted, along with <code>sprint_hold</code> and <code>backlog</code> (<code>crates/runtime/src/sprints.rs</code>) and the <code>goes_on</code> filter in <code>tick</code>. A <code>ready</code> task that sat in the Backlog is then assigned by rule 8 on the first tick, like any ready task. A task carrying the <code>left_for_the_backlog</code> mark in <code>assigned</code>, <code>in_progress</code> or <code>rejected</code> is started, worked or reworked by rules 7, 6 and 3. The projection's column stays and is not read.</li>
+<li><strong>An open sprint at upgrade.</strong> It is never ended. Catervas appends no sprint event, ever again. Its tasks are ordinary tasks.</li>
+<li><strong>The first delivery</strong> counts tasks accepted after the later of the last <code>delivery.closed</code> and the last <code>sprint.ended</code> whose review ran. Work an old sprint already reviewed is not reviewed twice, and work accepted after it is not lost.</li>
+<li><strong>Past events are neither rewritten nor deleted.</strong> No task in this plan edits or removes a line of any project's log. This repository's own <code>.catervas/team.yaml</code> is not edited by hand: its leftover key is simply ignored.</li>
+</ul>
+
+<h2>5. WIP counting and assignment (R5)</h2>
+<p><strong>The counting function</strong> is <code>transitions::open_tasks</code> in <code>crates/runtime/src/transitions.rs</code>. The orchestrator's <code>has_room</code> (<code>crates/runtime/src/orchestrator/rules.rs</code>) and the governor's <code>AssignmentInput::assignee_open_tasks</code> both read it. After 1.5 it counts the tasks an agent holds in <code>assigned</code>, <code>in_progress</code>, <code>verifying</code> and <code>rejected</code>, except a row whose <code>waiting_on_human</code> is set. It leaves out <code>blocked</code>, <code>escalated</code>, <code>accepted</code> and <code>cancelled</code>, and it takes no sprint argument. Counting <code>assigned</code>, <code>verifying</code> and <code>rejected</code> keeps the reason given in <code>AssignmentInput</code>'s comment: the limit cannot be walked through them.</p>
+<p><strong>The resume rule.</strong> When a wait clears, the task counts again. The clearing moves are <code>blocked → in_progress</code>, a resolve out of <code>escalated</code> into <code>assigned</code>, <code>in_progress</code> or <code>rejected</code>, and an answered question. A new function, <code>within_limit</code>, takes the place of <code>goes_on</code> in <code>tick</code>. It ranks an agent's counted tasks by when each last became counted, and rules 7, 6 and 3 work only the first <code>wip_limit_per_agent</code> of them. A task past that rank is <em>returning</em>, and a new rule between rules 5 and 6, <code>resume</code>, does this with it:</p>
+<ol>
+<li>If its previous assignee has room again, it simply goes on with them on a later tick, because it is now within their limit.</li>
+<li>Otherwise, the first active agent of its <code>assignee_role</code>, in team order, that has room and is not the task's reviewer, gets it. The governor appends a new event, <code>task.reassigned</code> (<code>from</code>, <code>to</code>, <code>reason: resumed</code>), under a new gate, <code>check_reassignment</code>, in <code>crates/core/src/governor/gates.rs</code>. The projection sets <code>assignee_id</code> from it. The task keeps its worktree and branch, and its next session is told the last commit and note, as <code>resume</code> already does.</li>
+<li>If no agent has room, it waits with its previous assignee and is tried again every tick.</li>
+<li>A task with a <code>lane</code> is never handed over. It waits for its lane's builder, so two agents never work in one lane's paths at once (ADR 0051, <code>lanes_overlap</code>).</li>
+</ol>
+<p><strong>Why no task is held by two agents.</strong> A task has one holder, the projection's single <code>assignee_id</code>. Only two events set it: <code>ready → assigned</code>, behind <code>check_assignment</code>, and <code>task.reassigned</code>, behind <code>check_reassignment</code>. <code>check_reassignment</code> refuses unless the task is in <code>assigned</code>, <code>in_progress</code> or <code>rejected</code>, is returning, has no lane, and the candidate has room and holds the task's role. One process drives a project (ADR 0053), its tick runs one rule at a time, and a session runs to its end before the next tick. So no reassignment can land while the task's session runs. Rules 3, 6 and 7 start sessions only for the row's current <code>assignee_id</code>.</p>
+<p><strong>Why nobody reviews their own work.</strong> The reviewer is fixed at assignment and <code>task.reassigned</code> does not change it. <code>check_reassignment</code> refuses a candidate who is the task's <code>reviewer_id</code>, with the same exception <code>check_assignment</code> makes for <code>Role::reviews_its_own</code> (the Product Manager alone). The previous assignee could not be the reviewer either, since <code>check_assignment</code> refused that when the task was first assigned.</p>
+
+<h2>6. Escalation choices (R4)</h2>
+<p><code>escalation.choices</code> (<code>choices</code> in <code>crates/runtime/src/daemon/gates.rs</code>) gains, for each choice, <code>next</code> (what happens next, in plain words, naming the agent), <code>suggested</code> (exactly one per escalation) and <code>kind</code> (<code>command</code>, or <code>open</code> with a <code>path</code> for a choice made on another page). It covers every reason in <code>escalation.raised</code>; today four reasons get no choice at all. No two choices send the same command. The shape below is fixed, and Theo may improve the wording:</p>
+<div class="wrap">
+<table>
+<tr><th>Reason</th><th>Choices, suggested first</th><th>Example of <code>next</code> for the suggested one</th></tr>
+<tr><td><code>iterations</code></td><td>Give 2 more tries; ask the Product Manager to change the plan; cancel</td><td>"Theo picks CTV-14 up again with 2 more tries."</td></tr>
+<tr><td><code>budget</code>, <code>sessions</code></td><td>Ask the Product Manager to change the plan; cancel</td><td>"Mira rewrites the plan of CTV-14; it is assigned again once it is ready."</td></tr>
+<tr><td><code>blocker_age</code></td><td>Answer the blocker and carry on (to <code>in_progress</code>, the message being the answer); change the plan; cancel</td><td>"Theo reads your answer and carries on with CTV-14."</td></tr>
+<tr><td><code>permission</code>, <code>explicit_request</code></td><td>Carry on (to the status before); change the plan; cancel</td><td>"CTV-14 goes back to in progress, and Theo is told what you wrote."</td></tr>
+<tr><td><code>readiness_failures</code></td><td>Ask the Product Manager to try the plan again (to <code>refining</code>); cancel</td><td>"Mira writes the plan of CTV-14 again with your note."</td></tr>
+<tr><td><code>approval</code>, <code>risk_gate</code></td><td>Review the plan (<code>open</code> the approval); cancel</td><td>"You read the plan and approve it or send it back."</td></tr>
+<tr><td><code>integration</code></td><td>Add it to the project now (the integrate command); cancel</td><td>"Catervas merges CTV-14 into your main branch."</td></tr>
+<tr><td><code>preview</code></td><td>Set the preview (<code>open</code> Settings); cancel</td><td>"You tell Catervas how to start your app, and Iris carries on."</td></tr>
+</table>
+</div>
+<p>Cancelling always says: "CTV-14 stops for good. Its branch is kept, and nothing is merged."</p>
+
+<h2>7. Rules for every task</h2>
+<ul>
+<li>Follow ADR 0060: write one test for each major functionality first and watch it fail for the right reason. Do not add one test per case.</li>
+<li>Leave <code>pnpm run check</code> and <code>cargo xtask check</code> passing at the end of every task. Where an epic criterion is a test, leave <code>cargo xtask check --integration</code> passing too.</li>
+<li>Rewrite or delete no past event in any project's log. Never edit this repository's <code>.catervas/</code> by hand.</li>
+<li>Take on no new dependency.</li>
+<li>Write new documents under <code>docs/catervas/</code> as HTML (ADR 0058).</li>
+<li>Change only what the epic's scope names. The WIP limit's value, the escalation reasons, their limits, the budgets, milestones beyond their sprint words, and the desktop app stay as they are.</li>
+<li>Iris's tasks run as the Designer's do: explore, then a plan the Product Manager approves, then the implementation.</li>
+</ul>
+
+<h2>Lane 1: Theo, software_developer</h2>
+
+<h3>1.1 Record the decision: deliveries replace sprints</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 1, <code>software_developer</code>.</dd>
+<dt>Builds</dt>
+<dd>A new ADR, <code>docs/decisions/0061-deliveries-replace-sprints.md</code> (the next free number when it lands), that supersedes ADR 0028. It records: sprints, the Backlog and <code>plan_in_sprints</code> leave the product; the delivery trigger of section 3 with its reason and the alternatives ruled out; the compatibility rules of section 4; the WIP and resume rules of section 5; allowances (ADR 0037) counted per UTC day; and that ADR 0042's <code>skips_sprints</code> exception and ADR 0027's incident-fix exception have nothing left to except. ADR 0028 gets one added line under its status, "Superseded by ADR 0061", and nothing else in it changes.</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>docs/decisions/**</code></dd>
+<dt>Depends on</dt>
+<dd>Nothing.</dd>
+<dt>Constraints</dt>
+<dd>Follow <code>docs/decisions/0000-template.md</code>. The header carries the text <code>Supersedes ADR 0028</code>, so that epic C4's search finds it. Status: accepted by the owner's approval of CTV-9 (question 34). Write no code.</dd>
+<dt>Satisfies</dt>
+<dd>R3 (the decision), R1, R2.</dd>
+</dl>
+
+<h3>1.2 Escalations that say what each choice does</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 1, <code>software_developer</code>.</dd>
+<dt>Builds</dt>
+<dd>The choices of section 6 in <code>choices</code> (<code>crates/runtime/src/daemon/gates.rs</code>), with <code>next</code>, <code>suggested</code> and <code>kind</code> added to <code>escalationChoicesResult</code> in <code>docs/schemas/rpc.schema.json</code> and to <code>packages/protocol-client</code>'s mapping. <code>catervas resolve</code> gains <code>--extra-tries &lt;n&gt;</code>. At the end of a run, <code>print_waiting</code> (<code>crates/cli/src/run.rs</code>) lists every open escalation with one line per choice: the exact command (for example <code>catervas resolve CTV-14 in_progress --extra-tries 2 "your message"</code>), its <code>next</code> words, and which is suggested. A recorded transcript in <code>crates/runtime/src/recorded/transcripts/</code>, named in <code>catervas-e2e-serve</code>, leaves a task escalated, so that 2.2's journey can raise one.</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>crates/**</code>, <code>docs/schemas/**</code>, <code>packages/protocol-client/**</code></dd>
+<dt>Depends on</dt>
+<dd>Nothing. It runs while Iris does 2.1.</dd>
+<dt>Constraints</dt>
+<dd>The wire change is additive only: no field is removed or renamed, so the web app keeps compiling until 2.2 uses the new fields. The command line and the web app read the same <code>choices</code>; nothing builds the list twice. Two tests: every reason gets one suggested choice, each with <code>next</code>; and the end-of-run lines name a runnable command for each choice.</dd>
+<dt>Satisfies</dt>
+<dd>R4.</dd>
+</dl>
+
+<h3>1.3 Take sprints out of the engine, and keep old projects working</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 1, <code>software_developer</code>.</dd>
+<dt>Builds</dt>
+<dd>Everything in section 4. Delete the sprint hold and gates (<code>crates/core/src/governor/gates.rs</code>, <code>crates/core/src/sprint.rs</code>), the sprint rules in <code>tick</code> (<code>finished_sprint</code>, <code>sprint_planning</code>, <code>standup</code>; the review and retro stay for 1.4 to move), <code>crates/runtime/src/sprints.rs</code>, <code>TickReport::Sprint</code>'s sprint case and the "waits for a sprint" idle words. Remove the <code>catervas sprint</code> commands, <code>metrics --sprint</code> and the end-of-run Backlog line (<code>backlog_now</code>). Remove the <code>sprint_start</code> and <code>sprint_end</code> commands, the <code>sprint.current</code>, <code>sprints.list</code> and <code>sprint.get</code> queries, the Backlog summary, the board row's Backlog flag, the sprint cost scope and <code>catervas_plan_sprint</code>, together with their schema entries and protocol-client mappings. Allowances count per UTC day (<code>crates/runtime/src/allowances.rs</code>). Delete the planning-ceremony transcripts. Make <code>plan_in_sprints</code> and <code>ambient_messages_per_sprint</code> work as section 4 says, and remove <code>plan_in_sprints</code> from <code>team-template.schema.json</code>. <code>catervas-e2e-serve</code> stops rewriting <code>plan_in_sprints</code>.</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>crates/**</code>, <code>docs/schemas/**</code>, <code>packages/protocol-client/**</code></dd>
+<dt>Depends on</dt>
+<dd>1.1, and 2.1 in lane 2. The web app must stop reading the sprint wire before this task removes it.</dd>
+<dt>Constraints</dt>
+<dd>Section 4 is the contract for old projects. The event kinds and threads of sprints stay in the event schema and in <code>catervas-protocol</code>. Change the scrum master's kit, role and skill files only as far as the roles crate's own checks need once <code>catervas_plan_sprint</code> is gone; 1.6 rewrites the words. One test, epic C2 (a): a project whose <code>team.yaml</code> says <code>plan_in_sprints: true</code>, whose log holds <code>sprint.started</code>, <code>sprint.planned</code> and <code>sprint.ended</code> with <code>backlog: true</code>, and whose ready task sat in the Backlog, loads, and on the first tick its ready task is assigned to a free agent. The test asserts that the log's earlier events are unchanged.</dd>
+<dt>Satisfies</dt>
+<dd>R1, R2.</dd>
+</dl>
+
+<h3>1.4 Deliveries: the ceremonies' outputs without sprints</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 1, <code>software_developer</code>.</dd>
+<dt>Builds</dt>
+<dd>Section 3: the <code>delivery.closed</code> event in <code>docs/schemas/event.schema.json</code> and <code>catervas-protocol</code>, the rule that closes a delivery on its trigger, and <code>review_and_retro</code>, <code>due_refresh</code> and <code>product_files</code> moved from the ended sprint to the latest closed delivery (<code>closed_delivery</code> taking the place of <code>ended_sprint</code>). The review is told the open escalations' digest. Catervas files the "Changelog for D&lt;n&gt;" task. The product plan proposals on the wire gain <code>delivery_id</code>, with <code>sprint_id</code> kept optional for proposals made before.</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>crates/**</code>, <code>docs/schemas/**</code>, <code>packages/protocol-client/**</code></dd>
+<dt>Depends on</dt>
+<dd>1.3.</dd>
+<dt>Constraints</dt>
+<dd>Each delivery gets its review, refreshes, changelog task and retro once, under the ceremonies' existing bound and their spent-day and asleep checks. The first delivery's starting point is the one section 4 gives. No setting is added. One test: a team with no sprint accepts an epic, and one delivery closes and runs its review (with the digest), the Product Manager's refresh, the changelog task and the retro, each once. The other two triggers are checked inside that same test only if it stays one test.</dd>
+<dt>Satisfies</dt>
+<dd>R3.</dd>
+</dl>
+
+<h3>1.5 WIP counting and resuming a cleared task</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 1, <code>software_developer</code>.</dd>
+<dt>Builds</dt>
+<dd>Section 5: the new <code>open_tasks</code>; <code>within_limit</code> in place of <code>goes_on</code>; the <code>resume</code> rule; the <code>task.reassigned</code> event (schema, <code>catervas-protocol</code>, projection); and <code>check_reassignment</code> in <code>catervas-core</code>, pure and without I/O like the other gates. The team activity read (<code>teamActivityResult</code>) shows an agent with a blocked task and another task under way as <code>working</code>.</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>crates/**</code>, <code>docs/schemas/**</code>, <code>packages/protocol-client/**</code></dd>
+<dt>Depends on</dt>
+<dd>1.3.</dd>
+<dt>Constraints</dt>
+<dd>The WIP limit's value does not change. <code>check_assignment</code>'s rule that nobody reviews their own work is not loosened. A lane task is never handed over. Two tests, epic C2 (b) and (c): an agent whose task becomes blocked, and then escalated, is assigned the next ready task of its role; and a cleared task resumes with its previous assignee when they have room, else with another free agent of its role, and its <code>assignee_id</code> is one agent throughout.</dd>
+<dt>Satisfies</dt>
+<dd>R5.</dd>
+</dl>
+
+<h3>1.6 Remove sprint wording from roles, skills, templates, setup and documents</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 1, <code>software_developer</code>.</dd>
+<dt>Builds</dt>
+<dd>Every sprint, sprint planning, sprint budget, Backlog-as-holding-area and "Start sprint" word goes from the role prompts and skills (<code>crates/roles/roles/**</code>: the Scrum Master's <code>planning-a-sprint</code> becomes delivery-free, or is removed, and <code>running-ceremonies</code> and <code>keeping-work-flowing</code> describe deliveries; the Product Manager's prompt and skills file no changelog task themselves, since Catervas files it), from tool descriptions (<code>catervas_append_retro</code>'s "next sprint's planning"), from the ready-made team templates, from <code>catervas init</code>, <code>catervas setup</code> and <code>doctor</code>, from the CLI help, from <code>docs/SPEC.md</code> (sections 3, 5.5 and 5.9, with deliveries in their place), and from <code>README.md</code> and <code>CONTRIBUTING.md</code>.</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>crates/**</code>, <code>docs/schemas/**</code>, <code>docs/SPEC.md</code>, <code>README.md</code>, <code>CONTRIBUTING.md</code></dd>
+<dt>Depends on</dt>
+<dd>1.4 and 1.5, so that the words describe the behaviour that shipped.</dd>
+<dt>Constraints</dt>
+<dd>When it is done, <code>grep -rni sprint</code> over <code>crates</code>, <code>packages</code>, <code>docs/schemas</code>, <code>docs/SPEC.md</code>, <code>README.md</code> and <code>CONTRIBUTING.md</code> finds only code and schema text that reads old logs, keys and contracts, and the completion note lists what is left and why (epic C5's first question). Words only: no behaviour changes.</dd>
+<dt>Satisfies</dt>
+<dd>R1.</dd>
+</dl>
+
+<h2>Lane 2: Iris, ui_ux_designer</h2>
+
+<h3>2.1 Take sprints out of the web app</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 2, <code>ui_ux_designer</code>.</dd>
+<dt>Builds</dt>
+<dd>Delete <code>apps/web/src/pages/SprintPage.tsx</code> and its test, the <code>StartSprint</code> and <code>EndSprint</code> dialogs, <code>apps/web/e2e/sprints.spec.ts</code>, the route and navigation to them, the Board's Backlog lane (<code>apps/web/src/app/lanes.ts</code>), Today's sprint card and "start a sprint" prompts, the "Plan work in sprints" switch in Settings (<code>settings/Work.tsx</code>) and in setup's Advanced step, the sprint tab of Costs, and the <code>sprints</code> option of <code>apps/web/e2e/fixtures/serve.ts</code>. Remove every sprint word from <code>apps/web/src/strings/en.ts</code> and the tests' fixtures, and from <code>packages/ui</code>'s gallery and tests. Where a page said "this sprint", it now says what it means without one, for example "since the last review". At the top of <code>docs/design/sprint-backlog.md</code>, add one line saying ADR 0061 supersedes it.</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>apps/**</code>, <code>packages/ui/**</code>, <code>docs/design/**</code></dd>
+<dt>Depends on</dt>
+<dd>Nothing. It runs while Theo does 1.1 and 1.2.</dd>
+<dt>Constraints</dt>
+<dd>The page stops calling sprint queries and commands, and the setup and Settings pages stop sending <code>plan_in_sprints</code>, so that 1.3 can remove them from the wire. Until 1.3 lands, a project that already plans in sprints can only start one from the command line. That is acceptable on the integration branch and is said in the completion note. Use the brand's tokens. When the task is done, the web half of epic C3's command passes: no <code>SprintPage.tsx</code>, no <code>sprints.spec.ts</code>, and no "sprint" in <code>en.ts</code>, matched without regard to case. The existing journeys and unit tests that touched sprints are changed or removed, not skipped.</dd>
+<dt>Satisfies</dt>
+<dd>R1.</dd>
+</dl>
+
+<h3>2.2 An escalation view that explains itself</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 2, <code>ui_ux_designer</code>.</dd>
+<dt>Builds</dt>
+<dd><code>apps/web/src/pages/HelpNeeded.tsx</code> says in plain words what happened and what the agent tried (from the task's history and tries, as today). It lists every choice from <code>escalation.choices</code> with its <code>next</code> words, marks the suggested one, and makes each choice one action: one button, with an optional message where the choice takes one, and never a status to type or pick. An <code>open</code> choice links to its page. On Today, the "Waiting on you" row for an escalation opens this view directly. A Playwright journey in <code>apps/web/e2e/</code>, using 1.2's recorded transcript, answers an escalation from Today in one action (epic C2 (d)).</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>apps/**</code>, <code>packages/ui/**</code></dd>
+<dt>Depends on</dt>
+<dd>2.1, and 1.2 in lane 1.</dd>
+<dt>Constraints</dt>
+<dd>Show the server's <code>next</code> words as they come; do not compose them on the page. The view works on a phone at 360 px wide, and every choice is reachable by keyboard and named for a screen reader. Use the brand's tokens. One journey, plus one unit test of the view.</dd>
+<dt>Satisfies</dt>
+<dd>R4.</dd>
+</dl>
+
+<h3>2.3 Iris's walkthrough as a new user (last task)</h3>
+<dl class="task">
+<dt>Lane, role</dt>
+<dd>Lane 2, <code>ui_ux_designer</code>.</dd>
+<dt>Builds</dt>
+<dd>Once 1.1 to 1.6, 2.1 and 2.2 are on the integration branch, Iris uses the web app as a new user would, through its preview, in a throwaway project of a small product she makes up. She sets it up, files one small request, answers the team's questions, approves the epic or the contract, watches the team build, answers at least one escalation, and accepts the result. She writes <code>docs/catervas/design/ux-walkthrough.html</code> and its twin <code>ux-walkthrough.agent.html</code>. For each step, the report gives what she did and what she saw. For each issue, it gives the screen, what she expected, what happened, and a severity (blocker, major or minor). It says whether R1, R4 and R5 held for a real user, and what the throwaway project spent.</dd>
+<dt><code>allowed_paths</code></dt>
+<dd><code>docs/catervas/design/**</code></dd>
+<dt>Depends on</dt>
+<dd>Every other task: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1 and 2.2. It is the last planned task.</dd>
+<dt>Constraints</dt>
+<dd>The throwaway project lives in a new directory outside this repository and its worktrees, for example under the sandbox's temporary folder. It is never pushed anywhere and is deleted afterwards. Its <code>team.yaml</code> sets <code>budgets.daily_usd</code> to 35 before the first request, and the walkthrough stops when the project's own agent spend, read from its Costs page, would pass <strong>40 USD</strong> in total. The report states the final figure. Fix nothing: each blocker and major finding is a new request for the Product Manager to file, not a change in this epic. The report includes the words "Escalation", "Severity", "Expected" and "Accepted" (epic C6), and both pages follow the document rules.</dd>
+<dt>Satisfies</dt>
+<dd>R6.</dd>
+</dl>
+
+<h2>8. What this plan leaves out</h2>
+<ul>
+<li>Fixing what the walkthrough finds, beyond R1 to R5.</li>
+<li>The escalation reasons themselves, their limits, the daily and per-task budgets, and the WIP limit's value.</li>
+<li>The desktop app, and CTV-10 and any other epic.</li>
+<li>Any change to this repository's <code>.catervas/team.yaml</code>.</li>
+</ul>
+</body>
+</html>
