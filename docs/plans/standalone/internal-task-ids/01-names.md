@@ -1,6 +1,6 @@
 # Standalone internal-task-ids, plan 1: the names
 
-Status: draft
+Status: done
 Branch: `feat/internal-task-ids` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.11, 5.14 (recorded by plan 6)
 Depends on: `feat/parallel-agents` landed beneath this branch (README)

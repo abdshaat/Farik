@@ -1,6 +1,6 @@
 # Standalone internal-task-ids, plan 2: a task's branch and pull request
 
-Status: draft
+Status: done
 Branch: `feat/internal-task-ids` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 5.11, 5.14 (recorded by plan 6)
 Depends on: plan 1 of this branch

@@ -1,6 +1,6 @@
 # Standalone internal-task-ids, plan 6: the record
 
-Status: draft
+Status: done
 Branch: `feat/internal-task-ids` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md`, the sections below (hard rule 8)
 Depends on: plans 1 to 5 of this branch
@@ -123,7 +123,7 @@ Files: as the file map.
 Tests: none. This is the record of behaviour plans 1 to 5 already test. Its check is
 `cargo xtask check` passing and reading each changed paragraph against the code it describes.
 
-- [ ] `docs(spec): task ids stay inside Catervas, revision 0.119`
+- [x] `docs(spec): task ids stay inside Catervas, revision 0.119`
 
 ## Verification
 
