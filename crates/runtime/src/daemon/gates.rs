@@ -325,7 +325,7 @@ pub(super) fn query(
             "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
         })),
         "sprint.current" => sprint_current(deps),
-        "backlog.summary" => backlog_summary(deps, &team()?),
+        "backlog.summary" => Ok(backlog_summary(&team()?)),
         "product_plan.state" => product_plan_state(deps, &team()?),
         "catervafication.get" => catervafication_get(deps, &team()?),
         "questions.list" => questions(deps, params["task_id"].as_str()),
@@ -595,12 +595,10 @@ fn sprint_current(deps: &ToolDeps) -> Result<Value, Failure> {
 
 /// `backlog.summary`: whether `team` plans in sprints, and how many of the Backlog's rows have no
 /// parent, so an epic counts once.
-fn backlog_summary(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
-    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
-    let open = open.as_ref().map(|open| open.sprint_id.as_str());
-    let board = deps.projections.board().map_err(|e| internal(&e))?;
-    let count = crate::sprints::backlog(team, open, &board).count();
-    Ok(json!({ "plan_in_sprints": team.plans_in_sprints(), "count": count }))
+fn backlog_summary(team: &Team) -> Value {
+    // Nothing waits for a sprint any more (ADR 0062); the query goes with the reads in plan 5's
+    // Task 4.
+    json!({ "plan_in_sprints": team.plans_in_sprints(), "count": 0 })
 }
 
 /// `product_plan.state`: a new project's name, whether its plan is approved, the newest task that
@@ -3734,7 +3732,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-1", "contract": draft }),
             "contractCheckResult",
         );
-        assert_eq!(checked["total"], 31, "{checked}");
+        assert_eq!(checked["total"], 30, "{checked}");
         let failures = checked["failures"].as_array().expect("failures");
         assert_eq!(failures.len(), 1, "{checked}");
         assert_eq!(failures[0]["rule"], "reviewer_available");
@@ -4332,7 +4330,7 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn answers_tries_and_the_sprint() {
+    fn answers_tries() {
         let harness = driven("gates-tries");
         harness.rejected("CTV-1", 3, "C1 still fails");
         harness.project.moved(
@@ -4377,13 +4375,6 @@ pub(super) mod tests {
         assert!(reply["result"]["said"].is_string(), "{reply}");
         assert_eq!(tries("CTV-1"), json!({ "try": 5, "of": 6 }));
 
-        let none = query(
-            &harness.daemon,
-            "sprint.current",
-            &json!({}),
-            "sprintCurrentResult",
-        );
-        assert_eq!(none, Value::Null);
         harness.accepted("CTV-2");
         harness.ready("CTV-3");
         // Nothing sent back yet: the first try.
@@ -4393,17 +4384,6 @@ pub(super) mod tests {
         harness
             .project
             .moved("CTV-5", "refining", "cancelled", &json!({}));
-        harness
-            .project
-            .open_sprint("S1", Some(50.0), &["CTV-2", "CTV-3", "CTV-5"]);
-        let sprint = query(
-            &harness.daemon,
-            "sprint.current",
-            &json!({}),
-            "sprintCurrentResult",
-        );
-        assert_eq!(sprint, json!({ "sprint_id": "S1", "done": 2, "total": 3 }));
-
         let contract = harness.project.file("CTV-3");
         let checked = query(
             &harness.daemon,
@@ -4411,7 +4391,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-3", "contract": contract }),
             "contractCheckResult",
         );
-        assert_eq!(checked, json!({ "failures": [], "total": 31 }));
+        assert_eq!(checked, json!({ "failures": [], "total": 30 }));
 
         // The activity and what moved answer in their shapes.
         query(
@@ -4430,22 +4410,6 @@ pub(super) mod tests {
             !moved["moved"].as_array().expect("moved").is_empty(),
             "{moved}"
         );
-    }
-
-    /// A ready task CTV-1, and an epic CTV-2 broken down into the ready CTV-3, CTV-4 and CTV-5,
-    /// on a team that plans in sprints when `on`.
-    fn a_backlog(name: &str, on: bool) -> Harness {
-        let harness = Harness::new(name, |wire| {
-            if on {
-                wire["policy"]["plan_in_sprints"] = json!(true);
-            }
-        });
-        harness.ready("CTV-1");
-        harness.project.filed("CTV-2", "in_progress", "epic", None);
-        for task in ["CTV-3", "CTV-4", "CTV-5"] {
-            harness.project.filed(task, "ready", "task", Some("CTV-2"));
-        }
-        harness
     }
 
     #[test]
@@ -4632,28 +4596,6 @@ pub(super) mod tests {
         assert_eq!(line(&harness, "dev-a"), "Nothing to do right now");
     }
 
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn summarises_the_backlog() {
-        let summary = |harness: &Harness| {
-            query(
-                &harness.daemon,
-                "backlog.summary",
-                &json!({}),
-                "backlogSummaryResult",
-            )
-        };
-        // The epic counts once, its tasks with it.
-        assert_eq!(
-            summary(&a_backlog("gates-backlog-on", true)),
-            json!({ "plan_in_sprints": true, "count": 2 })
-        );
-        assert_eq!(
-            summary(&a_backlog("gates-backlog-off", false)),
-            json!({ "plan_in_sprints": false, "count": 0 })
-        );
-    }
-
     /// `harness` with its daemon taking commands through its orchestrator.
     fn driven_by(harness: Harness) -> Harness {
         let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
@@ -4722,20 +4664,6 @@ pub(super) mod tests {
             offer(&no_writers),
             json!({ "offered": true, "roles": ["product_manager", "software_developer"] })
         );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn leaves_the_backlog_out_of_waiting() {
-        let harness = a_backlog("gates-backlog-waiting", true);
-        let waiting = query(
-            &harness.daemon,
-            "waiting.list",
-            &json!({}),
-            "waitingListResult",
-        );
-        // The Backlog waits for a sprint, which Today says in the team band (answer 2).
-        assert_eq!(waiting["waiting"], json!([]), "{waiting}");
     }
 
     #[test]

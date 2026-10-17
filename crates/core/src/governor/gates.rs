@@ -99,18 +99,6 @@ pub struct AssignmentInput {
     pub assignee_open_tasks: u32,
     /// The team's limit on work in progress per agent.
     pub wip_limit: u32,
-    /// What is left of the open sprint's budget, in dollars: infinite with no sprint open or one
-    /// with no budget (ADR 0015).
-    pub remaining_sprint_budget_usd: f64,
-    /// The sprint that is open, if one is (`docs/SPEC.md` section 5.5).
-    pub open_sprint: Option<String>,
-    /// The sprint the task is in, if it is in one.
-    pub task_sprint: Option<String>,
-    /// The sprint the task's epic is in, when the task has an epic: `Some(None)` for an epic in
-    /// no sprint.
-    pub parent_sprint: Option<Option<String>>,
-    /// Whether the team plans its work in sprints (`Team::plans_in_sprints`, ADR 0028).
-    pub plan_in_sprints: bool,
     /// The state of every dependency the contract lists, in any order.
     pub dependencies: Vec<DependencyState>,
     /// Whether a UI/UX Designer assignee could open the app; read for no other role.
@@ -120,121 +108,14 @@ pub struct AssignmentInput {
     /// A task sent back, blocked or escalated still holds it, since `rejected -> in_progress` and
     /// `blocked -> in_progress` pass no assignment gate. `false` for a role with no folder.
     pub private_folder_busy: bool,
-    /// Whether the task skips the sprint queue: the request the owner files to raise a marketing
-    /// plan's budget (ADR 0042, ADR 0028's exception). It is worked on at once, in no sprint,
-    /// under the policy or not, and the sprint's budget does not pay for it.
-    pub skips_sprints: bool,
     /// The agent that builds the task's lane, when the task has a lane and a parent and another
     /// task of that lane and role is not cancelled and has an active assignee: the one of them
     /// with the highest id. `None` for the first task of a lane to be assigned.
     pub lane_builder: Option<String>,
 }
 
-/// A row of the board as the sprint policy reads it (ADR 0028).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SprintHold<'a> {
-    /// Whether the team plans its work in sprints.
-    pub plan_in_sprints: bool,
-    /// The sprint that is open, if one is.
-    pub open_sprint: Option<&'a str>,
-    /// The row's kind.
-    pub kind: Kind,
-    /// The row's status.
-    pub status: TaskStatus,
-    /// The sprint the row is in, if it is in one.
-    pub sprint: Option<&'a str>,
-    /// Whether a sprint ended early left the task for the Backlog.
-    pub left_for_the_backlog: bool,
-    /// Whether the task skips the sprint queue (see `AssignmentInput::skips_sprints`).
-    pub skips_sprints: bool,
-}
-
-/// Whether a task waits for a sprint to plan it: under the policy, a task outside the open sprint
-/// that is `ready` or that a sprint left for the Backlog. Work under way when the policy was
-/// switched on is not held, and an epic never is: its breakdown is preparation. Nor is a task that
-/// skips sprints, the owner's request to raise a marketing plan's budget.
-#[must_use]
-pub fn waits_for_a_sprint(hold: &SprintHold<'_>) -> bool {
-    hold.plan_in_sprints
-        && !hold.skips_sprints
-        && hold.kind == Kind::Task
-        && outside(hold)
-        && (hold.status == TaskStatus::Ready || hold.left_for_the_backlog)
-}
-
-/// Whether a row is in the Backlog: under the policy, outside the open sprint, in `ready`,
-/// `assigned`, `in_progress` or `rejected`, and an epic or a task that waits for a sprint.
-#[must_use]
-pub fn in_the_backlog(hold: &SprintHold<'_>) -> bool {
-    hold.plan_in_sprints
-        && outside(hold)
-        && matches!(
-            hold.status,
-            TaskStatus::Ready
-                | TaskStatus::Assigned
-                | TaskStatus::InProgress
-                | TaskStatus::Rejected
-        )
-        && (hold.kind == Kind::Epic || waits_for_a_sprint(hold))
-}
-
-/// Whether the row is outside the open sprint: in no sprint, or in another than the open one.
-fn outside(hold: &SprintHold<'_>) -> bool {
-    hold.sprint.is_none() || hold.sprint != hold.open_sprint
-}
-
-/// Whether the open sprint lets the task be assigned (`docs/SPEC.md` section 5.5): with none open,
-/// any task; with one open, a task in it, or one under an epic in no sprint, whose work began
-/// before any sprint. Under the policy (ADR 0028), an epic, whose assignment is preparation, and a
-/// task that does not wait for a sprint, read as `ready` with no mark: one in the open sprint.
-#[must_use]
-pub fn in_the_open_sprint(kind: Kind, input: &AssignmentInput) -> bool {
-    // A raise of a marketing plan's budget is worked on at once, whatever sprint is open (ADR 0042).
-    if input.skips_sprints {
-        return true;
-    }
-    if input.plan_in_sprints {
-        return !waits_for_a_sprint(&SprintHold {
-            plan_in_sprints: true,
-            open_sprint: input.open_sprint.as_deref(),
-            kind,
-            status: TaskStatus::Ready,
-            sprint: input.task_sprint.as_deref(),
-            left_for_the_backlog: false,
-            skips_sprints: input.skips_sprints,
-        });
-    }
-    let Some(open) = &input.open_sprint else {
-        return true;
-    };
-    input.task_sprint.as_ref() == Some(open) || input.parent_sprint == Some(None)
-}
-
-/// Whether the open sprint would let the task be assigned, by the two rules of the assignment gate
-/// that are the sprint's: its membership and its budget. The orchestrator passes over a task that
-/// fails them rather than asking for a move the gate refuses.
-#[must_use]
-pub fn fits_the_open_sprint(contract: &TaskContract, input: &AssignmentInput) -> bool {
-    in_the_open_sprint(contract.kind, input) && the_sprint_pays(contract, input)
-}
-
-/// Whether the open sprint's budget lets the row be assigned. Under the policy only a row in the
-/// open sprint is paid from it: an epic's breakdown outside it is preparation.
-fn the_sprint_pays(contract: &TaskContract, input: &AssignmentInput) -> bool {
-    if input.skips_sprints {
-        return true;
-    }
-    let in_it = input.task_sprint.is_some() && input.task_sprint == input.open_sprint;
-    (input.plan_in_sprints && !in_it)
-        || fits_within(
-            contract.budget.max_cost_usd,
-            input.remaining_sprint_budget_usd,
-        )
-}
-
 /// The `Assignment` gate of `ready -> assigned` (`docs/SPEC.md` sections 5.2, 5.14, 5.16): who may
-/// ask, whether the pair of agents fits the contract, whether the agent has room, whether the
-/// sprint can pay for it, whether a UI/UX Designer can open the app (`preview_not_set`,
+/// ask, whether the pair of agents fits the contract, whether the agent has room, whether a UI/UX Designer can open the app (`preview_not_set`,
 /// `designer_needs_sandbox`), whether another task holds the assignee's private folder
 /// (`private_folder_busy`), and whether every dependency is accepted.
 ///
@@ -309,28 +190,6 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     reasons.extend(over_the_limit(input));
     reasons.extend(without_the_folder(input));
     reasons.extend(lane_taken(contract, input));
-    if !in_the_open_sprint(contract.kind, input) {
-        let open = input.open_sprint.as_deref().unwrap_or_default();
-        reasons.push(if input.plan_in_sprints {
-            format!(
-                "this team plans work in sprints, and {} waits in the Backlog until a sprint plans \
-                 it",
-                contract.id.as_str()
-            )
-        } else {
-            format!(
-                "this task is in {} and {open} is open; only {open}'s tasks are assigned until it \
-                 ends",
-                input.task_sprint.as_deref().unwrap_or("no sprint")
-            )
-        });
-    }
-    if !the_sprint_pays(contract, input) {
-        reasons.push(format!(
-            "the budget of {} USD does not fit the {} USD left in the sprint",
-            contract.budget.max_cost_usd, input.remaining_sprint_budget_usd
-        ));
-    }
     reasons.extend(without_a_browser(input));
     reasons.extend(unready_dependencies(contract, input));
     verdict(reasons)
@@ -1177,11 +1036,10 @@ mod tests {
         ContractWriteOutcome, ContractWriteRefusal, DependencyState, DesignerBrowser,
         FIELDS_AFTER_FREEZE, FIELDS_ALWAYS_WRITABLE, FIELDS_FIXED_AT_CREATION,
         FIELDS_OF_THE_CONTENT, FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES,
-        FIELDS_THE_STORE_OWNS, FolderWork, ParentEpic, Rejection, SprintHold, WorkState,
-        check_assignment, check_blocker_resolved, check_blocker_written, check_child_creation,
-        check_children_done, check_contract_write, check_criteria_recorded, check_human_triage,
-        check_rejection_reasons, check_repo_write, fits_the_open_sprint, in_the_backlog,
-        in_the_open_sprint, waits_for_a_sprint,
+        FIELDS_THE_STORE_OWNS, FolderWork, ParentEpic, Rejection, WorkState, check_assignment,
+        check_blocker_resolved, check_blocker_written, check_child_creation, check_children_done,
+        check_contract_write, check_criteria_recorded, check_human_triage, check_rejection_reasons,
+        check_repo_write,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
@@ -1201,15 +1059,9 @@ mod tests {
             reviewer_role: Role::Architect,
             assignee_open_tasks: 0,
             wip_limit: 2,
-            remaining_sprint_budget_usd: 15.0,
-            open_sprint: None,
-            task_sprint: None,
-            parent_sprint: None,
-            plan_in_sprints: false,
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
-            skips_sprints: false,
             lane_builder: None,
         }
     }
@@ -1550,320 +1402,6 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_budget_the_sprint_cannot_pay_and_one_that_is_not_a_number() {
-        let mut input = an_assignment();
-        input.remaining_sprint_budget_usd = 5.0;
-        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
-        input.remaining_sprint_budget_usd = 4.99;
-        assert_eq!(
-            reasons(check_assignment(&a_contract(), &input)),
-            ["the budget of 5 USD does not fit the 4.99 USD left in the sprint"]
-        );
-        input.remaining_sprint_budget_usd = f64::NAN;
-        assert_eq!(reasons(check_assignment(&a_contract(), &input)).len(), 1);
-    }
-
-    #[test]
-    fn refuses_an_assignment_outside_the_open_sprint() {
-        let mut input = an_assignment();
-        input.open_sprint = Some("S1".to_string());
-        assert_eq!(
-            reasons(check_assignment(&a_contract(), &input)),
-            [
-                "this task is in no sprint and S1 is open; only S1's tasks are assigned until it ends"
-            ]
-        );
-        input.task_sprint = Some("S0".to_string());
-        assert_eq!(
-            reasons(check_assignment(&a_contract(), &input)),
-            ["this task is in S0 and S1 is open; only S1's tasks are assigned until it ends"]
-        );
-        input.task_sprint = Some("S1".to_string());
-        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
-        // Work under an epic that began before any sprint goes on.
-        input.task_sprint = None;
-        input.parent_sprint = Some(None);
-        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
-        input.parent_sprint = Some(Some("S0".to_string()));
-        assert_eq!(reasons(check_assignment(&a_contract(), &input)).len(), 1);
-        // With no sprint open, the board flows as in phase 3.
-        input.open_sprint = None;
-        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
-    }
-
-    /// The statuses of work under way: past `ready`, not finished, not escalated.
-    const UNDER_WAY: [TaskStatus; 5] = [
-        TaskStatus::Assigned,
-        TaskStatus::InProgress,
-        TaskStatus::Blocked,
-        TaskStatus::Verifying,
-        TaskStatus::Rejected,
-    ];
-
-    /// A task in no sprint, with no sprint open, no mark, under the policy.
-    fn a_hold(status: TaskStatus) -> SprintHold<'static> {
-        SprintHold {
-            plan_in_sprints: true,
-            open_sprint: None,
-            kind: Kind::Task,
-            status,
-            sprint: None,
-            left_for_the_backlog: false,
-            skips_sprints: false,
-        }
-    }
-
-    #[test]
-    fn holds_a_task_outside_the_sprint() {
-        let ready = a_hold(TaskStatus::Ready);
-        assert!(waits_for_a_sprint(&ready), "no sprint is open");
-        let open = SprintHold {
-            open_sprint: Some("S1"),
-            ..ready
-        };
-        assert!(!waits_for_a_sprint(&SprintHold {
-            sprint: Some("S1"),
-            ..open
-        }));
-        assert!(waits_for_a_sprint(&open), "in no sprint while S1 is open");
-        assert!(waits_for_a_sprint(&SprintHold {
-            sprint: Some("S0"),
-            ..open
-        }));
-        for status in [
-            TaskStatus::Assigned,
-            TaskStatus::InProgress,
-            TaskStatus::Rejected,
-        ] {
-            let marked = SprintHold {
-                left_for_the_backlog: true,
-                ..a_hold(status)
-            };
-            assert!(waits_for_a_sprint(&marked), "{status:?}");
-        }
-        for status in TASK_STATUSES {
-            for left_for_the_backlog in [false, true] {
-                let off = SprintHold {
-                    plan_in_sprints: false,
-                    left_for_the_backlog,
-                    ..a_hold(status)
-                };
-                assert!(!waits_for_a_sprint(&off), "{status:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_raise_never_waits_for_a_sprint() {
-        // Under the policy a raise neither waits nor is in the Backlog, in any status it can be
-        // in, whether a sprint is open or not and whether or not it carries the Backlog's mark.
-        for open_sprint in [None, Some("S1")] {
-            for left_for_the_backlog in [false, true] {
-                for status in [
-                    TaskStatus::Ready,
-                    TaskStatus::Assigned,
-                    TaskStatus::InProgress,
-                    TaskStatus::Rejected,
-                ] {
-                    let raise = SprintHold {
-                        skips_sprints: true,
-                        open_sprint,
-                        left_for_the_backlog,
-                        ..a_hold(status)
-                    };
-                    assert!(!waits_for_a_sprint(&raise), "{status:?} {open_sprint:?}");
-                    assert!(!in_the_backlog(&raise), "{status:?} {open_sprint:?}");
-                }
-            }
-        }
-        // Assigned while another sprint is open, with the policy and without it, and with that
-        // sprint's budget spent; without the mark the same task is held.
-        for plan_in_sprints in [true, false] {
-            let mut input = an_assignment();
-            input.plan_in_sprints = plan_in_sprints;
-            input.open_sprint = Some("S2".to_string());
-            input.remaining_sprint_budget_usd = 0.0;
-            input.skips_sprints = true;
-            assert!(in_the_open_sprint(Kind::Task, &input), "{plan_in_sprints}");
-            assert!(
-                fits_the_open_sprint(&a_contract(), &input),
-                "the sprint's budget does not pay for it ({plan_in_sprints})"
-            );
-            input.skips_sprints = false;
-            assert!(!in_the_open_sprint(Kind::Task, &input), "{plan_in_sprints}");
-            assert!(!fits_the_open_sprint(&a_contract(), &input));
-        }
-    }
-
-    #[test]
-    fn lets_work_under_way_finish() {
-        for status in UNDER_WAY {
-            assert!(!waits_for_a_sprint(&a_hold(status)), "{status:?}");
-            assert!(!in_the_backlog(&a_hold(status)), "{status:?}");
-        }
-    }
-
-    #[test]
-    fn never_holds_an_epic() {
-        for open_sprint in [None, Some("S1")] {
-            for left_for_the_backlog in [false, true] {
-                let epic = SprintHold {
-                    kind: Kind::Epic,
-                    open_sprint,
-                    left_for_the_backlog,
-                    ..a_hold(TaskStatus::Ready)
-                };
-                assert!(!waits_for_a_sprint(&epic), "{open_sprint:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn places_rows_in_the_backlog() {
-        let in_four = [
-            TaskStatus::Ready,
-            TaskStatus::Assigned,
-            TaskStatus::InProgress,
-            TaskStatus::Rejected,
-        ];
-        assert!(in_the_backlog(&a_hold(TaskStatus::Ready)));
-        for status in [
-            TaskStatus::Assigned,
-            TaskStatus::InProgress,
-            TaskStatus::Rejected,
-        ] {
-            let marked = SprintHold {
-                left_for_the_backlog: true,
-                ..a_hold(status)
-            };
-            assert!(in_the_backlog(&marked), "{status:?} with the mark");
-            assert!(!in_the_backlog(&a_hold(status)), "{status:?} without it");
-        }
-        for status in in_four {
-            let epic = SprintHold {
-                kind: Kind::Epic,
-                ..a_hold(status)
-            };
-            assert!(in_the_backlog(&epic), "an epic in {status:?}");
-        }
-        for status in TASK_STATUSES.into_iter().filter(|s| !in_four.contains(s)) {
-            for kind in [Kind::Task, Kind::Epic] {
-                for left_for_the_backlog in [false, true] {
-                    let row = SprintHold {
-                        kind,
-                        left_for_the_backlog,
-                        ..a_hold(status)
-                    };
-                    assert!(!in_the_backlog(&row), "{kind:?} in {status:?}");
-                }
-            }
-        }
-        for kind in [Kind::Task, Kind::Epic] {
-            let in_the_sprint = SprintHold {
-                kind,
-                open_sprint: Some("S1"),
-                sprint: Some("S1"),
-                ..a_hold(TaskStatus::Ready)
-            };
-            assert!(
-                !in_the_backlog(&in_the_sprint),
-                "{kind:?} in the open sprint"
-            );
-        }
-        for status in TASK_STATUSES {
-            for kind in [Kind::Task, Kind::Epic] {
-                for left_for_the_backlog in [false, true] {
-                    let off = SprintHold {
-                        plan_in_sprints: false,
-                        kind,
-                        left_for_the_backlog,
-                        ..a_hold(status)
-                    };
-                    assert!(!in_the_backlog(&off), "{kind:?} in {status:?}, policy off");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn assigns_an_epic_outside_the_sprint_under_the_policy() {
-        let mut epic = a_contract();
-        epic.kind = Kind::Epic;
-        assert!((epic.budget.max_cost_usd - 5.0).abs() < f64::EPSILON);
-        let mut input = an_assignment();
-        input.assignee_role = Role::ScrumMaster;
-        input.reviewer_role = Role::ProductManager;
-        input.remaining_sprint_budget_usd = 1.0;
-        input.plan_in_sprints = true;
-        assert_eq!(check_assignment(&epic, &input), Ok(()), "no sprint open");
-        input.open_sprint = Some("S1".to_string());
-        assert_eq!(
-            check_assignment(&epic, &input),
-            Ok(()),
-            "S1 open, the epic in none"
-        );
-        input.plan_in_sprints = false;
-        assert_eq!(
-            reasons(check_assignment(&epic, &input)),
-            [
-                "this task is in no sprint and S1 is open; only S1's tasks are assigned until it ends",
-                "the budget of 5 USD does not fit the 1 USD left in the sprint",
-            ]
-        );
-    }
-
-    #[test]
-    fn pays_a_task_in_the_sprint_from_its_budget_under_the_policy() {
-        let contract = a_contract();
-        assert!((contract.budget.max_cost_usd - 5.0).abs() < f64::EPSILON);
-        let mut input = an_assignment();
-        input.plan_in_sprints = true;
-        input.open_sprint = Some("S1".to_string());
-        input.task_sprint = Some("S1".to_string());
-        input.remaining_sprint_budget_usd = 5.0;
-        assert_eq!(check_assignment(&contract, &input), Ok(()));
-        assert!(fits_the_open_sprint(&contract, &input));
-        input.remaining_sprint_budget_usd = 1.0;
-        assert_eq!(
-            reasons(check_assignment(&contract, &input)),
-            ["the budget of 5 USD does not fit the 1 USD left in the sprint"]
-        );
-        assert!(!fits_the_open_sprint(&contract, &input));
-    }
-
-    #[test]
-    fn refuses_a_held_task_in_plain_words() {
-        let mut input = an_assignment();
-        input.plan_in_sprints = true;
-        let backlog = [
-            "this team plans work in sprints, and CTV-1 waits in the Backlog until a sprint plans it",
-        ];
-        assert_eq!(reasons(check_assignment(&a_contract(), &input)), backlog);
-        input.open_sprint = Some("S1".to_string());
-        assert_eq!(reasons(check_assignment(&a_contract(), &input)), backlog);
-    }
-
-    #[test]
-    fn drops_the_unsprinted_epic_exception_under_the_policy() {
-        let mut input = an_assignment();
-        input.open_sprint = Some("S1".to_string());
-        input.parent_sprint = Some(None);
-        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
-        input.plan_in_sprints = true;
-        assert!(check_assignment(&a_contract(), &input).is_err());
-    }
-
-    #[test]
-    fn assigns_a_task_when_the_sprint_has_no_limit() {
-        // ADR 0015: a team with no sprint budget has an infinite one left, however much it spent.
-        let mut input = an_assignment();
-        input.remaining_sprint_budget_usd = f64::INFINITY;
-        let mut contract = a_contract();
-        contract.budget.max_cost_usd = 1000.0;
-        assert_eq!(check_assignment(&contract, &input), Ok(()));
-    }
-
-    #[test]
     fn assigns_a_task_once_every_dependency_is_accepted() {
         let contract = a_depending_contract();
         let mut input = an_assignment();
@@ -2006,7 +1544,6 @@ mod tests {
         input.assignee_role = Role::MarketingSpecialist;
         input.reviewer_id = "dev-1".to_string();
         input.assignee_open_tasks = 9;
-        input.remaining_sprint_budget_usd = 0.0;
         let contract = a_depending_contract();
         // The whole list, in the order the rules are written: counting the reasons would leave
         // the order free, and an agent reads them in the order it is given them.
@@ -2017,7 +1554,6 @@ mod tests {
                 "the assignee has role marketing_specialist and this contract is assigned to role software_developer",
                 "dev-1 cannot review its own work; name another agent as reviewer",
                 "dev-1 already holds 9 unfinished tasks and the limit is 2",
-                "the budget of 5 USD does not fit the 0 USD left in the sprint",
                 "the runtime reported nothing about CTV-2, which this task depends on"
             ]
         );

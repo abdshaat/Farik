@@ -4,9 +4,8 @@
 use std::fmt;
 
 use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
-use catervas_core::governor::gates::{SprintHold, in_the_backlog};
 use catervas_core::sprint::{Sprint, SprintStatus, validate_sprint};
-use catervas_core::team::{SprintWork, Team};
+use catervas_core::team::SprintWork;
 use catervas_protocol::event::{
     CatervasEvent, EventBody, EventKind, SessionStartedBodyPurpose, Thread, new_event,
 };
@@ -89,45 +88,11 @@ impl From<StoreError> for SprintError {
     }
 }
 
-/// The board's `row` as the sprint policy reads it (ADR 0028), on `team` with `open_sprint` open.
-#[must_use]
-pub fn sprint_hold<'a>(
-    team: &Team,
-    open_sprint: Option<&'a str>,
-    row: &'a TaskProjection,
-) -> SprintHold<'a> {
-    SprintHold {
-        plan_in_sprints: team.plans_in_sprints(),
-        open_sprint,
-        kind: row.kind,
-        status: row.status,
-        sprint: row.sprint.as_deref(),
-        left_for_the_backlog: row.left_for_the_backlog,
-        skips_sprints: row.skips_sprints,
-    }
-}
-
-/// The Backlog's rows on `board` with no parent while `open` is the open sprint, so an epic counts
-/// once (ADR 0028).
-pub fn backlog<'a>(
-    team: &'a Team,
-    open: Option<&'a str>,
-    board: &'a [TaskProjection],
-) -> impl Iterator<Item = &'a TaskProjection> {
-    board
-        .iter()
-        .filter(move |row| row.parent.is_none() && in_the_backlog(&sprint_hold(team, open, row)))
-}
-
 /// What switching `team`'s sprint policy touches on `board` while `open` is the open sprint
 /// (ADR 0028): the tasks under way outside it without the Backlog mark, and the titles of the
 /// Backlog's rows with no parent.
 #[must_use]
-pub fn sprint_work<'a>(
-    team: &'a Team,
-    open: Option<&'a str>,
-    board: &'a [TaskProjection],
-) -> SprintWork<'a> {
+pub fn sprint_work<'a>(open: Option<&'a str>, board: &'a [TaskProjection]) -> SprintWork<'a> {
     let under_way = board
         .iter()
         .filter(|row| {
@@ -146,9 +111,7 @@ pub fn sprint_work<'a>(
         .count();
     SprintWork {
         under_way: u32::try_from(under_way).unwrap_or(u32::MAX),
-        in_the_backlog: backlog(team, open, board)
-            .map(|row| row.title.as_str())
-            .collect(),
+        in_the_backlog: Vec::new(),
     }
 }
 
@@ -307,7 +270,7 @@ fn plan_sprint_racing(
     let team = deps.files.read_team()?;
     let mut planned: Vec<TaskId> = Vec::new();
     if assigner.is_some() && team.plans_in_sprints() {
-        planned.extend(waiting_rederives(deps, &team, &board, &open, task_ids)?);
+        planned.extend(waiting_rederives(deps, &board, task_ids)?);
     }
     for task_id in task_ids {
         let id = task_id.as_str();
@@ -328,20 +291,11 @@ fn plan_sprint_racing(
                 parent.as_str()
             )));
         }
-        // Under the policy the candidates are the Backlog's rows; off, `ready` ones (ADR 0028).
-        let (candidate, only) = if team.plans_in_sprints() {
-            (
-                in_the_backlog(&sprint_hold(&team, Some(open.sprint_id.as_str()), row)),
-                "only work waiting in the Backlog is planned",
-            )
-        } else {
-            (
-                row.status == TaskStatus::Ready,
-                "only a ready task or an approved epic is planned",
-            )
-        };
-        if !candidate {
-            return Err(plan_refused(&format!("{id} is {}, and {only}", row.status)));
+        if row.status != TaskStatus::Ready {
+            return Err(plan_refused(&format!(
+                "{id} is {}, and only a ready task or an approved epic is planned",
+                row.status
+            )));
         }
         planned.extend(
             board
@@ -351,7 +305,7 @@ fn plan_sprint_racing(
         );
     }
     if assigner.is_some() {
-        fits(deps, &open, &board, task_ids)?;
+        fits(&open, &board)?;
     }
     let file = deps.files.read_sprint(&open.sprint_id)?;
     // An end writes the file before its event: a plan that sees it ended writes nothing. One that
@@ -397,9 +351,7 @@ fn plan_sprint_racing(
 /// them ahead of its own, outside the sprint's budget (`docs/SPEC.md` 3, 5.17).
 fn waiting_rederives(
     deps: &ToolDeps,
-    team: &Team,
     board: &[TaskProjection],
-    open: &SprintProjection,
     named: &[TaskId],
 ) -> Result<Vec<TaskId>, SprintError> {
     let mut waiting: Vec<TaskId> = Vec::new();
@@ -407,10 +359,7 @@ fn waiting_rederives(
         let in_the_queue = board
             .iter()
             .find(|row| row.task_id == task_id)
-            .is_some_and(|row| {
-                row.sprint.is_none()
-                    && in_the_backlog(&sprint_hold(team, Some(open.sprint_id.as_str()), row))
-            });
+            .is_some_and(|row| row.sprint.is_none() && row.status == TaskStatus::Ready);
         if in_the_queue && !named.contains(&task_id) && !waiting.contains(&task_id) {
             waiting.push(task_id);
         }
@@ -441,37 +390,13 @@ fn may_plan(deps: &ToolDeps, agent_id: &str) -> Result<(), SprintError> {
     }
 }
 
-/// Refuses the assigner's plan of `task_ids` past the open sprint's budget, counting the tasks
-/// already in it, and a second plan of a sprint that already holds a task. An epic's budget covers
-/// its tasks, so a task under one adds nothing.
-fn fits(
-    deps: &ToolDeps,
-    open: &SprintProjection,
-    board: &[TaskProjection],
-    task_ids: &[TaskId],
-) -> Result<(), SprintError> {
+/// Refuses a second plan of a sprint that already holds a task.
+fn fits(open: &SprintProjection, board: &[TaskProjection]) -> Result<(), SprintError> {
     let in_sprint: Vec<&TaskId> = board
         .iter()
         .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
         .map(|row| &row.task_id)
         .collect();
-    if let Some(budget_usd) = open.budget_usd {
-        let mut total = 0.0;
-        for task_id in task_ids.iter().chain(in_sprint.iter().copied()) {
-            if board
-                .iter()
-                .any(|row| &row.task_id == task_id && row.parent.is_none())
-            {
-                total += deps.files.read_contract(task_id)?.budget.max_cost_usd;
-            }
-        }
-        if total > budget_usd {
-            return Err(plan_refused(&format!(
-                "the tasks would cost up to ${total:.2}, past {}'s budget of ${budget_usd:.2}",
-                open.sprint_id
-            )));
-        }
-    }
     if in_sprint.is_empty() {
         Ok(())
     } else {
@@ -675,60 +600,6 @@ mod tests {
         }
 
         assert!(planning_session_spent(&project.deps.log, "S1").expect("the log reads"));
-    }
-
-    /// Epic CTV-1 `in_progress` with its task CTV-2 `ready`, on a team with the policy `on`, and
-    /// S1 started.
-    fn an_epic_under_way(name: &str, on: bool) -> TestProject {
-        let project = TestProject::new(
-            name,
-            &a_team_of_three(|wire| {
-                if on {
-                    wire["policy"]["plan_in_sprints"] = serde_json::json!(true);
-                }
-            }),
-        );
-        project.filed("CTV-1", "ready", "epic", None);
-        let people = serde_json::json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
-        project.moved("CTV-1", "ready", "assigned", &people);
-        project.moved("CTV-1", "assigned", "in_progress", &people);
-        project.filed("CTV-2", "ready", "task", Some("CTV-1"));
-        start_sprint(&project.deps, None, "human").expect("S1 starts");
-        project
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn plans_a_backlog_epic_under_way() {
-        let on = an_epic_under_way("sprints-backlog-epic", true);
-        let sprint = plan_sprint(
-            &on.deps,
-            &[task("CTV-1")],
-            &PlannedBy::Assigner("pm".to_string()),
-        )
-        .expect("the Backlog's epic is planned");
-        assert_eq!(
-            sprint
-                .task_ids
-                .iter()
-                .map(|id| id.as_str())
-                .collect::<Vec<_>>(),
-            ["CTV-1", "CTV-2"]
-        );
-
-        let off = an_epic_under_way("sprints-backlog-epic-off", false);
-        let refused = plan_sprint(
-            &off.deps,
-            &[task("CTV-1")],
-            &PlannedBy::Assigner("pm".to_string()),
-        )
-        .expect_err("off, only a ready epic is planned");
-        assert_eq!(
-            refused,
-            plan_refused(
-                "CTV-1 is in_progress, and only a ready task or an approved epic is planned"
-            )
-        );
     }
 
     /// A team with a Scrum Master `sm`, CTV-1 accepted, a re-derive CTV-2 in the Backlog and a

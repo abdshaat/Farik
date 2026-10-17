@@ -998,13 +998,6 @@ mod tests {
         assert_eq!(project.event_count(), before);
     }
 
-    /// `filed` in `status`, of `kind`, with a budget of `usd` dollars.
-    fn filed_at(project: &TestProject, task: &str, status: &str, kind: &str, usd: f64) {
-        project.filed_with(task, status, kind, None, |wire| {
-            wire["budget"]["max_cost_usd"] = json!(usd);
-        });
-    }
-
     /// `agent` calls `catervas_plan_sprint` of `tasks` from a planning ceremony session.
     fn plan(project: &TestProject, agent: &str, tasks: &[&str]) -> Result<Value, ToolError> {
         let mut context = project.context(agent, None);
@@ -1114,20 +1107,6 @@ mod tests {
             planned(&project),
             [json!({ "sprint_id": "S1", "task_ids": ["CTV-1", "CTV-2"], "planned_by": "sm" })]
         );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_plan_past_the_sprint_budget() {
-        let project = a_project_with_scrum_master("tools-plan-budget");
-        filed_at(&project, "CTV-1", "ready", "task", 6.0);
-        filed_at(&project, "CTV-2", "ready", "task", 5.0);
-        project.open_sprint("S1", Some(10.0), &["CTV-1"]);
-
-        plan_refused(&project, "sm", &["CTV-2"], &["budget", "S1"]);
-
-        assert_eq!(sprint_of(&project, "CTV-2"), Value::Null);
-        assert_eq!(held_by(&project, "S1"), ["CTV-1"]);
     }
 
     #[test]

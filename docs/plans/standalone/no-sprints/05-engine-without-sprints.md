@@ -173,7 +173,7 @@ planning ceremony's candidates are the `ready` rows with no parent and in no spr
   `dev-a` after it; every event recorded before the tick is in the log after it with the same seq,
   kind and body, no `sprint.*` event was appended, and `S1.yaml` is byte for byte as written.
 
-- [ ] `feat(runtime): ready work is assigned at once, whatever sprint a project had`
+- [x] `feat(runtime): ready work is assigned at once, whatever sprint a project had`
 
 ### Task 2: no sprint is planned, stood up or ended
 

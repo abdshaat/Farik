@@ -15,8 +15,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use catervas_core::contract::{TaskId, TaskStatus};
-use catervas_core::governor::gates::in_the_backlog;
-use catervas_core::team::Team;
 use catervas_protocol::clock::Clock;
 use catervas_protocol::command::{Command, command_from_value, reply_to_value};
 use catervas_protocol::event::{EventBody, event_to_value};
@@ -38,7 +36,6 @@ use crate::claude::CredentialKind;
 use crate::computer::{build_sandbox_image, check_computer, pull_browser_image};
 use crate::credential::CredentialStore;
 use crate::locked;
-use crate::sprints::sprint_hold;
 
 /// What the browser routes need, which only `catervas serve` gives the daemon (`DaemonState::set_web`).
 pub struct WebState {
@@ -812,10 +809,9 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         "tasks.list" => {
             let board = deps.projections.board().map_err(|error| internal(&error))?;
             let team = deps.files.read_team().map_err(|error| internal(&error))?;
-            let open = open_sprint(deps)?;
             let mut tasks = Vec::with_capacity(board.len());
             for task in &board {
-                let mut wire = task_wire(task, &team, open.as_deref());
+                let mut wire = task_wire(task);
                 // A UI change in review says where its design review stands, for the board's card.
                 // One that cannot be read (its contract or branch) leaves only its card without
                 // the state, not the whole board blank; the task's page says what failed.
@@ -865,7 +861,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                         })
                         .collect();
                     Ok(json!({
-                        "task": task_wire(&task, &team, open_sprint(deps)?.as_deref()),
+                        "task": task_wire(&task),
                         "design_plan": plan,
                         "ui_change": ui_change,
                         "design_review": ui_change.then_some(review),
@@ -1063,21 +1059,11 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
     .unwrap_or_else(|error| Err(Failure::new(INTERNAL_ERROR, error.to_string())))
 }
 
-/// One board row as the RPC schema's `taskProjection`: an optional field is left out, not null,
-/// when the projection has none.
-/// The id of the sprint that is open, if one is.
-fn open_sprint(deps: &crate::tools::ToolDeps) -> Result<Option<String>, Failure> {
-    deps.projections
-        .open_sprint()
-        .map(|open| open.map(|open| open.sprint_id))
-        .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))
-}
-
-/// The board's row as the wire carries it, with whether it waits in `team`'s Backlog while
-/// `open` is the open sprint.
-fn task_wire(task: &TaskProjection, team: &Team, open: Option<&str>) -> Value {
+/// The board's row as the wire carries it. Nothing waits in a Backlog any more (ADR 0062); the
+/// field goes with the reads in plan 5's Task 4.
+fn task_wire(task: &TaskProjection) -> Value {
     let mut wire = json!({
-        "backlog": in_the_backlog(&sprint_hold(team, open, task)),
+        "backlog": false,
         "task_id": task.task_id,
         "kind": task.kind,
         "title": task.title,
@@ -2223,54 +2209,6 @@ pub(super) mod tests {
         );
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
-    }
-
-    /// Whether `tasks.list` puts each of `tasks` in the Backlog, in order.
-    fn backlog_of(harness: &Harness, tasks: &[&str]) -> Vec<Value> {
-        let listed = crate::daemon::gates::tests::query(
-            &harness.daemon,
-            "tasks.list",
-            &json!({}),
-            "tasksListResult",
-        );
-        tasks
-            .iter()
-            .map(|id| {
-                listed["tasks"]
-                    .as_array()
-                    .and_then(|rows| rows.iter().find(|row| row["task_id"] == *id))
-                    .unwrap_or_else(|| panic!("{id} is listed: {listed}"))["backlog"]
-                    .clone()
-            })
-            .collect()
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn marks_backlog_rows() {
-        let on = Harness::new("rpc-backlog-on", |wire| {
-            wire["policy"]["plan_in_sprints"] = json!(true);
-        });
-        on.ready("CTV-1");
-        // Under way since before the switch: no mark, so it keeps its lane.
-        on.file("CTV-2", "in_progress", |_| {});
-        assert_eq!(
-            backlog_of(&on, &["CTV-1", "CTV-2"]),
-            [json!(true), json!(false)]
-        );
-        on.open_sprint("S1", &["CTV-1"]);
-        assert_eq!(
-            backlog_of(&on, &["CTV-1", "CTV-2"]),
-            [json!(false), json!(false)]
-        );
-
-        let off = Harness::new("rpc-backlog-off", |_| {});
-        off.ready("CTV-1");
-        off.file("CTV-2", "in_progress", |_| {});
-        assert_eq!(
-            backlog_of(&off, &["CTV-1", "CTV-2"]),
-            [json!(false), json!(false)]
-        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

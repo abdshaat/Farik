@@ -21,7 +21,6 @@ use catervas_runtime::RuntimeAdapter;
 use catervas_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1,
     planning_ceremony_ctv_1, refine_writes_task_ctv_1, reply_to_a_mention, review_writes_note,
-    standup,
 };
 use catervas_runtime::sleep::Sleeper;
 use catervas_store::git::fixtures::TempRepo;
@@ -872,66 +871,6 @@ fn lists_a_marketing_plan_that_waits_with_its_commands() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
     assert_eq!(last["waiting_on_you"][0]["plan"], "MP-1", "{last}");
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn says_the_backlog_waits() {
-    let repository = a_team_with("run-backlog", |wire| {
-        wire["policy"]["plan_in_sprints"] = json!(true);
-    });
-    let task = a_small_request(&repository);
-    walked(&repository, &task, &["refining", "ready"]);
-
-    let ran = run_with(&repository.path, &["run"], |io| {
-        io.engine = recorded(Vec::new());
-    });
-
-    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert!(
-        ran.out
-            .lines()
-            .any(|line| line == "idle: the ready work waits for a sprint"),
-        "{}",
-        ran.out
-    );
-    assert_eq!(
-        ran.out.lines().last(),
-        Some("start a sprint: 1 waits in the Backlog (`catervas sprint start`)"),
-        "{}",
-        ran.out
-    );
-    assert_eq!(status_of(&repository, &task), "ready");
-
-    let ran = run_with(&repository.path, &["--json", "run"], |io| {
-        io.engine = recorded(Vec::new());
-    });
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
-    assert_eq!(last, json!({ "backlog": { "count": 1 } }));
-
-    // With a sprint open, its Backlog waits for the next sprint, not for the human to start one.
-    // Its planning session posts and plans nothing, so the request stays in the Backlog.
-    let started = run_with(&repository.path, &["sprint", "start"], |_| {});
-    assert_eq!(started.code, 0, "{}", started.err);
-    let ran = run_with(&repository.path, &["run"], |io| {
-        io.engine = recorded(vec![standup()]);
-    });
-    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert!(
-        ran.out
-            .lines()
-            .any(|line| line == "idle: nothing on the board needs doing"),
-        "{}",
-        ran.out
-    );
-    assert!(!ran.out.contains("start a sprint"), "{}", ran.out);
-    let ran = run_with(&repository.path, &["--json", "run"], |io| {
-        io.engine = recorded(Vec::new());
-    });
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
-    assert_eq!(last, json!({ "waiting_on_you": [] }));
 }
 
 #[test]

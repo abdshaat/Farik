@@ -813,10 +813,7 @@ fn leave_note(
             BudgetScope::SessionTokens => "the session's input or output tokens",
             BudgetScope::SessionWallClock => "the session's wall clock",
             BudgetScope::SessionToolCalls => "the session's tool calls",
-            BudgetScope::TaskUsd
-            | BudgetScope::TaskSessions
-            | BudgetScope::SprintUsd
-            | BudgetScope::DayUsd => continue,
+            BudgetScope::TaskUsd | BudgetScope::TaskSessions | BudgetScope::DayUsd => continue,
         });
     }
     if causes.is_empty() {
@@ -1494,14 +1491,11 @@ async fn read_to_end(
                 }
                 let now = record(&before, &held)?;
                 crossed.extend(now.iter().map(|exhausted| exhausted.scope));
-                // A task's last session and in-progress work past the sprint's budget may finish
-                // (5.5): what those stop is the next session and the next assignment.
-                if now.iter().any(|exhausted| {
-                    !matches!(
-                        exhausted.scope,
-                        BudgetScope::TaskSessions | BudgetScope::SprintUsd
-                    )
-                }) {
+                // A task's last session may finish (5.5): what it stops is the next session.
+                if now
+                    .iter()
+                    .any(|exhausted| !matches!(exhausted.scope, BudgetScope::TaskSessions))
+                {
                     handle.abort()?;
                 }
             }

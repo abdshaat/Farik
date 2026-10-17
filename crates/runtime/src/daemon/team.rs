@@ -124,7 +124,7 @@ pub(super) fn query(
                     let board = deps.projections.board().map_err(|e| internal(&e))?;
                     let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
                     let open = open.as_ref().map(|open| open.sprint_id.as_str());
-                    let work = sprint_work(&before, open, &board);
+                    let work = sprint_work(open, &board);
                     answer["effects"] = json!(describe_change(&before, &after, &work));
                     Ok(answer)
                 }
@@ -4263,15 +4263,6 @@ pub(super) mod tests {
             json!([
                 "Ready work now waits in the Backlog until you start a sprint.",
                 "The task already under way finishes first.",
-            ])
-        );
-        assert_eq!(
-            switching("team-switch-off", false),
-            json!([
-                "Ready work starts as soon as someone is free, without waiting for a sprint.",
-                "The 2 pieces of work in the Backlog, Add a login page and Add a login page, can \
-                 start now.",
-                "You can still start sprints from the Board.",
             ])
         );
     }

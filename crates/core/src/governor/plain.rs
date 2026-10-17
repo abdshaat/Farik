@@ -19,9 +19,6 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::CommandCriteriaComplete => {
             "One of the checks for done is missing what to run."
         }
-        ReadinessRule::BudgetWithinSprint => {
-            "The plan costs more than is left of this sprint's budget."
-        }
         ReadinessRule::ReviewerAvailable => {
             "Nobody on the team is free to review the work but the one doing it."
         }
@@ -92,13 +89,12 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 30] = [
+    const EVERY_RULE: [ReadinessRule; 29] = [
         IntentPresent,
         CriteriaPresent,
         CriteriaMethodsValid,
         NoReviewOutsideCode,
         CommandCriteriaComplete,
-        BudgetWithinSprint,
         ReviewerAvailable,
         AssigneeAvailable,
         RepoNotAllowed,
@@ -133,7 +129,6 @@ mod tests {
             | CriteriaMethodsValid
             | NoReviewOutsideCode
             | CommandCriteriaComplete
-            | BudgetWithinSprint
             | ReviewerAvailable
             | AssigneeAvailable
             | RepoNotAllowed

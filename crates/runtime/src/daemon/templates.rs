@@ -186,7 +186,7 @@ fn answer(
     effects.extend(describe_change(
         before,
         &applied.team,
-        &sprint_work(before, open, &board),
+        &sprint_work(open, &board),
     ));
     Ok(json!({
         "team": applied.team,
@@ -616,25 +616,6 @@ mod tests {
         );
         assert_eq!(team_file(&harness), team, "previewing writes nothing");
         assert_eq!(seq_count(&harness), events, "and records nothing");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn previews_the_work_a_switch_touches() {
-        let (harness, folder) = templated("templates-switch", |wire| {
-            wire["policy"]["plan_in_sprints"] = json!(true);
-        });
-        harness.ready("CTV-1");
-        let mut off = pair();
-        off["policy"]["plan_in_sprints"] = json!(false);
-        saved(&folder, &off);
-        let effects = preview(&harness, "pair")["effects"].clone();
-        assert!(
-            effects.as_array().expect("effects").contains(&json!(
-                "Add a login page, waiting in the Backlog, can start now."
-            )),
-            "{effects}"
-        );
     }
 
     #[test]
