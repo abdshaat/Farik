@@ -556,7 +556,7 @@ describe("today", () => {
 				"/tasks/CTV-2/accept",
 			],
 			["question", "Mira has a question", "Answer", "/tasks/CTV-3/questions"],
-			["help", "Theo needs your help", "Help", "/tasks/CTV-4/help"],
+			["help", "Theo needs your help", "Answer", "/tasks/CTV-4/help"],
 			[
 				"integration",
 				"Add the photos to your project",

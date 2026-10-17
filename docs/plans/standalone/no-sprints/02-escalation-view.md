@@ -125,7 +125,7 @@ stay), `apps/web/src/pages/Today.test.tsx` (`lists_what_waits_on_you` expects "A
   `path: "/tasks/CTV-1/plan"`, suggested) and "Cancel the task": "Review the plan" is a link whose
   `href` is `/tasks/CTV-1/plan`, and following it sends no command.
 
-- [ ] `feat(web): answer an escalation with one press, each choice saying what it does`
+- [x] `feat(web): answer an escalation with one press, each choice saying what it does`
 
 ### Task 2: the journey from Today
 

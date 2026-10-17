@@ -120,7 +120,7 @@ const KINDS: Record<
 		word: "waitingAnswer",
 		page: "questions",
 	},
-	help: { title: "waitingHelp", word: "waitingHelpButton", page: "help" },
+	help: { title: "waitingHelp", word: "waitingHelpAnswer", page: "help" },
 	integration: {
 		title: "waitingIntegration",
 		word: "waitingAdd",
