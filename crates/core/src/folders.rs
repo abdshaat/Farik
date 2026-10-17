@@ -2,7 +2,7 @@
 //! (`docs/SPEC.md` section 5.17, ADR 0051). Pure: paths in, answers out.
 
 use crate::contract::TaskId;
-use crate::governor::paths::{normalise, stays_within};
+use crate::governor::paths::normalise;
 use crate::team::{Role, plain_role};
 
 /// Each role that owns a folder, with its folder, in the order the Team rules list them. The Finance
@@ -578,56 +578,6 @@ pub fn stale_line(stale_twins: &[String]) -> Option<String> {
     })
 }
 
-/// What a role may read of the project (`docs/SPEC.md` section 5.6): everything, or only the
-/// listed read paths, each `<folder>/**`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReadAccess {
-    /// The whole project.
-    Open,
-    /// Only what these read paths, each `<folder>/**`, hold.
-    Only(Vec<String>),
-}
-
-/// What the role may read: the Marketing Specialist reads the Product Manager's folder and its own,
-/// every other role (the human included) reads the project.
-#[must_use]
-pub fn read_access(role: Role) -> ReadAccess {
-    if role != Role::MarketingSpecialist {
-        return ReadAccess::Open;
-    }
-    ReadAccess::Only(
-        [Role::ProductManager, Role::MarketingSpecialist]
-            .into_iter()
-            .filter_map(role_folder)
-            .map(|folder| format!("{folder}/**"))
-            .collect(),
-    )
-}
-
-impl ReadAccess {
-    /// Whether every path the glob could match is readable.
-    #[must_use]
-    pub fn allows(&self, glob: &str) -> bool {
-        match self {
-            Self::Open => true,
-            Self::Only(reads) => reads.iter().any(|read| stays_within(glob, read)),
-        }
-    }
-
-    /// The folders it allows, each without its `**`, as the sentence names them.
-    #[must_use]
-    pub fn named(&self) -> String {
-        match self {
-            Self::Open => "everything".to_string(),
-            Self::Only(reads) => reads
-                .iter()
-                .map(|read| read.strip_suffix("**").unwrap_or(read))
-                .collect::<Vec<_>>()
-                .join(" and "),
-        }
-    }
-}
-
 /// The Team rules' line about folders (`docs/SPEC.md` 5.17): each folder of an active role, and of
 /// the reader's own, in table order; which one is the reader's; how to read them; and, in a
 /// project folder, the reader's member folders.
@@ -645,13 +595,7 @@ pub fn folders_line(role: Role, active_roles: &[Role], members: &[&str]) -> Stri
         || "You have none: write none of them.".to_string(),
         |folder| format!("Yours is {folder}/: write no other folder named here."),
     );
-    let reading = match read_access(role) {
-        ReadAccess::Open => "Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.".to_string(),
-        held @ ReadAccess::Only(_) => format!(
-            "Read only {}: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.",
-            held.named()
-        ),
-    };
+    let reading = "Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.";
     let own = member_folders_sentence(role, members);
     format!("- folders: {}. {yours} {reading}{own}", listed.join(", "))
 }
@@ -839,9 +783,9 @@ fn compare<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(LineChange, &'a str)> {
 mod tests {
     use super::{
         DocumentFormat, FolderDocPathRefusal, FormatRefusal, OWNER_ACCEPTED_STEMS, ROLE_FOLDERS,
-        ReadAccess, agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
+        agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
         folder_doc_message, folder_of, folders_line, format_line, human_of_twin, is_human_document,
-        is_plan_of, pair_changed_alone, plan_stem, read_access, role_folder, stem_of, with_format,
+        is_plan_of, pair_changed_alone, plan_stem, role_folder, stem_of, with_format,
     };
     use super::{LineChange, ShownLine, artifact_marks, changed_lines, is_heading};
     use super::{
@@ -1211,62 +1155,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_marketing_specialist_s_reads_are_held() {
-        assert_eq!(
-            read_access(Role::MarketingSpecialist),
-            ReadAccess::Only(vec![
-                "docs/catervas/product/**".to_string(),
-                "docs/catervas/marketing/**".to_string()
-            ])
-        );
-        for role in [
-            Role::ProductManager,
-            Role::ScrumMaster,
-            Role::Architect,
-            Role::SoftwareDeveloper,
-            Role::UiUxDesigner,
-            Role::FinanceSpecialist,
-            Role::ProcurementSpecialist,
-            Role::Human,
-        ] {
-            assert_eq!(read_access(role), ReadAccess::Open, "{role:?}");
-        }
-    }
-
-    #[test]
-    fn a_held_reader_reads_its_folders_alone() {
-        let held = read_access(Role::MarketingSpecialist);
-        for glob in [
-            "docs/catervas/product/spec.agent.md",
-            "docs/catervas/marketing/plans/MP-1.md",
-        ] {
-            assert!(held.allows(glob), "{glob}");
-        }
-        for glob in [
-            "docs/catervas/architecture/overview.md",
-            "README.md",
-            "docs/catervas/*.md",
-        ] {
-            assert!(!held.allows(glob), "{glob}");
-        }
-        for glob in [
-            "docs/catervas/product/spec.agent.md",
-            "docs/catervas/marketing/plans/MP-1.md",
-            "docs/catervas/architecture/overview.md",
-            "README.md",
-            "docs/catervas/*.md",
-        ] {
-            assert!(ReadAccess::Open.allows(glob), "{glob}");
-        }
-        assert_eq!(
-            held.named(),
-            "docs/catervas/product/ and docs/catervas/marketing/"
-        );
-        assert_eq!(ReadAccess::Open.named(), "everything");
-    }
-
-    #[test]
-    fn tells_the_marketing_specialist_what_it_reads() {
+    fn tells_the_marketing_specialist_to_read_any_folder() {
         assert_eq!(
             folders_line(
                 Role::MarketingSpecialist,
@@ -1277,7 +1166,7 @@ mod tests {
                 ],
                 &[]
             ),
-            "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read only docs/catervas/product/ and docs/catervas/marketing/: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
+            "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
         );
     }
 

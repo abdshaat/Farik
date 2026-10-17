@@ -565,7 +565,6 @@ mod tests {
             read_roots: Vec::new(),
             session_id: "session-iris".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
-            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "iris".to_string(),
             task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),

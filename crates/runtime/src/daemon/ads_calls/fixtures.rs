@@ -57,7 +57,6 @@ pub(crate) fn register(harness: &Harness, connector: SessionConnector) -> String
         read_roots: Vec::new(),
         session_id: SESSION.to_string(),
         web: catervas_core::governor::sites::WebAccess::Open,
-        reads: catervas_core::folders::ReadAccess::Open,
         agent_id: "kai".to_string(),
         task_id: Some("CTV-1".parse().expect("a task id")),
         purpose: SessionPurpose::Implement,

@@ -677,16 +677,12 @@ impl Orchestrator {
         let contract = self.deps.tools.files.read_contract(task_id)?;
         let folder = worktree(&self.deps, task_id);
         let project = std::fs::canonicalize(self.deps.tools.files.root()).ok();
-        let reads: Vec<(String, PathBuf)> = read_roots(
-            &self.deps.tools.files,
-            Some(&contract),
-            &folder,
-            contract.assignee_role,
-        )
-        .into_iter()
-        .filter(|root| Some(&root.path) != project.as_ref())
-        .map(|root| (root.name, root.path))
-        .collect();
+        let reads: Vec<(String, PathBuf)> =
+            read_roots(&self.deps.tools.files, Some(&contract), &folder)
+                .into_iter()
+                .filter(|root| Some(&root.path) != project.as_ref())
+                .map(|root| (root.name, root.path))
+                .collect();
         let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
             &self.deps.tools.ids.project_id,
             task_id,

@@ -1658,16 +1658,13 @@ mod tests {
         );
     }
 
-    /// The Marketing Specialist reads two folders (step 02): its prompt says so and where, and
-    /// nothing it is given sends it to `CHANGELOG.md` or to "the project" at large.
+    /// The Marketing Specialist reads the whole project (ADR 0061): its prompt says so and names
+    /// the Product Manager's folder, and nothing it is given sends it to `CHANGELOG.md`.
     #[test]
     fn the_marketing_specialist_is_told_where_it_reads() {
         let definition = loaded(Role::MarketingSpecialist);
         let prompt = flattened(&definition.system_prompt);
-        for needle in [
-            "Catervas refuses a `Read`, `Grep` or `Glob` anywhere else",
-            "`docs/catervas/product/`",
-        ] {
+        for needle in ["You read the whole project", "`docs/catervas/product/`"] {
             assert!(prompt.contains(needle), "{needle}: {prompt}");
         }
         let root =

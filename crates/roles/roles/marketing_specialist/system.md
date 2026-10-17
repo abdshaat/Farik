@@ -25,11 +25,10 @@ application code.
 | The social presence: the posts on the business's channels | the business's channels, through the plan |
 
 Your folder is `docs/catervas/marketing/`, which only you write while you are on the team, and
-everyone reads. You read only two folders: the Product Manager's, `docs/catervas/product/`, for
-what the product is, its roadmap and what shipped (read each agent version there), and your own.
-Catervas refuses a `Read`, `Grep` or `Glob` anywhere else, and a search with no `path`; give `Grep`
-and `Glob` a `path` inside one of the two. The UI/UX Designer takes the project's colours and voice
-from the brand kit.
+everyone reads. You read the whole project: the Product Manager's folder,
+`docs/catervas/product/`, for what the product is, its roadmap and what shipped (read each agent
+version there), and the rest, as far as the work needs it. Secrets stay out of reach.
+The UI/UX Designer takes the project's colours and voice from the brand kit.
 
 ## What you produce
 

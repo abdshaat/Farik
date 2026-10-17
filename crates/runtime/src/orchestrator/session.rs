@@ -8,7 +8,7 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
-use catervas_core::folders::{ReadAccess, read_access, role_folder};
+use catervas_core::folders::role_folder;
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 use catervas_core::governor::sites::{WebAccess, web_access};
@@ -17,7 +17,7 @@ use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::pricing::Usage;
 use catervas_core::team::{
     Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
-    private_folder, task_private_folder,
+    private_folder,
 };
 use catervas_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -63,17 +63,15 @@ use crate::transitions::TransitionAsk;
 
 /// The folders a session may read outside its `cwd` (5.6): every present member of a project
 /// folder but the task's own repository, by name in `repos.yaml` order, then the project folder,
-/// named `project`, unless `cwd` is it. None for a one-repository project, for a role held to read
-/// paths, for a task in a private folder, and when `repos.yaml` cannot be read: reads fail closed
-/// and the session still starts. A folder whose path cannot be written into a `Read(//<path>/...)`
+/// named `project`, unless `cwd` is it. None for a one-repository project and when `repos.yaml`
+/// cannot be read: reads fail closed and the session still starts. Every role reads them (ADR 0061). A folder whose path cannot be written into a `Read(//<path>/...)`
 /// rule is left out, since Claude Code would ignore the settings that held it.
 pub(crate) fn read_roots(
     files: &ProjectFiles,
     contract: Option<&TaskContract>,
     cwd: &Path,
-    role: Role,
 ) -> Vec<ReadRoot> {
-    let Some(repos) = members_read(files, contract, role) else {
+    let Some(repos) = members_read(files) else {
         return Vec::new();
     };
     let own = contract
@@ -103,25 +101,15 @@ pub(crate) fn read_roots(
     roots
 }
 
-/// The project's member repositories when a session of `role` on `contract` may read them: none
-/// for a one-repository project, for a role held to read paths, for a task in a private folder,
-/// and when `repos.yaml` cannot be read.
-fn members_read(
-    files: &ProjectFiles,
-    contract: Option<&TaskContract>,
-    role: Role,
-) -> Option<catervas_core::repos::Repos> {
-    if read_access(role) != ReadAccess::Open
-        || contract.is_some_and(|contract| task_private_folder(contract).is_some())
-    {
-        return None;
-    }
+/// The project's member repositories a session may read: none for a one-repository project and
+/// when `repos.yaml` cannot be read.
+fn members_read(files: &ProjectFiles) -> Option<catervas_core::repos::Repos> {
     files.read_repos().ok().flatten()
 }
 
 /// The folders `ask`'s session reads outside its working directory, for Claude Code's `--add-dir`.
-fn read_root_paths(deps: &OrchestratorDeps, ask: &SessionAsk<'_>, role: Role) -> Vec<PathBuf> {
-    read_roots(&deps.tools.files, ask.contract, &ask.cwd, role)
+fn read_root_paths(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<PathBuf> {
+    read_roots(&deps.tools.files, ask.contract, &ask.cwd)
         .into_iter()
         .map(|root| root.path)
         .collect()
@@ -134,13 +122,12 @@ fn read_root_paths(deps: &OrchestratorDeps, ask: &SessionAsk<'_>, role: Role) ->
 fn member_lines(
     deps: &OrchestratorDeps,
     ask: &SessionAsk<'_>,
-    role: Role,
 ) -> (Vec<MemberLine>, Option<OwnRepo>) {
     let files = &deps.tools.files;
-    let Some(repos) = members_read(files, ask.contract, role) else {
+    let Some(repos) = members_read(files) else {
         return (Vec::new(), None);
     };
-    let roots = read_roots(files, ask.contract, &ask.cwd, role);
+    let roots = read_roots(files, ask.contract, &ask.cwd);
     let own = ask
         .contract
         .and_then(|contract| contract.repo.as_ref())
@@ -281,10 +268,9 @@ pub(super) async fn run_session(
     let tiers = registered_tiers(&ask, team, browser.is_some());
     let (skills, skills_root) = skill_registration(deps, &spec);
     deps.daemon.register_session(SessionRegistration {
-        read_roots: read_roots(&deps.tools.files, ask.contract, &spec.cwd, role),
+        read_roots: read_roots(&deps.tools.files, ask.contract, &spec.cwd),
         session_id: spec.session_id.clone(),
         web: web_access(role),
-        reads: read_access(role),
         agent_id: spec.agent_id.clone(),
         task_id: spec.task_id.clone(),
         purpose: ask.purpose,
@@ -1287,7 +1273,7 @@ fn session_spec_without(
     let stale_twins = integration_branch(team, &deps.tools.git)
         .and_then(|branch| stale_twins(&deps.tools.git, &branch))
         .unwrap_or_default();
-    let (members, own_repo) = member_lines(deps, ask, role_id);
+    let (members, own_repo) = member_lines(deps, ask);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
@@ -1324,7 +1310,7 @@ fn session_spec_without(
     )?
     .session_limits;
     Ok(SessionSpec {
-        read_roots: read_root_paths(deps, ask, role_id),
+        read_roots: read_root_paths(deps, ask),
         session_id: deps.session_ids.session_id(),
         agent_id: ask.agent.id.to_string(),
         task_id: ask.contract.map(|contract| contract.id.clone()),
@@ -1852,8 +1838,6 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn knows_which_folders_a_session_reads() {
         use super::read_roots;
-        use catervas_core::contract::Role;
-
         let (harness, members) = Harness::project_folder("read-roots", &["app", "infra"]);
         harness.assigned_in("CTV-1", "iris", "ada", "app");
         let files = &harness.project.deps.files;
@@ -1866,21 +1850,11 @@ mod tests {
         let root = files.root().to_path_buf();
 
         // A task in `app` reads `infra` and the project folder, never its own repository.
-        let task = read_roots(
-            files,
-            Some(&contract),
-            &harness.worktree("CTV-1"),
-            Role::SoftwareDeveloper,
-        );
+        let task = read_roots(files, Some(&contract), &harness.worktree("CTV-1"));
         assert_eq!(task[0].path, members[1].path.canonicalize().expect("infra"));
         assert_eq!(names(task), ["infra", "project"]);
-        // The Architect planning at the project root reads every member.
-        assert_eq!(
-            names(read_roots(files, None, &root, Role::Architect)),
-            ["app", "infra"]
-        );
-        // The Marketing Specialist reads no member.
-        assert!(read_roots(files, None, &root, Role::MarketingSpecialist).is_empty());
+        // A session planning at the project root reads every member, whatever its role (ADR 0061).
+        assert_eq!(names(read_roots(files, None, &root)), ["app", "infra"]);
     }
 
     #[tokio::test]

@@ -4432,7 +4432,6 @@ mod tests {
                     read_roots: Vec::new(),
                     session_id: session.to_string(),
                     web: catervas_core::governor::sites::WebAccess::Open,
-                    reads: catervas_core::folders::ReadAccess::Open,
                     agent_id: agent.to_string(),
                     task_id: None,
                     purpose,

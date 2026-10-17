@@ -99,7 +99,7 @@ Tests:
   - A `Read` of `.env` is still denied `path_protected`.
   - In a project folder, the session is given every other member's read root.
 
-- [ ] `feat(runtime): let the Marketing Specialist read the whole project`
+- [x] `feat(runtime): let the Marketing Specialist read the whole project`
 
 ### Task 3: the Procurement Specialist fetches any site
 
