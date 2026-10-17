@@ -885,6 +885,25 @@ describe("task detail", () => {
 		).toBeTruthy();
 	});
 
+	it("says_catervas_checks_a_hunt", async () => {
+		const hunt = (allowed_paths: string[]) => ({ ...CONTRACT, allowed_paths });
+		await opened(hunt(["docs/catervas/engineering/bug-hunt.html"]));
+		expect(
+			await screen.findByText(
+				"CTV-1 in sprint 2. Theo is doing it, and Catervas checks it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/reviews it/)).toBeNull();
+		cleanup();
+
+		await opened(hunt(["docs/catervas/engineering/bug-hunt.html", "src/**"]));
+		expect(
+			await screen.findByText(
+				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+	});
+
 	it("says_what_each_risk_means", async () => {
 		for (const [risk, words] of [
 			["low", en.riskLowWhy],

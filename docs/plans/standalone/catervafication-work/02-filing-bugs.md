@@ -261,7 +261,7 @@ holds), tested by `apps/web/src/pages/TaskDetail.test.tsx`. Consumes ADR 0061 pl
   "reviews it"; with `["docs/catervas/engineering/bug-hunt.html", "src/**"]` the lead holds "Ada
   reviews it", as ADR 0061's test sets the reviewer.
 
-- [ ] `feat(web): say Catervas checks a bug hunt`
+- [x] `feat(web): say Catervas checks a bug hunt`
 
 ## Verification
 
