@@ -73,12 +73,12 @@ The skills say how. Out of scope:
     catervafying-the-repository." follows, as every row's does;
   - summary "The Marketing Specialist writes your marketing plan and starts on it straight away;
     anything that costs money waits for you.";
-  - documents `["kickoff"]`;
-  - its artifact criterion's `must_contain` adds `"MP-"` after the heading mark.
+  - documents `["kickoff"]`; criteria: ADR 0061's C1, the command `ls docs/catervas/marketing/plans/MP-* >/dev/null 2>&1`
+    (exit 0), kept; then C2, the kickoff's artifact, whose `must_contain` adds `"MP-"` after the
+    heading mark.
 
-  `Row` gains `also_contains: &'static [&'static str]`, `&[]` on every other row. The
-  `paths.is_empty()` branch of `task_contract` and its words go, since no row is without a
-  document now.
+  `Row` gains `also_contains: &'static [&'static str]` (`&[]` elsewhere); `task_contract`'s
+  `paths.is_empty()` branch goes, since every row has a document now.
 - **Marketing goes alongside.** `catervafication_roles` drops the clause that lists the
   Marketing Specialist only after a Product Manager's row. `file_due` files the Marketing task
   with no `dependencies`, removing the line ADR 0061's plan 5 added. Its doc comment says so.
@@ -207,10 +207,11 @@ existing tests to the new rows:
     - `is_hunt` of it validated is true.
   - `hunt_contract(UiUxDesigner, 20.0, Markdown)`: `allowed_paths`
     `["docs/catervas/design/ui-bug-hunt.md"]`, `must_contain` `["# ", "Bugs filed"]`.
-  - `epic_hunts` of `epic_contract(Existing, 20.0)` validated is true, and its budget is 140;
-    of `epic_contract(New, 20.0)`, false.
-  - The Marketing task in Markdown has `allowed_paths` `["docs/catervas/marketing/**"]`, and one
-    artifact on `docs/catervas/marketing/kickoff.md` with `must_contain` `["# ", "MP-"]`.
+  - `epic_hunts` of `epic_contract(Existing, 20.0, Markdown)` validated is true, and its budget is
+    140; of `epic_contract(New, 20.0, Markdown)`, false. Its C1 stays ADR 0061's spec artifact.
+  - The Marketing task in Markdown has `allowed_paths` `["docs/catervas/marketing/**"]`, C1 the
+    `MP-*` command, and C2 the artifact on `docs/catervas/marketing/kickoff.md` with
+    `must_contain` `["# ", "MP-"]`.
 
 - [ ] `feat(runtime): the Catervafication's templates hunt for bugs and start the marketing`
 

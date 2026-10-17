@@ -65,15 +65,16 @@ Out of scope:
   answers the present members, in order, each with `has_ui`.
 - **Held, by member.** `file_due` holds a task under the epic as `(assignee_role, is_hunt,
   contract.repo)`. A hunt row is due when no held task matches its role, `true` and its `repo`.
-- **The epic's budget.** `epic_contract(project, max_cost_usd, hunted: usize)`. For `Existing` the
+- **The epic's budget.** `epic_contract(project, max_cost_usd, format, hunted: usize)` (ADR 0061 added `format`). For `Existing` the
   budget is `max_cost_usd * (5 + 2 * hunted)`, and for `New` `max_cost_usd * 3`.
   - `catervafication::start` passes `hunted`: the number of members `hunt_members` answers, or 1
     when it answers `None`.
   - A one-repo epic is unchanged at 7.
 - **`catervafication.get`'s `roles`** uses the same rows: a role is added when any row has it.
-- **The criterion of a folder's epic** is ADR 0061's to settle (its plan 1, open decision 2:
-  `EpicCommandInProjectFolder` refuses the `command` that plan puts on the epic). This plan adds
-  none. If that decision is not made when this plan starts, stop and send it back to planning.
+- **The criterion of a folder's epic** is ADR 0061's, settled in its plan 1 (commit `83ec2ab0`):
+  an `artifact` on `docs/catervas/product/spec.<x>` holding the heading mark, in a single
+  repository and a project folder alike, which `EpicCommandInProjectFolder` allows. This plan
+  adds none.
 
 ## File map
 
@@ -100,7 +101,7 @@ Produces:
 pub(crate) fn hunt_members(deps: &ToolDeps) -> Result<Option<Vec<HuntMember>>, CatervaficationError>;
 #[must_use] pub(crate) fn catervafication_hunts(team: &Team, project: Project, designer_ready: bool, members: Option<&[HuntMember]>) -> Hunts;
 #[must_use] pub(crate) fn hunt_contract(role: Role, max_cost_usd: f64, format: DocumentFormat, repo: Option<&str>) -> Value;
-#[must_use] pub(crate) fn epic_contract(project: Project, max_cost_usd: f64, hunted: usize) -> Value;
+#[must_use] pub(crate) fn epic_contract(project: Project, max_cost_usd: f64, format: DocumentFormat, hunted: usize) -> Value;
 ```
 
 ## Tasks
@@ -121,7 +122,8 @@ Files: `crates/runtime/src/catervafication.rs` (types, `catervafication_hunts`, 
     - validated, it `is_hunt`;
     - it passes `evaluate_readiness` with a context whose `repos` is `["api", "web"]` and whose
       parent is the epic.
-  - `epic_contract(Existing, 20.0, 2)`'s budget is 180, and `(Existing, 20.0, 1)`'s is 140.
+  - `epic_contract(Existing, 20.0, Html, 2)`'s budget is 180, and `(Existing, 20.0, Html, 1)`'s
+    is 140.
 
 - [ ] `feat(runtime): a project folder's Catervafication hunts each member`
 

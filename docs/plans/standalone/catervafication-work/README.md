@@ -23,10 +23,13 @@ These plans assume the following of the two earlier branches, and change none of
   `command` `test -d docs/catervas` (ADR 0061 plan 1, Task 4).
 - `FileDue::MarketingWaits` is gone, and the Marketing task is filed with `dependencies` naming the
   Product Manager's task (ADR 0061 plan 5). Plan 3 removes that dependency.
-- Whatever machine criterion ADR 0061 gives the Marketing task (its plan 1, open decision 1) is
-  replaced by plan 3's: the artifact `docs/catervas/marketing/kickoff` holding `MP-`. The
-  epic's own criterion is ADR 0061's (its open decision 2, the one a project folder allows), and
-  these plans change only its `satisfies`.
+- ADR 0061 plan 1 (settled in `83ec2ab0`):
+  - The Marketing task's C1 is the command `ls docs/catervas/marketing/plans/MP-* >/dev/null
+    2>&1`, exit 0. Plan 3 keeps it and adds C2, the kickoff artifact.
+  - The epic's C1 is an `artifact` on `docs/catervas/product/spec.<x>` holding the heading mark,
+    in a single repository and a project folder alike.
+  - `epic_contract` takes `format`; these plans change only the epic's `satisfies`, budget,
+    intent and summary.
 - No agent judges a contract (ADR 0061 plan 7). Rule 9 asks the governor's `judge` directly.
 - `catervas_propose_marketing_plan` records `marketing_plan.approved` at once for a plan that
   spends nothing (ADR 0061 plan 5, Task 4).
@@ -48,6 +51,7 @@ it committed. Every task is one commit and leaves `cargo xtask check` passing.
 | 3 | `03-catervafication-creates-work.md` | The two hunts and the Marketing task filed in the first tick; the kickoff document; a Designer's hunt skips explore; the skills; the propose answer once approved at once |
 | 3b | `03b-hunts-in-a-project-folder.md` | A project folder hunts each present member: hunts name `repo`; a member has a UI when its scan finds an app start, else a note on the epic says why; the epic's budget counts two hunts per member |
 | 4 | `04-tasks-from-chat.md` | `chat_message_post { as_task }`, `chat_message.posted.as_task` and `task.created.given_to`; the agent refines and is assigned its own task, its role fixed; the chat does not answer it |
+| 4b | `04b-the-chat-takes-a-task.md` | The chat session decides: it answers a question, or takes work its role does with `catervas_take_task` (chat sessions only), filing the same given task, and replies in one line naming it |
 | 5 | `05-web.md` | "Send as a task" in a one-to-one chat and the task's link under the message; the Catervafication's words; the activity word for a connection request |
 | 6 | `06-record.md` | `docs/SPEC.md` revision 0.117 and the plans' ticks (hard rule 8) |
 

@@ -51,8 +51,8 @@ From there:
 - **`file_given_task`** files it as `file_request` does, under the same `FILING` lock, with
   `Filing.given_to`. In place of `check_proposal`, `check_task_message` refuses, as
   `RequestError::Refused`:
-  - a seq that is not `chat_message.posted` by `human` with `as_task: true` in chat
-    `given_to`: "links to message <seq>, which is not the owner's task in <agent>'s chat";
+  - a seq not by `human` in chat `given_to`, `as_task` or not (plan 4b files from a plain one):
+    "links to message <seq>, which is not the owner's message in <agent>'s chat";
   - one a `task.created` already names: "was already sent, as <id>".
 - **`Given`**: who the task is the agent's for. It is `Given::No` when any of these holds:
   - there is no `given_to`;
@@ -159,7 +159,7 @@ Produces:
 Command::ChatMessagePost { agent_id: String, text: String, as_task: bool }
 
 // catervas-store::requests
-pub fn file_given_task(files: &ProjectFiles, log: &EventLog, wire: Value, given_to: &str,
+pub fn file_given_task(files: &ProjectFiles, log: &EventLog, wire: Value, created_by: &str, given_to: &str,
     from_chat_message: u64, now: DateTime<Utc>, ids: &EventIds) -> Result<TaskContract, RequestError>;
 pub fn given_to(log: &EventLog, task: &TaskId) -> Result<Option<String>, StoreError>;
 
@@ -215,8 +215,8 @@ Files: `crates/store/src/requests.rs`. Tests in its `mod tests`, on a temporary 
     chat", triaged_by: "catervas" }`;
   - `given_to(log, CTV-1)` is `Some("dev")`;
   - filing again from `n` is refused "was already sent, as CTV-1";
-  - filing from a message without `as_task` is refused "links to message <seq>, which is not the
-    owner's task in dev's chat".
+  - filing from `dev`'s own reply is refused "links to message <seq>, which is not the owner's
+    message in dev's chat".
 
 - [ ] `feat(store): file the task the owner gave an agent in its chat`
 

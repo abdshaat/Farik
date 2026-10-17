@@ -30,6 +30,9 @@ The founder, in order:
    the WIP limit.
 7. Contract judging is removed entirely (ADR 0061, its plan 7), so neither a hunt nor a chat task
    is judged by an agent.
+8. On chats, verbatim: "The agent does not stop his current task, but it forks itself to either
+   answer the user question or create a new task to the backlog. The process of agents answering
+   questions must be quick."
 
 ## Context
 
@@ -80,8 +83,9 @@ a plan task.
   - A member with no UI gets no UI hunt. Catervas writes the reason once on the epic, as a
     progress note: "No UI bug hunt for <name>: Catervas found no way to start its app."
   - The epic's budget counts two hunts per member present at the Start.
-  - It relies on ADR 0061 giving the epic a criterion that a project folder allows (that ADR's
-    open decision 2).
+  - The epic's criterion is ADR 0061's: an `artifact` on `docs/catervas/product/spec.<x>`, which
+    a project folder allows (its plan 1, settled in `83ec2ab0`). The Marketing task keeps ADR
+    0061's command, that a plan `MP-*` exists, and adds the kickoff artifact.
 - An epic filed before this change carries no hunts: only an epic whose contract holds the hunts'
   requirement gets them, so an old epic's budget is never overrun.
 
@@ -162,6 +166,23 @@ Then the agent's own sessions take it, with no Product Manager session:
 
 Every active agent may be given a task. The Product Manager's draft-to-refining move stays
 mechanical (rule 10, no session).
+
+**The agent's chat decides, too** (answer 8). The chat session is the agent's fork: it answers a
+question, and takes a request for work its role does as its own task.
+- It takes the work with a new tool, `catervas_take_task { text }`, offered in chat sessions alone.
+  The tool files from the message the session answers, exactly as "Send as a task" does
+  (`given_to` the agent, `from_chat_message` that message), but created by the agent.
+- It then replies in one line naming the task.
+- Work for another role is still a proposed request the owner sends.
+- "Send as a task" stays, as the owner's way to force a task.
+- From there the task follows the decisions above: the agent writes its contract, and the task is
+  next in its queue.
+- Running the fork beside the agent's current session, so that it does not stop its task and
+  answers quickly, is ADR 0064's (parallel agents, planned separately). Until that lands, the chat
+  is answered as today, by the chat rule at the start of each tick.
+
+This amends ADR 0026 part B further. The chat session still writes nothing in the project, and its
+one new act files a task given to itself.
 
 ## Consequences
 

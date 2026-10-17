@@ -3,7 +3,7 @@
 Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md`, the sections below (hard rule 8)
-Depends on: plans 1 to 5 of this branch (3b included)
+Depends on: plans 1 to 5 of this branch (3b and 4b included)
 Readiness confirmed by: pending
 
 ## Goal
@@ -44,8 +44,14 @@ theirs. The plans' ticks and statuses are brought up to date. Nothing else chang
   - It is refused with `agent_not_active` for an agent that is not active, and with
     `task_too_short` under 20 characters.
   - The chat shows "Given to <Name> as <id>" under the message.
+  - The chat session decides as well. A request for work its role does it takes with
+    `catervas_take_task`, filing the same task given to itself, created by the agent, from the
+    message it answers. It then replies in one line naming it. A question it answers, and work for
+    another role it proposes as a request. Its refusals are `take_task_refused`,
+    `agent_not_active`, `task_too_short` and `already_a_task`.
 - **5.1, "Chat is not command"**: a chat session still files and moves nothing. The two ways from
-  a chat to work are the owner's: "Send as a request" under a proposal, and "Send as a task".
+  a chat to work are "Send as a request" under a proposal and "Send as a task", the owner's, and
+  `catervas_take_task`, by which the chat session files a task given to its own agent.
 - **5.2**:
   - Rule 8 takes the ready tasks given in a chat first. It assigns each to its agent on the
     assigner's behalf, with no session, when the agent has room under the WIP limit, naming the
@@ -102,7 +108,7 @@ theirs. The plans' ticks and statuses are brought up to date. Nothing else chang
   - `task.created`'s `found_by` and `given_to`;
   - `chat_message.posted`'s `as_task`;
   - the count of event kinds, one more than 0.116 states.
-- **F8**: "Send as a task". **F9**: `catervas_request_connection` and `requested_connections`.
+- **F8**: "Send as a task" and `catervas_take_task`. **F9**: `catervas_request_connection` and `requested_connections`.
 
 ## File map
 
