@@ -22,7 +22,12 @@ These plans assume the following of the two earlier branches, and change none of
 - The Catervafication's templates carry no `review` criterion, and its epic's C1 is the
   `command` `test -d docs/catervas` (ADR 0061 plan 1, Task 4).
 - `FileDue::MarketingWaits` is gone, and the Marketing task is filed with `dependencies` naming the
-  Product Manager's task (ADR 0061 plan 5).
+  Product Manager's task (ADR 0061 plan 5). Plan 3 removes that dependency.
+- Whatever machine criterion ADR 0061 gives the Marketing task (its plan 1, open decision 1) is
+  replaced by plan 3's: the artifact `docs/catervas/marketing/kickoff` holding `MP-`. The
+  epic's own criterion is ADR 0061's (its open decision 2, the one a project folder allows), and
+  these plans change only its `satisfies`.
+- No agent judges a contract (ADR 0061 plan 7). Rule 9 asks the governor's `judge` directly.
 - `catervas_propose_marketing_plan` records `marketing_plan.approved` at once for a plan that
   spends nothing (ADR 0061 plan 5, Task 4).
 - The Marketing Specialist reads the whole project (ADR 0061 plan 6).
@@ -41,6 +46,7 @@ it committed. Every task is one commit and leaves `cargo xtask check` passing.
 | 1 | `01-asking-for-connections.md` | `catervas_request_connection` and `connection.requested`; `team.get` answers `requested_connections`; Today's suggestions list a requested pair first, with the agent's reason |
 | 2 | `02-filing-bugs.md` | `is_hunt` and `hunt_report` in core, a hunt not reviewed by an agent; `task.created.found_by`; `catervas_file_bug`, bounded and deduplicated |
 | 3 | `03-catervafication-creates-work.md` | The two hunts and the Marketing task filed in the first tick; the kickoff document; a Designer's hunt skips explore; the skills; the propose answer once approved at once |
+| 3b | `03b-hunts-in-a-project-folder.md` | A project folder hunts each present member: hunts name `repo`; a member has a UI when its scan finds an app start, else a note on the epic says why; the epic's budget counts two hunts per member |
 | 4 | `04-tasks-from-chat.md` | `chat_message_post { as_task }`, `chat_message.posted.as_task` and `task.created.given_to`; the agent refines and is assigned its own task, its role fixed; the chat does not answer it |
 | 5 | `05-web.md` | "Send as a task" in a one-to-one chat and the task's link under the message; the Catervafication's words; the activity word for a connection request |
 | 6 | `06-record.md` | `docs/SPEC.md` revision 0.117 and the plans' ticks (hard rule 8) |
@@ -58,8 +64,9 @@ it committed. Every task is one commit and leaves `cargo xtask check` passing.
 
 ## Not in these plans
 
-- Hunts for a new project (no code yet) and for a project folder (ADR 0057). ADR 0063 leaves both
-  for a later decision.
+- Hunts for a new project, which has no code yet (the founder).
+- Moving a folder's hunt reports into `docs/catervas/repos/<name>/`, and hunts for a member added
+  after the Start. Both belong to phase 9 step 06, which is planned and not executed.
 - A recurring hunt. The owner gives one with "Send as a task" in the agent's chat.
 - Screenshots as bug evidence. Evidence is text: a URL, a console line, a command and its output.
 - The founder's live run. It runs once the branch has landed, from the web app on an existing

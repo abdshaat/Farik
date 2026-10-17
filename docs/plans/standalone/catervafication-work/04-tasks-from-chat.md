@@ -3,7 +3,7 @@
 Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 4.3, 5.1 ("Chat is not command"), 5.2, 5.16, 8.5, F8
-Depends on: plans 1 to 3 of this branch
+Depends on: plans 1 to 3b of this branch
 Readiness confirmed by: pending
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
@@ -21,37 +21,33 @@ From there:
 - Rule 9 gives the refine session to that agent, not the Product Manager. The agent writes the
   contract with the Product Manager's standing on that one task, and may not change its
   `assignee_role`.
-- Judging and the Definition of Ready are unchanged.
-- Once `ready`, rule 8 assigns it to that agent first, with no session, on the assigner's behalf,
-  within the WIP limit.
-- Its code is reviewed as any code is (ADR 0061).
-
-Out of scope: the web (plan 5).
+- The Definition of Ready and the governor's own check are unchanged; no agent judges it (ADR
+  0061 plan 7 removes contract judging).
+- Once `ready`, it is next in that agent's queue: rule 8 assigns it, with no session, on the
+  assigner's behalf, as soon as the agent has room under the WIP limit, ahead of any other ready
+  task for that agent.
+- Its code is reviewed as any code is (ADR 0061). Out of scope: the web (plan 5).
 
 ## Decisions
 
-- **One command, one flag**: `chat_message_post` gains `as_task`, optional boolean, default false.
-  Chosen over a second command: one message is one act, and the box's second button only sets
-  the flag.
+- **One command, one flag**: `chat_message_post` gains `as_task`, optional, default false; chosen
+  over a second command, since one message is one act.
 - **Checked first, nothing recorded on a refusal**, after the existing checks (on the team, not
   retired):
   - `agent_not_active: <Name> is paused; resume them on the Team page to give them a task`, for
     an agent whose status is not `active`;
   - `task_too_short: say a little more: at least 20 characters`, for text under 20 code points
-    once trimmed (`request_from_text`'s floor).
-
-  Both are `CommandError::Refused`.
+    once trimmed (`request_from_text`'s floor). Both are `CommandError::Refused`.
 - **What is recorded, in order:**
   1. `chat_message.posted { chat, author: human, text, as_task: true }`;
   2. `task.created { created_by: "human", from_chat_message: <that seq>, given_to: <agent id> }`;
   3. `request.triaged { size: small, reason: "a task the owner gave <agent id> in their chat",
      triaged_by: "catervas" }`.
 
-  The command's report is `said: "given to <Name> as <id>"`, its events those seqs.
-- **The contract filed** is `request_from_text(text, placeholder_budget_usd(rules))` with:
-  - `assignee_role` the agent's role;
-  - `reviewer_role` from `catervas_roles::reviewer_for(team, role)`. A `None` is a failure
-    (`CommandError` of kind failed), since every role an agent can hold has a row.
+  The report is `said: "given to <Name> as <id>"`, its events those seqs.
+- **The contract filed** is `request_from_text(text, placeholder_budget_usd(rules))` with
+  `assignee_role` the agent's role and `reviewer_role` `catervas_roles::reviewer_for(team, role)`;
+  a `None` is a failure (`CommandError` of kind failed), since every agent's role has a row.
 - **`file_given_task`** files it as `file_request` does, under the same `FILING` lock, with
   `Filing.given_to`. In place of `check_proposal`, `check_task_message` refuses, as
   `RequestError::Refused`:
@@ -71,7 +67,8 @@ Out of scope: the web (plan 5).
   - the filter at `chat.rs`'s third use (the chat rule's unanswered check).
 
   So the chat shows no "thinking", and no chat session proposes the same work.
-- **Rule 9** (`requests::refining`): the product-plan wait and the judging branch are unchanged.
+- **Rule 9** (`requests::refining`): the product-plan wait and the governor's `judge` of a
+  written contract are unchanged (after ADR 0061 plan 7 there is no judgment session).
   The writer is then chosen from `Given`:
   `Active(agent)`: the refine session is that agent's, its `initial_prompt` from
   `given_task_message`; `Waits`: `Ok(None)`; `No`: the Product Manager, as today.
@@ -120,7 +117,10 @@ Out of scope: the web (plan 5).
       assigner's id;
     - the ask is `TransitionAsk { assignee_id, reviewer_id, .. }`;
     - moved, it reports `Acted { what: "assigned it to <agent id>, who was given it in its chat" }`.
-  - A full agent's task waits: the WIP limit is the governor's (ADR 0063).
+  - A full agent's task waits, and is assigned in the first tick the agent has room, before the
+    second pass offers that agent anything else (the founder: "Next in his queue"; ADR 0063). This
+    plan does not change what counts as busy. ADR 0064, landing later, stops a task under review
+    counting.
 
 ## File map
 

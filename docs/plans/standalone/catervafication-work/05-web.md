@@ -3,7 +3,7 @@
 Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 4.1 (the offer), 4.3, F8
-Depends on: plans 1 to 4 of this branch
+Depends on: plans 1 to 4 of this branch (3b included)
 Readiness confirmed by: pending
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).

@@ -20,7 +20,7 @@ A new project's Catervafication files its three tasks, the Marketing one being t
 hunt. A Designer's hunt starts in its implement session, with no explore or design plan. The
 Marketing Specialist's propose answer tells it to start at once when Catervas approved the plan.
 The skills say how. Out of scope:
-- hunts for a new project or a project folder (ADR 0063);
+- hunts in a project folder (plan 3b) and for a new project (none, ADR 0063);
 - the web's words (plan 5).
 
 ## Decisions

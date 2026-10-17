@@ -24,6 +24,12 @@ The founder, in order:
 4. Asked who writes a chat task's contract: "The agent writes it". The owner's message becomes a
    task that agent writes its own contract for and starts on at once, with no Product Manager;
    code it changes is still reviewed.
+5. Asked about a project folder (ADR 0057): "Folders hunt each repo". A new project gets no hunts.
+6. Asked what happens when the agent is busy: "Next in his queue". The task waits until the agent
+   finishes its current work, then goes ahead of any other new ready task for that agent, within
+   the WIP limit.
+7. Contract judging is removed entirely (ADR 0061, its plan 7), so neither a hunt nor a chat task
+   is judged by an agent.
 
 ## Context
 
@@ -59,8 +65,23 @@ a plan task.
   of the Designer is.
 - **One-off.** The hunts are filed once, with the Catervafication. A later hunt is the owner's
   word to the agent in its chat (below).
-- **Not for a new project**, which has no code to hunt in, and not for a project folder (ADR
-  0057), whose members a single report cannot cover. Both are left for a later decision.
+- **Not for a new project**, which has no code to hunt in.
+- **A project folder hunts each member** (ADR 0057). The code today Catervafies a project folder
+  as one repository: phase 9 step 06, the per-member Catervafication, is planned and not
+  executed. Within today's code:
+  - For each member present at the breakdown, in `repos.yaml` order, the Developer's hunt and then
+    the Designer's are filed, each naming that member in `repo`. So each runs in that member's
+    worktree and sandbox, and its tests and preview are that member's.
+  - Its report is at the same path inside that member, and reaches it by that member's pull
+    request. Chosen over the project folder's `docs/catervas/repos/<name>/`, which a task naming
+    a `repo` cannot write. Phase 9 step 06 may move it there.
+  - **A member has a UI** when its project scan finds a way to start its app (`app_start`, from
+    the `dev`, `start` or `preview` script of its `package.json`, ADR 0054).
+  - A member with no UI gets no UI hunt. Catervas writes the reason once on the epic, as a
+    progress note: "No UI bug hunt for <name>: Catervas found no way to start its app."
+  - The epic's budget counts two hunts per member present at the Start.
+  - It relies on ADR 0061 giving the epic a criterion that a project folder allows (that ADR's
+    open decision 2).
 - An epic filed before this change carries no hunts: only an epic whose contract holds the hunts'
   requirement gets them, so an old epic's budget is never overrun.
 
@@ -127,14 +148,17 @@ Then the agent's own sessions take it, with no Product Manager session:
   `draft` or `refining`.
 - **The role stays.** No writer may change its `assignee_role` (`given_task_role_fixed`), so the
   work cannot be passed to another role.
-- **Judging and readiness are unchanged.** Contract judging (ADR 0061 keeps it) and the Definition
-  of Ready apply as to any contract.
+- **Readiness is unchanged.** The Definition of Ready and the governor's own check of a written
+  contract apply as to any contract. No agent judges it, since ADR 0061 removes contract judging.
 - **Assignment.** Once `ready`, Catervas assigns it to that agent on the assigner's behalf, with no
   session, as it assigns an approved epic. The reviewer is named as usual, and a code change is
   reviewed under ADR 0061.
-- **Ahead of other ready work.** Rule 8 takes given tasks before other ready rows. They are not
-  exempt from the WIP limit: a full agent's task waits for room. That limit is the governor's own
-  and stays (ADR 0060, ADR 0062).
+- **Next in its queue** (the founder: "Next in his queue"). Rule 8 takes given tasks before other
+  ready rows. A given task is not exempt from the WIP limit: while the agent is full it waits, and
+  once the agent has room it is assigned before any other ready task for that agent. That limit
+  is the governor's own and stays (ADR 0060, ADR 0062). ADR 0064, landing after this one, stops a
+  task under review counting as busy. A given task then goes ahead sooner, with nothing here
+  changed.
 
 Every active agent may be given a task. The Product Manager's draft-to-refining move stays
 mechanical (rule 10, no session).
@@ -143,14 +167,15 @@ mechanical (rule 10, no session).
 
 - An existing repository's first work produces bugs on the board, and marketing that is already
   running, not only documents.
-- The Catervafication of an existing repository is filed with seven tasks, and its epic's budget
-  is seven placeholder budgets.
+- The Catervafication of an existing repository is filed with seven tasks. Its epic's budget is
+  five placeholder budgets plus two per hunted repository: seven for one repository, and five
+  plus two per member present at the Start for a project folder.
 - Bugs a hunt misreads reach the Product Manager as requests. The bound of 10 per hunt and the
   duplicate rule keep the board from flooding. The Product Manager can cancel what is not a bug.
 - A hunt's report and its bugs go unreviewed: a wrong report is caught when the owner reads it, a
   wrong bug when the Product Manager refines it.
 - A chat task skips triage and the Product Manager, so the owner's words become a contract written
-  by the agent that will do the work. The Definition of Ready, the judge, and the review of code
+  by the agent that will do the work. The Definition of Ready and the review of code
   are what check it.
 - Three event shapes grow and one kind is added:
   - `chat_message.posted` gains `as_task`;

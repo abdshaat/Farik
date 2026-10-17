@@ -3,7 +3,7 @@
 Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md`, the sections below (hard rule 8)
-Depends on: plans 1 to 5 of this branch
+Depends on: plans 1 to 5 of this branch (3b included)
 Readiness confirmed by: pending
 
 ## Goal
@@ -50,6 +50,8 @@ theirs. The plans' ticks and statuses are brought up to date. Nothing else chang
   - Rule 8 takes the ready tasks given in a chat first. It assigns each to its agent on the
     assigner's behalf, with no session, when the agent has room under the WIP limit, naming the
     first other active agent of the reviewer role.
+  - A given task is next in its agent's queue. While the agent is at its WIP limit the task
+    waits, and in the first tick the agent has room it is assigned before any other ready task.
   - A task given to a paused agent waits.
   - A task whose `assignee_role` the human changed is no longer given.
 - **5.16**, three places:
@@ -60,14 +62,14 @@ theirs. The plans' ticks and statuses are brought up to date. Nothing else chang
     (`request.triaged { reason: "a bug <hunt> found", triaged_by: "catervas" }`) and refined by
     the Product Manager like any request.
   - **The Catervafication's epic.** For an existing repository:
-    - its budget is seven placeholder budgets;
+    - its budget is seven placeholder budgets for one repository (see the project folder below);
     - its R2 is the hunts' requirement, and an epic without R2 (filed before 0.117) gets no hunt;
     - its intent and summary say the team also hunts and starts the marketing.
   - **Its tasks.**
     - The Marketing Specialist's task, "Write the marketing plan and start on it", is filed with
       the others, with no dependency, for both kinds of project. Its one criterion is the
       artifact `docs/catervas/marketing/kickoff` holding a heading and `MP-`.
-    - For an existing repository that is not a project folder, after the documentation tasks:
+    - For an existing repository of one repository, after the documentation tasks:
       the Developer's "Hunt for bugs in the code", and the Designer's "Hunt for bugs in the app's
       screens" when its browser is ready.
     - A hunt's `allowed_paths` are exactly `docs/catervas/engineering/bug-hunt` or
@@ -75,6 +77,12 @@ theirs. The plans' ticks and statuses are brought up to date. Nothing else chang
       holding a heading and "Bugs filed", and its reviewer role is the Product Manager. No agent
       reviews it, since a hunt is the one task of a code-changing role that is not reviewed.
     - A hunt is filed once, with the Catervafication.
+    - In a project folder, the hunts are filed for each member present, in `repos.yaml` order,
+      each naming that member in `repo` and writing its report inside that member. A member has a
+      UI when its scan finds a way to start its app. One without a UI gets no UI hunt, and the
+      epic gets the progress note "No UI bug hunt for <name>: Catervas found no way to start its
+      app." The epic's budget is five placeholder budgets plus two per member present at the
+      Start.
 - **5.17**: the Files page names the three new documents "Bug hunt", "UI bug hunt" and "Marketing
   kickoff".
 - **6.4** (Developer) and **6.8** (Designer): each hunts once at the Catervafication and files
