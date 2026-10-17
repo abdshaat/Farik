@@ -18,7 +18,7 @@ Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
   - 5.2:
     - the table gains the governor's `verifying -> accepted` and `verifying -> rejected` rows, open only to a task that changes no code and whose every criterion Catervas runs (plan 1);
     - `refining -> escalated` for approval never opens for a new contract (plan 5);
-    - the human's `verifying -> rejected` opens only for a code task's `human` criterion (plan 1);
+    - the human's `verifying -> rejected` opens only while a result waits on the human: a code task's `human` criterion, or an epic filed before ADR 0061 that Catervas does not verify alone, which keeps the old path (plan 1);
     - the Designer paragraph says the plan is approved by Catervas as it is proposed (plan 4);
     - the dependency paragraph says a dependency counts once accepted (plan 3).
   - 5.3: the judgment of a contract by an agent, its rules `judgment_recorded` and `judgment_answers`, and the judge go (plan 7); the rule `no_review_outside_code` (plan 1); the rule `summary_present` goes, and a contract's `summary` is optional (plan 5); `product_plan_first` waits for the product plan task's acceptance (plan 5); `human_accepts_contracts` is ignored (plan 5).

@@ -95,7 +95,7 @@ Out of scope:
 ## File map
 
 ```
-crates/core/src/governor/transition.rs, done.rs, readiness.rs, readiness/fixtures.rs, plain.rs; crates/runtime/src/transitions.rs, catervafication.rs (its test at 717); orchestrator/requests.rs   contract approval (Task 1)
+crates/core/src/governor/transition.rs, done.rs, readiness.rs, readiness/fixtures.rs, plain.rs; crates/runtime/src/transitions.rs, catervafication.rs (its test at 717); orchestrator/requests.rs; apps/web/src/strings/en.ts (`riskHighWhy`)   contract approval (Task 1)
 crates/roles/roles/product_manager/system.md, skills/writing-task-contracts/SKILL.md                                        (Task 1)
 crates/runtime/src/transitions.rs, orchestrator/rules.rs, orchestrator/human.rs, catervafication.rs, daemon/gates.rs; crates/store/src/git.rs, product_plan.rs, crates/store/tests/git.rs; crates/core/src/folders.rs; apps/web/src/pages/ProductPlanCard.tsx (.module.css, .test.tsx deleted), Today.tsx, OneToOne.tsx; apps/web/src/app/productPlan.ts (new)   (Task 2)
 crates/runtime/src/tools/folders.rs, tools.rs (the input's description), orchestrator/messages.rs, daemon/documents.rs; crates/core/src/folders.rs; crates/roles/src/lib.rs; crates/roles/roles/product_manager/skills/catervafying-the-repository/SKILL.md   (Task 3)
@@ -119,6 +119,8 @@ Files: those of the File map for Task 1. These tests change to the new flow here
 - `requests.rs`: `escalates_an_epic_for_approval_once_it_passes` (2006), `assigns_an_approved_epic_to_its_product_manager` (2679) and `assigns_an_approved_epic_to_the_scrum_master` (3255);
 - `catervafication.rs`'s test that sets `human_approves` (717);
 - any test of `readiness.rs` and `plain.rs` that names `SummaryPresent`.
+
+The risk line of the task page changes with the approval: `riskHighWhy` (`apps/web/src/strings/en.ts`), which plan 1 left as "High. You approve its plan.", becomes "High. The team may accept it without you, as for any task." No web test pins it.
 
 `crates/store/src/projections.rs`' `awaits_approval_from_the_escalation_until_the_next_move` (2045) and `counts_every_escalation_but_the_two_the_process_asks_for` (2383), and `daemon/gates.rs`' `waiting_lists_a_plan_to_approve` (1950), read events an older log holds and stay as they are.
 

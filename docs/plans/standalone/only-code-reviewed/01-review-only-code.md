@@ -4,16 +4,9 @@ Status: draft
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.1, 5.2, 5.3, 5.4, 5.16 items 3 and 4; F9
 Depends on: `origin/main` at `74b4a5af`; ADR 0061
-Readiness confirmed by: pending (Opus 5.5 readiness review, 2026-10-16: two decisions unmade, see Open decisions; everything else is fixed in the plan)
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16 (second round on the two decisions the first found unmade, settled by the controller the same day)
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008). One test per major functionality (ADR 0060). A test that pins the old behaviour is changed in the task that changes the behaviour, never skipped.
-
-## Open decisions (found in the readiness review of 2026-10-16)
-
-Task 2 cannot be executed until the planning role answers both:
-
-1. **The Catervafication's Marketing task.** Its template (`catervafication.rs` `task_contract`, `row`'s `(_, Role::MarketingSpecialist)`) has no documents, so its one criterion is the `review` one. Dropping it leaves no criterion (the schema's `minItems: 1` and `CriteriaPresent` refuse that), and its output, a marketing plan at `docs/catervas/marketing/plans/MP-<n>.<x>`, has a number nobody knows when the contract is written. Which machine criterion does it carry?
-2. **The Catervafication epic in a project folder.** The epic's C1 becomes a `command` (Decisions), and `EpicCommandInProjectFolder` refuses a `command` or `test` criterion on an epic in a project folder (ADR 0057), so a Catervafication started in a project folder (`catervafication_start` does not refuse one) would never be ready. Which criterion does a project folder's epic carry? (Phase 9 step 06, not yet executed, owns the per-member Catervafication.)
 
 ## Goal
 
@@ -52,8 +45,13 @@ Out of scope:
   - `product_plan_request` (`:367`): one per allowed path: `spec.<x>` satisfies `R1`, `roadmap.<x>` `R2`, and each `.agent.<x>` file `R3`.
   - `change_request` (`:504`): one per path of `paths` (the document, then its twin), satisfying `R1`.
   - `rewrite_request` (`:551`): its allowed path is the glob `<folder>/**`, so it adds none. Its per-document `artifact` criteria stay and its last, `review` criterion goes.
-  - Every task of `crates/runtime/src/catervafication.rs` (`task_contract`): its last, `review` criterion goes; its path criteria stay. The Marketing row is Open decision 1.
-  - The Catervafication epic's C1 (`epic_contract`, `catervafication.rs:171`) becomes `{ "method": "command", "command": "test -d docs/catervas", "expect": { "exit_code": 0 } }`, run on the integration branch once its tasks are merged; its `id`, `text` and `satisfies` stay. A project folder's epic is Open decision 2.
+  - Every task of `crates/runtime/src/catervafication.rs` (`task_contract`): its last, `review` criterion goes; its path criteria stay.
+  - The Marketing row, which has no documents (`row`'s `(_, Role::MarketingSpecialist)`), gets in their place one criterion (the controller, 2026-10-16): `{ "id": "C1", "text": "A marketing plan is written in docs/catervas/marketing/plans/", "satisfies": ["R1"], "verification": { "method": "command", "command": "ls docs/catervas/marketing/plans/MP-* >/dev/null 2>&1", "expect": { "exit_code": 0 } } }`. A `command` is allowed here: no readiness rule refuses one on a Marketing task (`private_folder_task` holds only the Finance and Procurement Specialists, `EpicCommandInProjectFolder` only epics), Catervas runs it in the task's sandbox from the root of its repository through `sh -c`, so the glob expands, and `catervas_propose_marketing_plan` writes `MP-<n>` into the task's worktree (`tools/marketing.rs:265`), committed on the task's branch before `verifying`.
+  - The Catervafication epic's C1 (`epic_contract`, `catervafication.rs:171`), in a single repository and in a project folder alike (the controller, 2026-10-16), becomes `{ "method": "artifact", "path": "docs/catervas/product/spec.<x>", "must_contain": [<heading>] }`, `<x>` the team format's extension and `<heading>` the format's heading mark (`artifact_marks`: `"# "` for Markdown, `"<h1"` for HTML); its `id`, `text` and `satisfies` stay. `epic_contract` gains the format: `epic_contract(project: Project, max_cost_usd: f64, format: DocumentFormat) -> Value`, its caller `start` passing `team.document_format()` and its tests (`catervafication.rs:709`, `:772`, `requests.rs:2156`) `DocumentFormat::Markdown`. This holds:
+    - `EpicCommandInProjectFolder` refuses only `command` and `test` criteria (`runs_a_command`, `readiness.rs:688`), not an `artifact`.
+    - An epic's mechanical criteria run on the integration branch (`run_on_the_integration_branch`, `requests.rs:861`), in a detached worktree of `deps.tools.git`, which in a project folder is the project folder's own repository, where `docs/catervas/` lives (ADR 0057); an `artifact` is read there with `cat`.
+    - The spec is always there by then: an existing repository's Catervafication always has the Product Manager's task (`catervafication_start_for` refuses otherwise), and a new project's starts after its product plan.
+    - A spec kept in the other format (a team that changed its format afterwards) fails the criterion and sends the epic back; that is accepted, as the owner chose the format.
   - A template whose owner changes code (`change_request` for the Developer's or the Designer's folder) keeps its `review` criterion.
 - **Role prompts.** Every sentence in these files that says a non-code task is reviewed, or tells the author to give one a `review` or `human` criterion, says instead that Catervas checks its criteria and that only code is reviewed:
   - `finance_specialist/system.md` and `skills/keeping-the-books/SKILL.md`;
@@ -135,15 +133,13 @@ Tests:
 
 ### Task 2: what Catervas files whole carries machine criteria
 
-Blocked by Open decisions 1 and 2.
-
 Files: `crates/store/src/requests.rs` and `crates/runtime/src/catervafication.rs` (the templates of Decisions), and the role files of Decisions. Tests that read the templates' criteria change here: in `requests.rs`, `writes_the_product_plans_contract` (1411: four criteria, each an `artifact`, in place of two `review`s; its `result_needs_the_human` assertion stays until Task 3); in `catervafication.rs`, `writes_each_template_as_the_table_says` (785) and `every_template_passes_the_definition_of_ready` (704).
 
 This task comes before Task 3, so that no template Catervas files is refused by `NoReviewOutsideCode`. Until Task 4, such a task still goes through its reviewer's session, which reviews Catervas's runs as it does today.
 
 Tests:
 - `whole_filed_contracts_need_no_review` (`crates/store/src/requests.rs`): for each owner role that does not change code (Product Manager, Architect, Marketing Specialist), the contracts of `rederive_request`, `product_plan_request`, `change_request` and `rewrite_request` validate (`validate_contract`) and hold no `review` or `human` criterion, and each criterion is an `artifact` whose path is one of `allowed_paths` or, for `rewrite_request`, lies under its folder; `change_request` for `software_developer` keeps its `review` criterion.
-- `epic_contract`'s criterion is the `command` of Decisions, asserted in `writes_each_template_as_the_table_says`.
+- In `writes_each_template_as_the_table_says`: `epic_contract`'s criterion, for Markdown and for HTML, is the `artifact` of Decisions (`docs/catervas/product/spec.md` with `"# "`, `docs/catervas/product/spec.html` with `"<h1"`); the Marketing task's one criterion is the `command` of Decisions; and in `every_template_passes_the_definition_of_ready` the epic also passes with `repos` set (a project folder).
 
 - [ ] `feat(store): file whole contracts with machine criteria outside code`
 
