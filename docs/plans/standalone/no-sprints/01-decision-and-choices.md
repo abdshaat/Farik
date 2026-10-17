@@ -264,7 +264,7 @@ Consumes Task 3's `offer_for` and `Choice::command_line`.
   printed command with `<your message>` replaced by `Go on.` exits 0 and records
   `escalation.resolved { to: in_progress, extra_tries: 2, message: "Go on." }`.
 
-- [ ] `feat(cli): resolve takes more tries, and a run ends with a command for each choice`
+- [x] `feat(cli): resolve takes more tries, and a run ends with a command for each choice`
 
 ## Verification
 

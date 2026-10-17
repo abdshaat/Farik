@@ -508,6 +508,12 @@ enum Commands {
         task_id: String,
         /// Where it goes.
         status: StatusArgument,
+        /// More tries for a task that used its tries, counting the one this starts.
+        #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
+        extra_tries: Option<u8>,
+        /// The contract's own sessions and dollars again, for a task that spent them.
+        #[arg(long, conflicts_with = "extra_tries")]
+        extra_room: bool,
         /// What the next session about it is told.
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
@@ -1548,6 +1554,8 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
         Commands::Resolve {
             task_id,
             status,
+            extra_tries,
+            extra_room,
             message,
         } => (
             "resolve",
@@ -1555,8 +1563,8 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 task_id: task(task_id)?,
                 to: (*status).into(),
                 message: message.join(" "),
-                extra_tries: None,
-                extra_room: false,
+                extra_tries: *extra_tries,
+                extra_room: *extra_room,
             },
         ),
         Commands::Cancel { task_id, reason } => (

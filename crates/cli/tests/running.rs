@@ -757,7 +757,10 @@ fn lists_what_waits_on_the_human() {
         format!("question {n} on {first} from pm: "),
         format!("  catervas answer {n} <your answer>"),
         format!("{second} awaits your approval: catervas approve {second}"),
-        format!("{third} is escalated (iterations)"),
+        format!("{third} is escalated (iterations): choose one"),
+        format!("  catervas resolve {third} in_progress --extra-tries 2 "),
+        format!("  catervas resolve {third} refining "),
+        format!("  catervas resolve {third} cancelled "),
     ];
     assert_eq!(after.len(), expected.len(), "{}", ran.out);
     for (line, start) in after.iter().zip(&expected) {

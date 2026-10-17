@@ -4,6 +4,7 @@
 //! the plan that wait for the owner, the purchase orders the Procurement Specialist set up and the data sources it asked for.
 
 use catervas_core::team::Team;
+use catervas_runtime::choices::offer_for;
 use catervas_store::files::ProjectFiles;
 use catervas_store::waiting::WaitingKind;
 use catervas_store::{EventLog, Projections};
@@ -29,6 +30,8 @@ pub(crate) struct Waiting {
     order: Option<u64>,
     /// The number of the data pipeline request that waits, for a script to act on.
     pipeline: Option<u64>,
+    /// An escalation's choices: the command, what happens next, and whether it is suggested.
+    choices: Vec<(String, String, bool)>,
 }
 
 impl Waiting {
@@ -40,6 +43,10 @@ impl Waiting {
             vec![format!("{} {}: {}", self.task_id, self.what, self.command)]
         };
         lines.extend(self.input.iter().map(|input| format!("  input: {input}")));
+        lines.extend(self.choices.iter().map(|(command, next, suggested)| {
+            let mark = if *suggested { " (suggested)" } else { "" };
+            format!("  {command}  # {next}{mark}")
+        }));
         lines
     }
 
@@ -62,6 +69,15 @@ impl Waiting {
         if let Some(pipeline) = self.pipeline {
             item["pipeline"] = json!(pipeline);
         }
+        if !self.choices.is_empty() {
+            item["choices"] = self
+                .choices
+                .iter()
+                .map(|(command, next, suggested)| {
+                    json!({ "command": command, "next": next, "suggested": suggested })
+                })
+                .collect();
+        }
         item
     }
 }
@@ -81,7 +97,27 @@ pub(crate) fn waiting(
 ) -> Result<Vec<Waiting>, String> {
     let listed = catervas_store::waiting::waiting(projections, log, files, team)
         .map_err(|e| e.to_string())?;
-    Ok(listed.into_iter().map(|item| describe(&item)).collect())
+    let mut described = Vec::new();
+    for item in listed {
+        let mut waiting = describe(&item);
+        if item.kind == WaitingKind::Help {
+            let offered = offer_for(log, projections, files, team, &item.task_id)
+                .map_err(|e| e.to_string())?
+                .unwrap_or_default();
+            waiting.choices = offered
+                .iter()
+                .map(|choice| {
+                    (
+                        choice.command_line(item.task_id.as_str()),
+                        choice.next.clone(),
+                        choice.suggested,
+                    )
+                })
+                .collect();
+        }
+        described.push(waiting);
+    }
+    Ok(described)
 }
 
 /// What waits, and the command that answers it.
@@ -108,7 +144,7 @@ fn describe(item: &catervas_store::waiting::Waiting) -> Waiting {
                 "is escalated ({})",
                 item.reason.as_deref().unwrap_or("no reason recorded")
             ),
-            format!("catervas resolve {id} <status> <message>"),
+            "choose one".to_string(),
         ),
         WaitingKind::Acceptance => (
             "may need your acceptance".to_string(),
@@ -171,6 +207,7 @@ fn describe(item: &catervas_store::waiting::Waiting) -> Waiting {
         post: item.post.as_ref().map(|ask| ask.post),
         order: item.order.as_ref().map(|ask| ask.order),
         pipeline: item.pipeline.as_ref().map(|ask| ask.pipeline),
+        choices: Vec::new(),
     }
 }
 

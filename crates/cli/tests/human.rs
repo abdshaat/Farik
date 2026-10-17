@@ -143,6 +143,92 @@ fn cancels_and_resolves_for_the_human() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn the_end_of_a_run_names_a_command_for_each_choice() {
+    let repository = a_team("human-choices");
+    let task = filed(&repository, "Add done.txt");
+    let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+    moved(&repository, &task, "draft", "refining", &json!({}));
+    moved(&repository, &task, "refining", "ready", &json!({}));
+    moved(&repository, &task, "ready", "assigned", &people);
+    moved(&repository, &task, "assigned", "in_progress", &people);
+    moved(&repository, &task, "in_progress", "escalated", &people);
+    record(
+        &repository,
+        &task,
+        "escalation.raised",
+        &json!({ "reason": "iterations", "detail": "rejected three times" }),
+    );
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let lines: Vec<&str> = ran
+        .out
+        .lines()
+        .skip_while(|line| !line.starts_with(&format!("{task} is escalated")))
+        .collect();
+    assert_eq!(
+        lines[0],
+        format!("{task} is escalated (iterations): choose one")
+    );
+    let first =
+        format!("  catervas resolve {task} in_progress --extra-tries 2 \"<your message>\"  # ");
+    assert!(lines[1].starts_with(&first), "{}", lines[1]);
+    assert!(lines[1].ends_with(" (suggested)"), "{}", lines[1]);
+    assert!(
+        lines[2].starts_with(&format!(
+            "  catervas resolve {task} refining \"<your message>\"  # "
+        )),
+        "{}",
+        lines[2]
+    );
+    assert!(
+        lines[3].starts_with(&format!(
+            "  catervas resolve {task} cancelled \"<your message>\"  # "
+        )),
+        "{}",
+        lines[3]
+    );
+    assert!(
+        !lines[2].contains("(suggested)") && !lines[3].contains("(suggested)"),
+        "{}",
+        ran.out
+    );
+
+    let ran = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
+    let offered = &last["waiting_on_you"][0]["choices"];
+    assert_eq!(offered.as_array().map(Vec::len), Some(3), "{last}");
+    assert_eq!(offered[0]["suggested"], true);
+
+    // The first printed command, with the message filled in, is runnable.
+    let printed = lines[1]
+        .trim_start()
+        .split("  # ")
+        .next()
+        .and_then(|command| command.strip_prefix("catervas "))
+        .and_then(|command| command.strip_suffix(" \"<your message>\""))
+        .expect("a command");
+    let mut args: Vec<&str> = printed.split(' ').collect();
+    args.extend(["Go", "on."]);
+    let ran = run(&repository.path, &args);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let resolved = events(&repository, &[EventKind::EscalationResolved]);
+    let EventBody::EscalationResolved(body) = &resolved[0].body else {
+        panic!("a resolution");
+    };
+    assert_eq!(body.to.to_string(), "in_progress");
+    assert_eq!(body.extra_tries.map(std::num::NonZero::get), Some(2));
+    assert_eq!(body.message, "Go on.");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn sends_a_command_to_the_driving_process() {
     let repository = a_project("human-sends");
     let task = filed(&repository, "Add done.txt");
