@@ -34,6 +34,18 @@ Out of scope: the new project's product plan (plan 5).
   - On `MergeOutcome::Conflicts`, the worktree and its branch are removed (`remove_worktree`, then `Git::delete_branch`), and the task waits. The next tick tries again. Once a conflicting dependency is integrated it drops out of the list.
   - This was chosen over refusing or escalating, because the conflict resolves itself when the human merges.
   - Merging inside the task's own fresh worktree is not merging code into the integration branch, which stays the human's (ADR 0061).
+- **A task's diff is taken from where it started.** This settles the earlier plan's readiness finding 1. A task started from another task's branch would otherwise show that task's changes in its own diff, since the diff is three-dot from the integration branch, and its merge base does not move when the other task is squash-merged. `paths_within_allowed` would then refuse it, and its reviewer, its UI-change check and its twin check would read the other task's work.
+  - Once its worktree is made and merged, `assigned` writes the ref `refs/catervas/start/<id>` at the worktree's `HEAD` (`Git::set_ref`). The ref is written only when the start point is not `[integration_branch]`.
+  - `catervas_store::git::task_base(git, integration_branch, task_id) -> String` answers that ref when it exists, else `integration_branch`.
+  - Every place that takes a task's diff or base from its integration branch takes `task_base` instead:
+    - `transitions.rs:819` (`work`'s changed paths and commit check);
+    - `verify.rs:207` (the base of the new-tests check);
+    - `verify.rs:412` (the design review's diff) and `verify.rs:510` (the review's diff);
+    - `tools/git.rs:53` (`catervas_git_diff`);
+    - `rules.rs:1767` (the commit count);
+    - `crates/store/src/diff.rs:143` (the web's diff).
+  - Integration is unchanged: the pull request is still from the task's branch into the integration branch.
+  - This was chosen over adding the plan, or each dependency's paths, to `allowed_paths`, which would let the task change them, and over leaving the plan out of the diff by name, which handles plans only.
 - **`Git::delete_branch(name)`** is `git branch -D <name>` at the root, refused for the branch checked out there.
 - **`Git::merge_in`** (`crates/store/src/git.rs`) is `git -C <worktree> merge --no-ff -m <message> <from>`, as `merge_what_is_checked_out` does. On conflicts it aborts and answers `Conflicts`. It never checks out at the root, unlike `Git::merge`.
 - **The epic's step** (`requests.rs`):
@@ -60,6 +72,7 @@ crates/core/src/governor/gates.rs, crates/runtime/src/transitions.rs   dependenc
 crates/runtime/src/orchestrator/rules.rs                               rule 8's filter (Task 1); assigned's start (Task 3)
 crates/store/src/git.rs, crates/store/tests/git.rs                     merge_in (Task 2)
 crates/runtime/src/orchestrator/requests.rs                            start_point (Task 3); epic step and message (Task 4)
+crates/runtime/src/transitions.rs, orchestrator/verify.rs, tools/git.rs, crates/store/src/diff.rs   diffs from task_base (Task 3)
 crates/runtime/src/orchestrator/messages.rs                            plan messages (Task 4)
 crates/roles/roles/product_manager/system.md, skills/writing-task-contracts/SKILL.md   (Task 4)
 crates/runtime/src/orchestrator/integrate.rs                           carried_plan (Task 5)
@@ -75,6 +88,9 @@ Produces:
 // catervas_store::git::Git
 pub fn merge_in(&self, worktree: &Path, from: &str, message: &str) -> Result<MergeOutcome, GitError>;
 pub fn delete_branch(&self, name: &str) -> Result<(), GitError>;
+pub fn set_ref(&self, name: &str, rev: &str) -> Result<(), GitError>;   // git update-ref
+// catervas_store::git
+pub fn task_base(git: &Git, integration_branch: &str, task_id: &TaskId) -> String;
 // catervas_runtime::orchestrator::requests
 pub(super) fn start_point(deps: &OrchestratorDeps, board: &[TaskProjection],
     contract: &TaskContract, repository: &TaskRepository) -> Result<Vec<String>, OrchestratorError>;
@@ -105,7 +121,7 @@ Tests:
 
 ### Task 3: a task starts from what it needs
 
-Files: `requests.rs` (`start_point`), `rules.rs` (`assigned` uses it as Decisions say). Tests are ignored and need git, in `requests.rs`.
+Files: `requests.rs` (`start_point`), `rules.rs` (`assigned` uses it and writes the start ref), `crates/store/src/git.rs` (`set_ref`, `task_base`), and the diff sites of Decisions. Tests are ignored and need git, in `requests.rs`.
 
 Tests:
 - `a_task_starts_from_its_unmerged_dependencies_and_its_plan`:
@@ -113,6 +129,7 @@ Tests:
   - CTV-4 depends on CTV-3, which is accepted and awaiting integration with `site/a.txt` on `feature/CTV-3`. Once CTV-4 is assigned, its worktree holds the plan and `site/a.txt`.
   - A task with nothing unmerged starts from `main` (`git.commit_count("main", "feature/CTV-5")` is 0).
   - With CTV-3 and the plan changing one file differently, CTV-4 has no worktree after the tick and stays `assigned`.
+  - A lane task CTV-3 started from the plan's branch, whose `allowed_paths` exclude the plan, commits its own file and moves to `verifying`. Its Definition of Done context's `changed_paths` holds only that file (`refs/catervas/start/CTV-3` exists).
 
 - [ ] `feat(runtime): start a task from its unmerged dependencies and its plan`
 
@@ -123,8 +140,8 @@ Files: `requests.rs`, `messages.rs`, the two prompt files.
 Tests:
 - `reads_an_epics_next_step` (changed): `Child` without `awaiting_integration`; an accepted plan task alone is `WriteThePlansTasks`; the other cases as today.
 - `writes_the_plans_tasks_from_the_plan_tasks_branch` (replaces `writes_the_plans_tasks_once_the_plan_is_integrated`; ignored, needs git): `an_accepted_plan_task`, with `docs/CTV-2` made from `main` and the plan committed only there. The first tick starts the Product Manager's `plan` session on CTV-1 whose prompt holds `<untrusted source="plan">\n# Plan for CTV-1`, `## Lane 1` and `` `lane` ``, while CTV-2 still awaits integration and `main` has no plan.
-- The `plan_task_message` and `plan_tasks_message` tests (`messages.rs`) assert the two sentences of Decisions.
-- `breaks_down_again_when_the_plan_is_missing` keeps its assertions.
+- `asks_for_the_architects_plan_task` (`messages.rs`) also asserts the message ends with the sentence of Decisions. `asks_for_a_task_per_planned_task` asserts that it starts with `The Architect's plan for the epic CTV-1 is at docs/catervas/architecture/plans/CTV-1.md: `, the rest unchanged.
+- `breaks_down_again_when_the_plan_is_missing` and `the_plan_is_read_in_either_format` keep their assertions.
 
 - [ ] `feat(runtime): file an epic's tasks once its plan task is accepted`
 

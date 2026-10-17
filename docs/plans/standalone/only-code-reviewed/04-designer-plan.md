@@ -38,7 +38,7 @@ Unchanged:
   - `ui_ux_designer/system.md` drops step 3 (Approval) and says the plan is recorded by Catervas and the finished change reviewed.
   - `skills/writing-mockups/SKILL.md` speaks of the reviewer of the finished change in place of a Product Manager who approves.
   - The event schema's description (`docs/schemas/event.schema.json`, the body shared by `design_plan.approved`) says that since ADR 0061 the approval is Catervas's, recorded with no agent, and that it was the Product Manager's decision before.
-- **The e2e.** `apps/web/e2e/designer.spec.ts` drops `decide_design_plan_approves_ctv_1`, and asserts `design_plan.approved` (no agent) after `design_plan.proposed iris` and before `review.recorded ada`.
+- **The e2e.** `apps/web/e2e/designer.spec.ts` drops `decide_design_plan_approves_ctv_1`, and asserts the log entry `design_plan.approved` (`logOf` trims the missing agent) after `design_plan.proposed iris` and before `review.recorded ada`, in place of `design_plan.approved mira`.
 - **The task page:**
   - A proposed plan reads as `designBeingBuilt`, in the header and in the plan panel.
   - The decision line shows only when there is a decision, its name `nameOf(decision.agentId)`: "Catervas" for no agent, Mira for an older one.
@@ -69,9 +69,15 @@ Produces: nothing new. Removed: the items listed above.
 Files: those of the File map for Task 1.
 
 Tests:
-- `catervas_approves_a_proposed_plan_and_the_designer_implements` (`design.rs`, replacing the decision tests; ignored, needs git):
+- `catervas_approves_a_proposed_plan_and_the_designer_implements` (`design.rs`; ignored, needs git). It replaces `explores_first_then_asks_the_product_manager`, `implements_only_after_approval`, `explores_again_with_the_returned_reason`, `asks_the_active_product_manager_not_a_paused_one` and `starts_again_without_an_answer`:
   - After Iris's explore session proposes (`explore_plans_ctv_1`), the next tick appends `design_plan.approved` with no `agent_id`, starts Iris's `implement` session in that tick, and starts no Product Manager session.
   - A log holding `design_plan.returned` (appended directly) reads `PlanState::Returned`, and starts a new explore session.
+- Changed with it:
+  - `sends_the_designers_work_to_the_architect` drops `decide_design_plan_approves_ctv_1` and the Product Manager's `verify` session from what it expects;
+  - `one_tool_sessions_get_no_skills` and `gives_custom_servers_to_task_sessions_only` (`session.rs`) drop their `(SessionPurpose::Verify, Some(super::DECIDE_TOOL))` row;
+  - `refuses_the_decision_but_from_the_product_manager` (`tools/design.rs`) goes with `decide`;
+  - `lists_every_tool_with_its_tier` no longer lists the tool;
+  - `escalates_after_too_many_returns` and `explores_again_once_the_human_grants_more_tries` are unchanged.
 - `says_a_designer_explores_then_waits_for_its_plans_decision` (`activity.rs`) becomes `says_a_designer_explores_then_rests`: after `design_plan.proposed`, Iris's line is "Nothing to do right now".
 
 - [ ] `feat(runtime): approve a Designer's plan at once`

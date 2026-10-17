@@ -113,7 +113,10 @@ Files:
   - `has_exactly_twenty_two_distinct_rows` becomes `has_exactly_twenty_four_distinct_rows`;
   - `has_eighteen_specific_rows_and_four_any_rows` becomes `has_twenty_specific_rows_and_four_any_rows`;
   - `matches_every_line_of_the_spec_table` gains the two pairs.
-- `transition.rs`: `check_gate`, for `actor == Governor` on `DefinitionOfDone` or `RejectionReasons`, gives the refusal above unless `catervas_verifies_alone`, then the gate as today.
+- `transition.rs`: `check_gate`, for `actor == Governor` on `DefinitionOfDone` or `RejectionReasons`, gives the refusal above unless `catervas_verifies_alone`, then the gate as today. In `mod tests`:
+  - `every_row` becomes `[Case; 24]`, the rows renumbered in table order, with two cases added: `Verifying -> Accepted` and `Verifying -> Rejected` by `A::Governor`. Their `prepare` makes the contract an Architect's docs task, with `allowed_paths` `docs/catervas/architecture/overview.md`, one `artifact` criterion holding the id `a_result` records, and `done.changed_paths` that path. For the rejection, it sets `rejection` to that criterion with written reasons.
+  - `refuses_every_row_of_the_table_to_an_actor_it_does_not_name` asks a `Governor` row from `verifying` as `A::Assignee`, since the reviewer shares `verifying -> rejected`.
+  - These two fixes were found in the readiness round of 2026-10-16 on the earlier plan.
 
 Tests:
 - `the_governor_verifies_only_what_no_agent_reviews` (`transition.rs`). Take a verifying Architect task with one `artifact` criterion and passing done evidence:
