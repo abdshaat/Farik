@@ -133,7 +133,7 @@ Files: `docs/schemas/event.schema.json`, `crates/protocol/src/event.rs`,
   - it refuses the same with an extra body field `"x": 1`;
   - it refuses one with no `why`.
 
-- [ ] `feat(protocol): record an agent's request for a connection`
+- [x] `feat(protocol): record an agent's request for a connection`
 
 ### Task 2: the tool
 

@@ -15,20 +15,21 @@ pub use crate::generated::event::{
     AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
     BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CatervaficationStartedBody,
     CatervaficationStartedBodyProject, ChatMessagePostedBody, CheckTheme, CheckWidth,
-    ConnectorConnectedBody, ConnectorDisconnectedBody, ConnectorTag as ConnectorTagWire,
-    ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractJudgedBody, ContractLockedBody,
-    ContractSummary, ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk,
-    ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody, CostRecordedBody,
-    CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DecisionWrittenBody, DeliveryClosedBody, DesignPlanProposedBody,
-    DesignReviewCheck, DesignReviewRecordedBody, DocumentRewriteStartedBody, DriftDetectedBody,
-    DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
-    EscalationResolvedBody, EventKind, Heard, HumanAcceptedBody, HumanAcceptedBodySubject,
-    JudgmentAnswer, MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope,
-    MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
-    MarketingCampaignPausedBody, MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody,
-    MarketingPlanBudget, MarketingPlanCampaign, MarketingPlanCampaignChannel,
-    MarketingPlanEndedBody, MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
+    ConnectionRequestedBody, ConnectorConnectedBody, ConnectorDisconnectedBody,
+    ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
+    ContractJudgedBody, ContractLockedBody, ContractSummary, ContractSummaryKind,
+    ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody,
+    ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
+    CriteriaUpdatedBody, CriterionRecordedBody, CriterionRecordedBodyRunBy, DecisionWrittenBody,
+    DeliveryClosedBody, DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody,
+    DocumentRewriteStartedBody, DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody,
+    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, Heard,
+    HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, MarketingBudgetReachedBody,
+    MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
+    MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBody,
+    MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody, MarketingPlanBudget,
+    MarketingPlanCampaign, MarketingPlanCampaignChannel, MarketingPlanEndedBody,
+    MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
     MarketingPlanProposedBody, MarketingPlanProposedBodyFormat, MarketingPlanReturnedBody,
     MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
     PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
@@ -262,6 +263,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::FolderChangeEscalated => "folderChangeEscalatedBody",
         EventKind::ProjectStarted => "projectStartedBody",
         EventKind::CatervaficationStarted => "catervaficationStartedBody",
+        EventKind::ConnectionRequested => "connectionRequestedBody",
         EventKind::RepoAdded => "repoAddedBody",
         EventKind::RepoRemoved => "repoRemovedBody",
         EventKind::RepoMoved => "repoMovedBody",
@@ -357,7 +359,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// the agent in `written_by` and `proposed_by`; the other kinds of the folder documents name no one in
 /// the body: the owner decided or edited, or Catervas integrated or escalated a change.
 /// `project.started` names no one: the first run recorded it for the owner's paragraph.
-/// `catervafication.started` names no one: `task.created` names who filed the epic. The three
+/// `catervafication.started` names no one: `task.created` names who filed the epic. `connection.requested` names no one in the body: the envelope names the agent. The three
 /// `repo.` kinds name no one either: the owner added, removed or located a repository, and the
 /// envelope names no agent and no session.
 #[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
@@ -480,13 +482,14 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::RepoMoved(_)
         | EventBody::DocumentRewriteStarted(_)
         | EventBody::DeliveryClosed(_)
-        | EventBody::TaskReassigned(_) => None,
+        | EventBody::TaskReassigned(_)
+        | EventBody::ConnectionRequested(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 118] = [
+pub const EVERY_KIND: [EventKind; 119] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -605,6 +608,7 @@ pub const EVERY_KIND: [EventKind; 118] = [
     EventKind::DocumentRewriteStarted,
     EventKind::DeliveryClosed,
     EventKind::TaskReassigned,
+    EventKind::ConnectionRequested,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -982,6 +986,9 @@ pub enum EventBody {
     /// The team began documenting the project: the epic the event is about is the Catervafication.
     #[serde(rename = "catervafication.started")]
     CatervaficationStarted(CatervaficationStartedBody),
+    /// An agent asked the owner to connect a service of its kit.
+    #[serde(rename = "connection.requested")]
+    ConnectionRequested(ConnectionRequestedBody),
     /// A repository joined the project folder.
     #[serde(rename = "repo.added")]
     RepoAdded(RepoAddedBody),
@@ -1120,6 +1127,7 @@ impl EventBody {
             Self::FolderChangeEscalated(_) => EventKind::FolderChangeEscalated,
             Self::ProjectStarted(_) => EventKind::ProjectStarted,
             Self::CatervaficationStarted(_) => EventKind::CatervaficationStarted,
+            Self::ConnectionRequested(_) => EventKind::ConnectionRequested,
             Self::RepoAdded(_) => EventKind::RepoAdded,
             Self::RepoRemoved(_) => EventKind::RepoRemoved,
             Self::RepoMoved(_) => EventKind::RepoMoved,
@@ -2146,7 +2154,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 118);
+        assert_eq!(EVERY_KIND.len(), 119);
     }
 
     #[test]
@@ -2175,7 +2183,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 118);
+        assert_eq!(EVERY_KIND.len(), 119);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2464,6 +2472,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_connection_requested_event() {
+        let wire = |body: serde_json::Value| {
+            let mut wire = an_event_wire(EventKind::RequestTriaged);
+            wire["kind"] = json!("connection.requested");
+            wire["body"] = body;
+            wire
+        };
+        let body =
+            json!({ "server": "buffer", "why": "The plan posts to Instagram every Tuesday." });
+        let input = wire(body.clone());
+        let event = event_from_value(&input).expect("a valid connection.requested");
+        assert_eq!(event.body.kind().to_string(), "connection.requested");
+        assert_eq!(event_to_value(&event), input);
+        let mut extra = body.clone();
+        extra["x"] = json!(1);
+        assert!(!refusal(&wire(extra)).is_empty());
+        let mut no_why = body;
+        no_why.as_object_mut().expect("an object").remove("why");
+        assert!(!refusal(&wire(no_why)).is_empty());
+    }
+
+    #[test]
     fn project_started_holds_its_bounds() {
         let kind = EventKind::ProjectStarted;
         assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
@@ -2563,7 +2593,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 118);
+        assert_eq!(EVERY_KIND.len(), 119);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2704,7 +2734,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 118);
+        assert_eq!(EVERY_KIND.len(), 119);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3019,7 +3049,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 118);
+        assert_eq!(EVERY_KIND.len(), 119);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

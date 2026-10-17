@@ -318,6 +318,10 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "sha": "a1b2c3d4"
         }),
         EventKind::CatervaficationStarted => json!({ "project": "existing" }),
+        EventKind::ConnectionRequested => json!({
+            "server": "buffer",
+            "why": "The plan posts to Instagram every Tuesday."
+        }),
         EventKind::RepoAdded => json!({
             "name": "shop-api",
             "path": "/home/me/Projects/shop-api",

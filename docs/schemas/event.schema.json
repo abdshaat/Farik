@@ -174,7 +174,8 @@
         "repo.moved",
         "document_rewrite.started",
         "delivery.closed",
-        "task.reassigned"
+        "task.reassigned",
+        "connection.requested"
       ]
     },
     "eventBodyWire": {
@@ -288,7 +289,8 @@
         { "$ref": "#/$defs/repoMovedBody" },
         { "$ref": "#/$defs/documentRewriteStartedBody" },
         { "$ref": "#/$defs/deliveryClosedBody" },
-        { "$ref": "#/$defs/taskReassignedBody" }
+        { "$ref": "#/$defs/taskReassignedBody" },
+        { "$ref": "#/$defs/connectionRequestedBody" }
       ]
     },
     "contractSummary": {
@@ -1961,6 +1963,17 @@
         "from": { "type": "string" },
         "to": { "type": "string" },
         "reason": { "type": "string", "enum": ["resumed"] }
+      }
+    },
+    "connectionRequestedBody": {
+      "title": "Connection Requested Body",
+      "description": "An agent's ask for a service of its own kit (ADR 0063), shown on Today. The envelope names the agent, the session and the task when the session has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "why"],
+      "properties": {
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "why": { "type": "string", "minLength": 1, "maxLength": 300 }
       }
     },
     "connectorTag": {
