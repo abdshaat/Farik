@@ -1,6 +1,6 @@
 # Standalone 1 of 8: review only code
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.1, 5.2, 5.3, 5.4, 5.16 items 3 and 4; F9
 Depends on: `origin/main` at `74b4a5af`; ADR 0061

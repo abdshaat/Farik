@@ -1,6 +1,6 @@
 # Standalone 4 of 8: a Designer's plan needs no approval
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.2 (the Designer paragraph), 5.6 (`design_plan_not_approved`), 6.8; F9
 Depends on: plan 1 committed on this branch; ADR 0061

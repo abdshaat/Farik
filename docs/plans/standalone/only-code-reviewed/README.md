@@ -1,6 +1,6 @@
 # Standalone: only code is reviewed, only payments ask, research is free, Catervas never merges
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review` (work outside a phase, one pull request to `main`)
 Decision: ADR 0061 (`docs/decisions/0061-only-code-is-reviewed-only-payments-ask.md`)
 Depends on: `origin/main` at `74b4a5af` (#45 merged)
@@ -8,16 +8,16 @@ Readiness confirmed by: pending (one round per plan file, against `docs/standard
 
 Eight plans, each copied from `docs/plans/step-template.md` and executed in this order. A plan consumes only what the plans before it committed. The parallel CTV-9 work (no sprints, ADR 0062) is rebased on this branch, so no plan here touches sprints, the sprint budget or ceremonies' scheduling.
 
-| # | File | What it does |
-|---|---|---|
-| 1 | `01-review-only-code.md` | The governor accepts and rejects every task that is not code on Catervas's own runs; readiness refuses `review` and `human` criteria outside code; no result waits on the human; templates carry machine criteria |
-| 2 | `02-pull-requests-only.md` | Catervas never merges: every policy reads as `pull_request`, a project with no `origin` waits for a hand merge, setup and settings lose the choice, Today lists each merge waited on |
-| 3 | `03-nothing-waits-on-a-merge.md` | A dependency counts once accepted and a task starts from its dependencies' branches; an epic's plan tasks follow at once, start from the plan's branch, and the plan task opens no pull request |
-| 4 | `04-designer-plan.md` | Catervas approves a Designer's plan at once; the decision session, its tool and prompt go; the task page and activity follow |
-| 5 | `05-only-payments-ask.md` | The owner is asked only before money is spent: contract approval, the product plan's approval, document proposals, free marketing plans, posts outside a plan, free connector calls and the PM's pipeline decision stop asking |
-| 6 | `06-research-is-free.md` | Every role holds `network`, every session may search and fetch, every sandbox has the network, the Marketing read limit and the approved sites go, every role reads the private workbooks; secrets stay |
-| 7 | `07-no-contract-judging.md` | No agent judges a contract: the judgment session, its tool and readiness rules go; `policy.judgment` is ignored on load and dropped on write; setup and settings lose "Who checks" |
-| 8 | `08-record.md` | SPEC 0.115, the design documents, and the plans' ticks (hard rule 8) |
+| # | File | What it does | Commits |
+|---|---|---|---|
+| 1 | `01-review-only-code.md` | The governor accepts and rejects every task that is not code on Catervas's own runs; readiness refuses `review` and `human` criteria outside code; no result waits on the human; templates carry machine criteria | `8470eec9`, `519aa1fe`, `3557a17f`, `b75062a7`, `78acc55d` |
+| 2 | `02-pull-requests-only.md` | Catervas never merges: every policy reads as `pull_request`, a project with no `origin` waits for a hand merge, setup and settings lose the choice, Today lists each merge waited on | `e6d271bc`, `261c68b5`, `5161e2f7` |
+| 3 | `03-nothing-waits-on-a-merge.md` | A dependency counts once accepted and a task starts from its dependencies' branches; an epic's plan tasks follow at once, start from the plan's branch, and the plan task opens no pull request | `19763edb`, `bbdd477f`, `9fc6edd0`, `11ce4b84`, `6c856162` |
+| 4 | `04-designer-plan.md` | Catervas approves a Designer's plan at once; the decision session, its tool and prompt go; the task page and activity follow | `b2144357`, `fb289495` |
+| 5 | `05-only-payments-ask.md` | The owner is asked only before money is spent: contract approval, the product plan's approval, document proposals, free marketing plans, posts outside a plan, free connector calls and the PM's pipeline decision stop asking | `baeee659`, `204ebda4`, `794d3177`, `bfee25b9`, `e8d3161e`, `08623820` |
+| 6 | `06-research-is-free.md` | Every role holds `network`, every session may search and fetch, every sandbox has the network, the Marketing read limit and the approved sites go, every role reads the private workbooks; secrets stay | `4a098ee6`, `1418a4a5`, `e4b8f9ae`, `f1c7773a` |
+| 7 | `07-no-contract-judging.md` | No agent judges a contract: the judgment session, its tool and readiness rules go; `policy.judgment` is ignored on load and dropped on write; setup and settings lose "Who checks" | `63a2de50`, `58c6c86a`, `793ac90f` |
+| 8 | `08-record.md` | SPEC 0.115, the design documents, and the plans' ticks (hard rule 8) | this commit (`docs(spec): only code is reviewed, only payments ask, revision 0.115`) |
 
 ## The rule for "changes code" (plan 1)
 
@@ -59,7 +59,7 @@ A Developer's task that only touches documents is still reviewed. That is rare, 
 ## Read limits: removed or kept (R3)
 
 | Limit (where) | Decision | Plan |
-|---|---|---|
+|---|---|---|---|
 | Marketing reads only `product/` and `marketing/` (`folders::read_access`, `ReadAccess`, `hooks::judge_reads`, `read_not_allowed`, `members_read`'s exception) | removed | 6 |
 | Procurement held to approved sites (`sites::web_access`, `check_site_urls`, `hooks::judge_fetch`, `judge_sites_of_call`, `site_not_approved`, `sites_unreadable`, `catervas_request_sites`, `catervas_read_sites`, `purchase_order_site_not_approved`) | removed | 6 |
 | Procurement's sandbox with no network (`sandbox_for`) | removed: the network follows the tier for every role | 6 |

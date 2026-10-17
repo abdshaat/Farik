@@ -1,6 +1,6 @@
 # Standalone 6 of 8: research is free
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.6 (the tier table, "A role held to read paths", "A role held to approved sites", "Read roots"), 5.17, 6.5, 6.6, 6.8, 6.10, 8.2, 8.3, 8.6; F9
 Depends on: plans 1 to 5 committed on this branch; ADR 0061

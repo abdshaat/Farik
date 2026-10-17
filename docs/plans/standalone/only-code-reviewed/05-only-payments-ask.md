@@ -1,6 +1,6 @@
 # Standalone 5 of 8: only payments ask
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 4.1, 4.3, 5.2, 5.3, 5.6, 5.7, 5.12, 5.16 item 2, 5.17, 6.5, 6.7, 6.10; F9, F12
 Depends on: plans 1 to 3 committed on this branch; ADR 0061

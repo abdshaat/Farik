@@ -1,6 +1,6 @@
 # Standalone 8 of 8: the record
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md`, revision 0.115
 Depends on: plans 1 to 7 committed on this branch; ADR 0061
@@ -62,7 +62,7 @@ Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Files: `docs/SPEC.md`, `docs/design/catervas-folders.md`, `docs/design/marketing-specialist.md`, `docs/design/designer-chats-templates.md`, and the nine files of this folder.
 
-- [ ] `docs(spec): only code is reviewed, only payments ask, revision 0.115`
+- [x] `docs(spec): only code is reviewed, only payments ask, revision 0.115`
 
 ## Verification
 

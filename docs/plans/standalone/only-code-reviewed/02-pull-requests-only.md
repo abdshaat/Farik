@@ -1,6 +1,6 @@
 # Standalone 2 of 8: Catervas never merges
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.14, 5.17 (folder changes), 4.1 (setup's last step); F16
 Depends on: plan 1 committed on this branch; ADR 0061

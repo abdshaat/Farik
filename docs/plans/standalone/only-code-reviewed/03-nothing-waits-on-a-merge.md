@@ -1,6 +1,6 @@
 # Standalone 3 of 8: nothing waits on a merge
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.2 (the dependency paragraph), 5.14, 5.16 item 3, 6.1, 6.3; F9
 Depends on: plans 1 and 2 committed on this branch (`catervas_verifies_alone`, pull requests only); ADR 0061
