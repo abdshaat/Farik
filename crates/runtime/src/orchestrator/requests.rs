@@ -35,7 +35,7 @@ use super::verify::{
     governor_results, history, is_mechanical, ran_criteria, read_only, record_review, reject,
     reviewer_results, since_verifying, unanswered,
 };
-use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
+use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, task_repository_of};
 use crate::catervafication::{FileDue, catervafication_of, file_due};
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
@@ -433,8 +433,8 @@ pub(super) fn assigned_epic(
 
 /// What a task under an epic says of the epic's progress.
 struct Child {
+    task_id: TaskId,
     status: TaskStatus,
-    awaiting_integration: bool,
     /// Its `allowed_paths` are exactly its `plan`: it writes the epic's plan.
     plan_task: bool,
 }
@@ -450,8 +450,8 @@ enum EpicStep {
 
 /// Every task cancelled, or none: break the epic down. Any task neither accepted nor cancelled:
 /// nothing, its tasks being worked. When every task not cancelled is a plan task, the Architect's
-/// plan is written: its tasks come next once the plan is integrated, and nothing while it awaits
-/// integration. Otherwise the epic's work is done and it is closed out.
+/// plan is written: its tasks come next once the plan task is accepted, integrated or not
+/// (ADR 0061). Otherwise the epic's work is done and it is closed out.
 fn epic_step(children: &[Child]) -> EpicStep {
     let live = || {
         children
@@ -464,8 +464,6 @@ fn epic_step(children: &[Child]) -> EpicStep {
         EpicStep::Nothing
     } else if !live().all(|c| c.plan_task) {
         EpicStep::CloseOut
-    } else if live().any(|c| c.awaiting_integration) {
-        EpicStep::Nothing
     } else {
         EpicStep::WriteThePlansTasks
     }
@@ -562,12 +560,30 @@ fn children_of_epic(
                 Err(error) => return Err(error.into()),
             };
             Ok(Child {
+                task_id: task.task_id.clone(),
                 status: task.status,
-                awaiting_integration: task.awaiting_integration,
                 plan_task,
             })
         })
         .collect()
+}
+
+/// The plan at `stem` on `branch` of `git` and its text, in the format it was written in. A branch
+/// that does not exist holds no plan.
+fn plan_on(
+    git: &catervas_store::Git,
+    branch: &str,
+    stem: &str,
+    team: &Team,
+) -> Result<Option<(String, String)>, OrchestratorError> {
+    match held_document(git, branch, stem, team.document_format()) {
+        Ok(Some(plan)) => {
+            let text = git.file_at(branch, &plan)?;
+            Ok(Some((plan, text)))
+        }
+        Ok(None) | Err(GitError::CommandFailed { .. }) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The Product Manager's message for an epic that is to be broken down, or whose plan is to be
@@ -580,20 +596,23 @@ fn product_managers_message(
     contract: &TaskContract,
     step: &EpicStep,
     listed: &[(String, String, String)],
+    plan_task: Option<&TaskId>,
 ) -> Result<String, OrchestratorError> {
     let unextended = plan_stem(contract.id.as_str());
     if *step == EpicStep::WriteThePlansTasks {
         let git = &deps.tools.git;
         let branch = integration_branch(team, git)?;
-        // The plan is read in the format it was written in.
-        match held_document(git, &branch, &unextended, team.document_format()) {
-            Ok(Some(plan)) => {
-                let text = git.file_at(&branch, &plan)?;
-                return Ok(plan_tasks_message(contract, &plan, &text, listed));
-            }
-            // No plan on the integration branch: the epic is broken down again.
-            Ok(None) | Err(GitError::CommandFailed { .. }) => {}
-            Err(error) => return Err(error.into()),
+        // The plan is read in the format it was written in: on the integration branch, else on the
+        // branch of the accepted plan task that has not been integrated yet.
+        if let Some(found) = plan_on(git, &branch, &unextended, team)? {
+            return Ok(plan_tasks_message(contract, &found.0, &found.1, listed));
+        }
+        if let Some(plan_task) = plan_task
+            && let Ok(theirs) = deps.tools.files.read_contract(plan_task)
+            && let Ok(repository) = task_repository_of(deps, team, &theirs)
+            && let Some(found) = plan_on(&repository.git, &task_branch(&theirs), &unextended, team)?
+        {
+            return Ok(plan_tasks_message(contract, &found.0, &found.1, listed));
         }
     }
     // A new plan is named in the team's format.
@@ -683,7 +702,17 @@ pub(super) async fn in_progress_epic(
             };
             (
                 pm,
-                product_managers_message(deps, team, &contract, &step, &listed)?,
+                product_managers_message(
+                    deps,
+                    team,
+                    &contract,
+                    &step,
+                    &listed,
+                    children
+                        .iter()
+                        .rfind(|child| child.plan_task && child.status != TaskStatus::Cancelled)
+                        .map(|child| &child.task_id),
+                )?,
             )
         }
     };
@@ -1132,55 +1161,42 @@ mod tests {
             EpicStep::{BreakDown, CloseOut, Nothing, WriteThePlansTasks},
             epic_step,
         };
-        let child = |status, awaiting_integration, plan_task| Child {
+        let child = |status, plan_task| Child {
+            task_id: "CTV-2".parse().expect("a task id"),
             status,
-            awaiting_integration,
             plan_task,
         };
-        let plan_task = |status, awaiting| child(status, awaiting, true);
-        let built = |status| child(status, false, false);
+        let plan_task = |status| child(status, true);
+        let built = |status| child(status, false);
         assert_eq!(epic_step(&[]), BreakDown);
+        assert_eq!(epic_step(&[plan_task(TaskStatus::Cancelled)]), BreakDown);
+        assert_eq!(epic_step(&[plan_task(TaskStatus::InProgress)]), Nothing);
         assert_eq!(
-            epic_step(&[plan_task(TaskStatus::Cancelled, false)]),
-            BreakDown
-        );
-        assert_eq!(
-            epic_step(&[plan_task(TaskStatus::InProgress, false)]),
-            Nothing
-        );
-        assert_eq!(epic_step(&[plan_task(TaskStatus::Accepted, true)]), Nothing);
-        assert_eq!(
-            epic_step(&[plan_task(TaskStatus::Accepted, false)]),
+            epic_step(&[plan_task(TaskStatus::Accepted)]),
             WriteThePlansTasks
         );
         assert_eq!(
             epic_step(&[
-                plan_task(TaskStatus::Cancelled, false),
-                plan_task(TaskStatus::Accepted, false)
+                plan_task(TaskStatus::Cancelled),
+                plan_task(TaskStatus::Accepted)
             ]),
             WriteThePlansTasks
         );
         assert_eq!(
-            epic_step(&[
-                plan_task(TaskStatus::Accepted, false),
-                built(TaskStatus::Accepted)
-            ]),
+            epic_step(&[plan_task(TaskStatus::Accepted), built(TaskStatus::Accepted)]),
             CloseOut
         );
         assert_eq!(epic_step(&[built(TaskStatus::Accepted)]), CloseOut);
         // A cancelled task that is no plan task does not stop the plan's tasks from being written.
         assert_eq!(
             epic_step(&[
-                plan_task(TaskStatus::Accepted, false),
+                plan_task(TaskStatus::Accepted),
                 built(TaskStatus::Cancelled)
             ]),
             WriteThePlansTasks
         );
         assert_eq!(
-            epic_step(&[
-                plan_task(TaskStatus::Accepted, false),
-                built(TaskStatus::Ready)
-            ]),
+            epic_step(&[plan_task(TaskStatus::Accepted), built(TaskStatus::Ready)]),
             Nothing
         );
     }
@@ -3574,48 +3590,24 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn writes_the_plans_tasks_once_the_plan_is_integrated() {
+    async fn writes_the_plans_tasks_from_the_plan_tasks_branch() {
         let harness = Harness::new("epic-plans-tasks", with_a_scrum_master_and_an_architect);
         a_scrum_masters_epic_in_progress(&harness);
         an_accepted_plan_task(&harness);
+        // The plan is on CTV-2's branch alone: `main` has none, and CTV-2 awaits integration.
+        branch_with(
+            &harness,
+            "docs/CTV-2",
+            "main",
+            &[(
+                THE_PLAN,
+                "# Plan for CTV-1: Add done.txt\n\n## Lane 1\n\n### 1.1 Write it\n",
+            )],
+        );
+        assert!(harness.row("CTV-2").awaiting_integration);
         let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        // Accepted, not yet integrated: nothing is asked about the epic.
-        orchestrator.tick().await.expect("the tick runs");
-        assert!(
-            adapter
-                .started()
-                .iter()
-                .all(|spec| spec.task_id != Some(task("CTV-1"))),
-            "{:?}",
-            adapter.started().len()
-        );
-
-        std::fs::create_dir_all(
-            harness
-                .project
-                .repo
-                .path
-                .join("docs/catervas/architecture/plans"),
-        )
-        .expect("the plans folder is made");
-        harness.commit_at_root(
-            "docs/catervas/architecture/plans/CTV-1.md",
-            "# Plan for CTV-1: Add done.txt\n\n## Lane 1\n\n### 1.1 Write it\n",
-            "docs: plan CTV-1",
-        );
-        if harness
-            .project
-            .deps
-            .projections
-            .board()
-            .expect("the board")
-            .iter()
-            .any(|row| row.task_id == task("CTV-2") && row.awaiting_integration)
-        {
-            integrated(&harness, false);
-        }
         orchestrator.tick().await.expect("the tick runs");
 
         let started = adapter.started();

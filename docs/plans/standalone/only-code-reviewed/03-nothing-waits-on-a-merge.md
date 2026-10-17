@@ -150,7 +150,7 @@ Tests:
 - `asks_for_the_architects_plan_task` (`messages.rs`) also asserts the message ends with the sentence of Decisions. `asks_for_a_task_per_planned_task` asserts that it starts with `The Architect's plan for the epic CTV-1 is at docs/catervas/architecture/plans/CTV-1.md: `, the rest unchanged.
 - `breaks_down_again_when_the_plan_is_missing` and `the_plan_is_read_in_either_format` keep their assertions.
 
-- [ ] `feat(runtime): file an epic's tasks once its plan task is accepted`
+- [x] `feat(runtime): file an epic's tasks once its plan task is accepted`
 
 ### Task 5: a plan task rides with its tasks
 

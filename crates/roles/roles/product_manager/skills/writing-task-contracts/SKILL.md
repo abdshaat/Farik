@@ -113,7 +113,7 @@ An approved epic's tasks are yours to write. Read the epic and the tasks already
    extension (`.html` or `.md`, as the Team rules say),
    no `lane`, an `artifact` criterion that the plan exists, and in its requirements how many
    builders (Software Developers and UI/UX Designers) are active.
-2. Once the plan is on the integration branch, file one task per planned task: its `plan`, its
+2. Once Catervas has accepted the plan task (you are asked with the plan's text), file one task per planned task: its `plan`, its
    `lane`, the planned tasks it needs in `dependencies`, the Architect's paths as `allowed_paths`
    and its constraints as `constraints`, with acceptance criteria from the epic's requirements and
    the spec.
