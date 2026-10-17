@@ -25,8 +25,18 @@ use crate::session::{McpServerConfig, McpTransport};
 pub mod docker;
 
 /// A dead port on the preview's loopback: every request the browser does not make to `localhost`
-/// goes to it, and fails, whatever the namespace lets through (step 12's confinement).
+/// or `host.docker.internal` goes to it, and fails, whatever the namespace lets through (step 12's
+/// confinement).
 pub const BLACKHOLE_PROXY: &str = "http://127.0.0.1:9";
+
+/// The hosts the browser reaches past the dead proxy: the preview, and the owner's computer (ADR 0067).
+pub const PROXY_BYPASS: &str = "localhost,host.docker.internal";
+
+/// The origins the browser may request beside the preview's: the owner's computer, on any port.
+pub const OWNER_ORIGINS: [&str; 2] = [
+    "http://host.docker.internal:*",
+    "https://host.docker.internal:*",
+];
 
 /// axe-core, as `packages/ui` pins it for the web tests, which the page check runs in the page.
 pub const AXE_SOURCE: &str = include_str!("../assets/axe.min.js");
@@ -333,7 +343,8 @@ pub fn disallowed_tools(definition: &ConnectorDefinition) -> Vec<String> {
 
 /// The MCP server a session's browser is: `definition`'s image run by docker in the preview's
 /// network namespace, as the user, named and labelled, with every request that is not to
-/// `localhost` sent to `BLACKHOLE_PROXY`, and only the preview's origin allowed. `output_dir` is
+/// `localhost` or `host.docker.internal` sent to `BLACKHOLE_PROXY`, and only the preview's origin
+/// and the owner's computer allowed. `output_dir` is
 /// where it writes what it saves.
 #[must_use]
 pub fn connector_server(
@@ -377,9 +388,12 @@ pub fn connector_server(
         BLACKHOLE_PROXY.to_string(),
         // Playwright drops Chromium's own loopback bypass once a proxy is set, so it is named.
         "--proxy-bypass".to_string(),
-        "localhost".to_string(),
+        PROXY_BYPASS.to_string(),
         "--allowed-origins".to_string(),
-        preview.origin(),
+        std::iter::once(preview.origin())
+            .chain(OWNER_ORIGINS.map(String::from))
+            .collect::<Vec<_>>()
+            .join(";"),
         "--output-dir".to_string(),
         "/output".to_string(),
     ]);
@@ -522,7 +536,7 @@ pub fn check_page(
         "--proxy-server".to_string(),
         BLACKHOLE_PROXY.to_string(),
         "--proxy-bypass".to_string(),
-        "localhost".to_string(),
+        PROXY_BYPASS.to_string(),
         "--tags".to_string(),
         AXE_TAGS.join(","),
     ]);
@@ -1192,10 +1206,13 @@ mod tests {
             .expect("the pinned image");
         let server_args = &args[image + 1..];
         assert_eq!(after(server_args, "--proxy-server"), ["http://127.0.0.1:9"]);
-        assert_eq!(after(server_args, "--proxy-bypass"), ["localhost"]);
+        assert_eq!(
+            after(server_args, "--proxy-bypass"),
+            ["localhost,host.docker.internal"]
+        );
         assert_eq!(
             after(server_args, "--allowed-origins"),
-            ["http://localhost:4400"]
+            ["http://localhost:4400;http://host.docker.internal:*;https://host.docker.internal:*"]
         );
         assert_eq!(after(server_args, "--output-dir"), ["/output"]);
         assert!(server_args.contains(&"--isolated".to_string()), "{args:?}");
