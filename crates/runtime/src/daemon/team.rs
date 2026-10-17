@@ -5055,7 +5055,7 @@ pub(super) mod tests {
     const KIT_TAGS: fn() -> Value =
         || json!({ "search": "network", "env": "paid", "delete_repo": "denied" });
 
-    /// The fixture kit with a spending tool `make`, which may run 20 times a sprint unasked, and
+    /// The fixture kit with a spending tool `make`, which may run 20 times a day unasked, and
     /// `post`, which publishes and so always asks.
     fn allowance_kit(test: &str) -> catervas_roles::Kit {
         fixture_kit_with(

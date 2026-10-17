@@ -648,7 +648,7 @@ mod tests {
         assert_eq!(listed["unreadable"], json!([{ "slug": "broken" }]));
     }
 
-    /// A template that switches "Plan work in sprints" off frees the Backlog at once.
+    /// A template applied wakes the team at once.
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn wakes_the_team_when_a_template_is_applied() {

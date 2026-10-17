@@ -1,6 +1,6 @@
 // The product plan's changes Today asks the owner to approve, as `folder_doc_proposals.list`
-// answers (spec 5.7), with the words of the approved mockup: Mira's two documents after the
-// sprint 4 review.
+// answers (spec 5.7), with the words of the approved mockup: Mira's two documents after
+// review 4.
 
 import type { FakeSocket } from "./fake-socket.ts";
 import { answerQuery, answerStatus, renderApp } from "./render-app.tsx";

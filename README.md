@@ -51,7 +51,7 @@ A team has two to seven agents. Each has its own name, avatar, persona, model se
 | Role | What it does | What it may not do |
 |---|---|---|
 | **Product Manager** | Turns your requests into contracts after asking you its questions, owns the backlog and the product documents, and accepts work against its contracts. | Write application code, or accept work that no reviewer has verified. |
-| **Scrum Master** | Triages requests, breaks approved plans into tasks, assigns them, and runs planning, standup, review and retro. | Change a plan's requirements, write application code, or accept work. |
+| **Scrum Master** | Triages requests, assigns ready work, and runs each delivery's review and retro. | Change a plan's requirements, write application code, or accept work. |
 | **Architect** | Holds the shape of the system: writes decision records, sets constraints for contracts, and reviews the Developer's changes. | Write application code, push shared branches, or accept work. |
 | **Developer** | Implements contracts on `feature/` or `fix/` branches and runs the exit criteria before declaring done. It is the only role that writes application code. | Change a contract, accept its own work, or touch files outside the contract's paths. |
 | **Marketing Specialist** | Researches the market and writes the marketing plan, release notes, landing copy and positioning. | Change application code, or publish anywhere without your approval. |
@@ -144,12 +144,11 @@ The browser is the main way to use Catervas. The commands below are also availab
 | **Open** | `catervas serve` | Open the browser app and keep the team available until stopped |
 | **Run** | `catervas run` | Drive the team until nothing needs doing, a stop, or Ctrl-C |
 | | `catervas plan` | Triage, contract, break down and assign, without starting any work |
-| | `catervas sprint start` / `end` / `show` | Start, end, or show a sprint, with an optional budget |
 | | `catervas stop` | Stop the run after its session, or stop one session now |
 | **Decide** | `catervas approve <id>` | Approve a contract that awaits your approval |
 | | `catervas accept <id>` | Accept a result that waits for you |
 | | `catervas answer <question> <answer>` | Answer a question an agent asked |
-| | `catervas resolve <id> <status> <message>` | Resolve an escalation, with a message for the next session |
+| | `catervas resolve <id> <status> [--extra-tries <n> \| --extra-room] <message>` | Resolve an escalation, with a message for the next session; a task that used its tries or its room can be given more |
 | | `catervas integrate <id>` | Integrate an accepted task now |
 | | `catervas cancel <id> <reason>` | Cancel a task |
 | **Talk** | `catervas say <text>` | Post in the team channel; `@<id>` mentions an agent |
@@ -157,7 +156,7 @@ The browser is the main way to use Catervas. The commands below are also availab
 | **Read** | `catervas board` | The lifecycle, one line per task |
 | | `catervas task show <id>` | One contract and everything that happened to it |
 | | `catervas log` | The event log, filtered by `--task`, `--kind` or `--limit` |
-| | `catervas metrics` | The harness metrics for the project or one sprint |
+| | `catervas metrics` | The harness metrics for the project |
 | | `catervas doctor` | Every way the files and the log disagree |
 
 ## Open source

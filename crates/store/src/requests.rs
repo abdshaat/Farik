@@ -344,7 +344,7 @@ pub fn file_rederive_request(
 
 /// Files the request that raises the budget of marketing plan `plan` (ADR 0042, step 08g), as
 /// `file_request` files one for `created_by`: `task.created` names the plan in `raises`, so that
-/// the sprint policy never holds it, and `request.triaged { small }` follows at once, by `catervas`,
+/// nothing holds it, and `request.triaged { small }` follows at once, by `catervas`,
 /// so that no triage session runs.
 ///
 /// # Errors
@@ -424,7 +424,7 @@ pub fn product_plan_request(reviewer: Role, max_cost_usd: f64, format: DocumentF
 }
 
 /// Files the contract `product_plan_request` makes, as the owner's word: `created_by` is `human`,
-/// `task.created` has `product_plan`, which skips the sprint queue and has the contract judged as
+/// `task.created` has `product_plan`, which has the contract judged as
 /// filed, and `request.triaged { small }` follows at once, by `catervas`, so that no triage
 /// session runs.
 ///
@@ -1191,7 +1191,7 @@ pub fn contract_write(refusal: &ContractWriteRefusal) -> String {
         }
         ContractWriteRefusal::ContractFrozen { fields } => format!(
             "the contract is frozen: once a task leaves refining only its status, assignee, \
-             reviewer, iteration, sprint and notes change (5.11), and this would change {}",
+             reviewer, iteration and notes change (5.11), and this would change {}",
             listed(fields)
         ),
         ContractWriteRefusal::TaskTerminal { status } => format!(

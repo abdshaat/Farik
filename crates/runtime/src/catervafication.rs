@@ -454,8 +454,8 @@ pub(crate) enum FileDue {
 }
 
 /// Files, as Catervas, the task of each role `catervafication_roles` lists that has none under
-/// `epic` in any status (a task the owner cancelled is not filed again), each into the epic's
-/// sprint. The Marketing Specialist's task is filed with the others and depends on the Product
+/// `epic` in any status (a task the owner cancelled is not filed again), each under the
+/// epic. The Marketing Specialist's task is filed with the others and depends on the Product
 /// Manager's task under the epic (on an existing repository) or on the new project's product plan
 /// task, so that it starts from that task's branch once it is accepted (ADR 0061); it is not filed
 /// when that task is cancelled.

@@ -996,8 +996,8 @@ fn raise_words(plan_id: &str, currency: &str, raised: &Raised) -> (String, Strin
 /// `marketing_budget.raise`: the owner raises the budget of the active marketing plan whose ads
 /// reached it. The plan must be the active one and have a `marketing_budget.reached`, no raise of
 /// it may be open, and the amounts must pass `check_raise` (`raise_refused`, `raise_open`). Files
-/// the request for a new version of the plan as a request of the human's that skips triage and the
-/// sprint queue (`file_raise_request`), and answers its task.
+/// the request for a new version of the plan as a request of the human's that skips triage
+/// (`file_raise_request`), and answers its task.
 fn raise_budget(deps: &ToolDeps, spent: &PlanSpend, params: &Value) -> Result<Value, Failure> {
     let plan_id = params["plan"].as_str().unwrap_or_default();
     let (plan, reached) = plan_to_raise(deps, plan_id)?;

@@ -184,7 +184,7 @@ pub(super) const TRIAGE_TOOL: &str = "catervas_triage_request";
 pub(super) struct SessionAsk<'a> {
     /// The agent the session is.
     pub(super) agent: &'a Agent,
-    /// The task it is about, when it is about one: a sprint's planning session is about none.
+    /// The task it is about, when it is about one: a ceremony's session is about none.
     pub(super) contract: Option<&'a TaskContract>,
     /// Why it runs.
     pub(super) purpose: SessionPurpose,
@@ -953,7 +953,7 @@ const DRAFT_SELLER_MESSAGE_TOOL: &str = "catervas_draft_seller_message";
 /// the implement session of a task and in its chat.
 const READ_SELLER_MESSAGES_TOOL: &str = "catervas_read_seller_messages";
 const READ_SELLER_REPLIES_TOOL: &str = "catervas_read_seller_replies";
-/// The tool that writes a document of the caller's folder at a sprint planning, review or retro.
+/// The tool that writes a document of the caller's folder at a delivery's review or retro.
 const WRITE_FOLDER_DOC_TOOL: &str = "catervas_write_folder_doc";
 
 /// The tool that replaces the agent's notebook.

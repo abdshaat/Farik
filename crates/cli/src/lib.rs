@@ -1868,3 +1868,38 @@ fn usage(error: &clap::Error, io: &mut CliIo<'_>) -> i32 {
 fn say(stream: &mut Box<dyn Write + '_>, line: &str) {
     let _ = writeln!(stream, "{}", printable::printable(line));
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::{Command, CommandFactory};
+
+    use super::Cli;
+
+    /// Every command's help, at every depth, with the command's own name for the failure.
+    fn helps(command: &mut Command, path: &str, found: &mut Vec<(String, String)>) {
+        found.push((path.to_string(), command.render_long_help().to_string()));
+        let names: Vec<String> = command
+            .get_subcommands()
+            .map(|sub| sub.get_name().to_string())
+            .collect();
+        for name in names {
+            if let Some(sub) = command.find_subcommand_mut(&name) {
+                helps(sub, &format!("{path} {name}"), found);
+            }
+        }
+    }
+
+    /// Deliveries replace sprints (ADR 0062): no help text speaks of a sprint.
+    #[test]
+    fn the_help_never_mentions_a_sprint() {
+        let mut found = Vec::new();
+        helps(&mut Cli::command(), "catervas", &mut found);
+        assert!(found.len() > 20, "{} commands", found.len());
+        let hits: Vec<&str> = found
+            .iter()
+            .filter(|(_, help)| help.to_lowercase().contains("sprint"))
+            .map(|(path, _)| path.as_str())
+            .collect();
+        assert!(hits.is_empty(), "{hits:?}");
+    }
+}

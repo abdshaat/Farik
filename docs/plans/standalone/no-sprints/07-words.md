@@ -144,7 +144,7 @@ fields (`docs/schemas/team.schema.json`'s `plan_in_sprints` and `ambient_message
 (`crates/runtime/src/deliveries.rs`); and the tests that build old logs (plan 5's and plan 3's).
 A match outside these is fixed in this task.
 
-- [ ] `docs(cli): no sprint in the help or the README`
+- [x] `docs(cli): no sprint in the help or the README`
 
 ## Verification
 

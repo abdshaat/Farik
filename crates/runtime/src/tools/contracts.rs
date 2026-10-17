@@ -1,4 +1,4 @@
-//! Triage, contract writing, filing tasks, and planning a sprint: the tools that decide what a task
+//! Triage, contract writing, and filing tasks: the tools that decide what a task
 //! is and when it is worked on.
 
 use catervas_core::contract::{

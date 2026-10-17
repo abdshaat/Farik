@@ -453,7 +453,7 @@ pub(super) fn plan_message(
 pub(super) struct Digest {
     /// Every open escalation, oldest first.
     pub(super) escalations: Vec<OpenEscalation>,
-    /// Each `budget.exhausted` of the day's or the sprint's dollars since the previous planning,
+    /// Each `budget.exhausted` of the day's dollars since the previous ceremony,
     /// with when it was recorded.
     pub(super) spent: Vec<(BudgetExhaustedBodyScope, DateTime<Utc>)>,
     /// Now, which each escalation has waited until.

@@ -1730,7 +1730,10 @@ mod tests {
             }
         }
         let mut found = Vec::new();
-        files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("roles"), &mut found);
+        files(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("roles"),
+            &mut found,
+        );
         assert!(found.len() > 50, "{found:?}");
         let mut hits = Vec::new();
         for path in found {
