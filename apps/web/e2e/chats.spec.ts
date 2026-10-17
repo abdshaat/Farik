@@ -43,6 +43,17 @@ test("the user chats with an agent, and sends her proposal as a request, through
 			page.getByRole("heading", { name: "Talking with Mira" }),
 		).toBeVisible();
 
+		// 1b. "Send as a task" is beside Send, and the real server refuses a message too short to be
+		// one, in words, recording nothing.
+		await page.getByLabel("Message Mira").fill("too short");
+		await page.getByRole("button", { name: "Send as a task" }).click();
+		await expect(page.getByRole("alert")).toHaveText(
+			"Say a little more: a task needs at least 20 characters.",
+		);
+		expect(events(serve.project).map((e) => e.kind)).not.toContain(
+			"chat_message.posted",
+		);
+
 		// 2. The question, labelled You.
 		await ask(page, "Mira", "Could customers also pay with Apple Pay?");
 		const messages = page.getByRole("list", { name: "Messages" });
