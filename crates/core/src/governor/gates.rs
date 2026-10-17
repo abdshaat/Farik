@@ -896,9 +896,10 @@ pub const FIELDS_THE_GOVERNOR_WRITES: [&str; 5] =
 /// that could set it would take the contract from its own team until a human intervened.
 pub const FIELDS_ONLY_THE_HUMAN_WRITES: [&str; 1] = ["locked"];
 
-/// The fields the store owns and nobody writes through this path: the identifier it assigns and
-/// the times it stamps.
-pub const FIELDS_THE_STORE_OWNS: [&str; 4] = ["id", "created_by", "created_at", "updated_at"];
+/// The fields the store owns and nobody writes through this path: the identifier it assigns, the
+/// times it stamps, and the branch Catervas records when the task's worktree is first made.
+pub const FIELDS_THE_STORE_OWNS: [&str; 5] =
+    ["id", "created_by", "created_at", "updated_at", "branch"];
 
 /// The fields fixed when a contract is created and never written afterwards: what kind of thing
 /// it is, which the triage decided before refining started, and which epic it belongs to, which
@@ -2656,7 +2657,7 @@ mod tests {
             ),
             Ok(ContractWriteOutcome::Allowed)
         );
-        for field in ["id", "created_by", "created_at", "updated_at"] {
+        for field in ["id", "created_by", "created_at", "updated_at", "branch"] {
             assert_eq!(
                 check_contract_write(
                     Kind::Task,
