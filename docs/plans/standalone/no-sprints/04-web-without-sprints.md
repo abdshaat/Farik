@@ -148,7 +148,7 @@ expects no "Planning work" heading.
   `team.propose` answer whose policy holds `plan_in_sprints: true`, the `team.start` call sent at the
   end of setup (`sent(s, "team.start")`) has no `plan_in_sprints` under `params.team.policy`.
 
-- [ ] `feat(web): setup and Settings no longer ask about sprints`
+- [x] `feat(web): setup and Settings no longer ask about sprints`
 
 ### Task 5: the words, and the journeys
 

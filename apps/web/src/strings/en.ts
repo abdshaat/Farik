@@ -17,7 +17,7 @@ export const en = {
 	sectionGeneralSummary: "Theme and language",
 	sectionAllowedActionsSummary: "What agents may do",
 	sectionSpendingSummary: "The daily limit",
-	sectionWorkSummary: "Sprints and plan checks",
+	sectionWorkSummary: "How documents are written",
 	sectionYourAppSummary: "How to open your app",
 	sectionSavedTeamsSummary: "Your saved teams",
 	sectionComputerSummary: "Folder and connection",
@@ -857,10 +857,6 @@ export const en = {
 	todayBacklogStart: "Start a sprint",
 	todayBacklogBegin: "to begin them.",
 	todayBacklogBeginOne: "to begin it.",
-	rulesPlanning: "Planning work",
-	planInSprints: "Plan work in sprints",
-	planInSprintsNote:
-		"The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks.\nNobody starts building until you start a sprint.\nWork that gets ready during a sprint waits in the Backlog for the next one.",
 	rulesDocuments: "Documents",
 	documentsHtml: "Write documents as HTML",
 	documentsHtmlNote:
@@ -873,11 +869,6 @@ export const en = {
 	refuseRewriteOpen: "Your team is still rewriting its documents.",
 	refuseNothingToRewrite:
 		"Every document your team can rewrite is already HTML.",
-	finishSprints: "Your team works in sprints",
-	finishSprintsNote:
-		"The team gets your requests ready straight away, and starts building when you start a sprint from the Board. Until then, ready work waits in the Backlog.",
-	finishSprintsChange:
-		"Change this under advanced settings, or later in Settings.",
 	taskBack: "Back to the board",
 	taskInSprint: "{id} in sprint {n}.",
 	taskDoing: "{name} is doing it",

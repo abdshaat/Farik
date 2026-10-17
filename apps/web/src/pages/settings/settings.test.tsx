@@ -208,7 +208,6 @@ describe("settings directory", () => {
 			policy: {
 				integration: "auto_merge",
 				permissions: { run_commands: true, push: false },
-				plan_in_sprints: true,
 			},
 			ui_paths: ["**/*.tsx"],
 		};
@@ -216,18 +215,13 @@ describe("settings directory", () => {
 			en.rulesMay,
 			en.rulesSpendTitle,
 			en.rulesFinish,
-			en.rulesPlanning,
 			en.rulesDocuments,
 			en.uiPathsTitle,
 		];
 		const pages = [
 			["allowed-actions", en.sectionAllowedActions, [en.rulesMay]],
 			["spending", en.sectionSpending, [en.rulesSpendTitle]],
-			[
-				"work",
-				en.sectionWork,
-				[en.rulesFinish, en.rulesPlanning, en.rulesDocuments],
-			],
+			["work", en.sectionWork, [en.rulesFinish, en.rulesDocuments]],
 		] as const;
 		for (const [path, name, held] of pages) {
 			const { container, s } = await open(`/settings/${path}`, rules);

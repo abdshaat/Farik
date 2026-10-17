@@ -46,8 +46,6 @@ export type Team = {
 	policy: {
 		integration: string;
 		permissions?: { runCommands?: boolean; push?: boolean };
-		/** Whether work waits for a sprint (step 15); absent means no. */
-		planInSprints?: boolean;
 		/** The format new documents are written in; absent means HTML. */
 		documentFormat?: "html" | "markdown";
 		[key: string]: unknown;
@@ -131,7 +129,9 @@ export function teamOf(draft: Draft): Team {
 		});
 	const preview =
 		agents.some((a) => a.role === "ui_ux_designer") && previewOf(draft.preview);
-	return { ...draft.team, agents, ...(preview && { preview }) };
+	// The daemon may still answer `planInSprints`; the setup never sends it back.
+	const { planInSprints: _, ...policy } = draft.team.policy;
+	return { ...draft.team, policy, agents, ...(preview && { preview }) };
 }
 
 /** Another agent like `like`, named from the spare names none of `agents` uses yet. */
@@ -206,8 +206,7 @@ function teamDraftOf(
 		start,
 	};
 	if ((start === "saved" || start === "builtin") && template) {
-		const { permissions, integration, planInSprints, documentFormat } =
-			template.policy;
+		const { permissions, integration, documentFormat } = template.policy;
 		const { dailyUsd: _, ...budgets } = proposed.team.budgets;
 		return {
 			...base,
@@ -218,8 +217,6 @@ function teamDraftOf(
 					...proposed.team.policy,
 					permissions,
 					integration,
-					// A saved team without the answer plans in sprints, as any new team.
-					...(planInSprints !== undefined && { planInSprints }),
 					...(documentFormat !== undefined && { documentFormat }),
 				},
 				budgets:
