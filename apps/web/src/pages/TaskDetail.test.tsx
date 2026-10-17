@@ -890,7 +890,7 @@ describe("task detail", () => {
 		await opened(hunt(["docs/catervas/engineering/bug-hunt.html"]));
 		expect(
 			await screen.findByText(
-				"CTV-1 in sprint 2. Theo is doing it, and Catervas checks it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Catervas checks it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 		expect(screen.queryByText(/reviews it/)).toBeNull();
@@ -899,7 +899,7 @@ describe("task detail", () => {
 		await opened(hunt(["docs/catervas/engineering/bug-hunt.html", "src/**"]));
 		expect(
 			await screen.findByText(
-				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 	});
