@@ -17,7 +17,7 @@ mod tests {
     use crate::generated::event::EventKind;
 
     /// Every kind the log holds in this phase, with the wire name the schema gives it.
-    const KINDS: [(&str, EventKind); 115] = [
+    const KINDS: [(&str, EventKind); 116] = [
         ("task.created", EventKind::TaskCreated),
         ("request.triaged", EventKind::RequestTriaged),
         ("contract.written", EventKind::ContractWritten),
@@ -49,6 +49,7 @@ mod tests {
         ("question.answered", EventKind::QuestionAnswered),
         ("human.accepted", EventKind::HumanAccepted),
         ("escalation.resolved", EventKind::EscalationResolved),
+        ("task.room_granted", EventKind::TaskRoomGranted),
         ("agent.updated", EventKind::AgentUpdated),
         ("sprint.started", EventKind::SprintStarted),
         ("sprint.planned", EventKind::SprintPlanned),

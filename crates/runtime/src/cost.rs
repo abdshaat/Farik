@@ -251,7 +251,7 @@ pub fn budget_state(
             let spent = spent_by(projections, CostScope::Task, &contract.id.to_string())?;
             let resolved = projections.log().read(&EventQuery {
                 task_id: Some(contract.id.clone()),
-                kinds: vec![EventKind::EscalationResolved],
+                kinds: vec![EventKind::EscalationResolved, EventKind::TaskRoomGranted],
                 ..EventQuery::default()
             })?;
             // A session the provider refused the key of is not the task's (5.5): it is not counted.
@@ -274,10 +274,11 @@ pub fn budget_state(
                     .as_ref()
                     .map_or(0, |row| row.sessions)
                     .saturating_sub(u32::try_from(refused).unwrap_or(u32::MAX)),
-                contract.budget.max_cost_usd,
+                contract.budget.max_cost_usd + room_granted(&resolved).1,
                 u32::try_from(contract.budget.max_sessions.get())
                     .unwrap_or(u32::MAX)
-                    .saturating_add(extra_tries(&resolved).saturating_mul(4)),
+                    .saturating_add(extra_tries(&resolved).saturating_mul(4))
+                    .saturating_add(room_granted(&resolved).0),
             )
         }
     };
@@ -301,6 +302,23 @@ pub fn budget_state(
         day_spent_usd: day.map_or(0.0, |row| row.usd),
         day_max_usd: team.budgets.daily_usd.unwrap_or(f64::INFINITY),
     })
+}
+
+/// The sessions and dollars the human granted over `history`'s `task.room_granted` events
+/// (ADR 0062), added to the contract's own caps.
+pub(crate) fn room_granted(history: &[CatervasEvent]) -> (u32, f64) {
+    history
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::TaskRoomGranted(body) => Some(body),
+            _ => None,
+        })
+        .fold((0, 0.0), |(sessions, usd), body| {
+            (
+                sessions.saturating_add(u32::try_from(body.sessions.get()).unwrap_or(u32::MAX)),
+                usd + body.cost_usd,
+            )
+        })
 }
 
 /// The more tries the human granted over `history`'s `escalation.resolved` events (ADR 0024).

@@ -5137,6 +5137,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Carry on.".to_string(),
                 extra_tries: None,
+                extra_room: false,
             })
             .await
             .expect("the human resolves the escalation");

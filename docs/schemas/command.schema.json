@@ -157,7 +157,7 @@
     },
     "escalationResolveBody": {
       "title": "Escalation Resolve Body",
-      "description": "The human resolves an escalation (docs/SPEC.md section 5.7) by moving the task to a status, with a message the next session about it is given. extra_tries grants that many more attempts, counting the one the resolve starts; only an iterations escalation takes it (ADR 0024).",
+      "description": "The human resolves an escalation (docs/SPEC.md section 5.7) by moving the task to a status, with a message the next session about it is given. extra_tries grants that many more attempts, counting the one the resolve starts; only an iterations escalation takes it (ADR 0024). extra_room gives a task whose dollars or sessions are spent the contract's own budget again; only a budget or sessions escalation takes it, and not together with extra_tries (ADR 0062).",
       "type": "object",
       "additionalProperties": false,
       "required": ["task_id", "to", "message"],
@@ -165,7 +165,8 @@
         "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
         "to": { "$ref": "#/$defs/taskStatus" },
         "message": { "type": "string" },
-        "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 }
+        "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "extra_room": { "type": "boolean" }
       }
     },
     "humanSendBackBody": {

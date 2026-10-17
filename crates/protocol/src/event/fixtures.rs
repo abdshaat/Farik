@@ -134,6 +134,9 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::EscalationResolved
         | EventKind::MessagePosted
         | EventKind::ChatMessagePosted => a_human_body_wire(kind),
+        EventKind::TaskRoomGranted => {
+            json!({ "sessions": 4, "cost_usd": 5.0, "granted_by": "human" })
+        }
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
         EventKind::TeamPaused | EventKind::TeamResumed => json!({ "by": "human" }),
         EventKind::DesignPlanProposed

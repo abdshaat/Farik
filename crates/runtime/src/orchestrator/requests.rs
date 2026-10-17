@@ -2941,6 +2941,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Add the missing file.".to_string(),
                 extra_tries: None,
+                extra_room: false,
             })
             .await
             .expect("the human sends it back");

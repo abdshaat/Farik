@@ -1098,6 +1098,7 @@ async fn save(state: &DaemonState, deps: &Arc<ToolDeps>, params: &Value) -> Resu
             to: TaskStatus::Refining,
             message: EDITED.to_string(),
             extra_tries: None,
+            extra_room: false,
         };
         if let CommandReply::Error { detail, .. } = super::handled(state, command).await {
             return Err(Failure::new(REFUSED, detail));

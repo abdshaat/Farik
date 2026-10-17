@@ -1556,6 +1556,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 to: (*status).into(),
                 message: message.join(" "),
                 extra_tries: None,
+                extra_room: false,
             },
         ),
         Commands::Cancel { task_id, reason } => (

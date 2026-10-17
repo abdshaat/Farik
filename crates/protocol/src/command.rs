@@ -140,6 +140,9 @@ pub enum Command {
         message: String,
         /// More attempts for an `iterations` escalation, counting the one this starts (ADR 0024).
         extra_tries: Option<u8>,
+        /// The contract's own sessions and dollars again, for a `budget` or `sessions`
+        /// escalation (ADR 0062).
+        extra_room: bool,
     },
     /// Send a contract awaiting approval back to `refining`, or a result that waits for the human
     /// back to its assignee (ADR 0024).
@@ -533,6 +536,7 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 extra_tries: body
                     .extra_tries
                     .and_then(|tries| u8::try_from(tries.get()).ok()),
+                extra_room: body.extra_room.unwrap_or(false),
             })
         }
         CommandName::HumanSendBack => send_back(read_body(body, name)?),
@@ -933,7 +937,8 @@ pub fn command_to_value(command: &Command) -> Value {
             to,
             message,
             extra_tries,
-        } => resolve_wire(task_id, *to, message, *extra_tries),
+            extra_room,
+        } => resolve_wire(task_id, *to, message, *extra_tries, *extra_room),
         Command::HumanSendBack {
             task_id,
             subject,
@@ -1283,13 +1288,18 @@ fn resolve_wire(
     to: TaskStatus,
     message: &str,
     extra_tries: Option<u8>,
+    extra_room: bool,
 ) -> (CommandName, Value) {
     (
         CommandName::EscalationResolve,
         with_optional(
-            json!({ "task_id": task_id.as_str(), "to": to.to_string(), "message": message }),
-            "extra_tries",
-            extra_tries.map(|tries| json!(tries)),
+            with_optional(
+                json!({ "task_id": task_id.as_str(), "to": to.to_string(), "message": message }),
+                "extra_tries",
+                extra_tries.map(|tries| json!(tries)),
+            ),
+            "extra_room",
+            extra_room.then_some(Value::Bool(true)),
         ),
     )
 }
@@ -1681,7 +1691,8 @@ mod tests {
                 task_id: ctv(3),
                 to: TaskStatus::Refining,
                 message: "Split it by page.".to_string(),
-                extra_tries: None
+                extra_tries: None,
+                extra_room: false
             }
         );
         assert_eq!(

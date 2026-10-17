@@ -88,6 +88,7 @@
         "question.answered",
         "human.accepted",
         "escalation.resolved",
+        "task.room_granted",
         "agent.updated",
         "sprint.started",
         "sprint.planned",
@@ -209,6 +210,7 @@
         { "$ref": "#/$defs/questionAnsweredBody" },
         { "$ref": "#/$defs/humanAcceptedBody" },
         { "$ref": "#/$defs/escalationResolvedBody" },
+        { "$ref": "#/$defs/taskRoomGrantedBody" },
         { "$ref": "#/$defs/agentUpdatedBody" },
         { "$ref": "#/$defs/sprintStartedBody" },
         { "$ref": "#/$defs/sprintPlannedBody" },
@@ -693,6 +695,18 @@
         "message": { "type": "string" },
         "resolved_by": { "type": "string" },
         "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 }
+      }
+    },
+    "taskRoomGrantedBody": {
+      "title": "Task Room Granted Body",
+      "description": "The human gave a task whose dollars or sessions are spent more room when resolving its escalation (ADR 0062, amending ADR 0024): the task's caps grow by sessions and cost_usd, which are the contract's own, for the rest of its life. granted_by is the actor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions", "cost_usd", "granted_by"],
+      "properties": {
+        "sessions": { "type": "integer", "minimum": 1 },
+        "cost_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "granted_by": { "type": "string" }
       }
     },
     "agentUpdatedBody": {

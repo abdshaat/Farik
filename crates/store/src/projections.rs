@@ -697,6 +697,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::SessionEnded(_)
         | EventBody::HumanAccepted(_)
         | EventBody::EscalationResolved(_)
+        | EventBody::TaskRoomGranted(_)
         | EventBody::AgentUpdated(_)
         | EventBody::SprintStarted(_)
         | EventBody::SprintPlanned(_)

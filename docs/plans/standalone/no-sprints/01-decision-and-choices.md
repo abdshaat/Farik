@@ -198,7 +198,7 @@ Files as the map's Task 2. The new kind follows `escalation.resolved`'s preceden
   `iterations` is refused with a reason starting `extra_room_only_for_spent`, and a resolve with
   both `extra_room` and `extra_tries` with one starting `extra_room_or_extra_tries`.
 
-- [ ] `feat(runtime): the human may give a spent task more room`
+- [x] `feat(runtime): the human may give a spent task more room`
 
 ### Task 3: one list of choices, read by the page
 

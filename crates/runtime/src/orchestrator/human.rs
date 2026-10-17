@@ -18,7 +18,7 @@ use catervas_protocol::event::{
     AgentUpdatedBody, ConnectorDisconnectedBody, DataPipelineApprovedBody, DataPipelineDecidedBy,
     DataPipelineDeclinedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody,
     EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind,
-    QuestionAnsweredBody, new_event,
+    QuestionAnsweredBody, TaskRoomGrantedBody, new_event,
 };
 use catervas_store::folder_docs::{ProposalState, folder_docs};
 use catervas_store::pipelines::{PipelineState, data_pipelines};
@@ -110,7 +110,8 @@ pub(super) async fn handle(
             to,
             message,
             extra_tries,
-        } => resolve(tools, &task_id, to, &message, extra_tries),
+            extra_room,
+        } => resolve(tools, &task_id, to, &message, extra_tries, extra_room),
         Command::HumanSendBack {
             task_id,
             subject: AcceptSubject::Contract,
@@ -1528,7 +1529,7 @@ fn send_plan_back(
     if !row.awaiting_approval {
         return Err(not_awaiting_approval(&row));
     }
-    resolve(tools, task_id, TaskStatus::Refining, message, None)
+    resolve(tools, task_id, TaskStatus::Refining, message, None, false)
 }
 
 /// Sends a result that waits on the human back to its assignee (ADR 0024): `verifying ->
@@ -1629,6 +1630,7 @@ fn resolve(
     to: TaskStatus,
     message: &str,
     extra_tries: Option<u8>,
+    extra_room: bool,
 ) -> Result<CommandReport, CommandError> {
     written(message, "a resolution's message")?;
     let row = row_of(tools, task_id)?;
@@ -1689,8 +1691,17 @@ fn resolve(
             });
         }
     }
+    if extra_room && extra_tries.is_some() {
+        return Err(CommandError::Refused {
+            reason: "extra_room_or_extra_tries: ask for one of them".to_string(),
+        });
+    }
+    let mut events = Vec::new();
+    if extra_room {
+        events.push(grant_room(tools, task_id)?);
+    }
     let team = tools.files.read_team().map_err(failed)?;
-    let mut events = human_moves(
+    events.extend(human_moves(
         tools,
         &team,
         task_id,
@@ -1700,7 +1711,7 @@ fn resolve(
             grants_tries: extra_tries.is_some(),
             ..TransitionAsk::default()
         },
-    )?;
+    )?);
     events.push(append(
         tools,
         Some(task_id.clone()),
@@ -1715,6 +1726,35 @@ fn resolve(
         said: format!("{} is resolved to {to}", task_id.as_str()),
         events,
     })
+}
+
+/// Appends `task.room_granted`: the contract's own sessions and dollars again, for a task that
+/// escalated for `budget` or `sessions` (ADR 0062).
+fn grant_room(tools: &ToolDeps, task_id: &TaskId) -> Result<u64, CommandError> {
+    let reason = escalated_for(tools, task_id)?;
+    if !matches!(
+        reason,
+        Some(EscalationRaisedBodyReason::Budget | EscalationRaisedBodyReason::Sessions)
+    ) {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "extra_room_only_for_spent: {} escalated for {}, and more room is granted only \
+                 to a task whose dollars or sessions are spent",
+                task_id.as_str(),
+                reason.map_or_else(|| "no recorded reason".to_string(), |r| r.to_string())
+            ),
+        });
+    }
+    let contract = tools.files.read_contract(task_id).map_err(failed)?;
+    append(
+        tools,
+        Some(task_id.clone()),
+        EventBody::TaskRoomGranted(TaskRoomGrantedBody {
+            sessions: contract.budget.max_sessions,
+            cost_usd: contract.budget.max_cost_usd,
+            granted_by: HUMAN.to_string(),
+        }),
+    )
 }
 
 /// The reason of the task's last escalation.
@@ -2702,6 +2742,7 @@ mod tests {
 
     use crate::orchestrator::fixtures::{Harness, UsageThenWaitAdapter};
     use crate::orchestrator::{CommandError, CommandReport, Orchestrator};
+    use crate::recorded::fixtures::implement_stops_early;
 
     fn task(id: &str) -> catervas_core::contract::TaskId {
         id.parse().expect("a task id")
@@ -3717,6 +3758,7 @@ mod tests {
             to,
             message: message.to_string(),
             extra_tries: None,
+            extra_room: false,
         };
 
         handled(
@@ -3779,6 +3821,7 @@ mod tests {
             to: TaskStatus::Ready,
             message: "Go.".to_string(),
             extra_tries: None,
+            extra_room: false,
         };
 
         let unapproved = refused(&orchestrator, to_ready("CTV-1")).await;
@@ -5085,6 +5128,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Try again with the new API.".to_string(),
                 extra_tries: Some(2),
+                extra_room: false,
             },
         )
         .await;
@@ -5127,6 +5171,70 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn grants_room_to_a_spent_task() {
+        let harness = Harness::new("human-extra-room", |_| {});
+        harness.file("CTV-1", "ready", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-1", "assigned", "in_progress", &people);
+        harness.spent(Some("CTV-1"), "s-0", 0.01);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick escalates it");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
+        let max_cost = harness.project.file("CTV-1")["budget"]["max_cost_usd"]
+            .as_f64()
+            .expect("a dollar budget");
+        let resolve =
+            |extra_tries: Option<u8>, extra_room: bool, id: &str| Command::EscalationResolve {
+                task_id: task(id),
+                to: TaskStatus::InProgress,
+                message: "Carry on.".to_string(),
+                extra_tries,
+                extra_room,
+            };
+
+        handled(&orchestrator, resolve(None, true, "CTV-1")).await;
+
+        let events = harness.events(&[EventKind::TaskRoomGranted, EventKind::EscalationResolved]);
+        let kinds: Vec<EventKind> = events.iter().map(|event| event.body.kind()).collect();
+        assert_eq!(
+            kinds,
+            vec![EventKind::TaskRoomGranted, EventKind::EscalationResolved]
+        );
+        let EventBody::TaskRoomGranted(body) = &events[0].body else {
+            panic!("a grant");
+        };
+        assert_eq!(
+            (body.sessions.get(), body.granted_by.as_str()),
+            (1, "human")
+        );
+        assert!((body.cost_usd - max_cost).abs() < f64::EPSILON);
+        assert_eq!(max_sessions(&harness), 2);
+
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "the work starts again");
+        assert_eq!(harness.events(&[EventKind::EscalationRaised]).len(), 1);
+
+        // Room is for a spent task alone, and not with more tries.
+        harness.rejected("CTV-2", 3, "C1: done.txt missing");
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Escalated);
+        let reason = refused(&orchestrator, resolve(None, true, "CTV-2")).await;
+        assert!(reason.starts_with("extra_room_only_for_spent"), "{reason}");
+        let reason = refused(&orchestrator, resolve(Some(2), true, "CTV-2")).await;
+        assert!(reason.starts_with("extra_room_or_extra_tries"), "{reason}");
+        assert_eq!(harness.events(&[EventKind::TaskRoomGranted]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn refuses_extra_tries_for_other_reasons() {
         let harness = Harness::new("human-extra-tries-refused", |_| {});
         harness.file("CTV-1", "refining", |_| {});
@@ -5140,6 +5248,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Split it by page.".to_string(),
                 extra_tries: Some(2),
+                extra_room: false,
             },
         )
         .await;
@@ -5159,6 +5268,7 @@ mod tests {
                     to,
                     message: "Stop here.".to_string(),
                     extra_tries: Some(2),
+                    extra_room: false,
                 },
             )
             .await;
@@ -5177,6 +5287,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Go on.".to_string(),
                 extra_tries: Some(2),
+                extra_room: false,
             },
         )
         .await;

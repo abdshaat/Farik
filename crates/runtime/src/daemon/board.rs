@@ -111,10 +111,19 @@ fn task_costs(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         .projections
         .costs_by_purpose(&task_id)
         .map_err(|e| internal(&e))?;
+    let granted = deps
+        .projections
+        .log()
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![EventKind::TaskRoomGranted],
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
     Ok(json!({
         "total_usd": spent.values().sum::<f64>(),
         "by_purpose": in_words(spent),
-        "limit_usd": contract.budget.max_cost_usd,
+        "limit_usd": contract.budget.max_cost_usd + crate::cost::room_granted(&granted).1,
     }))
 }
 
