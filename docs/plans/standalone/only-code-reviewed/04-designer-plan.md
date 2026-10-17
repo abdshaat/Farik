@@ -1,4 +1,4 @@
-# Standalone 4 of 7: a Designer's plan needs no approval
+# Standalone 4 of 8: a Designer's plan needs no approval
 
 Status: draft
 Branch: `fix/plans-need-no-review`

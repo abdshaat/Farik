@@ -1,4 +1,4 @@
-# Standalone 1 of 7: review only code
+# Standalone 1 of 8: review only code
 
 Status: draft
 Branch: `fix/plans-need-no-review`
@@ -16,7 +16,7 @@ Out of scope:
 - integration, which is plan 2;
 - the plan's tasks and lanes, which are plan 3;
 - the contract's approval, which is plan 5;
-- contract judging (R5).
+- contract judging (plan 7).
 
 ## Decisions
 

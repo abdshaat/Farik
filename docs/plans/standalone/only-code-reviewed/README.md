@@ -6,7 +6,7 @@ Decision: ADR 0061 (`docs/decisions/0061-only-code-is-reviewed-only-payments-ask
 Depends on: `origin/main` at `74b4a5af` (#45 merged)
 Readiness confirmed by: pending (one round per plan file, against `docs/standards/workflow.md` stage 2)
 
-Seven plans, each copied from `docs/plans/step-template.md` and executed in this order. A plan consumes only what the plans before it committed. The parallel CTV-9 work (no sprints, ADR 0062) is rebased on this branch, so no plan here touches sprints, the sprint budget or ceremonies' scheduling.
+Eight plans, each copied from `docs/plans/step-template.md` and executed in this order. A plan consumes only what the plans before it committed. The parallel CTV-9 work (no sprints, ADR 0062) is rebased on this branch, so no plan here touches sprints, the sprint budget or ceremonies' scheduling.
 
 | # | File | What it does |
 |---|---|---|
@@ -16,7 +16,8 @@ Seven plans, each copied from `docs/plans/step-template.md` and executed in this
 | 4 | `04-designer-plan.md` | Catervas approves a Designer's plan at once; the decision session, its tool and prompt go; the task page and activity follow |
 | 5 | `05-only-payments-ask.md` | The owner is asked only before money is spent: contract approval, the product plan's approval, document proposals, free marketing plans, posts outside a plan, free connector calls and the PM's pipeline decision stop asking |
 | 6 | `06-research-is-free.md` | Every role holds `network`, every session may search and fetch, every sandbox has the network, the Marketing read limit and the approved sites go, every role reads the private workbooks; secrets stay |
-| 7 | `07-record.md` | SPEC 0.115, the design documents, and the plans' ticks (hard rule 8) |
+| 7 | `07-no-contract-judging.md` | No agent judges a contract: the judgment session, its tool and readiness rules go; `policy.judgment` is ignored on load and dropped on write; setup and settings lose "Who checks" |
+| 8 | `08-record.md` | SPEC 0.115, the design documents, and the plans' ticks (hard rule 8) |
 
 ## The rule for "changes code" (plan 1)
 
@@ -50,10 +51,10 @@ A Developer's task that only touches documents is still reviewed. That is rare, 
 | Purchase orders (decide, send, place, receive, close) | yes | kept | none |
 | Data pipeline: the PM's decision | no | removed: filed at once unless it needs the owner | 5 |
 | Data pipeline: paid or unknown cost to the owner | yes | kept | none |
-| Data pipeline: free but `sends_project_data` to the owner | no | removed (only payment asks); see the questions for the founder | 5 |
+| Data pipeline: free but `sends_project_data` to the owner | no | kept (the founder, 2026-10-16: "Still ask me") | none |
 | Seller messages sent by the owner | no | kept: Catervas has no mailbox (a missing capability) | none |
 | Merging into the integration branch | no | the human's alone, always (R2) | 2 |
-| Agent judging of contracts (`contract.judged`, `judgment.required: always`) | no | unchanged (R5): it is effectively a plan review, put to the founder | none |
+| Agent judging of contracts (`contract.judged`, `judgment.required: always`) | no | removed (the founder, 2026-10-16: "Remove it"); not a human gate, but a plan review | 7 |
 
 ## Read limits: removed or kept (R3)
 
@@ -70,7 +71,7 @@ A Developer's task that only touches documents is still reviewed. That is rare, 
 | Playwright confined to the preview (`url_outside_preview`) | kept: it drives the app under test, not research; the web is open through `WebFetch` | none |
 | Built-in connectors at fixed endpoints (osv, fx, recalls, ebay) | kept: a server's own design, no agent limit | none |
 
-## Questions for the founder (not decided here)
+## The founder's answers (2026-10-16)
 
-1. Contract judging (R5). Every team runs an agent's check of a contract's plan before work starts (`judgment.required: always`, by the Architect or the Scrum Master). That is a plan review. Should it default to `never`?
-2. Project data leaving. A free data source that sends the project's data to a third party (`sends_project_data`) is now filed without asking, because only payment asks. Should it still ask?
+1. Contract judging: "Remove it". Plan 7 removes it entirely.
+2. A free data source that sends the project's data to a third party: "Still ask me". Plan 5 keeps `pipeline_needs_owner` as it is.

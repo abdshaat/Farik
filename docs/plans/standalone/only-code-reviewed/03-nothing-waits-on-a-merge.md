@@ -1,4 +1,4 @@
-# Standalone 3 of 7: nothing waits on a merge
+# Standalone 3 of 8: nothing waits on a merge
 
 Status: draft
 Branch: `fix/plans-need-no-review`

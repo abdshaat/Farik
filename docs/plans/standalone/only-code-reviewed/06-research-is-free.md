@@ -1,4 +1,4 @@
-# Standalone 6 of 7: research is free
+# Standalone 6 of 8: research is free
 
 Status: draft
 Branch: `fix/plans-need-no-review`

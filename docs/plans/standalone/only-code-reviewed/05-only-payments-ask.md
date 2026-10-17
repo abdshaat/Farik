@@ -1,4 +1,4 @@
-# Standalone 5 of 7: only payments ask
+# Standalone 5 of 8: only payments ask
 
 Status: draft
 Branch: `fix/plans-need-no-review`
@@ -19,13 +19,13 @@ The owner is asked only before money is spent. These stop asking:
 - a connector call that costs nothing;
 - the Product Manager's decision on a data source.
 
-These are kept: a marketing plan with money in it and its ads, a raised budget, purchase orders, a paid or unknown-cost data source, a `paid` connector call within its allowance, and every AI spending limit.
+These are kept: a marketing plan with money in it and its ads, a raised budget, purchase orders, a paid, unknown-cost or data-sending data source, a `paid` connector call within its allowance, and every AI spending limit.
 
 Out of scope:
 - seller messages (Catervas has no mailbox);
 - questions an agent asks;
 - connector and skill confirmation;
-- contract judging (R5).
+- contract judging (plan 7).
 
 ## Decisions
 
@@ -70,9 +70,9 @@ Out of scope:
   - `kit`'s and `github`'s stay `external_effect` and run without asking; `kit`'s allowances are removed.
   - The web's tag labels (`AgentEdit.tsx`, `en.ts`) gain `paid` "Costs money: asks you first".
 - **The Product Manager no longer decides a data source.**
-  - `pipeline_needs_owner(cost, _)` (`crates/core/src/pipeline.rs:22`) becomes `!matches!(cost, PipelineCost::Free)`, and `sends_project_data` asks nothing (see the README's question 2).
+  - `pipeline_needs_owner` (`crates/core/src/pipeline.rs:22`) is unchanged: a request that costs money, whose cost is unknown, or that sends the project's data to a third party (`sends_project_data`) asks the owner (the founder, 2026-10-16: "Still ask me").
   - `catervas_request_data_pipeline` (`tools/pipeline.rs:215`) files a free request at once, as `file_the_approved` files an approved one, recording `data_pipeline.approved { by: "catervas", reason: "", request }`. `dataPipelineDecidedBy` gains `"catervas"` in `docs/schemas/event.schema.json`.
-  - A paid or unknown-cost request is recorded `data_pipeline.escalated { reason: "It costs money, or its cost is not known, so you decide (ADR 0061)." }` at once, with no agent and no session on the envelope.
+  - A request `pipeline_needs_owner` holds is recorded `data_pipeline.escalated { reason }` at once, with no agent and no session on the envelope; `reason` is "It costs money, or its cost is not known, so you decide (ADR 0061)." or, for one that is free and sends data out, "It sends your project's data to another service, so you decide (ADR 0061)."
   - `catervas_decide_data_pipeline`, its decision session (`orchestrator/pipeline.rs`) and `PIPELINE_DECISION_INSTRUCTION` go. `data_pipeline_decide` (`human.rs:1326`) stays the owner's.
 
 ## File map
@@ -149,18 +149,17 @@ Tests:
 
 - [ ] `feat(core): ask only before a connector call that costs money`
 
-### Task 6: a data source asks only when it costs
+### Task 6: a data source asks only when it costs or sends data
 
 Files: those of the File map for Task 6. The tests at `tools/pipeline.rs` 674, 736 and 884, and `orchestrator/pipeline.rs` 386 and 458, change here; the PM's decision tests are deleted with the session.
 
 Tests:
 - `files_a_free_source_at_once_and_asks_the_owner_for_a_paid_one` (`tools/pipeline.rs`):
   - A free request is filed (the request's `task.created`) with no Product Manager session and no `data_pipeline.escalated`.
-  - A free request with `sends_project_data` is filed the same way.
   - The free requests record `data_pipeline.approved { by: "catervas" }`.
-  - A `paid` request, and an `unknown` one, record `data_pipeline.escalated` with the reason of Decisions and no `agent_id`, and file nothing.
+  - A `paid` request, an `unknown` one, and a free one with `sends_project_data`, each record `data_pipeline.escalated` with its reason of Decisions and no `agent_id`, and file nothing.
 
-- [ ] `feat(runtime): file a free data source at once, ask the owner about a paid one`
+- [ ] `feat(runtime): file a free data source at once, ask the owner about one that costs or sends data`
 
 ## Verification
 

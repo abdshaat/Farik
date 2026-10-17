@@ -8,6 +8,7 @@ The founder, in order:
 2. "The only thing that needs review is the code produced by the developer. Anything else needs no review and can be planned and executed by an agent. Agents must be free to do any research, no check on what the agent can research. The only check must be for actions that require payment."
 3. Asked about the human's approvals: "Catervas will not be allowed to merge code now. Just opening pull requests."
 4. Asked which code is reviewed: any code change, the Software Developer's and the UI/UX Designer's. Asked about research: only secrets stay hidden.
+5. Asked about the agent judgment of contracts: "Remove it". Asked whether a free data source that sends the project's data to a third party should still ask: "Still ask me".
 
 ## What this supersedes and amends
 
@@ -21,7 +22,7 @@ Supersedes, in part:
 - **ADR 0039**, further:
   - the Procurement Specialist's approved sites (`site.requested`, `catervas_request_sites`, `site_not_approved`);
   - its sandbox with no network;
-  - the Product Manager's decision on a data pipeline request. A request that costs money, or whose cost is unknown, goes to the owner; any other request is filed at once.
+  - the Product Manager's decision on a data pipeline request. A request that costs money, whose cost is unknown, or that sends the project's data to a third party goes to the owner; any other request is filed at once.
 - **ADR 0041** (ask or auto, not built): replaced for every team by "only a payment asks".
 - **ADR 0042**:
   - the owner's approval of a marketing plan that spends nothing;
@@ -36,8 +37,9 @@ Supersedes, in part:
   - the `refining -> escalated` approval of every epic and of every `high` risk contract (5.16 item 2);
   - the team policy `human_accepts_contracts`, which still loads and is ignored.
 
+- **The agent judgment of contracts** (5.3): the judge's session, `catervas_record_judgment`, the readiness rules `judgment_recorded` and `judgment_answers`, and the team policy `judgment`, which still loads, is ignored, and is dropped when Catervas writes the team file. The governor's structural check of a contract stays.
+
 Kept as they are:
-- **Agent judging of contracts** before they are ready (`contract.judged`, 5.3). It is put to the founder, below.
 - **ADR 0030's and ADR 0034's confirmation** of a connector or a skill that arrived by a clone or a hand edit. It is a guard against code someone else planted, not a review.
 - **The governor's own limits**: allowed and protected paths, the worktree, the sandbox, the denial of secrets, and every AI spending limit and hard stop (ADR 0015).
 - **Past events**, which are never rewritten. Old logs and old team files load.
@@ -70,7 +72,7 @@ Research is open to any agent; only secrets stay hidden. Two alternatives were r
 - a marketing plan with money in it, and so its ad campaigns;
 - a raised marketing budget;
 - a purchase order, which the owner still places;
-- a data source that costs money or whose cost is unknown;
+- a data source that costs money or whose cost is unknown, and one that sends the project's data to a third party, which is not a payment but which the founder keeps ("Still ask me");
 - a connector call tagged `paid`, within ADR 0037's allowances.
 
 The AI spending limits stay. No other approval remains: not of a contract, a product plan, a result, a document change, a site, a post, or a free outward act. A seller message is still drafted for the owner to send, because Catervas has no mailbox; that is a missing capability, not a check.
@@ -104,4 +106,4 @@ What cuts against it:
 - There is one pull request per finished task. A pull request started from an unmerged branch carries that branch's commits, so the same commit can appear in several.
 - Every sandbox has the network, so a Developer's commands can reach the internet.
 - The governor gains its first acceptance and rejection rows, open only to tasks that do not change code. "Nobody grades their own homework" (5.1) now concerns code alone.
-- Contract judging, which is on for every team by default (`judgment.required: always`), is an agent's check of a contract's plan before work starts. It contradicts the founder's second message, and is kept unchanged until the founder decides whether to turn it off by default.
+- With contract judging gone, a contract is checked only by the governor's structural rules before work starts; a contract that is well formed but unwise is caught in the code review of what is built from it.

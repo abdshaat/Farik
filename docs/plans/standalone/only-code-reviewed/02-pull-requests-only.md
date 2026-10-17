@@ -1,4 +1,4 @@
-# Standalone 2 of 7: Catervas never merges
+# Standalone 2 of 8: Catervas never merges
 
 Status: draft
 Branch: `fix/plans-need-no-review`
