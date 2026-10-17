@@ -124,7 +124,7 @@ Tests:
   - In a repository with `main` checked out at the root, branches `a` and `b` each add a different file, and a worktree is made on `t` from `a`. `merge_in(worktree, "b", "m")` answers `Merged`; the worktree holds both files; the root is still on `main`, its tree unchanged.
   - When `b` and `t` change one line differently, it answers `Conflicts` naming the file, and the worktree is clean; after `remove_worktree`, `delete_branch("t")` leaves no branch `t` (`has_local_branch` false).
 
-- [ ] `feat(store): merge a branch inside a task's own worktree`
+- [x] `feat(store): merge a branch inside a task's own worktree`
 
 ### Task 3: a task starts from what it needs
 

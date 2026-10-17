@@ -723,6 +723,55 @@ impl Git {
         }
     }
 
+    /// Merges `from` into the branch checked out in the worktree at `worktree`, with a merge
+    /// commit, and never touches the root's checkout: a task that starts from other tasks'
+    /// unmerged branches is made this way (ADR 0061). On conflicts the merge is aborted and the
+    /// paths are answered, the worktree as it was.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `worktree` is not a worktree of this repository, when `from` names
+    /// nothing, or when git refuses for a reason that is not a conflict.
+    pub fn merge_in(
+        &self,
+        worktree: &Path,
+        from: &str,
+        message: &str,
+    ) -> Result<MergeOutcome, GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(worktree)?;
+        match run_git(
+            worktree,
+            &as_someone(worktree, &["merge", "--no-ff", "-m", message, from]),
+        ) {
+            Ok(_) => Ok(MergeOutcome::Merged {
+                sha: run_git(worktree, &["rev-parse", "HEAD"])?,
+            }),
+            Err(refusal) => {
+                let conflicted =
+                    run_git(worktree, &["diff", "--name-only", "--diff-filter=U", "-z"])?;
+                let conflicts = paths_of(&conflicted);
+                if conflicts.is_empty() {
+                    return Err(refusal);
+                }
+                run_git(worktree, &["merge", "--abort"])?;
+                Ok(MergeOutcome::Conflicts(conflicts))
+            }
+        }
+    }
+
+    /// Deletes the local branch `name` (`git branch -D`), which no worktree may have checked out.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the branch is checked out anywhere or does not exist.
+    pub fn delete_branch(&self, name: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.check_branch_name(name)?;
+        self.at_root(&["branch", "-D", name])?;
+        Ok(())
+    }
+
     /// Makes the branch `branch` at `from` with one commit that writes `files` (`(path, text)`,
     /// repository-relative) and removes `removed`, in the root's checkout as `merge` does, and
     /// puts the branch that was checked out back (`docs/SPEC.md` 5.14).

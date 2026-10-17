@@ -540,6 +540,63 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn merges_a_branch_into_a_worktree_only() {
+    // A task that starts from another task's unmerged branch merges it inside its own worktree;
+    // the root and the integration branch stay the human's (ADR 0061).
+    let repository = TempRepo::new("merge-in");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "a"]);
+    repository.write("a.txt", "from a\n");
+    repository.commit("docs: a");
+    repository.git(&["checkout", "main"]);
+    repository.git(&["checkout", "-b", "b"]);
+    repository.write("b.txt", "from b\n");
+    repository.write("shared.txt", "b's line\n");
+    repository.commit("docs: b");
+    repository.git(&["checkout", "main"]);
+    let main_before = repository.git_output(&["rev-parse", "main"]);
+    let worktree = repository.path.join(".catervas/local/worktrees/t");
+    git.create_worktree(&worktree, "t", "a")
+        .expect("the worktree is made");
+
+    let outcome = git.merge_in(&worktree, "b", "m").expect("the merge runs");
+
+    assert!(
+        matches!(outcome, MergeOutcome::Merged { .. }),
+        "{outcome:?}"
+    );
+    assert!(worktree.join("a.txt").is_file() && worktree.join("b.txt").is_file());
+    assert_eq!(git.current_branch().expect("a branch"), "main");
+    assert_eq!(repository.git_output(&["rev-parse", "main"]), main_before);
+    assert!(
+        !repository.path.join("b.txt").exists(),
+        "the root's tree is unchanged"
+    );
+
+    // A conflict is reported by its file, and the worktree is left clean.
+    let other = repository.path.join(".catervas/local/worktrees/u");
+    git.create_worktree(&other, "u", "main")
+        .expect("the worktree is made");
+    std::fs::write(other.join("shared.txt"), "u's line\n").expect("written");
+    git_in(&other, &["add", "shared.txt"]);
+    git_in(&other, &["commit", "-m", "docs: u"]);
+    let outcome = git.merge_in(&other, "b", "m").expect("the merge runs");
+    assert_eq!(
+        outcome,
+        MergeOutcome::Conflicts(vec!["shared.txt".to_string()])
+    );
+    assert!(git.is_clean(&other).expect("the read works"));
+    git.remove_worktree(&other).expect("it is taken away");
+    git.delete_branch("u").expect("the branch goes");
+    assert!(!git.has_local_branch("u").expect("the read works"));
+    assert!(
+        git.delete_branch("main").is_err(),
+        "the checked-out branch is refused"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn commits_the_named_paths_and_returns_the_sha() {
     let repository = TempRepo::new("commit-paths");
     repository.write("named.txt", "the one to commit\n");
