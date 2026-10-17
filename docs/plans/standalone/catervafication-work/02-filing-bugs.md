@@ -200,7 +200,7 @@ hunt that found this bug (ADR 0063); written by catervas_file_bug alone."),
   - `bugs_found` answers `[(CTV-2, CTV-1)]`;
   - `CTV-1`, filed with `file_request`, is not in `bugs_found`.
 
-- [ ] `feat(store): file a bug as a request its hunt is named on`
+- [x] `feat(store): file a bug as a request its hunt is named on`
 
 ### Task 3: catervas_file_bug
 

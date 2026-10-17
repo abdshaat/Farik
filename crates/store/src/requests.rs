@@ -217,6 +217,7 @@ pub fn file_request(
             parent,
             from_chat_message,
             raises: None,
+            found_by: None,
             rederives: None,
             product_plan: false,
             catervafies: None,
@@ -333,6 +334,7 @@ pub fn file_rederive_request(
             parent: None,
             from_chat_message: None,
             raises: None,
+            found_by: None,
             rederives: Some(twin),
             product_plan: false,
             catervafies: None,
@@ -366,6 +368,7 @@ pub fn file_raise_request(
             parent: None,
             from_chat_message: None,
             raises: Some(plan),
+            found_by: None,
             rederives: None,
             product_plan: false,
             catervafies: None,
@@ -373,6 +376,62 @@ pub fn file_raise_request(
         },
         (now, ids),
     )
+}
+
+/// Files a bug a hunt found as a draft request created by `created_by`, `found_by` the hunt,
+/// triaged small by Catervas in the same filing (ADR 0063).
+///
+/// # Errors
+///
+/// As [`file_request`].
+pub fn file_bug(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    created_by: &str,
+    found_by: &TaskId,
+    now: DateTime<Utc>,
+    ids: &EventIds,
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            found_by: Some(found_by),
+            rederives: None,
+            product_plan: false,
+            catervafies: None,
+            filed_as: None,
+        },
+        (now, ids),
+    )
+}
+
+/// Every (bug, hunt) a `task.created` with `found_by` records, oldest first.
+///
+/// # Errors
+///
+/// The log could not be read.
+pub fn bugs_found(log: &EventLog) -> Result<Vec<(TaskId, TaskId)>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            kinds: vec![EventKind::TaskCreated],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter_map(|event| {
+            let EventBody::TaskCreated(body) = event.body else {
+                return None;
+            };
+            let hunt = TaskId::try_from(body.found_by?.as_str()).ok()?;
+            Some((event.envelope.ids.task_id?, hunt))
+        })
+        .collect())
 }
 
 /// The whole contract of the task that drafts a new project's product plan (`docs/SPEC.md` 4.3,
@@ -446,6 +505,7 @@ pub fn file_product_plan_request(
             parent: None,
             from_chat_message: None,
             raises: None,
+            found_by: None,
             rederives: None,
             product_plan: true,
             catervafies: None,
@@ -479,6 +539,7 @@ pub fn file_catervafication_epic(
             parent: None,
             from_chat_message: None,
             raises: None,
+            found_by: None,
             rederives: None,
             product_plan: false,
             catervafies: Some(project),
@@ -736,6 +797,7 @@ pub fn file_small_request(
             parent: None,
             from_chat_message: None,
             raises: None,
+            found_by: None,
             rederives: None,
             product_plan: false,
             catervafies: None,
@@ -752,6 +814,8 @@ struct Filing<'a> {
     parent: Option<&'a TaskId>,
     from_chat_message: Option<u64>,
     raises: Option<&'a str>,
+    /// The hunt that found this bug (ADR 0063).
+    found_by: Option<&'a TaskId>,
     rederives: Option<&'a str>,
     product_plan: bool,
     catervafies: Option<CatervaficationStartedBodyProject>,
@@ -868,6 +932,7 @@ fn file(
 
 /// The events a request is filed with: `task.created`, and the triage that follows at once for a
 /// task of an epic and for a request that raises a marketing plan's budget.
+#[allow(clippy::too_many_lines, reason = "one triage per way a request is filed")]
 fn creation_bodies(
     contract: &TaskContract,
     filing: Filing<'_>,
@@ -877,6 +942,7 @@ fn creation_bodies(
         parent,
         from_chat_message,
         raises,
+        found_by,
         rederives,
         product_plan,
         catervafies,
@@ -906,12 +972,29 @@ fn creation_bodies(
             })
             .transpose()?,
         filed_as: filed_as.map(|(kind, _)| kind),
+        found_by: found_by
+            .map(|hunt| {
+                hunt.as_str()
+                    .to_string()
+                    .try_into()
+                    .map_err(|_| RequestError::Refused {
+                        reason: format!("found by {}, which is no hunt's id", hunt.as_str()),
+                    })
+            })
+            .transpose()?,
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
             size: RequestTriagedBodySize::Small,
             reason: format!("a task of {}", parent.as_str()),
             triaged_by: created_by.to_string(),
+        }));
+    }
+    if let Some(hunt) = found_by {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: format!("a bug {} found", hunt.as_str()),
+            triaged_by: "catervas".to_string(),
         }));
     }
     if let Some(plan) = raises {
@@ -1375,9 +1458,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        PLACEHOLDER, RequestError, file_catervafication_epic, file_product_plan_request,
-        file_request, hold_contract, placeholder_budget_usd, product_plan_request,
-        request_from_brief, triage_by_human,
+        PLACEHOLDER, RequestError, bugs_found, file_bug, file_catervafication_epic,
+        file_product_plan_request, file_request, hold_contract, placeholder_budget_usd,
+        product_plan_request, request_from_brief, triage_by_human,
     };
     use crate::files::fixtures::{TempProject, a_team};
     use crate::git::fixtures::git_in;
@@ -1833,6 +1916,45 @@ mod tests {
         let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
             .expect("the request is filed");
         assert_eq!(request.id.as_str(), "CTV-1");
+    }
+
+    #[test]
+    fn files_a_bug_triaged_small_and_linked_to_its_hunt() {
+        let (project, log) = a_project("requests-bug");
+        let files = project.files();
+        let hunt = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
+            .expect("the hunt stands in as a request");
+        assert_eq!(hunt.id.as_str(), "CTV-1");
+        let wire = request_from_brief(
+            "The save button does nothing",
+            "Fix this bug, found by Theo while hunting in CTV-1.",
+            20.0,
+        )
+        .expect("a request");
+        let bug = file_bug(&files, &log, wire, "dev-a", &hunt.id, at(), &ids())
+            .expect("the bug is filed");
+        assert_eq!(bug.id.as_str(), "CTV-2");
+        assert_eq!(bug.status, TaskStatus::Draft);
+        assert_eq!(bug.kind, TaskKind::Task);
+
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        let EventBody::TaskCreated(created) = &events[1].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "dev-a");
+        assert_eq!(
+            created.found_by.as_ref().map(|hunt| hunt.as_str()),
+            Some("CTV-1")
+        );
+        let EventBody::RequestTriaged(triaged) = &events[2].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.size, RequestTriagedBodySize::Small);
+        assert_eq!(triaged.reason, "a bug CTV-1 found");
+        assert_eq!(triaged.triaged_by, "catervas");
+        assert_eq!(events[2].envelope.ids.task_id.as_ref(), Some(&bug.id));
+
+        assert_eq!(bugs_found(&log).expect("reads"), vec![(bug.id, hunt.id)]);
     }
 
     #[test]
