@@ -1,0 +1,110 @@
+# Standalone (parallel agents), plan 5: the spec says agents work at once
+
+Status: draft
+Branch: `feat/parallel-agents` (work outside a phase, its own pull request to `main`)
+Spec: `docs/SPEC.md`, revision 0.118
+Depends on: plans 1 to 4 of this folder (committed on this branch)
+Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+
+Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
+
+## Goal
+
+`docs/SPEC.md` says what plans 1 to 4 built (hard rule 8), in one revision, 0.118: sessions of
+different agents run at once, one per agent, everything else one at a time; a task under review
+does not count towards its assignee's WIP limit and a sent-back one does and stays with its
+author; a spent day stops every running session; the drivers print each start and drain on stop.
+This plan touches documents only, so it has no test; its check is the full check and a reading
+against plans 1 to 4's Decisions.
+
+## Decisions
+
+- **One revision**, 0.118, dated 2026-10-16, naming ADR 0064 and the standalone plans
+  `parallel-agents` 1 to 4, placed after 0.117's line in the revisions list at the top. 0.115 to
+  0.117 are ADRs 0061 to 0063's. Each changed paragraph carries "(changed in 0.118; ADR 0064)" or
+  "(added in 0.118; ADR 0064)".
+- **The revision line**: "Revision 0.118 (2026-10-16) records that agents work in parallel
+  (ADR 0064, standalone plans `parallel-agents`): in 5.2 a task in `verifying` no longer counts
+  towards its assignee's work-in-progress limit, a `rejected` one counts from its rejection and is
+  never handed to another agent; in 5.5 a daily budget crossed by one session stops every other
+  session running then; in 5.14 integration stays one at a time beside concurrent sessions; in 6.7
+  a `stdio` connector's folder is safe because an agent runs one session at a time; in 8.2 one
+  session per agent runs at once while everything else a tick does stays one at a time under the
+  process's turn, a rule passes over an agent whose session runs and a task whose session runs, a
+  driving process prints a line when a session starts, and Ctrl-C stops after, or aborts, every
+  running session."
+- **5.2**, the `ready -> assigned` row's gate, the work-in-progress sentence as 0.116 left it:
+  the counted statuses become `assigned`, `in_progress` and `rejected` (not waiting on the human,
+  as 0.116 says), and the row says why `verifying` is not counted ("a task under review is its
+  reviewer's work, and when it comes back it counts again from its rejection, so its author takes
+  no new work while it waits") and that a sent-back task is never handed to another agent, unlike a
+  blocked, escalated or waiting one (0.116's hand-over). The private folder's hold, in the same
+  row, is unchanged.
+- **5.5**, the paragraph "This release enforces the table above": after "a task's dollars or a
+  daily budget crossed during a session stops the next one from starting rather than cutting that
+  one short", add: "; with sessions of several agents running at once (8.2), a daily budget that a
+  session's cost crosses also stops every other session running in the process then, with the
+  reason `the team's daily budget is spent`: each ends `aborted`, its task keeps its status, and
+  nothing is escalated, so the overshoot is what the running sessions had used by then (added in
+  0.118; ADR 0064)".
+- **5.14**, "One task integrates at a time": after "it is integration alone that is serialised",
+  add: "Sessions of different agents run at once (8.2); integration runs in a tick, which holds the
+  process's turn as well as this lock (added in 0.118; ADR 0064)."
+- **6.7**, "Connecting a server again while a session runs it …": "and Catervas runs one session
+  at a time" becomes "and an agent runs one session at a time, the folder being the agent's
+  (changed in 0.118; ADR 0064)".
+- **8.2**, "Driving the team":
+  - after "It then ticks until nothing needs doing, printing what each tick did", add: "A tick
+    takes the process's turn and holds it while it reads the board, asks the governor, runs
+    Catervas's own criteria, integrates, and prepares a session; it gives the turn back while its
+    session runs and takes it again when the session ends. So every agent may have one session
+    running beside other agents' sessions, while everything else is done one at a time; an agent
+    never runs two sessions at once, and a rule passes over an agent whose session runs as it
+    passes over a sleeping one, and over a task whose session runs. There is no other limit than
+    the team's active agents. A session's start prints `<task>: <agent> started its <purpose>
+    session` (`<agent>: started its <purpose> session` about no task; JSON `{"started", "agent_id",
+    "task_id"}`), and its tick's line follows when it ends. While sessions run and the next tick
+    finds nothing, the process waits for a session to end, a command, a filed request, or the
+    minute's recheck, and ticks again; it says it is idle, or that it waits for a sleeping agent,
+    only when nothing runs (added in 0.118; ADR 0064)."
+  - "The first Ctrl-C stops the run after the session running now; the second aborts that
+    session" becomes "The first Ctrl-C stops the run once every session running now has ended;
+    the second aborts them all" (changed in 0.118); "the second press has no session to abort"
+    becomes "the second press aborts only the sessions running beside it".
+  - a tick that fails: "A tick that fails stops the run as the first Ctrl-C does, and the process
+    exits 1 once the running sessions have ended (added in 0.118)."
+- **The design and decision documents.** ADR 0062's plan 06
+  (`docs/plans/standalone/no-sprints/06-wip-and-resume.md`) is not edited: it is done and its
+  amendment is ADR 0064 and plan 1 here. This folder's plans are ticked by their own commits.
+  `docs/plans/standalone/parallel-agents/README.md`'s `Status` becomes `done`.
+- No change to `docs/standards/` and no new ADR.
+
+## File map
+
+```
+docs/SPEC.md                                           modifies: revision 0.118; 5.2, 5.5, 5.14, 6.7, 8.2 (Task 1)
+docs/plans/standalone/parallel-agents/README.md        modifies: Status done (Task 1)
+docs/plans/standalone/parallel-agents/05-spec.md       modifies: its checkbox (Task 1)
+```
+
+## Interfaces
+
+Consumes: plans 1 to 4's behaviour as their Decisions state it. Produces: nothing.
+
+## Tasks
+
+### Task 1: SPEC 0.118
+
+Files as the map. No test (documents only); the check is the full check and a read of each
+changed paragraph against plans 1 to 4.
+
+- [ ] `docs(spec): agents work in parallel, revision 0.118`
+
+## Verification
+
+```
+cargo xtask check
+# expected: xtask check: ok
+grep -c "0.118; ADR 0064" docs/SPEC.md
+# expected: 5 (the lines of 5.2's row, 5.5's, 5.14's, 6.7's and 8.2's paragraphs)
+```
