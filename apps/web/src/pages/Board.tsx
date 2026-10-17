@@ -199,7 +199,6 @@ export function Board() {
 										row,
 										agents.find((a) => a.id === row.agent)?.displayName ??
 											row.agent,
-										allowances.period,
 									)}
 								</li>
 							))}

@@ -133,7 +133,7 @@ Files as the map's Task 3. `allowances.test.tsx`'s `sprintPeriod` fixture become
   without asking?"; the Costs page's allowance column is headed as the day's (`allowCostsDay`); the
   Costs page has no text matching `/sprint/i` and sends `metrics` with params `{}`.
 
-- [ ] `feat(web): costs and allowances count by the day`
+- [x] `feat(web): costs and allowances count by the day`
 
 ### Task 4: setup and Settings never ask about sprints
 

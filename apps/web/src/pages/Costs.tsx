@@ -15,13 +15,7 @@ import type { RoleKit } from "./Team.tsx";
 type Summary = {
 	todayUsd: number;
 	dailyLimitUsd?: number | null;
-	sprint: {
-		sprintId: string;
-		status: "open" | "ended";
-		spentUsd: number;
-		budgetUsd?: number | null;
-	} | null;
-	agents: { agentId: string; todayUsd: number; sprintUsd: number }[];
+	agents: { agentId: string; todayUsd: number }[];
 	conversationsTodayUsd: number;
 };
 type Activity = { agentId: string; line: string };
@@ -39,7 +33,7 @@ type Metrics = {
 	>;
 };
 
-/** Today's and this sprint's spending per agent, and the harness metrics (spec F17). */
+/** Today's spending per agent, and the harness metrics (spec F17). */
 export function Costs() {
 	const { data: team } = useQuery<{ team: Team; kits?: RoleKit[] }>(
 		"team.get",
@@ -53,16 +47,9 @@ export function Costs() {
 		"team.activity",
 		{},
 	);
-	const [oneSprint, setOneSprint] = useState(false);
-	const sprint = summary?.sprint;
-	const { data: metrics } = useQuery<Metrics>(
-		"metrics",
-		oneSprint && sprint ? { sprintId: sprint.sprintId } : {},
-	);
+	const { data: metrics } = useQuery<Metrics>("metrics", {});
 	const [limiting, setLimiting] = useState(false);
 	if (!team || !summary || !activity || !metrics) return null;
-	const n = sprint?.sprintId.slice(1) ?? "";
-	const ended = sprint?.status === "ended";
 	const today = dollars(summary.todayUsd);
 
 	const rate = (
@@ -86,9 +73,7 @@ export function Costs() {
 		(team.kits ?? [])
 			.flatMap((kit) => kit.connectors)
 			.find((service) => service.name === row.server)?.title ?? row.server;
-	const period = t(
-		allowances?.period.kind === "day" ? "allowCostsDay" : "allowCostsSprint",
-	);
+	const period = t("allowCostsDay");
 
 	return (
 		<div className={styles.page}>
@@ -101,22 +86,6 @@ export function Costs() {
 								.replace("{limit}", dollars(summary.dailyLimitUsd))
 						: t("costsToday").replace("{spent}", today)}
 				</p>
-				{sprint && (
-					<>
-						<p>
-							{(sprint.budgetUsd
-								? t(ended ? "costsSprintEnded" : "costsSprint").replace(
-										"{budget}",
-										dollars(sprint.budgetUsd),
-									)
-								: t(ended ? "costsSprintEndedNoLimit" : "costsSprintNoLimit")
-							)
-								.replace("{n}", n)
-								.replace("{spent}", dollars(sprint.spentUsd))}
-						</p>
-						<p className={styles.muted}>{t("costsSprintWhy")}</p>
-					</>
-				)}
 				<Button onClick={() => setLimiting(true)}>{t("costsSetLimit")}</Button>
 			</div>
 			<section className={styles.section} aria-labelledby="by-agent">
@@ -126,11 +95,6 @@ export function Costs() {
 						<tr>
 							<th scope="col">{t("costsAgent")}</th>
 							<th scope="col">{t("costsTodayColumn")}</th>
-							<th scope="col">
-								{ended
-									? t("costsSprintEndedColumn").replace("{n}", n)
-									: t("costsSprintColumn")}
-							</th>
 							<th scope="col">{t("costsNow")}</th>
 						</tr>
 					</thead>
@@ -158,7 +122,6 @@ export function Costs() {
 										)}
 									</th>
 									<td>{dollars(row.todayUsd)}</td>
-									<td>{dollars(row.sprintUsd)}</td>
 									<td>
 										{activity.activity.find((a) => a.agentId === row.agentId)
 											?.line ?? ""}
@@ -220,23 +183,7 @@ export function Costs() {
 			)}
 			<section className={styles.section} aria-labelledby="how-well">
 				<h2 id="how-well">{t("costsHowWell")}</h2>
-				<p className={styles.muted}>
-					{oneSprint && sprint
-						? t("costsSprintOnly").replace("{n}", n)
-						: t("costsWholeProject")}
-				</p>
-				{sprint && (
-					<span>
-						<button
-							type="button"
-							className={board.chip}
-							aria-pressed={oneSprint}
-							onClick={() => setOneSprint(!oneSprint)}
-						>
-							{t("costsShowSprint").replace("{n}", n)}
-						</button>
-					</span>
-				)}
+				<p className={styles.muted}>{t("costsWholeProject")}</p>
 				<dl className={own.metrics}>
 					{rate(
 						"metricFirstTry",

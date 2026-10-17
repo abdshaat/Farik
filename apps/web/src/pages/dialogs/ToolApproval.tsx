@@ -127,11 +127,7 @@ export function ToolApproval({
 								used: counted.used,
 								of: counted.of,
 								what: counted.what,
-								period: t(
-									allowance.period.kind === "day"
-										? "allowApprovalDay"
-										: "allowApprovalSprint",
-								),
+								period: t("allowApprovalDay"),
 							})}{" "}
 							<Link to={`/team/${agentId}?allowances=${ask.server}`}>
 								{t("allowChange")}

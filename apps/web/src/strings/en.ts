@@ -1419,13 +1419,13 @@ export const en = {
 	allowSave: "Save",
 	allowClose: "Close",
 	allowSignedIn: "Signed in to {service}.",
-	allowQuestion: "How many may {name} make each sprint without asking?",
+	allowQuestion: "How many may {name} make each day without asking?",
 	allowSpends:
 		"Each one uses your {service} credits. After that many, {name} asks you first.",
-	allowEach: "each sprint",
+	allowEach: "each day",
 	allowRange: "0 means {name} asks every time. Up to 1,000 each.",
 	allowAlwaysAsk: "Only tools that cost money count here.",
-	allowDay: "With no sprint running, the count starts again each day.",
+	allowDay: "The count starts again each day, at midnight UTC.",
 	allowApplies:
 		"A new number applies from {name}’s next piece of work. It does not allow a call that is already waiting; decide that one on Today.",
 	allowMade: "{n} made so far",
@@ -1438,13 +1438,11 @@ export const en = {
 	allowAgainTitle: "Connect {service} again first",
 	allowAgain:
 		"Catervas updated this service since you connected it. Connect it again to keep using it; you choose the numbers again there.",
-	allowMakeUpTo: "make up to {list} each sprint",
+	allowMakeUpTo: "make up to {list} each day",
 	allowMore: "making more than that",
-	allowRowSprint: "This sprint: {list}.",
 	allowRowDay: "Today: {list}.",
 	allowOf: "{used} of {of} {what}",
 	allowBoardHeading: "Made on other services",
-	allowBoardSprint: "{name}: {used} of {of} {what} this sprint",
 	allowBoardDay: "{name}: {used} of {of} {what} today",
 	allowBoardAsks:
 		"{name}: {used} of {of} {what}. {name} asks you before making more.",
@@ -1454,14 +1452,12 @@ export const en = {
 	allowCostsMade: "Made",
 	allowCostsWhen: "When",
 	allowCostsWho: "{name}, on {service}",
-	allowCostsSprint: "This sprint",
 	allowCostsDay: "Today",
 	allowCostsBill:
 		"Catervas counts what agents made, not what the service charges. Check your bill there.",
 	allowApprovalStopped:
 		"{name} stopped to ask before making more {what}, which uses your {service} credits.",
 	allowApprovalCount: "{name} has made {used} of {of} {what} {period}.",
-	allowApprovalSprint: "this sprint",
 	allowApprovalDay: "today",
 	allowApprovalOnce: "A new number does not allow it; decide it here.",
 	uiPathsTitle: "Which files are screens",
