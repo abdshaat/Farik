@@ -6,7 +6,7 @@ use std::str::FromStr as _;
 
 use catervas_core::contract::{Role, TaskId, TaskStatus};
 use catervas_core::marketing::{CapScope, network_name};
-use catervas_core::team::{AgentStatus, Integration, Team};
+use catervas_core::team::{AgentStatus, Team};
 use catervas_protocol::event::{
     CatervasEvent, EventBody, EventKind, MessageKind, SessionStartedBodyPurpose, Thread,
 };
@@ -579,23 +579,15 @@ fn architecture_moves(
             _ => {}
         }
     }
-    let by_pull_request = team.policy.integration == Integration::PullRequest;
     Ok(sessions
         .into_iter()
         .filter_map(|each| {
             let (seq, at) = each.wrote?;
             let (agent, n) = (&each.agent, each.sprint.trim_start_matches('S'));
-            let line = if by_pull_request {
-                format!(
-                    "{} sent the architecture notes for sprint {n} as a pull request",
-                    who(agent)
-                )
-            } else {
-                format!(
-                    "{} brought the architecture notes up to date with sprint {n}",
-                    who(agent)
-                )
-            };
+            let line = format!(
+                "{} sent the architecture notes for sprint {n} as a pull request",
+                who(agent)
+            );
             Some((
                 seq,
                 Moved {
@@ -988,14 +980,6 @@ mod tests {
             .collect()
         };
 
-        assert_eq!(
-            said("manual"),
-            [(
-                at(10, 3),
-                "ada".to_string(),
-                "Ada brought the architecture notes up to date with sprint 4".to_string()
-            )]
-        );
         assert_eq!(
             said("pull_request"),
             [(

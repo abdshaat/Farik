@@ -5,13 +5,14 @@
 
 use std::str::FromStr;
 
+use catervas_core::branch::task_branch;
 use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::governor::done::result_awaits_human;
 use catervas_core::governor::permissions::ApprovalKey;
 use catervas_core::governor::sites::site_of;
 use catervas_core::marketing::{PostChannel, network_name};
 use catervas_core::pipeline::PipelineCost;
-use catervas_core::team::{Integration, Team};
+use catervas_core::team::Team;
 use catervas_protocol::event::{
     CatervasEvent, EventBody, EventKind, SellerMessagePurpose, TaskStatusWire,
 };
@@ -462,15 +463,36 @@ pub fn waiting(
         };
         waiting.push(item(row, WaitingKind::Acceptance, assignee, line));
     }
-    if team.policy.integration == Integration::Manual {
-        for row in board.iter().filter(|row| row.awaiting_integration) {
-            waiting.push(item(
-                row,
-                WaitingKind::Integration,
-                row.assignee_id.as_deref(),
-                "Accepted, waiting for you to add it".to_string(),
-            ));
-        }
+    // Catervas never merges (ADR 0061): every accepted task awaiting integration waits for the
+    // human, with its pull request when one was opened since it was accepted.
+    for row in board.iter().filter(|row| row.awaiting_integration) {
+        let events = log.read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            kinds: vec![EventKind::TaskTransitioned, EventKind::PullRequestOpened],
+            ..EventQuery::default()
+        })?;
+        let accepted =
+            last_move_into(&events, TaskStatus::Accepted).map_or(0, |event| event.envelope.seq);
+        let opened = events.iter().any(|event| {
+            event.envelope.seq > accepted && matches!(event.body, EventBody::PullRequestOpened(_))
+        });
+        let line = if opened {
+            "Accepted: its pull request waits for you to merge it".to_string()
+        } else {
+            let branch = files
+                .read_contract(&row.task_id)
+                .map_err(|error| StoreError::Io {
+                    detail: error.to_string(),
+                })
+                .map(|contract| task_branch(&contract))?;
+            format!("Accepted: waiting for you to merge {branch}")
+        };
+        waiting.push(item(
+            row,
+            WaitingKind::Integration,
+            row.assignee_id.as_deref(),
+            line,
+        ));
     }
     Ok(waiting)
 }
@@ -1216,7 +1238,7 @@ mod tests {
                     WaitingKind::Integration,
                     Some("linus"),
                     "Done work",
-                    "Accepted, waiting for you to add it"
+                    "Accepted: waiting for you to merge feature/CTV-5"
                 ),
             ]
         );

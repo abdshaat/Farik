@@ -3175,8 +3175,8 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn lists_a_folder_change_waiting_to_be_added_under_manual() {
-        let harness = folders_integrating("gates-folder-change-manual", "manual");
+    fn lists_a_folder_change_waiting_to_be_merged() {
+        let harness = folders_integrating("gates-folder-change-manual", "pull_request");
         let roadmap = pm_proposes(&harness, "S4", ROADMAP, "# Roadmap\n", "Roadmap.");
         let spec = pm_proposes(&harness, "S4", SPEC, "# Spec\n", "Spec.");
         harness.project.record(
@@ -3216,12 +3216,12 @@ pub(super) mod tests {
                 json!({
                     "kind": "integration", "folder_change": 1, "agent_id": "pm",
                     "title": "Roadmap and Product description from the sprint 4 review",
-                    "line": "You approved it; it waits for you to add it"
+                    "line": "You approved it; it waits for you to merge it"
                 }),
                 json!({
                     "kind": "integration", "folder_change": 2, "agent_id": "sm",
                     "title": "Sprint rhythm by Sol",
-                    "line": "Sol wrote it; it waits for you to add it"
+                    "line": "Sol wrote it; it waits for you to merge it"
                 }),
             ]
         );
@@ -3238,6 +3238,7 @@ pub(super) mod tests {
         );
         assert!(integration_rows(&harness).is_empty());
 
+        // A pull request opened for it changes the words, under any policy the file says.
         let harness = folders_integrating("gates-folder-change-auto", "auto_merge");
         harness.project.record_in(
             Some("sm"),
@@ -3249,7 +3250,19 @@ pub(super) mod tests {
                 "change": 1, "sha": "def"
             }),
         );
-        assert!(integration_rows(&harness).is_empty());
+        harness.project.record(
+            "",
+            "folder_change.opened",
+            &json!({ "change": 1, "url": "https://github.com/o/r/pull/7", "number": 7 }),
+        );
+        assert_eq!(
+            integration_rows(&harness),
+            [json!({
+                "kind": "integration", "folder_change": 1, "agent_id": "sm",
+                "title": "Sprint rhythm by Sol",
+                "line": "Its pull request waits for you to merge it"
+            })]
+        );
     }
 
     #[test]

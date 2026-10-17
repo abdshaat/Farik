@@ -110,7 +110,7 @@ Tests:
   - `integrate` before that refuses with the message starting `not_merged: `.
   - A folder change behaves the same way, and is listed by `integration_rows` until it is integrated.
 
-- [ ] `feat(runtime): integrate only by pull request, never by a merge of Catervas's`
+- [x] `feat(runtime): integrate only by pull request, never by a merge of Catervas's`
 
 ### Task 2: every team integrates by pull request
 

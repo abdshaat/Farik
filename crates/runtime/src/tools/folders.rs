@@ -11,15 +11,15 @@ use catervas_core::folders::{
     folder_doc_author, folder_doc_message, is_human_document, role_folder,
 };
 use catervas_core::governor::paths::check_protected_paths;
-use catervas_core::team::{Integration, Team};
-use catervas_protocol::event::{EventBody, Thread};
-use catervas_store::StoreError;
+use catervas_core::team::Team;
+use catervas_protocol::event::{EventBody, EventKind, Thread};
 use catervas_store::folder_docs::{FolderDocProposal, ProposalState, folder_docs};
 use catervas_store::requests::{
     RequestError, file_rederive_request, placeholder_budget_usd, rederive_request, rederive_tasks,
 };
 use catervas_store::waiting::name_of;
 use catervas_store::{CommitOutcome, Git};
+use catervas_store::{EventQuery, StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -111,14 +111,15 @@ fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
     .into()
 }
 
-/// What the team's policy does with a folder change, in the sentence the tool answers with.
-fn next_by(policy: Integration, branch: &str, into: &str) -> String {
-    match policy {
-        Integration::AutoMerge => format!("Catervas merges {branch} into {into} on its next tick."),
-        Integration::PullRequest => format!(
+/// What becomes of a folder change, in the sentence the tool answers with: a pull request when
+/// there is an `origin`, else a merge by hand (Catervas never merges, ADR 0061).
+fn next_by(has_origin: bool, branch: &str, into: &str) -> String {
+    if has_origin {
+        format!(
             "Catervas opens a pull request for {branch} on its next tick; the document is in {into} once it merges."
-        ),
-        Integration::Manual => format!("{branch} waits for the owner to add it."),
+        )
+    } else {
+        format!("{branch} waits for you to merge it into {into}.")
     }
 }
 
@@ -180,7 +181,11 @@ pub(crate) fn land(
     {
         CommitOutcome::Committed { sha } => Ok(Some(Landed {
             change,
-            next: next_by(team.policy.integration, &branch, &into),
+            next: next_by(
+                deps.git.has_remote("origin").unwrap_or(false),
+                &branch,
+                &into,
+            ),
             branch,
             sha,
         })),
@@ -324,13 +329,21 @@ pub(crate) fn proposals_list(deps: &ToolDeps, team: &Team) -> Result<Value, Stor
     }))
 }
 
-/// The `integration` rows of `waiting.list` for the folder changes under `manual` that are
-/// neither integrated nor escalated: an approval waits for the owner to add it, as does a write;
-/// empty under any other policy.
+/// The `integration` rows of `waiting.list` for the folder changes that are neither integrated nor
+/// escalated: each waits for the owner to merge it, with its pull request when one was opened.
 pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, StoreError> {
-    if team.policy.integration != Integration::Manual {
-        return Ok(Vec::new());
-    }
+    let opened: Vec<u64> = deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::FolderChangeOpened],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter_map(|event| match event.body {
+            EventBody::FolderChangeOpened(body) => Some(body.change.get()),
+            _ => None,
+        })
+        .collect();
     let docs = folder_docs(&deps.log)?;
     let mut rows = Vec::new();
     for change in docs
@@ -357,7 +370,11 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
                     plain_names(&paths),
                     first.sprint_id.trim_start_matches('S')
                 ),
-                "You approved it; it waits for you to add it".to_string(),
+                if opened.contains(&change.change) {
+                    "Its pull request waits for you to merge it".to_string()
+                } else {
+                    "You approved it; it waits for you to merge it".to_string()
+                },
             )
         } else if let Some(writer) = &change.written_by {
             let name = name_of(team, writer);
@@ -365,7 +382,11 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
             (
                 writer.clone(),
                 format!("{} by {name}", plain_names(&paths)),
-                format!("{name} wrote it; it waits for you to add it"),
+                if opened.contains(&change.change) {
+                    "Its pull request waits for you to merge it".to_string()
+                } else {
+                    format!("{name} wrote it; it waits for you to merge it")
+                },
             )
         } else {
             continue;
@@ -767,7 +788,7 @@ mod tests {
             answer,
             json!({
                 "path": CADENCE, "change": 1, "branch": "docs/folder-1",
-                "next": "Catervas merges docs/folder-1 into main on its next tick."
+                "next": "docs/folder-1 waits for you to merge it into main."
             })
         );
         let repo = &project.repo;
@@ -818,26 +839,33 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn says_what_happens_next_by_the_policy() {
-        for (policy, next) in [
+    fn says_a_pull_request_opens_only_where_there_is_an_origin() {
+        for (origin, next) in [
+            (false, "docs/folder-1 waits for you to merge it into main."),
             (
-                "auto_merge",
-                "Catervas merges docs/folder-1 into main on its next tick.",
-            ),
-            (
-                "pull_request",
+                true,
                 "Catervas opens a pull request for docs/folder-1 on its next tick; the document is in main once it merges.",
             ),
-            ("manual", "docs/folder-1 waits for the owner to add it."),
         ] {
-            let project = project(&format!("folder-doc-next-{policy}"), policy, true, false);
+            let project = project(
+                &format!("folder-doc-next-{origin}"),
+                "auto_merge",
+                true,
+                false,
+            );
+            let remote = origin.then(|| {
+                crate::orchestrator::fixtures::Harness::with_origin_in(&project.repo.path)
+            });
             let context = ceremony(&project, "sm", Thread::Planning);
             let answer = write(&context, CADENCE, "a\n").expect("written");
-            assert_eq!(answer["next"], next, "{policy}");
+            assert_eq!(answer["next"], next, "{origin}");
             assert!(
                 project.events(&[EventKind::MessagePosted]).is_empty(),
-                "{policy} posts no line in the channel"
+                "{origin} posts no line in the channel"
             );
+            if let Some(remote) = remote {
+                let _ = std::fs::remove_dir_all(remote);
+            }
         }
     }
 

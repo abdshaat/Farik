@@ -2004,6 +2004,10 @@ async fn integrate(
             "{}'s pull request is open on the forge, waiting for its merge",
             task_id.as_str()
         ),
+        Ok(IntegrationOutcome::AwaitingHand { branch, into }) => format!(
+            "{}: {branch} waits for you to merge it into {into}",
+            task_id.as_str()
+        ),
         Ok(IntegrationOutcome::Escalated { detail, scan }) => format!(
             "{} could not be integrated: {detail}{}",
             task_id.as_str(),
@@ -2188,6 +2192,9 @@ async fn integrate_folder_change(
         }
         Ok(IntegrationOutcome::AwaitingForge) => {
             format!("{name}'s pull request is open on the forge, waiting for its merge")
+        }
+        Ok(IntegrationOutcome::AwaitingHand { branch, into }) => {
+            format!("{name}: {branch} waits for you to merge it into {into}")
         }
         Ok(IntegrationOutcome::Escalated { detail, .. }) => {
             format!("{name} could not be integrated: {detail}")
@@ -4066,6 +4073,7 @@ mod tests {
         let harness = Harness::new("human-door", |_| {});
         harness.file("CTV-1", "draft", |_| {});
         harness.accepted("CTV-2");
+        harness.merge_by_hand("CTV-2");
         let orchestrator = an_orchestrator(&harness);
 
         let locked = handled(
@@ -7383,7 +7391,7 @@ mod tests {
         );
         assert_eq!(
             report.said,
-            "Catervas merges docs/folder-1 into main on its next tick."
+            "docs/folder-1 waits for you to merge it into main."
         );
         assert_eq!(report.events, vec![approved[0].envelope.seq]);
         let docs = catervas_store::folder_docs::folder_docs(&harness.project.deps.log)
@@ -7394,7 +7402,8 @@ mod tests {
                 .all(|p| p.state == catervas_store::folder_docs::ProposalState::Approved)
         );
 
-        // The next tick integrates change 1, as it does a task's branch.
+        // Once the owner has merged change 1, the next tick records it, as it does a task's branch.
+        harness.merge_branch_by_hand("docs/folder-1");
         let tick = orchestrator.tick().await.expect("the tick runs");
         assert!(
             matches!(

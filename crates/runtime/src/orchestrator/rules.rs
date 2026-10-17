@@ -15,7 +15,7 @@ use catervas_core::governor::task_status::is_terminal;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::marketing::plans_to_end;
-use catervas_core::team::{Agent, AgentStatus, Integration, Team, task_private_folder};
+use catervas_core::team::{Agent, AgentStatus, Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationAgedBody, EventBody, EventIds, EventKind, HumanAcceptedBodySubject,
     SessionStartedBodyPurpose, Thread, new_event,
@@ -535,7 +535,7 @@ async fn review_and_retro(
     }
     let tasks = sprint_tasks(tools, board, &sprint, &file)?;
     let refresh = if sprint.reviewed {
-        due_refresh(deps, team, board, &sprint, &tasks, waiting)?
+        due_refresh(deps, team, &sprint, &tasks, waiting)?
     } else {
         Refresh::None
     };
@@ -737,13 +737,10 @@ fn held_on_the_integration_branch(
 /// (`reviewed_by`): the Product Manager's, when its `spec` (either format) is on the integration branch and it
 /// has not reviewed (a Product Manager that ran the review has: its review was its refresh); then
 /// the Architect's, when its `structure` (either format) is and a task of the sprint was integrated after the
-/// sprint started, read from the log. Under `auto_merge` they wait while a task of the sprint is
-/// accepted and awaiting its integration, which rule 2 does first, unless its integration was
-/// escalated to the human. Passed over on a spent day or while the agent sleeps, as the review is.
+/// sprint started, read from the log. Passed over on a spent day or while the agent sleeps, as the review is.
 fn due_refresh<'a>(
     deps: &OrchestratorDeps,
     team: &'a Team,
-    board: &[TaskProjection],
     sprint: &EndedSprint,
     tasks: &[SprintTask],
     waiting: &mut Waiting,
@@ -765,17 +762,6 @@ fn due_refresh<'a>(
     let architecture = owed(Role::Architect, ARCHITECTURE_STRUCTURE)?;
     if product.is_none() && architecture.is_none() {
         return Ok(Refresh::None);
-    }
-    if team.policy.integration == Integration::AutoMerge {
-        let escalated = open_escalations(&tools.log, &tools.projections)?;
-        if board.iter().any(|row| {
-            tasks.iter().any(|task| task.task_id == row.task_id)
-                && row.status == TaskStatus::Accepted
-                && row.awaiting_integration
-                && !escalated.iter().any(|open| open.task_id == row.task_id)
-        }) {
-            return Ok(Refresh::Wait);
-        }
     }
     let cannot_be_asked = |agent: &Agent, waiting: &mut Waiting| {
         Ok::<_, OrchestratorError>(
@@ -2966,7 +2952,7 @@ mod tests {
     async fn waits_for_a_dependency_in_another_repository() {
         let (harness, members) =
             Harness::project_folder_with("orch-plan-dependency-repo", &["app", "infra"], |wire| {
-                wire["policy"]["integration"] = json!("manual");
+                wire["policy"]["integration"] = json!("pull_request");
             });
         harness.accepted_in("CTV-1", &members[0].path, Some("app"));
         members[0]
@@ -2990,6 +2976,7 @@ mod tests {
         );
         assert!(adapter.started().is_empty());
 
+        members[0].git(&["merge", "--no-ff", "-m", "By hand", "feature/CTV-1"]);
         orchestrator
             .integrate(&"CTV-1".parse().expect("a task id"))
             .await
@@ -9142,53 +9129,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn integrates_before_it_refreshes() {
-        let harness = Harness::new("orch-refresh-integrates", |wire| {
-            with_a_scrum_master_and_an_architect(wire);
-            wire["policy"]["integration"] = json!("auto_merge");
-        });
-        harness.accepted("CTV-1");
-        harness.open_sprint("S1", &["CTV-1"]);
-        harness.project.record(
-            "CTV-1",
-            "note.written",
-            &json!({ "kind": "completion", "text": "The login page is done.", "written_by": "dev-a" }),
-        );
-        on_main(&harness, SPEC);
-        on_main(&harness, STRUCTURE);
-        let adapter = harness.recorded(vec![review(), review(), review(), retro()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("the sprint ends");
-        orchestrator.tick().await.expect("the review runs");
-        assert_eq!(who_held(&harness).len(), 1);
-
-        let integrating = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&integrating, TickReport::Acted { task_id, what }
-                if task_id.as_str() == "CTV-1" && what.contains("integrated")),
-            "{integrating:?}"
-        );
-        assert_eq!(who_held(&harness).len(), 1, "no refresh ran first");
-        orchestrator
-            .tick()
-            .await
-            .expect("the Product Manager's refresh runs");
-        orchestrator
-            .tick()
-            .await
-            .expect("the Architect's refresh runs");
-        assert_eq!(
-            who_held(&harness)[1..],
-            [
-                ("pm".to_string(), Thread::Review),
-                ("ada".to_string(), Thread::Review)
-            ]
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_product_managers_review_is_its_refresh() {
         // No Scrum Master: the Product Manager runs the review and the retro.
         let harness = Harness::new("orch-refresh-pm-runs", |wire| {
@@ -10590,6 +10530,7 @@ mod tests {
         });
         harness.verifying("CTV-1");
         harness.accepted("CTV-2");
+        harness.merge_by_hand("CTV-2");
         let adapter = harness.recorded(vec![review_writes_note()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 

@@ -393,6 +393,25 @@ fn runs_a_task_to_acceptance_and_says_what_waits() {
     );
     assert!(!daemon_file(&repository).exists());
 
+    // Catervas never merges: until the branch is merged by hand, integrating is refused.
+    let ran = run(&repository.path, &["integrate", &task]);
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.err.contains("not_merged: "), "{}", ran.err);
+    assert!(
+        std::process::Command::new("git")
+            .args([
+                "merge",
+                "--no-ff",
+                "-m",
+                "By hand",
+                &format!("feature/{task}")
+            ])
+            .current_dir(&repository.path)
+            .status()
+            .expect("git runs")
+            .success()
+    );
+
     let ran = run(&repository.path, &["integrate", &task]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(ran.out.contains("merged"), "{}", ran.out);

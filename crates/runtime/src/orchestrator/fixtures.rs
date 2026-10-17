@@ -643,32 +643,6 @@ impl Harness {
         git_in(root, &["commit", "-m", "Approve the product plan"]);
     }
 
-    /// `task` accepted, its worktree gone, with `a.txt`'s first line changed on its branch and
-    /// changed differently on `main` afterwards, so that merging it conflicts in `a.txt`.
-    pub(crate) fn accepted_in_conflict(&self, task: &str) {
-        self.commit_at_root("a.txt", "first\n", "Add a.txt");
-        self.accepted_with_worktree(task);
-        let worktree = self.worktree(task);
-        std::fs::write(worktree.join("a.txt"), "the task's\n").expect("written");
-        self.project
-            .deps
-            .git
-            .commit(&worktree, "Change a.txt", &["a.txt".to_string()])
-            .expect("the branch's change is committed");
-        self.project
-            .deps
-            .git
-            .remove_worktree(&worktree)
-            .expect("the worktree is removed");
-        self.commit_at_root("a.txt", "main's\n", "Change a.txt on main");
-    }
-
-    /// Resolves `accepted_in_conflict` by a commit on `main` restoring `a.txt` to its text at the
-    /// branch point.
-    pub(crate) fn resolve_the_conflict(&self) {
-        self.commit_at_root("a.txt", "first\n", "Restore a.txt");
-    }
-
     /// A bare repository beside the project, added to it as `origin`, with `main` pushed there.
     pub(crate) fn with_origin(&self) -> PathBuf {
         Self::with_origin_in(&self.project.repo.path)
@@ -686,6 +660,39 @@ impl Harness {
         );
         git_in(repo, &["push", "origin", "main"]);
         origin
+    }
+
+    /// `task`'s branch made, or moved, to one empty commit ahead of `main`: its work waits to be
+    /// merged by hand.
+    pub(crate) fn unmerged_branch(&self, task: &str) {
+        let root = &self.project.repo.path;
+        let commit = git_output_in(
+            root,
+            &[
+                "commit-tree",
+                "main^{tree}",
+                "-p",
+                "main",
+                "-m",
+                "The task's work",
+            ],
+        );
+        git_in(root, &["branch", "-f", &self.branch(task), &commit]);
+    }
+
+    /// Merges `task`'s branch into `main` at the root, as the human merging it by hand would
+    /// when the project has no `origin`.
+    pub(crate) fn merge_by_hand(&self, task: &str) {
+        self.merge_branch_by_hand(&self.branch(task));
+    }
+
+    /// `merge_by_hand` for any branch of the project, a folder change's among them.
+    pub(crate) fn merge_branch_by_hand(&self, branch: &str) {
+        let root = &self.project.repo.path;
+        git_in(
+            root,
+            &["merge", "--no-ff", "-m", &format!("Merge {branch}"), branch],
+        );
     }
 
     /// Merges `task`'s branch into `origin`'s `main` from a clone of `origin` of its own, as the

@@ -1226,6 +1226,7 @@ mod tests {
         assert_eq!(waiting["document"]["last_change"]["by_you"], true);
         assert_eq!(waiting["stale"], false);
 
+        harness.merge_branch_by_hand("docs/folder-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1343,6 +1344,7 @@ mod tests {
             git_output(&harness, &["show", &format!("docs/folder-1:{path}")]),
             "<h1>new roadmap</h1>"
         );
+        harness.merge_branch_by_hand("docs/folder-1");
         ticks(&harness);
         let read = read(&harness.daemon, &path);
         assert_eq!(read["document"]["text"], "<h1>new roadmap</h1>\n");
@@ -1498,9 +1500,10 @@ mod tests {
         assert_eq!(
             git_output(&harness, &["show", &format!("main:{OVERVIEW}")]),
             "the overview",
-            "main holds the old text until the next tick"
+            "main holds the old text until the owner merges the branch"
         );
 
+        harness.merge_branch_by_hand("docs/folder-1");
         ticks(&harness);
         assert_eq!(
             git_output(&harness, &["show", &format!("main:{OVERVIEW}")]),

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
-use catervas_core::team::{Integration, Team, task_private_folder};
+use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind,
     NoteWrittenBodyKind, PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
@@ -18,7 +18,7 @@ use catervas_store::files::FilesError;
 use catervas_store::folder_docs::{FolderChange, folder_docs};
 use catervas_store::repos::{TaskRepositoryError, task_repository};
 use catervas_store::{
-    EventQuery, Git, GitError, MergeOutcome, TaskProjection, material, names_of, project_document,
+    EventQuery, Git, GitError, TaskProjection, material, names_of, project_document,
     rescan_members, scan_project, seeded_library,
 };
 
@@ -39,18 +39,16 @@ enum Asker {
     Human,
 }
 
-/// Rule 2: an accepted task awaiting integration is integrated the way the team's policy says,
-/// unless an integration escalation was raised since it was accepted: that one is the human's to
-/// settle through `integrate`, and is not tried again on every tick. `manual` has no rule.
+/// Rule 2: an accepted task awaiting integration gets its pull request, and is recorded once it
+/// is merged, unless an integration escalation was raised since it was accepted: that one is the
+/// human's to settle through `integrate`, and is not tried again on every tick. Catervas never
+/// merges (ADR 0061).
 pub(super) async fn awaiting(
     orchestrator: &Orchestrator,
     team: &Team,
     row: &TaskProjection,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if row.kind != TaskKind::Task
-        || !row.awaiting_integration
-        || team.policy.integration == Integration::Manual
-    {
+    if row.kind != TaskKind::Task || !row.awaiting_integration {
         return Ok(None);
     }
     let subject = Subject::Task(row.task_id.clone());
@@ -64,7 +62,9 @@ pub(super) async fn awaiting(
             "escalated its integration to the human: {detail}{}",
             scan.map(|scan| scan.to_string()).unwrap_or_default()
         ),
-        IntegrationOutcome::AwaitingForge => return Ok(None),
+        IntegrationOutcome::AwaitingForge | IntegrationOutcome::AwaitingHand { .. } => {
+            return Ok(None);
+        }
     };
     Ok(Some(TickReport::Acted {
         task_id: row.task_id.clone(),
@@ -191,16 +191,13 @@ fn folder_change(tools: &ToolDeps, change: u64) -> Result<FolderChange, Orchestr
         })
 }
 
-/// Rule 2's second half: each folder change not integrated is integrated the way the team's policy
-/// says, as `awaiting` does for each accepted task, in a tick scoped to no task. One that was
-/// escalated is the human's to settle through `integrate_folder_change`; `manual` has no rule.
+/// Rule 2's second half: each folder change not integrated gets its pull request, as `awaiting`
+/// does for each accepted task, in a tick scoped to no task. One that was escalated is the
+/// human's to settle through `integrate_folder_change`.
 pub(super) async fn awaiting_folder_changes(
     orchestrator: &Orchestrator,
     team: &Team,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if team.policy.integration == Integration::Manual {
-        return Ok(None);
-    }
     let waiting: Vec<u64> = folder_docs(&orchestrator.deps.tools.log)?
         .changes
         .iter()
@@ -220,7 +217,9 @@ pub(super) async fn awaiting_folder_changes(
             IntegrationOutcome::Escalated { detail, .. } => {
                 format!("escalated its integration to the human: {detail}")
             }
-            IntegrationOutcome::AwaitingForge => continue,
+            IntegrationOutcome::AwaitingForge | IntegrationOutcome::AwaitingHand { .. } => {
+                continue;
+            }
         };
         return Ok(Some(TickReport::FolderChange { change, what }));
     }
@@ -369,16 +368,8 @@ fn integrate_locked(
             return escalate(tools, subject, words).map(Some);
         }
     };
-    let integrated_by = match asker {
-        Asker::Tick => TaskIntegratedBodyIntegratedBy::Governor,
-        Asker::Human => TaskIntegratedBodyIntegratedBy::Human,
-    };
     let integrated_before = integrations_of(tools, subject)?;
-    let outcome = match team.policy.integration {
-        Integration::Manual => Some(merge(tools, subject, &target, integrated_by, false)?),
-        Integration::AutoMerge => Some(merge(tools, subject, &target, integrated_by, true)?),
-        Integration::PullRequest => through_the_forge(tools, subject, &target, asker)?,
-    };
+    let outcome = through_the_forge(tools, subject, &target, asker)?;
     // A folder change touches no language, toolchain, test or criterion: no scan to refresh.
     let Subject::Task(task_id) = subject else {
         return Ok(outcome);
@@ -568,7 +559,7 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId, git: &Git) -> Result<ScanRefresh, 
     Ok(ScanRefresh::Refreshed)
 }
 
-/// Under `pull_request`: with no pull request opened since acceptance, the branch pushed to
+/// With no pull request opened since acceptance, the branch pushed to
 /// `origin` and one opened; with one, its state read. A merge on the forge is recorded as the
 /// human's and the local integration branch brought up to it; a closed one is escalated, unless
 /// the human asks and the branch is in the integration branch all the same.
@@ -581,7 +572,7 @@ fn through_the_forge(
     let into = target.into.as_str();
     let branch = subject.branch(tools)?;
     let Some(url) = opened_url(tools, subject)? else {
-        return open(tools, subject, target, &branch).map(Some);
+        return open(tools, subject, target, &branch, asker).map(Some);
     };
     let state = match target.forge.pull_request_state(&url) {
         Ok(state) => state,
@@ -698,23 +689,20 @@ fn closed_for_the_human(
     }
 }
 
-/// Pushes the branch to `origin` and opens its pull request, recording it.
+/// Pushes the branch to `origin` and opens its pull request, recording it. With no `origin` there
+/// is nothing to open: the branch is integrated once it is in the integration branch, merged by
+/// hand, and waits for that until then (the human asking is told so).
 fn open(
     tools: &ToolDeps,
     subject: &Subject,
     target: &IntegrationTarget,
     branch: &str,
+    asker: Asker,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
     let into = target.into.as_str();
     match target.git.has_remote("origin") {
         Ok(true) => {}
-        Ok(false) => {
-            let detail = format!(
-                "the pull_request policy pushes {branch} to origin, and there is no remote named \
-                 origin"
-            );
-            return escalate(tools, subject, detail);
-        }
+        Ok(false) => return merged_by_hand(tools, subject, target, branch, asker),
         Err(error) => return escalate(tools, subject, git_words(&error)),
     }
     if let Err(error) = target.git.push("origin", &format!("refs/heads/{branch}")) {
@@ -766,6 +754,42 @@ fn open(
     })
 }
 
+/// A subject with no `origin` to open a pull request on: integrated, as the human's, once its
+/// branch is in the integration branch; else the tick waits and the human asking is refused.
+fn merged_by_hand(
+    tools: &ToolDeps,
+    subject: &Subject,
+    target: &IntegrationTarget,
+    branch: &str,
+    asker: Asker,
+) -> Result<IntegrationOutcome, OrchestratorError> {
+    let into = target.into.as_str();
+    match target.git.commit_count(into, branch) {
+        Ok(0) => {
+            let head = target.git.merge_base(into, into)?;
+            record_integrated(
+                tools,
+                subject,
+                &head,
+                into,
+                TaskIntegratedBodyIntegratedBy::Human,
+            )?;
+            Ok(IntegrationOutcome::Merged {
+                sha: head,
+                scan: ScanRefresh::Unchanged,
+            })
+        }
+        Ok(_) if asker == Asker::Tick => Ok(IntegrationOutcome::AwaitingHand {
+            branch: branch.to_string(),
+            into: into.to_string(),
+        }),
+        Ok(_) => Err(refused(format!(
+            "not_merged: {branch} is not in {into} yet; merge it, then ask again"
+        ))),
+        Err(error) => escalate(tools, subject, git_words(&error)),
+    }
+}
+
 /// The pull request's body: a task's contract intent, then the last completion and review notes; a
 /// folder change's paths, one per line, then a line for the owner's approval.
 fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, OrchestratorError> {
@@ -803,60 +827,6 @@ fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, Orch
         last_note(NoteWrittenBodyKind::Completion),
         last_note(NoteWrittenBodyKind::Review)
     ))
-}
-
-/// Merges the subject's branch into `into`, records it, and, when `push` and there is an `origin`,
-/// pushes `into` there. A conflict, a git failure, or a failed push is an escalation; the merge
-/// stays when only the push failed, since the local integration branch is what dependents start
-/// from.
-fn merge(
-    tools: &ToolDeps,
-    subject: &Subject,
-    target: &IntegrationTarget,
-    integrated_by: TaskIntegratedBodyIntegratedBy,
-    push: bool,
-) -> Result<IntegrationOutcome, OrchestratorError> {
-    let into = target.into.as_str();
-    let id = subject.name();
-    let branch = subject.branch(tools)?;
-    let (message, _) = subject.titles(tools)?;
-    let sha = match target.git.merge(into, &branch, &message) {
-        Ok(MergeOutcome::Merged { sha }) => sha,
-        Ok(MergeOutcome::Conflicts(paths)) => {
-            let detail = format!(
-                "merging {branch} into {into} conflicts in {}: resolve them on {into}, then run \
-                 catervas integrate {id}",
-                paths.join(", ")
-            );
-            return escalate(tools, subject, detail);
-        }
-        Err(error) => {
-            let detail = format!("merging {branch} into {into} failed: {}", git_words(&error));
-            return escalate(tools, subject, detail);
-        }
-    };
-    record_integrated(tools, subject, &sha, into, integrated_by)?;
-    if push {
-        let pushed = target.git.has_remote("origin").and_then(|has| {
-            if has {
-                target.git.push("origin", &format!("refs/heads/{into}"))
-            } else {
-                Ok(())
-            }
-        });
-        if let Err(error) = pushed {
-            let detail = format!(
-                "merged locally as {sha}; pushing {into} to origin failed: {}; run git push origin \
-                 {into} once it can be pushed",
-                git_words(&error)
-            );
-            return escalate(tools, subject, detail);
-        }
-    }
-    Ok(IntegrationOutcome::Merged {
-        sha,
-        scan: ScanRefresh::Unchanged,
-    })
 }
 
 /// Appends `task.integrated`, or `folder_change.integrated`.
@@ -1174,7 +1144,6 @@ fn remove_folder(path: &Path) -> Result<(), OrchestratorError> {
 
 #[cfg(test)]
 mod tests {
-    use catervas_core::contract::TaskStatus;
     use catervas_protocol::event::{
         EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind, NewEvent,
         PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
@@ -1233,53 +1202,108 @@ mod tests {
         id.parse().expect("a task id")
     }
 
+    /// The words of Today's integration rows for tasks.
+    fn integration_lines(harness: &Harness) -> Vec<String> {
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        catervas_store::waiting::waiting(&deps.projections, &deps.log, &deps.files, &team)
+            .expect("the store reads")
+            .into_iter()
+            .filter(|item| item.kind == catervas_store::waiting::WaitingKind::Integration)
+            .map(|item| item.line)
+            .collect()
+    }
+
+    /// The folder changes Today lists as waiting for a merge.
+    fn folder_rows(harness: &Harness) -> Vec<serde_json::Value> {
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        crate::tools::folders::integration_rows(deps, &team).expect("the log reads")
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn merges_and_pushes_under_auto_merge() {
-        let harness = under("int-auto-merge", "auto_merge");
+    async fn integrates_only_through_a_pull_request_or_a_hand_merge() {
+        // With an origin: a pull request, never a merge of Catervas's, whatever the file says.
+        let harness = under("int-only-pr", "auto_merge");
         let origin = harness.with_origin();
         harness.accepted("CTV-1");
-        // A tag named as the integration branch: a push that did not spell `refs/heads/main` would
-        // be refused as matching both.
-        git_in(&harness.project.repo.path, &["tag", "main"]);
+        let main_before = at_root(&harness, &["rev-parse", "refs/heads/main"]);
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
-            "{report:?}"
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(opened(&harness).len(), 1);
+        assert_eq!(
+            at_root(&harness, &["rev-parse", "refs/heads/main"]),
+            main_before
         );
+        assert!(integrations(&harness).is_empty());
+        assert_eq!(
+            integration_lines(&harness),
+            vec!["Accepted: its pull request waits for you to merge it".to_string()]
+        );
+        let sha = harness.merge_on_the_forge(&origin, "CTV-1");
+        harness.gh.answers(
+            "view",
+            &format!(r#"{{"mergeCommit":{{"oid":"{sha}"}},"state":"MERGED"}}"#),
+            "",
+            0,
+        );
+        orchestrator.tick().await.expect("the tick runs");
+        let integrated = integrations(&harness);
+        assert_eq!(integrated.len(), 1, "{integrated:?}");
+        assert_eq!(
+            integrated[0].integrated_by,
+            TaskIntegratedBodyIntegratedBy::Human
+        );
+        let _ = std::fs::remove_dir_all(&origin);
+
+        // With no origin: it waits for a merge by hand, and the human's ask is refused until then.
+        let harness = under("int-only-hand", "auto_merge");
+        harness.accepted("CTV-1");
+        assert_eq!(harness.folder_change(CADENCE, "a\n"), 1);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        assert!(integrations(&harness).is_empty());
         assert!(
             escalations(&harness).is_empty(),
             "{:?}",
             escalations(&harness)
         );
-        let head = at_root(&harness, &["rev-parse", "refs/heads/main"]);
+        assert_eq!(
+            integration_lines(&harness),
+            vec!["Accepted: waiting for you to merge feature/CTV-1".to_string()]
+        );
+        assert_eq!(folder_rows(&harness).len(), 1);
+        let refusal = orchestrator.integrate(&task("CTV-1")).await;
+        assert!(
+            matches!(&refusal, Err(OrchestratorError::Refused { reason }) if reason.starts_with("not_merged: ")),
+            "{refusal:?}"
+        );
+        let refusal = orchestrator.integrate_folder_change(1).await;
+        assert!(
+            matches!(&refusal, Err(OrchestratorError::Refused { reason }) if reason.starts_with("not_merged: ")),
+            "{refusal:?}"
+        );
+        harness.merge_by_hand("CTV-1");
+        harness.merge_branch_by_hand("docs/folder-1");
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
         let integrated = integrations(&harness);
         assert_eq!(integrated.len(), 1, "{integrated:?}");
-        assert_eq!(integrated[0].sha, head);
-        assert_eq!(integrated[0].into, "main");
         assert_eq!(
             integrated[0].integrated_by,
-            TaskIntegratedBodyIntegratedBy::Governor
+            TaskIntegratedBodyIntegratedBy::Human
         );
-        let parents = at_root(
-            &harness,
-            &["rev-list", "--parents", "-n", "1", "refs/heads/main"],
-        );
-        let branch = at_root(&harness, &["rev-parse", &harness.branch("CTV-1")]);
-        assert!(
-            parents.split(' ').skip(1).any(|parent| parent == branch),
-            "{parents}"
-        );
-        assert_eq!(git_output_in(&origin, &["rev-parse", "main"]), head);
         assert_eq!(
-            at_root(&harness, &["symbolic-ref", "HEAD"]),
-            "refs/heads/main"
+            folder_events(&harness, EventKind::FolderChangeIntegrated).len(),
+            1
         );
-        assert!(!harness.row("CTV-1").awaiting_integration);
-        let _ = std::fs::remove_dir_all(&origin);
+        assert!(integration_lines(&harness).is_empty());
+        assert!(folder_rows(&harness).is_empty());
     }
 
     #[tokio::test]
@@ -1293,6 +1317,7 @@ mod tests {
             "accepted",
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
         );
+        harness.merge_by_hand("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let mut said = Vec::new();
@@ -1323,118 +1348,6 @@ mod tests {
         assert!(
             said.iter().any(|what| what.ends_with("and kept fix/CTV-1")),
             "{said:?}"
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn merges_without_a_push_when_there_is_no_origin() {
-        let harness = under("int-no-origin", "auto_merge");
-        harness.accepted("CTV-1");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        assert_eq!(integrations(&harness).len(), 1);
-        assert!(escalations(&harness).is_empty());
-        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_a_failed_push_and_keeps_the_merge() {
-        let harness = under("int-push-fails", "auto_merge");
-        harness.with_origin_nowhere();
-        harness.accepted("CTV-1");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let integrated = integrations(&harness);
-        assert_eq!(integrated.len(), 1);
-        let raised = escalations(&harness);
-        assert_eq!(raised.len(), 1, "{raised:?}");
-        assert_eq!(raised[0].reason, EscalationRaisedBodyReason::Integration);
-        assert!(
-            raised[0].detail.starts_with("merged locally as"),
-            "{}",
-            raised[0].detail
-        );
-        assert!(
-            raised[0].detail.contains("git push origin main"),
-            "{}",
-            raised[0].detail
-        );
-        let kinds = harness.events(&[EventKind::TaskIntegrated, EventKind::EscalationRaised]);
-        assert_eq!(kinds[0].body.kind(), EventKind::TaskIntegrated);
-        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
-        let before = harness.events(&[]).len();
-        assert_eq!(
-            orchestrator.integrate(&task("CTV-1")).await,
-            Ok(IntegrationOutcome::Merged {
-                sha: integrated[0].sha.clone(),
-                scan: ScanRefresh::Unchanged,
-            })
-        );
-        assert_eq!(harness.events(&[]).len(), before);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_a_conflict_and_leaves_the_task_accepted() {
-        let harness = under("int-conflict", "auto_merge");
-        harness.accepted_in_conflict("CTV-1");
-        let moves_before = harness.events(&[EventKind::TaskTransitioned]).len();
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let raised = escalations(&harness);
-        assert_eq!(raised.len(), 1, "{raised:?}");
-        assert_eq!(raised[0].reason, EscalationRaisedBodyReason::Integration);
-        assert!(raised[0].detail.contains("a.txt"), "{}", raised[0].detail);
-        assert_eq!(
-            harness.events(&[EventKind::TaskTransitioned]).len(),
-            moves_before
-        );
-        let row = harness.row("CTV-1");
-        assert_eq!(row.status, TaskStatus::Accepted);
-        assert!(row.awaiting_integration);
-        assert!(integrations(&harness).is_empty());
-        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn integrates_for_the_human_after_an_escalation() {
-        let harness = under("int-human", "auto_merge");
-        harness.accepted_in_conflict("CTV-1");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        orchestrator.tick().await.expect("the tick runs");
-
-        let again = orchestrator.integrate(&task("CTV-1")).await;
-        assert!(
-            matches!(&again, Ok(IntegrationOutcome::Escalated { detail, scan: None }) if detail.contains("a.txt")),
-            "{again:?}"
-        );
-        assert_eq!(escalations(&harness).len(), 2);
-
-        harness.resolve_the_conflict();
-        let merged = orchestrator.integrate(&task("CTV-1")).await;
-        let head = at_root(&harness, &["rev-parse", "main"]);
-        assert_eq!(
-            merged,
-            Ok(IntegrationOutcome::Merged {
-                sha: head.clone(),
-                scan: ScanRefresh::Refreshed
-            })
-        );
-        let integrated = integrations(&harness);
-        assert_eq!(integrated.len(), 1);
-        assert_eq!(integrated[0].sha, head);
-        assert_eq!(
-            integrated[0].integrated_by,
-            TaskIntegratedBodyIntegratedBy::Human
         );
     }
 
@@ -1477,6 +1390,7 @@ mod tests {
             .git
             .remove_worktree(&harness.worktree("CTV-1"))
             .expect("the task's worktree is removed");
+        harness.merge_by_hand("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let merged = orchestrator.integrate(&task("CTV-1")).await;
@@ -1507,6 +1421,7 @@ mod tests {
     async fn answers_an_integrated_task_without_merging_again() {
         let harness = under("int-twice", "auto_merge");
         harness.accepted("CTV-1");
+        harness.merge_by_hand("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator.tick().await.expect("the tick runs");
         let sha = integrations(&harness)[0].sha.clone();
@@ -1520,33 +1435,6 @@ mod tests {
         );
         assert_eq!(integrations(&harness).len(), 1);
         assert_eq!(at_root(&harness, &["rev-parse", "main"]), sha);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn leaves_an_accepted_task_to_the_human_under_manual() {
-        let harness = under("int-manual", "manual");
-        let origin = harness.with_origin();
-        harness.accepted("CTV-1");
-        let pushed = git_output_in(&origin, &["rev-parse", "main"]);
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
-        assert!(integrations(&harness).is_empty());
-        assert_eq!(at_root(&harness, &["rev-parse", "main"]), pushed);
-
-        let merged = orchestrator.integrate(&task("CTV-1")).await;
-        let head = at_root(&harness, &["rev-parse", "main"]);
-        assert_ne!(head, pushed);
-        assert_eq!(
-            merged,
-            Ok(IntegrationOutcome::Merged {
-                sha: head,
-                scan: ScanRefresh::Refreshed
-            })
-        );
-        assert_eq!(git_output_in(&origin, &["rev-parse", "main"]), pushed);
-        let _ = std::fs::remove_dir_all(&origin);
     }
 
     #[tokio::test]
@@ -1682,56 +1570,28 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_a_push_that_would_have_to_be_forced() {
-        let harness = under("int-push-behind", "auto_merge");
-        let origin = harness.with_origin();
+    async fn escalates_a_push_origin_refuses() {
+        let harness = under("int-push-fails", "pull_request");
+        harness.with_origin_nowhere();
         harness.accepted("CTV-1");
-        // `origin`'s `main` gains a commit the local `main` lacks.
-        let theirs = harness.merge_on_the_forge(&origin, "CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(integrations(&harness).len(), 1);
-        let raised = escalations(&harness);
-        assert_eq!(raised.len(), 1, "{raised:?}");
-        assert!(
-            raised[0].detail.starts_with("merged locally as"),
-            "{}",
-            raised[0].detail
-        );
-        assert_eq!(git_output_in(&origin, &["rev-parse", "main"]), theirs);
-        let _ = std::fs::remove_dir_all(&origin);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_a_merge_git_refuses() {
-        let harness = under("int-merge-refused", "auto_merge");
-        harness.accepted("CTV-1");
-        // An untracked `done.txt` in the root checkout, which the merge would overwrite.
-        std::fs::write(harness.project.repo.path.join("done.txt"), "mine\n").expect("written");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
-            "{report:?}"
-        );
         let raised = escalations(&harness);
         assert_eq!(raised.len(), 1, "{raised:?}");
         assert_eq!(raised[0].reason, EscalationRaisedBodyReason::Integration);
         assert!(
             raised[0].detail.starts_with(&format!(
-                "merging {} into main failed",
+                "pushing {} to origin failed",
                 harness.branch("CTV-1")
             )),
             "{}",
             raised[0].detail
         );
+        assert!(opened(&harness).is_empty());
         assert!(integrations(&harness).is_empty());
-        assert!(harness.row("CTV-1").awaiting_integration);
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
     }
 
     #[tokio::test]
@@ -1761,6 +1621,7 @@ mod tests {
     async fn integrates_whatever_escalations_of_another_reason_it_carries() {
         let harness = under("int-other-escalation", "auto_merge");
         harness.accepted("CTV-1");
+        harness.merge_by_hand("CTV-1");
         harness.project.record(
             "CTV-1",
             "escalation.raised",
@@ -1771,67 +1632,6 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(integrations(&harness).len(), 1);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn merges_one_task_at_a_time_across_orchestrators() {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("a runtime");
-        for round in 0..20 {
-            let harness = Harness::new(&format!("int-lock-{round}"), |wire| {
-                wire["policy"]["integration"] = json!("manual");
-                wire["policy"]["integration_branch"] = json!("main");
-                wire["policy"]["wip_limit_per_agent"] = json!(2);
-            });
-            // Each branch gets a commit of its own: the fixtures' two `done.txt` commits, made in
-            // the same second on the same parent, are one commit, so either branch would hold the
-            // other's tip, and whichever merged second could find itself already merged.
-            for (task, file) in [("CTV-1", "one.txt"), ("CTV-2", "two.txt")] {
-                harness.accepted_with_worktree(task);
-                let worktree = harness.worktree(task);
-                std::fs::write(worktree.join(file), format!("{task}\n")).expect("written");
-                let git = &harness.project.deps.git;
-                git.commit(&worktree, &format!("Add {file}"), &[file.to_string()])
-                    .expect("committed");
-                git.remove_worktree(&worktree).expect("removed");
-            }
-            git_in(&harness.project.repo.path, &["checkout", "-b", "work"]);
-            let first = harness.orchestrator(harness.recorded(Vec::new()));
-            let second = harness.orchestrator(harness.recorded(Vec::new()));
-
-            let (ctv_1, ctv_2) = (task("CTV-1"), task("CTV-2"));
-            let (one, two) = runtime.block_on(async {
-                tokio::join!(first.integrate(&ctv_1), second.integrate(&ctv_2))
-            });
-
-            assert!(
-                matches!(one, Ok(IntegrationOutcome::Merged { .. })),
-                "{round}: {one:?}"
-            );
-            assert!(
-                matches!(two, Ok(IntegrationOutcome::Merged { .. })),
-                "{round}: {two:?}"
-            );
-            assert_eq!(
-                at_root(&harness, &["symbolic-ref", "--short", "HEAD"]),
-                "work",
-                "{round}"
-            );
-            for branch in [harness.branch("CTV-1"), harness.branch("CTV-2")] {
-                git_in(
-                    &harness.project.repo.path,
-                    &["merge-base", "--is-ancestor", &branch, "main"],
-                );
-            }
-            assert_eq!(
-                at_root(&harness, &["rev-list", "--merges", "--count", "main"]),
-                "2",
-                "{round}"
-            );
-        }
     }
 
     const PULL_URL: &str = "https://github.com/o/r/pull/7";
@@ -2074,26 +1874,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_a_pull_request_with_no_origin() {
-        let harness = under("int-pr-no-origin", "pull_request");
-        harness.accepted("CTV-1");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let raised = escalations(&harness);
-        assert_eq!(raised.len(), 1, "{raised:?}");
-        assert!(
-            raised[0].detail.contains("there is no remote named origin"),
-            "{}",
-            raised[0].detail
-        );
-        assert!(harness.gh.calls().is_empty());
-        assert!(opened(&harness).is_empty());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_forge_merge_the_local_branch_cannot_follow() {
         let (harness, origin) = a_pull_request("int-pr-diverged", true);
         let sha = harness.merge_on_the_forge(&origin, "CTV-1");
@@ -2127,7 +1907,7 @@ mod tests {
     }
 
     /// `task` accepted, its worktree gone, with each of `files` written and committed on its
-    /// branch.
+    /// branch, and the branch merged by hand into `main`.
     fn accepted_adding(harness: &Harness, task: &str, files: &[(&str, &str)]) {
         harness.verifying_with(task, false, true, |_| {});
         let worktree = harness.worktree(task);
@@ -2159,6 +1939,7 @@ mod tests {
             .git
             .remove_worktree(&worktree)
             .expect("the worktree is removed");
+        harness.merge_by_hand(task);
     }
 
     /// What the tick said it did, the first time it acted.
@@ -2308,7 +2089,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn skips_the_scan_off_the_integration_branch() {
         let harness = Harness::new("int-rescan-off", |wire| {
-            wire["policy"]["integration"] = json!("manual");
+            wire["policy"]["integration"] = json!("pull_request");
             // Named, since with none the integration branch is whatever is checked out.
             wire["policy"]["integration_branch"] = json!("main");
         });
@@ -2398,7 +2179,9 @@ mod tests {
             .block_on(work)
     }
 
-    fn adds(orchestrator: &crate::orchestrator::Orchestrator, change: u64) {
+    /// The owner merges folder change `change` by hand and asks for it to be added.
+    fn adds(harness: &Harness, orchestrator: &crate::orchestrator::Orchestrator, change: u64) {
+        harness.merge_branch_by_hand(&format!("docs/folder-{change}"));
         block_on(
             orchestrator
                 .handle(catervas_protocol::command::Command::FolderChangeIntegrate { change }),
@@ -2418,12 +2201,12 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_the_rederive_when_the_owners_change_is_integrated() {
-        let harness = with_documents("int-rederive", "manual");
+        let harness = with_documents("int-rederive", "pull_request");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         // An agent's change to the human document files none, before any owner's edit is held.
         let agents = harness.folder_change(ROADMAP, "an agent's roadmap\n");
-        adds(&orchestrator, agents);
+        adds(&harness, &orchestrator, agents);
         assert!(
             rederives(&harness).is_empty(),
             "an agent's change files none"
@@ -2434,7 +2217,7 @@ mod tests {
             rederives(&harness).is_empty(),
             "nothing is filed at the save"
         );
-        adds(&orchestrator, change);
+        adds(&harness, &orchestrator, change);
         assert_eq!(
             rederives(&harness),
             [("CTV-1".to_string(), ROADMAP_TWIN.to_string())]
@@ -2484,7 +2267,7 @@ mod tests {
 
         // A second integrated save while the first re-derive is a draft files none.
         let change = owner_saves(&harness, ROADMAP, "a second roadmap\n");
-        adds(&orchestrator, change);
+        adds(&harness, &orchestrator, change);
         assert_eq!(rederives(&harness).len(), 1);
 
         // Once that task is under way, the next one files another.
@@ -2492,19 +2275,19 @@ mod tests {
             .project
             .moved("CTV-1", "draft", "in_progress", &json!({}));
         let change = owner_saves(&harness, ROADMAP, "a third roadmap\n");
-        adds(&orchestrator, change);
+        adds(&harness, &orchestrator, change);
         assert_eq!(rederives(&harness).len(), 2);
 
         // Another document of the owner's files none.
         let change = owner_saves(&harness, "docs/catervas/architecture/overview.md", "x\n");
-        adds(&orchestrator, change);
+        adds(&harness, &orchestrator, change);
         assert_eq!(rederives(&harness).len(), 2);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_the_rederive_of_an_html_twin() {
-        let harness = with_documents("int-rederive-html", "manual");
+        let harness = with_documents("int-rederive-html", "pull_request");
         let spec = "docs/catervas/product/spec.html";
         let twin = "docs/catervas/product/spec.agent.html";
         harness.project.repo.write(spec, "<h1>spec</h1>\n");
@@ -2513,7 +2296,7 @@ mod tests {
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let change = owner_saves(&harness, spec, "<h1>new spec</h1>\n");
-        adds(&orchestrator, change);
+        adds(&harness, &orchestrator, change);
 
         assert_eq!(
             rederives(&harness),
@@ -2524,9 +2307,10 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_the_rederive_when_the_tick_integrates_the_owners_change() {
-        let harness = with_documents("int-rederive-auto", "auto_merge");
+        let harness = with_documents("int-rederive-auto", "pull_request");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        owner_saves(&harness, ROADMAP, "the owner's roadmap\n");
+        let change = owner_saves(&harness, ROADMAP, "the owner's roadmap\n");
+        harness.merge_branch_by_hand(&format!("docs/folder-{change}"));
         for _ in 0..3 {
             block_on(orchestrator.tick()).expect("the tick runs");
             if !rederives(&harness).is_empty() {
@@ -2558,48 +2342,6 @@ mod tests {
             TickReport::FolderChange { change, what } => (change, what),
             other => panic!("a folder change's report, not {other:?}"),
         }
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn merges_a_folder_change_on_the_next_tick() {
-        let harness = under("int-folder-merge", "auto_merge");
-        let origin = harness.with_origin();
-        harness.accepted("CTV-1");
-        assert_eq!(harness.folder_change(CADENCE, "a\n"), 1);
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        // The accepted task goes first, the folder change on the tick after it.
-        let first = orchestrator.tick().await.expect("the tick runs");
-        assert!(
-            matches!(&first, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
-            "{first:?}"
-        );
-        assert!(folder_events(&harness, EventKind::FolderChangeIntegrated).is_empty());
-        let (change, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
-
-        let head = at_root(&harness, &["rev-parse", "refs/heads/main"]);
-        assert_eq!((change, what), (1, format!("integrated at {head}")));
-        assert_eq!(
-            at_root(&harness, &["log", "-1", "--format=%s", "main"]),
-            "Merge docs/folder-1: delivery/cadence.md"
-        );
-        assert_eq!(git_output_in(&origin, &["rev-parse", "main"]), head);
-        let integrated = folder_events(&harness, EventKind::FolderChangeIntegrated);
-        assert_eq!(integrated.len(), 1);
-        assert_eq!(
-            integrated[0]["body"],
-            json!({ "change": 1, "sha": head, "into": "main", "integrated_by": "governor" })
-        );
-        assert_eq!(
-            at_root(
-                &harness,
-                &["show", "main:docs/catervas/delivery/cadence.md"]
-            ),
-            "a"
-        );
-        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
-        let _ = std::fs::remove_dir_all(&origin);
     }
 
     #[tokio::test]
@@ -2698,111 +2440,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&origin);
     }
 
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn leaves_a_folder_change_for_the_human_under_manual() {
-        use catervas_protocol::command::Command;
-
-        let harness = under("int-folder-manual", "manual");
-        let origin = harness.with_origin();
-        harness.folder_change(CADENCE, "a\n");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        let main_before = at_root(&harness, &["rev-parse", "main"]);
-
-        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
-        assert_eq!(at_root(&harness, &["rev-parse", "main"]), main_before);
-
-        let report = orchestrator
-            .handle(Command::FolderChangeIntegrate { change: 1 })
-            .await
-            .expect("the human integrates it");
-        let head = at_root(&harness, &["rev-parse", "main"]);
-        assert_ne!(head, main_before);
-        assert!(report.said.contains(&head), "{}", report.said);
-        let integrated = folder_events(&harness, EventKind::FolderChangeIntegrated);
-        assert_eq!(
-            integrated[0]["body"],
-            json!({ "change": 1, "sha": head, "into": "main", "integrated_by": "human" })
-        );
-        assert_eq!(
-            git_output_in(&origin, &["rev-parse", "main"]),
-            main_before,
-            "manual pushes nothing"
-        );
-        assert_eq!(
-            orchestrator.integrate_folder_change(1).await,
-            Ok(IntegrationOutcome::Merged {
-                sha: head,
-                scan: ScanRefresh::Unchanged
-            })
-        );
-        assert_eq!(
-            folder_events(&harness, EventKind::FolderChangeIntegrated).len(),
-            1
-        );
-        let refusal = orchestrator.integrate_folder_change(9).await;
-        assert!(
-            matches!(&refusal, Err(OrchestratorError::Refused { reason })
-                if reason.starts_with("no_such_folder_change: ")),
-            "{refusal:?}"
-        );
-        let _ = std::fs::remove_dir_all(&origin);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_a_folder_change_that_cannot_land() {
-        use catervas_protocol::command::Command;
-
-        let harness = under("int-folder-escalates", "auto_merge");
-        harness.folder_change(CADENCE, "a\n");
-        // The owner's own file at the path, made after the write: the merge would overwrite it.
-        harness.project.repo.write(CADENCE, "the owner's\n");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        let (change, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
-
-        assert_eq!(change, 1);
-        assert!(
-            what.starts_with("escalated its integration to the human: "),
-            "{what}"
-        );
-        let escalated = folder_events(&harness, EventKind::FolderChangeEscalated);
-        assert_eq!(escalated.len(), 1);
-        let detail = escalated[0]["body"]["detail"].as_str().expect("a detail");
-        assert!(
-            detail.contains("merging docs/folder-1 into main failed"),
-            "{detail}"
-        );
-        // The channel keeps a message on one line.
-        let one_line = detail.replace('\n', " ");
-        assert!(
-            harness
-                .events(&[EventKind::MessagePosted])
-                .iter()
-                .any(|event| matches!(&event.body, EventBody::MessagePosted(body)
-                    if body.text.contains(&one_line)))
-        );
-        assert!(folder_events(&harness, EventKind::FolderChangeIntegrated).is_empty());
-        // Not tried again by a tick.
-        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
-        assert_eq!(
-            folder_events(&harness, EventKind::FolderChangeEscalated).len(),
-            1
-        );
-
-        // The human's word tries again, once the owner's file is out of the way.
-        std::fs::remove_file(harness.project.repo.path.join(CADENCE)).expect("removed");
-        // An escalated change no longer holds its path: the next write of it is change 2.
-        assert_eq!(harness.folder_change(CADENCE, "b\n"), 2);
-        orchestrator
-            .handle(Command::FolderChangeIntegrate { change: 1 })
-            .await
-            .expect("the human integrates it");
-        let integrated = folder_events(&harness, EventKind::FolderChangeIntegrated);
-        assert_eq!(integrated[0]["body"]["integrated_by"], "human");
-    }
-
     /// A project folder over `app` and `infra`, integrating under `policy`.
     fn in_members(name: &str, policy: &str) -> (Harness, Vec<TempRepo>) {
         let policy = policy.to_string();
@@ -2823,84 +2460,29 @@ mod tests {
         std::fs::canonicalize(&app.path).expect("app is there")
     }
 
-    fn parents_of_main(repo: &TempRepo) -> Vec<String> {
-        repo.git_output(&["rev-list", "--parents", "-n", "1", "refs/heads/main"])
-            .split(' ')
-            .map(str::to_string)
-            .collect()
-    }
-
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn merges_into_its_member_and_pushes_it() {
-        let (harness, members) = in_members("int-member-merge", "auto_merge");
+    async fn integrates_in_its_member_once_merged_by_hand() {
+        let (harness, members) = in_members("int-member-hand", "pull_request");
         let (app, infra) = (&members[0], &members[1]);
-        let origin = Harness::with_origin_in(&app.path);
         accepted_in_app(&harness, app, "CTV-1");
-        // What a clone records: the branch to integrate into, whatever is checked out.
-        app.git(&["remote", "set-head", "origin", "main"]);
-        app.git(&["checkout", "-b", "topic"]);
         let root_before = at_root(&harness, &["rev-parse", "main"]);
         let infra_before = infra.git_output(&["rev-parse", "main"]);
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-1"),
-            "{report:?}"
-        );
-        assert!(
-            escalations(&harness).is_empty(),
-            "{:?}",
-            escalations(&harness)
-        );
-        let head = app.git_output(&["rev-parse", "refs/heads/main"]);
-        let parents = parents_of_main(app);
-        assert_eq!(parents.len(), 3, "{parents:?}");
-        assert_eq!(
-            app.git_output(&["log", "-1", "--format=%s", "refs/heads/main"]),
-            format!("Merge CTV-1: {}", harness.row("CTV-1").title)
-        );
-        assert_eq!(parents[2], app.git_output(&["rev-parse", "feature/CTV-1"]));
-        assert_eq!(git_output_in(&origin, &["rev-parse", "main"]), head);
-        let integrated = integrations(&harness);
-        assert_eq!(integrated.len(), 1, "{integrated:?}");
-        assert_eq!(integrated[0].sha, head);
-        assert_eq!(integrated[0].into, "main");
-        assert_eq!(at_root(&harness, &["rev-parse", "main"]), root_before);
-        assert_eq!(infra.git_output(&["rev-parse", "main"]), infra_before);
-        assert_eq!(
-            app.git_output(&["symbolic-ref", "HEAD"]),
-            "refs/heads/topic"
-        );
-        assert!(!harness.row("CTV-1").awaiting_integration);
-        let _ = std::fs::remove_dir_all(&origin);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn merges_in_the_member_when_the_human_asks() {
-        let (harness, members) = in_members("int-member-manual", "manual");
-        let app = &members[0];
-        let origin = Harness::with_origin_in(&app.path);
-        accepted_in_app(&harness, app, "CTV-1");
-        let root_before = at_root(&harness, &["rev-parse", "main"]);
         let app_before = app.git_output(&["rev-parse", "main"]);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
         assert_eq!(app.git_output(&["rev-parse", "main"]), app_before);
+        assert!(escalations(&harness).is_empty());
 
+        app.git(&["merge", "--no-ff", "-m", "By hand", "feature/CTV-1"]);
         let merged = orchestrator.integrate(&task("CTV-1")).await;
 
         let head = app.git_output(&["rev-parse", "main"]);
-        assert_ne!(head, app_before);
         assert!(
             matches!(&merged, Ok(IntegrationOutcome::Merged { sha, .. }) if *sha == head),
             "{merged:?}"
         );
-        assert_eq!(parents_of_main(app).len(), 3);
         let integrated = integrations(&harness);
         assert_eq!(integrated.len(), 1, "{integrated:?}");
         assert_eq!(
@@ -2908,13 +2490,8 @@ mod tests {
             TaskIntegratedBodyIntegratedBy::Human
         );
         assert_eq!(integrated[0].into, "main");
-        assert_eq!(
-            git_output_in(&origin, &["rev-parse", "main"]),
-            app_before,
-            "manual does not push"
-        );
         assert_eq!(at_root(&harness, &["rev-parse", "main"]), root_before);
-        let _ = std::fs::remove_dir_all(&origin);
+        assert_eq!(infra.git_output(&["rev-parse", "main"]), infra_before);
     }
 
     #[tokio::test]
@@ -2973,6 +2550,9 @@ mod tests {
         let app = &members[0];
         accepted_in_app(&harness, app, "CTV-1");
         accepted_in_app(&harness, app, "CTV-2");
+        for branch in ["feature/CTV-1", "feature/CTV-2"] {
+            app.git(&["merge", "--no-ff", "-m", "By hand", branch]);
+        }
         let there = app_canonical(app);
         let moved = std::path::PathBuf::from(format!("{}-moved", app.path.display()));
         let _ = std::fs::remove_dir_all(&moved);
@@ -3054,6 +2634,8 @@ mod tests {
         let (harness, members) = policy("int-member-docs-merge", "auto_merge");
         a_docs_task_accepted(&harness);
         harness.folder_change(CADENCE, "a\n");
+        harness.merge_by_hand("CTV-1");
+        harness.merge_branch_by_hand("docs/folder-1");
         let before: Vec<String> = members
             .iter()
             .map(|member| member.git_output(&["rev-parse", "main"]))
@@ -3179,6 +2761,7 @@ mod tests {
         app.adapter()
             .remove_worktree(&worktree)
             .expect("the worktree is removed");
+        app.git(&["merge", "--no-ff", "-m", "By hand", "feature/CTV-1"]);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let merged = orchestrator.integrate(&task("CTV-1")).await;
@@ -3239,6 +2822,7 @@ mod tests {
             )
             .expect("repos.yaml is written");
         accepted_in_app(&harness, app, "CTV-1");
+        app.git(&["merge", "--no-ff", "-m", "By hand", "feature/CTV-1"]);
         app.git(&["checkout", "-b", "topic"]);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -3284,13 +2868,14 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn removes_a_member_tasks_worktrees_with_its_git() {
-        let (harness, members) = in_members("int-member-cleanup", "manual");
+        let (harness, members) = in_members("int-member-cleanup", "pull_request");
         let app = &members[0];
         harness.accepted_in("CTV-1", &app.path, Some("app"));
         let base = harness.worktree("CTV-1-base");
         app.adapter()
             .create_detached_worktree(&base, "main")
             .expect("the base worktree is made");
+        app.git(&["merge", "--no-ff", "-m", "By hand", "feature/CTV-1"]);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator
             .integrate(&task("CTV-1"))

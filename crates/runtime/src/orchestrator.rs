@@ -328,6 +328,14 @@ pub enum IntegrationOutcome {
     },
     /// Its pull request is open on the forge, waiting for the human.
     AwaitingForge,
+    /// The project has no `origin` to open a pull request on: the branch waits for the human to
+    /// merge it into the integration branch by hand.
+    AwaitingHand {
+        /// The branch to merge.
+        branch: String,
+        /// The integration branch it goes into.
+        into: String,
+    },
     /// It could not land, and the human was told why in these words.
     Escalated {
         /// The escalation's detail.
@@ -559,11 +567,10 @@ impl Orchestrator {
     }
 
     /// Integrates an accepted task now, as the human asks (`catervas integrate`), whatever
-    /// escalations it carries: under `manual` a merge into the integration branch with no push,
-    /// under `auto_merge` the merge and the push to `origin` when there is one, under
-    /// `pull_request` a pull request opened when none was since acceptance, else the recorded one
-    /// read (`AwaitingForge` while open; when closed, `Merged` if the branch is in the integration
-    /// branch all the same). A task already integrated answers the commit it was integrated at and
+    /// escalations it carries: a pull request opened when none was since acceptance, else the
+    /// recorded one read (`AwaitingForge` while open; when closed, `Merged` if the branch is in
+    /// the integration branch all the same). Catervas never merges: with no `origin`, `Merged`
+    /// once the branch is in the integration branch, else `Refused` as `not_merged`. A task already integrated answers the commit it was integrated at and
     /// does nothing. One task integrates at a time, across processes too.
     ///
     /// # Errors
@@ -1040,6 +1047,13 @@ mod tests {
             .run_until_idle()
             .await
             .expect("the run ends idle");
+        // Catervas never merges: the run waits for the owner, who merges the branch by hand.
+        assert!(harness.row("CTV-1").awaiting_integration);
+        harness.merge_by_hand("CTV-1");
+        orchestrator
+            .run_until_idle()
+            .await
+            .expect("the run ends idle");
 
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
         let git = &harness.project.deps.git;
@@ -1273,6 +1287,9 @@ mod tests {
             .await
             .expect("the human approves the epic");
         orchestrator.run_until_idle().await.expect("the run idles");
+        // Catervas never merges: the owner merges the task's branch, and the epic goes on.
+        harness.merge_by_hand("CTV-2");
+        orchestrator.run_until_idle().await.expect("the run idles");
     }
 
     #[tokio::test]
@@ -1346,8 +1363,8 @@ mod tests {
                 "CTV-1 ready -> assigned",
                 "CTV-1 assigned -> in_progress",
                 "CTV-2 created",
-                "CTV-2 integrated",
                 "CTV-1 in_progress -> verifying",
+                "CTV-2 integrated",
                 "CTV-1 C1 run by the governor",
                 "CTV-1 C2 run by the governor",
                 "CTV-1 verifying -> accepted",

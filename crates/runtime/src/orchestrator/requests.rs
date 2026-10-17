@@ -2307,6 +2307,7 @@ mod tests {
         for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5"] {
             harness.project.moved(id, "draft", "accepted", &json!({}));
         }
+        harness.unmerged_branch("CTV-2");
         let integrate = |id: &str| {
             harness.project.record(
                 id,
@@ -2947,6 +2948,7 @@ mod tests {
     async fn waits_for_an_epics_tasks_to_be_integrated() {
         let harness = Harness::new("epic-waits-integration", |_| {});
         an_epic_verifying(&harness, |_| {});
+        harness.unmerged_branch("CTV-2");
         assert!(harness.row("CTV-2").awaiting_integration);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -3356,6 +3358,7 @@ mod tests {
         for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
             harness.project.moved("CTV-2", pair[0], pair[1], &people);
         }
+        harness.unmerged_branch("CTV-2");
         harness.file_under("CTV-3", "ready", Some("CTV-1"), |wire| {
             wire["lane"] = json!(1);
         });
