@@ -27,8 +27,6 @@
         "agent_update",
         "session_stop",
         "run_stop",
-        "sprint_start",
-        "sprint_end",
         "message_post",
         "chat_message_post",
         "team_pause",
@@ -78,7 +76,6 @@
         { "$ref": "#/$defs/taskIdBody" },
         { "$ref": "#/$defs/agentUpdateBody" },
         { "$ref": "#/$defs/sessionStopBody" },
-        { "$ref": "#/$defs/sprintStartBody" },
         { "$ref": "#/$defs/messagePostBody" },
         { "$ref": "#/$defs/chatMessagePostBody" },
         { "$ref": "#/$defs/connectorConnectBody" },
@@ -222,16 +219,6 @@
       "required": ["session_id"],
       "properties": {
         "session_id": { "type": "string", "minLength": 1 }
-      }
-    },
-    "sprintStartBody": {
-      "title": "Sprint Start Body",
-      "description": "The human starts a sprint (docs/SPEC.md sections 3 and 5.5): what it may spend, or null for no budget of its own (ADR 0015). budget_usd is required so that this body matches no other branch.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["budget_usd"],
-      "properties": {
-        "budget_usd": { "type": ["number", "null"], "exclusiveMinimum": 0 }
       }
     },
     "messagePostBody": {
@@ -554,7 +541,7 @@
     },
     "emptyBody": {
       "title": "Empty Body",
-      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, team_resume, product_plan_draft, and catervafication_start.",
+      "description": "The body of a command that carries nothing: run_stop, team_pause, team_resume, product_plan_draft, and catervafication_start.",
       "type": "object",
       "additionalProperties": false,
       "properties": {}

@@ -2084,7 +2084,7 @@ mod tests {
         for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5", "CTV-6"] {
             let row = harness.row(id);
             assert_eq!(row.parent, Some(task("CTV-1")), "{id}");
-            assert_eq!(row.sprint.as_deref(), Some("S1"), "{id}");
+            assert_eq!(row.sprint, None, "{id}");
             let created = harness
                 .events(&[EventKind::TaskCreated])
                 .into_iter()

@@ -1029,14 +1029,11 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                     && (works_on_a_task(ask.purpose, ask.contract.is_some())
                         || ask.purpose == SessionPurpose::Chat)
             }
-            // A folder document is written at a planning, a review or a retro (not the standup)
+            // A folder document is written at a review or a retro
             // by a role that owns a folder.
             WRITE_FOLDER_DOC_TOOL => {
                 ask.purpose == SessionPurpose::Ceremony
-                    && matches!(
-                        ask.thread,
-                        Some(Thread::Planning | Thread::Review | Thread::Retro)
-                    )
+                    && matches!(ask.thread, Some(Thread::Review | Thread::Retro))
                     && role_folder(Role::from(ask.agent.role)).is_some()
             }
             _ => true,
@@ -1546,7 +1543,7 @@ mod tests {
         SessionAsk, SessionEnd, TRIAGE_TOOL, offered_connector, offered_tools, run_session,
         session_spec, sleep,
     };
-    use crate::orchestrator::rules::{CEREMONY_TOOLS, PLANNING_TOOLS, RETRO_TOOLS};
+    use crate::orchestrator::rules::{CEREMONY_TOOLS, RETRO_TOOLS};
     use crate::prompt::{CEREMONY_INSTRUCTIONS, CLOSING_INSTRUCTIONS};
     use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
@@ -1622,7 +1619,6 @@ mod tests {
         };
         let ceremony = SessionPurpose::Ceremony;
         for (thread, list) in [
-            (Thread::Planning, PLANNING_TOOLS),
             (Thread::Review, CEREMONY_TOOLS),
             (Thread::Retro, RETRO_TOOLS),
         ] {
@@ -1631,13 +1627,6 @@ mod tests {
                 "{thread:?}"
             );
         }
-        // The standup is given the review's list and still does not write documents.
-        assert!(!offers(
-            "sm",
-            ceremony,
-            Some(Thread::Standup),
-            Some(CEREMONY_TOOLS)
-        ));
         assert!(!offers("sm", SessionPurpose::Chat, None, None));
         assert!(!offers("sm", SessionPurpose::Implement, None, None));
         // A role without a folder is offered it nowhere.
@@ -3865,7 +3854,7 @@ mod tests {
         let team = deps.tools.files.read_team().expect("the team");
         let pm = team.active_agents().next().expect("an agent");
 
-        run_session(deps, &team, a_ceremony(deps, pm, Thread::Standup))
+        run_session(deps, &team, a_ceremony(deps, pm, Thread::Review))
             .await
             .expect("the session runs");
 
@@ -3873,7 +3862,7 @@ mod tests {
         let EventBody::SessionStarted(start) = &starts[0].body else {
             panic!("a session's start");
         };
-        assert_eq!(start.thread, Some(Thread::Standup));
+        assert_eq!(start.thread, Some(Thread::Review));
         // The daemon gives its tool calls the thread it was registered with.
         let posted = harness.events(&[EventKind::MessagePosted]);
         let EventBody::MessagePosted(post) = &posted[0].body else {
@@ -3881,7 +3870,7 @@ mod tests {
         };
         assert_eq!(
             (post.kind, post.thread),
-            (MessageKind::Ceremony, Some(Thread::Standup))
+            (MessageKind::Ceremony, Some(Thread::Review))
         );
     }
 
@@ -3899,7 +3888,7 @@ mod tests {
         let team = deps.tools.files.read_team().expect("the team");
         let pm = team.active_agents().next().expect("an agent");
 
-        run_session(deps, &team, a_ceremony(deps, pm, Thread::Standup))
+        run_session(deps, &team, a_ceremony(deps, pm, Thread::Review))
             .await
             .expect("the session runs");
 
@@ -3918,7 +3907,7 @@ mod tests {
         let pm = team.active_agents().next().expect("an agent");
 
         let spec =
-            session_spec(deps, &team, &a_ceremony(deps, pm, Thread::Planning)).expect("the spec");
+            session_spec(deps, &team, &a_ceremony(deps, pm, Thread::Review)).expect("the spec");
 
         assert_eq!(
             (spec.model.as_str(), spec.effort),
@@ -3935,12 +3924,7 @@ mod tests {
         let team = deps.tools.files.read_team().expect("the team");
         let pm = team.active_agents().next().expect("an agent");
 
-        for thread in [
-            Thread::Planning,
-            Thread::Standup,
-            Thread::Review,
-            Thread::Retro,
-        ] {
+        for thread in [Thread::Review, Thread::Retro] {
             let spec = session_spec(deps, &team, &a_ceremony(deps, pm, thread)).expect("the spec");
             let closing = CEREMONY_INSTRUCTIONS
                 .iter()
@@ -4088,7 +4072,7 @@ mod tests {
             only_tool,
             tools: None,
             in_reply_to: None,
-            thread: (purpose == SessionPurpose::Ceremony).then_some(Thread::Standup),
+            thread: (purpose == SessionPurpose::Ceremony).then_some(Thread::Review),
             initial_prompt: String::new(),
         }
     }

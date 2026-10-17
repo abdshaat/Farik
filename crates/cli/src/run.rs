@@ -229,14 +229,6 @@ pub(crate) async fn ticks(
                 );
                 after(printer);
             }
-            Ok(TickReport::Sprint { sprint_id, what }) => {
-                last_idle = None;
-                printer.line(
-                    &format!("{sprint_id}: {what}"),
-                    &json!({ "sprint_id": sprint_id, "what": what }),
-                );
-                after(printer);
-            }
             Ok(TickReport::Delivery { delivery_id, what }) => {
                 last_idle = None;
                 printer.line(

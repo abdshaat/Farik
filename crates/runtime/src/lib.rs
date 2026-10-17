@@ -102,8 +102,6 @@ pub mod sign_in;
 pub mod skills;
 /// An agent asleep until its model provider's limit resets.
 pub mod sleep;
-/// Starting and ending a sprint.
-pub mod sprints;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
 /// Saved team templates, kept privately in Catervas's state folder.

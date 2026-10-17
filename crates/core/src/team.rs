@@ -36,7 +36,7 @@ mod describe;
 mod template;
 
 pub use defaults::{SMALL_ENOUGH_QUESTION, TeamDefaults, defaults};
-pub use describe::{MODEL_FAMILIES, SprintWork, describe_change};
+pub use describe::{MODEL_FAMILIES, describe_change};
 pub use template::{
     TeamTemplate, TemplateAgent, TemplateApplied, apply_template, template_from_team,
     template_slug, validate_template,

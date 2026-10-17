@@ -28,7 +28,6 @@ use crate::preview::PreviewFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
 use crate::sleep::Sleeper;
-use crate::sprints::SprintError;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
 
@@ -189,18 +188,6 @@ impl From<ForgeError> for OrchestratorError {
     }
 }
 
-impl From<SprintError> for OrchestratorError {
-    fn from(error: SprintError) -> Self {
-        match error {
-            SprintError::Files(error) => Self::Files(error),
-            SprintError::Store(error) => Self::Store(error),
-            other => Self::Refused {
-                reason: other.to_string(),
-            },
-        }
-    }
-}
-
 impl From<ChannelError> for OrchestratorError {
     fn from(error: ChannelError) -> Self {
         match error {
@@ -232,13 +219,6 @@ pub enum TickReport {
     Acted {
         /// The task.
         task_id: TaskId,
-        /// What was done.
-        what: String,
-    },
-    /// Something was done about the open sprint.
-    Sprint {
-        /// The sprint.
-        sprint_id: String,
         /// What was done.
         what: String,
     },
@@ -542,7 +522,6 @@ impl Orchestrator {
                 }
                 TickReport::Idle { until: None, .. } => break,
                 TickReport::Acted { .. }
-                | TickReport::Sprint { .. }
                 | TickReport::Delivery { .. }
                 | TickReport::Conversation { .. }
                 | TickReport::Chat { .. }

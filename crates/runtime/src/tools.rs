@@ -231,11 +231,6 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "Assign a ready task to an agent, with the agent that reviews it.",
         ),
-        tool::<contracts::PlanSprintInput>(
-            "catervas_plan_sprint",
-            Read,
-            "Plan the open sprint, in its planning ceremony: put ready tasks and approved epics in it, within its budget.",
-        ),
         tool::<work::DeclareBlockedInput>(
             "catervas_declare_blocked",
             Read,
@@ -259,7 +254,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<folders::WriteFolderDocInput>(
             "catervas_write_folder_doc",
             Read,
-            "At a sprint planning, review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. Name a document with its extension: write a new one in the format the Team rules say, and a document that is already there in the format it has. The product's spec and roadmap are written at the sprint review, with agent_text (their agent version), as one change like any other document; the summary is not needed.",
+            "At a review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. Name a document with its extension: write a new one in the format the Team rules say, and a document that is already there in the format it has. The product's spec and roadmap are written at the sprint review, with agent_text (their agent version), as one change like any other document; the summary is not needed.",
         ),
         tool::<channel::PostMessageInput>(
             "catervas_post_message",
@@ -486,7 +481,6 @@ pub async fn call_tool(
         "catervas_create_task" => contracts::create_task(&call, parse(input)?),
         "catervas_request_transition" => work::request_transition(&call, parse(input)?),
         "catervas_assign_task" => work::assign_task(&call, parse(input)?),
-        "catervas_plan_sprint" => contracts::plan_sprint(&call, &parse(input)?),
         "catervas_declare_blocked" => work::declare_blocked(&call, parse(input)?),
         "catervas_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "catervas_write_note" => work::write_note(&call, parse(input)?),
@@ -805,7 +799,6 @@ mod tests {
             "catervas_create_task",
             "catervas_request_transition",
             "catervas_assign_task",
-            "catervas_plan_sprint",
             "catervas_declare_blocked",
             "catervas_record_criterion_result",
             "catervas_write_note",
@@ -856,7 +849,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..36] {
+        for tool in &tools[..35] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

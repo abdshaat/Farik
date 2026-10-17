@@ -16,7 +16,6 @@ use super::team::{
     Refused, append, errors_wire, internal, off_the_worker, suggested, team_updated, web_of, worked,
 };
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, NOT_FOUND, REFUSED};
-use crate::sprints::sprint_work;
 use crate::templates::{TemplateError, TemplateListing, Templates, builtin, builtins};
 use crate::tools::ToolDeps;
 
@@ -181,13 +180,7 @@ fn answer(
             )),
         }
     }
-    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
-    let open = open.as_ref().map(|open| open.sprint_id.as_str());
-    effects.extend(describe_change(
-        before,
-        &applied.team,
-        &sprint_work(open, &board),
-    ));
+    effects.extend(describe_change(before, &applied.team));
     Ok(json!({
         "team": applied.team,
         "kept": applied.kept,

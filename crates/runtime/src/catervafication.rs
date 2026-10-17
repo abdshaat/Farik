@@ -18,7 +18,6 @@ use catervas_store::requests::{
 use catervas_store::{EventLog, EventQuery, StoreError, TaskProjection};
 use serde_json::{Value, json};
 
-use crate::sprints::{PlannedBy, SprintError, join_epics_sprint, plan_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{TransitionAsk, TransitionError};
 
@@ -331,8 +330,6 @@ pub(crate) enum CatervaficationError {
     NoProductManager,
     /// The epic could not be filed.
     Requests(RequestError),
-    /// Its sprint could not be opened or planned.
-    Sprint(SprintError),
     /// The move into refining failed.
     Transition(TransitionError),
     /// The log or the board failed.
@@ -346,7 +343,6 @@ impl fmt::Display for CatervaficationError {
         match self {
             Self::NoProductManager => write!(formatter, "the team has no active Product Manager"),
             Self::Requests(error) => write!(formatter, "the epic could not be filed: {error}"),
-            Self::Sprint(error) => write!(formatter, "its sprint failed: {error}"),
             Self::Transition(error) => write!(formatter, "the epic could not move: {error}"),
             Self::Store(error) => write!(formatter, "the store failed: {error}"),
             Self::Files(error) => write!(formatter, "the files failed: {error}"),
@@ -359,12 +355,6 @@ impl std::error::Error for CatervaficationError {}
 impl From<RequestError> for CatervaficationError {
     fn from(error: RequestError) -> Self {
         Self::Requests(error)
-    }
-}
-
-impl From<SprintError> for CatervaficationError {
-    fn from(error: SprintError) -> Self {
-        Self::Sprint(error)
     }
 }
 
@@ -386,13 +376,11 @@ impl From<FilesError> for CatervaficationError {
     }
 }
 
-/// What `start` did: the epic, and the sprint it opened for it, when it opened one.
+/// What `start` did: the epic it filed.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Started {
     /// The epic of the Catervafication.
     pub epic: TaskId,
-    /// The sprint `start` opened and planned the epic into, absent when one was open already.
-    pub sprint: Option<String>,
 }
 
 /// The epic of the Catervafication the log holds, when it holds one.
@@ -412,8 +400,7 @@ pub(crate) fn started(log: &EventLog) -> Result<Option<TaskId>, StoreError> {
 }
 
 /// Starts the Catervafication of `project` as `by` (`human` for the owner's Start, `catervas` for a
-/// new project's): files its epic, opens a sprint for it when none is open and plans the epic into
-/// it, and asks `draft -> refining` as the first active Product Manager. No epic waits for the
+/// new project's): files its epic and asks `draft -> refining` as the first active Product Manager. No epic waits for the
 /// owner's approval (ADR 0061), so none is recorded.
 ///
 /// # Errors
@@ -444,14 +431,6 @@ pub(crate) fn start(
         (deps.clock.now(), &deps.ids),
     )?;
     deps.projections.catch_up()?;
-    // The sprint holds the epic alone, so nothing else is planned while it is open (spec 3).
-    let sprint = if deps.projections.open_sprint()?.is_none() {
-        let sprint = start_sprint(deps, None, by)?;
-        plan_sprint(deps, std::slice::from_ref(&epic.id), &PlannedBy::Governor)?;
-        Some(sprint.id.as_str().to_string())
-    } else {
-        None
-    };
     deps.transitions.request(
         &TransitionRequest {
             task_id: epic.id.clone(),
@@ -462,10 +441,7 @@ pub(crate) fn start(
         &TransitionAsk::default(),
         team,
     )?;
-    Ok(Started {
-        epic: epic.id,
-        sprint,
-    })
+    Ok(Started { epic: epic.id })
 }
 
 /// What `file_due` found to do for an epic.
@@ -564,7 +540,6 @@ pub(crate) fn file_due(
             None,
         )?;
         deps.projections.catch_up()?;
-        join_epics_sprint(deps, &contract.id)?;
         filed_by.push((role, contract.id.clone()));
         filed.push(contract.id);
     }

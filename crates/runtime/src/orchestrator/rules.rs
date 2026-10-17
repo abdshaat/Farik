@@ -31,8 +31,8 @@ use super::integrate::{awaiting, awaiting_folder_changes, cleanup};
 use super::messages::{
     DeliveredTask, Digest, ProductFiles, Resume, architecture_refresh_message, ceremony_message,
     delivery_review_message, implement_message, mention_message, owners_folder_lines,
-    owners_folder_words, plan_message, planning_message, posts_heard, product_refresh_message,
-    retro_message, standup_message, task_cost, with_the_approved_plan,
+    owners_folder_words, plan_message, posts_heard, product_refresh_message, retro_message,
+    task_cost, with_the_approved_plan,
 };
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
@@ -41,9 +41,7 @@ use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope,
     repository_refused, session_dir, task_repository_of, worktree,
 };
-use crate::ceremonies::{
-    budgets_spent_since_planning, day_budgets_spent_after, open_escalations, standup_moves,
-};
+use crate::ceremonies::{day_budgets_spent_after, open_escalations};
 use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
 use crate::deliveries::{
@@ -53,7 +51,6 @@ use crate::exec::Executor;
 use crate::marketing::{hold_plans, record_plan_end};
 use crate::session::{EndReason, SessionPurpose};
 use crate::sleep::asleep_until;
-use crate::sprints::{EndedBy, end_sprint, planning_session_spent};
 use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
 use catervas_core::delivery::{DeliveryTrigger, TASKS_PER_DELIVERY};
 
@@ -172,7 +169,7 @@ pub(super) async fn tick(
     if let Some(report) = open_the_interview(deps, scope, &team, &mut waiting).await? {
         return Ok(report);
     }
-    if let Some(report) = sprint_rules(deps, scope, &team, &board, &mut waiting).await? {
+    if let Some(report) = delivery_rules(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
     if runs(1) {
@@ -289,7 +286,7 @@ fn catervafy_a_new_project(
     scope: &TickScope,
     team: &Team,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if !sprint_rules_run(scope) {
+    if !delivery_rules_run(scope) {
         return Ok(None);
     }
     let tools = &deps.tools;
@@ -352,9 +349,9 @@ fn in_scope(scope: &TickScope) -> impl Fn(&&TaskProjection) -> bool + Copy + '_ 
     }
 }
 
-/// The sprint rules, which come before the numbered ones: the sprint that ends by itself, the
-/// ended sprint's review and retro, then the open sprint's planning and its standup.
-async fn sprint_rules(
+/// The delivery rules, which come before the numbered ones: the delivery that closes, then the
+/// closed delivery's review and retro.
+async fn delivery_rules(
     deps: &OrchestratorDeps,
     scope: &TickScope,
     team: &Team,
@@ -364,16 +361,7 @@ async fn sprint_rules(
     if let Some(report) = close_a_delivery(deps, scope, team)? {
         return Ok(Some(report));
     }
-    if let Some(report) = finished_sprint(deps, scope, board)? {
-        return Ok(Some(report));
-    }
-    if let Some(report) = review_and_retro(deps, scope, team, board, waiting).await? {
-        return Ok(Some(report));
-    }
-    if let Some(report) = sprint_planning(deps, scope, team, board, waiting).await? {
-        return Ok(Some(report));
-    }
-    standup(deps, scope, team, board, waiting).await
+    review_and_retro(deps, scope, team, board, waiting).await
 }
 
 /// The delivery that closes by itself (ADR 0062): the first time since the previous one that an
@@ -385,7 +373,7 @@ fn close_a_delivery(
     scope: &TickScope,
     team: &Team,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if !sprint_rules_run(scope) {
+    if !delivery_rules_run(scope) {
         return Ok(None);
     }
     let tools = &deps.tools;
@@ -406,36 +394,6 @@ fn close_a_delivery(
     Ok(Some(TickReport::Delivery {
         delivery_id: due.delivery_id,
         what: format!("closed it: {why}{changelog}"),
-    }))
-}
-
-/// The sprint that ends by itself (5.5): the open sprint, once it holds a task and every task in it
-/// is accepted or cancelled, ended by the governor. A sprint rule is about no one task, so it runs
-/// only in a tick scoped to none, under `All` or `Planning`.
-fn finished_sprint(
-    deps: &OrchestratorDeps,
-    scope: &TickScope,
-    board: &[TaskProjection],
-) -> Result<Option<TickReport>, OrchestratorError> {
-    if !sprint_rules_run(scope) {
-        return Ok(None);
-    }
-    let Some(open) = deps.tools.projections.open_sprint()? else {
-        return Ok(None);
-    };
-    let mut held = board
-        .iter()
-        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
-        .peekable();
-    if held.peek().is_none()
-        || !held.all(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
-    {
-        return Ok(None);
-    }
-    let sprint = end_sprint(&deps.tools, EndedBy::Governor)?;
-    Ok(Some(TickReport::Sprint {
-        sprint_id: sprint.id.as_str().to_string(),
-        what: "ended it: every task in it is accepted or cancelled".to_string(),
     }))
 }
 
@@ -810,208 +768,13 @@ pub(super) const RETRO_TOOLS: &[&str] = &[
     "catervas_write_folder_doc",
 ];
 
-/// Whether the sprint rules run in `scope`: they are about no one task, so only in a tick scoped
+/// Whether the delivery rules run in `scope`: they are about no one task, so only in a tick scoped
 /// to none, under `All` or `Planning`.
-fn sprint_rules_run(scope: &TickScope) -> bool {
+fn delivery_rules_run(scope: &TickScope) -> bool {
     scope.task_id.is_none() && scope.rules != TickRules::Refining
 }
 
-/// The open sprint's planning ceremony (5.5, 5.9): while it holds no task and its planning has not
-/// run, the assigner (the ceremony runner) gets one `ceremony` session in the `planning` thread,
-/// about no task, given the reading tools, `catervas_post_message`, and `catervas_plan_sprint`, and
-/// offered the candidates (the rows `ready` with no parent and in no sprint, or, under the policy
-/// "plan work in sprints", the Backlog's rows with no parent, each epic with its count of tasks),
-/// the digest of the
-/// open escalations and the budgets spent since the previous planning, the last retros, and the
-/// channel. Passed over with no candidate, no assigner, or on a spent day; a planning that plans
-/// nothing is not asked again, and the empty sprint waits for the human to end it.
-async fn sprint_planning(
-    deps: &OrchestratorDeps,
-    scope: &TickScope,
-    team: &Team,
-    board: &[TaskProjection],
-    waiting: &mut Waiting,
-) -> Result<Option<TickReport>, OrchestratorError> {
-    if !sprint_rules_run(scope) {
-        return Ok(None);
-    }
-    let Some(open) = deps.tools.projections.open_sprint()? else {
-        return Ok(None);
-    };
-    let candidates: Vec<&TaskProjection> = board
-        .iter()
-        .filter(|row| {
-            row.parent.is_none() && row.status == TaskStatus::Ready && row.sprint.is_none()
-        })
-        .collect();
-    let Some(assigner) = assigner(team) else {
-        return Ok(None);
-    };
-    if candidates.is_empty()
-        || board
-            .iter()
-            .any(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
-        || planning_session_spent(&deps.tools.log, &open.sprint_id)?
-    {
-        return Ok(None);
-    }
-    if day_is_spent(
-        deps,
-        team,
-        Role::from(assigner.role),
-        &mut waiting.day_spent,
-    )? | asleep(deps, assigner, &mut waiting.slept)?
-    {
-        return Ok(None);
-    }
-    let tools = &deps.tools;
-    let contracts = candidates
-        .iter()
-        .map(|row| {
-            let tasks = board
-                .iter()
-                .filter(|child| {
-                    child.parent.as_ref() == Some(&row.task_id)
-                        && child.status != TaskStatus::Cancelled
-                })
-                .count();
-            Ok((tools.files.read_contract(&row.task_id)?, tasks))
-        })
-        .collect::<Result<Vec<_>, OrchestratorError>>()?;
-    let digest = Digest {
-        escalations: open_escalations(&tools.log, &tools.projections)?,
-        spent: budgets_spent_since_planning(&tools.log, &open.sprint_id)?,
-        now: tools.clock.now(),
-    };
-    let retro = tools.files.read_retro()?;
-    let facts = planning_message(
-        &open.sprint_id,
-        &contracts,
-        false,
-        open.budget_usd,
-        &digest,
-        retro.as_deref(),
-    );
-    let end = run_session(
-        deps,
-        team,
-        SessionAsk {
-            agent: assigner,
-            contract: None,
-            purpose: SessionPurpose::Ceremony,
-            cwd: tools.files.root().to_path_buf(),
-            executor: None,
-            read_only: true,
-            only_tool: None,
-            tools: Some(PLANNING_TOOLS),
-            in_reply_to: None,
-            thread: Some(Thread::Planning),
-            initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
-        },
-    )
-    .await?;
-    Ok(Some(TickReport::Sprint {
-        sprint_id: open.sprint_id,
-        what: ran(assigner, "planning ceremony", &end),
-    }))
-}
-
-/// The Catervas tools the planning ceremony is offered: the reading tools, the channel, the plan, the
-/// notebook, and the decisions to read.
-pub(super) const PLANNING_TOOLS: &[&str] = &[
-    "catervas_read_task",
-    "catervas_read_board",
-    "catervas_read_rules",
-    "catervas_read_criteria",
-    "catervas_post_message",
-    "catervas_plan_sprint",
-    "catervas_write_memory",
-    "catervas_read_decisions",
-    "catervas_write_folder_doc",
-];
-
-/// The open sprint's standup (5.9), under `All` alone in a tick scoped to no task: once a UTC day,
-/// when a task in the sprint moved in the standup's window (`standup_moves`), the ceremony runner
-/// gets one `ceremony` session in the `standup` thread, about no task, given the reading tools and
-/// `catervas_post_message`, and told each such move, each blocked task of the sprint with its
-/// blocker, the open escalations, and the channel. Passed over with no runner or on a spent day.
-async fn standup(
-    deps: &OrchestratorDeps,
-    scope: &TickScope,
-    team: &Team,
-    board: &[TaskProjection],
-    waiting: &mut Waiting,
-) -> Result<Option<TickReport>, OrchestratorError> {
-    if scope.task_id.is_some() || scope.rules != TickRules::All {
-        return Ok(None);
-    }
-    let tools = &deps.tools;
-    let Some(open) = tools.projections.open_sprint()? else {
-        return Ok(None);
-    };
-    let Some(runner) = assigner(team) else {
-        return Ok(None);
-    };
-    let in_sprint: Vec<&TaskProjection> = board
-        .iter()
-        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
-        .collect();
-    let task_ids: Vec<TaskId> = in_sprint.iter().map(|row| row.task_id.clone()).collect();
-    let moves = standup_moves(&tools.log, &open.sprint_id, &task_ids, tools.clock.now())?;
-    if moves.is_empty() {
-        return Ok(None);
-    }
-    if day_is_spent(deps, team, Role::from(runner.role), &mut waiting.day_spent)?
-        | asleep(deps, runner, &mut waiting.slept)?
-    {
-        return Ok(None);
-    }
-    let mut blocked = Vec::new();
-    for row in in_sprint
-        .iter()
-        .filter(|row| row.status == TaskStatus::Blocked)
-    {
-        let wire =
-            last_move_into(deps, &row.task_id, TaskStatus::Blocked)?.and_then(|event| match event
-                .body
-            {
-                EventBody::TaskTransitioned(body) => body.blocker,
-                _ => None,
-            });
-        blocked.push((row.task_id.clone(), wire));
-    }
-    let facts = standup_message(
-        &open.sprint_id,
-        &moves,
-        &blocked,
-        &open_escalations(&tools.log, &tools.projections)?,
-        tools.clock.now(),
-    );
-    let end = run_session(
-        deps,
-        team,
-        SessionAsk {
-            agent: runner,
-            contract: None,
-            purpose: SessionPurpose::Ceremony,
-            cwd: tools.files.root().to_path_buf(),
-            executor: None,
-            read_only: true,
-            only_tool: None,
-            tools: Some(CEREMONY_TOOLS),
-            in_reply_to: None,
-            thread: Some(Thread::Standup),
-            initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
-        },
-    )
-    .await?;
-    Ok(Some(TickReport::Sprint {
-        sprint_id: open.sprint_id,
-        what: ran(runner, "standup ceremony", &end),
-    }))
-}
-
-/// The Catervas tools the standup and the review are offered: the reading tools, the channel, the
+/// The Catervas tools the review is offered: the reading tools, the channel, the
 /// notebook, and the decisions to read.
 pub(super) const CEREMONY_TOOLS: &[&str] = &[
     "catervas_read_task",
@@ -2084,11 +1847,9 @@ mod tests {
     use catervas_core::contract::{Role, TaskStatus};
     use catervas_core::governor::permissions::{PermissionTier, default_tiers};
     use catervas_core::pricing::Usage;
-    use catervas_core::sprint::SprintStatus;
     use catervas_core::team::Effort;
     use catervas_protocol::clock::MovableClock;
     use catervas_protocol::command::Command;
-    use catervas_protocol::event::SprintEndedBodyEndedBy;
     use catervas_protocol::event::{
         BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason,
         EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionEndedBodyReason,
@@ -2110,10 +1871,9 @@ mod tests {
     use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
         accept_ctv_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
-        implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1,
-        planning_ceremony_ctv_1, provider_limit_429, provider_limit_rejected, reads_a_file,
-        replays_catervas_read_board, reply_to_a_mention, retro, review, review_answers_nothing,
-        review_writes_note, standup, success_with_is_error,
+        implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1, provider_limit_429,
+        provider_limit_rejected, reads_a_file, replays_catervas_read_board, reply_to_a_mention,
+        retro, review, review_answers_nothing, review_writes_note, success_with_is_error,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -2126,7 +1886,6 @@ mod tests {
         match report {
             TickReport::Acted { task_id, .. } => Some(task_id.as_str()),
             TickReport::Idle { .. }
-            | TickReport::Sprint { .. }
             | TickReport::Delivery { .. }
             | TickReport::Conversation { .. }
             | TickReport::Chat { .. }
@@ -2439,6 +2198,67 @@ mod tests {
             std::fs::read_to_string(sprints.join("S1.yaml")).expect("the file reads"),
             old_file
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_open_sprint_from_before_is_never_planned_ended_or_stood_up() {
+        let harness = Harness::new("orch-sprints-never", |_| {});
+        harness.ready("CTV-1");
+        harness.ready("CTV-2");
+        let project = &harness.project;
+        project.record(
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S1", "budget_usd": 20, "started_by": "human" }),
+        );
+        project.record(
+            "",
+            "sprint.planned",
+            &json!({ "sprint_id": "S1", "task_ids": ["CTV-1"], "planned_by": "pm" }),
+        );
+        // Everything in S1 is cancelled, which an old tick ended the sprint for.
+        project.moved("CTV-1", "ready", "cancelled", &json!({}));
+        let adapter = harness.recorded(vec![
+            reads_a_file(),
+            reads_a_file(),
+            reads_a_file(),
+            reads_a_file(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let first = orchestrator.tick().await.expect("the tick runs");
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert_eq!(acted_on(&first), Some("CTV-2"), "{first:?}");
+        let started = adapter.started();
+        assert_eq!(
+            (
+                started[0].purpose,
+                started[0].task_id.as_ref().map(|t| t.as_str())
+            ),
+            (SessionPurpose::Plan, Some("CTV-2"))
+        );
+        assert!(
+            harness
+                .events(&[EventKind::SprintEnded, EventKind::SprintPlanned])
+                .iter()
+                .all(|event| event.body.kind() == EventKind::SprintPlanned),
+            "no sprint ends"
+        );
+        assert_eq!(harness.events(&[EventKind::SprintPlanned]).len(), 1);
+        assert_eq!(harness.events(&[EventKind::SprintStarted]).len(), 1);
+        for event in harness.events(&[EventKind::SessionStarted]) {
+            let EventBody::SessionStarted(body) = &event.body else {
+                panic!("a session start");
+            };
+            assert!(
+                !matches!(body.thread, Some(Thread::Planning | Thread::Standup)),
+                "{body:?}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -6287,46 +6107,6 @@ mod tests {
     }
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn ends_a_finished_sprint_by_itself() {
-        let harness = Harness::new("orch-sprint-finished", |_| {});
-        harness.accepted("CTV-1");
-        harness.ready("CTV-2");
-        harness.project.moved(
-            "CTV-2",
-            "ready",
-            "cancelled",
-            &json!({ "actor": "human", "requested_by": "human" }),
-        );
-        harness.open_sprint("S1", &["CTV-1", "CTV-2"]);
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Sprint { sprint_id, .. } if sprint_id == "S1"),
-            "{report:?}"
-        );
-        let ended = harness.events(&[EventKind::SprintEnded]);
-        assert_eq!(ended.len(), 1);
-        let EventBody::SprintEnded(body) = &ended[0].body else {
-            panic!("an end");
-        };
-        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Governor);
-        assert!(body.left.is_empty());
-        assert_eq!(
-            harness
-                .project
-                .deps
-                .files
-                .read_sprint("S1")
-                .expect("S1 reads")
-                .status,
-            SprintStatus::Ended
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn starts_no_session_while_paused() {
         let harness = Harness::new("orch-paused-no-session", |_| {});
         harness.ready("CTV-1");
@@ -6358,37 +6138,6 @@ mod tests {
         assert_eq!(adapter.started().len(), 1);
     }
 
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn ends_no_finished_sprint_while_paused() {
-        let harness = Harness::new("orch-paused-sprint", |_| {});
-        harness.accepted("CTV-1");
-        harness.open_sprint("S1", &["CTV-1"]);
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        orchestrator
-            .handle(Command::TeamPause)
-            .await
-            .expect("the pause is handled");
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
-        assert!(harness.events(&[EventKind::SprintEnded]).is_empty());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn leaves_an_empty_sprint_open() {
-        let harness = Harness::new("orch-sprint-empty", |_| {});
-        harness.open_sprint("S1", &[]);
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
-        assert!(harness.events(&[EventKind::SprintEnded]).is_empty());
-    }
-
     /// The harness's team with an active Scrum Master `sm` besides.
     fn with_a_scrum_master(wire: &mut serde_json::Value) {
         wire["agents"]
@@ -6398,19 +6147,6 @@ mod tests {
                 "sm",
                 "scrum_master",
             ));
-    }
-
-    /// `task` escalated at its iterations, waiting on the human.
-    fn escalated(harness: &Harness, task: &str) {
-        harness.project.filed(task, "rejected", "task", None);
-        harness
-            .project
-            .moved(task, "rejected", "escalated", &json!({}));
-        harness.project.record(
-            task,
-            "escalation.raised",
-            &json!({ "reason": "iterations", "detail": "three rejections" }),
-        );
     }
 
     /// The Catervas tools a session was given, in no order.
@@ -6429,431 +6165,6 @@ mod tests {
         "catervas_read_decisions",
     ];
 
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn plans_the_sprint_in_a_ceremony() {
-        let harness = Harness::new("orch-sprint-plan", with_a_scrum_master);
-        harness.ready("CTV-1");
-        escalated(&harness, "CTV-2");
-        harness.open_sprint("S1", &[]);
-        harness.project.record(
-            "",
-            "message.posted",
-            &json!({
-                "author": "human",
-                "kind": "human",
-                "text": "the login page comes first",
-                "mentions": []
-            }),
-        );
-        harness
-            .project
-            .deps
-            .files
-            .append_retro("S1", at().date_naive(), "Ask the human sooner.")
-            .expect("the last retro is written");
-        let adapter = harness.recorded(vec![planning_ceremony_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Sprint { sprint_id, what }
-                if sprint_id == "S1" && what.contains("S1 holds CTV-1")),
-            "{report:?}"
-        );
-        let started = adapter.started();
-        assert_eq!(started.len(), 1);
-        let spec = &started[0];
-        assert_eq!(
-            (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
-            ("sm", SessionPurpose::Ceremony, None)
-        );
-        let starts = harness.events(&[EventKind::SessionStarted]);
-        let EventBody::SessionStarted(start) = &starts[0].body else {
-            panic!("a session's start");
-        };
-        assert_eq!(start.thread, Some(Thread::Planning));
-        assert_eq!(
-            tools_of(spec),
-            BTreeSet::from([
-                "catervas_read_task",
-                "catervas_read_board",
-                "catervas_read_rules",
-                "catervas_read_criteria",
-                "catervas_post_message",
-                "catervas_plan_sprint",
-                "catervas_write_memory",
-                "catervas_read_decisions",
-                "catervas_write_folder_doc",
-            ])
-        );
-        // The candidates, the escalation the digest lists, the last retro, and the channel.
-        for fact in [
-            "CTV-1",
-            "$5.00",
-            "CTV-2",
-            "iterations",
-            "three rejections",
-            "Ask the human sooner.",
-            "the login page comes first",
-        ] {
-            assert!(
-                spec.initial_prompt.contains(fact),
-                "{fact}: {}",
-                spec.initial_prompt
-            );
-        }
-        let posted: Vec<_> = harness
-            .events(&[EventKind::MessagePosted])
-            .into_iter()
-            .filter_map(|event| match event.body {
-                EventBody::MessagePosted(body) => Some((body.kind, body.thread)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            posted[1..],
-            vec![(MessageKind::Ceremony, Some(Thread::Planning)); 2]
-        );
-        assert_eq!(harness.row("CTV-1").sprint.as_deref(), Some("S1"));
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn lists_the_spent_budgets_in_the_digest() {
-        let harness = Harness::new("orch-sprint-spent-digest", with_a_scrum_master);
-        harness.ready("CTV-1");
-        let exhausted = |scope: &str, consequence: &str| {
-            harness.project.record(
-                "",
-                "budget.exhausted",
-                &json!({ "scope": scope, "consequence": consequence }),
-            );
-        };
-        // The day spent before the previous planning, the sprint's budget since.
-        exhausted("day_usd", "pause_team");
-        harness.project.record(
-            "",
-            "session.started",
-            &json!({
-                "purpose": "ceremony",
-                "model": "claude-sonnet-5",
-                "effort": "medium",
-                "thread": "planning"
-            }),
-        );
-        exhausted("sprint_usd", "stop_new_assignments");
-        // Neither another ceremony nor a task's plan session is the sprint's planning, and a
-        // task's budget is not the digest's.
-        harness.project.record(
-            "",
-            "session.started",
-            &json!({
-                "purpose": "ceremony",
-                "model": "claude-sonnet-5",
-                "effort": "medium",
-                "thread": "review"
-            }),
-        );
-        harness.project.record(
-            "CTV-1",
-            "session.started",
-            &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
-        );
-        exhausted("task_usd", "escalate_task");
-        harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![planning_ceremony_ctv_1()]);
-
-        harness
-            .orchestrator(adapter.clone())
-            .tick()
-            .await
-            .expect("the tick runs");
-
-        let prompt = &adapter.started()[0].initial_prompt;
-        assert_eq!(
-            prompt.matches("the sprint's budget spent").count(),
-            1,
-            "{prompt}"
-        );
-        assert!(!prompt.contains("the day's budget spent"), "{prompt}");
-    }
-
-    /// `day` days after S1's first day, 22 September, at `hour`:`minute` UTC.
-    fn on(day: i64, hour: u32, minute: u32) -> chrono::DateTime<chrono::Utc> {
-        at().date_naive()
-            .and_hms_opt(hour, minute, 0)
-            .expect("a real time")
-            .and_utc()
-            + chrono::Duration::days(day)
-    }
-
-    /// The Scrum Master to run the standup, and CTV-1 assigned to `dev-a` (asleep for ten days, so
-    /// that no implement session starts) and reviewed by `dev-b`, before S1 opens holding it at
-    /// noon on its first day.
-    fn a_sprint_of_ctv_1(name: &str) -> Harness {
-        let harness = Harness::new(name, with_a_scrum_master);
-        harness.assigned("CTV-1", "dev-a", "dev-b");
-        harness.asleep("dev-a", at() + chrono::Duration::days(10));
-        harness.open_sprint("S1", &["CTV-1"]);
-        harness
-    }
-
-    /// CTV-1 moved from `assigned` to `in_progress` by `dev-a` at 13:00 on S1's first day.
-    fn ctv_1_started(harness: &Harness) {
-        harness.project.moved_at(
-            on(0, 13, 0),
-            "CTV-1",
-            "assigned",
-            "in_progress",
-            &json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "dev-b" }),
-        );
-    }
-
-    /// CTV-1 moved from `in_progress` to `escalated` by the governor at `when`.
-    fn ctv_1_escalated(harness: &Harness, when: chrono::DateTime<chrono::Utc>) {
-        harness
-            .project
-            .moved_at(when, "CTV-1", "in_progress", "escalated", &json!({}));
-    }
-
-    /// The first message of each standup the adapter started, oldest first.
-    fn standups(harness: &Harness, adapter: &RecordedAdapter) -> Vec<String> {
-        let threads: Vec<Option<Thread>> = harness
-            .events(&[EventKind::SessionStarted])
-            .into_iter()
-            .map(|event| match event.body {
-                EventBody::SessionStarted(body) => body.thread,
-                _ => None,
-            })
-            .collect();
-        adapter
-            .started()
-            .into_iter()
-            .zip(threads)
-            .filter(|(_, thread)| *thread == Some(Thread::Standup))
-            .map(|(spec, _)| spec.initial_prompt)
-            .collect()
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_a_standup_when_the_sprint_moved() {
-        let harness = Harness::new("orch-standup", with_a_scrum_master);
-        harness.assigned("CTV-1", "dev-a", "dev-b");
-        harness.asleep("dev-a", at() + chrono::Duration::days(10));
-        escalated(&harness, "CTV-2");
-        harness.project.filed("CTV-3", "in_progress", "task", None);
-        harness.open_sprint("S1", &["CTV-1", "CTV-2", "CTV-3"]);
-        ctv_1_started(&harness);
-        harness.project.moved_at(
-            on(0, 23, 0),
-            "CTV-3",
-            "in_progress",
-            "blocked",
-            &json!({ "blocker": { "description": "the API is down", "needed": "an API key" } }),
-        );
-        // CTV-4, in no sprint, moved too.
-        harness.project.filed("CTV-4", "rejected", "task", None);
-        harness
-            .project
-            .moved_at(on(0, 14, 0), "CTV-4", "rejected", "escalated", &json!({}));
-        let clock = Arc::new(MovableClock::new(on(1, 12, 0)));
-        let adapter = harness.recorded(vec![standup(), standup()]);
-        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
-
-        // Only a tick of every rule, scoped to no task, holds it.
-        for scope in [
-            TickScope {
-                rules: TickRules::Planning,
-                ..TickScope::default()
-            },
-            TickScope {
-                task_id: Some("CTV-1".parse().expect("a task id")),
-                ..TickScope::default()
-            },
-        ] {
-            let report = orchestrator
-                .tick_within(&scope)
-                .await
-                .expect("the tick runs");
-            assert!(!matches!(&report, TickReport::Sprint { .. }), "{report:?}");
-        }
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Sprint { sprint_id, what }
-                if sprint_id == "S1" && what.contains("standup")),
-            "{report:?}"
-        );
-        let first = &standups(&harness, &adapter)[0];
-        for fact in [
-            "CTV-1: assigned -> in_progress, by dev-a",
-            "CTV-3: in_progress -> blocked, by governor",
-            "CTV-3 is blocked: the API is down; needed: an API key",
-            "CTV-2",
-            "three rejections",
-        ] {
-            assert!(first.contains(fact), "{fact}: {first}");
-        }
-        assert!(!first.contains("CTV-4"), "{first}");
-        let posted: Vec<_> = harness
-            .events(&[EventKind::MessagePosted])
-            .into_iter()
-            .filter_map(|event| match event.body {
-                EventBody::MessagePosted(body) => Some((body.kind, body.thread)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(posted, vec![(MessageKind::Ceremony, Some(Thread::Standup))]);
-
-        // The same day holds no second standup, and a move made today waits for tomorrow's.
-        let again = orchestrator.tick().await.expect("the tick runs");
-        assert!(!matches!(again, TickReport::Sprint { .. }), "{again:?}");
-        ctv_1_escalated(&harness, on(1, 13, 0));
-        clock.set(on(1, 14, 0));
-        let today = orchestrator.tick().await.expect("the tick runs");
-        assert!(!matches!(today, TickReport::Sprint { .. }), "{today:?}");
-        assert_eq!(standups(&harness, &adapter).len(), 1);
-        clock.set(on(2, 9, 0));
-        let tomorrow = orchestrator.tick().await.expect("the tick runs");
-        assert!(
-            matches!(&tomorrow, TickReport::Sprint { .. }),
-            "{tomorrow:?}"
-        );
-        let second = &standups(&harness, &adapter)[1];
-        assert!(
-            second.contains("CTV-1: in_progress -> escalated, by governor"),
-            "{second}"
-        );
-        assert!(!second.contains("assigned -> in_progress"), "{second}");
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_the_standup_before_work() {
-        let harness = a_sprint_of_ctv_1("orch-standup-first");
-        ctv_1_started(&harness);
-        harness.in_progress("CTV-2", "dev-b", "dev-a");
-        let adapter = harness.recorded(vec![standup(), implement_stops_early()]);
-        let orchestrator = harness.orchestrator_at(adapter.clone(), on(1, 12, 0));
-
-        orchestrator.tick().await.expect("the tick runs");
-        orchestrator.tick().await.expect("the tick runs");
-
-        let started: Vec<_> = adapter
-            .started()
-            .iter()
-            .map(|spec| {
-                (
-                    spec.purpose,
-                    spec.task_id.as_ref().map(|task| task.as_str().to_string()),
-                )
-            })
-            .collect();
-        assert_eq!(
-            started,
-            vec![
-                (SessionPurpose::Ceremony, None),
-                (SessionPurpose::Implement, Some("CTV-2".to_string())),
-            ]
-        );
-        assert_eq!(standups(&harness, &adapter).len(), 1);
-        assert_eq!(
-            tools_of(&adapter.started()[0]),
-            BTreeSet::from(READ_AND_POST)
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_no_standup_on_a_still_day() {
-        let harness = a_sprint_of_ctv_1("orch-standup-still");
-        ctv_1_started(&harness);
-        let clock = Arc::new(MovableClock::new(on(1, 9, 0)));
-        let adapter = harness.recorded(vec![standup(), standup()]);
-        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
-        orchestrator.tick().await.expect("the tick runs");
-
-        clock.set(on(2, 9, 0));
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
-        assert_eq!(standups(&harness, &adapter).len(), 1);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_the_next_days_standup() {
-        let harness = a_sprint_of_ctv_1("orch-standup-next-day");
-        ctv_1_started(&harness);
-        let clock = Arc::new(MovableClock::new(on(1, 9, 0)));
-        let adapter = harness.recorded(vec![standup(), standup()]);
-        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
-        orchestrator.tick().await.expect("the tick runs");
-        ctv_1_escalated(&harness, on(1, 10, 0));
-
-        clock.set(on(2, 9, 0));
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(matches!(&report, TickReport::Sprint { .. }), "{report:?}");
-        let held = standups(&harness, &adapter);
-        assert!(
-            held[1].contains("CTV-1: in_progress -> escalated, by governor"),
-            "{}",
-            held[1]
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn reports_a_move_made_before_the_days_standup() {
-        let harness = a_sprint_of_ctv_1("orch-standup-early-move");
-        ctv_1_started(&harness);
-        ctv_1_escalated(&harness, on(1, 0, 2));
-        let clock = Arc::new(MovableClock::new(on(1, 0, 5)));
-        let adapter = harness.recorded(vec![standup(), standup()]);
-        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
-        orchestrator.tick().await.expect("the tick runs");
-
-        clock.set(on(2, 0, 10));
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(matches!(&report, TickReport::Sprint { .. }), "{report:?}");
-        let held = standups(&harness, &adapter);
-        assert!(!held[0].contains("in_progress -> escalated"), "{}", held[0]);
-        assert!(
-            held[1].contains("CTV-1: in_progress -> escalated, by governor"),
-            "{}",
-            held[1]
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn retries_a_standup_that_hit_its_limit() {
-        let harness = a_sprint_of_ctv_1("orch-standup-limit");
-        ctv_1_started(&harness);
-        let adapter = harness.recorded(vec![hits_the_turn_limit(), standup()]);
-        let orchestrator = harness.orchestrator_at(adapter.clone(), on(1, 12, 0));
-
-        orchestrator.tick().await.expect("the tick runs");
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Sprint { what, .. } if what.contains("standup")),
-            "{report:?}"
-        );
-        assert_eq!(
-            end_reasons(&harness),
-            vec![
-                SessionEndedBodyReason::Limit,
-                SessionEndedBodyReason::Completed
-            ]
-        );
-    }
-
     /// The team's whole daily budget, $20, spent at `when`.
     fn day_spent_at(harness: &Harness, when: chrono::DateTime<chrono::Utc>) {
         harness.project.record_at(
@@ -6871,176 +6182,6 @@ mod tests {
                 },
                 "cost_usd": 20.0
             }),
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_no_standup_on_a_spent_day() {
-        let harness = a_sprint_of_ctv_1("orch-standup-day");
-        ctv_1_started(&harness);
-        day_spent_at(&harness, on(1, 8, 0));
-        let adapter = harness.recorded(vec![standup()]);
-
-        let report = harness
-            .orchestrator_at(adapter.clone(), on(1, 12, 0))
-            .tick()
-            .await
-            .expect("the tick runs");
-
-        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
-        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_no_standup_while_its_runner_sleeps() {
-        let harness = a_sprint_of_ctv_1("orch-standup-asleep");
-        ctv_1_started(&harness);
-        harness.asleep("sm", on(1, 13, 0));
-        let adapter = harness.recorded(vec![standup()]);
-
-        let report = harness
-            .orchestrator_at(adapter.clone(), on(1, 12, 0))
-            .tick()
-            .await
-            .expect("the tick runs");
-
-        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
-        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn holds_no_standup_without_a_sprint() {
-        let harness = Harness::new("orch-standup-no-sprint", with_a_scrum_master);
-        harness.assigned("CTV-1", "dev-a", "dev-b");
-        harness.asleep("dev-a", at() + chrono::Duration::days(10));
-        ctv_1_started(&harness);
-        let adapter = harness.recorded(vec![standup()]);
-
-        let report = harness
-            .orchestrator_at(adapter.clone(), on(1, 12, 0))
-            .tick()
-            .await
-            .expect("the tick runs");
-
-        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
-        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn asks_no_plan_on_a_spent_day() {
-        let harness = Harness::new("orch-sprint-day", with_a_scrum_master);
-        harness.spent(None, "s-0", 20.0);
-        harness.ready("CTV-1");
-        harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![planning_ceremony_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: "the team's daily budget is spent".to_string(),
-                until: None,
-            }
-        );
-        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn asks_no_plan_of_a_sprint_that_holds_a_task() {
-        let harness = Harness::new("orch-sprint-held", with_a_scrum_master);
-        harness.ready("CTV-1");
-        harness.ready("CTV-2");
-        harness.open_sprint("S1", &["CTV-1"]);
-        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        assert!(
-            adapter.started().iter().all(|spec| spec.task_id.is_some()),
-            "{:?}",
-            adapter.started()
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn plans_once_per_sprint_as_a_ceremony() {
-        let harness = Harness::new("orch-sprint-once", with_a_scrum_master);
-        harness.ready("CTV-1");
-        harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![reads_a_file(), plan_assigns_ctv_1()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        let first = orchestrator.tick().await.expect("the tick runs");
-        assert!(matches!(&first, TickReport::Sprint { .. }), "{first:?}");
-        assert_eq!(
-            harness.row("CTV-1").sprint,
-            None,
-            "the session planned nothing"
-        );
-
-        let second = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(!matches!(&second, TickReport::Sprint { .. }), "{second:?}");
-        let planning = adapter
-            .started()
-            .iter()
-            .filter(|spec| spec.purpose == SessionPurpose::Ceremony)
-            .count();
-        assert_eq!(planning, 1);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn plans_a_sprint_at_most_three_times() {
-        let harness = Harness::new("orch-sprint-thrice", with_a_scrum_master);
-        harness.ready("CTV-1");
-        harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![
-            hits_its_wall_clock(),
-            hits_its_wall_clock(),
-            hits_its_wall_clock(),
-            hits_its_wall_clock(),
-        ]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        for _ in 0..4 {
-            orchestrator.tick().await.expect("the tick runs");
-        }
-
-        let planning = adapter
-            .started()
-            .iter()
-            .filter(|spec| spec.purpose == SessionPurpose::Ceremony)
-            .count();
-        assert_eq!(planning, 3);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn assigns_the_backlog_without_a_sprint() {
-        let harness = Harness::new("orch-sprint-none", |_| {});
-        harness.ready("CTV-1");
-        let adapter = harness.recorded(vec![reads_a_file()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        orchestrator.tick().await.expect("the tick runs");
-
-        let started = adapter.started();
-        assert_eq!(started.len(), 1, "{started:?}");
-        assert_eq!(
-            (
-                started[0].purpose,
-                started[0].task_id.as_ref().map(|task| task.as_str())
-            ),
-            (SessionPurpose::Plan, Some("CTV-1"))
         );
     }
 
@@ -7211,41 +6352,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn plans_a_sprint_again_after_its_planner_slept() {
-        let harness = Harness::new("orch-sleep-sprint", with_a_scrum_master);
-        harness.ready("CTV-1");
-        harness.open_sprint("S1", &[]);
-        let until = at() + chrono::Duration::hours(2);
-        let adapter = harness.recorded(vec![refused_until(until), planning_ceremony_ctv_1()]);
-        let first = harness
-            .orchestrator(adapter.clone())
-            .tick()
-            .await
-            .expect("the tick runs");
-        assert!(matches!(&first, TickReport::Sprint { .. }), "{first:?}");
-
-        let report = harness
-            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
-            .tick()
-            .await
-            .expect("the tick runs");
-
-        assert!(
-            matches!(&report, TickReport::Sprint { sprint_id, what }
-                if sprint_id == "S1" && what.contains("S1 holds CTV-1")),
-            "{report:?}"
-        );
-        let planning = adapter
-            .started()
-            .iter()
-            .filter(|spec| spec.purpose == SessionPurpose::Ceremony && spec.agent_id == "sm")
-            .count();
-        assert_eq!(planning, 2);
-        assert_eq!(harness.row("CTV-1").sprint.as_deref(), Some("S1"));
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn starts_no_session_for_a_sleeping_agent() {
         let harness = Harness::new("orch-sleep-other", |_| {});
         harness.in_progress("CTV-1", "dev-a", "dev-b");
@@ -7401,19 +6507,6 @@ mod tests {
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         waits_for(&orchestrator, "pm", until).await;
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn waits_for_a_sleeping_sprint_planner() {
-        let harness = Harness::new("orch-sleep-planner", with_a_scrum_master);
-        harness.ready("CTV-1");
-        harness.open_sprint("S1", &[]);
-        let until = at() + chrono::Duration::hours(1);
-        harness.asleep("sm", until);
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-
-        waits_for(&orchestrator, "sm", until).await;
     }
 
     #[tokio::test]
@@ -8371,9 +7464,7 @@ mod tests {
             matches!(&started[0].body, EventBody::CatervaficationStarted(body)
             if body.project == catervas_protocol::event::CatervaficationStartedBodyProject::New)
         );
-        let sprint = harness.events(&[EventKind::SprintStarted]);
-        assert!(matches!(&sprint[0].body, EventBody::SprintStarted(body)
-            if body.sprint_id.as_str() == "S1" && body.started_by == "catervas"));
+        assert!(harness.events(&[EventKind::SprintStarted]).is_empty());
         let moved = harness.events(&[EventKind::TaskTransitioned]);
         let into_refining = moved
             .iter()

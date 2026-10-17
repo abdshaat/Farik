@@ -20,7 +20,7 @@ use catervas_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
 use catervas_runtime::RuntimeAdapter;
 use catervas_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1,
-    planning_ceremony_ctv_1, refine_writes_task_ctv_1, reply_to_a_mention, review_writes_note,
+    refine_writes_task_ctv_1, reply_to_a_mention, review_writes_note,
 };
 use catervas_runtime::sleep::Sleeper;
 use catervas_store::git::fixtures::TempRepo;
@@ -673,29 +673,6 @@ fn plans_without_starting_work() {
             .exists()
     );
     assert_eq!(purposes(&repository), ["plan"]);
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn prints_a_sprint_line_for_a_planning_session() {
-    let repository = a_team("plan-sprint");
-    let task = a_small_request(&repository);
-    walked(&repository, &task, &["refining", "ready"]);
-    let started = run(&repository.path, &["sprint", "start"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-
-    let ran = run_with(&repository.path, &["plan"], |io| {
-        io.engine = recorded(vec![planning_ceremony_ctv_1(), plan_assigns_ctv_1()]);
-    });
-
-    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert!(
-        ran.out
-            .lines()
-            .any(|line| line.starts_with("S1: ") && line.contains("S1 holds CTV-1")),
-        "{}",
-        ran.out
-    );
 }
 
 #[test]

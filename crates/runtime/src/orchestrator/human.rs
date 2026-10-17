@@ -11,7 +11,6 @@ use catervas_core::governor::gates::{Blocker, DesignerBrowser, Rejection};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::marketing::parse_amount;
-use catervas_core::sprint::{Sprint, SprintStatus};
 use catervas_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
 use catervas_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
 use catervas_protocol::event::{
@@ -51,7 +50,6 @@ use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
     removed_sentence, save_skill, saved_sentence,
 };
-use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::tools::folders::{LandRefusal, land};
 use crate::transitions::{
@@ -151,16 +149,6 @@ pub(super) async fn handle(
             update_agent(orchestrator, &agent_id, status)
         }
         Command::SessionStop { session_id } => stop_session(orchestrator, &session_id),
-        Command::SprintStart { budget_usd } => sprint(
-            tools,
-            start_sprint(tools, budget_usd, HUMAN),
-            EventKind::SprintStarted,
-        ),
-        Command::SprintEnd => sprint(
-            tools,
-            end_sprint(tools, EndedBy::Human),
-            EventKind::SprintEnded,
-        ),
         Command::TeamPause => pause(tools, true),
         Command::TeamResume => pause(tools, false),
         Command::ProductPlanDraft => draft_product_plan(tools),
@@ -383,8 +371,8 @@ fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandErro
 // ponytail: one lock for the process, as the product plan's draft has; the command line does not start one.
 static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// The owner's Start of the Catervafication of an existing repository (4.1, 5.16): the epic is filed,
-/// given a sprint of its own and approved by this order. Each refusal is `<code>: <words>`, in this
+/// The owner's Start of the Catervafication of an existing repository (4.1, 5.16): the epic is filed
+/// and approved by this order. Each refusal is `<code>: <words>`, in this
 /// order, and records nothing.
 fn catervafication_start(tools: &ToolDeps) -> Result<CommandReport, CommandError> {
     let team = tools.files.read_team().map_err(failed)?;
@@ -445,12 +433,9 @@ fn catervafication_start_for(tools: &ToolDeps, team: &Team) -> Result<CommandRep
         .iter()
         .map(|event| event.envelope.seq)
         .collect();
-    let in_sprint = started
-        .sprint
-        .map_or_else(String::new, |sprint| format!(" in {sprint}"));
     Ok(CommandReport {
         said: format!(
-            "Your team starts documenting the project{in_sprint}: {}.",
+            "Your team starts documenting the project: {}.",
             started.epic.as_str()
         ),
         events,
@@ -558,46 +543,6 @@ fn post_chat_message(
     Ok(CommandReport {
         said: format!("sent to {}", agent.display_name.as_str()),
         events: vec![seq],
-    })
-}
-
-/// What starting or ending a sprint did, as the human's report: the sprint and the event of
-/// `kind` it recorded last.
-fn sprint(
-    tools: &ToolDeps,
-    done: Result<Sprint, SprintError>,
-    kind: EventKind,
-) -> Result<CommandReport, CommandError> {
-    let sprint = done.map_err(|error| match error {
-        SprintError::AlreadyOpen { .. } => CommandError::Refused {
-            reason: format!("sprint_open: {error}"),
-        },
-        SprintError::NoneOpen => CommandError::Refused {
-            reason: format!("no_sprint_open: {error}"),
-        },
-        SprintError::Refused { reason } => CommandError::Refused { reason },
-        other => failed(other),
-    })?;
-    let recorded = tools
-        .log
-        .read(&EventQuery {
-            kinds: vec![kind],
-            ..EventQuery::default()
-        })
-        .map_err(failed)?;
-    let budget = sprint
-        .budget_usd
-        .map_or_else(|| "no budget".to_string(), |usd| format!("budget ${usd}"));
-    Ok(CommandReport {
-        said: match sprint.status {
-            SprintStatus::Open => format!("{} is open, {budget}", sprint.id.as_str()),
-            SprintStatus::Ended => format!("{} ended", sprint.id.as_str()),
-        },
-        events: recorded
-            .last()
-            .map(|event| event.envelope.seq)
-            .into_iter()
-            .collect(),
     })
 }
 
@@ -2736,10 +2681,6 @@ mod tests {
     };
     use serde_json::{Value, json};
 
-    use catervas_core::sprint::fixtures::an_open_sprint_wire;
-    use catervas_core::sprint::{SprintStatus, validate_sprint};
-    use catervas_protocol::event::SprintEndedBodyEndedBy;
-
     use crate::orchestrator::fixtures::{Harness, UsageThenWaitAdapter};
     use crate::orchestrator::{CommandError, CommandReport, Orchestrator};
     use crate::recorded::fixtures::implement_stops_early;
@@ -2871,8 +2812,8 @@ mod tests {
             ]
         );
 
-        // Rule 10 and rule 9 move it to ready with no refine session; sprints are on and none is
-        // open, and it is not held: the Scrum Master's plan session takes it to assigned.
+        // Rule 10 and rule 9 move it to ready with no refine session: the Scrum Master's plan
+        // session takes it to assigned.
         for _ in 0..3 {
             orchestrator.tick().await.expect("the tick runs");
         }
@@ -3010,15 +2951,6 @@ mod tests {
         assert_eq!(product_plan_tasks(&harness), ["CTV-1", "CTV-2"]);
     }
 
-    /// The kinds of these events about `epic`, oldest first.
-    fn about(harness: &Harness, epic: &str, kinds: &[EventKind]) -> Vec<CatervasEvent> {
-        harness
-            .events(kinds)
-            .into_iter()
-            .filter(|event| event.envelope.ids.task_id == Some(task(epic)))
-            .collect()
-    }
-
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn starts_a_catervafication_on_the_owners_word() {
@@ -3030,16 +2962,14 @@ mod tests {
 
         assert_eq!(
             report.said,
-            "Your team starts documenting the project in S1: CTV-1."
+            "Your team starts documenting the project: CTV-1."
         );
-        // The epic is filed whole, then its sprint is opened and planned, and it moves into
+        // The epic is filed whole, and it moves into
         // refining as the Product Manager asks. No approval of the owner's follows (ADR 0061).
         let kinds = [
             EventKind::TaskCreated,
             EventKind::RequestTriaged,
             EventKind::CatervaficationStarted,
-            EventKind::SprintStarted,
-            EventKind::SprintPlanned,
             EventKind::TaskTransitioned,
         ];
         let seen: Vec<EventKind> = harness
@@ -3053,13 +2983,6 @@ mod tests {
             matches!(&created.body, EventBody::TaskCreated(body) if body.created_by == "human")
         );
         assert_eq!(created.envelope.ids.task_id, Some(task("CTV-1")));
-        let started = last(&harness, EventKind::SprintStarted).expect("a sprint is opened");
-        assert!(matches!(&started.body, EventBody::SprintStarted(body)
-            if body.sprint_id.as_str() == "S1" && body.started_by == "human"));
-        let planned = last(&harness, EventKind::SprintPlanned).expect("the epic is planned");
-        assert!(matches!(&planned.body, EventBody::SprintPlanned(body)
-            if body.planned_by == "governor"
-                && json!(body.task_ids) == json!(["CTV-1"])));
         let moved = last(&harness, EventKind::TaskTransitioned).expect("the epic moves");
         assert!(matches!(&moved.body, EventBody::TaskTransitioned(body)
             if body.to.to_string() == "refining" && body.requested_by == "pm"));
@@ -3075,18 +2998,6 @@ mod tests {
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
         assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("sm"));
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-
-        // With a sprint already open, none is opened or planned, and the epic waits for one.
-        let open = Harness::with_the_suggested_six("human-catervafication-open");
-        open.open_sprint("S1", &[]);
-        let orchestrator = an_orchestrator(&open);
-        let report = handled(&orchestrator, Command::CatervaficationStart).await;
-        assert_eq!(
-            report.said,
-            "Your team starts documenting the project: CTV-1."
-        );
-        assert_eq!(open.events(&[EventKind::SprintStarted]).len(), 1);
-        assert!(about(&open, "CTV-1", &[EventKind::SprintPlanned]).is_empty());
     }
 
     #[tokio::test]
@@ -4565,93 +4476,6 @@ mod tests {
     }
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn starts_a_sprint() {
-        let harness = Harness::new("human-sprint-start", |_| {});
-        let orchestrator = an_orchestrator(&harness);
-
-        let report = handled(
-            &orchestrator,
-            Command::SprintStart {
-                budget_usd: Some(20.0),
-            },
-        )
-        .await;
-
-        let sprint = harness
-            .project
-            .deps
-            .files
-            .read_sprint("S1")
-            .expect("S1 is written");
-        assert_eq!(sprint.status, SprintStatus::Open);
-        assert_eq!(sprint.budget_usd, Some(20.0));
-        assert!(sprint.ended_at.is_none() && sprint.task_ids.is_empty());
-        let started = last(&harness, EventKind::SprintStarted).expect("the start is recorded");
-        let EventBody::SprintStarted(body) = &started.body else {
-            panic!("a start");
-        };
-        assert_eq!(
-            (
-                body.sprint_id.as_str(),
-                body.budget_usd,
-                body.started_by.as_str()
-            ),
-            ("S1", Some(20.0), "human")
-        );
-        assert_eq!(report.events, vec![started.envelope.seq]);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn numbers_a_sprint_after_the_files_and_the_log() {
-        let harness = Harness::new("human-sprint-numbers", |_| {});
-        let mut ended = an_open_sprint_wire();
-        ended["id"] = json!("S3");
-        ended["status"] = json!("ended");
-        ended["ended_at"] = json!("2026-09-24T01:00:00Z");
-        harness
-            .project
-            .deps
-            .files
-            .write_sprint(&validate_sprint(&ended).expect("a sprint"))
-            .expect("S3 is written");
-        let orchestrator = an_orchestrator(&harness);
-        handled(&orchestrator, Command::SprintStart { budget_usd: None }).await;
-        assert!(harness.project.deps.files.read_sprint("S4").is_ok());
-
-        let harness = Harness::new("human-sprint-numbers-log", |_| {});
-        harness.project.record(
-            "",
-            "sprint.started",
-            &json!({ "sprint_id": "S5", "budget_usd": null, "started_by": "human" }),
-        );
-        harness.project.record(
-            "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S5", "ended_by": "human", "left": [] }),
-        );
-        let orchestrator = an_orchestrator(&harness);
-        handled(&orchestrator, Command::SprintStart { budget_usd: None }).await;
-        assert!(harness.project.deps.files.read_sprint("S6").is_ok());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn refuses_a_second_open_sprint() {
-        let harness = Harness::new("human-sprint-second", |_| {});
-        harness.open_sprint("S1", &[]);
-        let before = harness.events(&[]).len();
-        let orchestrator = an_orchestrator(&harness);
-
-        let reason = refused(&orchestrator, Command::SprintStart { budget_usd: None }).await;
-
-        assert!(reason.contains("S1"), "{reason}");
-        assert_eq!(harness.events(&[]).len(), before);
-        assert!(harness.project.deps.files.read_sprint("S2").is_err());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn records_a_pause_the_human_asks_for() {
         let harness = Harness::new("human-pause", |_| {});
         let orchestrator = an_orchestrator(&harness);
@@ -4689,85 +4513,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn takes_the_human_commands_while_paused() {
         let harness = Harness::new("human-paused-commands", |_| {});
-        harness.open_sprint("S1", &[]);
         let orchestrator = an_orchestrator(&harness);
         handled(&orchestrator, Command::TeamPause).await;
 
-        handled(&orchestrator, Command::SprintEnd).await;
+        handled(&orchestrator, Command::TeamResume).await;
 
-        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
-        let EventBody::SprintEnded(body) = &ended.body else {
-            panic!("an end");
-        };
-        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Human);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn ends_a_sprint_leaving_its_unfinished_tasks() {
-        let harness = Harness::new("human-sprint-end", |_| {});
-        harness.accepted("CTV-1");
-        harness.in_progress("CTV-2", "dev-a", "dev-b");
-        harness.open_sprint("S1", &["CTV-1", "CTV-2"]);
-        let orchestrator = an_orchestrator(&harness);
-
-        let report = handled(&orchestrator, Command::SprintEnd).await;
-
-        let files = &harness.project.deps.files;
-        let sprint = files.read_sprint("S1").expect("S1 reads");
-        assert_eq!(sprint.status, SprintStatus::Ended);
-        assert!(sprint.ended_at.is_some());
-        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
-        let EventBody::SprintEnded(body) = &ended.body else {
-            panic!("an end");
-        };
-        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Human);
-        assert_eq!(
-            body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            vec!["CTV-2"]
-        );
-        // With the policy off, what the sprint leaves goes on: no Backlog mark (ADR 0028).
-        assert_eq!(body.backlog, None);
-        assert!(!harness.row("CTV-2").left_for_the_backlog);
-        assert_eq!(report.events, vec![ended.envelope.seq]);
-        let contract = files.read_contract(&task("CTV-2")).expect("CTV-2 reads");
-        assert_eq!(contract.sprint, None);
-        assert_eq!(harness.row("CTV-2").status, TaskStatus::InProgress);
-        assert_eq!(harness.row("CTV-2").sprint, None);
-        assert_eq!(harness.row("CTV-1").sprint.as_deref(), Some("S1"));
-
-        let again = refused(&orchestrator, Command::SprintEnd).await;
-        assert!(again.contains("no sprint is open"), "{again}");
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn ends_a_sprint_whose_file_omits_a_task_on_the_board() {
-        let harness = Harness::new("human-sprint-end-omitted", |_| {});
-        harness.in_progress("CTV-1", "dev-a", "dev-b");
-        harness.open_sprint("S1", &["CTV-1"]);
-        // S1's file restored from before CTV-1 was planned into it.
-        let files = &harness.project.deps.files;
-        let mut restored = an_open_sprint_wire();
-        restored["id"] = json!("S1");
-        files
-            .write_sprint(&validate_sprint(&restored).expect("a sprint"))
-            .expect("S1 is written");
-        let orchestrator = an_orchestrator(&harness);
-
-        handled(&orchestrator, Command::SprintEnd).await;
-
-        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
-        let EventBody::SprintEnded(body) = &ended.body else {
-            panic!("an end");
-        };
-        assert_eq!(
-            body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            vec!["CTV-1"]
-        );
-        let contract = files.read_contract(&task("CTV-1")).expect("CTV-1 reads");
-        assert_eq!(contract.sprint, None);
-        assert_eq!(harness.row("CTV-1").sprint, None);
+        assert_eq!(harness.events(&[EventKind::TeamResumed]).len(), 1);
     }
 
     /// What `handle` answers for the human's `text` in the channel.

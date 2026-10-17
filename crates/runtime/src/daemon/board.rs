@@ -571,7 +571,6 @@ mod tests {
 
     use super::super::gates::tests::query;
     use crate::orchestrator::fixtures::Harness;
-    use crate::sprints::{EndedBy, PlannedBy, end_sprint, plan_sprint};
     use crate::tools::fixtures::at;
 
     #[test]
@@ -609,23 +608,6 @@ mod tests {
         appended.envelope.seq
     }
 
-    /// A ceremony line by `agent` in its session `session`, in `thread`.
-    fn posted(harness: &Harness, agent: &str, session: &str, thread: &str) -> u64 {
-        put(
-            harness,
-            &json!({
-                "seq": 1,
-                "recorded_at": at().to_rfc3339(),
-                "team_id": "catervas",
-                "project_id": "catervas",
-                "agent_id": agent,
-                "session_id": session,
-                "kind": "message.posted",
-                "body": { "author": agent, "kind": "ceremony", "text": "Notes.", "mentions": [], "thread": thread },
-            }),
-        )
-    }
-
     /// A cost of `usd` by `agent` in `session` for `purpose`, on `task` when one is named, at
     /// `recorded_at`.
     fn spent(
@@ -654,135 +636,6 @@ mod tests {
             wire["task_id"] = json!(task);
         }
         put(harness, &wire);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    #[allow(
-        clippy::too_many_lines,
-        reason = "two sprints, their list, one's tasks and meetings, and a missing one"
-    )]
-    fn answers_the_sprints() {
-        let harness = Harness::new("board-sprints", |_| {});
-        let deps = &harness.project.deps;
-        harness.accepted("CTV-1");
-        harness.ready("CTV-2");
-        harness.file("CTV-4", "cancelled", |_| {});
-        harness
-            .project
-            .open_sprint("S1", Some(20.0), &["CTV-1", "CTV-2", "CTV-4"]);
-        let planning = posted(&harness, "pm", "c1", "planning");
-        posted(&harness, "pm", "c1", "planning");
-        // A reply in the planning thread is talk, not the meeting.
-        said(
-            &harness,
-            "dev-a",
-            "reply",
-            "Sounds right.",
-            &json!({ "session_id": "c1", "body": { "thread": "planning" } }),
-        );
-        // Each day's standup is a meeting of its own, in the same thread.
-        let monday = posted(&harness, "pm", "c5", "standup");
-        let tuesday = posted(&harness, "pm", "c6", "standup");
-        spent(
-            &harness,
-            (Some("CTV-1"), "dev-a", "s1"),
-            "implement",
-            1.5,
-            &at().to_rfc3339(),
-        );
-        end_sprint(deps, EndedBy::Human).expect("the sprint ends");
-        // The review and the look back run after the end, and are the sprint's.
-        let review = posted(&harness, "pm", "c2", "review");
-        let retro = posted(&harness, "pm", "c3", "retro");
-        // S2 is planned by Catervas alone: a breakdown joining its epic's sprint.
-        harness.ready("CTV-3");
-        harness.project.open_sprint("S2", None, &[]);
-        plan_sprint(
-            deps,
-            &["CTV-3".parse().expect("an id")],
-            &PlannedBy::Governor,
-        )
-        .expect("the governor plans");
-        posted(&harness, "pm", "c4", "standup");
-
-        let listed = query(
-            &harness.daemon,
-            "sprints.list",
-            &json!({}),
-            "sprintsListResult",
-        );
-        let at_now = at().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        assert_eq!(
-            listed["sprints"],
-            json!([
-                {
-                    "sprint_id": "S1", "status": "ended", "started_at": "2026-09-24T00:00:00Z",
-                    "started_by": "human", "ended_at": at_now, "budget_usd": 20.0,
-                    "spent_usd": 1.5, "planned_by": "pm", "task_count": 3, "done_count": 2,
-                },
-                {
-                    "sprint_id": "S2", "status": "open", "started_at": "2026-09-24T00:00:00Z",
-                    "started_by": "human", "ended_at": null, "budget_usd": null,
-                    "spent_usd": 0.0, "planned_by": null, "task_count": 1, "done_count": 0,
-                },
-            ]),
-            "{listed}"
-        );
-
-        let one = query(
-            &harness.daemon,
-            "sprint.get",
-            &json!({ "sprint_id": "S1" }),
-            "sprintGetResult",
-        );
-        assert_eq!(one["planned_by"], "pm", "{one}");
-        assert_eq!(
-            one["tasks"]
-                .as_array()
-                .expect("tasks")
-                .iter()
-                .map(|task| (task["task_id"].clone(), task["status"].clone()))
-                .collect::<Vec<_>>(),
-            vec![
-                (json!("CTV-1"), json!("accepted")),
-                (json!("CTV-2"), json!("ready")),
-                (json!("CTV-4"), json!("cancelled")),
-            ],
-            "{one}"
-        );
-        assert_eq!(
-            one["meetings"],
-            json!([
-                { "thread": "planning", "first_seq": planning, "at": at_now, "posts": 2 },
-                { "thread": "standup", "first_seq": monday, "at": at_now, "posts": 1 },
-                { "thread": "standup", "first_seq": tuesday, "at": at_now, "posts": 1 },
-                { "thread": "review", "first_seq": review, "at": at_now, "posts": 1 },
-                { "thread": "retro", "first_seq": retro, "at": at_now, "posts": 1 },
-            ]),
-            "{one}"
-        );
-        let later = query(
-            &harness.daemon,
-            "sprint.get",
-            &json!({ "sprint_id": "S2" }),
-            "sprintGetResult",
-        );
-        assert_eq!(
-            later["meetings"].as_array().map(Vec::len),
-            Some(1),
-            "{later}"
-        );
-        let missing = super::super::gates::tests::rpc(
-            &harness.daemon,
-            "query",
-            &json!({ "name": "sprint.get", "params": { "sprint_id": "S9" } }),
-        );
-        assert_eq!(
-            missing["error"]["code"],
-            super::super::web::NOT_FOUND,
-            "{missing}"
-        );
     }
 
     #[test]
@@ -1029,16 +882,6 @@ mod tests {
         ] {
             assert_eq!(none[rate], Value::Null, "{rate}: {none}");
         }
-
-        // Once the sprint ends, the summary keeps its figures and says it ended, until the next.
-        end_sprint(deps, EndedBy::Human).expect("the sprint ends");
-        let ended = summary(&harness);
-        assert_eq!(
-            ended["sprint"],
-            json!({ "sprint_id": "S1", "status": "ended", "spent_usd": 23.25, "budget_usd": 20.0 }),
-            "{ended}"
-        );
-        assert_eq!(ended["agents"][2]["sprint_usd"], 20.0, "{ended}");
 
         // With no daily limit set, the summary says so.
         let mut team = deps.files.read_team().expect("the team reads");

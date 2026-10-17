@@ -25,8 +25,7 @@ use crate::generated::command::{
     RequestTriageBodySize, SellerMessageDiscardBody, SellerMessageSendBody, SellerReplyDismissBody,
     SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel,
     SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
-    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
-    ToolDecisionBody,
+    SocialPostStopBody, TaskCreateBody, TaskIdBody, TaskTransitionBody, ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -192,13 +191,6 @@ pub enum Command {
     },
     /// Stop the run between ticks.
     RunStop,
-    /// Start a sprint.
-    SprintStart {
-        /// What it may spend, or nothing for no budget of its own.
-        budget_usd: Option<f64>,
-    },
-    /// End the open sprint.
-    SprintEnd,
     /// Pause the whole team: no rule runs until it is resumed.
     TeamPause,
     /// Resume a paused team.
@@ -576,17 +568,10 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             })
         }
         CommandName::RunStop
-        | CommandName::SprintEnd
         | CommandName::TeamPause
         | CommandName::TeamResume
         | CommandName::ProductPlanDraft
         | CommandName::CatervaficationStart => empty_command(name, body),
-        CommandName::SprintStart => {
-            let body: SprintStartBody = read_body(body, name)?;
-            Ok(Command::SprintStart {
-                budget_usd: body.budget_usd,
-            })
-        }
         CommandName::MessagePost => {
             let body: MessagePostBody = read_body(body, name)?;
             Ok(Command::MessagePost { text: body.text })
@@ -821,13 +806,12 @@ fn skill_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
     }
 }
 
-/// `run_stop`, `sprint_end`, `team_pause`, `team_resume`, `product_plan_draft` or
+/// `run_stop`, `team_pause`, `team_resume`, `product_plan_draft` or
 /// `catervafication_start`, whose body is empty.
 fn empty_command(name: CommandName, body: &Value) -> Result<Command, Vec<ValidationError>> {
     let _: EmptyBody = read_body(body, name)?;
     Ok(match name {
         CommandName::RunStop => Command::RunStop,
-        CommandName::SprintEnd => Command::SprintEnd,
         CommandName::TeamPause => Command::TeamPause,
         CommandName::ProductPlanDraft => Command::ProductPlanDraft,
         CommandName::CatervaficationStart => Command::CatervaficationStart,
@@ -964,11 +948,6 @@ pub fn command_to_value(command: &Command) -> Value {
             json!({ "session_id": session_id }),
         ),
         Command::RunStop => (CommandName::RunStop, json!({})),
-        Command::SprintStart { budget_usd } => (
-            CommandName::SprintStart,
-            json!({ "budget_usd": budget_usd }),
-        ),
-        Command::SprintEnd => (CommandName::SprintEnd, json!({})),
         Command::TeamPause => (CommandName::TeamPause, json!({})),
         Command::TeamResume => (CommandName::TeamResume, json!({})),
         Command::ProductPlanDraft => (CommandName::ProductPlanDraft, json!({})),
@@ -1733,17 +1712,6 @@ mod tests {
         );
         assert_eq!(read("run_stop", &json!({})), Command::RunStop);
         assert_eq!(
-            read("sprint_start", &json!({ "budget_usd": 20.0 })),
-            Command::SprintStart {
-                budget_usd: Some(20.0)
-            }
-        );
-        assert_eq!(
-            read("sprint_start", &json!({ "budget_usd": null })),
-            Command::SprintStart { budget_usd: None }
-        );
-        assert_eq!(read("sprint_end", &json!({})), Command::SprintEnd);
-        assert_eq!(
             read("message_post", &json!({ "text": "@dev-a how is CTV-1?" })),
             Command::MessagePost {
                 text: "@dev-a how is CTV-1?".to_string()
@@ -1840,9 +1808,6 @@ mod tests {
             json!({ "command": "agent_update", "body": { "agent_id": "dev-a", "status": "paused" } }),
             json!({ "command": "session_stop", "body": { "session_id": "session-7" } }),
             json!({ "command": "run_stop", "body": {} }),
-            json!({ "command": "sprint_start", "body": { "budget_usd": 20.0 } }),
-            json!({ "command": "sprint_start", "body": { "budget_usd": null } }),
-            json!({ "command": "sprint_end", "body": {} }),
             json!({ "command": "message_post", "body": { "text": "hello @dev-a" } }),
             json!({ "command": "chat_message_post", "body": { "agent_id": "mira", "text": "Apple Pay?\nOr not." } }),
         ];
@@ -2675,6 +2640,16 @@ mod tests {
             let wire = reply_to_value(&reply);
             assert_eq!(wire["error"]["kind"], kind.as_str());
             assert_eq!(reply_from_value(&wire), Ok(reply));
+        }
+    }
+
+    #[test]
+    fn refuses_the_sprint_commands() {
+        for wire in [
+            json!({ "command": "sprint_start", "body": { "budget_usd": 20 } }),
+            json!({ "command": "sprint_end", "body": {} }),
+        ] {
+            assert!(command_from_value(&wire).is_err(), "{wire}");
         }
     }
 }

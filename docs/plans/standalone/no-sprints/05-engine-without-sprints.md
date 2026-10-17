@@ -191,7 +191,7 @@ Files as the map's Task 2.
   "body": {} }` are each refused by `command_from_value` (an `Err`); `catervas sprint start` exits 2 (clap: no such
   command), checked in `crates/cli/tests/commands.rs`.
 
-- [ ] `feat(runtime): no sprint is planned, held or ended`
+- [x] `feat(runtime): no sprint is planned, held or ended`
 
 ### Task 3: allowances and the channel count by the day
 

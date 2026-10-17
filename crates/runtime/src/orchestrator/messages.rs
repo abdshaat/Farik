@@ -8,8 +8,8 @@ use catervas_core::governor::done::CriterionResult;
 use catervas_core::marketing::network_name;
 use catervas_core::team::{Agent, Team, task_private_folder};
 use catervas_protocol::event::{
-    BlockerWire, BudgetExhaustedBodyScope, CatervasEvent, EventBody, EventKind,
-    HumanAcceptedBodySubject, NoteWrittenBodyKind, Thread,
+    BudgetExhaustedBodyScope, CatervasEvent, EventBody, EventKind, HumanAcceptedBodySubject,
+    NoteWrittenBodyKind, Thread,
 };
 use catervas_store::folder_docs::{ProposalState, folder_docs};
 use catervas_store::git::HeadSummary;
@@ -460,75 +460,6 @@ pub(super) struct Digest {
     pub(super) now: DateTime<Utc>,
 }
 
-/// The planning ceremony's message: the sprint, its budget left or "no budget", each candidate's
-/// id, kind, most it may cost, and title; the digest, each open escalation's task, title, reason,
-/// detail, and hours waiting, and each budget spent; and the last retro, when there is one. What an
-/// agent or the human wrote is untrusted text, each block cut at 16 KiB.
-pub(super) fn planning_message(
-    sprint_id: &str,
-    candidates: &[(TaskContract, usize)],
-    backlog: bool,
-    budget_left: Option<f64>,
-    digest: &Digest,
-    retro: Option<&str>,
-) -> String {
-    let listed = candidates
-        .iter()
-        .map(|(contract, tasks)| {
-            let under = match (contract.kind, tasks) {
-                (TaskKind::Task, _) => String::new(),
-                (TaskKind::Epic, 1) => ", 1 task under it".to_string(),
-                (TaskKind::Epic, tasks) => format!(", {tasks} tasks under it"),
-            };
-            format!(
-                "{} ({}, ${:.2}{under}): {}",
-                contract.id.as_str(),
-                contract.kind,
-                contract.budget.max_cost_usd,
-                contract.title.as_str()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let escalations = digest
-        .escalations
-        .iter()
-        .map(|open| escalation_line(open, digest.now));
-    let spent = digest.spent.iter().map(|(scope, at)| {
-        let whose = match scope {
-            BudgetExhaustedBodyScope::DayUsd => "the day's",
-            _ => "the sprint's",
-        };
-        format!(
-            "{whose} budget spent at {}",
-            at.format("%Y-%m-%d %H:%M UTC")
-        )
-    });
-    let facts = escalations.chain(spent).collect::<Vec<_>>().join("\n");
-    format!(
-        "Plan {sprint_id} with `catervas_plan_sprint`, naming the tasks the team should finish in it. \
-         Its budget: {budget}. The candidates, {each}: {candidates}\nThe \
-         digest, each open escalation and each budget spent since the last planning: \
-         {digest}{retro}",
-        budget = budget_left.map_or_else(|| "no budget".to_string(), |usd| format!("${usd:.2}")),
-        each = if backlog {
-            "each waiting in the Backlog"
-        } else {
-            "each ready and in no sprint"
-        },
-        candidates = untrusted_block("candidates", &listed, NOTE_CAP_BYTES),
-        digest = if facts.is_empty() {
-            "none".to_string()
-        } else {
-            untrusted_block("digest", &facts, NOTE_CAP_BYTES)
-        },
-        retro = retro.map_or_else(String::new, |text| format!(
-            "\nWhat the last retros learned, their latest part: {}",
-            untrusted_block("retro", last_bytes(text, NOTE_CAP_BYTES), NOTE_CAP_BYTES)
-        )),
-    )
-}
-
 /// One open escalation, as a ceremony is told it: its task, title, reason, detail, and the hours
 /// it has waited until `now`.
 fn escalation_line(open: &OpenEscalation, now: DateTime<Utc>) -> String {
@@ -539,54 +470,6 @@ fn escalation_line(open: &OpenEscalation, now: DateTime<Utc>) -> String {
         open.reason,
         open.detail,
         (now - open.raised_at).num_hours()
-    )
-}
-
-/// The standup's facts (5.9): each move in its window, as task, from, to, and who asked for it;
-/// each blocked task of the sprint with its blocker; and each open escalation. What an agent wrote
-/// is untrusted text, cut at 16 KiB.
-pub(super) fn standup_message(
-    sprint_id: &str,
-    moves: &[CatervasEvent],
-    blocked: &[(TaskId, Option<BlockerWire>)],
-    escalations: &[OpenEscalation],
-    now: DateTime<Utc>,
-) -> String {
-    let moves = moves.iter().filter_map(|event| match &event.body {
-        EventBody::TaskTransitioned(body) => Some(format!(
-            "{}: {} -> {}, by {}",
-            event
-                .envelope
-                .ids
-                .task_id
-                .as_ref()
-                .map_or("", |task| task.as_str()),
-            body.from,
-            body.to,
-            body.requested_by
-        )),
-        _ => None,
-    });
-    let blocked = blocked.iter().map(|(task_id, wire)| match wire {
-        Some(wire) => format!(
-            "{} is blocked: {}; needed: {}",
-            task_id.as_str(),
-            wire.description,
-            wire.needed
-        ),
-        None => format!("{} is blocked", task_id.as_str()),
-    });
-    let escalations = escalations.iter().map(|open| escalation_line(open, now));
-    let facts = moves
-        .chain(blocked)
-        .chain(escalations)
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "Today's standup of {sprint_id}: each move of a task in the sprint since the last standup \
-         (task: from -> to, by whom), each task of the sprint that is blocked with its blocker, and \
-         each open escalation: {}",
-        untrusted_block("standup", &facts, NOTE_CAP_BYTES)
     )
 }
 
@@ -1351,9 +1234,9 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        Changes, Digest, Resume, ReviewBrief, breakdown_message, close_out_message,
-        design_review_message, human_message, implement_message, plan_message, plan_task_message,
-        plan_tasks_message, planning_message, refine_message, retro_message, review_message,
+        Changes, Resume, ReviewBrief, breakdown_message, close_out_message, design_review_message,
+        human_message, implement_message, plan_message, plan_task_message, plan_tasks_message,
+        refine_message, retro_message, review_message,
     };
     use super::{DeliveredTask, architecture_refresh_message, product_refresh_message};
     use crate::tools::fixtures::at;
@@ -2046,28 +1929,6 @@ mod tests {
             &started,
         ));
         assert_eq!(human_message(&history, "dev-a"), None);
-    }
-
-    #[test]
-    fn gives_the_planning_ceremony_the_end_of_the_retro() {
-        let digest = Digest {
-            escalations: Vec::new(),
-            spent: Vec::new(),
-            now: at(),
-        };
-        let retro = format!("# Retro\n{}\nkeep the tasks small", "x".repeat(20 * 1024));
-
-        let message =
-            planning_message("S2", &[(contract(), 0)], false, None, &digest, Some(&retro));
-
-        assert!(
-            message.contains("<untrusted source=\"retro\">"),
-            "{message}"
-        );
-        assert!(message.contains("keep the tasks small"), "{message}");
-        assert!(!message.contains("# Retro"), "{message}");
-        let without = planning_message("S2", &[(contract(), 0)], false, None, &digest, None);
-        assert!(!without.contains("source=\"retro\""), "{without}");
     }
 
     #[test]

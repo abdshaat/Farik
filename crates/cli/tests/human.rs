@@ -18,14 +18,13 @@ use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
 use catervas_protocol::event::{EventBody, EventKind, HumanAcceptedBodySubject};
 use catervas_runtime::orchestrator::CommandError;
 use catervas_runtime::recorded::fixtures::tool_runner;
-use catervas_runtime::sprints::{PlannedBy, plan_sprint};
 use catervas_runtime::{RecordedAdapter, RuntimeAdapter};
 use serde_json::{Value, json};
 
 use project::{
     LiveDriver, a_project, a_task_with_a_human_criterion_verifying, a_team, events, filed,
     files_of, hold_the_run_lock, joined, moved, record, record_as, recorded, run, run_with,
-    status_of, tool_deps,
+    status_of,
 };
 
 /// Records a question from `pm` on `task`, and answers its sequence number.
@@ -542,30 +541,6 @@ fn holds_the_run_lock_while_it_handles_a_command_here() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn starts_and_shows_a_sprint_from_the_command_line() {
-    let repository = a_team("human-sprint");
-
-    let started = run(&repository.path, &["sprint", "start", "--budget", "20"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-    let shown = run(&repository.path, &["sprint", "show"]);
-    assert_eq!(shown.code, 0, "{}", shown.err);
-    for said in ["S1", "open", "budget $20", "spent $0"] {
-        assert!(shown.out.contains(said), "{said} in {}", shown.out);
-    }
-
-    let ended = run(&repository.path, &["sprint", "end"]);
-    assert_eq!(ended.code, 0, "{}", ended.err);
-    let shown = run(&repository.path, &["sprint", "show"]);
-    assert_eq!(shown.code, 0, "{}", shown.err);
-    assert!(
-        shown.out.contains("S1") && shown.out.contains("ended"),
-        "{}",
-        shown.out
-    );
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
 fn pauses_and_resumes_from_the_command_line() {
     let repository = a_team("human-pause");
 
@@ -608,129 +583,6 @@ fn run_on_a_paused_team_says_so_and_exits() {
         ran.out
     );
     assert!(events(&repository, &[EventKind::SessionStarted]).is_empty());
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn says_an_empty_sprint_whose_planning_is_spent_waits_for_its_end() {
-    let repository = a_team("human-sprint-empty");
-    let started = run(&repository.path, &["sprint", "start"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-    let empty = "empty: end it with catervas sprint end";
-    let shown = run(&repository.path, &["sprint", "show"]);
-    assert!(!shown.out.contains(empty), "{}", shown.out);
-
-    record_as(
-        &repository,
-        "",
-        Some(("pm", "session-1")),
-        "session.started",
-        &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
-    );
-    // A planning session is spent once it ends other than at a limit.
-    record_as(
-        &repository,
-        "",
-        Some(("pm", "session-1")),
-        "session.ended",
-        &json!({ "reason": "completed", "detail": "done" }),
-    );
-    let shown = run(&repository.path, &["sprint", "show"]);
-
-    assert_eq!(shown.code, 0, "{}", shown.err);
-    assert!(shown.out.contains(empty), "{}", shown.out);
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn joins_a_task_the_human_files_under_a_sprints_epic() {
-    let repository = a_team("human-sprint-child");
-    let epic = an_epic_in_the_open_sprint(&repository);
-
-    let ran = file_under(&repository, &epic);
-
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    let contract = files_of(&repository)
-        .read_contract(&"CTV-2".parse().expect("a task id"))
-        .expect("the child is written");
-    assert_eq!(contract.sprint.as_deref(), Some("S1"));
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn files_a_task_whose_join_fails_and_says_so() {
-    let repository = a_team("human-sprint-child-ending");
-    let epic = an_epic_in_the_open_sprint(&repository);
-    // The human's end has written S1's file and not yet recorded `sprint.ended`.
-    let path = repository.path.join(".catervas/sprints/S1.yaml");
-    let text = std::fs::read_to_string(&path).expect("S1 reads");
-    let ending = text.replace(
-        "status: open",
-        "status: ended\nended_at: 2026-09-24T01:00:00Z",
-    );
-    assert_ne!(ending, text, "{text}");
-    std::fs::write(&path, ending).expect("S1 is written");
-
-    let ran = file_under(&repository, &epic);
-
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    assert!(ran.out.contains("CTV-2 filed"), "{}", ran.out);
-    assert!(ran.out.contains("S1 has ended"), "{}", ran.out);
-    let contract = files_of(&repository)
-        .read_contract(&"CTV-2".parse().expect("a task id"))
-        .expect("the child is written");
-    assert_eq!(contract.sprint, None);
-}
-
-/// An epic, in progress with the Product Manager, planned into S1, which is open.
-fn an_epic_in_the_open_sprint(repository: &catervas_store::git::fixtures::TempRepo) -> String {
-    let epic = filed(repository, "A whole board");
-    let ran = run(
-        &repository.path,
-        &["triage", &epic, "large", "--reason", "Two parts."],
-    );
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    moved(repository, &epic, "draft", "refining", &json!({}));
-    moved(repository, &epic, "refining", "ready", &json!({}));
-    moved(
-        repository,
-        &epic,
-        "ready",
-        "assigned",
-        &json!({ "assignee": "pm" }),
-    );
-    moved(
-        repository,
-        &epic,
-        "assigned",
-        "in_progress",
-        &json!({ "assignee": "pm" }),
-    );
-    let started = run(&repository.path, &["sprint", "start"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-    plan_sprint(
-        &tool_deps(repository),
-        &[epic.parse().expect("a task id")],
-        &PlannedBy::Governor,
-    )
-    .expect("the epic is planned");
-    epic
-}
-
-/// `catervas task create` of a request under `epic`.
-fn file_under(repository: &catervas_store::git::fixtures::TempRepo, epic: &str) -> project::Ran {
-    let child = repository.path.join("child.yaml");
-    std::fs::write(&child, project::a_request("One row of the board")).expect("written");
-    run(
-        &repository.path,
-        &[
-            "task",
-            "create",
-            child.to_str().expect("a path"),
-            "--parent",
-            epic,
-        ],
-    )
 }
 
 #[test]

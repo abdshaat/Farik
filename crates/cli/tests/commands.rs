@@ -1341,6 +1341,14 @@ fn refuses_an_invocation_it_cannot_use() {
 }
 
 #[test]
+fn refuses_the_sprint_command() {
+    let ran = run_in(Path::new("."), &["sprint", "start"]);
+
+    assert_eq!(ran.code, 2, "{}", ran.err);
+    assert!(ran.err.contains("sprint"), "{}", ran.err);
+}
+
+#[test]
 fn refuses_serve_with_json() {
     let ran = run_in(Path::new("."), &["serve", "--json"]);
 

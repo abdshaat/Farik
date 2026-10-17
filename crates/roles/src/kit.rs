@@ -200,7 +200,6 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "catervafying-the-repository",
         ),
         Role::ScrumMaster => embedded!("scrum_master":
-            "planning-a-sprint",
             "running-ceremonies",
             "writing-escalation-digests",
             "catervafying-the-repository",
@@ -2292,7 +2291,7 @@ mod tests {
         }
         for (role, count) in [
             (Role::ProductManager, 6),
-            (Role::ScrumMaster, 4),
+            (Role::ScrumMaster, 3),
             (Role::Architect, 7),
             (Role::SoftwareDeveloper, 8),
             (Role::UiUxDesigner, 1),
@@ -2344,7 +2343,6 @@ mod tests {
         assert_eq!(
             names,
             [
-                "planning-a-sprint",
                 "running-ceremonies",
                 "writing-escalation-digests",
                 "catervafying-the-repository",

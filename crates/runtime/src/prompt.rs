@@ -189,31 +189,16 @@ pub const INTERVIEW_INSTRUCTION: &str = "This session is your interview of the o
 
 /// The `This session` section of each ceremony (5.9), by its thread: what it posts, and the tool
 /// it ends with. The channel is read by all, so each tells the agent to mention no one.
-pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [
-    (
-        Thread::Planning,
-        "This session is the sprint's planning ceremony. Choose, from the candidates in the first \
-         message, the tasks the team should finish in this sprint, keeping their `max_cost_usd` \
-         together within the sprint's budget when it has one; an epic brings its tasks with it. \
-         Post the plan and the digest in the first message with `catervas_post_message`, then plan \
-         the sprint with one call of `catervas_plan_sprint`, and end the session. Post at most three \
-         messages, and mention no one: the channel is read by all.",
-    ),
-    (
-        Thread::Standup,
-        "This session is the team's standup. Post one standup summary of the first message with \
-         `catervas_post_message`: what moved, what is blocked, and what waits on the human. Mention \
-         no one: the channel is read by all. Then end the session.",
-    ),
+pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 2] = [
     (
         Thread::Review,
-        "This session is the sprint's review. Post what the sprint delivered and what it did not, \
+        "This session is the delivery's review. Post what the delivery delivered and what it did not, \
          from the first message, with `catervas_post_message`, in at most three messages. Mention no \
          one: the channel is read by all. Then end the session.",
     ),
     (
         Thread::Retro,
-        "This session is the sprint's retro. Post the retro, what to keep and what to change, with \
+        "This session is the delivery's retro. Post the retro, what to keep and what to change, with \
          `catervas_post_message`, in at most three messages, then record what the next planning should \
          know with `catervas_append_retro`, and end the session. Mention no one: the channel is read \
          by all.",

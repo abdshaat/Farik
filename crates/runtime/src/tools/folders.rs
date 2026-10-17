@@ -466,14 +466,11 @@ fn check_input<'a>(
 ) -> Result<Checked<'a>, ToolError> {
     let role = call.role();
     let in_a_document_ceremony = call.context.purpose == SessionPurpose::Ceremony
-        && matches!(
-            call.context.thread,
-            Some(Thread::Planning | Thread::Review | Thread::Retro)
-        );
+        && matches!(call.context.thread, Some(Thread::Review | Thread::Retro));
     let Some(folder) = role_folder(role).filter(|_| in_a_document_ceremony) else {
         return Err(refused(
             "folder_doc_refused",
-            "a folder document is written at a sprint planning, review or retro, by a role that owns a folder",
+            "a folder document is written at a review or retro, by a role that owns a folder",
         ));
     };
     let (target, twin) = checked_path(call, folder, &input.path)?;
@@ -800,7 +797,7 @@ mod tests {
             let remote = origin.then(|| {
                 crate::orchestrator::fixtures::Harness::with_origin_in(&project.repo.path)
             });
-            let context = ceremony(&project, "sm", Thread::Planning);
+            let context = ceremony(&project, "sm", Thread::Review);
             let answer = write(&context, CADENCE, "a\n").expect("written");
             assert_eq!(answer["next"], next, "{origin}");
             assert!(
@@ -1217,7 +1214,7 @@ mod tests {
         let contexts = [
             project.context("sm", Some("CTV-1")),
             chat,
-            ceremony(&project, "sm", Thread::Standup),
+            ceremony(&project, "sm", Thread::Planning),
             ceremony(&project, "fin", Thread::Retro),
         ];
         for context in &contexts {

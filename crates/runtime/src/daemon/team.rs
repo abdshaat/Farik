@@ -35,7 +35,6 @@ use crate::connectors::{ConnectorEntry, ConnectorError, ListedTool, SecretAt, li
 use crate::credential::{CredentialError, credential_of_kind, load_credential, save_credential};
 use crate::pause::{key_refused, paused};
 use crate::session::session_model;
-use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
@@ -121,11 +120,7 @@ pub(super) fn query(
                 Ok((before, after)) => {
                     let mut answer = effective(deps, &after)?;
                     answer["errors"] = json!([]);
-                    let board = deps.projections.board().map_err(|e| internal(&e))?;
-                    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
-                    let open = open.as_ref().map(|open| open.sprint_id.as_str());
-                    let work = sprint_work(open, &board);
-                    answer["effects"] = json!(describe_change(&before, &after, &work));
+                    answer["effects"] = json!(describe_change(&before, &after));
                     Ok(answer)
                 }
                 Err(Refused::Errors(errors)) => {
@@ -4224,78 +4219,6 @@ pub(super) mod tests {
         let again = json!({ "team": team_file(&harness), "criteria": criteria });
         call(&harness.daemon, "team.start", &again, "emptyResult");
         assert!(crate::pause::paused(&harness.project.deps.log).expect("reads"));
-    }
-
-    /// `team.validate`'s effects of switching the sprint policy to `on`, on a board with the ready
-    /// CTV-1, CTV-2 under way since before the switch, CTV-3 under way in the open S2, and CTV-4,
-    /// which S1 left for the Backlog.
-    fn switching(name: &str, on: bool) -> Value {
-        let harness = crate::orchestrator::fixtures::Harness::new(name, |wire| {
-            wire["policy"]["plan_in_sprints"] = json!(!on);
-        });
-        harness.ready("CTV-1");
-        harness.file("CTV-2", "in_progress", |_| {});
-        harness.file("CTV-3", "in_progress", |_| {});
-        harness.file("CTV-4", "assigned", |_| {});
-        harness.open_sprint("S1", &["CTV-4"]);
-        harness.project.record(
-            "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": ["CTV-4"], "backlog": true }),
-        );
-        harness.open_sprint("S2", &["CTV-3"]);
-        let mut team = team_file(&harness);
-        team["policy"]["plan_in_sprints"] = json!(on);
-        query(
-            &harness.daemon,
-            "team.validate",
-            &json!({ "team": team }),
-            "teamValidateResult",
-        )["effects"]
-            .clone()
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn describes_the_work_a_switch_touches() {
-        assert_eq!(
-            switching("team-switch-on", true),
-            json!([
-                "Ready work now waits in the Backlog until you start a sprint.",
-                "The task already under way finishes first.",
-            ])
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn proposes_sprints_for_a_new_team() {
-        let harness = driven("team-propose-sprints");
-        assert_eq!(team_file(&harness)["policy"].get("plan_in_sprints"), None);
-        let proposed = query(
-            &harness.daemon,
-            "team.propose",
-            &json!({}),
-            "teamProposeResult",
-        );
-        assert_eq!(
-            proposed["team"]["policy"]["plan_in_sprints"],
-            json!(true),
-            "{proposed}"
-        );
-        let defaults = query(
-            &harness.daemon,
-            "settings.defaults",
-            &json!({}),
-            "settingsDefaultsResult",
-        );
-        assert_eq!(defaults["policy"]["plan_in_sprints"], json!(true));
-        let start = json!({ "team": proposed["team"], "criteria": proposed["criteria"] });
-        call(&harness.daemon, "team.start", &start, "emptyResult");
-        assert_eq!(
-            team_file(&harness)["policy"]["plan_in_sprints"],
-            json!(true)
-        );
     }
 
     #[test]

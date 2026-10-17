@@ -71,8 +71,6 @@ pub mod show;
 
 #[cfg(unix)]
 mod skill;
-/// One sprint, and how it went.
-pub mod sprint;
 /// Who drives a project, and how a command reaches it.
 #[cfg(unix)]
 mod start;
@@ -560,11 +558,6 @@ enum Commands {
         #[command(subcommand)]
         command: RenewalCommands,
     },
-    /// Start, end, or show a sprint (5.5).
-    Sprint {
-        #[command(subcommand)]
-        command: SprintCommands,
-    },
     /// Pause the whole team: no rule runs and no session starts until `catervas resume`.
     Pause,
     /// Resume a paused team.
@@ -753,23 +746,6 @@ enum ConnectorCommands {
     /// Look eBay listings up with the user's own developer keys (used by the Procurement
     /// Specialist's kit).
     Ebay,
-}
-
-#[derive(Subcommand)]
-enum SprintCommands {
-    /// Start a sprint, which the team plans from the ready backlog.
-    Start {
-        /// What it may spend, in dollars. Left out, it has no budget of its own.
-        #[arg(long)]
-        budget: Option<f64>,
-    },
-    /// End the open sprint; its unfinished tasks leave it and keep their status.
-    End,
-    /// Show the sprint named, else the open one, else the latest.
-    Show {
-        /// The sprint, as S<n>.
-        sprint_id: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1189,10 +1165,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Cancel { .. }
         | Commands::Say { .. }
         | Commands::Pause
-        | Commands::Resume
-        | Commands::Sprint {
-            command: SprintCommands::Start { .. } | SprintCommands::End,
-        } => open_project(&io.cwd, now).and_then(|project| {
+        | Commands::Resume => open_project(&io.cwd, now).and_then(|project| {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
@@ -1235,10 +1208,6 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Task {
             command: TaskCommands::Show { task_id, diff },
         } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id, *diff)),
-        Commands::Sprint {
-            command: SprintCommands::Show { sprint_id },
-        } => open_project(&io.cwd, now)
-            .and_then(|project| sprint::show(&project, sprint_id.as_deref())),
         Commands::Channel { last } => {
             open_project(&io.cwd, now).and_then(|project| channel::channel(&project, *last))
         }
@@ -1575,17 +1544,6 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 reason: reason.join(" "),
             },
         ),
-        Commands::Sprint {
-            command: SprintCommands::Start { budget },
-        } => (
-            "sprint start",
-            Command::SprintStart {
-                budget_usd: *budget,
-            },
-        ),
-        Commands::Sprint {
-            command: SprintCommands::End,
-        } => ("sprint end", Command::SprintEnd),
         Commands::Pause => ("pause", Command::TeamPause),
         Commands::Resume => ("resume", Command::TeamResume),
         Commands::Say { text } => (
