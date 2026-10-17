@@ -159,7 +159,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `gives_every_field_of_the_schema_to_exactly_one_owner` passes unchanged. It fails until
   `"branch"` is in a set, which is the reason to watch.
 
-- [ ] `feat(core): a task's branch is named from its type and title, and recorded`
+- [x] `feat(core): a task's branch is named from its type and title, and recorded`
 
 ### Task 2: what leaves for the forge names no task
 
