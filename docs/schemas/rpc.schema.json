@@ -4611,7 +4611,7 @@
       }
     },
     "socialPostsListResult": {
-      "description": "The posts Today shows (docs/SPEC.md 6.5; ADR 0042): every post scheduled or sent whose time is still ahead, soonest first, then every post missed or failed in the last 24 hours, the latest first. A post stopped, one still waiting for the owner (waiting.list has it), and one whose time passed unsent are not here. at is when it goes out, in the offset it was written in; hands_over_at is when Catervas hands it to Buffer, in UTC: an hour before at, or later for a post the owner allowed later than that. approved_by is plan or owner; plan and slot are there for a plan's post. missed_why is there for a missed post and reason, Catervas's sentence then Buffer's words, for a failed one: both are shown as text, never as markup.",
+      "description": "The posts Today shows (docs/SPEC.md 6.5; ADR 0042): every post scheduled or sent whose time is still ahead, soonest first, then every post missed or failed in the last 24 hours, the latest first. A post stopped, one still waiting for the owner (waiting.list has it), and one whose time passed unsent are not here. at is when it goes out, in the offset it was written in; hands_over_at is when Catervas hands it to Buffer, in UTC: an hour before at, or later for a post the owner allowed later than that. approved_by is plan, owner or catervas (a post outside the plan, which costs nothing: ADR 0061); plan and slot are there for a plan's post. missed_why is there for a missed post and reason, Catervas's sentence then Buffer's words, for a failed one: both are shown as text, never as markup.",
       "type": "object",
       "additionalProperties": false,
       "required": ["posts"],
@@ -4648,7 +4648,7 @@
               "state": { "type": "string", "enum": ["scheduled", "sent", "missed", "failed"] },
               "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
               "slot": { "type": "string" },
-              "approved_by": { "type": "string", "enum": ["plan", "owner"] },
+              "approved_by": { "type": "string", "enum": ["plan", "owner", "catervas"] },
               "missed_why": { "type": "string", "enum": ["not_running", "paused", "undecided"] },
               "reason": { "type": "string" }
             }

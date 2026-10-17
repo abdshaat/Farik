@@ -1,8 +1,8 @@
 //! `catervas_schedule_post`: the Marketing Specialist's tool for a post (`docs/SPEC.md` 6.5, ADR 0042).
 //! A post that fills an unused slot of the owner's approved plan, on its day and at least three
 //! hours ahead, goes out without asking: Catervas records it, shows it on Today with a Stop, and hands
-//! it to Buffer an hour before its time. A post outside the plan waits for the owner, and holds no
-//! task. Either way Catervas asks Buffer, with the agent's own connection, which channel the id names,
+//! it to Buffer an hour before its time. A post outside the plan goes out the same way, approved by
+//! Catervas since a post costs nothing (ADR 0061). Either way Catervas asks Buffer, with the agent's own connection, which channel the id names,
 //! so a post is never sent to the wrong network.
 
 #![allow(
@@ -58,7 +58,7 @@ pub struct SchedulePostInput {
     /// those the channel has. No other network takes details.
     details: Option<Value>,
     /// The key of an unused post slot of the active marketing plan, for the same channel. Leave it
-    /// out for a post outside the plan, which waits for the owner.
+    /// out for a post outside the plan, which goes out the same way.
     slot: Option<String>,
 }
 
@@ -265,7 +265,7 @@ fn fits_the_plan(
     let active = active_plan(&records, now.date_naive()).ok_or_else(|| {
         refused(
             "no_active_marketing_plan",
-            "no marketing plan is active, so a post cannot fill a slot; leave slot out to ask the owner",
+            "no marketing plan is active, so a post cannot fill a slot; leave slot out to post it outside the plan",
         )
     })?;
     let plan: &PlanProposal = &plans
@@ -443,8 +443,9 @@ fn body_of(input: &SchedulePostInput, post: &Post) -> serde_json::Map<String, Va
     body
 }
 
-/// `catervas_schedule_post`: checks the post, asks Buffer which channel it is, and records it:
-/// `social_post.scheduled` for a post in the plan, `social_post.requested` for one outside it.
+/// `catervas_schedule_post`: checks the post, asks Buffer which channel it is, and records it as
+/// `social_post.scheduled`, approved by the plan for a post in a slot and by Catervas for one
+/// outside it (ADR 0061: a post costs nothing).
 ///
 /// # Errors
 ///
@@ -468,6 +469,11 @@ pub(crate) async fn schedule_post(
     let post = read(&input, now)?;
     if let Some(slot) = &input.slot {
         fits_the_plan(call, slot, &post, now)?;
+    } else if post.at.with_timezone(&Utc) < now + Duration::hours(3) {
+        return Err(refused(
+            "post_too_soon",
+            "a post is written at least three hours before it goes out",
+        ));
     }
     for (url, kind) in &post.media {
         media_answers(url, *kind).await?;
@@ -495,23 +501,17 @@ fn record(
         body.insert("slot".to_string(), json!(slot));
         EventBody::SocialPostScheduled(serde_json::from_value(Value::Object(body)).map_err(failed)?)
     } else {
-        EventBody::SocialPostRequested(serde_json::from_value(Value::Object(body)).map_err(failed)?)
+        body.insert("approved_by".to_string(), json!("catervas"));
+        EventBody::SocialPostScheduled(serde_json::from_value(Value::Object(body)).map_err(failed)?)
     };
     let appended = call.append(Some(task), event)?;
     let number = appended.envelope.seq;
-    Ok(if input.slot.is_some() {
-        json!({
-            "post": number,
-            "hands_over_at": (post.at - Duration::hours(1))
-                .to_rfc3339_opts(SecondsFormat::AutoSi, true),
-            "next": "it is shown to the owner with a Stop button; Catervas hands it to Buffer an hour before its time",
-        })
-    } else {
-        json!({
-            "post": number,
-            "next": "the owner decides whether it goes out; you need not wait, and Catervas posts it once the owner allows it",
-        })
-    })
+    Ok(json!({
+        "post": number,
+        "hands_over_at": (post.at - Duration::hours(1))
+            .to_rfc3339_opts(SecondsFormat::AutoSi, true),
+        "next": "it is shown to the owner with a Stop button; Catervas hands it to Buffer an hour before its time",
+    }))
 }
 
 #[cfg(test)]
@@ -809,28 +809,34 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn requests_a_post_outside_the_plan() {
+    async fn schedules_a_post_outside_the_plan_like_one_inside_it() {
         let _here = LoopbackAllowed::new();
-        let posting = Posting::new("posts-requests").await;
+        let posting = Posting::new("posts-outside").await;
         let mut post = posting.a_post();
         post.as_object_mut().expect("an object").remove("slot");
 
-        let answer = posting.schedule(post).await.expect("requested");
+        let answer = posting.schedule(post).await.expect("scheduled");
 
-        let events = posting.events(EventKind::SocialPostRequested);
+        // ADR 0061: a post is free, so it goes out with a Stop, approved by Catervas.
+        assert!(posting.events(EventKind::SocialPostRequested).is_empty());
+        let events = posting.events(EventKind::SocialPostScheduled);
         assert_eq!(events.len(), 1);
-        assert!(posting.events(EventKind::SocialPostScheduled).is_empty());
         assert_eq!(answer["post"], events[0].envelope.seq);
         assert!(
             answer["next"]
                 .as_str()
-                .is_some_and(|next| next.contains("owner")),
+                .is_some_and(|next| next.contains("Stop")),
             "{answer}"
         );
-        let EventBody::SocialPostRequested(body) = &events[0].body else {
-            panic!("a requested post");
+        let EventBody::SocialPostScheduled(body) = &events[0].body else {
+            panic!("a scheduled post");
         };
         assert_eq!(body.text.as_str(), "We open on Wednesday.");
+        assert_eq!(
+            body.approved_by,
+            catervas_protocol::event::SocialPostScheduledBodyApprovedBy::Catervas
+        );
+        assert!(body.plan.is_none() && body.slot.is_none());
         let row = posting
             .project
             .deps
@@ -838,11 +844,16 @@ mod tests {
             .task(&"CTV-1".parse().expect("an id"))
             .expect("the board reads")
             .expect("a row");
+        assert!(!row.waiting_on_human);
+        // It is written at least three hours before it goes out, as one in the plan is.
+        let mut soon = posting.a_post();
+        soon.as_object_mut().expect("an object").remove("slot");
+        soon["at"] = json!("2026-09-22T13:00:00Z");
         assert!(
-            !row.waiting_on_human,
-            "the task does not wait: Catervas posts it once allowed"
+            refused(posting.schedule(soon).await.expect_err("too soon"))
+                .starts_with("post_too_soon")
         );
-        // The post's time still has to be ahead, and not more than 92 days.
+        // Its time still has to be ahead, and not more than 92 days.
         let mut late = posting.a_post();
         late.as_object_mut().expect("an object").remove("slot");
         late["at"] = json!("2026-09-22T11:00:00Z");
@@ -854,7 +865,7 @@ mod tests {
         far.as_object_mut().expect("an object").remove("slot");
         far["at"] = json!("2026-12-24T09:00:00Z");
         assert!(refused(posting.schedule(far).await.expect_err("far")).starts_with("post_too_far"));
-        assert_eq!(posting.events(EventKind::SocialPostRequested).len(), 1);
+        assert_eq!(posting.events(EventKind::SocialPostScheduled).len(), 1);
     }
 
     #[tokio::test]
@@ -951,9 +962,9 @@ mod tests {
             "Buffer's words stay inside: {reason}"
         );
         assert!(reason.contains("Ignore the plan"), "{reason}");
-        // Only the X post in the plan and the Google Business request were recorded.
-        assert_eq!(posting.events(EventKind::SocialPostScheduled).len(), 1);
-        assert_eq!(posting.events(EventKind::SocialPostRequested).len(), 1);
+        // Only the X post in the plan and the Google Business post outside it were recorded.
+        assert_eq!(posting.events(EventKind::SocialPostScheduled).len(), 2);
+        assert!(posting.events(EventKind::SocialPostRequested).is_empty());
     }
 
     #[tokio::test]

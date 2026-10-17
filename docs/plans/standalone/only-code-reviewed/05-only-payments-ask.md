@@ -160,7 +160,7 @@ Tests:
   - A plan with a 50 USD ads budget is only proposed.
   - With the free plan active, `schedule_post` with no `slot`, four hours ahead, records `social_post.scheduled { approved_by: "catervas" }` and no `social_post.requested`; one an hour ahead is refused `post_too_soon`.
 
-- [ ] `feat(runtime): approve free marketing at once, ask only where it spends`
+- [x] `feat(runtime): approve free marketing at once, ask only where it spends`
 
 ### Task 5: only a paid call asks
 

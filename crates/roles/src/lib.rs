@@ -1131,8 +1131,8 @@ mod tests {
     }
 
     /// ADR 0042: the Marketing Specialist owns the brand kit, the brand persona, the marketing plan
-    /// and the social presence. It posts, advertises and spends only as the owner's approved plan
-    /// says or after the owner allows that one call, and the prompt carries every `forbidden` line
+    /// and the social presence. It advertises and spends only as the owner's approved plan says or
+    /// after the owner allows a call that costs money, and the prompt carries every `forbidden` line
     /// and the three paths it keeps its documents at.
     #[test]
     fn the_marketing_specialist_owns_the_brand_and_the_plan() {
@@ -1141,7 +1141,7 @@ mod tests {
             definition.forbidden,
             [
                 "write application code",
-                "publish, send or spend money except through a call the owner allows or the owner's approved marketing plan",
+                "spend money except through a call the owner allows or the owner's approved marketing plan, or send an email the human has not sent",
                 "delete a post, an email or a campaign",
                 "change billing, account access or conversion tracking at any service",
             ]
@@ -1174,7 +1174,7 @@ mod tests {
             assert!(prompt.contains(path), "the prompt does not name {path}");
         }
         assert!(
-            prompt.contains("after the owner allows that one call"),
+            prompt.contains("a plan that spends nothing is approved by catervas"),
             "{prompt}"
         );
         assert!(
@@ -1230,8 +1230,8 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        // The lines that say who sends a post: one in the owner's approved plan goes out through
-        // the tool that schedules it, and any other waits for the owner (a line may wrap).
+        // The lines that say who sends a post: any post goes out through the tool that schedules it,
+        // in the owner's plan or outside it, and the owner can Stop it (a line may wrap).
         for name in [
             "marketing-what-ships",
             "planning-a-launch",
@@ -1240,9 +1240,9 @@ mod tests {
         ] {
             let said = of(name);
             assert!(
-                said.contains(
-                    "in the owner's approved marketing plan goes out through `catervas_schedule_post`"
-                ) && said.contains("any other post waits for the owner"),
+                said.contains("goes out through `catervas_schedule_post`")
+                    && said.contains("Stop")
+                    && !said.contains("waits for the owner"),
                 "{name} lost its line on who sends a post"
             );
         }

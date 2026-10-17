@@ -581,7 +581,17 @@ fn fold_posts(log: &EventLog) -> Result<(Vec<SocialPost>, Vec<PostMove>), StoreE
                         ) {
                             post.plan = body.plan.as_ref().map(|plan| plan.as_str().to_string());
                             post.slot = body.slot.as_ref().map(|slot| slot.as_str().to_string());
-                            post.approved_by = Some("plan".to_string());
+                            post.approved_by =
+                                Some(
+                                    if body.approved_by
+                                        == SocialPostScheduledBodyApprovedBy::Catervas
+                                    {
+                                        "catervas"
+                                    } else {
+                                        "plan"
+                                    }
+                                    .to_string(),
+                                );
                             trail.push(PostMove {
                                 seq,
                                 recorded_at: at,

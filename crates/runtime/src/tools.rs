@@ -419,7 +419,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<posts::SchedulePostInput>(
             "catervas_schedule_post",
             Read,
-            "Write a social post for one channel. With a slot of the active marketing plan it goes out without asking, shown to the owner with a Stop button and handed to Buffer an hour before its time; without a slot it waits for the owner's yes. Read the channel's id with Buffer's list_channels first.",
+            "Write a social post for one channel. It goes out without asking, shown to the owner with a Stop button and handed to Buffer an hour before its time, at least three hours after you write it; give a slot of the active marketing plan to fill it, or leave the slot out for a post outside the plan. Read the channel's id with Buffer's list_channels first.",
         ),
     ]
 });

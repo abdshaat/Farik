@@ -1146,7 +1146,7 @@
     },
     "marketingPlanApprovedBody": {
       "title": "Marketing Plan Approved Body",
-      "description": "The owner approved a marketing plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, and note is what the owner added, empty when they added nothing. note is always present, so that this body is never also a valid design_plan.proposed body, whose only property is plan. The envelope names the proposing task and no agent and no session: only the owner decides, under ask and auto alike.",
+      "description": "The owner approved a marketing plan (docs/SPEC.md 6.5; ADR 0042), or Catervas did for a plan that spends nothing (ADR 0061): plan is its id, and note is what the owner added, empty when they added nothing, or Catervas's reason. note is always present, so that this body is never also a valid design_plan.proposed body, whose only property is plan. The envelope names the proposing task and no agent and no session: only the owner decides a plan with money in it, under ask and auto alike.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "note"],
@@ -1235,7 +1235,7 @@
     },
     "socialPostScheduledBody": {
       "title": "Social Post Scheduled Body",
-      "description": "A post is going out (docs/SPEC.md 6.5; ADR 0042). approved_by plan: the Marketing Specialist scheduled it with catervas_schedule_post into the slot slot of the active plan plan, at least three hours ahead; the envelope names its task, agent and session, and the event's sequence number is the post's number. approved_by owner: the owner allowed a post that was requested; post is the request's number, and the envelope names the request's task and no agent and no session. channel is the network and buffer_channel Buffer's id for the channel; text is the post's words; media is up to four pictures or clips in order; at is when it goes out, with its offset; details is present on YouTube and Pinterest only. Catervas hands it to Buffer an hour before at, or at once when the owner allowed it later than that.",
+      "description": "A post is going out (docs/SPEC.md 6.5; ADR 0042; ADR 0061). approved_by plan: the Marketing Specialist scheduled it with catervas_schedule_post into the slot slot of the active plan plan, at least three hours ahead; the envelope names its task, agent and session, and the event's sequence number is the post's number. approved_by catervas: the Marketing Specialist scheduled it with no slot, outside the plan or with no plan, at least three hours ahead; a post costs nothing, so Catervas approves it, and it is shown with a Stop as a planned one is; the envelope is as a plan post's, with no plan and no slot. approved_by owner: the owner allowed a post that was requested; post is the request's number, and the envelope names the request's task and no agent and no session. channel is the network and buffer_channel Buffer's id for the channel; text is the post's words; media is up to four pictures or clips in order; at is when it goes out, with its offset; details is present on YouTube and Pinterest only. Catervas hands it to Buffer an hour before at, or at once when the owner allowed it later than that.",
       "type": "object",
       "additionalProperties": false,
       "required": ["channel", "buffer_channel", "text", "media", "at", "approved_by"],
@@ -1247,14 +1247,14 @@
         "media": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/socialPostMedia" } },
         "at": { "$ref": "#/$defs/socialPostTime" },
         "details": { "$ref": "#/$defs/socialPostDetails" },
-        "approved_by": { "type": "string", "enum": ["plan", "owner"] },
+        "approved_by": { "type": "string", "enum": ["plan", "owner", "catervas"] },
         "plan": { "$ref": "#/$defs/marketingPlanId" },
         "slot": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 }
       }
     },
     "socialPostRequestedBody": {
       "title": "Social Post Requested Body",
-      "description": "The Marketing Specialist wrote a post that is not in the active plan, with catervas_schedule_post and no slot (docs/SPEC.md 6.5; ADR 0042). It waits for the owner, who allows it (social_post.scheduled with approved_by owner and post) or does not (social_post.stopped by declined). The event's sequence number is the post's number; the envelope names its task, agent and session, and the task does not wait. The fields are those of social_post.scheduled.",
+      "description": "Older logs only: the Marketing Specialist wrote a post that is not in the active plan, with catervas_schedule_post and no slot (docs/SPEC.md 6.5; ADR 0042); since ADR 0061 such a post is scheduled at once (social_post.scheduled with approved_by catervas). It waited for the owner, who allows it (social_post.scheduled with approved_by owner and post) or does not (social_post.stopped by declined). The event's sequence number is the post's number; the envelope names its task, agent and session, and the task does not wait. The fields are those of social_post.scheduled.",
       "type": "object",
       "additionalProperties": false,
       "required": ["channel", "buffer_channel", "text", "media", "at"],

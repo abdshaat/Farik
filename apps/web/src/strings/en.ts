@@ -2001,6 +2001,8 @@ export const en = {
 	postDays: "{n} days",
 	postApprovedBefore: "Approved in your plan ",
 	postAllowed: "You allowed this",
+	postByCatervas:
+		"Not in your plan. Posting costs nothing, so Catervas lets it go out. ",
 	postHandsOverAt: ". Catervas hands it to Buffer at {time}.",
 	postHandsOverBefore: ". Catervas hands it to Buffer an hour before.",
 	postBufferHas: ". Buffer has it, and posts it at {time}.",

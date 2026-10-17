@@ -5,9 +5,10 @@ description: Use when the task asks for a marketing plan.
 
 # Writing the marketing plan
 
-A marketing plan is the owner's decision. You write it, propose it with its budget, and end your
-turn; the owner approves it or sends it back, and nothing in it is spent or posted until they
-approve it. It also becomes the file `docs/catervas/marketing/plans/MP-<n>`, for people, beside
+A marketing plan with money in it is the owner's decision. You write it, propose it with its
+budget, and end your turn; the owner approves it or sends it back, and nothing in it is spent until
+they approve it. A plan that spends nothing (a total budget of 0 and no campaign) is approved by
+Catervas at once. It also becomes the file `docs/catervas/marketing/plans/MP-<n>`, for people, beside
 its agent version, for agents.
 
 ## 1. Research first
