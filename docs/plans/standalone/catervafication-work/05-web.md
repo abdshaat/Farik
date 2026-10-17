@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 4.1 (the offer), 4.3, F8
 Depends on: plans 1 to 4 of this branch (3b and 4b included)
-Readiness confirmed by: pending
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
 
@@ -62,7 +62,6 @@ proposal.
 ## File map
 
 ```
-packages/protocol-client/src/**             modifies: the chat_message_post body type gains asTask?, if typed by hand (Task 1)
 apps/web/src/pages/OneToOne.tsx             modifies: Composer's second button and InfoTip (Task 1); the human message's link (Task 2)
 apps/web/src/app/refusals.ts                modifies: two codes (Task 1)
 apps/web/src/strings/en.ts                  modifies: chatsSendTask, chatsTaskInfo, refuseAgentNotActive, refuseTaskTooShort (Task 1); chatsGivenAs (Task 2); the Catervafication words, toldConnectionRequested (Task 3)
@@ -88,15 +87,18 @@ above. There is no new component or export.
 ### Task 1: Send as a task
 
 Files: `apps/web/src/pages/OneToOne.tsx` (`Composer`), `apps/web/src/app/refusals.ts`,
-`apps/web/src/strings/en.ts`, the client's body type if it is typed by hand; tested by
-`apps/web/src/pages/Chats.test.tsx`.
+`apps/web/src/strings/en.ts`; tested by `apps/web/src/pages/Chats.test.tsx`. The client's
+`Command` type is generated from `command.schema.json` (plan 4 added `as_task`), so nothing in
+`packages/protocol-client` is edited.
 
 - `sends_a_message_as_a_task`, at `/channel/mira`:
   - typing "Add a dark mode switch to the settings page" and pressing "Send as a task" sends one
     `command` with params `{ command: { command: "chat_message_post", body: { agent_id: "mira",
     text: "Add a dark mode switch to the settings page", as_task: true } } }`;
   - answered `{ said: "given to Mira as CTV-7", events: [9, 10, 11] }`, the box is empty;
-  - the info button named for `chat-task-info` reveals `chatsTaskInfo` filled with "Mira";
+  - the button "More about this" whose `aria-describedby` is `chat-task-info`, clicked, has
+    `aria-expanded` `true`, and the element `#chat-task-info` has the text `chatsTaskInfo` filled
+    with "Mira";
   - the next send, answered `{ error: { kind: "refused", detail: "task_too_short: say a little
     more: at least 20 characters" } }`, shows an alert whose text is `en.refuseTaskTooShort`.
 

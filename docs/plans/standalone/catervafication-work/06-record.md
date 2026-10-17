@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md`, the sections below (hard rule 8)
 Depends on: plans 1 to 5 of this branch (3b and 4b included)
-Readiness confirmed by: pending
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 ## Goal
 
@@ -46,9 +46,10 @@ theirs. The plans' ticks and statuses are brought up to date. Nothing else chang
   - The chat shows "Given to <Name> as <id>" under the message.
   - The chat session decides as well. A request for work its role does it takes with
     `catervas_take_task`, filing the same task given to itself, created by the agent, from the
-    message it answers. It then replies in one line naming it. A question it answers, and work for
-    another role it proposes as a request. Its refusals are `take_task_refused`,
-    `agent_not_active`, `task_too_short` and `already_a_task`.
+    message it answers. Its input is the task's one-line title; the task's intent is always the
+    owner's message, never the agent's words. It then replies in one line naming it. A question it
+    answers, and work for another role it proposes as a request. Its refusals are
+    `take_task_refused`, `agent_not_active`, `task_title`, `task_too_short` and `already_a_task`.
 - **5.1, "Chat is not command"**: a chat session still files and moves nothing. The two ways from
   a chat to work are "Send as a request" under a proposal and "Send as a task", the owner's, and
   `catervas_take_task`, by which the chat session files a task given to its own agent.
@@ -64,7 +65,7 @@ theirs. The plans' ticks and statuses are brought up to date. Nothing else chang
   - **Requests.** A request given in a chat is refined by its agent, not the Product Manager. That
     agent writes its contract with the Product Manager's standing while it is `draft` or
     `refining`, and no writer but the human may change its `assignee_role`
-    (`given_task_role_fixed`). A bug a hunt files is triaged small by Catervas
+    (`given_task_role_fixed`) or its intent, the owner's words (`given_task_intent_fixed`). A bug a hunt files is triaged small by Catervas
     (`request.triaged { reason: "a bug <hunt> found", triaged_by: "catervas" }`) and refined by
     the Product Manager like any request.
   - **The Catervafication's epic.** For an existing repository:

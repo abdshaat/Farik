@@ -4,29 +4,20 @@ Status: draft
 Branch: `feat/catervafication-work` (work outside a phase; see `README.md`)
 Spec: `docs/SPEC.md` 4.3, 5.1 ("Chat is not command"), 5.2, 5.16, 8.5, F8
 Depends on: plans 1 to 3b of this branch
-Readiness confirmed by: pending
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16
 
 Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
 
 ## Goal
 
-The owner sends `chat_message_post { agent_id, text, as_task: true }`. The message is posted in
-that agent's chat, marked `as_task`, and the same command files a request:
-- given to that agent (`task.created.given_to`), linked to the message, created by the human;
-- its `assignee_role` the agent's role, triaged small by Catervas.
-
-From there:
-- The chat session does not answer it.
-- Rule 10 moves it to `refining` with no session, as for any triaged request.
-- Rule 9 gives the refine session to that agent, not the Product Manager. The agent writes the
-  contract with the Product Manager's standing on that one task, and may not change its
-  `assignee_role`.
-- The Definition of Ready and the governor's own check are unchanged; no agent judges it (ADR
-  0061 plan 7 removes contract judging).
-- Once `ready`, it is next in that agent's queue: rule 8 assigns it, with no session, on the
-  assigner's behalf, as soon as the agent has room under the WIP limit, ahead of any other ready
-  task for that agent.
-- Its code is reviewed as any code is (ADR 0061). Out of scope: the web (plan 5).
+The owner sends `chat_message_post { agent_id, text, as_task: true }`: the message is posted,
+marked `as_task`, and the same command files a request given to that agent (`given_to`), linked to
+the message, created by the human, its `assignee_role` the agent's role, triaged small by Catervas.
+The chat does not answer it. Rule 10 moves it to `refining` with no session; rule 9 gives the
+refine session to that agent, which writes the contract with the Product Manager's standing on that
+one task, its role and intent fixed. Readiness and the governor's own check are unchanged (no agent
+judges, ADR 0061 plan 7). Once `ready` it is next in that agent's queue: rule 8 assigns it, with no
+session, as soon as the agent has room. Its code is reviewed as any code is. Out of scope: the web.
 
 ## Decisions
 
@@ -53,6 +44,8 @@ From there:
   `RequestError::Refused`:
   - a seq not by `human` in chat `given_to`, `as_task` or not (plan 4b files from a plain one):
     "links to message <seq>, which is not the owner's message in <agent>'s chat";
+  - a wire whose `intent` is not that message's `text`: "its intent is not the owner's message
+    <seq>". So a given task's work is only ever the owner's words, whoever files it (plan 4b);
   - one a `task.created` already names: "was already sent, as <id>".
 - **`Given`**: who the task is the agent's for. It is `Given::No` when any of these holds:
   - there is no `given_to`;
@@ -61,12 +54,13 @@ From there:
 
   Otherwise it is `Given::Active(agent)` for an active agent and `Given::Waits` for a paused one.
 - **The chat does not answer it.** `awaits_a_reply(body)` is `body.author == "human" &&
-  body.as_task != Some(true)`, and replaces `body.author == HUMAN` in three places:
-  - `newest_from_the_user`;
-  - `chat_waiting`'s `user_wrote_last`;
-  - the filter at `chat.rs`'s third use (the chat rule's unanswered check).
+  body.as_task != Some(true)`, and replaces `body.author == HUMAN` in two places:
+  - `newest_from_the_user`, which `pending_chat` and so the chat rule read;
+  - `chat_waiting`'s `user_wrote_last`, now whether the newest message that is not `as_task` is
+    the human's (read newest first, a page at a time, as `newest_from_the_user` reads).
 
-  So the chat shows no "thinking", and no chat session proposes the same work.
+  `chat_history`'s line keeps `HUMAN`: an `as_task` message reads as the user's. So the chat shows
+  no "thinking", and no chat session proposes the same work.
 - **Rule 9** (`requests::refining`): the product-plan wait and the governor's `judge` of a
   written contract are unchanged (after ADR 0061 plan 7 there is no judgment session).
   The writer is then chosen from `Given`:
@@ -93,10 +87,13 @@ From there:
 
   `check_contract_write` then allows content in those statuses alone, as for the Product Manager.
   Chosen over a new actor kind, which every row and gate would have to learn for one case.
-- **The role stays.** `write_contract` refuses an agent's write leaving a given task's
-  `assignee_role` other than the given agent's role:
-  `given_task_role_fixed: <id> was given to <agent> in its chat, so its assignee_role stays
-  <role>`. This holds whoever the writer is, the Product Manager included. The human's
+- **The role and the words stay.** `write_contract` refuses an agent's write to a given task
+  - leaving `assignee_role` other than the given agent's role: `given_task_role_fixed: <id> was
+    given to <agent> in its chat, so its assignee_role stays <role>`;
+  - changing `intent`: `given_task_intent_fixed: <id> was given to <agent> in its chat, so its
+    intent stays the owner's words`.
+
+  This holds whoever the writer is, the Product Manager included. The human's
   `contract.save` is not held: the human writes anything, and `Given::No` then returns the task
   to the ordinary rules.
 - **Rule 8.**
@@ -128,7 +125,6 @@ From there:
 docs/schemas/command.schema.json                modifies: chatMessagePostBody.as_task (Task 1)
 docs/schemas/event.schema.json                  modifies: chatMessagePostedBody.as_task, taskCreatedBody.given_to (Task 1)
 crates/protocol/src/command.rs, event.rs        modifies: Command::ChatMessagePost.as_task; generated bodies (Task 1)
-packages/protocol-client/src/**                 modifies: as generated from the schemas, if the package generates its types (Task 1)
 crates/store/src/requests.rs                    modifies: Filing.given_to, file_given_task, check_task_message, given_to, mod tests (Task 2)
 crates/runtime/src/chat.rs                      modifies: NewChatMessage.as_task, awaits_a_reply (Task 3)
 crates/runtime/src/orchestrator/human.rs        modifies: post_chat_message, mod tests (Task 3)
@@ -140,7 +136,8 @@ crates/runtime/src/orchestrator/fixtures.rs     modifies: Harness::file_given (T
 crates/runtime/src/orchestrator/rules.rs        modifies: tick's rule 8 passes, ready, ready_given, mod tests (Task 6)
 ```
 
-Every `Command::ChatMessagePost` and `NewChatMessage` not setting it gains `as_task: false`.
+Every `Command::ChatMessagePost` and `NewChatMessage` not setting it gains `as_task: false`. The
+web client's types are generated from the schemas at build time (`packages/protocol-client/src/generate.ts`); nothing there is edited.
 
 ## Interfaces
 
@@ -185,7 +182,9 @@ Schemas: `chatMessagePostBody.as_task` `{ "type": "boolean" }`, not required;
 this message as a task for the chat's agent (ADR 0063); the chat does not answer it.";
 `taskCreatedBody.given_to` `{ "type": "string", "minLength": 1, "maxLength": 64 }`, described "The
 agent the owner gave this task to in its one-to-one chat (ADR 0063): from_chat_message names that
-message, the agent writes the contract and is assigned it."
+message, the agent writes the contract and is assigned it." `taskCreatedBody`'s description adds
+"With given_to, from_chat_message is the owner's own message in that chat, and created_by is human
+or that agent." The command's wire writes `as_task` only when it is true.
 
 ## Tasks
 
@@ -215,6 +214,7 @@ Files: `crates/store/src/requests.rs`. Tests in its `mod tests`, on a temporary 
     chat", triaged_by: "catervas" }`;
   - `given_to(log, CTV-1)` is `Some("dev")`;
   - filing again from `n` is refused "was already sent, as CTV-1";
+  - filing from `n` with another intent is refused "its intent is not the owner's message n";
   - filing from `dev`'s own reply is refused "links to message <seq>, which is not the owner's
     message in dev's chat".
 
@@ -255,7 +255,10 @@ and no parent, its `task.created` body also `given_to`), `crates/runtime/src/too
     `given_task_role_fixed: CTV-1 was given to dev-a in its chat, so its assignee_role stays
     software_developer`;
   - `pm` setting it to `architect` is refused the same way;
-  - once `CTV-1` is `ready`, `dev-a`'s write of `scope` is refused as frozen.
+  - `dev-a` changing `intent` is refused with `given_task_intent_fixed: CTV-1 was given to dev-a
+    in its chat, so its intent stays the owner's words`;
+  - once `CTV-1` is `ready`, `dev-a`'s write of `scope` is refused as `NotAContractWriter`: its
+    standing ended with `refining`.
 
 - [ ] `feat(runtime): an agent writes the contract of the task it was given`
 
