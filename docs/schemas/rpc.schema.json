@@ -1045,6 +1045,20 @@
             }
           }
         },
+        "requested_connections": {
+          "type": "array",
+          "description": "The kit services agents asked the owner to connect with catervas_request_connection (ADR 0063): one entry per agent and server, with the newest reason, ordered by each pair's newest request. Today lists these first.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["agent", "server", "why"],
+            "properties": {
+              "agent": { "type": "string" },
+              "server": { "type": "string" },
+              "why": { "type": "string" }
+            }
+          }
+        },
         "kits": {
           "type": "array",
           "description": "Each role on the team whose kit has a service to connect by name, with the copy the page shows (ADR 0036). A container connector, which Catervas runs itself, is not listed, and nor is a role with no service.",
@@ -1158,7 +1172,8 @@
         "connectors",
         "kits",
         "sandboxed",
-        "hidden_suggestions"
+        "hidden_suggestions",
+        "requested_connections"
       ]
     },
     "serveStatusResult": {

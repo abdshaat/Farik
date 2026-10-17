@@ -180,7 +180,7 @@ tests are. Consumes Task 1.
     "connection.requested", &body)`, the third with the why "third reason, long enough";
     `requested_connections` reads them whatever their task.
 
-- [ ] `feat(runtime): answer the connections agents asked for`
+- [x] `feat(runtime): answer the connections agents asked for`
 
 ### Task 4: Today lists a requested pair first
 
