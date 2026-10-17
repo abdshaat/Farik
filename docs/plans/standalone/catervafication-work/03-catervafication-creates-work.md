@@ -180,7 +180,7 @@ existing tests to the new rows:
     `MP-*` command, and C2 the artifact on `docs/catervas/marketing/kickoff.md` with
     `must_contain` `["# ", "MP-"]`.
 
-- [ ] `feat(runtime): the Catervafication's templates hunt for bugs and start the marketing`
+- [x] `feat(runtime): the Catervafication's templates hunt for bugs and start the marketing`
 
 ### Task 2: every task in the first tick
 

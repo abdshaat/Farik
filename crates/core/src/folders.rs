@@ -429,7 +429,7 @@ pub fn folder_doc_message(
 
 /// The documents with a fixed name, by stem, in the order the Files page lists them. A step that
 /// adds a document adds its name here.
-pub const DOCUMENT_STEMS: [(&str, &str); 12] = [
+pub const DOCUMENT_STEMS: [(&str, &str); 15] = [
     ("docs/catervas/product/spec", "Product description"),
     ("docs/catervas/product/roadmap", "Roadmap"),
     ("docs/catervas/architecture/overview", "Overview"),
@@ -438,10 +438,13 @@ pub const DOCUMENT_STEMS: [(&str, &str); 12] = [
     ("docs/catervas/architecture/structure", "Structure"),
     ("docs/catervas/engineering/conventions", "Conventions"),
     ("docs/catervas/engineering/workflow", "Workflow"),
+    ("docs/catervas/engineering/bug-hunt", "Bug hunt"),
     ("docs/catervas/design/ui-inventory", "UI inventory"),
+    ("docs/catervas/design/ui-bug-hunt", "UI bug hunt"),
     ("docs/catervas/delivery/cadence", "Delivery rhythm"),
     ("docs/catervas/marketing/brand/brand-kit", "Brand kit"),
     ("docs/catervas/marketing/brand/persona", "Brand persona"),
+    ("docs/catervas/marketing/kickoff", "Marketing kickoff"),
 ];
 
 /// A file stem or folder name as words: `-` and `_` as spaces, the first letter upper case.
@@ -1010,6 +1013,22 @@ mod tests {
         assert_eq!(name("marketing/brand/persona.md"), "Brand persona");
         assert_eq!(name("delivery/cadence.md"), "Delivery rhythm");
         assert_eq!(name("design/ui-inventory.md"), "UI inventory");
+        // The hunts' reports and the marketing kickoff sit in their folder's order (ADR 0063).
+        assert_eq!(super::DOCUMENT_STEMS.len(), 15);
+        let place = |path: &str| document_order(&format!("docs/catervas/{path}")).0;
+        assert_eq!(
+            place("engineering/bug-hunt.md"),
+            place("engineering/workflow.md") + 1
+        );
+        assert_eq!(
+            place("design/ui-bug-hunt.html"),
+            place("design/ui-inventory.md") + 1
+        );
+        assert_eq!(
+            place("marketing/kickoff.md"),
+            place("marketing/brand/persona.md") + 1
+        );
+        assert_eq!(name("marketing/kickoff.md"), "Marketing kickoff");
         assert_eq!(name("delivery/ceremony-notes.md"), "Ceremony notes");
         assert_eq!(name("engineering/how_we_test.md"), "How we test");
         assert_eq!(plain_name("product"), "Product");

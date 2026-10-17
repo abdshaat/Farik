@@ -3,8 +3,10 @@
 
 use std::fmt;
 
-use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
-use catervas_core::folders::{DocumentFormat, artifact_marks, role_folder, with_format};
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
+use catervas_core::folders::{
+    DocumentFormat, artifact_marks, hunt_report, role_folder, with_format,
+};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
@@ -52,8 +54,8 @@ const ASKS_ABOUT_THE_WORKFLOW: &str = "Does workflow.{x} say at its top whether 
 ///
 /// A role is listed when it has an active agent and `default_reviewer_role` names a reviewer for
 /// its task, since `ReviewerAvailable` would refuse it otherwise. The Marketing Specialist is
-/// listed only with a Product Manager's row for an existing repository: it reads the plan that row
-/// writes. The UI/UX Designer is listed only when `designer_ready` says its browser is ready.
+/// listed in both projects and waits for no other row (ADR 0063). The UI/UX Designer is listed only
+/// when `designer_ready` says its browser is ready.
 #[must_use]
 pub(crate) fn catervafication_roles(
     team: &Team,
@@ -70,11 +72,6 @@ pub(crate) fn catervafication_roles(
             .active_agents()
             .all(|agent| Role::from(agent.role) != role)
             || (role == Role::UiUxDesigner && !designer_ready)
-            || (role == Role::MarketingSpecialist
-                && project == Project::Existing
-                && rows
-                    .first()
-                    .is_none_or(|(first, _)| *first != Role::ProductManager))
         {
             continue;
         }
@@ -83,6 +80,110 @@ pub(crate) fn catervafication_roles(
         }
     }
     rows
+}
+
+/// The roles that hunt for bugs in an existing repository's Catervafication, in the order they are
+/// filed (ADR 0063): an active Software Developer, then an active UI/UX Designer whose browser is
+/// ready. A new project has no code to hunt in, and a project folder's hunts are planned apart.
+#[must_use]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "file_due files the hunts in the next commit")
+)]
+pub(crate) fn catervafication_hunts(
+    team: &Team,
+    project: Project,
+    designer_ready: bool,
+    project_folder: bool,
+) -> Vec<Role> {
+    if project != Project::Existing || project_folder {
+        return Vec::new();
+    }
+    let active = |role: Role| {
+        team.active_agents()
+            .any(|agent| Role::from(agent.role) == role)
+    };
+    let mut hunts = Vec::new();
+    if active(Role::SoftwareDeveloper) {
+        hunts.push(Role::SoftwareDeveloper);
+    }
+    if active(Role::UiUxDesigner) && designer_ready {
+        hunts.push(Role::UiUxDesigner);
+    }
+    hunts
+}
+
+/// The requirement an epic that asks for bug hunts holds; an epic filed without it gets none.
+pub(crate) const HUNTS_REQUIREMENT: &str = "The Software Developer and the UI/UX Designer, when the team has them, hunt for bugs, and every bug found is filed as a request.";
+
+/// Whether the epic asks for the bug hunts.
+#[must_use]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "file_due files the hunts in the next commit")
+)]
+pub(crate) fn epic_hunts(epic: &TaskContract) -> bool {
+    epic.requirements
+        .iter()
+        .any(|requirement| requirement.text.to_string() == HUNTS_REQUIREMENT)
+}
+
+/// The wire of a role's bug hunt under the epic: it reads and runs, changes no code, files each bug
+/// with `catervas_file_bug` and writes what it checked in its report (ADR 0063). The Product
+/// Manager is its reviewer on paper; no agent reviews it, the governor checks its one criterion.
+///
+/// # Panics
+///
+/// If `role` is not one that hunts; `catervafication_hunts` lists no other.
+#[must_use]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "file_due files the hunts in the next commit")
+)]
+pub(crate) fn hunt_contract(role: Role, max_cost_usd: f64, format: DocumentFormat) -> Value {
+    let path = hunt_report(role, format).expect("only a Developer or a Designer hunts");
+    let file_name = path.rsplit('/').next().unwrap_or(&path).to_string();
+    let (title, intent, summary) = if role == Role::SoftwareDeveloper {
+        (
+            "Hunt for bugs in the code",
+            "Read the code, run its tests and checks in the sandbox, and file each bug you find with catervas_file_bug, with its evidence. Change no code. Then write what you checked and the bugs you filed in bug-hunt.",
+            "The Software Developer looks for bugs in your code and files each one it finds, so the team can fix it.",
+        )
+    } else {
+        (
+            "Hunt for bugs in the app's screens",
+            "Open the app in your browser, go through its screens at phone and desktop sizes, and file each bug you find with catervas_file_bug, with its evidence. Change no code. Then write what you checked and the bugs you filed in ui-bug-hunt.",
+            "The UI/UX Designer goes through your app's screens and files each problem it finds, so the team can fix it.",
+        )
+    };
+    json!({
+        "title": title,
+        "intent": format!("{intent} {FOLLOW_THE_SKILL}"),
+        "summary": summary,
+        "scope": {
+            "in_scope": [path.clone(), "Bugs filed with catervas_file_bug, at most 10."],
+            "out_of_scope": ["Changing the code or the screens: each bug is filed, and fixed later as its own task."]
+        },
+        "requirements": [{
+            "id": "R1",
+            "text": format!("Each bug found is filed with its evidence, and {file_name} says what was checked and lists every bug filed under Bugs filed.")
+        }],
+        "exit_criteria": [{
+            "id": "C1",
+            "text": format!("{path} exists, holds a heading and lists the bugs filed."),
+            "satisfies": ["R1"],
+            "verification": {
+                "method": "artifact",
+                "path": path,
+                "must_contain": artifact_marks(&path, format).into_iter().chain(["Bugs filed"]).collect::<Vec<_>>()
+            }
+        }],
+        "assignee_role": role.to_string(),
+        "reviewer_role": "product_manager",
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": [path]
+    })
 }
 
 /// What a role's task says.
@@ -94,6 +195,8 @@ struct Row {
     documents: &'static [&'static str],
     /// A question the review adds to the two every row asks; `{x}` stands for the extension.
     question: Option<&'static str>,
+    /// Marks the documents' artifacts hold beyond `artifact_marks`.
+    also_contains: &'static [&'static str],
 }
 
 fn row(project: Project, role: Role) -> Row {
@@ -104,6 +207,7 @@ fn row(project: Project, role: Role) -> Row {
             summary: "The Product Manager writes what your product is and what comes next, as your product plan to approve.",
             documents: &["spec", "spec.agent", "roadmap", "roadmap.agent"],
             question: None,
+            also_contains: &[],
         },
         (Project::Existing, Role::Architect) => Row {
             title: "Document how the project is put together",
@@ -111,6 +215,7 @@ fn row(project: Project, role: Role) -> Row {
             summary: "The Architect writes how your project is put together, with diagrams.",
             documents: &["overview", "features", "jobs", "structure"],
             question: None,
+            also_contains: &[],
         },
         (Project::Existing, Role::SoftwareDeveloper) => Row {
             title: "Document how the project is built and worked on",
@@ -118,6 +223,7 @@ fn row(project: Project, role: Role) -> Row {
             summary: "The Software Developer writes how your project is built and worked on: its habits and rules.",
             documents: &["conventions", "workflow"],
             question: Some(ASKS_ABOUT_THE_WORKFLOW),
+            also_contains: &[],
         },
         (Project::Existing, Role::UiUxDesigner) => Row {
             title: "Write the project's UI inventory",
@@ -125,13 +231,15 @@ fn row(project: Project, role: Role) -> Row {
             summary: "The UI/UX Designer writes an inventory of your project's screens and how they look.",
             documents: &["ui-inventory"],
             question: None,
+            also_contains: &[],
         },
         (_, Role::MarketingSpecialist) => Row {
-            title: "Propose the first marketing plan from the product plan",
-            intent: "Read the approved product plan under docs/catervas/product/ and propose the project's first marketing plan from it.",
-            summary: "The Marketing Specialist writes your marketing plan, after you approve the product plan.",
-            documents: &[],
+            title: "Write the marketing plan and start on it",
+            intent: "Read the project, write its first marketing plan and propose it with catervas_propose_marketing_plan, and start on it at once: schedule the first posts the plan allows, and ask for any connection the plan needs with catervas_request_connection. Then write down what you started in kickoff.",
+            summary: "The Marketing Specialist writes your marketing plan and starts on it straight away; anything that costs money waits for you.",
+            documents: &["kickoff"],
             question: None,
+            also_contains: &["MP-"],
         },
         (Project::New, Role::Architect) => Row {
             title: "Write the first architecture from the product spec",
@@ -139,6 +247,7 @@ fn row(project: Project, role: Role) -> Row {
             summary: "The Architect writes how your new project will be put together, from your approved product plan, with diagrams.",
             documents: &["overview", "structure"],
             question: None,
+            also_contains: &[],
         },
         (Project::New, Role::SoftwareDeveloper) => Row {
             title: "Set the workflow and the stack's conventions",
@@ -146,6 +255,7 @@ fn row(project: Project, role: Role) -> Row {
             summary: "The Software Developer sets how your new project will be built and worked on: its habits and rules.",
             documents: &["workflow", "conventions"],
             question: Some(ASKS_ABOUT_THE_WORKFLOW),
+            also_contains: &[],
         },
         // `catervafication_roles` lists no other row.
         _ => Row {
@@ -154,6 +264,7 @@ fn row(project: Project, role: Role) -> Row {
             summary: "This role writes down what the project holds in its own folder.",
             documents: &[],
             question: None,
+            also_contains: &[],
         },
     }
 }
@@ -161,7 +272,7 @@ fn row(project: Project, role: Role) -> Row {
 /// The wire of the epic of a Catervafication, as `request_from_brief` makes a request (the store
 /// fills in the id, the kind and the stamps): approved by the owner's Start, or by the owner's
 /// acceptance of a new project's product plan. Its budget is `max_cost_usd`, the budget of each of
-/// its tasks, times the tasks it is filed with (five for an existing repository, else three). Its
+/// its tasks, times the tasks it is filed with (seven for an existing repository, which counts its two hunts, else three). Its
 /// one criterion is the product plan's spec in the team's `format`, which Catervas reads itself on
 /// the integration branch (ADR 0061).
 #[must_use]
@@ -169,9 +280,9 @@ pub(crate) fn epic_contract(project: Project, max_cost_usd: f64, format: Documen
     let (title, intent, summary, tasks) = match project {
         Project::Existing => (
             "Catervafy the repository",
-            "The team reads the project and writes down what it knows, each role in its own folder under docs/catervas/, before building anything.",
-            "Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
-            5.0,
+            "The team reads the project and writes down what it knows, each role in its own folder under docs/catervas/, while the Developer and the Designer hunt for bugs and the Marketing Specialist starts the marketing plan.",
+            "Your team reads your project and writes down what it learns, looks for bugs and starts your marketing. You can read all of it in Files.",
+            7.0,
         ),
         Project::New => (
             "Catervafy the new project",
@@ -181,6 +292,19 @@ pub(crate) fn epic_contract(project: Project, max_cost_usd: f64, format: Documen
         ),
     };
     let spec = format!("docs/catervas/product/spec.{}", format.extension());
+    let hunts = project == Project::Existing;
+    let mut requirements = vec![json!({
+        "id": "R1",
+        "text": "Each role on the team that has a folder documents the project in it."
+    })];
+    if hunts {
+        requirements.push(json!({ "id": "R2", "text": HUNTS_REQUIREMENT }));
+    }
+    let satisfies = if hunts {
+        json!(["R1", "R2"])
+    } else {
+        json!(["R1"])
+    };
     json!({
         "title": title,
         "intent": intent,
@@ -189,14 +313,11 @@ pub(crate) fn epic_contract(project: Project, max_cost_usd: f64, format: Documen
             "in_scope": ["The documents each role keeps in its own folder under docs/catervas/."],
             "out_of_scope": ["The project's code, and everything outside docs/catervas/."]
         },
-        "requirements": [{
-            "id": "R1",
-            "text": "Each role on the team that has a folder documents the project in it."
-        }],
+        "requirements": requirements,
         "exit_criteria": [{
             "id": "C1",
             "text": "Every Catervafication task is accepted or cancelled, and each accepted one's work is in your project.",
-            "satisfies": ["R1"],
+            "satisfies": satisfies,
             "verification": {
                 "method": "artifact",
                 "path": spec,
@@ -235,53 +356,15 @@ pub(crate) fn task_contract(
         .iter()
         .map(|name| format!("{folder}/{name}"))
         .collect();
-    let (in_scope, requirement) = if paths.is_empty() {
-        (
-            vec!["A first marketing plan, proposed with catervas_propose_marketing_plan from docs/catervas/product/.".to_string()],
-            "A first marketing plan is proposed from the documents under docs/catervas/product/, as the skill says.".to_string(),
-        )
-    } else {
-        (
-            paths.clone(),
-            format!(
-                "{} exist under {folder}/, each written from what the project holds, as the skill says.",
-                names.join(", ")
-            ),
-        )
-    };
-    let mut criteria: Vec<Value> = paths
-        .iter()
-        .enumerate()
-        .map(|(index, path)| {
-            // A heading, and for the architecture's overview a diagram.
-            let kind = match format {
-                DocumentFormat::Markdown => "a Markdown heading",
-                DocumentFormat::Html => "an HTML heading",
-            };
-            let must = artifact_marks(path, format);
-            json!({
-                "id": format!("C{}", index + 1),
-                "text": format!("{path} exists and holds {kind}."),
-                "satisfies": ["R1"],
-                "verification": { "method": "artifact", "path": path, "must_contain": must }
-            })
-        })
-        .collect();
-    if changes_code(role) {
-        let question = row
-            .question
-            .map(|question| question.replace("{x}", extension));
-        let mut rubric = vec![ASKS_WHERE_IT_READ, ASKS_FOR_CONTRADICTIONS];
-        rubric.extend(question.as_deref());
-        criteria.push(json!({
-            "id": format!("C{}", paths.len() + 1),
-            "text": "Everything written says only what the project, its history or its owner's words show.",
-            "satisfies": ["R1"],
-            "verification": { "method": "review", "rubric": rubric }
-        }));
-    } else if paths.is_empty() {
-        // The Marketing Specialist's task has no document: a plan file is the evidence. The glob
-        // expands in `sh -c` at the root of the task's worktree, where the plan is committed.
+    let requirement = format!(
+        "{} exist under {folder}/, each written from what the project holds, as the skill says.",
+        names.join(", ")
+    );
+    // The Marketing Specialist's plan file is the first criterion, so its documents come after it.
+    let mut criteria: Vec<Value> = Vec::new();
+    if role == Role::MarketingSpecialist {
+        // The glob expands in `sh -c` at the root of the task's worktree, where the plan is
+        // committed.
         criteria.push(json!({
             "id": "C1",
             "text": "A marketing plan is written in docs/catervas/marketing/plans/",
@@ -293,12 +376,41 @@ pub(crate) fn task_contract(
             }
         }));
     }
+    let first = criteria.len();
+    criteria.extend(paths.iter().enumerate().map(|(index, path)| {
+        // A heading, and for the architecture's overview a diagram.
+        let kind = match format {
+            DocumentFormat::Markdown => "a Markdown heading",
+            DocumentFormat::Html => "an HTML heading",
+        };
+        let mut must = artifact_marks(path, format);
+        must.extend(row.also_contains);
+        json!({
+            "id": format!("C{}", first + index + 1),
+            "text": format!("{path} exists and holds {kind}."),
+            "satisfies": ["R1"],
+            "verification": { "method": "artifact", "path": path, "must_contain": must }
+        })
+    }));
+    if changes_code(role) {
+        let question = row
+            .question
+            .map(|question| question.replace("{x}", extension));
+        let mut rubric = vec![ASKS_WHERE_IT_READ, ASKS_FOR_CONTRADICTIONS];
+        rubric.extend(question.as_deref());
+        criteria.push(json!({
+            "id": format!("C{}", criteria.len() + 1),
+            "text": "Everything written says only what the project, its history or its owner's words show.",
+            "satisfies": ["R1"],
+            "verification": { "method": "review", "rubric": rubric }
+        }));
+    }
     json!({
         "title": row.title,
         "intent": format!("{} {FOLLOW_THE_SKILL}", row.intent),
         "summary": row.summary,
         "scope": {
-            "in_scope": in_scope,
+            "in_scope": paths,
             "out_of_scope": [format!(
                 "Anything outside {folder}/: the project's code and every other folder stay as they are."
             )]
@@ -562,7 +674,10 @@ mod tests {
     use catervas_protocol::event::{CatervasEvent, event_from_value, fixtures::an_event_wire};
     use serde_json::{Value, json};
 
-    use super::{Project, catervafication_of, catervafication_roles, epic_contract, task_contract};
+    use super::{
+        Project, catervafication_hunts, catervafication_of, catervafication_roles, epic_contract,
+        epic_hunts, hunt_contract, task_contract,
+    };
     use crate::tools::fixtures::with_the_suggested_six;
 
     fn a_team(agents: &[(&str, &str)]) -> Team {
@@ -690,7 +805,7 @@ mod tests {
     #[test]
     fn every_template_passes_the_definition_of_ready() {
         let epic_id = TaskId::try_from("CTV-1".to_string()).expect("an id");
-        for (project, count) in [(Project::Existing, 5.0), (Project::New, 3.0)] {
+        for (project, count) in [(Project::Existing, 7.0), (Project::New, 3.0)] {
             let mut context = a_ready_context();
             context.active_agents_by_role.insert(Role::UiUxDesigner, 1);
             let wire = epic_contract(
@@ -745,6 +860,17 @@ mod tests {
                     "{project:?} {role:?}"
                 );
             }
+            for role in catervafication_hunts(&six, project, true, false) {
+                let wire =
+                    hunt_contract(role, 20.0, catervas_core::folders::DocumentFormat::Markdown);
+                let task = validate_contract(&filed(wire, "CTV-2", "draft", Some("CTV-1")))
+                    .unwrap_or_else(|errors| panic!("{project:?} {role:?} hunt: {errors:?}"));
+                assert_eq!(
+                    evaluate_readiness(&task, &context),
+                    Ok(()),
+                    "{project:?} {role:?} hunt"
+                );
+            }
         }
     }
 
@@ -759,7 +885,7 @@ mod tests {
         for (project, summary) in [
             (
                 Project::Existing,
-                "Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
+                "Your team reads your project and writes down what it learns, looks for bugs and starts your marketing. You can read all of it in Files.",
             ),
             (
                 Project::New,
@@ -807,7 +933,7 @@ mod tests {
             "Does any document contradict another, or the code?",
         ];
         let developer_question = "Does workflow.md say at its top whether it records the project's own process or adopts Catervas's recommended workflow, and does the evidence it names support that choice?";
-        let rows: [TableRow<'_>; 7] = [
+        let rows: [TableRow<'_>; 6] = [
             (
                 Project::Existing,
                 ProductManager,
@@ -838,14 +964,6 @@ mod tests {
                 Architect,
                 "Write the project's UI inventory",
                 &["ui-inventory.md"],
-                None,
-            ),
-            (
-                Project::Existing,
-                MarketingSpecialist,
-                ProductManager,
-                "Propose the first marketing plan from the product plan",
-                &[],
                 None,
             ),
             (
@@ -899,26 +1017,13 @@ mod tests {
                 .iter()
                 .map(|name| format!("{folder}/{name}"))
                 .collect();
-            if paths.is_empty() {
-                assert_eq!(
-                    wire["scope"]["in_scope"],
-                    json!([
-                        "A first marketing plan, proposed with catervas_propose_marketing_plan from docs/catervas/product/."
-                    ])
-                );
-            } else {
-                assert_eq!(wire["scope"]["in_scope"], json!(paths));
-            }
+            assert_eq!(wire["scope"]["in_scope"], json!(paths));
             let criteria = wire["exit_criteria"].as_array().expect("criteria");
             // Only a code role's task is reviewed (ADR 0061); Catervas runs every other criterion.
             let reviewed = catervas_core::team::changes_code(role);
             assert_eq!(
                 criteria.len(),
-                if documents.is_empty() {
-                    1
-                } else {
-                    documents.len() + usize::from(reviewed)
-                },
+                documents.len() + usize::from(reviewed),
                 "{project:?} {role:?}"
             );
             for (index, path) in paths.iter().enumerate() {
@@ -938,31 +1043,61 @@ mod tests {
                 let mut rubric: Vec<&str> = rubric_two.to_vec();
                 rubric.extend(extra);
                 assert_eq!(review["rubric"], json!(rubric), "{project:?} {role:?}");
-            } else if documents.is_empty() {
-                // The Marketing Specialist's task has no document: a plan file is the evidence.
-                assert_eq!(
-                    wire["exit_criteria"][0],
-                    json!({
-                        "id": "C1",
-                        "text": "A marketing plan is written in docs/catervas/marketing/plans/",
-                        "satisfies": ["R1"],
-                        "verification": {
-                            "method": "command",
-                            "command": "ls docs/catervas/marketing/plans/MP-* >/dev/null 2>&1",
-                            "expect": { "exit_code": 0 }
-                        }
-                    })
-                );
             }
-            if !documents.is_empty() {
-                assert_eq!(
-                    wire["requirements"][0]["text"],
-                    format!(
-                        "{} exist under {folder}/, each written from what the project holds, as the skill says.",
-                        documents.join(", ")
-                    )
-                );
-            }
+            assert_eq!(
+                wire["requirements"][0]["text"],
+                format!(
+                    "{} exist under {folder}/, each written from what the project holds, as the skill says.",
+                    documents.join(", ")
+                )
+            );
+        }
+        // The Marketing Specialist's task, in either project: the plan file first, then its kickoff.
+        for project in [Project::Existing, Project::New] {
+            let wire = task_contract(
+                project,
+                MarketingSpecialist,
+                ProductManager,
+                &epic,
+                20.0,
+                catervas_core::folders::DocumentFormat::Markdown,
+            );
+            assert_eq!(wire["title"], "Write the marketing plan and start on it");
+            assert_eq!(
+                wire["summary"],
+                "The Marketing Specialist writes your marketing plan and starts on it straight away; anything that costs money waits for you."
+            );
+            assert!(
+                wire["intent"]
+                    .as_str()
+                    .expect("an intent")
+                    .ends_with("write down what you started in kickoff. Follow your skill catervafying-the-repository.")
+            );
+            assert_eq!(wire["allowed_paths"], json!(["docs/catervas/marketing/**"]));
+            assert_eq!(
+                wire["exit_criteria"][0],
+                json!({
+                    "id": "C1",
+                    "text": "A marketing plan is written in docs/catervas/marketing/plans/",
+                    "satisfies": ["R1"],
+                    "verification": {
+                        "method": "command",
+                        "command": "ls docs/catervas/marketing/plans/MP-* >/dev/null 2>&1",
+                        "expect": { "exit_code": 0 }
+                    }
+                })
+            );
+            assert_eq!(wire["exit_criteria"].as_array().expect("criteria").len(), 2);
+            assert_eq!(wire["exit_criteria"][1]["id"], "C2");
+            assert_eq!(
+                criterion(&wire, 1),
+                &json!({
+                    "method": "artifact",
+                    "path": "docs/catervas/marketing/kickoff.md",
+                    "must_contain": ["# ", "MP-"]
+                })
+            );
+            assert!(wire.get("dependencies").is_none());
         }
         // The new project's Architect writes the first architecture and no plan.
         let wire = task_contract(
@@ -974,6 +1109,67 @@ mod tests {
             catervas_core::folders::DocumentFormat::Markdown,
         );
         assert!(!wire.to_string().contains("plans/"));
+    }
+
+    #[test]
+    fn files_hunts_for_an_existing_repository_alone() {
+        use Role::{SoftwareDeveloper, UiUxDesigner};
+        use catervas_core::folders::DocumentFormat::{Html, Markdown};
+        let six = the_suggested_six();
+        assert_eq!(
+            catervafication_hunts(&six, Project::Existing, true, false),
+            [SoftwareDeveloper, UiUxDesigner]
+        );
+        assert_eq!(
+            catervafication_hunts(&six, Project::Existing, false, false),
+            [SoftwareDeveloper]
+        );
+        assert!(catervafication_hunts(&six, Project::New, true, false).is_empty());
+        assert!(catervafication_hunts(&six, Project::Existing, true, true).is_empty());
+        let two = a_team(&[("pm", "product_manager"), ("dev", "software_developer")]);
+        assert_eq!(
+            catervafication_hunts(&two, Project::Existing, true, false),
+            [SoftwareDeveloper]
+        );
+
+        let wire = hunt_contract(SoftwareDeveloper, 20.0, Html);
+        assert_eq!(wire["title"], "Hunt for bugs in the code");
+        assert_eq!(
+            wire["allowed_paths"],
+            json!(["docs/catervas/engineering/bug-hunt.html"])
+        );
+        assert_eq!(wire["exit_criteria"].as_array().expect("criteria").len(), 1);
+        assert_eq!(
+            criterion(&wire, 0)["must_contain"],
+            json!(["<h1", "Bugs filed"])
+        );
+        assert_eq!(wire["reviewer_role"], "product_manager");
+        let mut filed_wire = filed(wire, "CTV-2", "draft", Some("CTV-1"));
+        filed_wire["kind"] = json!("task");
+        let contract = validate_contract(&filed_wire).expect("a contract");
+        assert!(catervas_core::folders::is_hunt(&contract));
+
+        let wire = hunt_contract(UiUxDesigner, 20.0, Markdown);
+        assert_eq!(
+            wire["allowed_paths"],
+            json!(["docs/catervas/design/ui-bug-hunt.md"])
+        );
+        assert_eq!(
+            criterion(&wire, 0)["must_contain"],
+            json!(["# ", "Bugs filed"])
+        );
+
+        let epic = |project, format| {
+            let wire = epic_contract(project, 20.0, format);
+            let mut as_epic = filed(wire.clone(), "CTV-1", "draft", None);
+            as_epic["kind"] = json!("epic");
+            (wire, validate_contract(&as_epic).expect("an epic"))
+        };
+        let (wire, existing) = epic(Project::Existing, Markdown);
+        assert!(epic_hunts(&existing));
+        assert!((wire["budget"]["max_cost_usd"].as_f64().expect("a budget") - 140.0).abs() < 1e-9);
+        assert_eq!(wire["exit_criteria"][0]["satisfies"], json!(["R1", "R2"]));
+        assert!(!epic_hunts(&epic(Project::New, Markdown).1));
     }
 
     #[test]
