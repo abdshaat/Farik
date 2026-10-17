@@ -162,7 +162,6 @@ export async function todayWith(fields: {
 	await answerQuery(s, "team.activity", { activity: [] });
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
 	await answerQuery(s, "moved.since", { moved: [] });
-	await answerQuery(s, "sprint.current", null);
 	await answerQuery(s, "social_posts.list", fields.posts ?? { posts: [] });
 	return { container, s };
 }

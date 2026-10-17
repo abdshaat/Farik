@@ -480,16 +480,6 @@ describe("allowances on the screens", () => {
 		await answerQuery(s, "tasks.list", { tasks: [] });
 		await answerQuery(s, "waiting.list", { waiting: [] });
 		await answerQuery(s, "team.activity", { activity: [] });
-		await answerQuery(s, "sprint.current", {
-			sprint_id: "S2",
-			done: 4,
-			total: 7,
-		});
-		await answerQuery(s, "backlog.summary", {
-			plan_in_sprints: false,
-			count: 0,
-		});
-		await answerQuery(s, "sprints.list", { sprints: [] });
 		let seq = 0;
 		const list = async (rows: object[], period: object = sprintPeriod) => {
 			// The page asks again after an event, and is answered with what is made by then.

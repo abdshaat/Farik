@@ -119,7 +119,7 @@ and the whole `describe("the board's backlog")`; `filters_the_board` loses its s
   `document.body.textContent` matches no `/sprint/i`; the socket received no query named
   `sprint.current`, `sprints.list`, `sprint.get` or `backlog.summary`.
 
-- [ ] `feat(web): the board and Today work with no sprint and no Backlog`
+- [x] `feat(web): the board and Today work with no sprint and no Backlog`
 
 ### Task 3: costs and allowances by the day
 

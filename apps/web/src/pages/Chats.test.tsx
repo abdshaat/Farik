@@ -99,7 +99,6 @@ async function chats(
 	if (path === "/channel") {
 		await answerQuery(s, "channel.messages", { messages: [] });
 		await answerQuery(s, "waiting.list", { waiting: [] });
-		await answerQuery(s, "sprint.current", null);
 	} else if (path !== "/channel/nobody")
 		await answerQuery(s, "chat.messages", {
 			messages: fields.messages ?? [],

@@ -13,7 +13,6 @@ import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
 import { type Allowances, useAllowances } from "./allowances.tsx";
-import { type Backlog, moreWaits } from "./Board.tsx";
 import {
 	type Catervafication,
 	CatervaficationCard,
@@ -96,7 +95,6 @@ type Waiting = {
 	Partial<OrderAsk> &
 	Partial<PipelineAsk>;
 type Moved = { at: string; by: string; line: string };
-type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
 
 /** Each kind's title, button word and page (the step 08 plan's routes); `line` in place of the daemon's. */
@@ -204,10 +202,6 @@ export function Today() {
 	// "Later" leaves a quiet card here until the owner starts the documenting sprint.
 	const { data: documenting, again: askDocumentingAgain } =
 		useQuery<Catervafication>("catervafication.get", {});
-	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
-	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
-	// The daemon counts nothing while the team does not plan in sprints.
-	const waits = backlog?.count ?? 0;
 	// While the provider refuses the key the team is paused, and one row says so first.
 	const { data: account } = useQuery<{ keyRefused?: boolean }>(
 		"account.status",
@@ -234,28 +228,7 @@ export function Today() {
 							waitsForPlan
 						)}
 					</p>
-				) : sprint ? (
-					<p>
-						<Link to={`/sprints/${sprint.sprintId}`}>
-							{t("sprintLine", {
-								n: sprint.sprintId.replace(/^S/, ""),
-								done: String(sprint.done),
-								total: String(sprint.total),
-							})}
-						</Link>
-						{waits > 0 && <>. {moreWaits(waits)}</>}
-					</p>
-				) : (
-					waits > 0 && (
-						<p>
-							{waits === 1
-								? t("todayBacklogOne")
-								: t("todayBacklog", { count: waits })}{" "}
-							<Link to="/board?start=sprint">{t("todayBacklogStart")}</Link>{" "}
-							{t(waits === 1 ? "todayBacklogBeginOne" : "todayBacklogBegin")}
-						</p>
-					)
-				)}
+				) : null}
 				<ul className={styles.agents} aria-label={t("teamBand")}>
 					{activity?.activity.map((one) => (
 						<AgentEntry

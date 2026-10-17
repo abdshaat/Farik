@@ -12,7 +12,7 @@ import {
 	renderMessageText,
 	type WaitingRow,
 } from "../components/MessageText.tsx";
-import { useMedia, useWide } from "../shell/Shell.tsx";
+import { useWide } from "../shell/Shell.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import styles from "./Channel.module.css";
@@ -41,7 +41,6 @@ type Message = {
 	inReplyTo: number | null;
 	taskId: string | null;
 };
-type Meeting = { thread: string; at: string };
 
 const PAGE = 100;
 /** The most a message holds, in characters, as the runtime counts them (channel.rs). */
@@ -126,16 +125,10 @@ export function Channel() {
 	const { client } = useConnection();
 	const events = useEvents();
 	const wide = useWide();
-	// From 1440 px the meetings sit beside the chat; below it they fold under its intro.
-	const beside = useMedia("(min-width: 1440px)");
 	const { hash } = useLocation();
 	const { data: team } = useQuery<{ team: Team }>("team.get", {});
 	const { data: waiting } = useQuery<{ waiting: WaitingRow[] }>(
 		"waiting.list",
-		{},
-	);
-	const { data: sprint } = useQuery<{ sprintId: string } | null>(
-		"sprint.current",
 		{},
 	);
 	// The pages read and each live message since, by seq; the newest seq of the first page, after
@@ -146,9 +139,6 @@ export function Channel() {
 		more: boolean;
 	}>();
 	const [opened, setOpened] = useState<Record<string, boolean>>({});
-	// The folded meetings' own open state, kept here so that opening them renders the page, and
-	// the feed follows the box's new height.
-	const [fold, setFold] = useState(false);
 
 	useEffect(() => {
 		if (!client) return;
@@ -240,19 +230,6 @@ export function Channel() {
 		setOpened((o) => ({ ...o, [anchor]: to }));
 
 	const newest = messages.at(-1);
-	const meetings = sprint && (
-		<Meetings
-			sprintId={sprint.sprintId}
-			folded={!beside}
-			open={fold}
-			onToggle={setFold}
-			onOpen={(anchor) => {
-				setGone(false);
-				setPaging(undefined);
-				setTarget(anchor);
-			}}
-		/>
-	);
 
 	return (
 		<div className={styles.page}>
@@ -262,7 +239,6 @@ export function Channel() {
 						{t("channel")}
 					</h1>
 					<p className={styles.muted}>{t("channelIntro")}</p>
-					{!beside && meetings}
 				</div>
 				<Feed
 					labelledBy="channel-title"
@@ -312,7 +288,6 @@ export function Channel() {
 				</Feed>
 				<Composer agents={agents} wide={wide} />
 			</div>
-			{beside && meetings}
 		</div>
 	);
 }
@@ -520,62 +495,6 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 				</p>
 			)}
 		</form>
-	);
-}
-
-/** "Meetings in this sprint": a link to each of the open sprint's thread blocks. */
-function Meetings({
-	sprintId,
-	folded,
-	open,
-	onToggle,
-	onOpen,
-}: {
-	sprintId: string;
-	/** Under the chat's intro, closed until opened, instead of a column beside the chat. */
-	folded: boolean;
-	/** Whether the folded meetings are open. */
-	open: boolean;
-	onToggle: (open: boolean) => void;
-	onOpen: (anchor: string) => void;
-}) {
-	const { data } = useQuery<{ meetings: Meeting[] }>("sprint.get", {
-		sprintId,
-	});
-	const links = data?.meetings.map((m) => {
-		const anchor = threadAnchor(m.thread, m.at);
-		return (
-			<a
-				key={anchor}
-				className={styles.meeting}
-				href={`#${anchor}`}
-				onClick={() => onOpen(anchor)}
-			>
-				{t("channelMeetingLink", {
-					thread: threadWord(m.thread),
-					weekday: weekday(m.at),
-				})}
-			</a>
-		);
-	});
-	return (
-		<aside className={styles.side} aria-labelledby="channel-meetings">
-			{folded ? (
-				<details
-					className={styles.fold}
-					open={open}
-					onToggle={(e) => onToggle(e.currentTarget.open)}
-				>
-					<summary id="channel-meetings">{t("channelMeetings")}</summary>
-					{links}
-				</details>
-			) : (
-				<>
-					<h2 id="channel-meetings">{t("channelMeetings")}</h2>
-					{links}
-				</>
-			)}
-		</aside>
 	);
 }
 
