@@ -132,9 +132,6 @@ pub(crate) enum Refusal {
     /// A refusal of one of the Finance Specialist's tools under the code it names: another role's
     /// call, a range of costs, a workbook, a formula, a path (6.6).
     Finance { code: &'static str, detail: String },
-    /// A refusal of one of the Procurement Specialist's site tools, or of a hand-in while a site
-    /// waits, under the code it names (6.10).
-    Sites { code: &'static str, detail: String },
     /// A refusal of one of the Procurement Specialist's purchase order tools under the code it
     /// names (6.10).
     PurchaseOrder { code: &'static str, detail: String },
@@ -249,7 +246,6 @@ impl Refusal {
             Self::ChatReplyRefused { detail } => ("chat_reply_refused", detail.clone()),
             Self::MarketingPlan { code, detail }
             | Self::Finance { code, detail }
-            | Self::Sites { code, detail }
             | Self::PurchaseOrder { code, detail }
             | Self::Pipeline { code, detail }
             | Self::Seller { code, detail }

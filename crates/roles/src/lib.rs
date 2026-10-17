@@ -22,8 +22,6 @@ pub mod generated;
 mod kit;
 /// Which role reviews a task (D7).
 mod reviewer;
-/// Catervas's own list of approved sites for the Procurement Specialist.
-pub mod sites;
 /// Checking a skill a user adds.
 mod skill_check;
 
@@ -1026,35 +1024,6 @@ mod tests {
         assert!(skill.contains(recording), "{skill}");
     }
 
-    /// Step 10b2: the role reads only Catervas's approved sites and the sites the owner allowed, and
-    /// its prompt and its skill say how it learns which they are, how it asks for another, and that
-    /// the address it asks with is no place for the business's details (ADR 0039). The tool names
-    /// are held to tools Catervas lists by `kit_skills_name_only_tools_catervas_lists` in the runtime.
-    #[test]
-    fn sourcing_a_product_says_how_to_ask_for_a_site() {
-        let definition = loaded(Role::ProcurementSpecialist);
-        let flatten = |text: &str| {
-            text.split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .to_lowercase()
-        };
-        let prompt = flatten(&definition.system_prompt);
-        let skill = flatten(&definition.skills[0].body);
-        assert!(
-            prompt.contains("catervas's approved sites and the sites the owner allowed"),
-            "the prompt lost the sites it may read: {prompt}"
-        );
-        for phrase in [
-            "`catervas_read_sites`",
-            "`catervas_request_sites`",
-            "end your turn",
-            "never put the business's details in an address",
-        ] {
-            assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
-        }
-    }
-
     /// Step 10c: the role suggests an order and tracks it, and its prompt and its skill say that it
     /// never places, pays for, confirms or cancels one, nor marks one placed or received (ADR
     /// 0039). The tool names are held to tools Catervas lists by `kit_skills_name_only_tools_catervas_lists`
@@ -1094,8 +1063,6 @@ mod tests {
         for phrase in [
             "`catervas_draft_purchase_order`",
             "`evaluations/<name>.md`",
-            "on a site the owner allowed",
-            "ask for it with `catervas_request_sites`",
             "`catervas_read_purchase_orders`",
             "`catervas_update_purchase_order`",
             "`preparing`, `shipped`, `delayed`",

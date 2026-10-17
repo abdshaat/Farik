@@ -111,7 +111,7 @@ Tests:
   - A `serpapi` call whose input holds `https://other.example/` is allowed by the sites (a `paid` call still asks, plan 5).
   - `site_decide` answers `REFUSED` with the message starting `sites_gone: `.
 
-- [ ] `feat(runtime): let the Procurement Specialist fetch any site`
+- [x] `feat(runtime): let the Procurement Specialist fetch any site`
 
 ### Task 4: every role reads the private workbooks
 

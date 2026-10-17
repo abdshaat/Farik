@@ -1,6 +1,6 @@
 //! `catervas order list`: the purchase orders the Procurement Specialist set up and where each
 //! stands (`docs/SPEC.md` 6.10, ADR 0039). The owner's steps on them are commands, sent as
-//! `catervas site approve` sends its own.
+//! `catervas order approve` sends its own.
 
 use catervas_runtime::procurement::purchase_orders_list;
 use chrono::{DateTime, Utc};

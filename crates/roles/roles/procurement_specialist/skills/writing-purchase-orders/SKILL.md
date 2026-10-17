@@ -21,9 +21,8 @@ Draft it with `catervas_draft_purchase_order`:
   and the unit price as the seller quoted it, with no rounding or converting. A bag of 50 mirrors
   is one line, not fifty; a software plan is one line, with `period` `month` or `year`.
 - **Delivery and terms.** As the seller agreed or published them, in the seller's words.
-- **`url`.** The seller's own page for these goods, on a site you may read, never a reseller's page,
-  an advertisement or a shortened link. The tool refuses a page on another site: ask for it with
-  `catervas_request_sites` first, and end your turn. Leave it empty for a seller who has no page, met
+- **`url`.** The seller's own page for these goods, never a reseller's page,
+  an advertisement or a shortened link. It is an https address. Leave it empty for a seller who has no page, met
   by phone or in person.
 - **`why`.** Two plain sentences on why this seller and these goods.
 
@@ -37,8 +36,7 @@ was paid and its latest status.
 
 ## 4. Following up an order the founder placed
 
-When the founder marks an order placed, a follow-up task reads the seller's pages, only on sites
-you may read, and records what they say with `catervas_update_purchase_order`:
+When the founder marks an order placed, a follow-up task reads the seller's pages, and records what they say with `catervas_update_purchase_order`:
 - `preparing`, when the seller is making or packing it;
 - `shipped`, when the page shows it on its way;
 - `delayed`, with the reason in `note` and the expected day in `expected_on`;

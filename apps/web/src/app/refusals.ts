@@ -64,17 +64,11 @@ const WORDS: Record<string, keyof typeof en> = {
 	unknown_post: "refusePostUnknown",
 	post_decided: "refusePostDecided",
 	post_in_the_past: "refusePostInThePast",
-	// The owner's decisions on the sites the Procurement Specialist reads (SPEC 6.10).
-	site_invalid: "refuseSiteInvalid",
-	site_already_allowed: "refuseSiteAlreadyAllowed",
-	site_not_allowed: "refuseSiteNotAllowed",
-	site_request_decided: "refuseSiteRequestDecided",
+	// The owner's decisions on a data pipeline request (SPEC 6.10).
 	pipeline_decided: "refusePipelineDecided",
 	pipeline_not_escalated: "refusePipelineNotEscalated",
 	unknown_pipeline: "refusePipelineUnknown",
 	pipeline_note_too_long: "refusePipelineNoteLong",
-	unknown_site_request: "refuseSiteRequestUnknown",
-	site_note_too_long: "refuseSiteNoteTooLong",
 	// The owner's steps on a purchase order, and on a renewal (SPEC 6.10).
 	purchase_order_decided: "refusePurchaseOrderDecided",
 	purchase_order_expired: "refusePurchaseOrderExpired",

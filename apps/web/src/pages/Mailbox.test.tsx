@@ -5,9 +5,9 @@ import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { showsWhatItHides } from "../test/hidden.ts";
 import { EFFECTIVE, ORDERS, TEAM } from "../test/orders.ts";
+import { NOW } from "../test/procurementTeam.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { at, MAILBOX, NO_MAILBOX } from "../test/sellerMail.ts";
-import { NOW, SITES } from "../test/sites.ts";
 
 /** One agent's page; the mailbox is asked for only where the role has one. */
 async function opened(agent: string, mailbox: object) {
@@ -27,7 +27,6 @@ async function opened(agent: string, mailbox: object) {
 	await answerQuery(s, "models.list", { models: [] });
 	await answerQuery(s, "skills.list", { skills: [] });
 	if (agent === "ivo") {
-		await answerQuery(s, "sites.list", SITES);
 		await answerQuery(s, "purchase_orders.list", ORDERS);
 		await answerQuery(s, "procurement_mailbox.get", mailbox);
 	}

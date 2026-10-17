@@ -11,7 +11,6 @@ use catervas_core::contract::{Role, TaskContract, TaskStatus};
 use catervas_core::folders::role_folder;
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
-use catervas_core::governor::sites::{WebAccess, web_access};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::pricing::Usage;
@@ -270,7 +269,6 @@ pub(super) async fn run_session(
     deps.daemon.register_session(SessionRegistration {
         read_roots: read_roots(&deps.tools.files, ask.contract, &spec.cwd),
         session_id: spec.session_id.clone(),
-        web: web_access(role),
         agent_id: spec.agent_id.clone(),
         task_id: spec.task_id.clone(),
         purpose: ask.purpose,
@@ -943,9 +941,6 @@ const READ_SHEET_TOOL: &str = "catervas_read_sheet";
 const WRITE_SHEET_TOOL: &str = "catervas_write_sheet";
 /// The tool that writes a comparison as a note, the Procurement Specialist's alone (step 10b).
 const WRITE_EVALUATION_TOOL: &str = "catervas_write_evaluation";
-/// The Procurement Specialist's request for a site, and the list of what it may read.
-const REQUEST_SITES_TOOL: &str = "catervas_request_sites";
-const READ_SITES_TOOL: &str = "catervas_read_sites";
 /// The tool that suggests a purchase order, the Procurement Specialist's alone (ADR 0039).
 const DRAFT_PURCHASE_ORDER_TOOL: &str = "catervas_draft_purchase_order";
 /// The tool that reads every purchase order: the Procurement Specialist's, in the implement session
@@ -1042,14 +1037,6 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                 ask.agent.role == RoleWire::ProcurementSpecialist
                     && (works_on_a_task(ask.purpose, ask.contract.is_some())
                         || ask.purpose == SessionPurpose::Chat)
-            }
-            // The sites are the held role's: it asks in the implement session of a task, the one
-            // session that can wait for the owner, and reads the list there and in its chat.
-            REQUEST_SITES_TOOL | READ_SITES_TOOL => {
-                let in_its_task = works_on_a_task(ask.purpose, ask.contract.is_some());
-                web_access(Role::from(ask.agent.role)) == WebAccess::ApprovedSites
-                    && (in_its_task
-                        || (tool.name == READ_SITES_TOOL && ask.purpose == SessionPurpose::Chat))
             }
             // A folder document is written at a planning, a review or a retro (not the standup)
             // by a role that owns a folder.
@@ -3193,109 +3180,6 @@ mod tests {
                 Vec::<&str>::new(),
                 "{who} {purpose:?}"
             );
-        }
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn offers_the_site_tools_to_a_held_role() {
-        use crate::tools::fixtures::{
-            with_the_finance_specialist, with_the_marketing_specialist,
-            with_the_procurement_specialist,
-        };
-        let harness = Harness::new("session-sites-offer", |wire| {
-            with_the_finance_specialist(wire);
-            with_the_marketing_specialist(wire);
-            with_the_procurement_specialist(wire);
-        });
-        harness.procurement_task("CTV-1", Some("in_progress"));
-        harness.finance_task("CTV-2", Some("in_progress"));
-        harness.in_progress("CTV-3", "dev-a", "dev-b");
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        let deps = &orchestrator.deps;
-        let team = deps.tools.files.read_team().expect("the team");
-        let read = |task: &str| {
-            deps.tools
-                .files
-                .read_contract(&task.parse().expect("an id"))
-                .expect("the contract")
-        };
-        let (procurement, finance, developers) = (read("CTV-1"), read("CTV-2"), read("CTV-3"));
-        let site_tools = ["catervas_read_sites", "catervas_request_sites"];
-        let offered = |who: &str, purpose: SessionPurpose, about| {
-            let mut ask = asked(deps, agent(&team, who), purpose, about);
-            ask.read_only = purpose == SessionPurpose::Verify;
-            let given = session_spec(deps, &team, &ask)
-                .expect("the spec")
-                .catervas_tools;
-            site_tools
-                .into_iter()
-                .filter(|tool| given.iter().any(|one| one == tool))
-                .collect::<Vec<_>>()
-        };
-
-        assert_eq!(
-            offered("proc", SessionPurpose::Implement, Some(&procurement)),
-            site_tools,
-            "its task's implement session is offered both"
-        );
-        assert_eq!(
-            offered("proc", SessionPurpose::Chat, None),
-            ["catervas_read_sites"],
-            "its chat reads the list and asks for nothing"
-        );
-        for (who, purpose, about, what) in [
-            (
-                "proc",
-                SessionPurpose::Implement,
-                None,
-                "an implement session about no task",
-            ),
-            (
-                "proc",
-                SessionPurpose::Verify,
-                Some(&procurement),
-                "a verify session",
-            ),
-            (
-                "fin",
-                SessionPurpose::Implement,
-                Some(&finance),
-                "a Finance Specialist's implement session",
-            ),
-            (
-                "fin",
-                SessionPurpose::Chat,
-                None,
-                "a Finance Specialist's chat",
-            ),
-            (
-                "kai",
-                SessionPurpose::Implement,
-                Some(&procurement),
-                "a Marketing Specialist's implement session",
-            ),
-            (
-                "kai",
-                SessionPurpose::Chat,
-                None,
-                "a Marketing Specialist's chat",
-            ),
-            (
-                "dev-a",
-                SessionPurpose::Implement,
-                Some(&developers),
-                "a Developer's implement session",
-            ),
-            ("dev-a", SessionPurpose::Chat, None, "a Developer's chat"),
-            (
-                "pm",
-                SessionPurpose::Implement,
-                Some(&procurement),
-                "the Product Manager's implement session about its task",
-            ),
-        ] {
-            assert_eq!(offered(who, purpose, about), Vec::<&str>::new(), "{what}");
         }
     }
 

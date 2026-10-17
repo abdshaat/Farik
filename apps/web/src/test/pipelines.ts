@@ -1,17 +1,17 @@
 // The data sources Ivo asks for and the Product Manager passes to the owner, as `waiting.list`
 // gives them (spec 6.10, ADR 0039). The words are the approved mockups'.
 
-import { MARKUP, SITE_ROW } from "./sites.ts";
+import { MARKUP } from "./procurementTeam.ts";
 
-export { MARKUP, TEAM } from "./sites.ts";
+export { MARKUP, TEAM } from "./procurementTeam.ts";
 
 /** A right-to-left override, which would reorder what follows it; the page writes it out. */
 export const HIDDEN = "\u202e";
 
 const TASK = {
-	task_id: SITE_ROW.task_id,
+	task_id: "CTV-31",
 	agent_id: "ivo",
-	title: SITE_ROW.title,
+	title: "Find a supplier for 500 pie boxes",
 };
 
 /** A source that costs money, passed on with the Product Manager's reason. */

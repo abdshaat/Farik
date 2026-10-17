@@ -729,8 +729,6 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_a_pipeline_request() {
         let project = a_project("pipeline-record");
-        let approved_before =
-            crate::tools::sites::approved_set(&project.deps.log).expect("the approved sites read");
 
         let answer = ask(&project, &firecrawl()).expect("a request is recorded");
 
@@ -760,22 +758,6 @@ mod tests {
         assert_eq!(body.cost, DataPipelineCost::Paid);
         assert!(body.needs_account);
         assert!(!body.sends_project_data);
-
-        // The source's page is on no approved site, and asking for the source approves none: the
-        // team asks for the site with catervas_request_sites if it must read it.
-        let approved_after =
-            crate::tools::sites::approved_set(&project.deps.log).expect("the approved sites read");
-        assert_eq!(approved_after, approved_before);
-        assert!(!approved_after.contains("firecrawl.dev"));
-        assert!(
-            project
-                .events(&[
-                    EventKind::SiteRequested,
-                    EventKind::SiteApproved,
-                    EventKind::SiteDeclined
-                ])
-                .is_empty()
-        );
 
         // A line break is allowed in what and why, and the fields are kept trimmed.
         let second = ask(

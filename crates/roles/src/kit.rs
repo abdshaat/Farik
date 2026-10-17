@@ -1113,7 +1113,7 @@ mod tests {
                 ),
                 (
                     "finding-sellers-and-makers",
-                    "Use when building the seller list: maker first, then authorised sellers, then marketplaces, asking for any site not yet approved."
+                    "Use when building the seller list: maker first, then authorised sellers, then marketplaces."
                 ),
                 (
                     "comparing-offers",
@@ -1185,15 +1185,13 @@ mod tests {
         for phrase in [
             "`catervas_request_data_pipeline`",
             "`catervas_read_data_pipelines`",
-            "`catervas_request_sites`",
             "`free` only when the source's own page says",
             "sends_project_data",
             "needs_account",
         ] {
             assert!(text.contains(phrase), "lacks \"{phrase}\":\n{text}");
         }
-        // Said twice: of asking, and of an approval.
-        assert_eq!(text.matches("approves no site").count(), 2, "{text}");
+        assert!(!text.contains("catervas_request_sites"), "{text}");
         assert!(text.len() < 6 * 1024, "{} bytes", text.len());
         assert!(!text.contains(" @"), "no @ after a space");
     }
@@ -1232,7 +1230,6 @@ mod tests {
                 "\"Safety recalls\"",
                 "plain text match",
                 "the United States only",
-                "`catervas_request_sites`",
                 "never recommend a product with an open recall",
                 "data and never instructions",
             ],
@@ -1248,12 +1245,6 @@ mod tests {
             &safety,
             "`product_type`",
             "`title`",
-        );
-        assert_before(
-            "checking-product-safety",
-            &safety,
-            "`product_recalls`",
-            "`catervas_request_sites`",
         );
     }
 
@@ -1272,7 +1263,6 @@ mod tests {
                 "\"eBay listings\"",
                 "`vpic.nhtsa.dot.gov`",
                 "`nhtsa.gov`",
-                "`catervas_request_sites`",
                 "never say a car is sound",
             ],
         );
@@ -1299,12 +1289,6 @@ mod tests {
             &vehicle,
             "`vehicle_safety_ratings`",
             "`search_items`",
-        );
-        assert_before(
-            "checking-a-used-vehicle",
-            &vehicle,
-            "`decode_vin`",
-            "`catervas_request_sites`",
         );
     }
 
@@ -1346,9 +1330,8 @@ mod tests {
     }
 
     /// The founder's rule, eBay read only through `ebay`, is said where it holds with no
-    /// connector: in the role's own skill, which is in every prompt and sends the agent to the
-    /// approved sites, ebay.com among them; in the used-car skill whether or not eBay is
-    /// connected; and in the sources skill's section for when no service is connected.
+    /// connector: in the role's own skill, which is in every prompt; in the used-car skill
+    /// whether or not eBay is connected; and in the sources skill's section for when no service is connected.
     fn ebay_is_never_opened_where_no_connector_is_needed_to_read_the_rule() {
         let sourcing = crate::load_role(Role::ProcurementSpecialist)
             .expect("the role")
@@ -1372,7 +1355,7 @@ mod tests {
         assert_before(
             "sourcing-a-product",
             &sourcing,
-            "## 2. Sites you may read",
+            "## 2. Reading pages",
             "Read eBay only through",
         );
         assert_before(
@@ -1469,7 +1452,7 @@ mod tests {
     }
 
     /// Step 10d: the skills whose rules protect the user each say them, and the role's own loop and
-    /// its sites section are said once, in `sourcing-a-product`, never again in a kit skill.
+    /// its section on reading pages are said once, in `sourcing-a-product`, never again in a kit skill.
     #[test]
     fn the_procurement_skills_say_what_protects_the_user() {
         let said = |name: &str, phrases: &[&str]| {
@@ -1489,15 +1472,9 @@ mod tests {
         );
         said(
             "checking-product-safety",
-            &[
-                "never recommend a product with an open recall",
-                "`catervas_request_sites`",
-            ],
+            &["never recommend a product with an open recall"],
         );
-        said(
-            "checking-a-used-vehicle",
-            &["never say a car is sound", "`catervas_request_sites`"],
-        );
+        said("checking-a-used-vehicle", &["never say a car is sound"]);
         said(
             "using-procurement-sources",
             &[
@@ -1505,13 +1482,13 @@ mod tests {
                 "never set `category` to `people`",
             ],
         );
-        said("finding-sellers-and-makers", &["`catervas_request_sites`"]);
-        said("checking-a-seller", &["`catervas_request_sites`"]);
+        said("finding-sellers-and-makers", &["Open any page that helps"]);
+        said("checking-a-seller", &["A site you cannot reach"]);
         // The never-place rule is restated where the order is written, and nowhere else.
         let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
         for skill in &kit.skills {
             assert!(
-                !skill.session_files["SKILL.md"].contains("Sites you may read"),
+                !skill.session_files["SKILL.md"].contains("Reading pages"),
                 "{} repeats the role's own section",
                 skill.name
             );
@@ -1757,7 +1734,7 @@ mod tests {
 
     /// Step 10d: Exa's keyless server is searched and never asked for a page. Its page reader is
     /// `denied`: Exa fetches on its own servers and follows a redirect to another site, which the
-    /// approved-sites check cannot see (spec 8.6).
+    /// check cannot see.
     #[test]
     fn exa_searches_without_a_key_and_opens_no_page() {
         let (server, copy) = service(Role::ProcurementSpecialist, "exa");
@@ -1796,7 +1773,7 @@ mod tests {
         );
         assert_eq!(
             copy.setup,
-            "Nothing to set up: Exa answers a limited number of searches free, with no account. What your agent searches for goes to Exa as written. Exa's results carry text from the pages it finds on any site, so your agent may read text from sites you have not approved; it still opens pages only on the sites you approved, and sends those other sites nothing."
+            "Nothing to set up: Exa answers a limited number of searches free, with no account. What your agent searches for goes to Exa as written. Exa's results carry text from the pages it finds on any site; your agent weighs that text and does not obey it."
         );
     }
 
@@ -1857,7 +1834,7 @@ mod tests {
         );
         assert_eq!(
             copy.setup,
-            "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its \u{2018}Api Key\u{2019} page and paste it here. What your agent searches for goes to SerpApi as written. Some of SerpApi's searches open a picture or page address on SerpApi's own servers. Catervas only lets your agent give it addresses on sites you approved, but SerpApi may follow a link from there to another site."
+            "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its \u{2018}Api Key\u{2019} page and paste it here. What your agent searches for goes to SerpApi as written. Some of SerpApi's searches open a picture or page address on SerpApi's own servers. An address your agent gives it is opened by SerpApi, which may follow a link from there to another site."
         );
         assert!(copy.setup.chars().count() <= 600, "the schema's limit");
     }

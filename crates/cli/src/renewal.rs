@@ -1,5 +1,5 @@
 //! `catervas renewal list`: the renewals coming up that nobody dismissed (`docs/SPEC.md` 6.10, ADR
-//! 0039). Dismissing one is a command, sent as `catervas site approve` sends its own.
+//! 0039). Dismissing one is a command, sent as `catervas order approve` sends its own.
 
 use catervas_runtime::procurement::renewals_list;
 use serde_json::Value;

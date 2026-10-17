@@ -453,8 +453,7 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
                                   WHERE cost_records.task_id = task_projections.task_id), \
                                  assignee_id, reviewer_id, iteration, awaiting_integration, \
-                                 (open_questions > 0 OR open_approvals > 0 OR open_plans > 0 \
-                                  OR open_sites > 0), \
+                                 (open_questions > 0 OR open_approvals > 0 OR open_plans > 0), \
                                  awaiting_approval, verifications, \
                                  rejections, interventions, sprint, \
                                  left_for_the_backlog, skips_sprints \
@@ -676,10 +675,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::ToolApprovalRefused(_)
         | EventBody::MarketingPlanProposed(_)
         | EventBody::MarketingPlanApproved(_)
-        | EventBody::MarketingPlanReturned(_)
-        | EventBody::SiteRequested(_)
-        | EventBody::SiteApproved(_)
-        | EventBody::SiteDeclined(_) => apply_waiting(transaction, &id, &event.body, seq),
+        | EventBody::MarketingPlanReturned(_) => apply_waiting(transaction, &id, &event.body, seq),
         EventBody::DriftDetected(_)
         | EventBody::PullRequestOpened(_)
         | EventBody::ProjectScanned(_)
@@ -740,7 +736,11 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::MarketingCampaignCreated(_)
         | EventBody::MarketingBudgetReached(_)
         | EventBody::MarketingCampaignPaused(_)
-        // A removal is about no task, and a site is folded from the log when it is asked for.
+        // Catervas keeps no list of sites (ADR 0061): the events of an older log load and hold no
+        // task.
+        | EventBody::SiteRequested(_)
+        | EventBody::SiteApproved(_)
+        | EventBody::SiteDeclined(_)
         | EventBody::SiteRemoved(_)
         // An order and a renewal are folded from the log when they are asked for, as a post is,
         // and hold no task: an order waits on the owner while its task goes on.
@@ -892,21 +892,6 @@ fn apply_waiting(
              WHERE task_id = ?1",
             (id, seq),
         ),
-        EventBody::SiteRequested(_) => update(
-            transaction,
-            "UPDATE task_projections SET open_sites = open_sites + 1, updated_seq = ?2
-             WHERE task_id = ?1",
-            (id, seq),
-        ),
-        // A site the owner added unasked answers no request, so it lowers nothing.
-        EventBody::SiteApproved(body) | EventBody::SiteDeclined(body) if body.request.is_some() => {
-            update(
-                transaction,
-                "UPDATE task_projections SET open_sites = max(0, open_sites - 1), updated_seq = ?2
-                 WHERE task_id = ?1",
-                (id, seq),
-            )
-        }
         EventBody::EscalationRaised(body) => {
             // The two reasons of the `ContractRequiresHuman` gate: the contract waits on an
             // approval the process asks for by design, which is no intervention (F17). Any other
@@ -1973,72 +1958,27 @@ mod tests {
     }
 
     #[test]
-    fn a_site_request_makes_its_task_wait() {
+    fn an_old_site_request_makes_no_task_wait() {
+        // Catervas keeps no list of sites any more (ADR 0061): a `site.requested` in an older log
+        // loads, and holds no task.
         let (log, projections) = a_board();
         record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
-        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
-        let first = record(
+        record(
             &log,
             &projections,
             &about(EventKind::SiteRequested, "CTV-1"),
         );
-        assert!(
-            row_of(&projections, "CTV-1").waiting_on_human,
-            "the asking task waits on the owner"
-        );
-        assert!(
-            !row_of(&projections, "CTV-2").waiting_on_human,
-            "no other task does"
-        );
-        let second = record(
-            &log,
-            &projections,
-            &about(EventKind::SiteRequested, "CTV-1"),
-        );
-
-        // An approval that answers a request lowers the count, as a decline does.
-        let approves = |request: &CatervasEvent| {
-            with_body(
-                EventKind::SiteApproved,
-                "CTV-1",
-                json!({ "host": "shop.example", "request": request.envelope.seq }),
-            )
-        };
-        let declines = |request: &CatervasEvent| {
-            with_body(
-                EventKind::SiteDeclined,
-                "CTV-1",
-                json!({ "request": request.envelope.seq, "host": "shop.example", "note": "" }),
-            )
-        };
-        record(&log, &projections, &approves(&first));
-        assert!(
-            row_of(&projections, "CTV-1").waiting_on_human,
-            "one request still waits"
-        );
-        // A site the owner added unasked answers no request and lowers nothing.
+        assert!(!row_of(&projections, "CTV-1").waiting_on_human);
         record(
             &log,
             &projections,
             &with_body(
                 EventKind::SiteApproved,
                 "CTV-1",
-                json!({ "host": "added.example" }),
+                json!({ "host": "shop.example", "request": 1 }),
             ),
         );
-        record(&log, &projections, &a_new_event(EventKind::SiteRemoved));
-        assert!(row_of(&projections, "CTV-1").waiting_on_human);
-        record(&log, &projections, &declines(&second));
         assert!(!row_of(&projections, "CTV-1").waiting_on_human);
-
-        // A decision with nothing waiting never takes the count below nothing.
-        record(&log, &projections, &declines(&second));
-        record(
-            &log,
-            &projections,
-            &about(EventKind::SiteRequested, "CTV-1"),
-        );
-        assert!(row_of(&projections, "CTV-1").waiting_on_human);
     }
 
     #[test]

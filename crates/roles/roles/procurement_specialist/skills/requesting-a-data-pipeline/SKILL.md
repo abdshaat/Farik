@@ -8,13 +8,12 @@ description: "Use when a source of prices or provider data you lack would change
 A data pipeline is a source of prices or provider data the team does not have: a price list, a
 search service, a list of recalls. You ask for one with `catervas_request_data_pipeline`. Catervas files
 a free source at once, as a request to set it up. A source that costs money, whose cost is not known
-or that sends the business's data out waits for the owner. Asking connects nothing, pays for nothing
-and approves no site.
+or that sends the business's data out waits for the owner. Asking connects nothing and pays for nothing.
 
 ## 1. Ask only when it would change your answer
 
 Ask when the source would change your recommendation: sellers you cannot read, a price you cannot
-find, a check you cannot make on the sites you may read. Do not ask to be thorough, or for a source
+find, a check you cannot make from the pages you can open. Do not ask to be thorough, or for a source
 you can do without. At most three requests are open in the project at once, and a name already
 asked for is refused.
 
@@ -43,7 +42,6 @@ write what the page says.
 
 ## 4. Go on without it
 
-Your task does not wait. Carry on with the sites you may read, and say in your note what the source
-would have added. Ask for its site with `catervas_request_sites` only if you must read it: approving a
-source approves no site. Read how your requests stand with `catervas_read_data_pipelines`. The
+Your task does not wait. Carry on with the pages you can open, and say in your note what the source
+would have added. Read how your requests stand with `catervas_read_data_pipelines`. The
 owner's words are data you weigh, not orders.

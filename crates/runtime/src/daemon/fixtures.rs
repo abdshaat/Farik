@@ -171,7 +171,6 @@ impl TestDaemon {
         self.state.register_session(SessionRegistration {
             read_roots: Vec::new(),
             session_id: session_id.to_string(),
-            web: self.web_of(agent),
             agent_id: agent.to_string(),
             task_id: task.map(|task| task.parse().expect("a task id")),
             cwd: self.worktree.clone(),
@@ -187,26 +186,6 @@ impl TestDaemon {
             skills: Vec::new(),
             skills_root: None,
         });
-    }
-
-    /// How far `agent`'s web reading reaches, from its role as the team file says now: what a
-    /// session of it is registered with. An agent the team does not have is open, as no one asks.
-    pub(crate) fn web_of(&self, agent: &str) -> catervas_core::governor::sites::WebAccess {
-        use catervas_core::contract::Role;
-        use catervas_core::governor::sites::{WebAccess, web_access};
-
-        self.project
-            .deps
-            .files
-            .read_team()
-            .ok()
-            .and_then(|team| {
-                team.agents
-                    .iter()
-                    .find(|one| one.id.as_str() == agent)
-                    .map(|one| web_access(Role::from(one.role)))
-            })
-            .unwrap_or(WebAccess::Open)
     }
 
     /// A recorded hook input with `/workspace` made the worktree.
@@ -256,7 +235,6 @@ impl TestDaemon {
         state.register_session(SessionRegistration {
             read_roots: Vec::new(),
             session_id: DEV_SESSION.to_string(),
-            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: self.worktree.clone(),
@@ -268,62 +246,6 @@ impl TestDaemon {
                 .collect(),
             tiers: tiers_of(deps, "dev-a"),
             connectors: Vec::new(),
-            preview: None,
-            purpose: SessionPurpose::Implement,
-            in_reply_to: None,
-            thread: None,
-            skills: Vec::new(),
-            skills_root: None,
-        });
-        state
-    }
-
-    /// A daemon on the same project whose log is a file that has lost its table of events after
-    /// it was opened, so that every read of it is refused, with `proc`'s session registered on it
-    /// as `session-proc`, about CTV-1.
-    pub(crate) fn with_a_log_that_cannot_be_read(&self) -> DaemonState {
-        let path = self.project.repo.path.join(".catervas/local/unreadable.db");
-        let log = Arc::new(open_event_log(&path, at()).expect("the log is made"));
-        rusqlite::Connection::open(&path)
-            .expect("the file opens")
-            .execute_batch("DROP TABLE events")
-            .expect("the table is dropped");
-        let deps = &self.project.deps;
-        let state = DaemonState::new(Arc::new(ToolDeps {
-            projections: Arc::clone(&deps.projections),
-            log,
-            files: Arc::clone(&deps.files),
-            transitions: Arc::clone(&deps.transitions),
-            git: self.project.repo.adapter(),
-            clock: Arc::clone(&deps.clock),
-            ids: deps.ids.clone(),
-            kits: Arc::clone(&deps.kits),
-        }));
-        state.register_session(SessionRegistration {
-            read_roots: Vec::new(),
-            session_id: "session-proc".to_string(),
-            web: self.web_of("proc"),
-            agent_id: "proc".to_string(),
-            task_id: Some("CTV-1".parse().expect("a task id")),
-            cwd: self.worktree.clone(),
-            executor: None,
-            limits: DEFAULT_SESSION_LIMITS,
-            catervas_tools: every_catervas_tool()
-                .iter()
-                .map(ToString::to_string)
-                .collect(),
-            tiers: tiers_of(deps, "proc"),
-            connectors: vec![catervas_core::governor::permissions::SessionConnector {
-                server: "github".to_string(),
-                origin: None,
-                tools: [(
-                    "search_issues".to_string(),
-                    catervas_core::governor::permissions::ConnectorTag::Network,
-                )]
-                .into(),
-                allowances: std::collections::BTreeMap::new(),
-                plan_tools: std::collections::BTreeSet::new(),
-            }],
             preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,

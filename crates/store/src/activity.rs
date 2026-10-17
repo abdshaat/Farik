@@ -194,25 +194,20 @@ pub fn while_the_plan_waits(all: &mut [AgentActivity], team: &Team, plan_task: O
 }
 
 /// What an agent waiting on the human is doing, in a sentence: for a connector call, a post
-/// outside the plan or a site to read, the question the dialog answers.
+/// outside the plan, the question the dialog answers.
 fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> String {
-    match (&item.approval, &item.post, &item.site) {
-        (Some(ask), _, _) => format!(
+    match (&item.approval, &item.post) {
+        (Some(ask), _) => format!(
             "Waiting on you: may {} use {}?",
             name_of(team, agent),
             ask.server
         ),
-        (None, Some(ask), _) => format!(
+        (None, Some(ask)) => format!(
             "Waiting on you: may {} post on {}?",
             name_of(team, agent),
             network_name(ask.channel)
         ),
-        (None, None, Some(ask)) => format!(
-            "Waiting on you: may {} read {}?",
-            name_of(team, agent),
-            ask.host
-        ),
-        (None, None, None) => format!("Waiting on you: {}", item.line),
+        (None, None) => format!("Waiting on you: {}", item.line),
     }
 }
 

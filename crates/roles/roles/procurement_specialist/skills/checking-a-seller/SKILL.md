@@ -28,13 +28,10 @@ For a service, read its trust or security page: whether it reports an audit such
 whether it holds ISO 27001, whether it offers two-factor sign-in, and how it encrypts data. Report
 what the page claims and say it is the seller's own claim, not a check.
 
-## 3. A site you may not yet read
+## 3. A site you cannot reach
 
-A review site, a company register or the seller's trust page may not be on a site you may read. Ask
-for it before you end your turn, with `catervas_request_sites`: the first page you want, and a reason
-in one line, such as "the official register of companies, to check the seller exists". Your task
-then waits for the owner. If the answer is no, or you cannot wait, say plainly in your note what
-you could not check.
+A review site, a company register or the seller's trust page may not open. If you cannot reach one,
+say plainly in your note what you could not check.
 
 ## 4. What you write
 

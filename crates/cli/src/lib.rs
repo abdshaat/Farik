@@ -68,7 +68,6 @@ mod serve;
 mod setup;
 /// One contract, and what happened to it.
 pub mod show;
-pub mod site;
 
 #[cfg(unix)]
 mod skill;
@@ -532,12 +531,6 @@ enum Commands {
         #[command(subcommand)]
         command: MarketingCommands,
     },
-    /// List the sites the Procurement Specialist may read, allow or refuse the ones it asked for,
-    /// and add or remove one (6.10).
-    Site {
-        #[command(subcommand)]
-        command: SiteCommands,
-    },
     /// Connect the mailbox the Procurement Specialist's messages go from, and send, discard or
     /// read what it wrote to sellers (6.10).
     Procurement {
@@ -832,38 +825,6 @@ enum MailboxCommands {
     Disconnect,
     /// The connected mailbox and what was sent today.
     Show,
-}
-
-#[derive(Subcommand)]
-enum SiteCommands {
-    /// Catervas's approved sites, on or off, the sites you allowed, and the requests that wait.
-    List,
-    /// Allow a site the Procurement Specialist asked to read.
-    Approve {
-        /// The request's number, as catervas run prints it.
-        request: u64,
-        /// A note for the Procurement Specialist's next session.
-        #[arg(long)]
-        note: Option<String>,
-    },
-    /// Do not allow a site the Procurement Specialist asked to read.
-    Decline {
-        /// The request's number, as catervas run prints it.
-        request: u64,
-        /// A note for the Procurement Specialist's next session.
-        #[arg(long)]
-        note: Option<String>,
-    },
-    /// Allow a site no one asked for, or turn one of Catervas's back on.
-    Add {
-        /// A name like shop.com, or the address of any page on it.
-        site: String,
-    },
-    /// Take a site away: one you allowed, or one of Catervas's, which this turns off.
-    Remove {
-        /// A name like shop.com, or the address of any page on it.
-        host: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1247,13 +1208,6 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             human_command(&project, command, name, io)
         }),
         Commands::Procurement { command } => procurement_arm(command, io, now),
-        Commands::Site {
-            command: SiteCommands::List,
-        } => open_project(&io.cwd, now).and_then(|project| site::list(&project)),
-        Commands::Site { .. } => open_project(&io.cwd, now).and_then(|project| {
-            let (name, command) = humans(&parsed.command)?;
-            human_command(&project, command, name, io)
-        }),
         Commands::Order {
             command: OrderCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| order::list(&project, now)),
@@ -1694,29 +1648,6 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             PostCommands::List => {
                 return Err("catervas marketing post list only reads".to_string());
             }
-        },
-        Commands::Site { command } => match command {
-            SiteCommands::Approve { request, note } => (
-                "site approve",
-                Command::SiteDecide {
-                    request: *request,
-                    allow: true,
-                    note: note.clone(),
-                },
-            ),
-            SiteCommands::Decline { request, note } => (
-                "site decline",
-                Command::SiteDecide {
-                    request: *request,
-                    allow: false,
-                    note: note.clone(),
-                },
-            ),
-            SiteCommands::Add { site } => ("site add", Command::SiteAdd { site: site.clone() }),
-            SiteCommands::Remove { host } => {
-                ("site remove", Command::SiteRemove { host: host.clone() })
-            }
-            SiteCommands::List => return Err("catervas site list only reads".to_string()),
         },
         Commands::Pipeline { command } => match command {
             PipelineCommands::Approve { pipeline, note } => (

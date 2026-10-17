@@ -23,12 +23,7 @@ import {
 	type DocumentChangesCard,
 } from "./DocumentChanges.tsx";
 import { DataPipeline, type PipelineAsk } from "./dialogs/DataPipeline.tsx";
-import {
-	isScript,
-	ScriptWarning,
-	type SiteAsk,
-	SiteRequest,
-} from "./dialogs/SiteRequest.tsx";
+import { isScript, ScriptWarning } from "./dialogs/ScriptWarning.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import {
 	ToolApproval,
@@ -88,7 +83,6 @@ type Waiting = {
 		| "tool_approval"
 		| "marketing_plan"
 		| "social_post"
-		| "site_request"
 		| "purchase_order"
 		| "data_pipeline"
 		| AdsAsk["kind"];
@@ -99,7 +93,6 @@ type Waiting = {
 	Partial<Omit<AdsAsk, "kind" | "taskId" | "agentId" | "plan">> &
 	Partial<PlanAsk> &
 	Partial<PostAsk> &
-	Partial<SiteAsk> &
 	Partial<OrderAsk> &
 	Partial<PipelineAsk>;
 type Moved = { at: string; by: string; line: string };
@@ -184,7 +177,6 @@ export function Today() {
 				item.kind === "tool_approval" ||
 				item.kind === "marketing_plan" ||
 				item.kind === "social_post" ||
-				item.kind === "site_request" ||
 				item.kind === "purchase_order" ||
 				item.kind === "data_pipeline" ||
 				isAds(item.kind) ||
@@ -320,12 +312,6 @@ export function Today() {
 									<AdsRow
 										key={`${item.kind}-${item.plan}`}
 										item={item as AdsAsk}
-										agent={agent(item.agentId)}
-									/>
-								) : item.kind === "site_request" ? (
-									<SiteRequestRow
-										key={`${item.kind}-${item.request}`}
-										item={item}
 										agent={agent(item.agentId)}
 									/>
 								) : item.kind === "purchase_order" ? (
@@ -755,91 +741,6 @@ function PostRequestRow({
 					{t("postItNo")}
 				</Button>
 			</div>
-		</li>
-	);
-}
-
-/**
- * A site the Procurement Specialist asks to read: the site in bold, the page it wants as text
- * (never a link: the agent wrote it), its reason in a frame that says whose words they are, and
- * the owner's "Allow" or "Don't allow", each of which asks for a note (spec 6.10).
- */
-function SiteRequestRow({
-	item,
-	agent,
-}: {
-	item: Waiting;
-	agent: Agent | undefined;
-}) {
-	const name = agent?.displayName ?? item.agentId ?? "";
-	const host = item.host ?? "";
-	const titleId = `waiting-site-${item.request}`;
-	const whyId = `${titleId}-why`;
-	const [dialog, setDialog] = useState<"allow" | "decline">();
-	// The host and the task are set apart in their own elements, in the places the words put them.
-	const [asks, asksEnd] = t("siteRequestLine", { name, host: "{host}" }).split(
-		"{host}",
-	);
-	const [forTask, forTaskEnd] = t("siteRequestTask", {
-		task: "{task}",
-	}).split("{task}");
-	const ask: SiteAsk = {
-		request: item.request ?? 0,
-		host,
-		url: item.url ?? "",
-		why: item.why ?? "",
-	};
-	return (
-		<li className={styles.row}>
-			<AgentPicture agent={agent} />
-			<div className={styles.rowText}>
-				<strong id={titleId}>
-					{asks}
-					<code className={styles.host}>{host}</code>
-					{asksEnd}
-				</strong>
-				<span>
-					{forTask}
-					<Link to={`/tasks/${item.taskId}`}>
-						{item.taskId} {item.title}
-					</Link>
-					{forTaskEnd}
-				</span>
-				{isScript(host) && <ScriptWarning className={styles.script} />}
-				<span className={styles.muted}>{t("siteRequestPage", { name })}</span>
-				<code className={styles.address}>{visibly(ask.url)}</code>
-				<span className={styles.muted} id={whyId}>
-					{t("siteRequestWhy", { name })}
-				</span>
-				{/* The agent's own words: React renders them as text, never as markup. */}
-				<fieldset
-					aria-labelledby={whyId}
-					data-trust="untrusted"
-					className={styles.frame}
-				>
-					{visibly(ask.why)}
-				</fieldset>
-				<span className={styles.muted}>
-					{t("siteRequestWhat", { name, host })}
-				</span>
-			</div>
-			{/* The group names the site, so that each row's "Allow" is told from the others. */}
-			<fieldset className={styles.decide} aria-labelledby={titleId}>
-				<Button kind="primary" onClick={() => setDialog("allow")}>
-					{t("siteRequestAllow")}
-				</Button>
-				<Button onClick={() => setDialog("decline")}>
-					{t("siteRequestDecline")}
-				</Button>
-			</fieldset>
-			{dialog && (
-				<SiteRequest
-					ask={ask}
-					agent={name}
-					allow={dialog === "allow"}
-					onClose={() => setDialog(undefined)}
-				/>
-			)}
 		</li>
 	);
 }

@@ -6,7 +6,7 @@ import { useQuery } from "../app/store.ts";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import { PurchaseOrder } from "./dialogs/PurchaseOrder.tsx";
-import { isScript, ScriptWarning } from "./dialogs/SiteRequest.tsx";
+import { isScript, ScriptWarning } from "./dialogs/ScriptWarning.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
 import {
 	aheadDay,

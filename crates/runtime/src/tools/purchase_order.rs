@@ -23,7 +23,7 @@ use super::refusal::Refusal;
 use super::sheets::{
     CellInput, SheetInput, in_its_own_implement_session, private_path, write_new_workbook,
 };
-use super::sites::{approved_set, shown};
+use super::sites::shown;
 use super::{Call, ToolError, failed};
 use crate::procurement::{ORDERS, check_follow_up, order_row};
 
@@ -62,9 +62,8 @@ pub(crate) struct DraftPurchaseOrderInput {
     /// Payment terms and conditions, as the seller said them, 0 to 600 characters.
     #[serde(default)]
     terms: String,
-    /// The seller's page for these goods, an address that starts with https:// on a site the
-    /// owner allowed (`catervas_read_sites` lists them; `catervas_request_sites` asks for another),
-    /// at most 2000 characters. Leave it empty for a seller with no page, met by phone or in
+    /// The seller's page for these goods, an address that starts with https://, at most 2000
+    /// characters. Leave it empty for a seller with no page, met by phone or in
     /// person.
     #[serde(default)]
     url: String,
@@ -226,8 +225,8 @@ fn check_currency_and_terms(input: &DraftPurchaseOrderInput) -> Result<(), ToolE
     Ok(())
 }
 
-/// The seller's page: empty, or an address on a site the owner allowed. Answers its site.
-fn check_page(call: &Call<'_>, url: &str) -> Result<(), ToolError> {
+/// The seller's page: empty, or an https address.
+fn check_page(url: &str) -> Result<(), ToolError> {
     if url.is_empty() {
         return Ok(());
     }
@@ -240,24 +239,12 @@ fn check_page(call: &Call<'_>, url: &str) -> Result<(), ToolError> {
             ),
         ));
     }
-    let host = site_of(url).map_err(|fault| {
+    site_of(url).map_err(|fault| {
         refused(
             "purchase_order_url_invalid",
             format!("{} {fault}", shown(url)),
         )
     })?;
-    if !approved_set(&call.deps().log)
-        .map_err(failed)?
-        .contains(&host)
-    {
-        return Err(refused(
-            "purchase_order_site_not_approved",
-            format!(
-                "{host} is not a site the owner allowed; ask for it with catervas_request_sites \
-                 first, then end your turn"
-            ),
-        ));
-    }
     Ok(())
 }
 
@@ -386,7 +373,7 @@ fn workbook(
 /// `purchase_order_seller_invalid`, `purchase_order_lines_invalid`,
 /// `purchase_order_line_invalid`, `purchase_order_too_large`, `purchase_order_currency_invalid`,
 /// `purchase_order_delivery_invalid`, `purchase_order_terms_invalid`, `purchase_order_url_invalid`,
-/// `purchase_order_site_not_approved`, `purchase_order_evaluation_invalid`,
+/// `purchase_order_evaluation_invalid`,
 /// `evaluation_missing`, `purchase_order_why_invalid`, `purchase_order_open` and
 /// `too_many_purchase_orders`; `purchase_order_file_exists` when a workbook of the number is
 /// there; `Failed` when the log or a file cannot be written.
@@ -406,7 +393,7 @@ pub(super) fn draft_purchase_order(
         OrderError::TooLarge { .. } => refused("purchase_order_too_large", error.to_string()),
     })?;
     check_currency_and_terms(input)?;
-    check_page(call, &input.url)?;
+    check_page(&input.url)?;
     check_evaluation(call, folder, &input.evaluation)?;
     if !(20..=600).contains(&input.why.chars().count()) || !is_text(&input.why) {
         return Err(refused(
@@ -665,7 +652,6 @@ mod tests {
 
     use calamine::{Data, DataType as _, Range, Reader as _, Xlsx, open_workbook};
     use catervas_protocol::event::{EventBody, EventKind};
-    use catervas_roles::sites::catervas_sites;
     use serde_json::{Value, json};
 
     use crate::session::SessionPurpose;
@@ -724,14 +710,12 @@ mod tests {
         project.repo.path.join(".catervas/local/procurement")
     }
 
-    /// One of Catervas's own hosts, taken from the shipped list so that the launch review edits the
-    /// YAML alone.
-    fn a_catervas_host() -> &'static str {
-        &catervas_sites()[0].host
+    /// The host of the seller's page in the fixtures' orders.
+    fn a_shop_host() -> &'static str {
+        "shop.example"
     }
 
-    /// An order for three mirrors and a kit, 59.98 USD, from `seller`, with its page on a site
-    /// Catervas ships.
+    /// An order for three mirrors and a kit, 59.98 USD, from `seller`, with its page on a shop.
     fn an_order(seller: &str) -> Value {
         json!({
             "seller": seller,
@@ -744,7 +728,7 @@ mod tests {
             "period": "once",
             "delivery": "Ships in 3 days",
             "terms": "Net 30",
-            "url": format!("https://www.{}/mirrors", a_catervas_host()),
+            "url": format!("https://www.{}/mirrors", a_shop_host()),
             "evaluation": "evaluations/mirrors.md",
             "why": "It is the cheapest seller that ships to us with a safety mark."
         })
@@ -825,7 +809,7 @@ mod tests {
         assert_eq!(body.terms.to_string(), "Net 30");
         assert_eq!(
             body.url.to_string(),
-            format!("https://www.{}/mirrors", a_catervas_host()),
+            format!("https://www.{}/mirrors", a_shop_host()),
             "the address is kept exactly as the agent wrote it"
         );
         assert_eq!(body.evaluation.to_string(), "evaluations/mirrors.md");
@@ -1301,7 +1285,7 @@ mod tests {
         let url = "purchase_order_url_invalid";
         let evaluation = "purchase_order_evaluation_invalid";
         let why = "purchase_order_why_invalid";
-        let head = format!("https://{}/", a_catervas_host());
+        let head = format!("https://{}/", a_shop_host());
         refuses_each(
             "po-page",
             &[
@@ -1402,7 +1386,7 @@ mod tests {
         let answer = draft(&project, &edges).expect("every limit may be reached");
         assert_eq!(answer["total"], "10000000.00");
         // An address of 2,000 characters is the longest taken.
-        let head = format!("https://{}/", a_catervas_host());
+        let head = format!("https://{}/", a_shop_host());
         let mut long_page = an_order("Long page");
         long_page["url"] = json!(format!("{head}{}", "x".repeat(2_000 - head.len())));
         draft(&project, &long_page).expect("an address of 2,000 characters");
@@ -1416,39 +1400,20 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_page_not_on_an_approved_site() {
+    fn takes_any_https_page() {
+        // Research is free (ADR 0061): the seller's page may be on any site, with or without www.
         let project = a_project("po-site");
-        let before = project.event_count();
-
-        let reason = refusal_of(draft(
-            &project,
-            &changed(&[("url", json!("https://acme.example/x"))]),
-        ));
-        assert!(
-            reason.starts_with("purchase_order_site_not_approved:"),
-            "{reason}"
-        );
-        assert!(reason.contains("acme.example"), "{reason}");
-        assert!(reason.contains("catervas_request_sites"), "{reason}");
-        assert_eq!(project.event_count(), before);
-        assert!(!folder(&project).join("orders").exists());
-
-        // Once the owner allowed the site, its page is taken, with or without www.
-        project.record("", "site.approved", &json!({ "host": "acme.example" }));
         let mut input = an_order("Acme");
         input["url"] = json!("https://www.acme.example/x");
-        draft(&project, &input).expect("an allowed site's page is taken");
+        draft(&project, &input).expect("any https page is taken");
 
-        // A page on a site Catervas ships is taken; once the owner turned that site off, it is not.
-        let mut shipped = an_order("Bolt");
-        shipped["url"] = json!(format!("https://{}/p", a_catervas_host()));
-        draft(&project, &shipped).expect("a site Catervas ships is taken");
-        project.record("", "site.removed", &json!({ "host": a_catervas_host() }));
-        let mut turned_off = an_order("Cog");
-        turned_off["url"] = json!(format!("https://{}/p", a_catervas_host()));
-        let reason = refusal_of(draft(&project, &turned_off));
+        // A page that is no https address on a named site is still refused.
+        let reason = refusal_of(draft(
+            &project,
+            &changed(&[("url", json!("http://bolt.example/x"))]),
+        ));
         assert!(
-            reason.starts_with("purchase_order_site_not_approved:"),
+            reason.starts_with("purchase_order_url_invalid:"),
             "{reason}"
         );
 

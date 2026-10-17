@@ -20,7 +20,6 @@ import {
 } from "../test/orders.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { NO_MAILBOX } from "../test/sellerMail.ts";
-import { SITES } from "../test/sites.ts";
 import { onlyInTips } from "../test/tips.ts";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
@@ -2413,18 +2412,12 @@ describe("info buttons on the agent page", () => {
 		});
 		await answerQuery(s, "models.list", MODELS);
 		await answerQuery(s, "skills.list", { skills: [] });
-		await answerQuery(s, "sites.list", SITES);
 		await answerQuery(s, "purchase_orders.list", ORDERS);
 		await answerQuery(s, "procurement_mailbox.get", NO_MAILBOX);
 		await screen.findByRole("heading", {
 			name: "Ivo, your Procurement Specialist",
 		});
-		for (const key of [
-			"ordersLead",
-			"sitesLead",
-			"sitesCatervasNote",
-			"mailboxNoneNote",
-		] as const)
+		for (const key of ["ordersLead", "mailboxNoneNote"] as const)
 			onlyInTips(t(key, { name: "Ivo" }));
 	});
 });

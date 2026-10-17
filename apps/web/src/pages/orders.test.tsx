@@ -7,7 +7,6 @@ import type { FakeSocket } from "../test/fake-socket.ts";
 import { sentCommand } from "../test/gate.ts";
 import { at, EFFECTIVE, MARKUP, NOW, ORDERS, TEAM } from "../test/orders.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
-import { SITES } from "../test/sites.ts";
 
 /** One agent's page, its orders answered unless `orders` is left out, on `team`. */
 async function opened(
@@ -30,7 +29,6 @@ async function opened(
 	});
 	await answerQuery(s, "models.list", { models: [] });
 	await answerQuery(s, "skills.list", { skills: [] });
-	if (agent === "ivo") await answerQuery(s, "sites.list", SITES);
 	if (orders) await answerQuery(s, "purchase_orders.list", orders);
 	await screen.findByRole("heading", {
 		name:
@@ -64,11 +62,11 @@ describe("the orders on the Procurement Specialist's page", () => {
 		const { container } = await opened("ivo");
 		await expectNoAxeViolations(container);
 
-		// Orders come directly before the sites the agent may read.
+		// Orders come directly before what the agent may do.
 		const heading = await screen.findByRole("heading", { name: "Orders" });
 		const section = heading.closest("section") as HTMLElement;
 		expect(section.nextElementSibling).toBe(
-			screen.getByRole("heading", { name: en.sitesTitle }).closest("section"),
+			container.querySelector("#may-heading")?.closest("section"),
 		);
 		expect(section.textContent).toContain(
 			"Ivo suggests and tracks orders. Catervas never orders or pays: you place each, then mark it placed and received.",

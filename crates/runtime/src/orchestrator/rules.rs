@@ -1042,7 +1042,7 @@ const CONVERSATION_TOOLS: &[&str] = &[
 ];
 
 /// The Catervas tools a chat session is offered (ADR 0026): the reading tools and its one reply, and
-/// the lists of sites, of purchase orders and of data pipeline requests, which `offered_tools`
+/// the lists of purchase orders and of data pipeline requests, which `offered_tools`
 /// keeps for the role they are the Procurement Specialist's alone.
 pub(super) const CHAT_TOOLS: &[&str] = &[
     "catervas_read_task",
@@ -1050,7 +1050,6 @@ pub(super) const CHAT_TOOLS: &[&str] = &[
     "catervas_read_rules",
     "catervas_read_criteria",
     "catervas_read_decisions",
-    "catervas_read_sites",
     "catervas_read_purchase_orders",
     "catervas_read_data_pipelines",
     "catervas_read_seller_messages",
@@ -6092,8 +6091,6 @@ mod tests {
                     "catervas_write_sheet",
                     "catervas_read_sheet",
                     "catervas_write_evaluation",
-                    "catervas_request_sites",
-                    "catervas_read_sites",
                     "catervas_draft_purchase_order",
                     "catervas_read_purchase_orders",
                     "catervas_update_purchase_order",
@@ -9527,7 +9524,6 @@ mod tests {
             .copied()
             .filter(|tool| {
                 ![
-                    "catervas_read_sites",
                     "catervas_read_purchase_orders",
                     "catervas_read_data_pipelines",
                     "catervas_read_seller_messages",
@@ -9561,7 +9557,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn gives_the_procurement_specialists_chat_its_lists() {
-        // The role the lists are for gets every chat tool: sites, orders, data pipeline
+        // The role the lists are for gets every chat tool: orders, data pipeline
         // requests and the messages to sellers and their replies among them.
         let harness = Harness::with_procurement("orch-chat-procurement");
         chatted(&harness, "proc", "human", "Status?", None);
@@ -9584,7 +9580,6 @@ mod tests {
                 "catervas_read_rules",
                 "catervas_read_criteria",
                 "catervas_read_decisions",
-                "catervas_read_sites",
                 "catervas_read_purchase_orders",
                 "catervas_read_data_pipelines",
                 "catervas_read_seller_messages",
@@ -9752,59 +9747,6 @@ mod tests {
                     "mcp__playwright__browser_navigate",
                     "connector_not_in_session"
                 ),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn starts_a_procurement_session_held_to_approved_sites() {
-        // The registration's `web` is the agent's role, whatever the session's purpose: the hook
-        // judges a `WebFetch` of the role's implement session by the list, and a Developer's
-        // session, given `network`, by nothing.
-        let harness = Harness::with_procurement("orch-procurement-held");
-        harness.procurement_task("CTV-1", Some("in_progress"));
-        let catervas = catervas_roles::sites::catervas_sites()[0].host.clone();
-        let probe = Arc::new(HookProbe {
-            inner: harness.recorded(vec![reads_a_file()]),
-            daemon: Arc::clone(&harness.daemon),
-            calls: vec![
-                (
-                    "WebFetch",
-                    json!({ "url": "https://shop.example/", "prompt": "read" }),
-                ),
-                (
-                    "WebFetch",
-                    json!({ "url": format!("https://www.{catervas}/"), "prompt": "read" }),
-                ),
-                ("WebSearch", json!({ "query": "corrugated boxes" })),
-            ],
-            seen: std::sync::Mutex::new(Vec::new()),
-        });
-
-        harness
-            .orchestrator(probe.clone())
-            .tick()
-            .await
-            .expect("the tick runs");
-
-        let seen = probe
-            .seen
-            .lock()
-            .expect("no test panics holding it")
-            .clone();
-        assert_eq!(seen.len(), 1, "one implement session: {seen:?}");
-        let verdicts: Vec<(&str, &str)> = seen[0]
-            .0
-            .iter()
-            .map(|(tool, verdict)| (tool.as_str(), verdict.as_str()))
-            .collect();
-        assert_eq!(
-            verdicts,
-            [
-                ("WebFetch", "site_not_approved"),
-                ("WebFetch", "allow"),
-                ("WebSearch", "allow"),
             ]
         );
     }
@@ -10111,7 +10053,6 @@ mod tests {
         harness.daemon.register_session(SessionRegistration {
             read_roots: Vec::new(),
             session_id: session_id.clone(),
-            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: agent.to_string(),
             task_id: None,
             purpose,

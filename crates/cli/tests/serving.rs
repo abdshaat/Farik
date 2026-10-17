@@ -570,7 +570,6 @@ fn told_at_listen<T: Send + 'static>(
                 daemon.register_session(SessionRegistration {
                     read_roots: Vec::new(),
                     session_id: "probe".to_string(),
-                    web: catervas_core::governor::sites::WebAccess::Open,
                     agent_id: "probe".to_string(),
                     task_id: None,
                     purpose: SessionPurpose::Triage,

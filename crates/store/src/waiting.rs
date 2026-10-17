@@ -24,7 +24,6 @@ use crate::marketing::{PostMedia, PostState, marketing_plans, social_posts};
 use crate::pipelines::{PipelineState, cost_of, data_pipelines};
 use crate::purchase_orders::{OrderState, expires_at, purchase_orders};
 use crate::seller_mail::{MessageState, seller_mail};
-use crate::sites::site_requests;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
 /// What kind of thing waits.
@@ -46,9 +45,6 @@ pub enum WaitingKind {
     MarketingPlan,
     /// A post outside the plan, which the owner allows or does not (ADR 0042).
     SocialPost,
-    /// A site the Procurement Specialist asked to read, which the owner allows or does not
-    /// (ADR 0039).
-    SiteRequest,
     /// A purchase order the Procurement Specialist set up, which the owner approves or rejects
     /// and places themselves (ADR 0039). It holds no task.
     PurchaseOrder,
@@ -70,7 +66,6 @@ impl WaitingKind {
             Self::ToolApproval => "tool_approval",
             Self::MarketingPlan => "marketing_plan",
             Self::SocialPost => "social_post",
-            Self::SiteRequest => "site_request",
             Self::PurchaseOrder => "purchase_order",
             Self::DataPipeline => "data_pipeline",
         }
@@ -100,8 +95,6 @@ pub struct Waiting {
     pub plan: Option<PlanAsk>,
     /// A post's ask.
     pub post: Option<PostAsk>,
-    /// A site's ask.
-    pub site: Option<SiteAsk>,
     /// A purchase order's ask.
     pub order: Option<OrderAsk>,
     /// A data pipeline request's ask.
@@ -199,20 +192,6 @@ pub struct OrderAsk {
     pub expires_at: DateTime<chrono::Utc>,
     /// The message that goes with it, while one waits.
     pub send: Option<OrderSend>,
-}
-
-/// A site an agent asked to read, as its `site.requested` recorded it. Its host is in ASCII; its
-/// address and its reason are the agent's own words, which are untrusted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SiteAsk {
-    /// The request's number, the seq of its `site.requested`.
-    pub request: u64,
-    /// The site.
-    pub host: String,
-    /// The first page the agent wants, exactly as it wrote it.
-    pub url: String,
-    /// Why, in the agent's words.
-    pub why: String,
 }
 
 /// A post outside the plan that waits for the owner, as its `social_post.requested` recorded it.
@@ -383,7 +362,6 @@ pub fn waiting(
         approval: None,
         plan: None,
         post: None,
-        site: None,
         order: None,
         pipeline: None,
     };
@@ -391,7 +369,6 @@ pub fn waiting(
     waiting.extend(undecided(&board, &history, team, &item));
     waiting.extend(plans_waiting(&board, log, team, &item)?);
     waiting.extend(posts_waiting(&board, log, team, &item)?);
-    waiting.extend(sites_waiting(&board, log, team, &item)?);
     waiting.extend(orders_waiting(&board, log, team, &item)?);
     waiting.extend(pipelines_waiting(&board, log, team, &item)?);
     let product_manager = team
@@ -649,40 +626,6 @@ fn plans_waiting(
                 ends_on: proposal.ends_on,
             }),
             ..item(row, WaitingKind::MarketingPlan, Some(&plan.agent_id), line)
-        });
-    }
-    Ok(waiting)
-}
-
-/// Every request to read a site nobody decided yet, oldest first (ADR 0039). Its row is about the
-/// task that asked, and its line says who asks to read which site.
-fn sites_waiting(
-    board: &[TaskProjection],
-    log: &EventLog,
-    team: &Team,
-    item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
-) -> Result<Vec<Waiting>, StoreError> {
-    let mut waiting = Vec::new();
-    for asked in site_requests(log)?
-        .into_iter()
-        .filter(|asked| asked.decision.is_none())
-    {
-        let Some(row) = board.iter().find(|row| row.task_id == asked.task_id) else {
-            continue;
-        };
-        let line = format!(
-            "{} asks to read {}",
-            name_of(team, &asked.agent_id),
-            asked.host
-        );
-        waiting.push(Waiting {
-            site: Some(SiteAsk {
-                request: asked.request,
-                host: asked.host.clone(),
-                url: asked.url.clone(),
-                why: asked.why.clone(),
-            }),
-            ..item(row, WaitingKind::SiteRequest, Some(&asked.agent_id), line)
         });
     }
     Ok(waiting)
@@ -1649,112 +1592,5 @@ mod tests {
             board.put(at(10, number), Some("CTV-1"), None, kind, body);
             assert!(rows(&board).is_empty(), "{kind} decided");
         }
-    }
-    /// Ada, Linus and Kai, the Procurement Specialist.
-    fn with_kai_buying() -> catervas_core::team::Team {
-        let mut wire = catervas_core::team::fixtures::a_team_wire();
-        wire["agents"] = json!([
-            { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
-            { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
-            { "id": "kai", "display_name": "Kai", "role": "procurement_specialist", "status": "active" },
-        ]);
-        catervas_core::team::validate_team(&wire).expect("the fixture is a team")
-    }
-
-    /// A request of Kai's, in her session, to read `url`, on CTV-1.
-    fn asked_to_read(board: &Board, minute: u32, host: &str, url: &str) -> u64 {
-        board
-            .session(
-                super::fixtures::at(9, minute),
-                Some("CTV-1"),
-                "kai",
-                "session-1",
-                "site.requested",
-                json!({ "host": host, "url": url, "why": "It sells the boxes." }),
-            )
-            .envelope
-            .seq
-    }
-
-    #[test]
-    fn waiting_lists_each_site_request() {
-        let board = Board::new("waiting-site");
-        let team = with_kai_buying();
-        board.file("CTV-1", "Price 500 boxes", |_| {});
-        let site = asked_to_read(&board, 6, "shop.example", "https://www.shop.example/boxes");
-        let rows = |board: &Board| {
-            waiting(&board.projections, &board.log, &board.files, &team)
-                .expect("the store reads")
-                .into_iter()
-                .filter(|item| {
-                    matches!(
-                        item.kind,
-                        WaitingKind::SocialPost | WaitingKind::SiteRequest
-                    )
-                })
-                .collect::<Vec<_>>()
-        };
-
-        let all = crate::activity::activity(
-            &board.log,
-            &board.projections,
-            &board.files,
-            &team,
-            at(12, 0),
-        )
-        .expect("the store reads");
-        let kai = all.iter().find(|one| one.agent_id == "kai").expect("Kai");
-        assert_eq!(kai.line, "Waiting on you: may Kai read shop.example?");
-
-        requested(&board, "2026-09-28T14:00:00+02:00");
-        let listed = rows(&board);
-
-        // After the posts outside the plan.
-        assert_eq!(
-            listed.iter().map(|row| row.kind).collect::<Vec<_>>(),
-            [WaitingKind::SocialPost, WaitingKind::SiteRequest]
-        );
-        let row = &listed[1];
-        assert_eq!(row.line, "Kai asks to read shop.example");
-        assert_eq!(row.agent_id.as_deref(), Some("kai"));
-        assert_eq!(row.task_id.as_str(), "CTV-1");
-        assert_eq!(WaitingKind::SiteRequest.as_str(), "site_request");
-        let ask = row.site.as_ref().expect("the site's ask");
-        assert_eq!(ask.request, site);
-        assert_eq!(ask.host, "shop.example");
-        assert_eq!(ask.url, "https://www.shop.example/boxes");
-        assert_eq!(ask.why, "It sells the boxes.");
-
-        // Decided by the owner, either way, it waits no more.
-        board.put(
-            at(9, 7),
-            Some("CTV-1"),
-            None,
-            "site.approved",
-            json!({ "host": "shop.example", "request": site }),
-        );
-        assert_eq!(rows(&board).len(), 1, "only the post is left");
-        let other = asked_to_read(&board, 8, "other.example", "https://other.example/");
-        assert_eq!(rows(&board).len(), 2);
-        board.put(
-            at(9, 9),
-            Some("CTV-1"),
-            None,
-            "site.declined",
-            json!({ "request": other, "host": "other.example", "note": "" }),
-        );
-        assert_eq!(rows(&board).len(), 1);
-
-        // A decision an agent's session recorded is no decision.
-        let third = asked_to_read(&board, 10, "third.example", "https://third.example/");
-        board.session(
-            at(9, 11),
-            Some("CTV-1"),
-            "kai",
-            "session-1",
-            "site.approved",
-            json!({ "host": "third.example", "request": third }),
-        );
-        assert_eq!(rows(&board).len(), 2, "the request still waits");
     }
 }
