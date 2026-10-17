@@ -77,7 +77,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   Before the change the first call commits.
 - No test compares the description's text today, and none is added: the words are not behaviour.
 
-- [ ] `feat(runtime): an agent's commit message names no task id`
+- [x] `feat(runtime): an agent's commit message names no task id`
 
 ## Verification
 
