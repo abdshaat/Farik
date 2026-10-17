@@ -7478,7 +7478,7 @@ mod tests {
         harness
     }
 
-    /// The three tasks of a new project's Catervafication, and that Marketing's depends on the plan.
+    /// The three tasks of a new project's Catervafication; Marketing's depends on nothing (ADR 0063).
     fn the_new_projects_tasks_are_filed(harness: &Harness) {
         let files = &harness.project.deps.files;
         let roles: Vec<String> = ["CTV-4", "CTV-5", "CTV-6"]
@@ -7498,14 +7498,10 @@ mod tests {
         let marketing = files
             .read_contract(&"CTV-6".parse().expect("an id"))
             .expect("the task is filed");
-        assert_eq!(
-            marketing
-                .dependencies
-                .iter()
-                .map(|dependency| dependency.as_str())
-                .collect::<Vec<_>>(),
-            ["CTV-2"],
-            "the Marketing task reads the plan task's branch"
+        assert!(
+            marketing.dependencies.is_empty(),
+            "the Marketing task waits for nothing: {:?}",
+            marketing.dependencies
         );
     }
 

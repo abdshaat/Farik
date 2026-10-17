@@ -5,7 +5,7 @@ use std::fmt;
 
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::{
-    DocumentFormat, artifact_marks, hunt_report, role_folder, with_format,
+    DocumentFormat, artifact_marks, hunt_report, is_hunt, role_folder, with_format,
 };
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::transition::TransitionRequest;
@@ -13,7 +13,6 @@ use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Team, changes_code};
 use catervas_protocol::event::{CatervasEvent, EventBody, EventKind};
 use catervas_store::files::FilesError;
-use catervas_store::product_plan::product_plan_tasks;
 use catervas_store::requests::{
     RequestError, file_catervafication_epic, file_request, placeholder_budget_usd,
 };
@@ -86,10 +85,6 @@ pub(crate) fn catervafication_roles(
 /// filed (ADR 0063): an active Software Developer, then an active UI/UX Designer whose browser is
 /// ready. A new project has no code to hunt in, and a project folder's hunts are planned apart.
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "file_due files the hunts in the next commit")
-)]
 pub(crate) fn catervafication_hunts(
     team: &Team,
     project: Project,
@@ -118,10 +113,6 @@ pub(crate) const HUNTS_REQUIREMENT: &str = "The Software Developer and the UI/UX
 
 /// Whether the epic asks for the bug hunts.
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "file_due files the hunts in the next commit")
-)]
 pub(crate) fn epic_hunts(epic: &TaskContract) -> bool {
     epic.requirements
         .iter()
@@ -136,10 +127,6 @@ pub(crate) fn epic_hunts(epic: &TaskContract) -> bool {
 ///
 /// If `role` is not one that hunts; `catervafication_hunts` lists no other.
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "file_due files the hunts in the next commit")
-)]
 pub(crate) fn hunt_contract(role: Role, max_cost_usd: f64, format: DocumentFormat) -> Value {
     let path = hunt_report(role, format).expect("only a Developer or a Designer hunts");
     let file_name = path.rsplit('/').next().unwrap_or(&path).to_string();
@@ -566,11 +553,10 @@ pub(crate) enum FileDue {
 }
 
 /// Files, as Catervas, the task of each role `catervafication_roles` lists that has none under
-/// `epic` in any status (a task the owner cancelled is not filed again), each under the
-/// epic. The Marketing Specialist's task is filed with the others and depends on the Product
-/// Manager's task under the epic (on an existing repository) or on the new project's product plan
-/// task, so that it starts from that task's branch once it is accepted (ADR 0061); it is not filed
-/// when that task is cancelled.
+/// `epic` in any status (a task the owner cancelled is not filed again), each under the epic, and
+/// then, when the epic asks for them, the bug hunt of each role `catervafication_hunts` lists that
+/// has none. The Marketing Specialist's task is filed with the others and depends on no task: a
+/// new project's product plan task is accepted before its Catervafication starts (ADR 0063).
 ///
 /// # Errors
 ///
@@ -583,64 +569,40 @@ pub(crate) fn file_due(
     project: Project,
 ) -> Result<FileDue, CatervaficationError> {
     let designer_ready = deps.transitions.designer_browser(team) == DesignerBrowser::Ready;
-    let mut held: Vec<(Role, &TaskProjection)> = Vec::new();
+    // The roles of the tasks under the epic, each with whether it is a hunt.
+    let mut held: Vec<(Role, bool)> = Vec::new();
     for task in board
         .iter()
         .filter(|row| row.parent.as_ref() == Some(&epic.task_id))
     {
-        held.push((deps.files.read_contract(&task.task_id)?.assignee_role, task));
+        let contract = deps.files.read_contract(&task.task_id)?;
+        held.push((contract.assignee_role, is_hunt(&contract)));
     }
     let max_cost_usd = placeholder_budget_usd(&team.rules());
-    let mut filed: Vec<TaskId> = Vec::new();
-    let mut filed_by: Vec<(Role, TaskId)> = Vec::new();
+    let format = team.document_format();
+    let mut due: Vec<(Value, Role)> = Vec::new();
     for (role, reviewer) in catervafication_roles(team, project, designer_ready) {
-        if held.iter().any(|(held, _)| *held == role) {
-            continue;
+        if !held.contains(&(role, false)) {
+            due.push((
+                task_contract(project, role, reviewer, &epic.task_id, max_cost_usd, format),
+                role,
+            ));
         }
-        let mut dependencies: Vec<TaskId> = Vec::new();
-        if role == Role::MarketingSpecialist {
-            match project {
-                Project::Existing => {
-                    let held_plan = held
-                        .iter()
-                        .find(|(held, _)| *held == Role::ProductManager)
-                        .map(|(_, row)| *row);
-                    match held_plan {
-                        // The owner cancelled it: nothing to read.
-                        Some(plan) if plan.status == TaskStatus::Cancelled => continue,
-                        Some(plan) => dependencies.push(plan.task_id.clone()),
-                        None => match filed_by
-                            .iter()
-                            .find(|(filed, _)| *filed == Role::ProductManager)
-                        {
-                            Some((_, id)) => dependencies.push(id.clone()),
-                            None => continue,
-                        },
-                    }
-                }
-                Project::New => {
-                    if let Some((plan, _)) = product_plan_tasks(&deps.log)?.pop() {
-                        dependencies.push(plan);
-                    }
-                }
+    }
+    if epic_hunts(&deps.files.read_contract(&epic.task_id)?) {
+        for role in catervafication_hunts(
+            team,
+            project,
+            designer_ready,
+            deps.files.is_project_folder(),
+        ) {
+            if !held.contains(&(role, true)) {
+                due.push((hunt_contract(role, max_cost_usd, format), role));
             }
         }
-        let mut wire = task_contract(
-            project,
-            role,
-            reviewer,
-            &epic.task_id,
-            max_cost_usd,
-            team.document_format(),
-        );
-        if !dependencies.is_empty() {
-            wire["dependencies"] = json!(
-                dependencies
-                    .iter()
-                    .map(|id| id.as_str())
-                    .collect::<Vec<_>>()
-            );
-        }
+    }
+    let mut filed: Vec<TaskId> = Vec::new();
+    for (wire, _) in due {
         let contract = file_request(
             &deps.files,
             &deps.log,
@@ -652,7 +614,6 @@ pub(crate) fn file_due(
             None,
         )?;
         deps.projections.catch_up()?;
-        filed_by.push((role, contract.id.clone()));
         filed.push(contract.id);
     }
     Ok(if filed.is_empty() {

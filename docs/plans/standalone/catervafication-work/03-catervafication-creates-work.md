@@ -221,7 +221,7 @@ Two more tests change to the new rows here:
   `catervafication.get` answers `roles: ["product_manager", "software_developer"]` and `offered:
   true`.
 
-- [ ] `feat(runtime): a Catervafication files its hunts and its marketing in its first tick`
+- [x] `feat(runtime): a Catervafication files its hunts and its marketing in its first tick`
 
 ## Verification
 

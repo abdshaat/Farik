@@ -2057,7 +2057,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn files_one_task_per_role_with_a_folder() {
+    async fn files_every_task_in_the_first_tick() {
         let harness = Harness::with_the_suggested_six("req-catervafication-files");
         let (orchestrator, adapter) = a_catervafication_in_progress(&harness).await;
 
@@ -2067,7 +2067,7 @@ mod tests {
             report,
             TickReport::Acted {
                 task_id: task("CTV-1"),
-                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5, CTV-6"
+                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5, CTV-6, CTV-7, CTV-8"
                     .to_string()
             }
         );
@@ -2078,13 +2078,16 @@ mod tests {
                 "architect",
                 "software_developer",
                 "ui_ux_designer",
-                "marketing_specialist"
+                "marketing_specialist",
+                "software_developer",
+                "ui_ux_designer"
             ]
         );
-        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5", "CTV-6"] {
+        for id in [
+            "CTV-2", "CTV-3", "CTV-4", "CTV-5", "CTV-6", "CTV-7", "CTV-8",
+        ] {
             let row = harness.row(id);
             assert_eq!(row.parent, Some(task("CTV-1")), "{id}");
-            assert_eq!(row.sprint, None, "{id}");
             let created = harness
                 .events(&[EventKind::TaskCreated])
                 .into_iter()
@@ -2095,23 +2098,34 @@ mod tests {
                 "{id}"
             );
         }
-        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-        // The team writes HTML (the default): the Architect is asked for pages, a diagram among them.
-        let architects = serde_json::to_string(
-            &harness
+        let contract = |id: &str| {
+            harness
                 .project
                 .deps
                 .files
-                .read_contract(&task("CTV-3"))
-                .expect("the Architect's task"),
-        )
-        .expect("a contract is json");
+                .read_contract(&task(id))
+                .expect("a contract")
+        };
+        assert!(contract("CTV-6").dependencies.is_empty());
+        assert!(catervas_core::folders::is_hunt(&contract("CTV-7")));
+        assert!(catervas_core::folders::is_hunt(&contract("CTV-8")));
+        assert!(!catervas_core::folders::is_hunt(&contract("CTV-4")));
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        // The team writes HTML (the default): the Architect is asked for pages, a diagram among them.
+        let architects = serde_json::to_string(&contract("CTV-3")).expect("a contract is json");
         assert!(
             architects.contains("architecture/overview.html") && !architects.contains(".md"),
             "{architects}"
         );
+        // A second tick files nothing.
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            !matches!(&report, TickReport::Acted { what, .. } if what.starts_with("filed the Catervafication")),
+            "{report:?}"
+        );
+        assert_eq!(roles_under_the_epic(&harness).len(), 7);
 
-        // A Designer whose browser is not ready (no preview can run) gets no task.
+        // A Designer whose browser is not ready (no preview can run) gets no task and no hunt.
         let unready = Harness::new(
             "req-catervafication-files-unready",
             crate::tools::fixtures::with_the_suggested_six,
@@ -2124,75 +2138,31 @@ mod tests {
                 "product_manager",
                 "architect",
                 "software_developer",
-                "marketing_specialist"
+                "marketing_specialist",
+                "software_developer"
             ]
         );
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn files_the_marketing_task_with_the_others_depending_on_the_plan() {
-        let harness = Harness::with_the_suggested_six("req-catervafication-marketing");
+    async fn an_epic_without_the_hunts_requirement_files_no_hunt() {
+        let harness = Harness::with_the_suggested_six("req-catervafication-no-hunts");
         let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
-        orchestrator.tick().await.expect("the tick files the tasks");
-
-        assert_eq!(
-            roles_under_the_epic(&harness).last().map(String::as_str),
-            Some("marketing_specialist")
-        );
-        let marketing = harness
-            .project
-            .deps
-            .files
-            .read_contract(&task("CTV-6"))
-            .expect("the Marketing task");
-        assert_eq!(
-            marketing
-                .dependencies
-                .iter()
-                .map(|dependency| dependency.as_str())
-                .collect::<Vec<_>>(),
-            ["CTV-2"],
-            "it reads the Product Manager's task, and starts from its branch once accepted"
-        );
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn files_no_marketing_task_for_a_cancelled_product_plan() {
-        let harness = Harness::with_the_suggested_six("req-catervafication-no-plan");
-        // The Marketing Specialist is paused at first, so its task is not filed with the others.
-        let team = harness
-            .project
-            .deps
-            .files
-            .read_team()
-            .expect("the team reads");
-        let mut wire = serde_json::to_value(&team).expect("the team is JSON");
-        wire["agents"][5]["status"] = json!("paused");
-        harness
-            .project
-            .deps
-            .files
-            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
-            .expect("the team is written");
-        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
-        orchestrator.tick().await.expect("the tick files the tasks");
-        assert_eq!(roles_under_the_epic(&harness).len(), 4);
-        harness
-            .project
-            .moved("CTV-2", "draft", "cancelled", &json!({}));
-        wire["agents"][5]["status"] = json!("active");
-        harness
-            .project
-            .deps
-            .files
-            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
-            .expect("the team is written");
+        // An epic filed before hunts existed: R1 alone.
+        let files = &harness.project.deps.files;
+        let mut wire = serde_json::to_value(files.read_contract(&task("CTV-1")).expect("the epic"))
+            .expect("a contract is json");
+        wire["requirements"] = json!([wire["requirements"][0].clone()]);
+        wire["exit_criteria"][0]["satisfies"] = json!(["R1"]);
+        files
+            .write_contract(&catervas_core::contract::validate_contract(&wire).expect("a contract"))
+            .expect("the epic is written");
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(roles_under_the_epic(&harness).len(), 4, "no Marketing task");
+        assert_eq!(roles_under_the_epic(&harness).len(), 5);
+        assert!(!roles_under_the_epic(&harness).iter().skip(5).any(|_| true));
     }
 
     #[tokio::test]
@@ -2229,7 +2199,8 @@ mod tests {
                 "product_manager",
                 "architect",
                 "software_developer",
-                "marketing_specialist"
+                "marketing_specialist",
+                "software_developer"
             ]
         );
 
@@ -2245,7 +2216,7 @@ mod tests {
             .await
             .expect("the tick runs");
         assert!(is_idle(&report), "{report:?}");
-        assert_eq!(roles_under_the_epic(&harness).len(), 4);
+        assert_eq!(roles_under_the_epic(&harness).len(), 5);
 
         // A Designer who joins later gets its task on the next tick.
         wire["agents"][4]["status"] = json!("active");
@@ -2260,13 +2231,14 @@ mod tests {
             .await
             .expect("the tick runs");
         assert!(
-            matches!(&report, TickReport::Acted { what, .. } if what.ends_with("CTV-6")),
+            matches!(&report, TickReport::Acted { what, .. } if what == "filed the Catervafication's tasks: CTV-7, CTV-8"),
             "{report:?}"
         );
         assert_eq!(
             roles_under_the_epic(&harness).last().map(String::as_str),
             Some("ui_ux_designer")
         );
+        assert_eq!(roles_under_the_epic(&harness).len(), 7);
     }
 
     #[tokio::test]

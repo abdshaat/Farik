@@ -3090,6 +3090,11 @@ mod tests {
                     catervas_core::contract::Role::SoftwareDeveloper,
                     catervas_core::contract::Role::SoftwareDeveloper
                 ),
+                // The Developer's bug hunt, which the Product Manager is named to review.
+                (
+                    catervas_core::contract::Role::SoftwareDeveloper,
+                    catervas_core::contract::Role::ProductManager
+                ),
             ]
         );
     }
