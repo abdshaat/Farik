@@ -1083,7 +1083,10 @@ fn judged(deps: &ToolDeps, params: &Value) -> Result<(TaskId, Vec<String>, Value
     let contract = contract_of(deps, &task_id)?;
     let row = row(deps, &task_id)?;
     let edited = &params["contract"];
-    let changed = changed_fields(&before, edited);
+    let mut changed = changed_fields(&before, edited);
+    // The branch is Catervas's, recorded when the worktree is first made (ADR 0066): an editor
+    // opened before then does not have it, and a save writes over the file as it is now.
+    changed.retain(|field| field != "branch");
     // Locking is recorded as `contract.locked`/`contract.unlocked`, which a save does not write.
     if changed.iter().any(|field| field == "locked") {
         return Err(Failure::new(
@@ -3869,6 +3872,36 @@ pub(super) mod tests {
             "{refused}"
         );
         assert_eq!(harness.project.file("CTV-1"), before);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_save_keeps_the_recorded_branch() {
+        let harness = driven("gates-save-branch");
+        harness.file("CTV-1", "refining", |wire| {
+            wire["branch"] = json!("feat/add-a-login-page");
+        });
+        let got = query(
+            &harness.daemon,
+            "contract.get",
+            &json!({ "task_id": "CTV-1" }),
+            "contractGetResult",
+        );
+        // An editor opened before the start has no `branch`; the save must not clear it.
+        let mut edited = got["contract"].clone();
+        edited.as_object_mut().expect("an object").remove("branch");
+        edited["intent"] =
+            json!("A person signs in with an email and a password, and stays signed in.");
+        let saved = call(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "CTV-1", "contract": edited }),
+            "contractSaveResult",
+        );
+        assert_eq!(saved["saved"], true, "{saved}");
+        let file = harness.project.file("CTV-1");
+        assert_eq!(file["intent"], edited["intent"]);
+        assert_eq!(file["branch"], "feat/add-a-login-page");
     }
 
     #[test]

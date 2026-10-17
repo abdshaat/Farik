@@ -170,7 +170,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 
   Before the change it fails with the store's-fields refusal.
 
-- [ ] `fix(runtime): the human's save keeps the branch Catervas recorded`
+- [x] `fix(runtime): the human's save keeps the branch Catervas recorded`
 
 ### Task 4: a task's pull request carries no task id
 
