@@ -102,6 +102,7 @@ const TOLD: Record<string, keyof typeof en> = {
 	"design_plan.approved": "toldDesignApproved",
 	"design_plan.returned": "toldDesignReturned",
 	"catervafication.started": "toldCatervafication",
+	"connection.requested": "toldConnectionRequested",
 };
 
 /** The body fields that name who did it, one per kind that has one. */
@@ -137,13 +138,33 @@ const NOTES = [
 	["escalation", "helpExplains"],
 ] as const;
 
+/** Whether the contract is a bug hunt: its `allowedPaths` are exactly its assignee's hunt report
+ * (`catervas_core::folders::is_hunt`, ADR 0063). */
+export function isHunt(contract: Contract): boolean {
+	const [only, ...more] = contract.allowedPaths;
+	const stem =
+		contract.assigneeRole === "software_developer"
+			? "docs/catervas/engineering/bug-hunt"
+			: contract.assigneeRole === "ui_ux_designer"
+				? "docs/catervas/design/ui-bug-hunt"
+				: undefined;
+	return (
+		contract.kind !== "epic" &&
+		stem !== undefined &&
+		more.length === 0 &&
+		(only === `${stem}.md` || only === `${stem}.html`)
+	);
+}
+
 /** Whether an agent reviews the contract's result: a task, not an epic, whose assignee's role
- * changes code (`catervas_core::team::reviewed_by_an_agent`, ADR 0061). */
+ * changes code, and which is not a bug hunt
+ * (`catervas_core::team::reviewed_by_an_agent`, ADR 0061 and 0063). */
 export function reviewedByAnAgent(contract: Contract): boolean {
 	return (
 		contract.kind !== "epic" &&
 		(contract.assigneeRole === "software_developer" ||
-			contract.assigneeRole === "ui_ux_designer")
+			contract.assigneeRole === "ui_ux_designer") &&
+		!isHunt(contract)
 	);
 }
 

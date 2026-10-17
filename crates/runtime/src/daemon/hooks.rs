@@ -586,11 +586,9 @@ fn plan_gate(
         .iter()
         .find(|agent| agent.id.as_str() == registration.agent_id)
         .map_or(Role::Human, |agent| Role::from(agent.role));
-    design_plan_gate(&deps.log, role, tier, registration.task_id.as_ref()).map_err(|error| {
-        match error {
-            ToolError::Refused { reason } => reason,
-            other => format!("design_plan_unreadable: {other}"),
-        }
+    design_plan_gate(deps, role, tier, registration.task_id.as_ref()).map_err(|error| match error {
+        ToolError::Refused { reason } => reason,
+        other => format!("design_plan_unreadable: {other}"),
     })
 }
 

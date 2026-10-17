@@ -1,6 +1,6 @@
 ---
 name: catervafying-the-repository
-description: Use when a task asks you to document how the project is built and worked on, a task of its Catervafication.
+description: Use when a task asks you to document how the project is built and worked on, a task of its Catervafication, or to hunt for bugs in its code.
 ---
 
 # Catervafying the repository
@@ -46,3 +46,17 @@ With no documented process, no CI that runs tests and no consistent commit style
 
 Commit with `catervas_git_commit`, and request `verifying`. The reviewer checks each rule against
 the evidence you name.
+
+## Hunting for bugs
+
+When your task is the bug hunt, its one allowed path is `docs/catervas/engineering/bug-hunt` in
+the team's format, and you change no code.
+
+- Read the code, and run the project's tests and checks with `catervas_exec`.
+- File each real bug with `catervas_file_bug`, with its evidence: the command and the lines of
+  output, or the file and line. File at most 10, never the same bug twice, and a failing test only
+  when the code, not the test, is wrong.
+- Remove anything the commands left in the worktree.
+- Write the report: what you checked, then a section headed "Bugs filed" with each id and title,
+  or "None found".
+- Commit with `catervas_git_commit`, and request `verifying`.

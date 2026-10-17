@@ -38,6 +38,8 @@ const WORDS: Record<string, keyof typeof en> = {
 	extra_tries_only_for_tries: "refuseExtraTries",
 	same_status: "refuseSameStatus",
 	agent_retired: "refuseAgentRetired",
+	agent_not_active: "refuseAgentNotActive",
+	task_too_short: "refuseTaskTooShort",
 	triage_refused: "refuseTriage",
 	lock_refused: "refuseLock",
 	// The owner's decisions on a marketing plan (SPEC 6.5).

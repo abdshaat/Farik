@@ -624,11 +624,25 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
 /// for want of a Product Manager and someone to check its notes, and the roles that would get a task.
 fn catervafication_get(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     let ready = deps.transitions.designer_browser(team) == DesignerBrowser::Ready;
-    let roles = crate::catervafication::catervafication_roles(
+    let mut roles = crate::catervafication::catervafication_roles(
         team,
         crate::catervafication::Project::Existing,
         ready,
     );
+    // A role that hunts for bugs is listed too, once, after the roles that write documents.
+    let members = crate::catervafication::hunt_members(deps).map_err(|e| internal(&e))?;
+    for hunt in crate::catervafication::catervafication_hunts(
+        team,
+        crate::catervafication::Project::Existing,
+        ready,
+        members.as_deref(),
+    )
+    .rows
+    {
+        if roles.iter().all(|(listed, _)| *listed != hunt.role) {
+            roles.push((hunt.role, catervas_core::contract::Role::ProductManager));
+        }
+    }
     let begun = crate::catervafication::started(&deps.log)
         .map_err(|e| internal(&e))?
         .is_some()
@@ -3472,6 +3486,7 @@ pub(super) mod tests {
                     text: "Add Apple Pay to the checkout beside the card form.".to_string(),
                 }),
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the chat message is recorded")
@@ -4641,6 +4656,28 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_hunts_among_the_roles() {
+        // A Product Manager and one Developer: the Developer cannot review its own documents, but
+        // it hunts for bugs, and a hunt needs no reviewer of its role.
+        let harness = driven_by(Harness::new("gates-catervafication-hunts", |wire| {
+            wire["agents"] = json!([
+                { "id": "pm", "display_name": "pm", "role": "product_manager", "status": "active" },
+                { "id": "dev", "display_name": "dev", "role": "software_developer", "status": "active" },
+            ]);
+        }));
+        assert_eq!(
+            query(
+                &harness.daemon,
+                "catervafication.get",
+                &json!({}),
+                "catervaficationGetResult",
+            ),
+            json!({ "offered": true, "roles": ["product_manager", "software_developer"] })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn answers_the_choice_of_an_integration_waiting_on_an_accepted_task() {
         let harness = driven("gates-integration-choice");
         let choices = |id: &str| {
@@ -4748,6 +4785,7 @@ pub(super) mod tests {
                 in_reply_to: None,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("recorded");

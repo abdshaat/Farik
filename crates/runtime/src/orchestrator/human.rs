@@ -24,8 +24,8 @@ use catervas_store::pipelines::{PipelineState, data_pipelines};
 use catervas_store::product_plan::{drafts_the_plan, new_project, product_plan_tasks};
 use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use catervas_store::requests::{
-    RequestError, file_product_plan_request, hold_contract, placeholder_budget_usd,
-    product_plan_request, triage_by_human,
+    RequestError, TOO_SHORT, file_given_task, file_product_plan_request, hold_contract,
+    placeholder_budget_usd, product_plan_request, triage_by_human,
 };
 use catervas_store::{EventQuery, TaskProjection};
 use serde_json::json;
@@ -36,7 +36,7 @@ use super::verify::{governor_results, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::catervafication::{self, Project};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
-use crate::chat::{ChatError, NewChatMessage, post_chat};
+use crate::chat::{ChatError, NewChatMessage, given_request, post_chat};
 use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
 use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
@@ -154,7 +154,11 @@ pub(super) async fn handle(
         Command::ProductPlanDraft => draft_product_plan(tools),
         Command::CatervaficationStart => catervafication_start(tools),
         Command::MessagePost { text } => post_message(tools, text),
-        Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
+        Command::ChatMessagePost {
+            agent_id,
+            text,
+            as_task,
+        } => post_chat_message(tools, &agent_id, text, as_task),
         Command::ConnectorConnect {
             agent,
             server,
@@ -498,11 +502,13 @@ fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, Command
 }
 
 /// The human's message in their one-to-one chat with `agent_id` (4.3), which is refused for an
-/// agent not on the team or retired.
+/// agent not on the team or retired. Sent `as_task` (ADR 0063), it also files the request given to
+/// that agent, which must be active, from at least 20 characters.
 fn post_chat_message(
     tools: &ToolDeps,
     agent_id: &str,
     text: String,
+    as_task: bool,
 ) -> Result<CommandReport, CommandError> {
     let team = tools.files.read_team().map_err(failed)?;
     let Some(agent) = team
@@ -522,6 +528,11 @@ fn post_chat_message(
             ),
         });
     }
+    let contract = if as_task {
+        Some(given_contract(&team, agent, &text)?)
+    } else {
+        None
+    };
     let seq = post_chat(
         &tools.log,
         tools.clock.as_ref(),
@@ -534,15 +545,79 @@ fn post_chat_message(
             in_reply_to: None,
             request: None,
             session_id: None,
+            as_task,
         },
     )
     .map_err(|error| match error {
         ChatError::Refused { reason } => CommandError::Invalid { detail: reason },
         ChatError::Store(error) => failed(error),
     })?;
+    let Some(wire) = contract else {
+        return Ok(CommandReport {
+            said: format!("sent to {}", agent.display_name.as_str()),
+            events: vec![seq],
+        });
+    };
+    let task = file_given_task(
+        &tools.files,
+        &tools.log,
+        wire,
+        HUMAN,
+        agent_id,
+        seq,
+        tools.clock.now(),
+        &tools.ids,
+    )
+    .map_err(|error| from_request("task_refused", error))?;
+    tools.projections.catch_up().map_err(failed)?;
+    let mut events = vec![seq];
+    events.extend(
+        tools
+            .log
+            .read(&EventQuery {
+                task_id: Some(task.id.clone()),
+                ..EventQuery::default()
+            })
+            .map_err(failed)?
+            .iter()
+            .map(|event| event.envelope.seq),
+    );
     Ok(CommandReport {
-        said: format!("sent to {}", agent.display_name.as_str()),
-        events: vec![seq],
+        said: format!(
+            "given to {} as {}",
+            agent.display_name.as_str(),
+            task.id.as_str()
+        ),
+        events,
+    })
+}
+
+/// The contract of the task the owner gives `agent` in its chat (ADR 0063): the owner's words as
+/// its intent, the agent's role as its assignee and the usual reviewer role. Refused, before
+/// anything is recorded, for an agent that is not active and for fewer than 20 characters.
+fn given_contract(
+    team: &Team,
+    agent: &Agent,
+    text: &str,
+) -> Result<serde_json::Value, CommandError> {
+    if agent.status != AgentStatus::Active {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "agent_not_active: {} is paused; resume them on the Team page to give them a task",
+                agent.display_name.as_str()
+            ),
+        });
+    }
+    given_request(team, agent, text, &team.rules()).map_err(|reason| {
+        if reason == TOO_SHORT {
+            CommandError::Refused {
+                reason: format!("task_too_short: {reason}"),
+            }
+        } else if reason.ends_with("reviewer role") {
+            failed(reason)
+        } else {
+            CommandError::Invalid { detail: reason }
+        }
     })
 }
 
@@ -2739,6 +2814,7 @@ mod tests {
                 request: None,
                 heard: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the greeting is recorded");
@@ -3001,6 +3077,136 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one command, all its records and refusals"
+    )]
+    async fn gives_an_agent_a_task_from_its_chat() {
+        let harness = Harness::with_the_suggested_six("human-chat-task");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let text = "Add a dark mode switch to the settings page";
+        let as_task = |agent: &str, text: &str| Command::ChatMessagePost {
+            agent_id: agent.to_string(),
+            text: text.to_string(),
+            as_task: true,
+        };
+
+        let report = handled(&orchestrator, as_task("dev", text)).await;
+
+        let name = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team")
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "dev")
+            .map(|agent| agent.display_name.as_str().to_string())
+            .expect("dev");
+        assert_eq!(report.said, format!("given to {name} as CTV-1"));
+        let kinds = [
+            EventKind::ChatMessagePosted,
+            EventKind::TaskCreated,
+            EventKind::RequestTriaged,
+        ];
+        let seen = harness.events(&kinds);
+        assert_eq!(
+            seen.iter()
+                .map(|event| event.body.kind())
+                .collect::<Vec<_>>(),
+            kinds
+        );
+        assert_eq!(
+            report.events,
+            seen.iter()
+                .map(|event| event.envelope.seq)
+                .collect::<Vec<_>>()
+        );
+        let EventBody::ChatMessagePosted(posted) = &seen[0].body else {
+            panic!("a chat message");
+        };
+        assert_eq!(
+            (posted.author.as_str(), posted.as_task),
+            ("human", Some(true))
+        );
+        let EventBody::TaskCreated(created) = &seen[1].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "human");
+        assert_eq!(
+            created.from_chat_message.map(std::num::NonZeroU64::get),
+            Some(seen[0].envelope.seq)
+        );
+        assert_eq!(
+            created.given_to.as_ref().map(|agent| agent.as_str()),
+            Some("dev")
+        );
+        let EventBody::RequestTriaged(triaged) = &seen[2].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.reason, "a task the owner gave dev in their chat");
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-1"))
+            .expect("the contract");
+        assert_eq!(
+            contract.assignee_role,
+            catervas_core::contract::Role::SoftwareDeveloper
+        );
+        assert_eq!(
+            contract.reviewer_role,
+            catervas_core::contract::Role::Architect
+        );
+        assert_eq!(contract.intent.as_str(), text);
+
+        let deps = &harness.project.deps;
+        let waiting = crate::chat::chat_waiting(
+            &deps.log,
+            &deps.projections,
+            &deps.files.read_team().expect("the team"),
+            "dev",
+            deps.clock.now(),
+        )
+        .expect("reads");
+        assert_eq!(waiting, None);
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // Each refusal records nothing more.
+        let before = harness
+            .events(&[EventKind::ChatMessagePosted, EventKind::TaskCreated])
+            .len();
+        let short = refused(&orchestrator, as_task("dev", "too short")).await;
+        assert!(short.starts_with("task_too_short: "), "{short}");
+        handled(
+            &orchestrator,
+            Command::AgentUpdate {
+                agent_id: "dev".to_string(),
+                status: AgentStatus::Paused,
+            },
+        )
+        .await;
+        let paused = refused(
+            &orchestrator,
+            as_task("dev", "Please add a light mode switch too"),
+        )
+        .await;
+        assert!(paused.starts_with("agent_not_active: "), "{paused}");
+        assert_eq!(
+            harness
+                .events(&[EventKind::ChatMessagePosted, EventKind::TaskCreated])
+                .len(),
+            before
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn refuses_a_second_start_and_a_new_projects() {
         let nothing_recorded = |harness: &Harness| {
             assert!(
@@ -3089,6 +3295,11 @@ mod tests {
                 (
                     catervas_core::contract::Role::SoftwareDeveloper,
                     catervas_core::contract::Role::SoftwareDeveloper
+                ),
+                // The Developer's bug hunt, which the Product Manager is named to review.
+                (
+                    catervas_core::contract::Role::SoftwareDeveloper,
+                    catervas_core::contract::Role::ProductManager
                 ),
             ]
         );
@@ -4604,6 +4815,7 @@ mod tests {
         let chat = |agent: &str, text: String| Command::ChatMessagePost {
             agent_id: agent.to_string(),
             text,
+            as_task: false,
         };
 
         for (agent, text) in [
@@ -4651,6 +4863,7 @@ mod tests {
                     in_reply_to: None,
                     request: Some(crate::chat::ProposedRequest { title, text }),
                     session_id: None,
+                    as_task: false,
                 },
             );
             assert!(

@@ -438,6 +438,7 @@ export const en = {
 	suggestionsShowAll: "Show all {count}",
 	suggestionsShowFewer: "Show fewer",
 	suggestionsLine: "{agent} · {about}",
+	suggestionsAsked: "{agent} asks: {why}",
 	waitingTitle: "Waiting on you ({count})",
 	waitingList: "Waiting on you",
 	waitingNone: "Nothing waits on you.",
@@ -717,6 +718,9 @@ export const en = {
 	refuseExtraTries:
 		"More tries come only with sending the work back to be done, for a task that used up its tries.",
 	refuseSameStatus: "That is already so, so nothing changed.",
+	refuseAgentNotActive:
+		"This teammate is paused. Resume them on the Team page to give them a task.",
+	refuseTaskTooShort: "Say a little more: a task needs at least 20 characters.",
 	refuseAgentRetired:
 		"This teammate has left the team, so this chat can be read but not added to.",
 	refuseTriage:
@@ -964,6 +968,9 @@ export const en = {
 	chatsNoSuch: "No such teammate",
 	chatsLabel: "Message {name}",
 	chatsSend: "Send",
+	chatsSendTask: "Send as a task",
+	chatsTaskInfo:
+		"{name} turns your message into a task, plans it and starts on it. Changes to code are still checked before they reach you.",
 	chatsEnterSends: "Enter sends, Shift+Enter for a new line",
 	chatsTooLong:
 		"A message is at most 4000 characters, and this one is {length}.",
@@ -972,6 +979,7 @@ export const en = {
 	chatsSendRequest: "Send as a request",
 	chatsNothingSent: "Nothing is sent until you press it.",
 	chatsSentAs: "Sent as {id}",
+	chatsGivenAs: "Given to {name} as {id}",
 	chatsAnswering: "{name} is thinking…",
 	chatsDaySpent:
 		"Today’s spending limit is reached, so {name} will answer tomorrow. Your message is kept.",
@@ -2419,17 +2427,18 @@ export const en = {
 	readyRecommended: "Recommended",
 	readyOfferTitle: "Start with a Catervafication",
 	readyOfferLead:
-		"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
+		"Your team reads your project, writes down what it learns, looks for bugs and starts your marketing. You can read all of it in Files.",
 	readyPm:
 		"writes what your product is and what comes next, as your product plan.",
 	readyArchitect: "writes how your project is put together, with diagrams.",
 	readyDeveloper:
-		"writes how your project is built and worked on: its habits and rules.",
-	readyDesigner: "writes down every screen your project has.",
+		"writes how your project is built and worked on, and looks for bugs in the code.",
+	readyDesigner:
+		"writes down every screen your project has, and looks for what is broken on them.",
 	readyMarketing:
-		"writes your marketing plan, after the product plan is written.",
+		"writes your marketing plan and starts on it; anything that costs money waits for you.",
 	readyNote:
-		"Your team only adds its notes; nothing else in your project changes.",
+		"Your team adds its notes and files each bug it finds as a request; nothing in your code changes yet.",
 	readyStart: "Start",
 	readyLater: "Later",
 	readyLaterNote: "Later keeps this on Today.",
@@ -2443,6 +2452,7 @@ export const en = {
 		"No one on your team can both write and have their notes checked. Add an Architect or a Scrum Master on the Team page, then start.",
 	cardTitle: "Your team hasn’t documented this project yet",
 	cardLead:
-		"A first piece of work where your team reads your project and writes down what it learns, before building anything.",
+		"A first piece of work where your team reads your project, writes down what it learns, looks for bugs and starts your marketing.",
 	toldCatervafication: "Catervas filed it to document the project.",
+	toldConnectionRequested: "Asked you to connect a service.",
 };

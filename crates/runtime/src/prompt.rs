@@ -178,8 +178,10 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
          Never write a file's or a folder's path: name it in plain words, as the user knows it. \
          When a table or a diagram says it better, put it in the reply: Markdown tables and \
          `mermaid` diagrams are shown formatted. You can read the project and change nothing. When \
-         work is needed, put a request in your reply, a title and what it asks for, for the user to \
-         send. Then end the session.",
+         the message asks you for work your role does, take it with `catervas_take_task` and reply \
+         in one line naming the task. When it asks for work another role does, put a request in \
+         your reply, a title and what it asks for, for the user to send. Otherwise answer. Then \
+         end the session.",
     ),
 ];
 

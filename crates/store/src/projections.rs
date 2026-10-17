@@ -790,7 +790,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::CatervaficationStarted(_)
         | EventBody::DocumentRewriteStarted(_)
         // A delivery is read from the log; it moves no board row.
-        | EventBody::DeliveryClosed(_) => Ok(()),
+        | EventBody::DeliveryClosed(_)
+        // An agent's ask for the owner to see on Today; the log is read for it, no table holds it.
+        | EventBody::ConnectionRequested(_) => Ok(()),
     }
 }
 

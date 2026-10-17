@@ -29,8 +29,10 @@ use crate::preview::RunningPreview;
 use crate::session::{SessionPurpose, works_on_a_task};
 use crate::transitions::Transitions;
 
+mod bugs;
 mod channel;
 mod chat;
+mod connections;
 pub(crate) mod contracts;
 mod costs;
 pub(crate) mod design;
@@ -251,6 +253,16 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "Ask the human a question; end your turn after asking.",
         ),
+        tool::<connections::RequestConnectionInput>(
+            "catervas_request_connection",
+            Read,
+            "Ask the owner to connect a service your kit offers that your work needs, and why. The owner sees it on Today; carry on without it.",
+        ),
+        tool::<bugs::FileBugInput>(
+            "catervas_file_bug",
+            Read,
+            "In a bug hunt: file one bug you found, with where it is, the steps, what you expected, what happened, its severity and the evidence. It goes to the Product Manager as a request. At most 10 per hunt.",
+        ),
         tool::<folders::WriteFolderDocInput>(
             "catervas_write_folder_doc",
             Read,
@@ -296,10 +308,15 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "End your design review with your answer: pass, or fail with what the Developer is to change. Check the task's pages at both widths in both themes first.",
         ),
+        tool::<chat::TakeTaskInput>(
+            "catervas_take_task",
+            Read,
+            "In your one-to-one chat: take the work the owner's message asks for as your own task; text is its one-line title, and its intent is the owner's message. You write its contract and start once your current work allows. Then reply in one line naming it.",
+        ),
         tool::<chat::ChatReplyInput>(
             "catervas_chat_reply",
             Read,
-            "Answer the user in your one-to-one chat, once, then end your turn. When work is needed, add a request, a title and what it asks for, for the user to send. During a new project's interview, put your summary in heard.",
+            "Answer the user in your one-to-one chat, once, then end your turn. When work another role does is needed, add a request, a title and what it asks for, for the user to send. During a new project's interview, put your summary in heard.",
         ),
         tool::<costs::ReadCostsInput>(
             "catervas_read_costs",
@@ -485,6 +502,8 @@ pub async fn call_tool(
         "catervas_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
+        "catervas_request_connection" => connections::request_connection(&call, &parse(input)?),
+        "catervas_file_bug" => bugs::file_bug(&call, &parse(input)?),
         "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
         "catervas_append_retro" => retro::append_retro(&call, &parse(input)?),
@@ -494,6 +513,7 @@ pub async fn call_tool(
         "catervas_propose_design_plan" => design::propose(&call, parse(input)?),
         "catervas_check_page" => design::check(&call, parse(input)?).await,
         "catervas_record_design_review" => design::record_review(&call, parse(input)?),
+        "catervas_take_task" => chat::take_task(&call, &parse(input)?),
         "catervas_chat_reply" => chat::chat_reply(&call, parse(input)?),
         "catervas_read_costs" => costs::read_costs(&call, &parse(input)?),
         "catervas_write_sheet" => sheets::write_sheet(&call, &parse(input)?),
@@ -675,7 +695,7 @@ impl Call<'_> {
         )
         .map_err(|refusal| -> ToolError { Refusal::Tool(refusal).into() })?;
         design::design_plan_gate(
-            &self.deps().log,
+            self.deps(),
             self.role(),
             tool.tier,
             self.context.task_id.as_ref(),
@@ -825,6 +845,8 @@ mod tests {
             "catervas_record_criterion_result",
             "catervas_write_note",
             "catervas_ask_human",
+            "catervas_request_connection",
+            "catervas_file_bug",
             "catervas_write_folder_doc",
             "catervas_post_message",
             "catervas_append_retro",
@@ -834,6 +856,7 @@ mod tests {
             "catervas_propose_design_plan",
             "catervas_check_page",
             "catervas_record_design_review",
+            "catervas_take_task",
             "catervas_chat_reply",
             "catervas_read_costs",
             "catervas_write_sheet",
@@ -871,7 +894,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..35] {
+        for tool in &tools[..37] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

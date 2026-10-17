@@ -268,6 +268,33 @@ impl Harness {
             });
     }
 
+    /// `file` for a task the owner gave `agent` in its chat (ADR 0063): no parent, its
+    /// `task.created` names `agent` in `given_to`.
+    pub(crate) fn file_given(
+        &self,
+        task: &str,
+        status: &str,
+        agent: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.project.filed_given_to(task, status, agent, |wire| {
+            wire["assignee_role"] = json!("software_developer");
+            wire["reviewer_role"] = json!("software_developer");
+            wire["allowed_paths"] = json!(["done.txt"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "done.txt exists.",
+                "satisfies": ["R1"],
+                "verification": {
+                    "method": "command",
+                    "command": "test -f done.txt",
+                    "expect": { "exit_code": 0 }
+                }
+            }]);
+            change(wire);
+        });
+    }
+
     /// Files a request titled `title`, as the human does through `file_request`: step 11's CTV-1
     /// contract with no kind, an untriaged draft whose one allowed path is `done.txt`, whose one
     /// criterion C1 runs `test -f done.txt`, with one item out of scope, risk `low`, and 5 dollars.

@@ -813,6 +813,7 @@ mod tests {
                 in_reply_to,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the chat message is recorded")
@@ -856,6 +857,7 @@ mod tests {
                     works_when: "Ten orders a month.".to_string(),
                 }),
                 session_id: Some("session-1".to_string()),
+                as_task: false,
             },
         )
         .expect("the reply is recorded");
@@ -962,6 +964,7 @@ mod tests {
                     text: "Add Apple Pay at checkout, beside the card form.".to_string(),
                 }),
                 session_id: Some("session-1".to_string()),
+                as_task: false,
             },
         )
         .expect("the reply is recorded");
@@ -1048,6 +1051,7 @@ mod tests {
                         text: "Add Apple Pay at checkout, beside the card form.".to_string(),
                     }),
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("the reply is recorded")
