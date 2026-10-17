@@ -130,7 +130,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   - The private-folder case gives no `branch` and still shows no "on the branch".
   - It fails first on `feature/CTV-1`, which the page still works out itself.
 
-- [ ] `feat(web): the task page shows the branch Catervas recorded`
+- [x] `feat(web): the task page shows the branch Catervas recorded`
 
 ## Verification
 
