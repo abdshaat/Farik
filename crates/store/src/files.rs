@@ -14,7 +14,6 @@ use catervas_core::criteria::{CriteriaLibrary, validate_criteria};
 use catervas_core::pricing::prices::PRICE_TABLE;
 use catervas_core::pricing::{PriceTable, validate_price_table};
 use catervas_core::repos::{Repos, validate_repos};
-use catervas_core::sprint::{Sprint, validate_sprint};
 use catervas_core::team::{AgentId, Team, TeamTemplate, validate_team, validate_template};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -247,97 +246,6 @@ impl ProjectFiles {
     /// written.
     pub fn write_criteria(&self, library: &CriteriaLibrary) -> Result<(), FilesError> {
         self.write_text(CRITERIA, &criteria_yaml(library)?)
-    }
-
-    /// One sprint, held to the rules a sprint on the wire is held to.
-    ///
-    /// # Errors
-    ///
-    /// `NotFound` when there is no sprint with that id, or `id` is no sprint's (`S<n>`), so that
-    /// nothing outside `sprints/` is read; `Invalid` when the file is not YAML or not a sprint, or
-    /// holds a sprint with another id; `Io` otherwise.
-    pub fn read_sprint(&self, id: &str) -> Result<Sprint, FilesError> {
-        let path = sprint_path(id);
-        if !is_sprint_id(id) {
-            return Err(FilesError::NotFound {
-                path: Self::named(&path),
-            });
-        }
-        let value = self.read_yaml(&path)?;
-        let sprint = validate_sprint(&value).map_err(|errors| refused(&path, &errors))?;
-        if sprint.id.as_str() == id {
-            Ok(sprint)
-        } else {
-            Err(FilesError::Invalid {
-                path: Self::named(&path),
-                detail: format!(
-                    "the sprint in it says it is {}, and a sprint lives in the file its own id \
-                     names",
-                    sprint.id.as_str()
-                ),
-            })
-        }
-    }
-
-    /// Writes a sprint to the file its own id names, after holding it to the same rules.
-    /// `.catervas/sprints/` is made on the first write; `init` does not make it.
-    ///
-    /// # Errors
-    ///
-    /// `Invalid` when the sprint is not one `validate_sprint` accepts, `Io` when it cannot be
-    /// written.
-    pub fn write_sprint(&self, sprint: &Sprint) -> Result<(), FilesError> {
-        let path = sprint_path(sprint.id.as_str());
-        let value = as_wire(&path, sprint)?;
-        validate_sprint(&value).map_err(|errors| refused(&path, &errors))?;
-        self.write_yaml(&path, &value)
-    }
-
-    /// Every sprint there is, by id, sorted by the number in it so that the tenth does not come
-    /// before the second.
-    ///
-    /// A file under `sprints/` whose name is not `S<n>.yaml` is not one of them and is not an
-    /// error either: the directory is a person's to keep notes in, as `contracts/` is.
-    ///
-    /// # Errors
-    ///
-    /// `Invalid` when a file named `S<n>.yaml` is not one `validate_sprint` accepts, `Io` when
-    /// the directory cannot be read. A project with no `.catervas/sprints/` has no sprints, which is
-    /// not an error.
-    pub fn list_sprints(&self) -> Result<Vec<Sprint>, FilesError> {
-        let directory = self.catervas().join(SPRINTS);
-        if !directory.is_dir() {
-            return Ok(Vec::new());
-        }
-        let named = format!(".catervas/{SPRINTS}");
-        let entries = std::fs::read_dir(&directory).map_err(|error| FilesError::Io {
-            path: named.clone(),
-            detail: error.to_string(),
-        })?;
-        let mut sprints: Vec<Sprint> = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|error| FilesError::Io {
-                path: named.clone(),
-                detail: error.to_string(),
-            })?;
-            let name = entry.file_name();
-            let Some(id) = name.to_str().and_then(|name| name.strip_suffix(".yaml")) else {
-                continue;
-            };
-            if !entry.path().is_file() || !is_sprint_id(id) {
-                continue;
-            }
-            sprints.push(self.read_sprint(id)?);
-        }
-        sprints.sort_by_key(|sprint| {
-            sprint
-                .id
-                .as_str()
-                .trim_start_matches('S')
-                .parse::<u64>()
-                .ok()
-        });
-        Ok(sprints)
     }
 
     /// One task's contract, held to the rules a contract on the wire is held to.
@@ -790,7 +698,6 @@ const TEAM: &str = "team.yaml";
 const CRITERIA: &str = "team/criteria.yaml";
 const REPOS: &str = "repos.yaml";
 const RETRO: &str = "team/retro.md";
-const SPRINTS: &str = "sprints";
 const DECISIONS: &str = "decisions";
 const PROJECT_SCAN: &str = "project.md";
 const PRICES: &str = "prices.json";
@@ -896,24 +803,6 @@ fn yaml_text(relative: &str, value: &Value) -> Result<String, FilesError> {
 /// The file a contract lives in: the one its own id names.
 fn contract_path(id: &TaskId) -> String {
     format!("contracts/{}.yaml", id.as_str())
-}
-
-/// The file a sprint lives in: the one its own id names.
-fn sprint_path(id: &str) -> String {
-    format!("{SPRINTS}/{id}.yaml")
-}
-
-/// Whether a file name, with `.yaml` already stripped, is a sprint's: `docs/schemas/sprint.schema.json`'s
-/// own pattern for `id`, `^S[1-9][0-9]{0,5}$`, checked here rather than with a regular expression
-/// this module otherwise has no use for.
-fn is_sprint_id(name: &str) -> bool {
-    let Some(digits) = name.strip_prefix('S') else {
-        return false;
-    };
-    !digits.is_empty()
-        && digits.len() <= 6
-        && !digits.starts_with('0')
-        && digits.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// The file an agent's notebook lives in. An agent id is a slug the team schema pinned, so this

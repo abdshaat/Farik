@@ -31,8 +31,6 @@ pub mod renewals;
 pub mod repos;
 /// A skill's hash.
 pub mod skill;
-/// The sprint and its validator.
-pub mod sprint;
 /// The team, its rules, and its validator.
 pub mod team;
 /// Small shared pieces of English used in refusal messages, and how a text is counted in tokens.

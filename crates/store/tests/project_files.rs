@@ -5,7 +5,6 @@
 
 use catervas_core::contract::{TaskId, validate_contract};
 use catervas_core::criteria::{fixtures::a_criteria_library_wire, validate_criteria};
-use catervas_core::sprint::{Sprint, validate_sprint};
 use catervas_core::team::AgentId;
 use catervas_store::files::fixtures::{TempProject, a_team};
 use catervas_store::files::{FilesError, LocalSettings, Sandbox, contract_yaml, criteria_yaml};
@@ -30,13 +29,6 @@ fn a_contract(id: &str) -> catervas_core::contract::TaskContract {
     let mut wire = catervas_core::contract::fixtures::a_contract_wire();
     wire["id"] = serde_json::json!(id);
     validate_contract(&wire).expect("the fixture is a contract")
-}
-
-/// The sprint `catervas-core`'s own fixture describes, with the id a test asks for.
-fn a_sprint(id: &str) -> Sprint {
-    let mut wire = catervas_core::sprint::fixtures::an_open_sprint_wire();
-    wire["id"] = serde_json::json!(id);
-    validate_sprint(&wire).expect("the fixture is a sprint")
 }
 
 #[test]
@@ -891,92 +883,4 @@ fn prices_with_the_override_as_a_whole() {
         ["claude-opus-5"]
     );
     assert!(!prices.prices.contains_key("claude-fable-5"));
-}
-
-#[test]
-fn writes_and_reads_a_sprint() {
-    let project = TempProject::new("round-trip-sprint");
-    let files = project.files();
-    assert!(
-        !project.root.join(".catervas/sprints").exists(),
-        "the directory did not exist before the first write"
-    );
-
-    let sprint = a_sprint("S1");
-    files.write_sprint(&sprint).expect("the sprint is written");
-
-    assert!(
-        project.root.join(".catervas/sprints").is_dir(),
-        "made on the first write"
-    );
-    assert_eq!(files.read_sprint("S1").expect("it reads back"), sprint);
-}
-
-#[test]
-fn lists_sprints_by_number() {
-    let project = TempProject::new("list-sprints");
-    let files = project.files();
-    for id in ["S2", "S10", "S1"] {
-        files.write_sprint(&a_sprint(id)).expect("written");
-    }
-    // A person's own notes in the same directory are not sprints and are not a problem either.
-    std::fs::write(project.root.join(".catervas/sprints/notes.md"), "mine\n").expect("a note");
-
-    assert_eq!(
-        files
-            .list_sprints()
-            .expect("they list")
-            .iter()
-            .map(|sprint| sprint.id.as_str().to_string())
-            .collect::<Vec<_>>(),
-        ["S1", "S2", "S10"],
-        "by the number in the id, so the tenth does not come before the second"
-    );
-}
-
-#[test]
-fn refuses_a_sprint_file_that_breaks_its_schema() {
-    let project = TempProject::new("broken-sprint");
-    let files = project.files();
-    files.write_sprint(&a_sprint("S1")).expect("written");
-    std::fs::write(
-        project.root.join(".catervas/sprints/S1.yaml"),
-        "id: S1\nstarted_at: 2026-09-24T00:00:00Z\ntask_ids: []\nstatus: closed\n",
-    )
-    .expect("a person edits it");
-    let Err(FilesError::Invalid { path, detail }) = files.read_sprint("S1") else {
-        panic!("closed is not a status a sprint takes");
-    };
-    assert_eq!(path, ".catervas/sprints/S1.yaml");
-    assert!(detail.contains("status"), "{detail}");
-}
-
-#[test]
-fn refuses_a_sprint_file_that_is_not_its_ids() {
-    let project = TempProject::new("misnamed-sprint");
-    let files = project.files();
-    files.init(&a_team()).expect("a project is made");
-    files.write_sprint(&a_sprint("S2")).expect("written");
-    std::fs::rename(
-        project.root.join(".catervas/sprints/S2.yaml"),
-        project.root.join(".catervas/sprints/S1.yaml"),
-    )
-    .expect("a person renames it");
-    let Err(FilesError::Invalid { path, detail }) = files.read_sprint("S1") else {
-        panic!("S1.yaml holds S2");
-    };
-    assert_eq!(path, ".catervas/sprints/S1.yaml");
-    assert!(detail.contains("S2"), "{detail}");
-
-    // An id that is no sprint's names no file: S0 because nothing is there, and ../team because the
-    // id pattern refuses it before the path can reach .catervas/team.yaml, which `init` wrote.
-    for id in ["../team", "S0"] {
-        assert_eq!(
-            files.read_sprint(id),
-            Err(FilesError::NotFound {
-                path: format!(".catervas/sprints/{id}.yaml")
-            }),
-            "{id}"
-        );
-    }
 }

@@ -230,7 +230,7 @@ with `write_sprint`; a test that still needs an old sprint in the log records it
   `taskProjection` value and a `costsSummaryResult` value with no `backlog`, `sprint` or
   `sprint_usd` pass `validator_for` of their definitions.
 
-- [ ] `feat(protocol): the sprint queries, fields and files are gone`
+- [x] `feat(protocol): the sprint queries, fields and files are gone`
 
 ### Task 5: old team files and templates
 

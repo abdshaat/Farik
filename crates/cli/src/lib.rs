@@ -361,12 +361,8 @@ enum Commands {
         #[arg(long)]
         limit: Option<usize>,
     },
-    /// Show the harness metrics over the whole project, or one sprint's, (F17).
-    Metrics {
-        /// Only this sprint's rows and costs.
-        #[arg(long)]
-        sprint: Option<String>,
-    },
+    /// Show the harness metrics over the whole project (F17).
+    Metrics,
     /// Say where the files and the log disagree, and what else this project got wrong.
     Doctor,
     /// Show the team's rules (5.12).
@@ -431,7 +427,7 @@ enum Commands {
         /// `<tool>=denied`. A tool left unlabelled is `paid`.
         #[arg(long = "tag")]
         tags: Vec<String>,
-        /// How many calls each sprint the agent makes of a kit service's spending tool without
+        /// How many calls each day the agent makes of a kit service's spending tool without
         /// asking, `<tool>=<number>` from 0 to 1000; repeat it for each. Left out, the kit's number.
         #[arg(long = "allowance")]
         allowances: Vec<String>,
@@ -1214,8 +1210,9 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
-        Commands::Metrics { sprint } => open_project(&io.cwd, now)
-            .and_then(|project| metrics::metrics(&project, sprint.as_deref())),
+        Commands::Metrics => {
+            open_project(&io.cwd, now).and_then(|project| metrics::metrics(&project))
+        }
         Commands::Doctor => {
             let found =
                 open_project(&io.cwd, now).and_then(|project| doctor::doctor(&project, now));

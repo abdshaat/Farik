@@ -304,7 +304,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<costs::ReadCostsInput>(
             "catervas_read_costs",
             Read,
-            "Read what the team has spent on AI, summed by task, agent, sprint, day or purpose, optionally between two days.",
+            "Read what the team has spent on AI, summed by task, agent, day or purpose, optionally between two days.",
         ),
         tool::<sheets::WriteSheetInput>(
             "catervas_write_sheet",

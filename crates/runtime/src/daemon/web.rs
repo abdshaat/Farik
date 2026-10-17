@@ -1059,11 +1059,9 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
     .unwrap_or_else(|error| Err(Failure::new(INTERNAL_ERROR, error.to_string())))
 }
 
-/// The board's row as the wire carries it. Nothing waits in a Backlog any more (ADR 0062); the
-/// field goes with the reads in plan 5's Task 4.
+/// The board's row as the wire carries it.
 fn task_wire(task: &TaskProjection) -> Value {
     let mut wire = json!({
-        "backlog": false,
         "task_id": task.task_id,
         "kind": task.kind,
         "title": task.title,
@@ -1085,7 +1083,6 @@ fn task_wire(task: &TaskProjection) -> Value {
         ("parent", task.parent.as_ref().map(|parent| json!(parent))),
         ("assignee_id", task.assignee_id.as_ref().map(|id| json!(id))),
         ("reviewer_id", task.reviewer_id.as_ref().map(|id| json!(id))),
-        ("sprint", task.sprint.as_ref().map(|sprint| json!(sprint))),
     ];
     for (name, value) in optional {
         if let Some(value) = value {

@@ -185,44 +185,12 @@ impl Recorded {
         self.projections.metrics(&self.project.files())
     }
 
-    fn metrics_for_sprint(&self, sprint_id: &str) -> Result<HarnessMetrics, MetricsError> {
-        self.projections
-            .metrics_for_sprint(&self.project.files(), sprint_id)
-    }
-
-    /// Opens `sprint_id`, with `budget_usd` when there is one.
-    fn sprint_started(&self, sprint_id: &str, budget_usd: Option<f64>) {
-        self.record(
-            EventKind::SprintStarted,
-            None,
-            json!({ "sprint_id": sprint_id, "budget_usd": budget_usd, "started_by": "human" }),
-        );
-    }
-
-    /// Puts `task_ids` into `sprint_id`.
-    fn sprint_planned(&self, sprint_id: &str, task_ids: &[&str]) {
-        self.record(
-            EventKind::SprintPlanned,
-            None,
-            json!({ "sprint_id": sprint_id, "task_ids": task_ids, "planned_by": "sam-ortiz" }),
-        );
-    }
-
     /// A line of `kind` in the channel, by `author`.
     fn posted(&self, author: &str, kind: &str) {
         self.record(
             EventKind::MessagePosted,
             None,
             json!({ "author": author, "kind": kind, "text": "A line.", "mentions": [] }),
-        );
-    }
-
-    /// Closes `sprint_id`, with `left` the tasks that were still in it.
-    fn sprint_ended(&self, sprint_id: &str, left: &[&str]) {
-        self.record(
-            EventKind::SprintEnded,
-            None,
-            json!({ "sprint_id": sprint_id, "ended_by": "human", "left": left }),
         );
     }
 }
@@ -492,76 +460,14 @@ fn counts_the_turn_of_a_year_as_one_week() {
 }
 
 #[test]
-fn measures_one_sprint() {
-    let recorded = Recorded::new("one-sprint");
-
-    recorded.contract("CTV-1", &["command"]);
-    recorded.created("CTV-1", "task", None);
-    recorded.walked("CTV-1", &TO_WORK);
-    recorded.sprint_started("S1", None);
-    recorded.sprint_planned("S1", &["CTV-1"]);
-    recorded.moved("CTV-1", "in_progress", "verifying", "assignee");
-    recorded.moved("CTV-1", "verifying", "accepted", "product_manager");
-    recorded.cost(Some("CTV-1"), "implement", 1.0, "2026-09-22");
-    // Spent during S1 by no task: the day's, not the sprint's.
-    recorded.cost(None, "conversation", 5.0, "2026-09-22");
-    recorded.sprint_ended("S1", &[]);
-
-    recorded.contract("CTV-2", &["human"]);
-    recorded.created("CTV-2", "task", None);
-    recorded.walked("CTV-2", &TO_WORK);
-    recorded.sprint_started("S2", None);
-    recorded.sprint_planned("S2", &["CTV-2"]);
-    recorded.moved("CTV-2", "in_progress", "verifying", "assignee");
-    recorded.moved("CTV-2", "verifying", "rejected", "reviewer");
-    recorded.moved("CTV-2", "rejected", "in_progress", "governor");
-    recorded.moved("CTV-2", "in_progress", "verifying", "assignee");
-    recorded.moved("CTV-2", "verifying", "accepted", "product_manager");
-    // In the ISO week after S1's.
-    recorded.cost(Some("CTV-2"), "implement", 2.0, "2026-09-29");
-    recorded.sprint_ended("S2", &[]);
-
-    let s1 = recorded
-        .metrics_for_sprint("S1")
-        .expect("S1's metrics compute");
-    assert_eq!(s1.accepted_tasks, 1);
-    assert_eq!(s1.first_pass_acceptance_rate, Some(1.0));
-    assert_eq!(
-        s1.cost_per_accepted_task_usd
-            .as_ref()
-            .map(|split| split.total),
-        Some(1.0)
-    );
-    assert_eq!(s1.mechanically_verified_criteria_share, Some(1.0));
-    assert_eq!(s1.active_weeks, 1);
-
-    let s2 = recorded
-        .metrics_for_sprint("S2")
-        .expect("S2's metrics compute");
-    assert_eq!(s2.accepted_tasks, 1);
-    assert_eq!(s2.first_pass_acceptance_rate, Some(0.0));
-    assert_eq!(
-        s2.cost_per_accepted_task_usd
-            .as_ref()
-            .map(|split| split.total),
-        Some(2.0)
-    );
-    assert_eq!(s2.mechanically_verified_criteria_share, Some(0.0));
-    assert_eq!(s2.active_weeks, 1);
-}
-
-#[test]
 fn counts_messages_by_kind() {
     let recorded = Recorded::new("messages");
     recorded.posted("human", "human");
-    recorded.sprint_started("S1", None);
     recorded.posted("dev-a", "reaction");
     recorded.posted("dev-b", "reaction");
     recorded.posted("dev-a", "ambient");
     recorded.posted("catervas", "system");
-    recorded.sprint_ended("S1", &[]);
     recorded.posted("dev-a", "reply");
-    recorded.sprint_started("S2", None);
     recorded.posted("dev-b", "reply");
 
     let project = metrics_of(&recorded);
@@ -573,29 +479,6 @@ fn counts_messages_by_kind() {
             reply: 2,
             system: 1,
             human: 1,
-            ..MessageCounts::default()
-        }
-    );
-    let s1 = recorded
-        .metrics_for_sprint("S1")
-        .expect("S1's metrics compute");
-    assert_eq!(
-        s1.messages,
-        MessageCounts {
-            reaction: 2,
-            ambient: 1,
-            system: 1,
-            ..MessageCounts::default()
-        }
-    );
-    // An open sprint's messages run to the end of the log.
-    let s2 = recorded
-        .metrics_for_sprint("S2")
-        .expect("S2's metrics compute");
-    assert_eq!(
-        s2.messages,
-        MessageCounts {
-            reply: 1,
             ..MessageCounts::default()
         }
     );

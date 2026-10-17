@@ -324,8 +324,6 @@ pub(super) fn query(
         "social_posts.list" => Ok(json!({
             "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
         })),
-        "sprint.current" => sprint_current(deps),
-        "backlog.summary" => Ok(backlog_summary(&team()?)),
         "product_plan.state" => product_plan_state(deps, &team()?),
         "catervafication.get" => catervafication_get(deps, &team()?),
         "questions.list" => questions(deps, params["task_id"].as_str()),
@@ -574,31 +572,6 @@ fn task_checks(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, 
         })
         .collect();
     Ok(json!({ "checks": checks }))
-}
-
-/// `sprint.current`: the open sprint and how many of its tasks are accepted or cancelled.
-fn sprint_current(deps: &ToolDeps) -> Result<Value, Failure> {
-    let Some(open) = deps.projections.open_sprint().map_err(|e| internal(&e))? else {
-        return Ok(Value::Null);
-    };
-    let board = deps.projections.board().map_err(|e| internal(&e))?;
-    let tasks: Vec<_> = board
-        .iter()
-        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
-        .collect();
-    let done = tasks
-        .iter()
-        .filter(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
-        .count();
-    Ok(json!({ "sprint_id": open.sprint_id, "done": done, "total": tasks.len() }))
-}
-
-/// `backlog.summary`: whether `team` plans in sprints, and how many of the Backlog's rows have no
-/// parent, so an epic counts once.
-fn backlog_summary(team: &Team) -> Value {
-    // Nothing waits for a sprint any more (ADR 0062); the query goes with the reads in plan 5's
-    // Task 4.
-    json!({ "plan_in_sprints": team.plans_in_sprints(), "count": 0 })
 }
 
 /// `product_plan.state`: a new project's name, whether its plan is approved, the newest task that

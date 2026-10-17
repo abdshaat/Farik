@@ -986,9 +986,9 @@ impl Harness {
         self.project.branch(task)
     }
 
-    /// Sprint `sprint` open with no budget and holding `tasks`, as starting and planning it would
-    /// leave it: its file, each task's contract naming it, `sprint.started` by the human, and
-    /// `sprint.planned` by the Product Manager when it holds a task.
+    /// Sprint `sprint` open with no budget and holding `tasks`, as a project made before ADR 0062
+    /// records it: `sprint.started` by the human, and `sprint.planned` by the Product Manager
+    /// when it holds a task.
     pub(crate) fn open_sprint(&self, sprint: &str, tasks: &[&str]) {
         self.project.open_sprint(sprint, None, tasks);
     }

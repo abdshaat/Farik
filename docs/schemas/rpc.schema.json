@@ -38,7 +38,6 @@
         "task.screenshot",
         "task.checks",
         "task.tries",
-        "sprint.current",
         "questions.list",
         "escalation.choices",
         "team.activity",
@@ -48,8 +47,6 @@
         "models.list",
         "project.scan",
         "task.costs",
-        "sprints.list",
-        "sprint.get",
         "costs.summary",
         "metrics",
         "settings.defaults",
@@ -58,7 +55,6 @@
         "chat.messages",
         "templates.list",
         "template.preview",
-        "backlog.summary",
         "product_plan.state",
         "catervafication.get",
         "skills.list",
@@ -248,9 +244,6 @@
               "$ref": "#/$defs/taskTriesQuery"
             },
             {
-              "$ref": "#/$defs/sprintCurrentQuery"
-            },
-            {
               "$ref": "#/$defs/questionsListQuery"
             },
             {
@@ -278,19 +271,10 @@
               "$ref": "#/$defs/taskCostsQuery"
             },
             {
-              "$ref": "#/$defs/sprintsListQuery"
-            },
-            {
-              "$ref": "#/$defs/backlogSummaryQuery"
-            },
-            {
               "$ref": "#/$defs/productPlanStateQuery"
             },
             {
               "$ref": "#/$defs/catervaficationGetQuery"
-            },
-            {
-              "$ref": "#/$defs/sprintGetQuery"
             },
             {
               "$ref": "#/$defs/costsSummaryQuery"
@@ -1372,13 +1356,6 @@
         "interventions": {
           "type": "integer",
           "minimum": 0
-        },
-        "sprint": {
-          "type": "string"
-        },
-        "backlog": {
-          "type": "boolean",
-          "description": "Whether the row waits in the Backlog for a sprint (ADR 0028): catervas-core's in_the_backlog, so the board need not work it out again."
         }
       },
       "required": [
@@ -1397,8 +1374,7 @@
         "awaiting_approval",
         "verifications",
         "rejections",
-        "interventions",
-        "backlog"
+        "interventions"
       ],
       "description": "One row of the board (catervas_store::TaskProjection). Optional fields are absent, not null, when the projection has none."
     },
@@ -2218,25 +2194,6 @@
         }
       }
     },
-    "sprintCurrentQuery": {
-      "title": "Sprint Current Query",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "params"
-      ],
-      "properties": {
-        "name": {
-          "const": "sprint.current"
-        },
-        "params": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {}
-        }
-      }
-    },
     "questionsListQuery": {
       "title": "Questions List Query",
       "type": "object",
@@ -2375,25 +2332,6 @@
         }
       }
     },
-    "backlogSummaryQuery": {
-      "title": "Backlog Summary Query",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "params"
-      ],
-      "properties": {
-        "name": {
-          "const": "backlog.summary"
-        },
-        "params": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {}
-        }
-      }
-    },
     "productPlanStateQuery": {
       "title": "Product Plan State Query",
       "type": "object",
@@ -2410,52 +2348,6 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {}
-        }
-      }
-    },
-    "sprintsListQuery": {
-      "title": "Sprints List Query",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "params"
-      ],
-      "properties": {
-        "name": {
-          "const": "sprints.list"
-        },
-        "params": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {}
-        }
-      }
-    },
-    "sprintGetQuery": {
-      "title": "Sprint Get Query",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "params"
-      ],
-      "properties": {
-        "name": {
-          "const": "sprint.get"
-        },
-        "params": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "sprint_id": {
-              "type": "string",
-              "pattern": "^S[1-9][0-9]{0,5}$"
-            }
-          },
-          "required": [
-            "sprint_id"
-          ]
         }
       }
     },
@@ -2965,12 +2857,7 @@
         "params": {
           "type": "object",
           "additionalProperties": false,
-          "properties": {
-            "sprint_id": {
-              "type": "string",
-              "pattern": "^S[1-9][0-9]{0,5}$"
-            }
-          }
+          "properties": {}
         }
       }
     },
@@ -3463,17 +3350,6 @@
         "of"
       ]
     },
-    "sprintCurrentResult": {
-      "description": "The open sprint and how many of its tasks are done (accepted or cancelled), or null when none is open.",
-      "oneOf": [
-        {
-          "type": "null"
-        },
-        {
-          "$ref": "#/$defs/sprintSummary"
-        }
-      ]
-    },
     "questionsListResult": {
       "type": "object",
       "additionalProperties": false,
@@ -3723,28 +3599,6 @@
         "back_to_refining"
       ]
     },
-    "sprintSummary": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "sprint_id": {
-          "type": "string"
-        },
-        "done": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "total": {
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "sprint_id",
-        "done",
-        "total"
-      ]
-    },
     "taskCostsResult": {
       "description": "What a task has spent, by the purposes' plain words (Planning: triage, refine, plan; Building: implement; Checking: verify; Meetings and talk: ceremony, conversation; Conversations: chat), each word that has spent anything, and its contract's limit.",
       "type": "object",
@@ -3790,112 +3644,6 @@
         "by_purpose",
         "total_usd",
         "limit_usd"
-      ]
-    },
-    "sprintRow": {
-      "description": "A sprint: its file, who started it (sprint.started), the first assigner that planned it (null when only Catervas did), what it spent, and how many of its tasks are done (accepted or cancelled).",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "sprint_id": {
-          "type": "string",
-          "pattern": "^S[1-9][0-9]{0,5}$"
-        },
-        "status": {
-          "type": "string",
-          "enum": [
-            "open",
-            "ended"
-          ]
-        },
-        "started_at": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "started_by": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "string"
-            }
-          ]
-        },
-        "ended_at": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "string",
-              "format": "date-time"
-            }
-          ]
-        },
-        "budget_usd": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "number",
-              "minimum": 0
-            }
-          ]
-        },
-        "spent_usd": {
-          "type": "number",
-          "minimum": 0
-        },
-        "planned_by": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "string"
-            }
-          ]
-        },
-        "task_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "done_count": {
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "sprint_id",
-        "status",
-        "started_at",
-        "started_by",
-        "ended_at",
-        "budget_usd",
-        "spent_usd",
-        "planned_by",
-        "task_count",
-        "done_count"
-      ]
-    },
-    "backlogSummaryResult": {
-      "description": "Whether the team plans its work in sprints, and how much work waits in its Backlog: the rows with no parent, so an epic counts once (ADR 0028).",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "plan_in_sprints": {
-          "type": "boolean"
-        },
-        "count": {
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "plan_in_sprints",
-        "count"
       ]
     },
     "catervaficationGetResult": {
@@ -3979,171 +3727,6 @@
         "approved",
         "task",
         "documents"
-      ]
-    },
-    "sprintsListResult": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "sprints": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/sprintRow"
-          }
-        }
-      },
-      "required": [
-        "sprints"
-      ]
-    },
-    "sprintGetResult": {
-      "description": "sprintRow's fields, its tasks, and its meetings: the ceremony posts from its start until the next sprint starts, one meeting per ceremony session, oldest first.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "sprint_id": {
-          "type": "string",
-          "pattern": "^S[1-9][0-9]{0,5}$"
-        },
-        "status": {
-          "type": "string",
-          "enum": [
-            "open",
-            "ended"
-          ]
-        },
-        "started_at": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "started_by": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "string"
-            }
-          ]
-        },
-        "ended_at": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "string",
-              "format": "date-time"
-            }
-          ]
-        },
-        "budget_usd": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "number",
-              "minimum": 0
-            }
-          ]
-        },
-        "spent_usd": {
-          "type": "number",
-          "minimum": 0
-        },
-        "planned_by": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "string"
-            }
-          ]
-        },
-        "task_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "done_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "tasks": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "task_id": {
-                "type": "string",
-                "pattern": "^CTV-[0-9]{1,6}$"
-              },
-              "title": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "task_id",
-              "title",
-              "status"
-            ]
-          }
-        },
-        "meetings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "thread": {
-                "type": "string",
-                "enum": [
-                  "standup",
-                  "planning",
-                  "review",
-                  "retro"
-                ]
-              },
-              "first_seq": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "at": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "posts": {
-                "type": "integer",
-                "minimum": 1
-              }
-            },
-            "required": [
-              "thread",
-              "first_seq",
-              "at",
-              "posts"
-            ]
-          }
-        }
-      },
-      "required": [
-        "sprint_id",
-        "status",
-        "started_at",
-        "started_by",
-        "ended_at",
-        "budget_usd",
-        "spent_usd",
-        "planned_by",
-        "task_count",
-        "done_count",
-        "tasks",
-        "meetings"
       ]
     },
     "marketingPlanListResult": {
@@ -4874,7 +4457,7 @@
       }
     },
     "costsSummaryResult": {
-      "description": "Today's spending (UTC) and the team's daily limit, today's one-to-one chats (purpose chat), the last sprint's (the open one while one is), and each agent's that is not retired, in the team's order.",
+      "description": "Today's spending (UTC) and the team's daily limit, today's one-to-one chats (purpose chat), and each agent's that is not retired, in the team's order.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -4897,51 +4480,6 @@
           "type": "number",
           "minimum": 0
         },
-        "sprint": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "sprint_id": {
-                  "type": "string",
-                  "pattern": "^S[1-9][0-9]{0,5}$"
-                },
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "open",
-                    "ended"
-                  ]
-                },
-                "spent_usd": {
-                  "type": "number",
-                  "minimum": 0
-                },
-                "budget_usd": {
-                  "oneOf": [
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "number",
-                      "minimum": 0
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "sprint_id",
-                "status",
-                "spent_usd",
-                "budget_usd"
-              ]
-            }
-          ]
-        },
         "agents": {
           "type": "array",
           "items": {
@@ -4954,16 +4492,11 @@
               "today_usd": {
                 "type": "number",
                 "minimum": 0
-              },
-              "sprint_usd": {
-                "type": "number",
-                "minimum": 0
               }
             },
             "required": [
               "agent_id",
-              "today_usd",
-              "sprint_usd"
+              "today_usd"
             ]
           }
         }
@@ -4972,12 +4505,11 @@
         "today_usd",
         "daily_limit_usd",
         "conversations_today_usd",
-        "sprint",
         "agents"
       ]
     },
     "metricsResult": {
-      "description": "The harness metrics of F17, over the project or one sprint; a rate is null while no task is accepted.",
+      "description": "The harness metrics of F17, over the project; a rate is null while no task is accepted.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

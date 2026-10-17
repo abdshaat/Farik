@@ -12,7 +12,7 @@ use catervas_protocol::event::{
     TransitionActorWire,
 };
 use chrono::NaiveDate;
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::error::StoreError;
 use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
@@ -97,35 +97,19 @@ pub enum CostScope {
     Session,
     /// By the UTC date the cost was recorded on, as `YYYY-MM-DD`.
     Day,
-    /// By the sprint the cost's task was in when the cost was recorded. A cost with no task, or of
-    /// a task in no sprint, is in no sprint's row.
-    Sprint,
     /// By the session purpose, as the log writes it (`chat`, `implement`, ...).
     Purpose,
 }
 
-/// Which costs a sum reads: one UTC day's, a range of days', one sprint's, or all of them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Which costs a sum reads: one UTC day's, a range of days', or all of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CostWindow {
     /// The costs recorded on this UTC day.
     Day(NaiveDate),
-    /// The costs whose task was in this sprint when they were recorded.
-    Sprint(String),
     /// Every cost.
     All,
     /// The costs recorded from the first UTC day to the second, both included.
     Between(NaiveDate, NaiveDate),
-}
-
-/// A sprint, as its `sprint.started` and `sprint.ended` left it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SprintProjection {
-    /// The sprint's id, `S<n>`.
-    pub sprint_id: String,
-    /// What it may spend, or nothing when it has no budget of its own (ADR 0015).
-    pub budget_usd: Option<f64>,
-    /// Whether it is still open: started and not yet ended.
-    pub open: bool,
 }
 
 /// What one key of a scope has spent.
@@ -301,7 +285,6 @@ impl Projections {
             CostScope::Agent => ("agent_id", "agent_id"),
             CostScope::Session => ("session_id", "session_id"),
             CostScope::Day => ("day", "day"),
-            CostScope::Sprint => ("sprint", "sprint"),
             CostScope::Purpose => ("purpose", "purpose"),
         };
         // The task order holds `?1`, so the window's parameters follow it there.
@@ -312,7 +295,6 @@ impl Projections {
         };
         let (within, bound) = match window {
             CostWindow::Day(day) => (format!("day = {slot}"), vec![day.to_string()]),
-            CostWindow::Sprint(sprint) => (format!("sprint = {slot}"), vec![sprint]),
             CostWindow::All => ("1".to_string(), Vec::new()),
             CostWindow::Between(from, to) => (
                 format!("day BETWEEN {slot} AND {next}"),
@@ -375,31 +357,6 @@ impl Projections {
             Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
-    }
-
-    /// The sprint that is open, or nothing when none is.
-    ///
-    /// # Errors
-    ///
-    /// `Sqlite` when the read fails.
-    pub fn open_sprint(&self) -> Result<Option<SprintProjection>, StoreError> {
-        let connection = self.connection();
-        // One is open at a time; were the log to hold two, the one started last is the open one.
-        let sprint = connection
-            .query_row(
-                "SELECT sprint_id, budget_usd FROM sprints WHERE open = 1
-                 ORDER BY rowid DESC LIMIT 1",
-                (),
-                |row| {
-                    Ok(SprintProjection {
-                        sprint_id: row.get(0)?,
-                        budget_usd: row.get(1)?,
-                        open: true,
-                    })
-                },
-            )
-            .optional()?;
-        Ok(sprint)
     }
 
     /// How far into the log the projections have read: the sequence number of the last event
@@ -1133,8 +1090,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        Arc, CatervasEvent, CostProjection, CostScope, EventLog, Projections, SprintProjection,
-        TaskProjection, open_projections,
+        Arc, CatervasEvent, CostProjection, CostScope, EventLog, Projections, TaskProjection,
+        open_projections,
     };
     use crate::error::StoreError;
     use crate::event_log::{IN_MEMORY, open_event_log};
@@ -2662,22 +2619,6 @@ mod tests {
     }
 
     #[test]
-    fn projects_the_open_sprint() {
-        let (log, projections) = a_board();
-        record(&log, &projections, &started("S1", Some(20.0)));
-        assert_eq!(
-            projections.open_sprint().expect("the sprint reads"),
-            Some(SprintProjection {
-                sprint_id: "S1".to_string(),
-                budget_usd: Some(20.0),
-                open: true,
-            })
-        );
-        record(&log, &projections, &ended("S1", &[]));
-        assert_eq!(projections.open_sprint().expect("the sprint reads"), None);
-    }
-
-    #[test]
     fn puts_a_task_in_a_sprint_and_takes_it_out() {
         let (log, projections) = a_board();
         for task_id in ["CTV-1", "CTV-2"] {
@@ -2729,77 +2670,14 @@ mod tests {
         assert_eq!(sprint_of(&projections, "CTV-2"), None);
     }
 
-    /// CTV-1 spends a dollar in S1, leaves it when S1 ends, then spends two more; S2 opens.
-    fn a_sprint_that_ended_with_a_task_left(log: &EventLog, projections: &Projections) {
-        record(log, projections, &about(EventKind::TaskCreated, "CTV-1"));
-        record(log, projections, &started("S1", Some(20.0)));
-        record(log, projections, &planned("S1", &["CTV-1"]));
-        let first = cost(Some("CTV-1"), "a", "s1", "2026-09-22", (1.0, 100, 10));
-        record(log, projections, &first);
-        record(log, projections, &ended("S1", &["CTV-1"]));
-        let second = cost(Some("CTV-1"), "a", "s2", "2026-09-22", (2.0, 200, 20));
-        record(log, projections, &second);
-        record(log, projections, &started("S2", None));
-    }
-
-    #[test]
-    fn keeps_a_cost_with_the_sprint_it_was_spent_in() {
-        let (log, projections) = a_board();
-        a_sprint_that_ended_with_a_task_left(&log, &projections);
-        assert_eq!(
-            projections
-                .costs(CostScope::Sprint)
-                .expect("the costs read"),
-            vec![row(CostScope::Sprint, "S1", (1.0, 100, 10, 1))]
-        );
-    }
-
-    /// What the sprint projections say: the open sprint, each row's sprint, and each sprint's
-    /// costs.
-    type SprintView = (
-        Option<SprintProjection>,
-        Vec<(String, Option<String>)>,
-        Vec<CostProjection>,
-    );
-
-    fn sprint_view(projections: &Projections) -> SprintView {
-        (
-            projections.open_sprint().expect("the sprint reads"),
-            projections
-                .board()
-                .expect("the board reads")
-                .into_iter()
-                .map(|task| (task.task_id.to_string(), task.sprint))
-                .collect(),
-            projections
-                .costs(CostScope::Sprint)
-                .expect("the costs read"),
-        )
-    }
-
-    #[test]
-    fn rebuilds_the_sprints() {
-        let (log, projections) = a_board();
-        a_sprint_that_ended_with_a_task_left(&log, &projections);
-        record(&log, &projections, &planned("S2", &["CTV-1"]));
-        let before = sprint_view(&projections);
-        assert_eq!(
-            before.0.as_ref().map(|sprint| sprint.sprint_id.as_str()),
-            Some("S2")
-        );
-        assert_eq!(
-            before.1,
-            vec![("CTV-1".to_string(), Some("S2".to_string()))]
-        );
-        // A sprint the log never started, which only emptying the table takes away.
-        log.connection()
-            .execute(
-                "INSERT INTO sprints (sprint_id, budget_usd, open) VALUES ('S9', NULL, 1)",
-                (),
-            )
-            .expect("a stray sprint is written");
-        projections.rebuild().expect("the board is built again");
-        assert_eq!(sprint_view(&projections), before);
+    /// What the sprint projection says of an old log: each row's sprint.
+    fn sprint_view(projections: &Projections) -> Vec<(String, Option<String>)> {
+        projections
+            .board()
+            .expect("the board reads")
+            .into_iter()
+            .map(|task| (task.task_id.to_string(), task.sprint))
+            .collect()
     }
 
     #[test]
@@ -2859,7 +2737,7 @@ mod tests {
         let projections = open_projections(log).expect("the projections open");
         let migrated = sprint_view(&projections);
         assert_eq!(
-            migrated.1,
+            migrated,
             vec![("CTV-1".to_string(), Some("S1".to_string()))]
         );
         projections.rebuild().expect("the board is built again");
@@ -2967,17 +2845,15 @@ mod tests {
     }
 
     #[test]
-    fn costs_each_agent_by_day_and_sprint() {
+    fn costs_each_agent_by_day() {
         use super::CostWindow;
         let (log, projections) = a_board();
         record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
-        record(&log, &projections, &started("S1", None));
-        record(&log, &projections, &planned("S1", &["CTV-1"]));
         for spent in [
             cost(Some("CTV-1"), "a", "s1", "2026-09-21", (1.0, 1, 1)),
             cost(Some("CTV-1"), "a", "s2", "2026-09-22", (2.0, 1, 1)),
             cost(Some("CTV-1"), "b", "s3", "2026-09-22", (4.0, 1, 1)),
-            // No task, so no sprint; still the day's.
+            // No task; still the day's.
             cost(None, "b", "s4", "2026-09-22", (8.0, 1, 1)),
         ] {
             record(&log, &projections, &spent);
@@ -2995,14 +2871,6 @@ mod tests {
                 row(CostScope::Agent, "b", (12.0, 2, 2, 2)),
             ]
         );
-        assert_eq!(
-            agents(CostWindow::Sprint("S1".to_string())),
-            vec![
-                row(CostScope::Agent, "a", (3.0, 2, 2, 2)),
-                row(CostScope::Agent, "b", (4.0, 1, 1, 1)),
-            ]
-        );
-        assert!(agents(CostWindow::Sprint("S2".to_string())).is_empty());
         // The task order's own parameter and the window's are bound together.
         assert_eq!(
             projections
