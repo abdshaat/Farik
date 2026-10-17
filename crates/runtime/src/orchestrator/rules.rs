@@ -8,7 +8,7 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus};
-use catervas_core::folders::with_format;
+use catervas_core::folders::{is_hunt, with_format};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::task_status::is_terminal;
 use catervas_core::governor::transition::TransitionRequest;
@@ -1476,7 +1476,8 @@ async fn in_progress(
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     // A Designer implements only a plan the Product Manager approved (ADR 0026).
-    let approved = if Role::from(assignee.role) == Role::UiUxDesigner {
+    // A bug hunt has no plan to wait for (ADR 0063): it goes straight to its implement session.
+    let approved = if Role::from(assignee.role) == Role::UiUxDesigner && !is_hunt(&contract) {
         match design::stage(orchestrator, team, row, assignee, &contract, waiting).await? {
             Stage::Approved(plan) => Some(plan),
             Stage::Handled(report) => return Ok(report),

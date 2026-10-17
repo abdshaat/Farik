@@ -265,6 +265,25 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_hunt_starts_in_its_implement_session() {
+        let report = "docs/catervas/design/ui-bug-hunt.html";
+        let harness = a_designers_task("design-hunt", |wire| {
+            wire["allowed_paths"] = json!([report]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The report exists.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": report, "must_contain": ["<h1"] }
+            }]);
+        });
+        let started = ticked(&harness, vec![implement_by_iris_ctv_1()], 1).await;
+
+        assert_eq!(who(&started), [("iris", SessionPurpose::Implement)]);
+        assert!(harness.events(&[EventKind::DesignPlanProposed]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn catervas_approves_a_proposed_plan_and_the_designer_implements() {
         let harness = a_designers_task("design-flow-order", |_| {});
         let started = ticked(

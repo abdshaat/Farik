@@ -689,7 +689,7 @@ impl Call<'_> {
         )
         .map_err(|refusal| -> ToolError { Refusal::Tool(refusal).into() })?;
         design::design_plan_gate(
-            &self.deps().log,
+            self.deps(),
             self.role(),
             tool.tier,
             self.context.task_id.as_ref(),

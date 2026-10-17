@@ -121,7 +121,7 @@ design.rs` `mod tests` (ignored, as its neighbours are) and `tools/design.rs` `m
   - for CTV-2, the same with `allowed_paths` `["site/**"]`, it is refused with a reason starting
     `design_plan_not_approved: `.
 
-- [ ] `feat(runtime): a Designer hunts without proposing a design plan`
+- [x] `feat(runtime): a Designer hunts without proposing a design plan`
 
 ### Task 2: the plan says to start now
 
