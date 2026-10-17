@@ -159,7 +159,7 @@ grows by one.
     `github` is refused with `connection_held: `;
   - after the three refusals the log still holds exactly one `connection.requested`.
 
-- [ ] `feat(runtime): an agent asks the owner to connect a service of its kit`
+- [x] `feat(runtime): an agent asks the owner to connect a service of its kit`
 
 ### Task 3: team.get answers the requests
 

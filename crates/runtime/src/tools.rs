@@ -31,6 +31,7 @@ use crate::transitions::Transitions;
 
 mod channel;
 mod chat;
+mod connections;
 pub(crate) mod contracts;
 mod costs;
 pub(crate) mod design;
@@ -250,6 +251,11 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             "catervas_ask_human",
             Read,
             "Ask the human a question; end your turn after asking.",
+        ),
+        tool::<connections::RequestConnectionInput>(
+            "catervas_request_connection",
+            Read,
+            "Ask the owner to connect a service your kit offers that your work needs, and why. The owner sees it on Today; carry on without it.",
         ),
         tool::<folders::WriteFolderDocInput>(
             "catervas_write_folder_doc",
@@ -485,6 +491,7 @@ pub async fn call_tool(
         "catervas_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
+        "catervas_request_connection" => connections::request_connection(&call, &parse(input)?),
         "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
         "catervas_append_retro" => retro::append_retro(&call, &parse(input)?),
@@ -825,6 +832,7 @@ mod tests {
             "catervas_record_criterion_result",
             "catervas_write_note",
             "catervas_ask_human",
+            "catervas_request_connection",
             "catervas_write_folder_doc",
             "catervas_post_message",
             "catervas_append_retro",
@@ -871,7 +879,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..35] {
+        for tool in &tools[..36] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {
