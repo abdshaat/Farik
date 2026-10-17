@@ -206,7 +206,7 @@ Tests:
   - A Developer's task's lead still holds "Ada reviews it".
   - No axe violations.
 
-- [ ] `feat(web): say Catervas checks a task no agent reviews`
+- [x] `feat(web): say Catervas checks a task no agent reviews`
 
 ## Verification
 

@@ -836,6 +836,53 @@ describe("task detail", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("says_catervas_checks_what_no_agent_reviews", async () => {
+		// An Architect's task is not code: no one reviews it, and Catervas checks its criteria.
+		const architects = {
+			...CONTRACT,
+			assignee_role: "architect",
+			assignee: "ada",
+			reviewer: "mira",
+		};
+		const { container } = await opened(architects, [], {
+			"task.history": {
+				events: [
+					...HISTORY,
+					event(
+						11,
+						"note.written",
+						{
+							kind: "review",
+							text: "Catervas ran every criterion of this task itself; only a code change is reviewed by an agent (ADR 0061).\n\nC1: passed: 3 passed",
+							written_by: "catervas",
+						},
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+		expect(
+			screen.getByText(
+				"CTV-1 in sprint 2. Ada is doing it, and Catervas checks it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/reviews it/)).toBeNull();
+		expect(
+			within(screen.getByRole("tabpanel")).getByText("Catervas checked it"),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+		cleanup();
+
+		// A Developer's task is code: its reviewer still reviews it.
+		await opened();
+		expect(
+			await screen.findByText(
+				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+	});
+
 	it("says_what_each_risk_means", async () => {
 		for (const [risk, words] of [
 			["low", en.riskLowWhy],

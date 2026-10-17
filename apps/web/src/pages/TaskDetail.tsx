@@ -139,6 +139,16 @@ const NOTES = [
 	["escalation", "helpExplains"],
 ] as const;
 
+/** Whether an agent reviews the contract's result: a task, not an epic, whose assignee's role
+ * changes code (`catervas_core::team::reviewed_by_an_agent`, ADR 0061). */
+export function reviewedByAnAgent(contract: Contract): boolean {
+	return (
+		contract.kind !== "epic" &&
+		(contract.assigneeRole === "software_developer" ||
+			contract.assigneeRole === "ui_ux_designer")
+	);
+}
+
 /** One task: its five tabs, what it cost, and what the user can do with it (step 09's plan). */
 export function TaskDetail() {
 	const { id = "" } = useParams();
@@ -203,7 +213,9 @@ export function TaskDetail() {
 	const assignee = contract.assignee && nameOf(contract.assignee);
 	const reviewer = contract.reviewer && nameOf(contract.reviewer);
 	const doing = assignee && t("taskDoing").replace("{name}", assignee);
-	const reviews = reviewer && t("taskReviews").replace("{name}", reviewer);
+	const reviews = reviewedByAnAgent(contract)
+		? reviewer && t("taskReviews").replace("{name}", reviewer)
+		: t("taskChecked");
 	const who = [doing, reviews].filter(Boolean).join(", and ");
 	const lead = [
 		contract.sprint
@@ -229,6 +241,9 @@ export function TaskDetail() {
 			(e.body.kind === "completion" || e.body.kind === "review"),
 	);
 	const summaryBy = agentOf(summary?.body.writtenBy);
+	// Catervas writes the review note of a task it checked itself, and no agent is that author.
+	const checkedByCatervas =
+		summary?.body.kind === "review" && summary.body.writtenBy === "catervas";
 	const approved = events.find(approvesPlan);
 	const integrated = events.findLast((e) => e.kind === "task.integrated");
 	const awaitsIntegration = waiting.waiting.some(
@@ -364,13 +379,17 @@ export function TaskDetail() {
 			<>
 				<h2>{t("taskFor")}</h2>
 				<p>{contract.intent}</p>
-				{summary && summaryBy && (
+				{summary && (summaryBy || checkedByCatervas) && (
 					<section className={own.letter} aria-labelledby="summary-signed">
 						<p id="summary-signed" className={styles.muted}>
-							{signed(
-								summary.body.kind === "review" ? "gateReviewed" : "gateWrote",
-								summaryBy,
-							)}
+							{summaryBy
+								? signed(
+										summary.body.kind === "review"
+											? "gateReviewed"
+											: "gateWrote",
+										summaryBy,
+									)
+								: t("gateChecked")}
 						</p>
 						<p>{summary.body.text?.split(/\n\s*\n/)[0]}</p>
 					</section>

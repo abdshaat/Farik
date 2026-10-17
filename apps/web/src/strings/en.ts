@@ -662,6 +662,7 @@ export const en = {
 	gateReviewed: "{name}, your {role}, reviewed it",
 	gateReviewedAfter:
 		"{name}, your {role}, reviewed the code after {designer} passed the screens",
+	gateChecked: "Catervas checked it",
 	gateCheckedHint:
 		"Catervas ran these checks itself. It did not take the team’s word for them.",
 	gateSeeChanges: "See the code changes",
@@ -911,6 +912,7 @@ export const en = {
 	taskInSprint: "{id} in sprint {n}.",
 	taskDoing: "{name} is doing it",
 	taskReviews: "{name} reviews it",
+	taskChecked: "Catervas checks it",
 	taskTry: "Try {try} of {of}.",
 	taskTabs: "About this task",
 	tabSummary: "Summary and checks",
@@ -1007,7 +1009,7 @@ export const en = {
 	taskAddByHand: "Accepted. It waits for you to add it.",
 	riskLowWhy: "Low. The team may accept it without you.",
 	riskMediumWhy: "Medium. The team may still accept it without you.",
-	riskHighWhy: "High. You approve its plan, and you accept the work yourself.",
+	riskHighWhy: "High. You approve its plan.",
 	taskAdded: "Added on {day}.",
 	taskStop: "Stop work on this task",
 	taskCancel: "Cancel this task",
