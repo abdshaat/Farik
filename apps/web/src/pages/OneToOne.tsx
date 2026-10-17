@@ -574,20 +574,24 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 					onChange={(e) => setText(e.target.value)}
 					onKeyDown={sendOnEnter}
 				/>
-				<Button kind="primary" type="submit" busy={busy}>
-					{t("chatsSend")}
-				</Button>
-				<Button
-					kind="secondary"
-					type="button"
-					busy={busy}
-					onClick={() => void send(true)}
-				>
-					{t("chatsSendTask")}
-				</Button>
-				<InfoTip id="chat-task-info">
-					{t("chatsTaskInfo", { name: agent.displayName })}
-				</InfoTip>
+				<div className={styles.actions}>
+					<Button kind="primary" type="submit" busy={busy}>
+						{t("chatsSend")}
+					</Button>
+					<span className={styles.task}>
+						<Button
+							kind="secondary"
+							type="button"
+							busy={busy}
+							onClick={() => void send(true)}
+						>
+							{t("chatsSendTask")}
+						</Button>
+						<InfoTip id="chat-task-info">
+							{t("chatsTaskInfo", { name: agent.displayName })}
+						</InfoTip>
+					</span>
+				</div>
 			</div>
 			<p id="chat-enter" className={wide ? channel.muted : channel.hidden}>
 				{t("chatsEnterSends")}
