@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/no-sprints` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.7, F3 (Today's "Waiting on you"); recorded by plan 8 (revision 0.116)
 Depends on: plan 1 of this folder (committed on this branch)
-Readiness confirmed by: not yet. The Opus 5.5 readiness review of 2026-10-16 found one unmade decision: what gives a `budget` or `sessions` escalation room (see plan 1's Decisions, the `budget`, `sessions` row)
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16 (second round on the budget choice, settled by the controller the same day)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -49,8 +49,10 @@ C2 (d)). Out of scope: changing the choices (plan 1), the acceptance and approva
   (triage, refine, plan and implement each record a cost on CTV-1, as
   `accepts_a_task_that_passes_on_its_last_iteration_within_the_default_sessions` in `rules.rs`
   counts them; ADR 0061 removed the judgment session), whose implement session stops early (`implement_stops_early`, which names no agent), is
-  escalated by the budget rule on the next tick. Its suggested choice is "Ask Mira to change the
-  plan". One new transcript, `refine_writes_four_session_task_for_theo_ctv_1.jsonl`, a copy of
+  escalated by the budget rule on the next tick. Its suggested choice is "Give it more room"
+  (plan 1), which grants four more sessions and $5.00 and resumes it to `in_progress`; three more
+  transcripts then finish it (`implement_finishes_ctv_1`, `review_writes_note`, `accept_ctv_1`), so
+  it is not escalated again. One new transcript, `refine_writes_four_session_task_for_theo_ctv_1.jsonl`, a copy of
   `refine_writes_task_for_theo_ctv_1.jsonl` whose `budget` is `{"max_cost_usd":5,"max_sessions":4}`
   and whose ids (session, message, tool-use) are new; chose this over a CLI escalation command,
   which does not exist and would be a new user-facing command for a test.
@@ -138,15 +140,19 @@ allowing four sessions"), `crates/cli/src/bin/catervas-e2e-serve.rs` (`transcrip
 - `an escalation is answered from Today in one action` (Playwright, `startServe({ team:
   "pm-architect-developer", transcripts: ["triage_ctv_1_small_by_pm",
   "refine_writes_four_session_task_for_theo_ctv_1",
-  "plan_assigns_ctv_1_to_theo", "implement_stops_early"] })`, timeout 90 s) — the request "Add a
+  "plan_assigns_ctv_1_to_theo", "implement_stops_early", "implement_finishes_ctv_1",
+  "review_writes_note", "accept_ctv_1"] })`, timeout 90 s) — the request "Add a
   done.txt at the root, so a run can be checked for it" is sent from Today; within 60 s Today's
   "Waiting on you" list has a row "Theo needs your help"; its link "Answer" leads to
-  `/tasks/CTV-1/help`; the page shows "Ask Mira to change the plan" marked "Suggested" with the
-  words "Mira rewrites the plan of CTV-1; it is assigned again once it is ready."; the page has no
+  `/tasks/CTV-1/help`; the page shows "Give it more room" marked "Suggested" with the
+  words "Theo carries on with CTV-1, with up to 4 more sessions and $5.00 more to spend.", and
+  "Cancel the task"; the page has no
   radio button and no combobox; at 360 px wide every choice button's right edge is at most 360;
-  one press of "Ask Mira to change the plan" returns to `/`, and the log (`events(serve.project)`)
-  holds one `escalation.resolved` with `to: "refining"` and `resolved_by: "human"`. (The row is not asserted gone: a `sessions` escalation resolved while the
-  sessions are still spent is raised again on a later tick, SPEC 5.7.) Screenshot `escalation` with `screenshots(page, "escalation")`.
+  one press of "Give it more room" returns to `/`, and the log (`events(serve.project)`) holds one
+  `task.room_granted { sessions: 4, cost_usd: 5, granted_by: "human" }` and one `escalation.resolved`
+  with `to: "in_progress"` and `resolved_by: "human"`; the row "Theo needs your help" leaves
+  Today; within 60 s the log holds a `task.transitioned` of CTV-1 to `accepted` and only the one
+  `escalation.raised`. Screenshot `escalation` with `screenshots(page, "escalation")`.
 
 - [ ] `test(web): answer an escalation from Today in one action, through the real server`
 

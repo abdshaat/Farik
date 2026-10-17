@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/no-sprints` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.7 (escalation), F12; recorded by plan 8 (revision 0.116)
 Depends on: `origin/main` at `74b4a5af`, rebased onto `fix/plans-need-no-review` (ADR 0061)
-Readiness confirmed by: not yet. The Opus 5.5 readiness review of 2026-10-16 found one unmade decision: what gives a `budget` or `sessions` escalation room (see plan 1's Decisions, the `budget`, `sessions` row)
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16 (second round on the budget choice, settled by the controller the same day)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -14,9 +14,11 @@ ADR 0062 records that deliveries replace sprints (the whole CTV-9 design, so lat
 rather than restate it). Every escalation a user can answer offers named choices, each saying in
 plain words what happens next and naming the agent, exactly one marked as the team's suggestion,
 no two sending the same command, for all eleven reasons of `escalation.raised`. The web app and
-the command line read the same list. `catervas resolve` takes `--extra-tries <n>`, and the end of
-a run prints, for each open escalation, one runnable command per choice. Out of scope: the web
-view (plan 2), changing any escalation reason or limit.
+the command line read the same list. The human may give a task whose dollars or sessions are spent
+more room in the same answer (`task.room_granted`). `catervas resolve` takes `--extra-tries <n>` and
+`--extra-room`, and the end of a run prints, for each open escalation, one runnable command per
+choice. Out of scope: the web view (plan 2), changing any escalation reason, the limits that raise
+them, or the contract's own budget.
 
 ## Decisions
 
@@ -40,7 +42,7 @@ view (plan 2), changing any escalation reason or limit.
   | Reason | Choice: label, action, next |
   |---|---|
   | `iterations` | "Give 2 more tries", resolve `in_progress` `extra_tries` 2, "{who} picks up {id} again with 2 more tries." · "Ask {pm} to change the plan", resolve `refining`, "{pm} rewrites the plan of {id}; it is assigned again once it is ready." · Cancel |
-  | `budget`, `sessions` | UNMADE (readiness review, 2026-10-16): "Ask {pm} to change the plan" (as above) · Cancel. A resolve to `refining` while the dollars or sessions are still spent is escalated again by the budget rule on the next `All` tick, before rule 9 gives the Product Manager a session (SPEC 5.7; `rules.rs` `escalates_again_a_task_resumed_without_room`, `escalates_a_refining_contract_out_of_sessions`), so these next words would not come true. The founder or the planner decides what gives the task room before this row is executed |
+  | `budget`, `sessions` | "Give it more room", resolve `{before}` with `extra_room`, "{who} carries on with {id}, with up to {n} more sessions and ${x} more to spend." (`{n}` the contract's `max_sessions`, `{x}` its `max_cost_usd` with two decimals; offered only when `before` is known) · Cancel. No "Ask {pm} to change the plan": a resolve while the task is still spent is escalated again on the next `All` tick before the Product Manager gets a session (SPEC 5.7; `rules.rs` `escalates_again_a_task_resumed_without_room`) |
   | `blocker_age` | "Answer and carry on", resolve `in_progress`, "{who} reads your answer and carries on with {id}." · change · Cancel |
   | `permission`, `explicit_request` | "Carry on", resolve `{before}`, "{id} goes back to {before} and {who} is told what you wrote." (only when `before` is known and is neither `refining` nor `escalated`) · change · Cancel |
   | `readiness_failures` | "Ask {pm} to try the plan again", resolve `refining`, "{pm} writes the plan of {id} again with your note." · Cancel |
@@ -57,6 +59,19 @@ view (plan 2), changing any escalation reason or limit.
   5.2), and since ADR 0061 Catervas never merges, so `integration` offers one choice, to try the
   pull request again (Ada's "Add it to the project now" and its merge are gone); `preview` needs a resolve after Settings, so it adds
   Carry on.
+- More room (the controller, 2026-10-16; no human budget raise exists on `main`: `extra_tries` is
+  for `iterations` alone, `human.rs` refuses it otherwise, and nothing else raises a task's caps).
+  `escalation_resolve` gains `extra_room` (boolean, optional, default false; `Command::EscalationResolve`
+  gains `extra_room: bool`). With it, the resolve first appends `task.room_granted { sessions,
+  cost_usd, granted_by: "human" }` (about the task; `granted_by` its attribution, as `resolved_by` is
+  `escalation.resolved`'s), `sessions` the contract's `max_sessions` and `cost_usd` its
+  `max_cost_usd`, both at once for either reason (one rule), then moves the task as any resolve does.
+  It is refused `extra_room_only_for_spent: <id> escalated for <reason>, and more room is granted
+  only to a task whose dollars or sessions are spent` unless the task escalated for `budget` or
+  `sessions`, and `extra_room_or_extra_tries: ask for one of them` when both are set.
+  `cost::budget_state` reads the task's caps as the contract's plus the sum of its
+  `task.room_granted`, so the budget rule and the session's own check see them on the next tick. The
+  contract file is not changed. This amends ADR 0024 for the human only, which ADR 0062 says.
 - After the rebase onto ADR 0061 these reasons still arise: `iterations`, `budget`, `sessions`,
   `blocker_age`, `permission`, `readiness_failures` (now also for a `review` criterion outside code,
   `no_review_outside_code`), `integration` (a failed push or pull request), `explicit_request`,
@@ -71,9 +86,10 @@ view (plan 2), changing any escalation reason or limit.
   `^/`) is added for `open`. The page adds the message to `body.body` of an `escalation_resolve`
   choice only, as today; `task_integrate` takes `taskIdBody`, which holds no `message` (readiness fix).
 - `catervas resolve` gains `--extra-tries <n>` (1 to 5, clap's range), passed as `extra_tries`,
+  and `--extra-room` (a flag, `conflicts_with = "extra_tries"`), passed as `extra_room`, both
   before the message words. The end of a run prints, under each escalated task's line, one line per
   choice: two spaces, the command, two spaces, `# `, the next words, and ` (suggested)` after the
-  suggested one's. Commands: `catervas resolve {id} {to} [--extra-tries {n}] "<your message>"`,
+  suggested one's. Commands: `catervas resolve {id} {to} [--extra-tries {n} | --extra-room] "<your message>"`,
   `catervas integrate {id}`, and for an open choice `in the web app: {path}`. JSON gains
   `"choices": [{ "command", "next", "suggested" }]` on the item. Approval and integration rows keep
   their own lines (they are `WaitingKind::Approval` and the integration kind, not `Help`).
@@ -84,13 +100,18 @@ view (plan 2), changing any escalation reason or limit.
 docs/decisions/0062-deliveries-replace-sprints.md     creates: the decision (Task 1)
 docs/decisions/0028-plan-work-in-sprints.md           modifies: one status line (Task 1)
 docs/design/sprint-backlog.md                         modifies: one line under the title (Task 1)
-crates/runtime/src/choices.rs                         creates: Offer, Choice, ChoiceAction, escalation_choices, offer_for; mod tests (Task 2)
-crates/runtime/src/lib.rs                             modifies: pub mod choices (Task 2)
-crates/runtime/src/daemon/gates.rs                    modifies: escalation_choices uses the module; choices() and its two tests deleted (Task 2)
-docs/schemas/rpc.schema.json                          modifies: escalationChoicesResult (Task 2)
-crates/cli/src/lib.rs                                 modifies: Resolve gains extra_tries (Task 3)
-crates/cli/src/waiting.rs                             modifies: Help rows carry their choices (Task 3)
-crates/cli/tests/human.rs                             tests: the end-of-run lines (Task 3)
+docs/schemas/event.schema.json, command.schema.json  modifies: task.room_granted and its body; extra_room on escalationResolveBody (Task 2)
+crates/protocol/src/event.rs, event/fixtures.rs, command.rs   modifies: the kind, its body, its fixture; extra_room (Task 2)
+crates/store/src/projections.rs                       modifies: TaskRoomGranted in the about-one-task arm, if the compiler asks (Task 2)
+crates/runtime/src/orchestrator/human.rs              modifies: the resolve grants room; mod tests (Task 2)
+crates/runtime/src/cost.rs                            modifies: caps plus grants (Task 2)
+crates/runtime/src/choices.rs                         creates: Offer, Choice, ChoiceAction, escalation_choices, offer_for; mod tests (Task 3)
+crates/runtime/src/lib.rs                             modifies: pub mod choices (Task 3)
+crates/runtime/src/daemon/gates.rs                    modifies: escalation_choices uses the module; choices() and its two tests deleted (Task 3)
+docs/schemas/rpc.schema.json                          modifies: escalationChoicesResult (Task 3)
+crates/cli/src/lib.rs                                 modifies: Resolve gains extra_tries and extra_room (Task 4)
+crates/cli/src/waiting.rs                             modifies: Help rows carry their choices (Task 4)
+crates/cli/tests/human.rs                             tests: the end-of-run lines (Task 4)
 ```
 
 ## Interfaces
@@ -106,8 +127,10 @@ Produces:
 pub struct Offer<'a> {
     pub task_id: &'a str, pub reason: &'a str, pub before: Option<TaskStatus>,
     pub who: &'a str, pub product_manager: &'a str,
+    pub max_sessions: u64, pub max_cost_usd: f64,   // the contract's, for "Give it more room"
 }
-pub enum ChoiceAction { Resolve { to: TaskStatus, extra_tries: Option<u8> }, Integrate, Open { path: String } }
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChoiceAction { Resolve { to: TaskStatus, extra_tries: Option<u8>, extra_room: bool }, Integrate, Open { path: String } }
 pub struct Choice { pub label: String, pub next: String, pub suggested: bool, pub action: ChoiceAction }
 impl Choice {
     /// `{label, next, suggested, kind, body?, path?}` as `escalationChoicesResult` holds one.
@@ -121,6 +144,9 @@ impl Choice {
 /// and the board; `None` when nothing is open for the task.
 pub fn offer_for(log: &EventLog, projections: &Projections, team: &Team, task_id: &TaskId)
     -> Result<Option<Vec<Choice>>, StoreError>;
+
+// catervas_protocol: EventKind::TaskRoomGranted ("task.room_granted"),
+// EventBody::TaskRoomGranted(TaskRoomGrantedBody { sessions: u64 (>= 1), cost_usd: f64 (> 0), granted_by: String })
 ```
 
 ## Tasks
@@ -136,7 +162,9 @@ founder's approval of the epic CTV-9, question 34: "Remove sprints from the prod
 then the line `Supersedes ADR 0028.`, the line `Builds on ADR 0061 (only code is reviewed, only
 payments ask, Catervas never merges), which lands first.`, and `Amends ADR 0037 (allowances count per UTC day), ADR 0042
 (the raise's exception to the sprint hold has nothing left to except) and ADR 0027 (the incident
-fix's exception likewise; a deploy is no longer approved by a sprint's start, which phase 13 re-plans).`
+fix's exception likewise; a deploy is no longer approved by a sprint's start, which phase 13 re-plans;
+the founder deferred how a deploy is approved to phase 13, 2026-10-16) and ADR 0024 (the human may
+grant a spent task room, `task.room_granted`, as well as more tries).`
 Context: the four frictions of CTV-9's intent, and the options Ada ruled out (a timer, a delivery per
 accepted task, a "close delivery" button). Decision, as bullets written out in the ADR itself (the
 plans are where they come from, not what the ADR links to): sprints, sprint planning, the standup,
@@ -152,14 +180,34 @@ deploy is approved to phase 13's planning, 2026-10-16).
 
 - [ ] `docs(decisions): deliveries replace sprints (ADR 0062)`
 
-### Task 2: one list of choices, read by the page
+### Task 2: the human gives a spent task more room
+
+Files as the map's Task 2. The new kind follows `escalation.resolved`'s precedent in `event.rs`
+(`body_def_name`, `is_about_one_contract` true, `attribution` `granted_by`, the kinds array,
+`EventBody`, `kind()`); `fixtures.rs` gains its body wire `{ "sessions": 4, "cost_usd": 5,
+"granted_by": "human" }`. Every `Command::EscalationResolve { .. }` written today gains
+`extra_room: false`.
+
+- `grants_room_to_a_spent_task` (`human.rs` `mod tests`, `#[ignore = "needs the git program: cargo
+  xtask check --integration"]`, on the harness `escalates_again_a_task_resumed_without_room` uses:
+  CTV-1 `in_progress` with `max_sessions` 1 and `max_cost_usd` its fixture's, one session spent,
+  escalated by the first tick for `sessions`) — resolving to `in_progress` with `extra_room: true`
+  appends, in order, `task.room_granted { sessions: 1, cost_usd: <the contract's max_cost_usd>,
+  granted_by: "human" }` and `escalation.resolved`; the next tick starts the implement session
+  (`implement_stops_early`) and raises no second escalation; a second task escalated for
+  `iterations` is refused with a reason starting `extra_room_only_for_spent`, and a resolve with
+  both `extra_room` and `extra_tries` with one starting `extra_room_or_extra_tries`.
+
+- [ ] `feat(runtime): the human may give a spent task more room`
+
+### Task 3: one list of choices, read by the page
 
 Files: created `crates/runtime/src/choices.rs`; modified `crates/runtime/src/lib.rs`,
 `crates/runtime/src/daemon/gates.rs` (`escalation_choices` calls `choices::offer_for` and answers
 `{ "choices": [choice.wire(id), ...] }`, or `[]`; the old `choices` fn and the tests
 `offers_the_choices_for_each_reason` and `offers_to_carry_on_where_the_task_was` are deleted, as
 the new test replaces them), `docs/schemas/rpc.schema.json` (`escalationChoicesResult` per the
-Decisions). Consumes Task 1's ADR only as text.
+Decisions). Consumes Task 1's ADR only as text and Task 2's `extra_room`.
 
 - `every_reason_offers_one_suggested_choice_that_says_what_happens` (in `choices.rs`, `mod tests`,
   pure) — for each of the eleven reasons of the event schema and for an unknown one, with
@@ -170,7 +218,9 @@ Decisions). Consumes Task 1's ADR only as text.
   again with 2 more tries." (resolve `in_progress`, 2 tries), "Ask Mira to change the plan" /
   "Mira rewrites the plan of CTV-14; it is assigned again once it is ready." (resolve
   `refining`), "Cancel the task" / "CTV-14 stops for good. Its branch is kept, and nothing is
-  merged." (resolve `cancelled`); `blocker_age`'s first resolves to `in_progress`; `integration`
+  merged." (resolve `cancelled`); with `max_sessions: 4` and `max_cost_usd: 5.0`, `sessions` and
+  `budget` each equal exactly "Give it more room" / "Theo carries on with CTV-14, with up to 4 more
+  sessions and $5.00 more to spend." (resolve `in_progress`, `extra_room` true) and Cancel; `blocker_age`'s first resolves to `in_progress`; `integration`
   has one choice, `Integrate`, labelled "Open the pull request again"; `approval` and `preview` start with an `Open` of `/tasks/CTV-14/plan`
   and `/settings/your-app`; `permission` with `before: Some(Refining)` has no "Carry on". Each
   `wire` of the lists conforms to `escalationChoicesResult`'s item.
@@ -191,15 +241,16 @@ read yet.
 
 - [ ] `feat(runtime): every escalation says what each choice does and suggests one`
 
-### Task 3: the command line answers each choice
+### Task 4: the command line answers each choice
 
 Files: modified `crates/cli/src/lib.rs` (`Commands::Resolve` gains
-`#[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))] extra_tries: Option<u8>`,
-passed to `Command::EscalationResolve { extra_tries }` in `humans()`), `crates/cli/src/waiting.rs`
+`#[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))] extra_tries: Option<u8>` and
+`#[arg(long, conflicts_with = "extra_tries")] extra_room: bool`, passed to
+`Command::EscalationResolve { extra_tries, extra_room }` in `humans()`), `crates/cli/src/waiting.rs`
 (`Waiting` gains `choices: Vec<(String, String, bool)>`, filled for `WaitingKind::Help` from
 `choices::offer_for`; `lines()` prints them after the row's line per the Decisions; `json()` adds
 `choices`; the Help row's own command becomes `choose one`, so its line reads `CTV-1 is escalated (iterations): choose one`), tested by `crates/cli/tests/human.rs`.
-Consumes Task 2's `offer_for` and `Choice::command_line`.
+Consumes Task 3's `offer_for` and `Choice::command_line`.
 
 - `the_end_of_a_run_names_a_command_for_each_choice` (`#[ignore = "needs the git program: cargo
   xtask check --integration"]`, on `a_team` with the shared helpers `filed`, `record`, `moved`, as
