@@ -178,7 +178,7 @@ milestone runs, phase 11 step 03, lose "one sprint carrying two requests" and ar
 phase 13's DevOps plans lose "a sprint's start approves its deploys"; the founder deferred how a
 deploy is approved to phase 13's planning, 2026-10-16).
 
-- [ ] `docs(decisions): deliveries replace sprints (ADR 0062)`
+- [x] `docs(decisions): deliveries replace sprints (ADR 0062)`
 
 ### Task 2: the human gives a spent task more room
 
