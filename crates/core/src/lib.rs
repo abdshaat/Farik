@@ -9,6 +9,8 @@ pub mod budget;
 pub mod contract;
 /// The criterion library and its validator.
 pub mod criteria;
+/// When a delivery closes (ADR 0062).
+pub mod delivery;
 /// Each role's folder under `docs/catervas/`, its human documents and their agent twins.
 pub mod folders;
 /// Types generated from `docs/schemas/`.

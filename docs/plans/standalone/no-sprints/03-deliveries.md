@@ -171,7 +171,7 @@ Files: created `crates/core/src/delivery.rs` (`mod tests`); `crates/core/src/lib
   tasks and a task with a parent, work left, is `None`; five standalone tasks, work left,
   `TasksAccepted`; one epic among any rows, work left, `EpicAccepted`.
 
-- [ ] `feat(core): what closes a delivery`
+- [x] `feat(core): what closes a delivery`
 
 ### Task 3: closing a delivery, and its changelog task
 
