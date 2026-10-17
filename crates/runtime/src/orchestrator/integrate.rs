@@ -6,9 +6,10 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use catervas_core::branch::task_branch;
+use catervas_core::branch::{change_type, task_branch};
 use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::is_plan_task;
+use catervas_core::forge_text::{pull_request_title, without_task_ids};
 use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind,
@@ -147,17 +148,16 @@ impl Subject {
         })
     }
 
-    /// Its merge commit's message and its pull request's title.
-    fn titles(&self, tools: &ToolDeps) -> Result<(String, String), OrchestratorError> {
+    /// Its pull request's title: a task's is its type and title, with no task id (ADR 0066).
+    fn title(&self, tools: &ToolDeps) -> Result<String, OrchestratorError> {
         match self {
             Self::Task(task_id) => {
-                let title = tools
-                    .projections
-                    .task(task_id)?
-                    .map(|row| row.title)
-                    .unwrap_or_default();
-                let id = task_id.as_str();
-                Ok((format!("Merge {id}: {title}"), format!("{id}: {title}")))
+                let contract = tools.files.read_contract(task_id)?;
+                Ok(pull_request_title(
+                    change_type(&contract),
+                    contract.title.as_str(),
+                    &title_of(tools),
+                ))
             }
             Self::FolderChange(change) => {
                 let paths = folder_change(tools, *change)?
@@ -170,12 +170,20 @@ impl Subject {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                Ok((
-                    format!("Merge docs/folder-{change}: {paths}"),
-                    format!("Folder change {change}: {paths}"),
-                ))
+                Ok(format!("Folder change {change}: {paths}"))
             }
         }
+    }
+}
+
+/// A task's title as the contract's file holds it, for the ids a pull request's words name.
+fn title_of(tools: &ToolDeps) -> impl Fn(&TaskId) -> Option<String> + '_ {
+    |id| {
+        tools
+            .files
+            .read_contract(id)
+            .ok()
+            .map(|contract| contract.title.as_str().to_string())
     }
 }
 
@@ -758,7 +766,7 @@ fn open(
         let detail = format!("pushing {branch} to origin failed: {}", git_words(&error));
         return escalate(tools, subject, detail);
     }
-    let (_, title) = subject.titles(tools)?;
+    let title = subject.title(tools)?;
     let body = pull_request_body(tools, subject)?;
     let pull_request = match target.forge.open_pull_request(into, branch, &title, &body) {
         Ok(pull_request) => pull_request,
@@ -855,7 +863,7 @@ fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, Orch
         }
     };
     let contract = tools.files.read_contract(task_id)?;
-    let intent = contract.intent.as_str();
+    let intent = without_task_ids(contract.intent.as_str(), &title_of(tools));
     let notes = tools.log.read(&EventQuery {
         task_id: Some(task_id.clone()),
         kinds: vec![EventKind::NoteWritten],
@@ -866,7 +874,9 @@ fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, Orch
             .iter()
             .rev()
             .find_map(|event| match &event.body {
-                EventBody::NoteWritten(body) if body.kind == kind => Some(body.text.clone()),
+                EventBody::NoteWritten(body) if body.kind == kind => {
+                    Some(without_task_ids(&body.text, &title_of(tools)))
+                }
                 _ => None,
             })
             .unwrap_or_else(|| "(none was written)".to_string())
@@ -1853,6 +1863,108 @@ mod tests {
         );
         assert_eq!(opened(&harness).len(), 1);
         assert_eq!(creates(&harness), 1);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_tasks_pull_request_carries_no_task_id() {
+        let harness = under("int-pr-no-id", "pull_request");
+        let origin = harness.with_origin();
+        harness.file("CTV-2", "cancelled", |wire| {
+            wire["title"] = json!("Pie pre-orders");
+        });
+        harness.assigned_with("CTV-1", "dev-a", "dev-b", |wire| {
+            wire["title"] = json!("Character counter on the note input");
+        });
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        // Rule 7 starts it: its branch is named from its title and recorded.
+        orchestrator.tick().await.expect("the tick runs");
+        let branch = harness.branch("CTV-1");
+        assert_eq!(branch, "feat/character-counter-on-the-note-input");
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(worktree.join("counter.txt"), "1\n").expect("written");
+        harness
+            .project
+            .deps
+            .git
+            .commit(
+                &worktree,
+                "feat: count the note's characters",
+                &["counter.txt".to_string()],
+            )
+            .expect("committed");
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Added the counter; CTV-2 still owes the pies.", "written_by": "dev-a" }),
+        );
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "review", "text": "C1 passes.", "written_by": "dev-b" }),
+        );
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        let mut by_assignee = people.clone();
+        by_assignee["actor"] = json!("assignee");
+        by_assignee["requested_by"] = json!("dev-a");
+        harness
+            .project
+            .moved("CTV-1", "in_progress", "verifying", &by_assignee);
+        harness.project.moved(
+            "CTV-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        harness.settle_delivery();
+        harness
+            .project
+            .deps
+            .git
+            .remove_worktree(&worktree)
+            .expect("the worktree is removed");
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", &branch]),
+            at_root(&harness, &["rev-parse", &branch])
+        );
+        let create = harness
+            .gh
+            .calls()
+            .into_iter()
+            .find(|call| call.get(1).map(String::as_str) == Some("create"))
+            .expect("a pull request is created");
+        let after = |flag: &str| {
+            let at = create.iter().position(|argument| argument == flag);
+            at.and_then(|at| create.get(at + 1)).cloned()
+        };
+        assert_eq!(after("--head"), Some(branch.clone()));
+        assert_eq!(
+            after("--title").as_deref(),
+            Some("Feat: Character counter on the note input")
+        );
+        let body = harness.gh.stdin_of("create");
+        assert!(
+            body.contains("\"Pie pre-orders\" still owes the pies"),
+            "{body}"
+        );
+        assert!(!body.contains("CTV-"), "{body}");
+        let log = at_root(
+            &harness,
+            &["log", "--format=%B", &format!("main..{branch}")],
+        );
+        assert!(!log.contains("CTV-"), "{log}");
+        let recorded = opened(&harness);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].branch, branch);
         let _ = std::fs::remove_dir_all(&origin);
     }
 

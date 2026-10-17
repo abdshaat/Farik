@@ -209,7 +209,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `opens_a_pull_request_for_an_accepted_task` and the other pull request tests stay as they are.
   Their tasks' worktrees are made by fixtures, on old branches, which is the old task's path.
 
-- [ ] `feat(runtime): a task's pull request is titled by its type and names no task id`
+- [x] `feat(runtime): a task's pull request is titled by its type and names no task id`
 
 ## Verification
 
