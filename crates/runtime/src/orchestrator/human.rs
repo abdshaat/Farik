@@ -318,7 +318,7 @@ fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandErro
     }
     if !tools
         .transitions
-        .awaits_the_product_plan(team)
+        .awaits_the_product_plan()
         .map_err(failed)?
     {
         return refused("product_plan_approved: the product plan is approved already".to_string());
@@ -376,7 +376,7 @@ fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandErro
         .collect();
     Ok(CommandReport {
         said: format!(
-            "{} drafts the product plan as {}. It comes to you on Today to approve.",
+            "{} drafts the product plan as {}. Your team starts building once it is done.",
             writer.display_name.as_str(),
             contract.id.as_str()
         ),
@@ -439,8 +439,7 @@ fn catervafication_start_for(tools: &ToolDeps, team: &Team) -> Result<CommandRep
         .map_err(failed)?
         .first()
         .map_or(0, |event| event.envelope.seq);
-    let started =
-        catervafication::start(tools, team, Project::Existing, HUMAN, None).map_err(failed)?;
+    let started = catervafication::start(tools, team, Project::Existing, HUMAN).map_err(failed)?;
     let events = tools
         .log
         .read(&EventQuery {
@@ -3019,7 +3018,7 @@ mod tests {
 
         assert_eq!(
             report.said,
-            "Mira drafts the product plan as CTV-1. It comes to you on Today to approve."
+            "Mira drafts the product plan as CTV-1. Your team starts building once it is done."
         );
         assert_eq!(report.events.len(), 2, "{report:?}");
         assert_eq!(product_plan_tasks(&harness), ["CTV-1"]);
@@ -3076,7 +3075,7 @@ mod tests {
         let report = handled(&an_orchestrator(&unreviewed), Command::ProductPlanDraft).await;
         assert_eq!(
             report.said,
-            "Mira drafts the product plan as CTV-1. It comes to you on Today to approve."
+            "Mira drafts the product plan as CTV-1. Your team starts building once it is done."
         );
         assert_eq!(product_plan_tasks(&unreviewed), ["CTV-1"]);
         let contract = unreviewed
@@ -3111,7 +3110,11 @@ mod tests {
             refusal,
             "product_plan_approved: the product plan is approved already"
         );
-        assert!(product_plan_tasks(&approved).is_empty());
+        assert_eq!(
+            product_plan_tasks(&approved).len(),
+            1,
+            "only the plan the fixture finished"
+        );
 
         // No active Product Manager: a team file cannot say so, so the team is handed in whole.
         let unwritten = a_new_project("human-plan-no-writer", |_| {});
@@ -3195,7 +3198,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn starts_a_catervafication_approved_by_the_owner() {
+    async fn starts_a_catervafication_on_the_owners_word() {
         let harness = Harness::with_the_suggested_six("human-catervafication");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -3206,8 +3209,8 @@ mod tests {
             report.said,
             "Your team starts documenting the project in S1: CTV-1."
         );
-        // The epic is filed whole, then its sprint is opened and planned, it moves into refining as
-        // the Product Manager asks, and the owner's approval comes after the move.
+        // The epic is filed whole, then its sprint is opened and planned, and it moves into
+        // refining as the Product Manager asks. No approval of the owner's follows (ADR 0061).
         let kinds = [
             EventKind::TaskCreated,
             EventKind::RequestTriaged,
@@ -3215,7 +3218,6 @@ mod tests {
             EventKind::SprintStarted,
             EventKind::SprintPlanned,
             EventKind::TaskTransitioned,
-            EventKind::HumanAccepted,
         ];
         let seen: Vec<EventKind> = harness
             .events(&kinds)
@@ -3238,11 +3240,8 @@ mod tests {
         let moved = last(&harness, EventKind::TaskTransitioned).expect("the epic moves");
         assert!(matches!(&moved.body, EventBody::TaskTransitioned(body)
             if body.to.to_string() == "refining" && body.requested_by == "pm"));
-        let accepted = last(&harness, EventKind::HumanAccepted).expect("the owner approves");
-        assert!(matches!(&accepted.body, EventBody::HumanAccepted(body)
-            if body.subject == HumanAcceptedBodySubject::Contract
-                && body.accepted_by == "human" && body.message.is_none()));
-        assert_eq!(report.events.last(), Some(&accepted.envelope.seq));
+        assert!(last(&harness, EventKind::HumanAccepted).is_none());
+        assert_eq!(report.events.last(), Some(&moved.envelope.seq));
 
         // The next tick readies it with no session and no escalation, and the one after assigns it
         // to the Scrum Master.

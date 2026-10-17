@@ -17,13 +17,13 @@ use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::marketing::plans_to_end;
 use catervas_core::team::{Agent, AgentStatus, Team, task_private_folder};
 use catervas_protocol::event::{
-    CatervasEvent, EscalationAgedBody, EventBody, EventIds, EventKind, HumanAcceptedBodySubject,
-    SessionStartedBodyPurpose, Thread, new_event,
+    CatervasEvent, EscalationAgedBody, EventBody, EventIds, EventKind, SessionStartedBodyPurpose,
+    Thread, new_event,
 };
 use catervas_store::baseline::{copy_baseline, folder_in};
 use catervas_store::git::{held_document, task_base};
 use catervas_store::marketing::{marketing_plans, social_posts};
-use catervas_store::product_plan::{new_project, product_plan_tasks};
+use catervas_store::product_plan::new_project;
 use catervas_store::repos::TaskRepositoryError;
 use catervas_store::{CostScope, EventQuery, Git, GitError, TaskProjection};
 use chrono::{DateTime, Utc};
@@ -317,7 +317,7 @@ fn catervafy_a_new_project(
     let tools = &deps.tools;
     if new_project(&tools.log)?.is_none()
         || crate::catervafication::started(&tools.log)?.is_some()
-        || tools.transitions.awaits_the_product_plan(team)?
+        || tools.transitions.awaits_the_product_plan()?
         || requests::product_manager(team).is_none()
     {
         return Ok(None);
@@ -332,13 +332,11 @@ fn catervafy_a_new_project(
     {
         return Ok(None);
     }
-    let note = plan_acceptance_note(tools)?;
     let started = crate::catervafication::start(
         tools,
         team,
         crate::catervafication::Project::New,
         "catervas",
-        note,
     )
     .map_err(|error| OrchestratorError::Refused {
         reason: format!("catervafication_failed: {error}"),
@@ -346,41 +344,6 @@ fn catervafy_a_new_project(
     Ok(Some(TickReport::Acted {
         task_id: started.epic,
         what: "started the Catervafication of the new project".to_string(),
-    }))
-}
-
-/// What the owner's approval of a new project's Catervafication says: that they approved it with
-/// the product plan, which task they accepted and on which UTC day. `None` when the log holds no
-/// product plan task.
-fn plan_acceptance_note(
-    tools: &crate::tools::ToolDeps,
-) -> Result<Option<String>, OrchestratorError> {
-    let Some((plan, _)) = product_plan_tasks(&tools.log)?.pop() else {
-        return Ok(None);
-    };
-    let day = tools
-        .log
-        .read(&EventQuery {
-            task_id: Some(plan.clone()),
-            kinds: vec![EventKind::HumanAccepted],
-            ..EventQuery::default()
-        })?
-        .iter()
-        .rev()
-        .find(|event| {
-            matches!(&event.body, EventBody::HumanAccepted(body)
-                if body.subject == HumanAcceptedBodySubject::Result)
-        })
-        .map(|event| event.envelope.recorded_at.format("%-d %B %Y").to_string());
-    Ok(Some(match day {
-        Some(day) => format!(
-            "Approved with the product plan: you accepted {} on {day}.",
-            plan.as_str()
-        ),
-        None => format!(
-            "Approved with the product plan: you accepted {}.",
-            plan.as_str()
-        ),
     }))
 }
 
@@ -1203,7 +1166,7 @@ async fn open_the_interview(
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if scope.rules != TickRules::All
         || scope.task_id.is_some()
-        || !deps.tools.transitions.awaits_the_product_plan(team)?
+        || !deps.tools.transitions.awaits_the_product_plan()?
     {
         return Ok(None);
     }
@@ -8182,9 +8145,8 @@ mod tests {
     }
 
     /// A new project (`project.started`) whose team has a Product Manager, an Architect, a Developer
-    /// and a Marketing Specialist, and whose first request CTV-1 and product plan CTV-2 are accepted
-    /// and integrated, the plan accepted by the owner three days ago; its documents are not yet on
-    /// main (`approve_the_product_plan`).
+    /// and a Marketing Specialist, whose first request CTV-1 is accepted and integrated and whose
+    /// product plan CTV-2 is in progress; its documents are not on main.
     fn a_new_project_with_its_plan_done(name: &str) -> Harness {
         use catervas_core::team::fixtures::an_agent_wire;
         let harness = Harness::new(name, |wire| {
@@ -8225,31 +8187,59 @@ mod tests {
             (deps.clock.now(), &deps.ids),
         )
         .expect("the product plan is filed");
-        harness.project.record_at(
-            at() - chrono::Duration::days(3),
-            "CTV-2",
-            "human.accepted",
-            &json!({ "subject": "result", "accepted_by": "human" }),
-        );
-        for id in ["CTV-1", "CTV-2"] {
-            harness.project.moved(id, "draft", "accepted", &json!({}));
-            harness.project.record(
-                id,
-                "task.integrated",
-                &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
-            );
-        }
         harness
+            .project
+            .moved("CTV-1", "draft", "accepted", &json!({}));
+        harness.project.record(
+            "CTV-1",
+            "task.integrated",
+            &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
+        );
+        harness
+            .project
+            .moved("CTV-2", "draft", "in_progress", &json!({}));
+        harness
+    }
+
+    /// The three tasks of a new project's Catervafication, and that Marketing's depends on the plan.
+    fn the_new_projects_tasks_are_filed(harness: &Harness) {
+        let files = &harness.project.deps.files;
+        let roles: Vec<String> = ["CTV-4", "CTV-5", "CTV-6"]
+            .iter()
+            .map(|id| {
+                files
+                    .read_contract(&id.parse().expect("an id"))
+                    .expect("the task is filed")
+                    .assignee_role
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            roles,
+            ["architect", "software_developer", "marketing_specialist"]
+        );
+        let marketing = files
+            .read_contract(&"CTV-6".parse().expect("an id"))
+            .expect("the task is filed");
+        assert_eq!(
+            marketing
+                .dependencies
+                .iter()
+                .map(|dependency| dependency.as_str())
+                .collect::<Vec<_>>(),
+            ["CTV-2"],
+            "the Marketing task reads the plan task's branch"
+        );
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn catervafies_a_new_project_once_its_plan_is_approved() {
+    async fn a_new_project_plans_once_its_product_plan_task_is_accepted() {
         let harness = a_new_project_with_its_plan_done("orch-catervafy-new");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        // While the plan is not on main, the rule does nothing.
+        // While the plan task is in progress, the rule does nothing.
         let report = orchestrator.tick().await.expect("the tick runs");
         assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
         assert!(
@@ -8258,7 +8248,15 @@ mod tests {
                 .is_empty()
         );
 
-        harness.approve_the_product_plan();
+        // Catervas accepts the plan task; nothing is merged, and the next tick starts.
+        harness
+            .project
+            .moved("CTV-2", "in_progress", "accepted", &json!({}));
+        harness.project.record(
+            "CTV-2",
+            "task.integrated",
+            &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
+        );
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
@@ -8301,13 +8299,21 @@ mod tests {
                 .map(|id| id.as_str()),
             Some("CTV-3")
         );
-        let accepted = harness.events(&[EventKind::HumanAccepted]);
-        let approval = accepted.last().expect("the owner's approval is recorded");
-        assert!(matches!(&approval.body, EventBody::HumanAccepted(body)
-            if body.accepted_by == "human"
-                && body.message.as_deref()
-                    == Some("Approved with the product plan: you accepted CTV-2 on 19 September 2026.")));
-        assert!(approval.envelope.seq > into_refining.envelope.seq);
+        assert!(
+            harness.events(&[EventKind::HumanAccepted]).iter().all(
+                |event| !matches!(&event.body, EventBody::HumanAccepted(body)
+                    if body.subject == catervas_protocol::event::HumanAcceptedBodySubject::Contract)
+            ),
+            "no epic waits for the owner's approval"
+        );
+        assert!(
+            !git_output_in(
+                &harness.project.repo.path,
+                &["ls-tree", "-r", "--name-only", "main"]
+            )
+            .contains("docs/catervas/product"),
+            "main holds no plan"
+        );
 
         // The next tick readies it with no session and no escalation.
         orchestrator.tick().await.expect("the tick runs");
@@ -8317,21 +8323,7 @@ mod tests {
         for _ in 0..3 {
             orchestrator.tick().await.expect("the tick runs");
         }
-        let files = &harness.project.deps.files;
-        let roles: Vec<String> = ["CTV-4", "CTV-5", "CTV-6"]
-            .iter()
-            .map(|id| {
-                files
-                    .read_contract(&id.parse().expect("an id"))
-                    .expect("the task is filed")
-                    .assignee_role
-                    .to_string()
-            })
-            .collect();
-        assert_eq!(
-            roles,
-            ["architect", "software_developer", "marketing_specialist"]
-        );
+        the_new_projects_tasks_are_filed(&harness);
         // A second epic is not filed.
         assert_eq!(
             harness.events(&[EventKind::CatervaficationStarted]).len(),
@@ -8357,7 +8349,11 @@ mod tests {
                 .events(&[EventKind::CatervaficationStarted])
                 .is_empty()
         );
-        assert!(existing.events(&[EventKind::TaskCreated]).is_empty());
+        assert_eq!(
+            existing.events(&[EventKind::TaskCreated]).len(),
+            1,
+            "only the plan the fixture finished"
+        );
         drop(harness);
     }
 
@@ -8380,7 +8376,11 @@ mod tests {
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
-        assert!(harness.events(&[EventKind::TaskCreated]).is_empty());
+        assert_eq!(
+            harness.events(&[EventKind::TaskCreated]).len(),
+            1,
+            "only the plan the fixture finished"
+        );
         assert!(
             harness
                 .events(&[EventKind::CatervaficationStarted])

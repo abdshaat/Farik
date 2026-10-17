@@ -150,7 +150,7 @@ pub(super) async fn refining(
     let history = history(deps, &row.task_id)?;
     // A new project plans nothing but its product plan until the plan is approved (5.3): the
     // contract waits, with no session and no governor ask to spend an attempt or escalate.
-    if !is_the_product_plan(&history) && deps.tools.transitions.awaits_the_product_plan(team)? {
+    if !is_the_product_plan(&history) && deps.tools.transitions.awaits_the_product_plan()? {
         return Ok(None);
     }
     let began = refining_began(&history);
@@ -664,7 +664,6 @@ pub(super) async fn in_progress_epic(
                     what: format!("filed the Catervafication's tasks: {}", ids.join(", ")),
                 }));
             }
-            FileDue::MarketingWaits => return Ok(None),
             FileDue::Nothing => {}
         }
     }
@@ -2327,7 +2326,8 @@ mod tests {
             report,
             TickReport::Acted {
                 task_id: task("CTV-1"),
-                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5".to_string()
+                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5, CTV-6"
+                    .to_string()
             }
         );
         assert_eq!(
@@ -2336,10 +2336,11 @@ mod tests {
                 "product_manager",
                 "architect",
                 "software_developer",
-                "ui_ux_designer"
+                "ui_ux_designer",
+                "marketing_specialist"
             ]
         );
-        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5"] {
+        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5", "CTV-6"] {
             let row = harness.row(id);
             assert_eq!(row.parent, Some(task("CTV-1")), "{id}");
             assert_eq!(row.sprint.as_deref(), Some("S1"), "{id}");
@@ -2378,51 +2379,40 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
         assert_eq!(
             roles_under_the_epic(&unready),
-            ["product_manager", "architect", "software_developer"]
+            [
+                "product_manager",
+                "architect",
+                "software_developer",
+                "marketing_specialist"
+            ]
         );
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn files_the_marketing_task_once_the_product_plan_is_in() {
+    async fn files_the_marketing_task_with_the_others_depending_on_the_plan() {
         let harness = Harness::with_the_suggested_six("req-catervafication-marketing");
-        let (orchestrator, adapter) = a_catervafication_in_progress(&harness).await;
+        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
         orchestrator.tick().await.expect("the tick files the tasks");
-        // CTV-3 to CTV-5 are accepted and integrated; the plan, CTV-2, awaits its integration.
-        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5"] {
-            harness.project.moved(id, "draft", "accepted", &json!({}));
-        }
-        harness.unmerged_branch("CTV-2");
-        let integrate = |id: &str| {
-            harness.project.record(
-                id,
-                "task.integrated",
-                &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
-            );
-        };
-        for id in ["CTV-3", "CTV-4", "CTV-5"] {
-            integrate(id);
-        }
-        assert!(harness.row("CTV-2").awaiting_integration);
 
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert!(is_idle(&report), "{report:?}");
-        assert_eq!(roles_under_the_epic(&harness).len(), 4);
-        assert!(adapter.started().is_empty(), "the epic is not closed out");
-
-        integrate("CTV-2");
-        let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(
-            report,
-            TickReport::Acted {
-                task_id: task("CTV-1"),
-                what: "filed the Catervafication's tasks: CTV-6".to_string()
-            }
-        );
         assert_eq!(
             roles_under_the_epic(&harness).last().map(String::as_str),
             Some("marketing_specialist")
+        );
+        let marketing = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-6"))
+            .expect("the Marketing task");
+        assert_eq!(
+            marketing
+                .dependencies
+                .iter()
+                .map(|dependency| dependency.as_str())
+                .collect::<Vec<_>>(),
+            ["CTV-2"],
+            "it reads the Product Manager's task, and starts from its branch once accepted"
         );
     }
 
@@ -2430,34 +2420,38 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn files_no_marketing_task_for_a_cancelled_product_plan() {
         let harness = Harness::with_the_suggested_six("req-catervafication-no-plan");
-        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator
-            .handle(Command::CatervaficationStart)
-            .await
-            .expect("the owner starts it");
-        for _ in 0..4 {
-            orchestrator.tick().await.expect("the tick runs");
-        }
+        // The Marketing Specialist is paused at first, so its task is not filed with the others.
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        let mut wire = serde_json::to_value(&team).expect("the team is JSON");
+        wire["agents"][5]["status"] = json!("paused");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
+            .expect("the team is written");
+        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
+        orchestrator.tick().await.expect("the tick files the tasks");
+        assert_eq!(roles_under_the_epic(&harness).len(), 4);
         harness
             .project
             .moved("CTV-2", "draft", "cancelled", &json!({}));
-        for id in ["CTV-3", "CTV-4", "CTV-5"] {
-            harness.project.moved(id, "draft", "accepted", &json!({}));
-            harness.project.record(
-                id,
-                "task.integrated",
-                &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
-            );
-        }
+        wire["agents"][5]["status"] = json!("active");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
+            .expect("the team is written");
 
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(roles_under_the_epic(&harness).len(), 4, "no Marketing task");
-        let started = adapter.started();
-        let spec = started.first().expect("the epic's close-out starts");
-        assert_eq!(spec.purpose, SessionPurpose::Plan);
-        assert_eq!(spec.task_id, Some(task("CTV-1")));
     }
 
     #[tokio::test]
@@ -2490,7 +2484,12 @@ mod tests {
             .expect("the tick files the tasks");
         assert_eq!(
             roles_under_the_epic(&harness),
-            ["product_manager", "architect", "software_developer"]
+            [
+                "product_manager",
+                "architect",
+                "software_developer",
+                "marketing_specialist"
+            ]
         );
 
         // The owner cancels the Architect's task: it is not filed again.
@@ -2505,7 +2504,7 @@ mod tests {
             .await
             .expect("the tick runs");
         assert!(is_idle(&report), "{report:?}");
-        assert_eq!(roles_under_the_epic(&harness).len(), 3);
+        assert_eq!(roles_under_the_epic(&harness).len(), 4);
 
         // A Designer who joins later gets its task on the next tick.
         wire["agents"][4]["status"] = json!("active");
@@ -2520,7 +2519,7 @@ mod tests {
             .await
             .expect("the tick runs");
         assert!(
-            matches!(&report, TickReport::Acted { what, .. } if what.ends_with("CTV-5")),
+            matches!(&report, TickReport::Acted { what, .. } if what.ends_with("CTV-6")),
             "{report:?}"
         );
         assert_eq!(

@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use catervas_core::folders::{
-    DocumentFormat, PRODUCT_PLAN_STEMS, agent_twin, is_human_document, product_plan_approved,
-    twin_is_stale, with_format,
+    DocumentFormat, agent_twin, is_human_document, twin_is_stale, with_format,
 };
 use catervas_core::team::Team;
 
@@ -1246,26 +1245,6 @@ pub fn held_document(
         }
     }
     Ok(None)
-}
-
-/// Whether the new project's product plan is on the team's integration branch: both documents of
-/// `PRODUCT_PLAN_STEMS` are there, each as `.md` or `.html` (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
-///
-/// # Errors
-///
-/// What `integration_branch` refuses; `CommandFailed` for any git error but a missing branch.
-pub fn product_plan_on(git: &Git, team: &Team) -> Result<bool, GitError> {
-    let branch = integration_branch(team, git)?;
-    match git.tree(&branch) {
-        Ok(_) => {}
-        Err(GitError::CommandFailed { .. }) => return Ok(false),
-        Err(other) => return Err(other),
-    }
-    let mut present = Vec::new();
-    for stem in PRODUCT_PLAN_STEMS {
-        present.extend(held_document(git, &branch, stem, team.document_format())?);
-    }
-    Ok(product_plan_approved(&present))
 }
 
 /// The `.agent.md` twins on `branch` that are behind the document for people beside them: the

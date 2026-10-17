@@ -139,7 +139,7 @@ Tests:
   - Once that task is `accepted`, the next tick starts the Catervafication. Its Marketing task is filed with `dependencies` naming the plan task, and the ready task is planned.
   - `main` holds no plan throughout.
 
-- [ ] `feat(runtime): start a new project once its product plan task is accepted`
+- [x] `feat(runtime): start a new project once its product plan task is accepted`
 
 ### Task 3: spec and roadmap change like any document
 

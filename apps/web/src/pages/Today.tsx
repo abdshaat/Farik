@@ -3,6 +3,7 @@ import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { type ProductPlanState, projectName } from "../app/productPlan.ts";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { codeOf } from "../app/words.ts";
@@ -43,11 +44,6 @@ import {
 	PostCard,
 	type PostMedia,
 } from "./PostGoingOut.tsx";
-import {
-	ProductPlanCard,
-	type ProductPlanState,
-	projectName,
-} from "./ProductPlanCard.tsx";
 import { RenewalsSection } from "./Renewals.tsx";
 import { SellerMailSections } from "./SellerMail.tsx";
 import { SuggestedConnections } from "./SuggestedConnections.tsx";
@@ -211,12 +207,8 @@ export function Today() {
 	const cards = planChanges?.cards ?? [];
 	// A new project's product plan: while it is interviewed, the band says so; once both documents
 	// are written, the plan's acceptance row is shown as the plan itself.
-	const { data: plan, again: askPlanAgain } = useQuery<ProductPlanState>(
-		"product_plan.state",
-		{},
-	);
+	const { data: plan } = useQuery<ProductPlanState>("product_plan.state", {});
 	const interviewing = !!plan?.newProject && !plan.approved;
-	const planTask = plan?.documents.length === 2 ? plan.task?.taskId : undefined;
 	// "Later" leaves a quiet card here until the owner starts the documenting sprint.
 	const { data: documenting, again: askDocumentingAgain } =
 		useQuery<Catervafication>("catervafication.get", {});
@@ -303,23 +295,7 @@ export function Today() {
 						<ul className={styles.rows} aria-label={t("waitingList")}>
 							{keyRefused && <KeyRefusedRow />}
 							{waiting.waiting.map((item) =>
-								item.kind === "acceptance" &&
-								plan &&
-								planTask &&
-								item.taskId === planTask ? (
-									<li key={`plan-${item.taskId}`}>
-										<ProductPlanCard
-											state={plan}
-											name={
-												agent(item.agentId)?.displayName ??
-												pm?.displayName ??
-												""
-											}
-											agent={agent(item.agentId) ?? pm}
-											again={askPlanAgain}
-										/>
-									</li>
-								) : item.kind === "tool_approval" ? (
+								item.kind === "tool_approval" ? (
 									<ToolApprovalRow
 										key={`${item.kind}-${item.approval}`}
 										item={item}

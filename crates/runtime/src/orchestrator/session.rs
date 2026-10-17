@@ -1266,7 +1266,7 @@ fn session_spec_without(
     let interviewing = ask.purpose == SessionPurpose::Chat
         && ask.contract.is_none()
         && role_id == Role::ProductManager
-        && deps.tools.transitions.awaits_the_product_plan(team)?;
+        && deps.tools.transitions.awaits_the_product_plan()?;
     let human = human_of(deps, ask, interviewing)?;
     let rules = team.rules();
     let permissions = team.permissions();

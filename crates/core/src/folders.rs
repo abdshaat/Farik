@@ -225,19 +225,6 @@ pub const PRODUCT_PLAN_STEMS: [&str; 2] = [
     "docs/catervas/product/roadmap",
 ];
 
-/// Whether both documents of [`PRODUCT_PLAN_STEMS`], each as `.md` or `.html`, are among the
-/// paths on the integration branch, compared after `normalise` and with letter case.
-#[must_use]
-pub fn product_plan_approved(on_integration_branch: &[String]) -> bool {
-    let present: Vec<String> = on_integration_branch
-        .iter()
-        .filter_map(|path| normalise(path))
-        .collect();
-    PRODUCT_PLAN_STEMS
-        .iter()
-        .all(|stem| present.iter().any(|path| stem_of(path) == Some(stem)))
-}
-
 /// Whether a task with these `allowed_paths` may change a document of [`OWNER_ACCEPTED_STEMS`], in
 /// either format: a path passes the Definition of Done's own test of a diff
 /// (`check_allowed_paths`), or a glob does not compile, which fails closed.
@@ -871,8 +858,7 @@ mod tests {
         DocumentFormat, FolderDocPathRefusal, FormatRefusal, OWNER_ACCEPTED_STEMS, ROLE_FOLDERS,
         ReadAccess, agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
         folder_doc_message, folder_of, folders_line, format_line, human_of_twin, is_human_document,
-        is_plan_of, pair_changed_alone, plan_stem, product_plan_approved, read_access, role_folder,
-        stem_of, with_format,
+        is_plan_of, pair_changed_alone, plan_stem, read_access, role_folder, stem_of, with_format,
     };
     use super::{
         LineChange, ShownLine, artifact_marks, changed_lines, is_heading,
@@ -883,30 +869,6 @@ mod tests {
         plain_name, stale_line, twin_is_stale,
     };
     use crate::team::Role;
-
-    #[test]
-    fn the_plan_is_approved_when_both_documents_are_there() {
-        let paths = |list: &[&str]| list.iter().map(|p| (*p).to_string()).collect::<Vec<_>>();
-        let spec = "docs/catervas/product/spec.md";
-        let roadmap = "docs/catervas/product/roadmap.md";
-        assert!(product_plan_approved(&paths(&[spec, roadmap])));
-        assert!(product_plan_approved(&paths(&[roadmap, "README.md", spec])));
-        assert!(product_plan_approved(&paths(&[
-            "./docs/catervas/product/spec.md",
-            roadmap
-        ])));
-        assert!(!product_plan_approved(&[]));
-        assert!(!product_plan_approved(&paths(&[spec])));
-        assert!(!product_plan_approved(&paths(&[roadmap])));
-        assert!(!product_plan_approved(&paths(&[
-            "docs/catervas/product/spec.agent.md",
-            "docs/catervas/product/roadmap.agent.md"
-        ])));
-        assert!(!product_plan_approved(&paths(&[
-            "Docs/Catervas/Product/spec.md",
-            roadmap
-        ])));
-    }
 
     #[test]
     fn names_an_epics_plan() {
@@ -1627,16 +1589,10 @@ mod tests {
     }
 
     #[test]
-    fn owner_documents_and_product_plan_by_stem() {
+    fn owner_documents_by_stem() {
         assert!(may_change_an_owner_document(&list(&[
             "docs/catervas/product/spec.html"
         ])));
-        let plan = |paths: &[&str]| product_plan_approved(&list(paths));
-        assert!(plan(&[
-            "docs/catervas/product/spec.html",
-            "docs/catervas/product/roadmap.md"
-        ]));
-        assert!(!plan(&["docs/catervas/product/spec.html"]));
     }
 
     #[test]

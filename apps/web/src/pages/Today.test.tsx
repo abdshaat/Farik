@@ -51,12 +51,7 @@ import {
 	UNDECIDED_ROW,
 } from "../test/pipelines.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
-import {
-	APPROVED,
-	IN_REVIEW,
-	INTERVIEWING,
-	PRODUCT_PLAN_ROW,
-} from "../test/productPlan.ts";
+import { APPROVED, INTERVIEWING } from "../test/productPlan.ts";
 import {
 	answerQuery,
 	answerStatus,
@@ -493,66 +488,6 @@ describe("today", () => {
 			await screen.findByRole("region", { name: en.docChangesTitle }),
 		).toBeTruthy();
 		expect(screen.queryByText(en.waitingNone)).toBeNull();
-	});
-
-	it("puts_the_plan_in_place_of_its_acceptance_row", async () => {
-		const question = {
-			task_id: "CTV-3",
-			kind: "question",
-			agent_id: "mira",
-			title: "the launch post",
-			line: "question line",
-		};
-		const other = {
-			task_id: "CTV-5",
-			kind: "acceptance",
-			agent_id: "mira",
-			title: "the weekly report",
-			line: "Accept the result",
-		};
-		await today({
-			waiting: [PRODUCT_PLAN_ROW, question, other],
-			plan: IN_REVIEW,
-		});
-		expect(
-			await screen.findByRole("heading", { name: "Waiting on you (3)" }),
-		).toBeTruthy();
-		const list = screen.getByRole("list", { name: en.waitingList });
-		picturesOpenTheirAgents(
-			await within(list).findByRole("region", {
-				name: "Your product plan to approve",
-			}),
-			TEAM.agents,
-		);
-		// The plan's task has no row of its own besides the card; the question keeps its row.
-		expect(within(list).getByText("Mira has a question")).toBeTruthy();
-		// Another acceptance stays the generic row beside the one plan card.
-		expect(within(list).getByText("Accept the weekly report")).toBeTruthy();
-		expect(
-			within(list).getAllByRole("region", {
-				name: "Your product plan to approve",
-			}),
-		).toHaveLength(1);
-		expect(
-			within(list).queryByText("Accept Draft the product plan"),
-		).toBeNull();
-		cleanup();
-
-		// Until both documents are there, the generic row, which still accepts.
-		await today({
-			waiting: [PRODUCT_PLAN_ROW, question],
-			plan: { ...IN_REVIEW, documents: [] },
-		});
-		const generic = await screen.findByRole("list", { name: en.waitingList });
-		expect(
-			await within(generic).findByText("Accept Draft the product plan"),
-		).toBeTruthy();
-		expect(
-			screen.queryByRole("region", { name: "Your product plan to approve" }),
-		).toBeNull();
-		expect(
-			screen.getByRole("heading", { name: "Waiting on you (2)" }),
-		).toBeTruthy();
 	});
 
 	it("says_the_team_waits_for_the_plan", async () => {

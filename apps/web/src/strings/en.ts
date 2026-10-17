@@ -1099,7 +1099,7 @@ export const en = {
 	chatsNoAnswer: "{name} could not answer. Ask again.",
 	chatsRetired: "{name} has left the team. This chat is kept for you to read.",
 	chatsInterviewIntro:
-		"Before your team builds anything, {name} asks what you want to make. This chat only talks: your product plan is written next, and you approve it before anything is built.",
+		"Before your team builds anything, {name} asks what you want to make. This chat only talks: your product plan is written next, and your team builds once it is done.",
 	heardTitle: "What I heard",
 	heardCustomers: "Your customers",
 	heardProblem: "The problem",
@@ -1108,8 +1108,9 @@ export const en = {
 	heardWorksWhen: "It works when",
 	draftPlan: "Draft the product plan",
 	draftPlanLine:
-		"I write it as my first task: a product description and a roadmap. It comes to you on Today to approve.",
-	draftPlanSent: "Drafting it as {id}. It comes to you on Today to approve.",
+		"I write it as my first task: a product description and a roadmap. Your team starts building once it is done.",
+	draftPlanSent:
+		"Drafting it as {id}. Your team starts building once it is done.",
 	channelIntro:
 		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
 	channelMessages: "Messages",
@@ -2508,17 +2509,6 @@ export const en = {
 	docChangesNeedNotes: "Write what {name} should change first.",
 	docChangesPullRequest:
 		"Nothing changes until you approve. Then Catervas opens a pull request, and the change is in your project once it is merged.",
-	planToApprove: "Your product plan to approve",
-	planFrom: "From {name}, written from your chat {when}",
-	planWhenMorning: "this morning",
-	planWhenAfternoon: "this afternoon",
-	planWhenEvening: "this evening",
-	planWhenYesterday: "yesterday",
-	planWhenOn: "on {weekday}",
-	planIntro:
-		"Here is what we will build and in what order. Read both parts, then approve it or send it back with what to change.",
-	planGate:
-		"Nothing else is planned until you approve. Then your team documents the plan in a first sprint.",
 	todayWaitsForPlan: "{project}: your team waits for your product plan",
 	refuseFolderDocDecided: "These changes were decided already.",
 	refuseFolderDocSuperseded: "A newer version of these changes is waiting.",

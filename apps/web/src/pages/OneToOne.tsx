@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import type { ProductPlanState } from "../app/productPlan.ts";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useEvents, useQuery } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
@@ -22,7 +23,6 @@ import channel from "./Channel.module.css";
 import styles from "./Chats.module.css";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { Heard, type HeardSummary } from "./Heard.tsx";
-import type { ProductPlanState } from "./ProductPlanCard.tsx";
 import type { Agent } from "./setup/TeamSetup.tsx";
 
 type Proposal = { title: string; text: string };

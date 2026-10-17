@@ -47,8 +47,8 @@ use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use catervas_store::git::integration_branch;
 use catervas_store::git::stale_twins;
-use catervas_store::git::{product_plan_on, task_base};
-use catervas_store::product_plan::{is_the_product_plan, new_project};
+use catervas_store::git::task_base;
+use catervas_store::product_plan::{is_the_product_plan, new_project, product_plan_tasks};
 use catervas_store::repos::{TaskRepositoryError, task_repository};
 
 /// Where the integration lock lives, under the project root.
@@ -676,18 +676,23 @@ impl Transitions {
         )
     }
 
-    /// Whether this is a new project whose product plan is not on the integration branch yet:
-    /// false with no `project.started`, and then git is not asked. Every caller asks this one
-    /// method (`docs/SPEC.md` 5.3).
+    /// Whether this is a new project whose product plan is not done yet: false with no
+    /// `project.started`, and otherwise true until a task created with `product_plan: true` is
+    /// accepted (ADR 0061: Catervas accepts it, and nothing waits for its merge). It reads the log
+    /// and the board, not git. Every caller asks this one method (`docs/SPEC.md` 5.3).
     ///
     /// # Errors
     ///
-    /// What the log or git refuses.
-    pub fn awaits_the_product_plan(&self, team: &Team) -> Result<bool, TransitionError> {
+    /// What the log or the board refuses.
+    pub fn awaits_the_product_plan(&self) -> Result<bool, TransitionError> {
         if new_project(&self.log)?.is_none() {
             return Ok(false);
         }
-        Ok(!product_plan_on(&self.git, team)?)
+        let plans = product_plan_tasks(&self.log)?;
+        let board = self.projections.board()?;
+        Ok(!board.iter().any(|row| {
+            row.status == TaskStatus::Accepted && plans.iter().any(|(plan, _)| *plan == row.task_id)
+        }))
     }
 
     /// The Definition of Ready's context for `contract` as it is given, which need not be the
@@ -757,7 +762,7 @@ impl Transitions {
             rules: team.rules(),
             requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
             judgment_review: judgment_since_written(history),
-            awaits_the_product_plan: self.awaits_the_product_plan(team)?,
+            awaits_the_product_plan: self.awaits_the_product_plan()?,
             is_the_product_plan: is_the_product_plan(history),
             repos: self.files.read_repos()?.map(|listed| {
                 listed
@@ -4215,21 +4220,9 @@ mod tests {
         }));
     }
 
-    /// Both documents of the product plan, committed on `main`.
-    fn approve_the_product_plan(project: &Project) {
-        for stem in catervas_core::folders::PRODUCT_PLAN_STEMS {
-            let document = catervas_core::folders::with_format(
-                stem,
-                catervas_core::folders::DocumentFormat::Markdown,
-            );
-            project.repo.write(&document, "# A document\n");
-        }
-        project.repo.commit("approve the product plan");
-    }
-
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_another_task_of_a_new_project_until_the_plan_is_on_main() {
+    fn refuses_another_task_of_a_new_project_until_the_plan_is_accepted() {
         // Without project.started nothing is refused for it, whatever git holds.
         let old = Project::new("plan-first-old", a_team(|_| {}), at(12));
         old.file("CTV-1", |_| {});
@@ -4269,7 +4262,7 @@ mod tests {
         assert!(
             holds(
                 &failures,
-                "this new project's product plan is not approved yet"
+                "this new project's product plan is not accepted yet"
             ),
             "{failures:?}"
         );
@@ -4279,7 +4272,7 @@ mod tests {
             "{outcome:?}"
         );
 
-        approve_the_product_plan(&project);
+        project.moved("CTV-2", "ready", "accepted", &json!({}), at(10));
         let outcome = readying(&project, "CTV-1");
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),

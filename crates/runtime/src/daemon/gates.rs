@@ -262,7 +262,7 @@ pub(super) fn query(
                 .map_err(|e| internal(&e))?;
             if deps
                 .transitions
-                .awaits_the_product_plan(&team)
+                .awaits_the_product_plan()
                 .map_err(|e| internal(&e))?
             {
                 let filed = product_plan_tasks(&deps.log).map_err(|e| internal(&e))?;
@@ -617,7 +617,7 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     let approved = project.is_some()
         && !deps
             .transitions
-            .awaits_the_product_plan(team)
+            .awaits_the_product_plan()
             .map_err(|e| internal(&e))?;
     let board = deps.projections.board().map_err(|e| internal(&e))?;
     let filed = product_plan_tasks(&deps.log).map_err(|e| internal(&e))?;

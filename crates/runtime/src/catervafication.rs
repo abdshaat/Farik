@@ -9,11 +9,9 @@ use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Team, changes_code};
-use catervas_protocol::event::{
-    CatervasEvent, EventBody, EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject,
-    new_event,
-};
+use catervas_protocol::event::{CatervasEvent, EventBody, EventKind};
 use catervas_store::files::FilesError;
+use catervas_store::product_plan::product_plan_tasks;
 use catervas_store::requests::{
     RequestError, file_catervafication_epic, file_request, placeholder_budget_usd,
 };
@@ -22,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::sprints::{PlannedBy, SprintError, join_epics_sprint, plan_sprint, start_sprint};
 use crate::tools::ToolDeps;
-use crate::transitions::{TransitionAsk, TransitionError, TransitionOutcome};
+use crate::transitions::{TransitionAsk, TransitionError};
 
 /// What the Catervafication documents: a repository that exists, or a project made from a
 /// paragraph.
@@ -415,9 +413,8 @@ pub(crate) fn started(log: &EventLog) -> Result<Option<TaskId>, StoreError> {
 
 /// Starts the Catervafication of `project` as `by` (`human` for the owner's Start, `catervas` for a
 /// new project's): files its epic, opens a sprint for it when none is open and plans the epic into
-/// it, asks `draft -> refining` as the first active Product Manager, and, only when that moved,
-/// records the owner's approval of the epic (`human.accepted`, with `note` as its message): after
-/// the move, because an approval counts only from the last move into `refining`.
+/// it, and asks `draft -> refining` as the first active Product Manager. No epic waits for the
+/// owner's approval (ADR 0061), so none is recorded.
 ///
 /// # Errors
 ///
@@ -427,7 +424,6 @@ pub(crate) fn start(
     team: &Team,
     project: Project,
     by: &str,
-    note: Option<String>,
 ) -> Result<Started, CatervaficationError> {
     let Some(manager) = team
         .active_agents()
@@ -456,7 +452,7 @@ pub(crate) fn start(
     } else {
         None
     };
-    let outcome = deps.transitions.request(
+    deps.transitions.request(
         &TransitionRequest {
             task_id: epic.id.clone(),
             to: TaskStatus::Refining,
@@ -466,26 +462,6 @@ pub(crate) fn start(
         &TransitionAsk::default(),
         team,
     )?;
-    if matches!(outcome, TransitionOutcome::Moved(_)) {
-        let ids = EventIds {
-            task_id: Some(epic.id.clone()),
-            ..deps.ids.clone()
-        };
-        let accepted = new_event(
-            EventBody::HumanAccepted(HumanAcceptedBody {
-                subject: HumanAcceptedBodySubject::Contract,
-                accepted_by: "human".to_string(),
-                message: note,
-            }),
-            deps.clock.now(),
-            ids,
-        )
-        .map_err(|error| StoreError::InvalidEvent {
-            detail: format!("the approval cannot be stamped: {error:?}"),
-        })?;
-        let appended = deps.log.append(&accepted)?;
-        deps.projections.apply(&appended)?;
-    }
     Ok(Started {
         epic: epic.id,
         sprint,
@@ -497,18 +473,16 @@ pub(crate) fn start(
 pub(crate) enum FileDue {
     /// These tasks were filed.
     Filed(Vec<TaskId>),
-    /// Nothing was filed, and the Marketing Specialist's task waits for the product plan, which is
-    /// written and not yet on the integration branch.
-    MarketingWaits,
     /// Nothing is due.
     Nothing,
 }
 
 /// Files, as Catervas, the task of each role `catervafication_roles` lists that has none under
 /// `epic` in any status (a task the owner cancelled is not filed again), each into the epic's
-/// sprint. On an existing repository the Marketing Specialist's task waits until the Product
-/// Manager's task under the epic is accepted and integrated, so that it reads the approved plan; it
-/// is never filed while there is no such task, or when that task is cancelled.
+/// sprint. The Marketing Specialist's task is filed with the others and depends on the Product
+/// Manager's task under the epic (on an existing repository) or on the new project's product plan
+/// task, so that it starts from that task's branch once it is accepted (ADR 0061); it is not filed
+/// when that task is cancelled.
 ///
 /// # Errors
 ///
@@ -530,39 +504,59 @@ pub(crate) fn file_due(
     }
     let max_cost_usd = placeholder_budget_usd(&team.rules());
     let mut filed: Vec<TaskId> = Vec::new();
-    let mut waits = false;
+    let mut filed_by: Vec<(Role, TaskId)> = Vec::new();
     for (role, reviewer) in catervafication_roles(team, project, designer_ready) {
         if held.iter().any(|(held, _)| *held == role) {
             continue;
         }
-        if role == Role::MarketingSpecialist && project == Project::Existing {
-            match held
-                .iter()
-                .find(|(held, _)| *held == Role::ProductManager)
-                .map(|(_, row)| *row)
-            {
-                // The plan is not filed yet, or the owner cancelled it: nothing to read.
-                None => continue,
-                Some(plan) if plan.status == TaskStatus::Cancelled => continue,
-                Some(plan) if plan.status == TaskStatus::Accepted && !plan.awaiting_integration => {
+        let mut dependencies: Vec<TaskId> = Vec::new();
+        if role == Role::MarketingSpecialist {
+            match project {
+                Project::Existing => {
+                    let held_plan = held
+                        .iter()
+                        .find(|(held, _)| *held == Role::ProductManager)
+                        .map(|(_, row)| *row);
+                    match held_plan {
+                        // The owner cancelled it: nothing to read.
+                        Some(plan) if plan.status == TaskStatus::Cancelled => continue,
+                        Some(plan) => dependencies.push(plan.task_id.clone()),
+                        None => match filed_by
+                            .iter()
+                            .find(|(filed, _)| *filed == Role::ProductManager)
+                        {
+                            Some((_, id)) => dependencies.push(id.clone()),
+                            None => continue,
+                        },
+                    }
                 }
-                Some(_) => {
-                    waits = true;
-                    continue;
+                Project::New => {
+                    if let Some((plan, _)) = product_plan_tasks(&deps.log)?.pop() {
+                        dependencies.push(plan);
+                    }
                 }
             }
+        }
+        let mut wire = task_contract(
+            project,
+            role,
+            reviewer,
+            &epic.task_id,
+            max_cost_usd,
+            team.document_format(),
+        );
+        if !dependencies.is_empty() {
+            wire["dependencies"] = json!(
+                dependencies
+                    .iter()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>()
+            );
         }
         let contract = file_request(
             &deps.files,
             &deps.log,
-            task_contract(
-                project,
-                role,
-                reviewer,
-                &epic.task_id,
-                max_cost_usd,
-                team.document_format(),
-            ),
+            wire,
             "catervas",
             Some(&epic.task_id),
             deps.clock.now(),
@@ -571,14 +565,13 @@ pub(crate) fn file_due(
         )?;
         deps.projections.catch_up()?;
         join_epics_sprint(deps, &contract.id)?;
+        filed_by.push((role, contract.id.clone()));
         filed.push(contract.id);
     }
-    Ok(if !filed.is_empty() {
-        FileDue::Filed(filed)
-    } else if waits {
-        FileDue::MarketingWaits
-    } else {
+    Ok(if filed.is_empty() {
         FileDue::Nothing
+    } else {
+        FileDue::Filed(filed)
     })
 }
 

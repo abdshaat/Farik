@@ -1209,7 +1209,7 @@ fn product_plan_first(_: &TaskContract, context: &ReadinessContext) -> Option<Re
     (context.awaits_the_product_plan && !context.is_the_product_plan).then(|| {
         failure(
             ReadinessRule::ProductPlanFirst,
-            "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec and docs/catervas/product/roadmap, as .md or .html, are on the integration branch".to_string(),
+            "this new project's product plan is not accepted yet: only its own task is planned until Catervas accepts that task".to_string(),
         )
     })
 }
@@ -1476,7 +1476,7 @@ mod tests {
     fn refuses_everything_but_the_product_plan_until_it_is_approved() {
         let mut context = a_ready_context();
         context.awaits_the_product_plan = true;
-        let message = "this new project's product plan is not approved yet: only its own task is planned until docs/catervas/product/spec and docs/catervas/product/roadmap, as .md or .html, are on the integration branch";
+        let message = "this new project's product plan is not accepted yet: only its own task is planned until Catervas accepts that task";
         assert_eq!(failed_rules(&a_contract(), &context), [R::ProductPlanFirst]);
         assert_eq!(
             message_of(&a_contract(), &context, R::ProductPlanFirst),

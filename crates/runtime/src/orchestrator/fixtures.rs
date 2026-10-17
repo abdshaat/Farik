@@ -601,7 +601,7 @@ impl Harness {
     }
 
     /// `project.started`, about no task: the project is new, and its product plan is not approved
-    /// until both documents are on the integration branch (`approve_the_product_plan`).
+    /// until a task that drafts it is accepted (`approve_the_product_plan`).
     pub(crate) fn started(&self) {
         let wire = json!({
             "seq": 1,
@@ -627,20 +627,28 @@ impl Harness {
         deps.projections.apply(&appended).expect("projects");
     }
 
-    /// Both documents of the product plan, committed on the branch checked out at the root.
+    /// The new project's product plan done: a task filed to draft it, accepted and merged.
     pub(crate) fn approve_the_product_plan(&self) {
-        let root = &self.project.repo.path;
-        for stem in catervas_core::folders::PRODUCT_PLAN_STEMS {
-            let path = &catervas_core::folders::with_format(
-                stem,
+        let deps = &self.project.deps;
+        let plan = catervas_store::requests::file_product_plan_request(
+            &deps.files,
+            &deps.log,
+            catervas_store::requests::product_plan_request(
+                catervas_core::team::Role::Architect,
+                5.0,
                 catervas_core::folders::DocumentFormat::Markdown,
-            );
-            let file = root.join(path);
-            std::fs::create_dir_all(file.parent().expect("a folder")).expect("the folder");
-            std::fs::write(file, "# A document\n").expect("the file is written");
-            git_in(root, &["add", "--", path]);
-        }
-        git_in(root, &["commit", "-m", "Approve the product plan"]);
+            ),
+            (deps.clock.now(), &deps.ids),
+        )
+        .expect("the product plan is filed");
+        deps.projections.catch_up().expect("the board catches up");
+        self.project
+            .moved(plan.id.as_str(), "draft", "accepted", &json!({}));
+        self.project.record(
+            plan.id.as_str(),
+            "task.integrated",
+            &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
+        );
     }
 
     /// A bare repository beside the project, added to it as `origin`, with `main` pushed there.

@@ -1770,34 +1770,6 @@ fn tells_whether_a_file_is_on_a_branch() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn reads_the_product_plan_from_the_integration_branch() {
-    use catervas_core::team::{fixtures::a_team_wire, validate_team};
-    use catervas_store::git::product_plan_on;
-
-    let team = |branch: Option<&str>| {
-        let mut wire = a_team_wire();
-        if let Some(branch) = branch {
-            wire["policy"]["integration_branch"] = serde_json::json!(branch);
-        }
-        validate_team(&wire).expect("a team")
-    };
-    let repository = TempRepo::new("product-plan-on");
-    let git = repository.adapter();
-    repository.write(SPEC, "# Bakery\n");
-    repository.commit("write the spec");
-    assert!(!product_plan_on(&git, &team(None)).expect("the read works"));
-    repository.write(ROADMAP, "# Roadmap\n");
-    repository.commit("write the roadmap");
-    assert!(product_plan_on(&git, &team(None)).expect("the read works"));
-    // The integration branch, not the default one: develop holds neither document.
-    repository.git(&["branch", "develop", "HEAD~2"]);
-    assert!(!product_plan_on(&git, &team(Some("develop"))).expect("the read works"));
-    // A branch the repository does not have is not an error: the plan is not there yet.
-    assert!(!product_plan_on(&git, &team(Some("release"))).expect("the read works"));
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
 fn knows_a_local_branch() {
     let repository = TempRepo::new("local-branch");
     let git = repository.adapter();
@@ -1873,23 +1845,6 @@ fn repairs_worktrees_after_a_move() {
     git_in(&worktree, &["status"]);
     let _ = std::fs::remove_dir_all(&worktree);
     std::fs::rename(&moved, &repository.path).expect("the repository is moved back");
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn product_plan_on_takes_either_format() {
-    use catervas_core::team::{fixtures::a_team_wire, validate_team};
-    use catervas_store::git::product_plan_on;
-
-    let team = validate_team(&a_team_wire()).expect("a team");
-    let repository = TempRepo::new("product-plan-either-format");
-    let adapter = repository.adapter();
-    repository.write("docs/catervas/product/spec.html", "<h1>Bakery</h1>\n");
-    repository.commit("write the spec");
-    assert!(!product_plan_on(&adapter, &team).expect("the read works"));
-    repository.write(ROADMAP, "# Roadmap\n");
-    repository.commit("write the roadmap");
-    assert!(product_plan_on(&adapter, &team).expect("the read works"));
 }
 
 #[test]
