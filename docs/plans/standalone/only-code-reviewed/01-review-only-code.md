@@ -129,7 +129,7 @@ Tests:
   - the same contract assigned to `software_developer`, and the Architect's with a `review` criterion added, are each refused on both moves with `GateFailed`, one failure each, whose details are exactly `[the refusal sentence]`.
 - `reviewed_by_an_agent` is covered by the assertion above.
 
-- [ ] `feat(core): let the governor accept or reject what no agent reviews`
+- [x] `feat(core): let the governor accept or reject what no agent reviews`
 
 ### Task 2: what Catervas files whole carries machine criteria
 

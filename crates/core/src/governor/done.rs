@@ -13,7 +13,7 @@ use crate::governor::paths::{
     GlobError, PathRefusal, check_allowed_paths, check_protected_paths,
     reaches_the_catervas_directory,
 };
-use crate::team::task_private_folder;
+use crate::team::{reviewed_by_an_agent, task_private_folder};
 use crate::text::{distinct, listed};
 
 /// Who ran a criterion.
@@ -144,6 +144,21 @@ pub fn result_awaits_human(contract: &TaskContract) -> bool {
                 .exit_criteria
                 .iter()
                 .any(|criterion| wire_method(&criterion.verification) == Some("human")))
+}
+
+/// Whether Catervas accepts or rejects the contract on its own (ADR 0061): no agent reviews it
+/// (it is not a code task) and every exit criterion is one Catervas runs (`command`, `test` or
+/// `artifact`). A contract that is not reviewed but still carries a `review` or `human` criterion,
+/// written before readiness refused them, takes the old path.
+#[must_use]
+pub fn catervas_verifies_alone(contract: &TaskContract) -> bool {
+    !reviewed_by_an_agent(contract)
+        && contract.exit_criteria.iter().all(|criterion| {
+            matches!(
+                wire_method(&criterion.verification),
+                Some("command" | "test" | "artifact")
+            )
+        })
 }
 
 type Check = fn(&TaskContract, &DoneEvidence) -> Option<DoneFailure>;

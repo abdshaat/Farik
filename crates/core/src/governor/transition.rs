@@ -16,7 +16,8 @@ use crate::contract::{TaskContract, TaskId, TaskStatus};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::done::{
-    CriterionResult, DoneEvidence, evaluate_done, requires_human_acceptance,
+    CriterionResult, DoneEvidence, catervas_verifies_alone, evaluate_done,
+    requires_human_acceptance,
 };
 use crate::governor::escalation::{
     BlockedAge, EscalationReason, READINESS_ATTEMPT_LIMIT, ReadinessOutcome, RejectionOutcome,
@@ -348,6 +349,7 @@ fn named_agent(actor: TransitionActor, contract: &TaskContract) -> Option<&str> 
 
 /// Whether one gate opens, and everything it says when it does not.
 fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext) -> GateResult {
+    governor_may_verify(gate, actor, context)?;
     match gate {
         GateId::None => Ok(()),
         GateId::Triaged => open_or(context.triaged, || {
@@ -454,6 +456,25 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
             })
         }
     }
+}
+
+/// The governor's own acceptance and rejection open only to a contract that no agent reviews and
+/// whose every criterion Catervas runs (ADR 0061).
+fn governor_may_verify(
+    gate: GateId,
+    actor: TransitionActor,
+    context: &TransitionContext,
+) -> GateResult {
+    if actor == TransitionActor::Governor
+        && matches!(gate, GateId::DefinitionOfDone | GateId::RejectionReasons)
+        && !catervas_verifies_alone(&context.contract)
+    {
+        return Err(vec![
+            "Catervas accepts or rejects on its own only a task that changes no code and whose every criterion it runs (ADR 0061)"
+                .to_string(),
+        ]);
+    }
+    Ok(())
 }
 
 /// Who asked for an assignment, from the actor of the row rather than from the input: the request
@@ -721,7 +742,7 @@ mod tests {
         TransitionRefusal, TransitionRequest, evaluate_transition,
     };
     use crate::budget::{BudgetState, DEFAULT_SESSION_LIMITS, SessionLedger};
-    use crate::contract::{Role, TaskStatus};
+    use crate::contract::{Role, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
     use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
     use crate::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
@@ -1984,8 +2005,21 @@ mod tests {
         }
     }
 
+    /// An Architect's docs task with one `artifact` criterion that the fixture's results record:
+    /// no agent reviews it, so the governor may accept or reject it.
+    fn a_task_no_agent_reviews(context: &mut TransitionContext) {
+        context.contract.assignee_role = Role::Architect;
+        context.contract.allowed_paths = vec!["docs/catervas/architecture/overview.md".to_string()];
+        context.contract.exit_criteria[0].verification = VerificationWire::Variant2 {
+            method: serde_json::json!("artifact"),
+            must_contain: Vec::new(),
+            path: "docs/catervas/architecture/overview.md".to_string(),
+        };
+        context.done.changed_paths = vec!["docs/catervas/architecture/overview.md".to_string()];
+    }
+
     /// One case per row of `TRANSITION_TABLE`, in its order.
-    fn every_row() -> [Case; 22] {
+    fn every_row() -> [Case; 24] {
         use TaskStatus as S;
         let no_change: fn(&mut TransitionContext) = |_| {};
         [
@@ -2018,18 +2052,32 @@ mod tests {
                 context.blocked_limit = Duration::from_secs(3600);
             }),
             case(13, S::Verifying, S::Accepted, A::ProductManager, no_change),
-            case(14, S::Verifying, S::Rejected, A::Reviewer, no_change),
-            case(15, S::Verifying, S::Rejected, A::Human, no_change),
-            case(16, S::Rejected, S::InProgress, A::Governor, no_change),
-            case(17, S::Rejected, S::Escalated, A::Governor, |context| {
+            case(
+                14,
+                S::Verifying,
+                S::Accepted,
+                A::Governor,
+                a_task_no_agent_reviews,
+            ),
+            case(15, S::Verifying, S::Rejected, A::Reviewer, no_change),
+            case(
+                16,
+                S::Verifying,
+                S::Rejected,
+                A::Governor,
+                a_task_no_agent_reviews,
+            ),
+            case(17, S::Verifying, S::Rejected, A::Human, no_change),
+            case(18, S::Rejected, S::InProgress, A::Governor, no_change),
+            case(19, S::Rejected, S::Escalated, A::Governor, |context| {
                 context.contract.iteration = 3;
             }),
-            case(18, S::InProgress, S::Escalated, A::Governor, |context| {
+            case(20, S::InProgress, S::Escalated, A::Governor, |context| {
                 context.permission_denied = true;
             }),
-            case(19, S::InProgress, S::Escalated, A::Human, no_change),
-            case(20, S::InProgress, S::Cancelled, A::Human, no_change),
-            case(21, S::Escalated, S::Ready, A::Human, no_change),
+            case(21, S::InProgress, S::Escalated, A::Human, no_change),
+            case(22, S::InProgress, S::Cancelled, A::Human, no_change),
+            case(23, S::Escalated, S::Ready, A::Human, no_change),
         ]
     }
 
@@ -2077,8 +2125,8 @@ mod tests {
             (case.prepare)(&mut context);
             let stranger = match case.actor {
                 A::Assignee | A::Reviewer => A::ScrumMaster,
-                // The reviewer shares the human's `verifying -> rejected`.
-                A::Human if case.from == TaskStatus::Verifying => A::Assignee,
+                // The reviewer shares the human's and the governor's `verifying -> rejected`.
+                A::Human | A::Governor if case.from == TaskStatus::Verifying => A::Assignee,
                 A::ScrumMaster | A::ProductManager | A::Governor | A::Human => A::Reviewer,
             };
             match decide(&ask(case.to, stranger, Some("arch-1")), &context) {
@@ -2175,5 +2223,40 @@ mod tests {
             crate::governor::escalation::evaluate_rejection(0, 3),
             RejectionOutcome::ReturnToInProgress
         );
+    }
+
+    #[test]
+    fn the_governor_verifies_only_what_no_agent_reviews() {
+        let refusal = "Catervas accepts or rejects on its own only a task that changes no code and whose every criterion it runs (ADR 0061)";
+        let mut architects = a_context();
+        architects.contract.status = TaskStatus::Verifying;
+        a_task_no_agent_reviews(&mut architects);
+        let accept = ask(TaskStatus::Accepted, A::Governor, None);
+        let reject = ask(TaskStatus::Rejected, A::Governor, None);
+        assert_eq!(
+            decide(&accept, &architects).expect("accepted").row.actor,
+            A::Governor
+        );
+        assert_eq!(
+            decide(&reject, &architects).expect("rejected").row.actor,
+            A::Governor
+        );
+        let mut developers = architects.clone();
+        developers.contract.assignee_role = Role::SoftwareDeveloper;
+        let mut with_a_review = architects.clone();
+        with_a_review.contract.exit_criteria[0].verification = VerificationWire::Variant3 {
+            method: serde_json::json!("review"),
+            rubric: vec!["Is it right?".to_string()],
+        };
+        for context in [&developers, &with_a_review] {
+            for request in [&accept, &reject] {
+                let (gate, details) = one_gate(request, context);
+                assert!(
+                    matches!(gate, GateId::DefinitionOfDone | GateId::RejectionReasons),
+                    "{gate:?}"
+                );
+                assert_eq!(details, [refusal]);
+            }
+        }
     }
 }

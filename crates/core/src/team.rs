@@ -104,6 +104,14 @@ pub fn changes_code(role: Role) -> bool {
     matches!(role, Role::SoftwareDeveloper | Role::UiUxDesigner)
 }
 
+/// Whether an agent reviews the contract's result (ADR 0061): a task, not an epic, whose assignee's
+/// role changes code. Every other contract is accepted or rejected by the governor on the criteria
+/// Catervas runs itself. It is known when the contract is written, before any diff exists.
+#[must_use]
+pub fn reviewed_by_an_agent(contract: &TaskContract) -> bool {
+    contract.kind == TaskKind::Task && changes_code(contract.assignee_role)
+}
+
 /// The folder, under the project root, that only one role's sessions work in (`docs/SPEC.md` 6.6,
 /// 6.10, D5): the Finance Specialist's books, `.catervas/local/finance`, and the Procurement
 /// Specialist's register and comparisons, `.catervas/local/procurement`. Each lies under
