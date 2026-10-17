@@ -8,9 +8,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use catervas_core::contract::{Role, TaskContract, TaskId};
+use catervas_core::contract::{TaskContract, TaskId};
 use catervas_core::governor::permissions::PermissionTier;
-use catervas_core::governor::sites::{WebAccess, web_access};
 use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::clock::IdSource;
 use catervas_protocol::command::{Command, CommandReply, ReplyKind};
@@ -664,17 +663,15 @@ impl Orchestrator {
             .projections
             .task(task_id)?
             .and_then(|row| row.assignee_id);
-        // A role held to approved sites (8.6) gets no network in its sandbox, `network` or not: a
-        // command is not held to the sites a `WebFetch` is.
+        // The network follows the tier for every role (ADR 0061).
         let network = team
             .agents
             .iter()
             .find(|agent| Some(agent.id.as_str()) == assignee.as_deref())
             .is_some_and(|agent| {
-                web_access(Role::from(agent.role)) == WebAccess::Open
-                    && agent
-                        .tiers(&team.permissions())
-                        .contains(&PermissionTier::Network)
+                agent
+                    .tiers(&team.permissions())
+                    .contains(&PermissionTier::Network)
             });
         // The project's other repositories, which a command can read at `/repos/<name>` (5.6).
         let contract = self.deps.tools.files.read_contract(task_id)?;

@@ -1157,7 +1157,10 @@ mod tests {
         );
         assert_eq!(
             review.builtin_tools,
-            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+            allowed_builtins(&BTreeSet::from([
+                PermissionTier::Read,
+                PermissionTier::Network
+            ]))
         );
         let servers: Vec<&str> = review.mcp_servers.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(servers, ["playwright"]);

@@ -4290,7 +4290,10 @@ mod tests {
         assert_eq!(started[0].cwd, harness.worktree("CTV-1"));
         assert_eq!(
             started[0].builtin_tools,
-            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+            allowed_builtins(&BTreeSet::from([
+                PermissionTier::Read,
+                PermissionTier::Network
+            ]))
         );
         assert_eq!(witness.had_executor(), vec![false]);
     }
@@ -5693,9 +5696,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn makes_a_tasks_sandbox_once_with_its_assignees_network() {
-        let harness = Harness::new("orch-sandbox-network", |wire| {
-            wire["agents"][1]["grants"] = json!(["network"]);
-        });
+        let harness = Harness::new("orch-sandbox-network", |_| {});
         harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![implement_stops_early(), implement_stops_early()]);
         let sandboxes = Arc::new(CountingSandboxFactory::default());
@@ -5707,7 +5708,9 @@ mod tests {
         assert_eq!(adapter.started().len(), 2);
         assert_eq!(sandboxes.networks("CTV-1"), vec![true]);
 
-        let harness = Harness::new("orch-sandbox-no-network", |_| {});
+        let harness = Harness::new("orch-sandbox-no-network", |wire| {
+            wire["agents"][1]["revokes"] = json!(["network"]);
+        });
         harness.in_progress("CTV-1", "dev-a", "dev-b");
         let sandboxes = Arc::new(CountingSandboxFactory::default());
         let orchestrator = harness.orchestrator_with(
@@ -5720,12 +5723,133 @@ mod tests {
         assert_eq!(sandboxes.networks("CTV-1"), vec![false]);
     }
 
-    /// A role held to approved sites keeps `network` (6.10), and its `execute`, if the owner turns
-    /// it on, would run commands in the task's sandbox: that sandbox gets no network, for a
-    /// command is not held to the sites a `WebFetch` is (8.6).
+    /// The decisions of the hook about `WebFetch` and `WebSearch` in the first session `harness`
+    /// runs (to idle when `idle`, else one tick), and the session's spec.
+    async fn researching(
+        harness: &Harness,
+        script: Vec<crate::recorded::Transcript>,
+        idle: bool,
+    ) -> (crate::session::SessionSpec, Vec<(String, String)>) {
+        let probe = Arc::new(HookProbe {
+            inner: harness.recorded(script),
+            daemon: Arc::clone(&harness.daemon),
+            calls: vec![
+                (
+                    "WebFetch",
+                    json!({ "url": "https://example.com/", "prompt": "read" }),
+                ),
+                ("WebSearch", json!({ "query": "anything" })),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        if idle {
+            harness
+                .orchestrator(probe.clone())
+                .run_until_idle()
+                .await
+                .expect("the run ends idle");
+        } else {
+            harness
+                .orchestrator(probe.clone())
+                .tick()
+                .await
+                .expect("the tick runs");
+        }
+        let spec = probe.inner.started().remove(0);
+        let seen = probe.seen.lock().expect("no test panics holding it")[0]
+            .0
+            .clone();
+        (spec, seen)
+    }
+
+    /// Research is free (ADR 0061): every role holds `network`, so every kind of session offers
+    /// `WebFetch` and `WebSearch` and the hook lets them through, and the sandbox has the network.
+    /// An agent the team file took `network` from has none of it.
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn gives_a_role_held_to_approved_sites_a_sandbox_with_no_network() {
+    async fn every_role_and_session_may_research() {
+        let offers = |spec: &crate::session::SessionSpec| {
+            ["WebFetch", "WebSearch"]
+                .iter()
+                .all(|tool| spec.builtin_tools.iter().any(|offered| offered == tool))
+        };
+        let offers_none = |spec: &crate::session::SessionSpec| {
+            !spec
+                .builtin_tools
+                .iter()
+                .any(|tool| tool == "WebFetch" || tool == "WebSearch")
+        };
+        let verdicts = |verdict: &str| {
+            vec![
+                ("WebFetch".to_string(), verdict.to_string()),
+                ("WebSearch".to_string(), verdict.to_string()),
+            ]
+        };
+
+        let harness = Harness::new("orch-research-implement", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let (spec, seen) = researching(&harness, vec![reads_a_file()], false).await;
+        assert_eq!(spec.purpose, SessionPurpose::Implement);
+        assert!(offers(&spec), "{:?}", spec.builtin_tools);
+        assert_eq!(seen, verdicts("allow"));
+
+        let harness = Harness::new("orch-research-chat", |_| {});
+        chatted(&harness, "dev-a", "human", "Status?", None);
+        let (spec, seen) = researching(&harness, vec![chat_answers_with_a_request()], false).await;
+        assert_eq!(spec.purpose, SessionPurpose::Chat);
+        assert!(offers(&spec), "{:?}", spec.builtin_tools);
+        assert_eq!(seen, verdicts("allow"));
+
+        let harness = Harness::new("orch-research-verify", |_| {});
+        harness.verifying("CTV-1");
+        let script = vec![review_writes_note(), accept_ctv_1()];
+        let (spec, seen) = researching(&harness, script, true).await;
+        assert_eq!(spec.purpose, SessionPurpose::Verify);
+        assert!(offers(&spec), "{:?}", spec.builtin_tools);
+        assert_eq!(seen, verdicts("allow"));
+
+        // A Developer's sandbox has the network.
+        let harness = Harness::new("orch-research-sandbox", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator =
+            harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
+        let team = harness.project.deps.files.read_team().expect("the team");
+        orchestrator
+            .sandbox_for(&"CTV-1".parse().expect("a task id"), &team)
+            .expect("a sandbox is made");
+        assert_eq!(sandboxes.networks("CTV-1"), vec![true]);
+
+        // A Developer the team file took `network` from has neither tool, nor a network.
+        let took = |wire: &mut serde_json::Value| {
+            wire["agents"][1]["revokes"] = json!(["network"]);
+        };
+        let harness = Harness::new("orch-research-revoked", took);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let (spec, seen) = researching(&harness, vec![reads_a_file()], false).await;
+        assert!(offers_none(&spec), "{:?}", spec.builtin_tools);
+        assert_eq!(seen, verdicts("tier_not_granted"));
+        let harness = Harness::new("orch-research-revoked-chat", took);
+        chatted(&harness, "dev-a", "human", "Status?", None);
+        let (spec, _) = researching(&harness, vec![chat_answers_with_a_request()], false).await;
+        assert!(offers_none(&spec), "{:?}", spec.builtin_tools);
+        let harness = Harness::new("orch-research-revoked-sandbox", took);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator =
+            harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
+        let team = harness.project.deps.files.read_team().expect("the team");
+        orchestrator
+            .sandbox_for(&"CTV-1".parse().expect("a task id"), &team)
+            .expect("a sandbox is made");
+        assert_eq!(sandboxes.networks("CTV-1"), vec![false]);
+    }
+
+    /// Every role's sandbox has the network when the role holds `network` (ADR 0061), the
+    /// Procurement Specialist's too.
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn gives_every_role_s_sandbox_the_network() {
         use catervas_core::governor::permissions::PermissionTier;
 
         let harness = Harness::new("orch-sandbox-held-role", |wire| {
@@ -5758,7 +5882,7 @@ mod tests {
             .sandbox_for(&"CTV-1".parse().expect("a task id"), &team)
             .expect("a sandbox is made");
 
-        assert_eq!(sandboxes.networks("CTV-1"), vec![false]);
+        assert_eq!(sandboxes.networks("CTV-1"), vec![true]);
     }
 
     #[tokio::test]
@@ -7487,7 +7611,10 @@ mod tests {
         );
         assert_eq!(
             spec.builtin_tools,
-            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+            allowed_builtins(&BTreeSet::from([
+                PermissionTier::Read,
+                PermissionTier::Network
+            ]))
         );
         let mentions = block(&spec.initial_prompt, "mentions");
         assert!(
@@ -9351,7 +9478,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn gives_a_chat_the_read_tier_alone() {
+    async fn gives_a_chat_the_read_and_network_tiers_alone() {
         // dev-a holds every tier the team can grant.
         let harness = Harness::new("orch-chat-tiers", |wire| {
             wire["policy"]["permissions"] = json!({ "run_commands": true, "push": true });
@@ -9412,10 +9539,16 @@ mod tests {
         assert_eq!(spec.catervas_tools, developers_chat);
         assert_eq!(
             spec.builtin_tools,
-            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+            allowed_builtins(&BTreeSet::from([
+                PermissionTier::Read,
+                PermissionTier::Network
+            ]))
         );
         assert!(spec.mcp_servers.is_empty(), "{:?}", spec.mcp_servers);
-        assert_eq!(witness.given_tiers(), [vec![PermissionTier::Read]]);
+        assert_eq!(
+            witness.given_tiers(),
+            [vec![PermissionTier::Read, PermissionTier::Network]]
+        );
         assert_eq!(
             witness.given_tools(),
             [developers_chat
@@ -9605,7 +9738,7 @@ mod tests {
                 ("Read", "path_protected"),
                 ("Edit", "tier_not_granted"),
                 ("Bash", "tool_not_allowed"),
-                ("WebFetch", "tier_not_granted"),
+                ("WebFetch", "allow"),
                 ("mcp__catervas__catervas_create_task", "tool_not_in_session"),
                 (
                     "mcp__catervas__catervas_post_message",

@@ -87,7 +87,7 @@ Tests:
   - The Developer's task's sandbox is made with the network.
   - A Developer the team file took `network` from (`revokes: [network]`) is offered neither tool in its implement session or its chat, the hook denies its `WebFetch`, and its sandbox has no network.
 
-- [ ] `feat(core): let every role and session research the web`
+- [x] `feat(core): let every role and session research the web`
 
 ### Task 2: every role reads the whole project
 

@@ -2139,6 +2139,7 @@ mod tests {
                 PermissionTier::Read,
                 PermissionTier::WriteWorkspace,
                 PermissionTier::Execute,
+                PermissionTier::Network,
                 PermissionTier::GitLocal,
             ],
             "and an agent that overrides nothing holds what its role holds"
@@ -2158,6 +2159,7 @@ mod tests {
             [
                 PermissionTier::Read,
                 PermissionTier::WriteWorkspace,
+                PermissionTier::Network,
                 PermissionTier::GitLocal,
             ],
             "execute taken away, git_remote granted and taken away, read granted twice over"
@@ -2387,6 +2389,7 @@ mod tests {
                 [
                     PermissionTier::Read,
                     PermissionTier::WriteWorkspace,
+                    PermissionTier::Network,
                     PermissionTier::GitLocal,
                     PermissionTier::GitRemote,
                 ]
@@ -2449,6 +2452,7 @@ mod tests {
             PermissionTier::Read,
             PermissionTier::WriteWorkspace,
             PermissionTier::Execute,
+            PermissionTier::Network,
             PermissionTier::GitLocal,
         ];
         for index in [1, 2] {
@@ -2460,6 +2464,7 @@ mod tests {
         let answered = [
             PermissionTier::Read,
             PermissionTier::WriteWorkspace,
+            PermissionTier::Network,
             PermissionTier::GitLocal,
             PermissionTier::GitRemote,
         ];

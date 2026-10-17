@@ -368,7 +368,6 @@ mod tests {
                 "Ada may no longer use the internet.",
                 "Linus's model changes from the role's model to the everyday model.",
                 "Linus now works carefully.",
-                "Linus may now use the internet.",
                 "The team may spend up to $10 a day.",
                 "Developers and Architects may no longer run commands.",
                 "Catervas still runs every check itself; the agents cannot run commands.",

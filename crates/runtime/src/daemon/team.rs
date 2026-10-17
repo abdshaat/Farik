@@ -3888,14 +3888,14 @@ pub(super) mod tests {
                 {
                     "id": "dev-a",
                     "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
-                    "tiers": ["read", "write_workspace", "git_remote"],
-                    "base_tiers": ["read", "write_workspace", "git_local", "git_remote"],
+                    "tiers": ["read", "write_workspace", "network", "git_remote"],
+                    "base_tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
                 },
                 {
                     "id": "dev-b",
                     "model": { "id": "claude-sonnet-5", "label": "Everyday model (older)", "effort": "low" },
-                    "tiers": ["read", "write_workspace", "git_local", "git_remote"],
-                    "base_tiers": ["read", "write_workspace", "git_local", "git_remote"],
+                    "tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
+                    "base_tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
                 },
                 {
                     "id": "ada",

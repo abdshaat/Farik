@@ -295,7 +295,10 @@ mod tests {
         );
         assert_eq!(
             explore.builtin_tools,
-            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+            allowed_builtins(&BTreeSet::from([
+                PermissionTier::Read,
+                PermissionTier::Network
+            ]))
         );
         assert_eq!(explore.cwd, harness.worktree("CTV-1"));
         assert!(
@@ -370,7 +373,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_the_explore_session_to_the_read_tier() {
         // The hook judges every call by the registration's tiers, so an explore session is held
-        // to reading there too, not by its offered tools alone, whatever the Designer's grants.
+        // to reading and researching there too, not by its offered tools alone, whatever the
+        // Designer's grants.
         let harness = a_designers_task_in(
             "design-flow-explore-tiers",
             |wire| {
@@ -388,7 +392,10 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(who(&adapter.started()), [("iris", SessionPurpose::Explore)]);
-        assert_eq!(witness.given_tiers(), [vec![PermissionTier::Read]]);
+        assert_eq!(
+            witness.given_tiers(),
+            [vec![PermissionTier::Read, PermissionTier::Network]]
+        );
     }
 
     #[tokio::test]

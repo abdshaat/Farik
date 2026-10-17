@@ -39,21 +39,20 @@ pub enum PermissionTier {
 pub fn default_tiers(role: Role) -> &'static [PermissionTier] {
     use PermissionTier as T;
     match role {
-        Role::SoftwareDeveloper | Role::UiUxDesigner => {
-            &[T::Read, T::WriteWorkspace, T::Execute, T::GitLocal]
-        }
-        Role::Architect => &[
+        Role::SoftwareDeveloper | Role::UiUxDesigner | Role::Architect => &[
             T::Read,
             T::WriteWorkspace,
             T::Execute,
             T::Network,
             T::GitLocal,
         ],
-        Role::FinanceSpecialist | Role::ProcurementSpecialist => &[T::Read, T::Network],
+        Role::FinanceSpecialist | Role::ProcurementSpecialist | Role::ScrumMaster => {
+            &[T::Read, T::Network]
+        }
         Role::ProductManager | Role::MarketingSpecialist => {
             &[T::Read, T::Network, T::WriteWorkspace, T::GitLocal]
         }
-        Role::ScrumMaster | Role::Human => &[T::Read],
+        Role::Human => &[T::Read],
     }
 }
 
@@ -1192,7 +1191,13 @@ mod tests {
         let expected = [
             (
                 Role::SoftwareDeveloper,
-                vec![T::Read, T::WriteWorkspace, T::Execute, T::GitLocal],
+                vec![
+                    T::Read,
+                    T::WriteWorkspace,
+                    T::Execute,
+                    T::Network,
+                    T::GitLocal,
+                ],
             ),
             (
                 Role::Architect,
@@ -1214,9 +1219,15 @@ mod tests {
             ),
             (
                 Role::UiUxDesigner,
-                vec![T::Read, T::WriteWorkspace, T::Execute, T::GitLocal],
+                vec![
+                    T::Read,
+                    T::WriteWorkspace,
+                    T::Execute,
+                    T::Network,
+                    T::GitLocal,
+                ],
             ),
-            (Role::ScrumMaster, vec![T::Read]),
+            (Role::ScrumMaster, vec![T::Read, T::Network]),
             (Role::Human, vec![T::Read]),
         ];
         for (role, tiers) in expected {
@@ -1302,12 +1313,10 @@ mod tests {
 
     #[test]
     fn refuses_a_call_whose_tier_the_agent_lacks() {
+        let mut grants = developer_grants();
+        grants.tiers.remove(&T::Network);
         assert_eq!(
-            evaluate_tool_call(
-                &a_call("web_fetch", T::Network, &[]),
-                &developer_grants(),
-                &a_context()
-            ),
+            evaluate_tool_call(&a_call("web_fetch", T::Network, &[]), &grants, &a_context()),
             Err(ToolRefusal::TierNotGranted { tier: T::Network })
         );
     }

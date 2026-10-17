@@ -278,19 +278,7 @@ pub(super) async fn run_session(
         Ok(None) => None,
         Err(failed) => return Ok(failed),
     };
-    // An explore or a chat session reads, whatever the agent's grants (ADR 0026). A session given the
-    // connector browses the preview, whose tools are tagged `network`: browsing before approval is
-    // for explore alone (step 11's m8), and the plan gate holds nothing at `network`.
-    let mut tiers = if matches!(ask.purpose, SessionPurpose::Explore | SessionPurpose::Chat) {
-        vec![PermissionTier::Read]
-    } else {
-        ask.agent.tiers(&team.permissions())
-    };
-    // The browser's alone: a custom connector's tag governs its calls whatever the tiers, and
-    // widening them would let `WebFetch` through for an agent without `network` (finding S2).
-    if browser.is_some() && !tiers.contains(&PermissionTier::Network) {
-        tiers.push(PermissionTier::Network);
-    }
+    let tiers = registered_tiers(&ask, team, browser.is_some());
     let (skills, skills_root) = skill_registration(deps, &spec);
     deps.daemon.register_session(SessionRegistration {
         read_roots: read_roots(&deps.tools.files, ask.contract, &spec.cwd, role),
@@ -1116,6 +1104,29 @@ fn closing_instruction(ask: &SessionAsk<'_>) -> Option<&'static str> {
     }
 }
 
+/// The tiers the hook holds `ask`'s session to. An explore or a chat session reads, whatever the
+/// agent's grants (ADR 0026), and searches and fetches if the agent holds `network` (ADR 0061). A
+/// session given the connector browses the preview, whose tools are tagged `network`: browsing
+/// before approval is for explore alone (step 11's m8), and the plan gate holds nothing at
+/// `network`. The browser's alone: a custom connector's tag governs its calls whatever the tiers,
+/// and widening them would let `WebFetch` through for an agent without `network` (finding S2).
+fn registered_tiers(ask: &SessionAsk<'_>, team: &Team, browses: bool) -> Vec<PermissionTier> {
+    let held = ask.agent.tiers(&team.permissions());
+    let mut tiers = if matches!(ask.purpose, SessionPurpose::Explore | SessionPurpose::Chat) {
+        let mut tiers = vec![PermissionTier::Read];
+        if held.contains(&PermissionTier::Network) {
+            tiers.push(PermissionTier::Network);
+        }
+        tiers
+    } else {
+        held
+    };
+    if browses && !tiers.contains(&PermissionTier::Network) {
+        tiers.push(PermissionTier::Network);
+    }
+    tiers
+}
+
 /// The program's own tools `ask`'s session is given: none for a session given one tool, the read
 /// tier's for a read-only one, otherwise those of the agent's tiers, without the ones that change
 /// the project unless the session works on a task.
@@ -1124,7 +1135,12 @@ fn builtins_of(ask: &SessionAsk<'_>, tiers: &BTreeSet<PermissionTier>) -> Vec<St
         return Vec::new();
     }
     if ask.read_only {
-        return allowed_builtins(&BTreeSet::from([PermissionTier::Read]));
+        // Reading, and searching and fetching the web if the agent holds `network` (ADR 0061).
+        let mut read = BTreeSet::from([PermissionTier::Read]);
+        if tiers.contains(&PermissionTier::Network) {
+            read.insert(PermissionTier::Network);
+        }
+        return allowed_builtins(&read);
     }
     let works = works_on_a_task(ask.purpose, ask.contract.is_some());
     allowed_builtins(tiers)
@@ -2212,7 +2228,10 @@ mod tests {
         // too; without it every browser call is `tier_not_granted: network`.
         use crate::preview::fixtures::FakePreviews;
 
-        let mut harness = Harness::new("preview-network-tier", browsing);
+        let mut harness = Harness::new("preview-network-tier", |wire| {
+            browsing(wire);
+            wire["agents"][1]["revokes"] = json!(["network"]);
+        });
         harness.previews = Arc::new(FakePreviews::ready());
         harness.in_progress("CTV-1", "iris", "ada");
         let adapter = harness.recorded(vec![
@@ -5793,6 +5812,7 @@ mod tests {
 
         let mut harness = Harness::new("session-custom-tier", |wire| {
             browsing(wire);
+            wire["agents"][1]["revokes"] = json!(["network"]);
             with_custom_servers(wire);
             // The Designer has the browser and `github` both.
             let github = wire["agents"][1]["mcp_servers"][0].clone();
