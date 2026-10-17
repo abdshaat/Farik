@@ -156,7 +156,7 @@ Files: the three `SKILL.md` of the File map; `crates/roles/src/kit.rs` `mod test
   while the plan waits", which the rewrite keeps (Decisions). If ADR 0061 changed that list, its
   list holds and the rewrite keeps those phrases instead.
 
-- [ ] `docs(roles): the skills say how to hunt and how to start the marketing`
+- [x] `docs(roles): the skills say how to hunt and how to start the marketing`
 
 ## Verification
 

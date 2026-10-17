@@ -2301,6 +2301,42 @@ mod tests {
     }
 
     #[test]
+    fn catervafying_skills_name_the_new_work() {
+        let text = |role: Role| {
+            let kit = load_kit(role).expect("a shipped kit");
+            let skill = kit
+                .skills
+                .iter()
+                .find(|skill| skill.name == "catervafying-the-repository")
+                .expect("the skill");
+            assert!(skill.description.starts_with("Use when"), "{role}");
+            skill.session_files["SKILL.md"].clone()
+        };
+        let developer = text(Role::SoftwareDeveloper);
+        for needle in ["`catervas_file_bug`", "bug-hunt", "Bugs filed"] {
+            assert!(developer.contains(needle), "the Developer lacks {needle}");
+        }
+        let designer = text(Role::UiUxDesigner);
+        for needle in [
+            "`catervas_file_bug`",
+            "ui-bug-hunt",
+            "Bugs filed",
+            "`catervas_check_page`",
+        ] {
+            assert!(designer.contains(needle), "the Designer lacks {needle}");
+        }
+        let marketing = text(Role::MarketingSpecialist);
+        for needle in [
+            "`catervas_request_connection`",
+            "`catervas_schedule_post`",
+            "docs/catervas/marketing/kickoff",
+        ] {
+            assert!(marketing.contains(needle), "Marketing lacks {needle}");
+        }
+        assert!(!marketing.contains("and only that"));
+    }
+
+    #[test]
     fn the_developer_carries_catervas_recommended_workflow() {
         let kit = load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
         assert_eq!(
