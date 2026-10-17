@@ -133,7 +133,6 @@ const teamGot = (
 ) => ({
 	team: team(servers),
 	agents: EFFECTIVE,
-	judges: { auto: null, architect: null, scrum_master: null },
 	max_agents: 7,
 	connectors,
 	sandboxed: true,

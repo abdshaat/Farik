@@ -93,7 +93,6 @@ async function opened(connectors: object[] = CONNECTORS, sandboxed = true) {
 	await answerQuery(s, "team.get", {
 		team: TEAM,
 		agents: EFFECTIVE,
-		judges: { auto: null, architect: null, scrum_master: null },
 		max_agents: 7,
 		connectors,
 		sandboxed,
@@ -170,7 +169,6 @@ async function listed(key = "pat-secret-1", sandboxed = true) {
 const teamGot = (team: object, connectors: object[] = CONNECTORS) => ({
 	team,
 	agents: EFFECTIVE,
-	judges: { auto: null, architect: null, scrum_master: null },
 	max_agents: 7,
 	connectors,
 	sandboxed: true,

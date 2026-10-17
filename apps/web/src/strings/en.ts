@@ -305,7 +305,7 @@ export const en = {
 	finishTitle: "When you accept a piece of work, what happens to it?",
 	finishLead: "Accepted work opens a pull request for you to merge.",
 	finishSafe:
-		"Rules for the whole team, the checks every piece of work must pass, and how plans are judged are already set to safe choices.",
+		"Rules for the whole team and the checks every piece of work must pass are already set to safe choices.",
 	startTeam: "Start the team",
 	advancedHide: "Hide advanced settings",
 	rulesTitle: "Team rules",
@@ -336,20 +336,6 @@ export const en = {
 	checkNewHint:
 		"Say what must be true of finished work, in at least 10 characters. Another agent checks it.",
 	checkAdd: "Add a check",
-	planTitle: "Checking plans",
-	planLead: "Before anyone starts, one agent checks that the plan makes sense.",
-	planRequired: "Check every plan before work starts",
-	planQuestions: "What the checker asks about each plan",
-	planBudget: "Can this be done within its budget?",
-	planBudgetNote: "So work does not stop halfway because the money ran out.",
-	planNotice: "Would the checks notice if it went wrong?",
-	planNoticeNote: "So a broken result cannot pass as finished.",
-	planSmall: "Is it small enough to finish in one go?",
-	planSmallNote: "Big plans get split into smaller pieces first.",
-	planJudge: "Who checks",
-	planJudgeAuto: "Catervas chooses: {who}",
-	planJudgeNamed: "{name}, the {role}",
-	planJudgeNone: "The {role}, once the team has one",
 	team: "Team",
 	teamPageLead:
 		"{count} agents work on {name}. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
@@ -711,14 +697,7 @@ export const en = {
 	refuseKeepsRead:
 		"Every agent reads the project. Pause the agent instead of taking reading away.",
 	refuseStatusFromCard: "Pause, retire or resume someone from their card.",
-	refuseJudge:
-		"Nobody on the team is an active {role}. Let Catervas choose who checks, or add a {role}.",
-	refuseNoQuestions:
-		"Checking plans needs at least one question. Tick one, or stop checking plans.",
-	refuseQuestionLength: "A question is 10 to 200 characters long.",
 	refuseLastOfRole: "{name} is your only {role}, so add another {role} first.",
-	refuseLastJudge:
-		"{name} checks your plans. Let Catervas choose who checks, or add another {role}, first.",
 	refuseOther:
 		"Catervas could not make this change. Check what you changed, then try again.",
 	refuseAlreadyPaused: "The team is already paused.",

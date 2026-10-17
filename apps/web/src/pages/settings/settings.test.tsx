@@ -31,7 +31,6 @@ const agent = (role: string, status = "active") => ({
 const team = (...agents: ReturnType<typeof agent>[]) => ({
 	team: { agents },
 	agents: [],
-	judges: [],
 	max_agents: 7,
 });
 const WITH_DESIGNER = team(
@@ -201,7 +200,6 @@ describe("settings directory", () => {
 				rules: {},
 			},
 			agents: [],
-			judges: [],
 			max_agents: 7,
 		};
 		const defaults = {
@@ -209,11 +207,6 @@ describe("settings directory", () => {
 			rules: {},
 			policy: {
 				integration: "auto_merge",
-				judgment: {
-					required: "always",
-					questions: ["Does the task fit its budget?"],
-					judge: "auto",
-				},
 				permissions: { run_commands: true, push: false },
 				plan_in_sprints: true,
 			},
@@ -225,7 +218,6 @@ describe("settings directory", () => {
 			en.rulesFinish,
 			en.rulesPlanning,
 			en.rulesDocuments,
-			en.planTitle,
 			en.uiPathsTitle,
 		];
 		const pages = [
@@ -234,7 +226,7 @@ describe("settings directory", () => {
 			[
 				"work",
 				en.sectionWork,
-				[en.rulesFinish, en.rulesPlanning, en.rulesDocuments, en.planTitle],
+				[en.rulesFinish, en.rulesPlanning, en.rulesDocuments],
 			],
 		] as const;
 		for (const [path, name, held] of pages) {
@@ -272,7 +264,7 @@ describe("settings directory", () => {
 
 		const { s } = await open("/settings/work", rules);
 		await answerQuery(s, "settings.defaults", defaults);
-		await main().findByRole("heading", { level: 3, name: en.planTitle });
+		await main().findByRole("heading", { level: 3, name: en.rulesDocuments });
 		fireEvent.click(main().getByRole("button", { name: en.advancedSwitch }));
 		expect(
 			await main().findByRole("region", { name: en.uiPathsTitle }),
@@ -295,7 +287,6 @@ describe("settings directory", () => {
 				rules: {},
 			},
 			agents: [],
-			judges: [],
 			max_agents: 7,
 		};
 		const { container, s } = await open("/settings/work", rules);
@@ -330,7 +321,6 @@ describe("settings directory", () => {
 				rules: {},
 			},
 			agents: [],
-			judges: [],
 			max_agents: 7,
 		};
 		const defaults = {

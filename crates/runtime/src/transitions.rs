@@ -3234,7 +3234,6 @@ mod tests {
             let mut paused = an_agent_wire("dev-c", "software_developer");
             paused["status"] = json!("paused");
             agents.push(paused);
-            wire["policy"]["judgment"] = json!({ "required": "always" });
         });
         let project = Project::new("context-sources", team, at(12));
         project.file("CTV-1", |wire| {

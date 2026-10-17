@@ -1,6 +1,6 @@
 # Standalone 7 of 8: no agent judges a contract
 
-Status: draft
+Status: done
 Branch: `fix/plans-need-no-review`
 Spec: `docs/SPEC.md` 5.3 (the judgment rules), 5.12 (`policy.judgment`), 5.16 item 2, 4.1 (setup's advanced step); F9
 Depends on: plans 1 to 6 committed on this branch; ADR 0061 (the founder, 2026-10-16, on contract judging: "Remove it")
@@ -87,7 +87,7 @@ Files: those of the File map for Task 3; `setup/team.test.tsx`, `settings/settin
 Tests:
 - `setup_and_rules_ask_nothing_about_checking_plans` (`setup/team.test.tsx`): setup's advanced step and the Team rules page have no group named "Who checks" and no plan-check switch or questions. A team whose file carries `policy.judgment` opens on both pages with no error.
 
-- [ ] `feat(web): drop the plan check and who checks it`
+- [x] `feat(web): drop the plan check and who checks it`
 
 ## Verification
 

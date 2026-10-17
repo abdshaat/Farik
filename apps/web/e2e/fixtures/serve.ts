@@ -260,10 +260,9 @@ function setUp(
 }
 
 /**
- * Mira (Product Manager), Ada (Architect, who checks plans and reviews Theo) and Theo (Developer),
- * and Iris (UI/UX Designer) when `designer`: with the Playwright connector, no plan checked
- * before work starts, and the site's preview, busybox's `httpd` on port 4401. The team does not
- * plan its work in sprints unless `sprints`, so a journey's work flows as soon as it is ready.
+ * Mira (Product Manager), Ada (Architect, who reviews Theo) and Theo (Developer),
+ * and Iris (UI/UX Designer) when `designer`: with the Playwright connector and the site's
+ * preview, busybox's `httpd` on port 4401. The team does not plan its work in sprints unless `sprints`, so a journey's work flows as soon as it is ready.
  */
 function writeTeam(project: string, designer: boolean, sprints: boolean): void {
 	const agent = (id: string, name: string, role: string, extra = "") =>

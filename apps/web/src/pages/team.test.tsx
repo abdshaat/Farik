@@ -72,11 +72,6 @@ const EFFECTIVE = [
 	tiers,
 	base_tiers: tiers,
 }));
-const JUDGES = {
-	auto: { agent_id: "ada", display_name: "Ada", role: "architect" },
-	architect: { agent_id: "ada", display_name: "Ada", role: "architect" },
-	scrum_master: { agent_id: "sol", display_name: "Sol", role: "scrum_master" },
-};
 const MODELS = {
 	models: [
 		{ id: "claude-opus-5-5", label: "Strongest model, thinks hard" },
@@ -92,7 +87,6 @@ async function opened(path: string, team: object = TEAM) {
 	await answerQuery(s, "team.get", {
 		team,
 		agents: EFFECTIVE,
-		judges: JUDGES,
 		max_agents: 7,
 	});
 	await answerQuery(s, "models.list", MODELS);
@@ -130,10 +124,6 @@ const saved = async (s: FakeSocket) =>
 const one = (team: typeof TEAM, id: string) =>
 	team.agents.find((a) => a.id === id) as Record<string, unknown>;
 
-const BUDGET = "Does the task fit its budget?";
-const NOTICE =
-	"Would its checks notice if the work went wrong the way its intent worries about?";
-const SMALL = "Is it small enough to finish in one go?";
 const UI_PATHS = [
 	"**/*.tsx",
 	"**/*.jsx",
@@ -161,11 +151,6 @@ const DEFAULTS = {
 	rules: {},
 	policy: {
 		integration: "auto_merge",
-		judgment: {
-			required: "always",
-			questions: [BUDGET, NOTICE],
-			judge: "auto",
-		},
 		permissions: { run_commands: true, push: false },
 		plan_in_sprints: true,
 	},
@@ -185,7 +170,6 @@ async function settings(team: object = TEAM, path = "/settings/work") {
 		await answerQuery(s, "team.get", {
 			team,
 			agents: EFFECTIVE,
-			judges: JUDGES,
 			max_agents: 7,
 		});
 	if (isRules) await answerQuery(s, "settings.defaults", DEFAULTS);
@@ -423,7 +407,6 @@ describe("team page", () => {
 		await answerQuery(f, "team.get", {
 			team: six,
 			agents: EFFECTIVE,
-			judges: JUDGES,
 			max_agents: 6,
 		});
 		const add = (await screen.findByRole("button", {
@@ -446,7 +429,6 @@ describe("team page", () => {
 		await answerQuery(s, "team.get", {
 			team: paused,
 			agents: EFFECTIVE,
-			judges: JUDGES,
 		});
 		fireEvent.click(await screen.findByRole("button", { name: "Resume Theo" }));
 		expect((await sent(s, "command")).params).toEqual({
@@ -635,7 +617,7 @@ describe("team page", () => {
 			if (f.length < 2) throw new Error("the team was not asked again");
 			return f.at(-1) as never;
 		});
-		await s.reply(again, { team: TEAM, agents: EFFECTIVE, judges: JUDGES });
+		await s.reply(again, { team: TEAM, agents: EFFECTIVE });
 		expect(
 			await screen.findByRole("heading", { name: en.teamMembers }),
 		).toBeTruthy();
@@ -937,96 +919,13 @@ describe("team page", () => {
 		expect((await saved(s2)).budgets).toEqual({ daily_usd: 15 });
 	});
 
-	it("changes_how_plans_are_checked_from_settings", async () => {
-		const { container, s, part } = await settings(TEAM, "/settings/work");
+	it("says_finished_work_opens_a_pull_request_from_settings", async () => {
+		const { part } = await settings(TEAM, "/settings/work");
 
 		// Finished work always opens a pull request (ADR 0061): said, and nothing to choose.
 		const finish = part(en.rulesFinish);
 		expect(within(finish).getByText(en.rulesFinishPullRequest)).toBeTruthy();
 		expect(within(finish).queryByRole("radio")).toBeNull();
-
-		const plans = part(en.planTitle);
-		const small = within(plans).getByRole("checkbox", {
-			name: new RegExp(`^${en.planSmall}`),
-		});
-		expect(picked(small)).toBe(false);
-		fireEvent.click(small);
-		fireEvent.click(within(plans).getByRole("radio", { name: /Scrum Master/ }));
-		const checked = await validated(s, [
-			"Plans are checked against 3 questions.",
-			"The Scrum Master checks every plan.",
-		]);
-		expect(checked.policy).toMatchObject({
-			judgment: {
-				required: "always",
-				questions: [BUDGET, NOTICE, SMALL],
-				judge: "scrum_master",
-			},
-		});
-		expect(
-			await within(plans).findByText("The Scrum Master checks every plan."),
-		).toBeTruthy();
-		await expectNoAxeViolations(container);
-
-		// A plan check with no questions is refused at the questions, in plain words.
-		for (const q of [
-			within(plans).getByRole("checkbox", {
-				name: new RegExp(`^${en.planBudget}`),
-			}),
-			within(plans).getByRole("checkbox", {
-				name: new RegExp(`^${en.planNotice}`),
-			}),
-			small,
-		])
-			fireEvent.click(q);
-		const frame = await waitFor(() => {
-			const f = s
-				.calls("query")
-				.filter((q) => q.params.name === "team.validate")
-				.at(-1);
-			const team = (f?.params.params as { team: typeof TEAM } | undefined)
-				?.team as
-				| { policy: { judgment?: { questions: string[] } } }
-				| undefined;
-			if (team?.policy.judgment?.questions.length !== 0)
-				throw new Error("the empty check was not asked");
-			return f as never;
-		});
-		await s.reply(frame, {
-			errors: [
-				{
-					path: "/policy/judgment/questions",
-					message: "/policy/judgment/questions has fewer than 1 items",
-					code: "no_questions",
-				},
-			],
-			effects: [],
-		});
-		expect(await within(plans).findByText(en.refuseNoQuestions)).toBeTruthy();
-		expect(within(plans).queryByText(/fewer than/)).toBeNull();
-		expect(
-			(
-				within(plans).getByRole("button", {
-					name: en.agentSave,
-				}) as HTMLButtonElement
-			).disabled,
-		).toBe(true);
-
-		fireEvent.click(within(plans).getByRole("button", { name: en.putBack }));
-		fireEvent.click(small);
-		await validated(s, ["Plans are checked against 3 questions."]);
-		expect(
-			await within(plans).findByText("Plans are checked against 3 questions."),
-		).toBeTruthy();
-		fireEvent.click(within(plans).getByRole("button", { name: en.agentSave }));
-		const saved_ = await saved(s);
-		expect(saved_.policy).toMatchObject({
-			judgment: {
-				required: "always",
-				questions: [BUDGET, NOTICE, SMALL],
-				judge: "auto",
-			},
-		});
 	});
 
 	it("reads_an_old_team_as_not_planning_in_sprints", async () => {
@@ -1321,15 +1220,14 @@ describe("team page", () => {
 		expect(sprints().getAttribute("aria-checked")).toBe("false");
 		fireEvent.click(sprints());
 		expect(sprints().getAttribute("aria-checked")).toBe("true");
-		const plans = () => part(en.planTitle);
-		const small = () =>
-			within(plans()).getByRole("checkbox", {
-				name: new RegExp(`^${en.planSmall}`),
-			});
-		fireEvent.click(small());
-		await validated(s, ["Plans are checked against 3 questions."]);
+		const documents = () => part(en.rulesDocuments);
+		const html = () =>
+			within(documents()).getByRole("switch", { name: en.documentsHtml });
+		expect(html().getAttribute("aria-checked")).toBe("true");
+		fireEvent.click(html());
+		await validated(s, ["New documents are written in Markdown."]);
 		fireEvent.click(
-			within(plans()).getByRole("button", { name: en.agentSave }),
+			within(documents()).getByRole("button", { name: en.agentSave }),
 		);
 		await s.reply(await sent(s, "team.save"), {});
 		const reread = await waitFor(() => {
@@ -1344,20 +1242,14 @@ describe("team page", () => {
 		await s.reply(reread, {
 			team: {
 				...TEAM,
-				policy: {
-					...TEAM.policy,
-					judgment: {
-						required: "always",
-						questions: [BUDGET, NOTICE, SMALL],
-						judge: "auto",
-					},
-				},
+				policy: { ...TEAM.policy, document_format: "markdown" },
 			},
 			agents: EFFECTIVE,
-			judges: JUDGES,
 			max_agents: 7,
 		});
-		await waitFor(() => expect(picked(small())).toBe(true));
+		await waitFor(() =>
+			expect(html().getAttribute("aria-checked")).toBe("false"),
+		);
 		expect(sprints().getAttribute("aria-checked")).toBe("true");
 
 		// Cancel drops the draft: the part shows the team's own answer again.
@@ -1399,7 +1291,6 @@ describe("team page", () => {
 		await s.reply(again, {
 			team: { ...TEAM, budgets: { daily_usd: 15 } },
 			agents: EFFECTIVE,
-			judges: JUDGES,
 			max_agents: 7,
 		});
 		await waitFor(() =>
@@ -1705,7 +1596,6 @@ const PAIR = {
 		],
 		policy: {
 			permissions: { run_commands: true, push: false },
-			judgment: { required: "always", questions: [BUDGET], judge: "auto" },
 			integration: "auto_merge",
 		},
 		budgets: {},
@@ -1895,7 +1785,6 @@ describe("team templates", () => {
 		await s.reply(await query(s, "team.get"), {
 			team: PREVIEW.team,
 			agents: EFFECTIVE,
-			judges: JUDGES,
 			max_agents: 7,
 		});
 		const cards = await screen.findByRole("list", { name: en.teamMembers });
@@ -2407,7 +2296,6 @@ describe("info buttons on the agent page", () => {
 		await answerQuery(s, "team.get", {
 			team: PROC_TEAM,
 			agents: PROC_EFFECTIVE,
-			judges: JUDGES,
 			max_agents: 7,
 		});
 		await answerQuery(s, "models.list", MODELS);

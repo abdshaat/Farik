@@ -19,7 +19,6 @@ async function opened(agent: string, mailbox: object) {
 	await answerQuery(s, "team.get", {
 		team: TEAM,
 		agents: EFFECTIVE,
-		judges: { auto: null, architect: null, scrum_master: null },
 		max_agents: 7,
 		connectors: [],
 		sandboxed: true,

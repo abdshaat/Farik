@@ -1,56 +1,22 @@
 import { toCamel, toSnake } from "@catervas/protocol-client";
-import { Button, Choice, Switch, TextArea, TextField } from "@catervas/ui";
-import { type ReactNode, useRef, useState } from "react";
+import { Button, Switch, TextArea, TextField } from "@catervas/ui";
+import { useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
-import type { Judges } from "../Team.tsx";
 import { slug } from "./SetupProject.tsx";
 import styles from "./setup.module.css";
 import {
 	type Criterion,
 	type Draft,
-	type Judgment,
 	PutBack,
-	roleName,
 	type Team,
 	teamOf,
 	useDefaults,
 	useSetup,
 } from "./TeamSetup.tsx";
-
-type Holder = NonNullable<Judges["auto"]>;
-
-/** The questions a plan check may ask, as the team file pins them, and the words shown for each. */
-const QUESTIONS = [
-	{
-		text: "Does the task fit its budget?",
-		label: "planBudget",
-		note: "planBudgetNote",
-	},
-	{
-		text: "Would its checks notice if the work went wrong the way its intent worries about?",
-		label: "planNotice",
-		note: "planNoticeNote",
-	},
-	{
-		text: "Is it small enough to finish in one go?",
-		label: "planSmall",
-		note: "planSmallNote",
-	},
-] as const;
-type Judge = NonNullable<Judgment["judge"]>;
-
-/** "Sol, the Scrum Master". */
-function holder(who: Holder | null | undefined): string | undefined {
-	return who
-		? t("planJudgeNamed")
-				.replace("{name}", who.displayName)
-				.replace("{role}", roleName(who.role))
-		: undefined;
-}
 
 /** "Plan work in sprints": the switch, as Settings has it (step 15). */
 export function SprintsSwitch({
@@ -71,142 +37,21 @@ export function SprintsSwitch({
 	);
 }
 
-/** The refusals whose path starts with `prefix`. */
-const at = (errors: Refusal[], prefix: string) =>
-	errors.filter((e) => e.path.startsWith(prefix));
-
-/** How plans are checked: whether, against which questions, and by whom; setup's and Settings'. */
-export function PlanCheck({
-	judgment: kept,
-	onChange,
-	judges,
-	errors,
-	putBack,
-	children,
-	heading: Heading = "h2",
-}: {
-	judgment: Judgment | undefined;
-	onChange: (judgment: Judgment) => void;
-	/** Who checks plans under each choice, as the daemon answers it. */
-	judges: Judges | undefined;
-	/** The daemon's refusals for the team; each one about the plan check is said at its group. */
-	errors: Refusal[];
-	putBack: (() => void) | undefined;
-	children?: ReactNode;
-	/** Settings puts the check under a page heading of its own. */
-	heading?: "h2" | "h3";
-}) {
-	const judgment: Required<Judgment> = {
-		required: "always",
-		questions: QUESTIONS.slice(0, 2).map((q) => q.text),
-		judge: "auto",
-		...kept,
-	};
-	const setJudgment = (next: Partial<Judgment>) =>
-		onChange({ ...judgment, ...next });
-	const toggle = (text: string) => {
-		const on = new Set(judgment.questions);
-		if (on.has(text)) on.delete(text);
-		else on.add(text);
-		const pinned: string[] = QUESTIONS.map((q) => q.text);
-		setJudgment({
-			questions: [
-				...pinned.filter((q) => on.has(q)),
-				...judgment.questions.filter((q) => !pinned.includes(q)),
-			],
-		});
-	};
-	const questionsWrong = at(errors, "/policy/judgment/questions");
-	const auto = holder(judges?.auto) ?? "";
-	const named = (role: "architect" | "scrum_master") =>
-		holder(role === "architect" ? judges?.architect : judges?.scrumMaster) ??
-		t("planJudgeNone").replace("{role}", roleName(role));
-	return (
-		<section className={styles.card} aria-labelledby="plans">
-			<Heading id="plans" className={styles.heading}>
-				{t("planTitle")}
-			</Heading>
-			<p>{t("planLead")}</p>
-			<Switch
-				id="plan-required"
-				label={t("planRequired")}
-				checked={judgment.required === "always"}
-				onChange={(on) => setJudgment({ required: on ? "always" : "never" })}
-			/>
-			<fieldset
-				className={styles.questions}
-				aria-describedby={questionsWrong.length ? "questions-error" : undefined}
-			>
-				<legend>{t("planQuestions")}</legend>
-				{QUESTIONS.map((q) => (
-					<label key={q.text} className={styles.question}>
-						<input
-							type="checkbox"
-							checked={judgment.questions.includes(q.text)}
-							onChange={() => toggle(q.text)}
-						/>
-						<span>
-							{t(q.label)}
-							<small>{t(q.note)}</small>
-						</span>
-					</label>
-				))}
-				{questionsWrong.length > 0 && (
-					<p id="questions-error" className={styles.error}>
-						{questionsWrong.map((e) => said(e.code)).join(" ")}
-					</p>
-				)}
-			</fieldset>
-			<Choice<Judge>
-				name="judge"
-				legend={t("planJudge")}
-				value={judgment.judge}
-				onChange={(judge) => setJudgment({ judge })}
-				{...(at(errors, "/policy/judgment/judge").length > 0 && {
-					error: said("judge_not_held", {
-						role:
-							judgment.judge === "auto"
-								? roleName("architect")
-								: roleName(judgment.judge),
-					}),
-				})}
-				options={[
-					{ value: "auto", label: t("planJudgeAuto").replace("{who}", auto) },
-					{ value: "architect", label: named("architect") },
-					{ value: "scrum_master", label: named("scrum_master") },
-				]}
-			/>
-			<PutBack onClick={putBack} />
-			{children}
-		</section>
-	);
-}
-
-/** The advanced settings of setup, opened in place on the last screen: team rules, the checks, and how plans are checked. */
+/** The advanced settings of setup, opened in place on the last screen: team rules and the checks. */
 export function AdvancedSettings() {
 	const { client } = useConnection();
 	const { draft, change } = useSetup();
 	const defaults = useDefaults();
 	const team = teamOf(draft);
 	// Every change is checked as it is made (spec 10); the daemon's refusal shows here.
-	const { data: checked } = useQuery<{ errors: Refusal[]; judges?: Judges }>(
-		"team.validate",
-		{ team },
-	);
-	// A refused draft has no answer for who checks: the last one stands meanwhile.
-	const lastJudges = useRef<Judges>(undefined);
-	if (checked?.judges) lastJudges.current = checked.judges;
-	const judges = lastJudges.current;
+	const { data: checked } = useQuery<{ errors: Refusal[] }>("team.validate", {
+		team,
+	});
 	const errors = checked?.errors ?? [];
 	// Each refusal is said at the group it concerns (SPEC 4.1); the rest at the foot.
 	const under = (prefix: string) =>
 		errors.filter((e) => e.path.startsWith(prefix));
-	const elsewhere = errors.filter(
-		(e) =>
-			!["/rules", "/policy/judgment/judge", "/policy/judgment/questions"].some(
-				(p) => e.path.startsWith(p),
-			),
-	);
+	const elsewhere = errors.filter((e) => !e.path.startsWith("/rules"));
 	const rules = draft.team.rules;
 	const [maxCost, setMaxCost] = useState(String(rules.maxTaskBudgetUsd ?? ""));
 	const [asText, setAsText] = useState<string>();
@@ -392,26 +237,6 @@ export function AdvancedSettings() {
 				</span>
 			</section>
 
-			<PlanCheck
-				judgment={draft.team.policy.judgment}
-				onChange={(judgment) =>
-					change(withTeam({ policy: { ...draft.team.policy, judgment } }))
-				}
-				judges={judges}
-				errors={errors}
-				putBack={
-					defaults &&
-					(() =>
-						change(
-							withTeam({
-								policy: {
-									...draft.team.policy,
-									judgment: defaults.policy.judgment ?? {},
-								},
-							}),
-						))
-				}
-			/>
 			<section className={styles.card} aria-labelledby="planning">
 				<h2 id="planning" className={styles.heading}>
 					{t("rulesPlanning")}

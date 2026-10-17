@@ -13,7 +13,7 @@ import {
 	type PreviewForm,
 	previewOf,
 } from "./setup/PreviewFields.tsx";
-import { PlanCheck, SprintsSwitch } from "./setup/SetupAdvanced.tsx";
+import { SprintsSwitch } from "./setup/SetupAdvanced.tsx";
 import { PermissionChoices } from "./setup/SetupPermissions.tsx";
 import { useDailyLimit } from "./setup/SetupSpending.tsx";
 import setup from "./setup/setup.module.css";
@@ -23,9 +23,8 @@ import {
 	type Team,
 	useDefaults,
 } from "./setup/TeamSetup.tsx";
-import type { Judges } from "./Team.tsx";
 
-type Checked = { errors: Refusal[]; effects: string[]; judges?: Judges };
+type Checked = { errors: Refusal[]; effects: string[] };
 type Part = {
 	saved: Team;
 	defaults: Defaults | undefined;
@@ -331,29 +330,6 @@ export function Documents(part: Part) {
 				</div>
 			)}
 		</Part>
-	);
-}
-
-export function Plans(part: Part) {
-	const { saved, defaults } = part;
-	const [mine, setMine] = useState<Team["policy"]["judgment"]>();
-	const next = mine
-		? { ...saved, policy: { ...saved.policy, judgment: mine } }
-		: saved;
-	const { checked, errors, foot } = useChange(part, next, {
-		shownAbove: "/policy/judgment",
-	});
-	return (
-		<PlanCheck
-			judgment={mine ?? saved.policy.judgment ?? defaults?.policy.judgment}
-			onChange={setMine}
-			judges={checked?.judges}
-			errors={errors}
-			putBack={defaults && (() => setMine(defaults.policy.judgment ?? {}))}
-			heading="h3"
-		>
-			{foot}
-		</PlanCheck>
 	);
 }
 
