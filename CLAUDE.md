@@ -6,7 +6,7 @@ Catervas is a production-grade harness system for multi-agent systems: it runs i
 
 - Workflow: `docs/standards/workflow.md`. Brainstorm, plan, execute under TDD, verify, review, finish. In that order.
 - Code: `docs/standards/code.md`. Naming (branches, commits, files, identifiers, wire formats, events), style, and the toolchain.
-- Models: Opus 5.5 plans (brainstorm, plans, mockups, readiness reviews); Sonnet 5.5 executes a passed plan (ADR 0032). No agent reviews code after it is written (ADR 0060).
+- Models: Opus 5.5 plans (brainstorm, plans, mockups); Sonnet 5.5 executes the plan (ADR 0032). No agent reviews a plan or code (ADR 0060, ADR 0065): the compiler, the tests and the founder's own testing are the check.
 - Decisions: `docs/decisions/`. Read the existing ADRs before proposing a change that touches architecture, tooling, or process. Add one when you make such a change.
 
 If the superpowers plugin is installed, its skills implement this workflow; use them, except `writing-plans`: write a step plan by copying `docs/plans/step-template.md` (ADR 0008, ADR 0010). If the plugin is not installed, follow the workflow document by hand. Either way the rules below hold.
@@ -15,7 +15,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 
 1. No production code before a failing test. Watch the test fail for the right reason. Code written before its test gets deleted, not adapted. One test per major functionality, not one per case; a security guarantee counts as one (ADR 0060).
 2. No completion claim without fresh evidence. Run the check, read the output, paste it. "Should work" is not a status.
-3. Planning is two-level: `docs/plans/project-plan.md` holds phases and steps; each step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, copied from `docs/plans/step-template.md` and passed by one readiness review (`workflow.md` stage 2) before execution. Tick its checkboxes in the same commits.
+3. Planning is two-level: `docs/plans/project-plan.md` holds phases and steps; each step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, copied from `docs/plans/step-template.md`; it meets the three readiness rules (`workflow.md` stage 2), which its author checks, with no separate review (ADR 0065). Tick its checkboxes in the same commits.
 4. Commits follow Conventional Commits with a package scope. One task, one commit.
 5. `crates/core` (`catervas-core`) does no I/O. Ever. `cargo xtask core-io` checks it.
 6. Wire and file formats use `snake_case`; Rust fields match them; TypeScript uses `camelCase`; one mapping layer per crate or package at the edge.

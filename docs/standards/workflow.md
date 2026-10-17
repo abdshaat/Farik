@@ -25,8 +25,8 @@ Planning and judging run on Opus 5.5; execution runs on Sonnet 5.5 (ADR 0032).
 
 | Model | Does |
 |---|---|
-| Opus 5.5 | Brainstorm, design, step plans, mockups, readiness reviews (by a session that did not write the plan) |
-| Sonnet 5.5 | A plan that has passed its readiness review: the tasks under TDD, verification, the recording of the spec, the runbook preparation |
+| Opus 5.5 | Brainstorm, design, step plans, mockups |
+| Sonnet 5.5 | A written plan: the tasks under TDD, verification, the recording of the spec, the runbook preparation |
 
 Since ADR 0060 (2026-10-12) no agent reviews code after it is written: the readiness review of the plan is the only agent review, and the full check and the `check` workflow are the gate. One task, one commit is unchanged. A decision found missing during execution goes back to the planning role; the executor does not decide it.
 
@@ -50,7 +50,7 @@ Output: a short design, two to twenty lines, that becomes the header of the plan
 
 ### 2. Plan
 
-Opus 5.5 writes the plan, and an Opus 5.5 session that did not write it runs its readiness review (see Who does what). A plan must be complete enough for Sonnet 5.5 to execute without design judgement.
+Opus 5.5 writes the plan (see Who does what). Since ADR 0065 no session reviews it: its author holds it to the three rules below. A plan must be complete enough for Sonnet 5.5 to execute without design judgement.
 
 Planning has two levels, and both are written before any product code.
 
@@ -62,9 +62,9 @@ A plan states what has been decided and what the boundaries are; it does not con
 
 A task is the smallest unit that carries its own test cycle and deserves a fresh reviewer's look. Each task lists the exact files it creates, modifies, and tests; the interfaces it consumes from earlier tasks and produces for later ones; the tests to write, each named and each with what it asserts; and one checkbox, ticked by the task's commit. Map the file structure before writing tasks so that two tasks never fight over one file, and state every type and signature the step produces or consumes, which is what the no-forward-dependency rule is checked against.
 
-Three rules decide whether a plan is ready to execute. A reviewer other than the author checks all three before the first task starts, and a plan that fails any of them goes back to brainstorming.
+Three rules decide whether a plan is ready to execute. Its author checks all three before the first task starts; there is no separate readiness review (ADR 0065). A decision found missing during execution goes back to the planner.
 
-That review is one round. A second round happens only when the first finds a decision the plan rests on that has not been made — the one failure that execution cannot recover from, because an undecided question gets decided silently and differently by whoever hits it next. Everything else the reviewer finds is written down and carried into execution. Rounds three and beyond are a sign that the plan is being proof-read rather than reviewed, which is work the compiler does better and faster.
+An unmade decision is the one failure execution cannot recover from, because an undecided question gets decided silently and differently by whoever hits it next; the author makes it before execution. Everything else is the compiler's and the tests' work, which they do better and faster than a reader.
 
 Every decision is made. Features, enhancements, names, data shapes, library choices, error behavior: all decided and written down in the plan's Decisions section or in an ADR it links. A decision that affects more than one step is an ADR.
 
@@ -76,7 +76,7 @@ No forward dependencies. A step depends only on phases already merged to `main` 
 
 ### 3. Execute
 
-Sonnet 5.5 executes a plan that has passed its readiness review (see Who does what).
+Sonnet 5.5 executes the plan (see Who does what).
 
 Work on the phase branch, `phase/<n>-<name>`, created from `main` when the phase's first step starts and kept until the phase merges. Use a git worktree for it so that a clean test baseline can be confirmed before the first change. Run the full check once at the start of the phase, and again at the start of a step only when the branch's head is not the commit the previous step landed on.
 
