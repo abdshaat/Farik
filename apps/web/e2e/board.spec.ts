@@ -1,5 +1,10 @@
 import { expect, type Page, test } from "@playwright/test";
-import { events, mergeByHand, startServe } from "./fixtures/serve.ts";
+import {
+	events,
+	mergeByHand,
+	startServe,
+	taskBranch,
+} from "./fixtures/serve.ts";
 import { screenshots } from "./fixtures/shots.ts";
 
 /** No page the journey visits says a word about sprints. */
@@ -109,7 +114,9 @@ test("work runs on the board by itself, from its plan to the team's look back", 
 		await expect(panel.getByText("$5.00 for this task")).toBeVisible();
 		await page.getByRole("tab", { name: "Code changes" }).click();
 		await expect(
-			panel.getByText("1 file, +0 −0, on the branch feature/CTV-1."),
+			panel.getByText(
+				`1 file, +0 −0, on the branch ${taskBranch(serve.project, "CTV-1")}.`,
+			),
 		).toBeVisible();
 		await page.getByRole("tab", { name: "Notes" }).click();
 		await expect(
@@ -126,7 +133,7 @@ test("work runs on the board by itself, from its plan to the team's look back", 
 		const cost = page.getByRole("region", { name: "Cost so far" });
 		await expect(cost.getByRole("row", { name: /^Building/ })).toBeVisible();
 		// The owner merges the branch on their own checkout and adds the task.
-		mergeByHand(serve.project, "feature/CTV-1");
+		mergeByHand(serve.project, taskBranch(serve.project, "CTV-1"));
 		await page.getByRole("button", { name: "Add to the project" }).click();
 		await expect(page.getByText(/^Added on /)).toBeVisible({
 			timeout: 15_000,

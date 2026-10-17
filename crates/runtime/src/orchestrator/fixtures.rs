@@ -888,9 +888,21 @@ impl Harness {
             Some("session-1"),
             "",
             "folder_doc.written",
-            &json!({ "path": path, "written_by": "sm", "change": landed.change, "sha": landed.sha }),
+            &json!({ "path": path, "written_by": "sm", "change": landed.change, "sha": landed.sha,
+                     "branch": landed.branch }),
         );
         landed.change
+    }
+
+    /// The branch folder change `change` was made on: the one the log records for it.
+    pub(crate) fn folder_branch(&self, change: u64) -> String {
+        catervas_store::folder_docs::folder_docs(&self.project.deps.log)
+            .expect("the log folds")
+            .changes
+            .into_iter()
+            .find(|held| held.change == change)
+            .map(|held| held.branch)
+            .expect("the change is in the log")
     }
 
     /// `origin` added at a path where there is no repository, so that every push to it fails.

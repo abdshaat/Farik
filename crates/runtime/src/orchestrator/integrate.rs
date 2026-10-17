@@ -6,9 +6,10 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use catervas_core::branch::task_branch;
+use catervas_core::branch::{change_type, task_branch};
 use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::is_plan_task;
+use catervas_core::forge_text::{pull_request_title, without_task_ids};
 use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind,
@@ -31,6 +32,7 @@ use super::{
 use crate::channel::post_system;
 use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
+use crate::tools::folders::plain_names;
 use crate::transitions::{INTEGRATION_LOCK, integration_lock, is_move_into};
 
 /// Who asked for an integration: the tick, on the team's policy, or the human.
@@ -143,39 +145,38 @@ impl Subject {
     fn branch(&self, tools: &ToolDeps) -> Result<String, OrchestratorError> {
         Ok(match self {
             Self::Task(task_id) => task_branch(&tools.files.read_contract(task_id)?),
-            Self::FolderChange(change) => format!("docs/folder-{change}"),
+            Self::FolderChange(change) => folder_change(tools, *change)?.branch,
         })
     }
 
-    /// Its merge commit's message and its pull request's title.
-    fn titles(&self, tools: &ToolDeps) -> Result<(String, String), OrchestratorError> {
+    /// Its pull request's title: a task's is its type and title, with no task id (ADR 0066).
+    fn title(&self, tools: &ToolDeps) -> Result<String, OrchestratorError> {
         match self {
             Self::Task(task_id) => {
-                let title = tools
-                    .projections
-                    .task(task_id)?
-                    .map(|row| row.title)
-                    .unwrap_or_default();
-                let id = task_id.as_str();
-                Ok((format!("Merge {id}: {title}"), format!("{id}: {title}")))
-            }
-            Self::FolderChange(change) => {
-                let paths = folder_change(tools, *change)?
-                    .paths
-                    .iter()
-                    .map(|path| {
-                        path.strip_prefix("docs/catervas/")
-                            .unwrap_or(path)
-                            .to_string()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Ok((
-                    format!("Merge docs/folder-{change}: {paths}"),
-                    format!("Folder change {change}: {paths}"),
+                let contract = tools.files.read_contract(task_id)?;
+                Ok(pull_request_title(
+                    change_type(&contract),
+                    contract.title.as_str(),
+                    &title_of(tools),
                 ))
             }
+            Self::FolderChange(change) => {
+                let held = folder_change(tools, *change)?;
+                let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
+                Ok(format!("Docs: Update {}", plain_names(&paths)))
+            }
         }
+    }
+}
+
+/// A task's title as the contract's file holds it, for the ids a pull request's words name.
+fn title_of(tools: &ToolDeps) -> impl Fn(&TaskId) -> Option<String> + '_ {
+    |id| {
+        tools
+            .files
+            .read_contract(id)
+            .ok()
+            .map(|contract| contract.title.as_str().to_string())
     }
 }
 
@@ -758,7 +759,7 @@ fn open(
         let detail = format!("pushing {branch} to origin failed: {}", git_words(&error));
         return escalate(tools, subject, detail);
     }
-    let (_, title) = subject.titles(tools)?;
+    let title = subject.title(tools)?;
     let body = pull_request_body(tools, subject)?;
     let pull_request = match target.forge.open_pull_request(into, branch, &title, &body) {
         Ok(pull_request) => pull_request,
@@ -855,7 +856,7 @@ fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, Orch
         }
     };
     let contract = tools.files.read_contract(task_id)?;
-    let intent = contract.intent.as_str();
+    let intent = without_task_ids(contract.intent.as_str(), &title_of(tools));
     let notes = tools.log.read(&EventQuery {
         task_id: Some(task_id.clone()),
         kinds: vec![EventKind::NoteWritten],
@@ -866,7 +867,9 @@ fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, Orch
             .iter()
             .rev()
             .find_map(|event| match &event.body {
-                EventBody::NoteWritten(body) if body.kind == kind => Some(body.text.clone()),
+                EventBody::NoteWritten(body) if body.kind == kind => {
+                    Some(without_task_ids(&body.text, &title_of(tools)))
+                }
                 _ => None,
             })
             .unwrap_or_else(|| "(none was written)".to_string())
@@ -1338,7 +1341,7 @@ mod tests {
             "{refusal:?}"
         );
         harness.merge_by_hand("CTV-1");
-        harness.merge_branch_by_hand("docs/folder-1");
+        harness.merge_branch_by_hand(&harness.folder_branch(1));
         orchestrator.tick().await.expect("the tick runs");
         orchestrator.tick().await.expect("the tick runs");
         let integrated = integrations(&harness);
@@ -1858,6 +1861,108 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_tasks_pull_request_carries_no_task_id() {
+        let harness = under("int-pr-no-id", "pull_request");
+        let origin = harness.with_origin();
+        harness.file("CTV-2", "cancelled", |wire| {
+            wire["title"] = json!("Pie pre-orders");
+        });
+        harness.assigned_with("CTV-1", "dev-a", "dev-b", |wire| {
+            wire["title"] = json!("Character counter on the note input");
+        });
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        // Rule 7 starts it: its branch is named from its title and recorded.
+        orchestrator.tick().await.expect("the tick runs");
+        let branch = harness.branch("CTV-1");
+        assert_eq!(branch, "feat/character-counter-on-the-note-input");
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(worktree.join("counter.txt"), "1\n").expect("written");
+        harness
+            .project
+            .deps
+            .git
+            .commit(
+                &worktree,
+                "feat: count the note's characters",
+                &["counter.txt".to_string()],
+            )
+            .expect("committed");
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Added the counter; CTV-2 still owes the pies.", "written_by": "dev-a" }),
+        );
+        harness.project.record(
+            "CTV-1",
+            "note.written",
+            &json!({ "kind": "review", "text": "C1 passes.", "written_by": "dev-b" }),
+        );
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        let mut by_assignee = people.clone();
+        by_assignee["actor"] = json!("assignee");
+        by_assignee["requested_by"] = json!("dev-a");
+        harness
+            .project
+            .moved("CTV-1", "in_progress", "verifying", &by_assignee);
+        harness.project.moved(
+            "CTV-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        harness.settle_delivery();
+        harness
+            .project
+            .deps
+            .git
+            .remove_worktree(&worktree)
+            .expect("the worktree is removed");
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", &branch]),
+            at_root(&harness, &["rev-parse", &branch])
+        );
+        let create = harness
+            .gh
+            .calls()
+            .into_iter()
+            .find(|call| call.get(1).map(String::as_str) == Some("create"))
+            .expect("a pull request is created");
+        let after = |flag: &str| {
+            let at = create.iter().position(|argument| argument == flag);
+            at.and_then(|at| create.get(at + 1)).cloned()
+        };
+        assert_eq!(after("--head"), Some(branch.clone()));
+        assert_eq!(
+            after("--title").as_deref(),
+            Some("Feat: Character counter on the note input")
+        );
+        let body = harness.gh.stdin_of("create");
+        assert!(
+            body.contains("\"Pie pre-orders\" still owes the pies"),
+            "{body}"
+        );
+        assert!(!body.contains("CTV-"), "{body}");
+        let log = at_root(
+            &harness,
+            &["log", "--format=%B", &format!("main..{branch}")],
+        );
+        assert!(!log.contains("CTV-"), "{log}");
+        let recorded = opened(&harness);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].branch, branch);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_while_the_pull_request_is_open() {
         let (harness, origin) = a_pull_request("int-pr-waits", true);
         harness.gh.answers("view", OPEN, "", 0);
@@ -2300,7 +2405,7 @@ mod tests {
 
     /// The owner merges folder change `change` by hand and asks for it to be added.
     fn adds(harness: &Harness, orchestrator: &crate::orchestrator::Orchestrator, change: u64) {
-        harness.merge_branch_by_hand(&format!("docs/folder-{change}"));
+        harness.merge_branch_by_hand(&harness.folder_branch(change));
         block_on(
             orchestrator
                 .handle(catervas_protocol::command::Command::FolderChangeIntegrate { change }),
@@ -2429,7 +2534,7 @@ mod tests {
         let harness = with_documents("int-rederive-auto", "pull_request");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let change = owner_saves(&harness, ROADMAP, "the owner's roadmap\n");
-        harness.merge_branch_by_hand(&format!("docs/folder-{change}"));
+        harness.merge_branch_by_hand(&harness.folder_branch(change));
         for _ in 0..3 {
             block_on(orchestrator.tick()).expect("the tick runs");
             if !rederives(&harness).is_empty() {
@@ -2474,6 +2579,9 @@ mod tests {
             .gh
             .answers("create", &format!("{PULL_URL}\n"), "", 0);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        // Named for the document, no number (ADR 0066).
+        let name = catervas_core::folders::document_name(CADENCE, &|_| None);
+        let branch = format!("docs/{}", catervas_core::branch::branch_slug(&name));
 
         let (change, what) = folder_report(orchestrator.tick().await.expect("the tick runs"));
 
@@ -2482,9 +2590,12 @@ mod tests {
             (1, format!("opened the pull request {PULL_URL}"))
         );
         assert_eq!(
-            git_output_in(&origin, &["rev-parse", "docs/folder-1"]),
-            at_root(&harness, &["rev-parse", "docs/folder-1"])
+            git_output_in(&origin, &["rev-parse", &branch]),
+            at_root(&harness, &["rev-parse", &branch])
         );
+        assert_eq!(harness.folder_branch(1), branch);
+        let written = folder_events(&harness, EventKind::FolderDocWritten);
+        assert_eq!(written[0]["body"]["branch"], branch.as_str());
         let create = harness
             .gh
             .calls()
@@ -2492,9 +2603,10 @@ mod tests {
             .find(|call| call.get(1).map(String::as_str) == Some("create"))
             .expect("a pull request is created");
         assert!(
-            create.contains(&"Folder change 1: delivery/cadence.md".to_string()),
+            create.contains(&format!("Docs: Update {name}")),
             "{create:?}"
         );
+        assert!(create.contains(&branch), "{create:?}");
         assert_eq!(harness.gh.stdin_of("create"), format!("{CADENCE}\n"));
         let opened = folder_events(&harness, EventKind::FolderChangeOpened);
         assert_eq!(
@@ -2503,7 +2615,7 @@ mod tests {
         );
 
         // Once the forge says merged, the next tick records it as the human's and brings main up.
-        let sha = harness.merge_branch_on_the_forge(&origin, "docs/folder-1");
+        let sha = harness.merge_branch_on_the_forge(&origin, &branch);
         harness.gh.answers(
             "view",
             &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
@@ -2755,7 +2867,7 @@ mod tests {
         a_docs_task_accepted(&harness);
         harness.folder_change(CADENCE, "a\n");
         harness.merge_by_hand("CTV-1");
-        harness.merge_branch_by_hand("docs/folder-1");
+        harness.merge_branch_by_hand(&harness.folder_branch(1));
         let before: Vec<String> = members
             .iter()
             .map(|member| member.git_output(&["rev-parse", "main"]))
@@ -2780,7 +2892,7 @@ mod tests {
         );
         assert_eq!(parents.split(' ').count(), 3, "{parents}");
         assert!(
-            at_root(&harness, &["branch", "--merged", "main"]).contains("docs/folder-1"),
+            at_root(&harness, &["branch", "--merged", "main"]).contains(&harness.folder_branch(1)),
             "the change landed in the project folder"
         );
         assert!(

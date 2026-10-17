@@ -116,6 +116,8 @@ pub(crate) enum Refusal {
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
+    /// A commit message that names a task, whose id stays inside Catervas (ADR 0066).
+    CommitMessageNamesATask { id: String },
     /// A marketing plan refused as a whole, under the code it names: asked outside the
     /// Marketing Specialist's implement session of a task, while the task has a plan waiting, or
     /// over a file that is there already (ADR 0042).
@@ -219,7 +221,9 @@ impl Refusal {
             | Self::CriterionAnsweredByTheHuman { .. }
             | Self::NotTheNamedAgent { .. } => self.reach(),
             Self::Command(refusal) => command(refusal),
-            Self::PathIsADirectory { .. } | Self::OutsideWorkspace { .. } => self.workspace(),
+            Self::PathIsADirectory { .. }
+            | Self::CommitMessageNamesATask { .. }
+            | Self::OutsideWorkspace { .. } => self.workspace(),
             Self::ChannelLimit { detail } => ("channel_limit", detail.clone()),
             Self::RetroRefused { detail } => ("retro_refused", detail.clone()),
             Self::MemoryRefused { detail } => ("memory_refused", detail.clone()),
@@ -301,20 +305,26 @@ impl Refusal {
         }
     }
 
-    /// The refusals of a path in the task's workspace: a commit naming a directory, and a command
-    /// run outside the workspace.
+    /// The refusals of a path in the task's workspace: a commit naming a directory, a commit
+    /// message naming a task, and a command run outside the workspace.
     fn workspace(&self) -> (&'static str, String) {
         match self {
             Self::PathIsADirectory { path } => (
                 "path_is_a_directory",
                 format!("{path} is a directory; name the files to commit"),
             ),
+            Self::CommitMessageNamesATask { id } => (
+                "commit_message_names_a_task",
+                format!(
+                    "{id} is a task id, which stays inside Catervas; describe the change instead"
+                ),
+            ),
             Self::OutsideWorkspace { cwd } => (
                 "outside_workspace",
                 format!("{cwd} is not a directory inside the task's workspace"),
             ),
             other => {
-                unreachable!("workspace is asked only of the two refusals it names: {other:?}")
+                unreachable!("workspace is asked only of the three refusals it names: {other:?}")
             }
         }
     }

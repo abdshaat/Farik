@@ -405,19 +405,29 @@ fn runs_a_task_to_acceptance_and_says_what_waits() {
     );
     assert!(!daemon_file(&repository).exists());
 
+    // The branch is the one the contract records (ADR 0066): named from the title, no task id.
+    let contract = std::fs::read_to_string(
+        repository
+            .path
+            .join(format!(".catervas/contracts/{task}.yaml")),
+    )
+    .expect("the contract is there");
+    let branch = contract
+        .lines()
+        .find_map(|line| line.strip_prefix("branch: "))
+        .expect("the contract records its branch")
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    assert!(!branch.contains("CTV-"), "{branch}");
+
     // Catervas never merges: until the branch is merged by hand, integrating is refused.
     let ran = run(&repository.path, &["integrate", &task]);
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(ran.err.contains("not_merged: "), "{}", ran.err);
     assert!(
         std::process::Command::new("git")
-            .args([
-                "merge",
-                "--no-ff",
-                "-m",
-                "By hand",
-                &format!("feature/{task}")
-            ])
+            .args(["merge", "--no-ff", "-m", "By hand", &branch])
             .current_dir(&repository.path)
             .status()
             .expect("git runs")

@@ -185,12 +185,14 @@ pub(super) fn file_bug(call: &Call<'_>, input: &FileBugInput) -> Result<Value, T
     }
 
     let intent = bug_intent(input, &call.agent.display_name, &hunt);
-    let wire = request_from_brief(
+    let mut wire = request_from_brief(
         input.title.trim(),
         &intent,
         placeholder_budget_usd(&call.team.rules()),
     )
     .map_err(|reason| ToolError::InvalidInput { detail: reason })?;
+    // A bug found by a hunt is a fix (ADR 0066); the Product Manager may still change it.
+    wire["change"] = json!("fix");
     let bug = file_a_bug(
         &deps.files,
         &deps.log,
@@ -282,6 +284,10 @@ mod tests {
             .read_contract(&"CTV-2".parse().expect("an id"))
             .expect("the bug is a contract");
         assert_eq!(contract.title.as_str(), TITLE);
+        assert_eq!(
+            contract.change,
+            Some(catervas_core::generated::task_contract::CatervasTaskContractChange::Fix)
+        );
         let hunter = a_team_of_three(|_| {})
             .agents
             .iter()

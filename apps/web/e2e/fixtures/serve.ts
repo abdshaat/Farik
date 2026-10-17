@@ -135,6 +135,21 @@ export function commitFiles(
 }
 
 /**
+ * The branch Catervas recorded for `task` in its contract (ADR 0066): named from its type and
+ * title, with no task id in it.
+ */
+export function taskBranch(project: string, task: string): string {
+	const contract = readFileSync(
+		join(project, ".catervas", "contracts", `${task}.yaml`),
+		"utf8",
+	);
+	const branch = /^branch: "?([^"\n]+)"?$/m.exec(contract)?.[1];
+	if (!branch) throw new Error(`${task} records no branch`);
+	if (branch.includes("CTV-")) throw new Error(`${branch} names a task id`);
+	return branch;
+}
+
+/**
  * Merges `branch` into the project's branch, as the owner does on their own checkout when no
  * `origin` holds a pull request for them to merge. Catervas never merges.
  */

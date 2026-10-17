@@ -5,6 +5,7 @@
 //! product's spec and roadmap, which the owner edits, are written the same way, both files and their
 //! agent versions as one change, at the review (ADR 0061).
 
+use catervas_core::branch::{ChangeType, branch_slug, free_branch};
 use catervas_core::contract::{TaskId, TaskStatus};
 use catervas_core::folders::{
     DocumentFormat, FolderDocPath, FolderDocPathRefusal, FormatRefusal, LineChange, ROLE_FOLDERS,
@@ -15,6 +16,7 @@ use catervas_core::governor::paths::check_protected_paths;
 use catervas_core::team::Team;
 use catervas_protocol::event::{EventBody, EventKind, Thread};
 use catervas_store::CommitOutcome;
+use catervas_store::branches::taken_branches;
 use catervas_store::folder_docs::{FolderDocProposal, ProposalState, folder_docs};
 use catervas_store::requests::{
     RequestError, file_rederive_request, placeholder_budget_usd, rederive_request, rederive_tasks,
@@ -117,8 +119,9 @@ fn next_by(has_origin: bool, branch: &str, into: &str) -> String {
 }
 
 /// Makes `files` (`(path, text)`) a folder change: the first number above the log's highest for
-/// which git has no branch `docs/folder-<n>`, here or on `origin`, and that branch from the
-/// integration branch with one commit by `author`, or by the person git knows when there is none.
+/// which git has no branch `docs/folder-<n>`, here or on `origin`, and a branch named for the
+/// documents (`docs/<slug>`, ADR 0066) from the integration branch with one commit by `author`, or
+/// by the person git knows when there is none.
 /// The caller holds the integration lock.
 ///
 /// # Errors
@@ -160,13 +163,26 @@ pub(crate) fn land(
         .max()
         .unwrap_or(0)
         + 1;
-    let branch = loop {
-        let branch = format!("docs/folder-{change}");
-        if deps.git.tree(&branch).is_err() && deps.git.tree(&format!("origin/{branch}")).is_err() {
-            break branch;
+    // The number stays the internal name; it is still past every older `docs/folder-<n>` branch.
+    loop {
+        let numbered = format!("docs/folder-{change}");
+        if deps.git.tree(&numbered).is_err()
+            && deps.git.tree(&format!("origin/{numbered}")).is_err()
+        {
+            break;
         }
         change += 1;
-    };
+    }
+    // The branch is named for the documents (ADR 0066) and recorded in the event that makes the
+    // change.
+    let named: Vec<&str> = files
+        .iter()
+        .map(|(path, _)| path.as_str())
+        .chain(removed.iter().map(String::as_str))
+        .collect();
+    let taken =
+        taken_branches(&deps.files, &deps.log, &deps.git, None).map_err(|error| words(&error))?;
+    let branch = free_branch(ChangeType::Docs, &branch_slug(&plain_names(&named)), &taken);
     match deps
         .git
         .commit_files(&branch, &into, files, removed, message, author)
@@ -260,9 +276,12 @@ pub(crate) fn file_rederive(
 }
 
 /// The documents' plain names, joined by " and ": each as the Files page names it.
-fn plain_names(paths: &[&str]) -> String {
+pub(crate) fn plain_names(paths: &[&str]) -> String {
+    // A human document's agent version is the same document to the people who read the name.
+    let twins: Vec<String> = paths.iter().filter_map(|path| agent_twin(path)).collect();
     paths
         .iter()
+        .filter(|path| !twins.iter().any(|twin| twin == *path))
         .map(|path| document_name(path, &|_: &str| None))
         .collect::<Vec<_>>()
         .join(" and ")
@@ -451,6 +470,7 @@ pub(super) fn write_folder_doc(
     };
     let body = serde_json::from_value(json!({
         "path": path, "written_by": call.agent_id(), "change": landed.change, "sha": landed.sha,
+        "branch": landed.branch,
     }))
     .map_err(failed)?;
     call.append(None, EventBody::FolderDocWritten(body))?;
@@ -702,12 +722,9 @@ mod tests {
     }
 
     fn branches(project: &TestProject) -> String {
-        project.repo.git_output(&[
-            "branch",
-            "--list",
-            "docs/folder-*",
-            "--format=%(refname:short)",
-        ])
+        project
+            .repo
+            .git_output(&["branch", "--list", "docs/*", "--format=%(refname:short)"])
     }
 
     fn code(error: &ToolError) -> &str {
@@ -728,21 +745,21 @@ mod tests {
         assert_eq!(
             answer,
             json!({
-                "path": CADENCE, "change": 1, "branch": "docs/folder-1",
-                "next": "docs/folder-1 waits for you to merge it into main."
+                "path": CADENCE, "change": 1, "branch": "docs/delivery-rhythm",
+                "next": "docs/delivery-rhythm waits for you to merge it into main."
             })
         );
         let repo = &project.repo;
         assert_eq!(
-            repo.git_output(&["log", "-1", "--format=%an <%ae>|%s", "docs/folder-1"]),
+            repo.git_output(&["log", "-1", "--format=%an <%ae>|%s", "docs/delivery-rhythm"]),
             "Sol (Catervas) <catervas@localhost>|docs(delivery): cadence.md by Sol"
         );
         assert_eq!(
-            repo.git_output(&["rev-list", "--count", "main..docs/folder-1"]),
+            repo.git_output(&["rev-list", "--count", "main..docs/delivery-rhythm"]),
             "1"
         );
         assert_eq!(
-            repo.git_output(&["diff", "--name-only", "main", "docs/folder-1"]),
+            repo.git_output(&["diff", "--name-only", "main", "docs/delivery-rhythm"]),
             CADENCE
         );
         assert!(project.deps.git.file_at("main", CADENCE).is_err());
@@ -761,9 +778,10 @@ mod tests {
         assert_eq!(wire["body"]["path"], CADENCE);
         assert_eq!(wire["body"]["written_by"], "sm");
         assert_eq!(wire["body"]["change"], 1);
+        assert_eq!(wire["body"]["branch"], "docs/delivery-rhythm");
         assert_eq!(
             wire["body"]["sha"],
-            repo.git_output(&["rev-parse", "docs/folder-1"])
+            repo.git_output(&["rev-parse", "docs/delivery-rhythm"])
         );
 
         let second = write(&context, "docs/catervas/delivery/notes.md", "n\n").expect("another");
@@ -782,10 +800,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn says_a_pull_request_opens_only_where_there_is_an_origin() {
         for (origin, next) in [
-            (false, "docs/folder-1 waits for you to merge it into main."),
+            (
+                false,
+                "docs/delivery-rhythm waits for you to merge it into main.",
+            ),
             (
                 true,
-                "Catervas opens a pull request for docs/folder-1 on its next tick; the document is in main once it merges.",
+                "Catervas opens a pull request for docs/delivery-rhythm on its next tick; the document is in main once it merges.",
             ),
         ] {
             let project = project(
@@ -828,15 +849,15 @@ mod tests {
 
         assert!(project.events(&[EventKind::FolderDocProposed]).is_empty());
         assert_eq!(answer["change"], 1);
-        assert_eq!(answer["branch"], "docs/folder-1");
+        assert_eq!(answer["branch"], "docs/roadmap");
         // The document and its agent version are one folder change.
         let git = &project.deps.git;
         assert_eq!(
-            git.file_at("docs/folder-1", ROADMAP).expect("the document"),
+            git.file_at("docs/roadmap", ROADMAP).expect("the document"),
             "Now: pie pre-orders.\n"
         );
         assert_eq!(
-            git.file_at("docs/folder-1", "docs/catervas/product/roadmap.agent.md")
+            git.file_at("docs/roadmap", "docs/catervas/product/roadmap.agent.md")
                 .expect("its agent version"),
             "- now: pie pre-orders\n"
         );
@@ -949,7 +970,7 @@ mod tests {
         write(&context, CADENCE, "a\n").expect("change 1");
         let refused = write(&context, CADENCE, "b\n").expect_err("change 1 holds it");
         assert_eq!(code(&refused), "folder_doc_waiting");
-        assert_eq!(branches(&waiting), "docs/folder-1");
+        assert_eq!(branches(&waiting), "docs/delivery-rhythm");
         assert_eq!(waiting.events(&[EventKind::FolderDocWritten]).len(), 1);
     }
 
@@ -979,7 +1000,7 @@ mod tests {
             project
                 .deps
                 .git
-                .file_at("docs/folder-1", FEATURES_HTML)
+                .file_at(answer["branch"].as_str().expect("a branch"), FEATURES_HTML)
                 .expect("on the branch"),
             "<p>a</p>\n"
         );
@@ -1023,10 +1044,11 @@ mod tests {
         project.repo.write(CADENCE, "old\n");
         project.repo.commit("a document");
         let context = ceremony(&project, "sm", Thread::Retro);
-        write(&context, CADENCE_HTML, "<p>new</p>\n").expect("rewritten");
+        let answer = write(&context, CADENCE_HTML, "<p>new</p>\n").expect("rewritten");
+        let branch = answer["branch"].as_str().expect("a branch");
         let git = &project.deps.git;
-        assert!(git.file_at("docs/folder-1", CADENCE_HTML).is_ok());
-        assert!(git.file_at("docs/folder-1", CADENCE).is_err());
+        assert!(git.file_at(branch, CADENCE_HTML).is_ok());
+        assert!(git.file_at(branch, CADENCE).is_err());
         let written = project.events(&[EventKind::FolderDocWritten]);
         let wire = catervas_protocol::event::event_to_value(&written[0]);
         assert_eq!(wire["body"]["path"], CADENCE_HTML);
@@ -1085,21 +1107,23 @@ mod tests {
             "path": "docs/catervas/product/spec.html", "text": "<p>a</p>\n",
             "agent_text": "<p>b</p>\n"
         });
-        run(&ceremony(&project, "pm", Thread::Review), TOOL, input).expect("written");
+        let answer = run(&ceremony(&project, "pm", Thread::Review), TOOL, input).expect("written");
         // The document and its agent version are written in the same format, as one change.
+        let branch = answer["branch"].as_str().expect("a branch");
+        assert_eq!(branch, "docs/product-description");
         let git = &project.deps.git;
         assert_eq!(
-            git.file_at("docs/folder-1", "docs/catervas/product/spec.html")
+            git.file_at(branch, "docs/catervas/product/spec.html")
                 .expect("the document"),
             "<p>a</p>\n"
         );
         assert_eq!(
-            git.file_at("docs/folder-1", "docs/catervas/product/spec.agent.html")
+            git.file_at(branch, "docs/catervas/product/spec.agent.html")
                 .expect("its agent version"),
             "<p>b</p>\n"
         );
         assert!(
-            git.file_at("docs/folder-1", "docs/catervas/product/spec.agent.md")
+            git.file_at(branch, "docs/catervas/product/spec.agent.md")
                 .is_err()
         );
     }
@@ -1201,7 +1225,7 @@ mod tests {
             matches!(refused, super::LandRefusal::Waiting { change: 1, .. }),
             "{refused:?}"
         );
-        assert_eq!(branches(&project), "docs/folder-1");
+        assert_eq!(branches(&project), "docs/delivery-rhythm");
     }
 
     #[test]

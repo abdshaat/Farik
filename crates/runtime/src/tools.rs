@@ -396,7 +396,9 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<git::CommitInput>(
             "catervas_git_commit",
             GitLocal,
-            "Commit the named paths of the task's worktree on the task branch.",
+            "Commit the named paths of the task's worktree on the task branch. Write the message as \
+             Conventional Commits: a type, a colon and what changed (feat: ..., fix: ..., docs: ...). \
+             Name no task id.",
         ),
         tool::<NoInput>(
             "catervas_git_push",

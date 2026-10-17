@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::TaskId;
+use catervas_core::forge_text::task_id_in;
 use catervas_core::governor::paths::{PathRefusal, check_allowed_paths, normalise};
 use catervas_core::governor::permissions::ToolRefusal;
 use catervas_store::git::task_base;
@@ -65,6 +66,10 @@ pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
 /// them would be committed.
 pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, ToolError> {
     let task = assignees_task(call)?;
+    // A task id stays inside Catervas (ADR 0066); checked first, so a refusal changes nothing.
+    if let Some(id) = task_id_in(&input.message) {
+        return Err(Refusal::CommitMessageNamesATask { id }.into());
+    }
     let worktree = worktree(call, task);
     if let Some(path) = input.paths.iter().find(|path| worktree.join(path).is_dir()) {
         return Err(Refusal::PathIsADirectory { path: path.clone() }.into());
@@ -180,6 +185,50 @@ mod tests {
 
     use crate::tools::ToolError;
     use crate::tools::fixtures::{TestProject, a_team_of_three};
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_commit_message_naming_a_task() {
+        let project = TestProject::new("tools-git-commit-id", &a_team_of_three(|_| {}));
+        project.filed("CTV-1", "assigned", "task", None);
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
+        let branch = project.branch("CTV-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, &branch, "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
+        let commit = |message: &str| {
+            project.call(
+                "dev-a",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({ "message": message, "paths": ["src/login/form.ts"] }),
+            )
+        };
+
+        match commit("feat: add the login form (CTV-1)") {
+            Err(ToolError::Refused { reason }) => assert!(
+                reason.starts_with("commit_message_names_a_task: CTV-1 is a task id"),
+                "{reason}"
+            ),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        let git = &project.deps.git;
+        assert_eq!(git.commit_count("main", &branch), Ok(0));
+
+        let committed = commit("feat: add the login form").expect("a message with no id commits");
+        assert!(committed["sha"].is_string(), "{committed}");
+        assert_eq!(git.commit_count("main", &branch), Ok(1));
+    }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]

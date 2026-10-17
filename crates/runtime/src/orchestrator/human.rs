@@ -1993,6 +1993,7 @@ pub(crate) fn folder_doc_decide(
         Ok(Some(landed)) => {
             body["change"] = json!(landed.change);
             body["sha"] = json!(landed.sha);
+            body["branch"] = json!(landed.branch);
             landed.next
         }
         Ok(None) => "Approved. The files already said it, so nothing was added.".to_string(),
@@ -6759,7 +6760,7 @@ mod tests {
         harness.project.repo.git_output(&[
             "branch",
             "--list",
-            "docs/folder-*",
+            "docs/*",
             "--format=%(refname:short)",
         ])
     }
@@ -6784,7 +6785,11 @@ mod tests {
 
         let repo = &harness.project.repo;
         assert_eq!(
-            repo.git_output(&["rev-list", "--count", "main..docs/folder-1"]),
+            repo.git_output(&[
+                "rev-list",
+                "--count",
+                "main..docs/roadmap-and-product-description"
+            ]),
             "1"
         );
         for (path, text) in [
@@ -6800,12 +6805,20 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                repo.git_output(&["show", &format!("docs/folder-1:{path}")]),
+                repo.git_output(&[
+                    "show",
+                    &format!("docs/roadmap-and-product-description:{path}")
+                ]),
                 text
             );
         }
         assert_eq!(
-            repo.git_output(&["log", "-1", "--format=%an <%ae>|%s", "docs/folder-1"]),
+            repo.git_output(&[
+                "log",
+                "-1",
+                "--format=%an <%ae>|%s",
+                "docs/roadmap-and-product-description"
+            ]),
             "Mira (Catervas) <catervas@localhost>|docs(product): roadmap.md, spec.md by Mira, approved by the owner"
         );
         let approved = harness.events(&[EventKind::FolderDocApproved]);
@@ -6816,12 +6829,13 @@ mod tests {
             wire_of(&approved[0])["body"],
             json!({
                 "proposals": [roadmap, spec], "change": 1,
-                "sha": repo.git_output(&["rev-parse", "docs/folder-1"]), "note": "Thanks"
+                "sha": repo.git_output(&["rev-parse", "docs/roadmap-and-product-description"]), "note": "Thanks",
+                "branch": "docs/roadmap-and-product-description"
             })
         );
         assert_eq!(
             report.said,
-            "docs/folder-1 waits for you to merge it into main."
+            "docs/roadmap-and-product-description waits for you to merge it into main."
         );
         assert_eq!(report.events, vec![approved[0].envelope.seq]);
         let docs = catervas_store::folder_docs::folder_docs(&harness.project.deps.log)
@@ -6833,7 +6847,7 @@ mod tests {
         );
 
         // Once the owner has merged change 1, the next tick records it, as it does a task's branch.
-        harness.merge_branch_by_hand("docs/folder-1");
+        harness.merge_branch_by_hand("docs/roadmap-and-product-description");
         let tick = orchestrator.tick().await.expect("the tick runs");
         assert!(
             matches!(
