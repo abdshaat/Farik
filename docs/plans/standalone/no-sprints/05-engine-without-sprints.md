@@ -215,7 +215,7 @@ a sprint from before records `sprint.started` with `record`/`record_at`, not `op
   of `dev-a` yesterday and one today: a second ambient post today is refused, its reason starting
   `channel_limit: ` and ending "today".
 
-- [ ] `feat(runtime): allowances and unprompted messages count by the day`
+- [x] `feat(runtime): allowances and unprompted messages count by the day`
 
 ### Task 4: nothing reads a sprint
 

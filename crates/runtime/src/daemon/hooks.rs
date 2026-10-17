@@ -719,8 +719,7 @@ fn calls_made(
 ) -> Result<u32, Denial> {
     let unreadable =
         |error: catervas_store::StoreError| Denial::from(format!("allowance_unreadable: {error}"));
-    let period =
-        allowance_period(&deps.log, &deps.projections, deps.clock.now()).map_err(unreadable)?;
+    let period = allowance_period(deps.clock.now());
     state
         .allowance_counts()
         .used(&deps.log, &period, agent, server, tool)
@@ -2888,29 +2887,20 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn resets_with_the_sprint() {
-        let daemon = TestDaemon::new("hook-allowance-sprint", |_| {});
-        allowing_github(&daemon, 2);
-        assert!(issue(&daemon, 1).allow);
-        assert!(issue(&daemon, 2).allow);
-        denied_for(&issue(&daemon, 3), "approval_needed");
-        // The calls before the sprint started are not its.
-        daemon.project.open_sprint("S1", None, &[]);
-        // The ask stopped that session; the agent's next one makes its calls.
-        allowing_session(&daemon, "session-next", "dev-a", "CTV-1", Some(2));
-        let next = |n: u32| create_issue(&daemon, "session-next", &json!({ "title": n }));
-        assert!(next(4).allow);
-        assert!(next(5).allow);
-        denied_for(&next(6), "approval_needed");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn counts_per_utc_day_with_no_sprint_open() {
+    fn counts_by_the_utc_day_even_with_a_sprint_from_before_open() {
         use chrono::{TimeZone, Utc};
 
         let daemon = TestDaemon::new("hook-allowance-day", |_| {});
         allowing_github(&daemon, 2);
+        // A project made before ADR 0062: a sprint opened yesterday and never ended.
+        daemon.project.record_at(
+            Utc.with_ymd_and_hms(2026, 9, 21, 12, 0, 0)
+                .single()
+                .expect("a time"),
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S1", "budget_usd": null, "started_by": "human" }),
+        );
         let yesterday = Utc
             .with_ymd_and_hms(2026, 9, 21, 23, 59, 0)
             .single()
@@ -2936,58 +2926,6 @@ mod tests {
         assert!(
             issue(&daemon, 1).allow,
             "yesterday's call does not count, today's does"
-        );
-        denied_for(&issue(&daemon, 2), "approval_needed");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn counts_from_the_sprints_end_on_the_day_it_ended() {
-        use chrono::{TimeZone, Utc};
-
-        let at_hour = |hour| {
-            Utc.with_ymd_and_hms(2026, 9, 22, hour, 0, 0)
-                .single()
-                .expect("a time")
-        };
-        let daemon = TestDaemon::new("hook-allowance-ended", |_| {}).on_the_clock(at_hour(17));
-        allowing_github(&daemon, 2);
-        daemon.project.record_at(
-            at_hour(8),
-            "",
-            "sprint.started",
-            &json!({ "sprint_id": "S1", "budget_usd": null, "started_by": "human" }),
-        );
-        called_at(
-            &daemon,
-            "dev-a",
-            "github",
-            "mcp__github__create_issue",
-            at_hour(9),
-        );
-        called_at(
-            &daemon,
-            "dev-a",
-            "github",
-            "mcp__github__create_issue",
-            at_hour(10),
-        );
-        daemon.project.record_at(
-            at_hour(15),
-            "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
-        );
-        called_at(
-            &daemon,
-            "dev-a",
-            "github",
-            "mcp__github__create_issue",
-            at_hour(16),
-        );
-        assert!(
-            issue(&daemon, 1).allow,
-            "the sprint's two calls are not today's"
         );
         denied_for(&issue(&daemon, 2), "approval_needed");
     }

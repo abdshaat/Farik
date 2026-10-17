@@ -1,7 +1,7 @@
 //! `catervas_post_message` (`docs/SPEC.md` 5.9): an agent says something in the team's channel from
 //! its session, and Catervas decides what kind of message it is from the session's purpose.
 
-use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, MessageKind};
+use catervas_protocol::event::{EventBody, EventKind, MessageKind};
 use catervas_store::EventQuery;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -58,11 +58,11 @@ const CEREMONY_POSTS: usize = 3;
 /// The kind the session's next post is: a conversation's one `reply`; a ceremony's `ceremony`, up
 /// to `CEREMONY_POSTS`; any other session's first a `reaction`, and every further one `ambient`
 /// while the agent's allowance lasts. The allowance counts the agent's ambient messages since the
-/// open sprint started, or since the UTC day began when no sprint is open.
+/// UTC day began (ADR 0062).
 fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
     let deps = call.deps();
     // ponytail: every post reads all of the agent's messages ever, linear in its history. Upgrade:
-    // a projection counting each agent's ambient messages per sprint and per day.
+    // a projection counting each agent's ambient messages per day.
     let posted = deps
         .log
         .read(&EventQuery {
@@ -102,49 +102,24 @@ fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
     if first {
         return Ok(MessageKind::Reaction);
     }
-    let started = match deps.projections.open_sprint().map_err(failed)? {
-        Some(sprint) => deps
-            .log
-            .read(&EventQuery {
-                kinds: vec![EventKind::SprintStarted],
-                ..EventQuery::default()
-            })
-            .map_err(failed)?
-            .iter()
-            .rev()
-            .find(|event| {
-                matches!(&event.body, EventBody::SprintStarted(body) if body.sprint_id.as_str() == sprint.sprint_id)
-            })
-            .map(|event| event.envelope.seq),
-        None => None,
-    };
     let day = deps
         .clock
         .now()
         .date_naive()
         .and_time(chrono::NaiveTime::MIN)
         .and_utc();
-    let in_window = |event: &CatervasEvent| match started {
-        Some(seq) => event.envelope.seq > seq,
-        None => event.envelope.recorded_at >= day,
-    };
     let spent = posted
         .iter()
         .filter(|event| {
-            in_window(event)
+            event.envelope.recorded_at >= day
                 && matches!(&event.body, EventBody::MessagePosted(body) if body.kind == MessageKind::Ambient)
         })
         .count();
     let allowance = usize::try_from(call.team.policy.ambient_messages_per_sprint).unwrap_or(0);
     if spent >= allowance {
-        let window = if started.is_some() {
-            "this sprint"
-        } else {
-            "today, with no sprint open"
-        };
         return Err(Refusal::ChannelLimit {
             detail: format!(
-                "{} has said its {allowance} unprompted message(s) {window}",
+                "{} has said its {allowance} unprompted message(s) today",
                 call.agent_id()
             ),
         }
@@ -222,7 +197,6 @@ mod tests {
     fn counts_a_second_post_as_ambient() {
         let project = TestProject::new("channel-ambient", &a_team_of_three(|_| {}));
         project.filed("CTV-1", "in_progress", "task", None);
-        project.open_sprint("S1", None, &[]);
 
         say(&project, "CTV-1 is in review.").expect("the reaction");
         say(&project, "The login page is lovely.").expect("the ambient message");
@@ -242,9 +216,16 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn counts_the_allowance_per_day_without_a_sprint() {
+    fn counts_ambient_posts_by_the_utc_day_even_with_a_sprint_from_before_open() {
         let project = TestProject::new("channel-day", &a_team_of_three(|_| {}));
         project.filed("CTV-1", "in_progress", "task", None);
+        // A project made before ADR 0062: a sprint opened yesterday and never ended.
+        project.record_at(
+            at() - Duration::days(1),
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S1", "budget_usd": null, "started_by": "human" }),
+        );
         post(
             &project.deps.log,
             &FixedClock::new(at() - Duration::days(1)),
@@ -265,7 +246,13 @@ mod tests {
 
         say(&project, "CTV-1 is in review.").expect("the reaction");
         say(&project, "Today's.").expect("today's allowance is whole");
+        let refused = say(&project, "And another.").expect_err("today's allowance is spent");
 
+        assert!(
+            matches!(&refused, ToolError::Refused { reason }
+                if reason.starts_with("channel_limit: ") && reason.ends_with("today")),
+            "{refused:?}"
+        );
         assert_eq!(
             kinds(&project.events(&[EventKind::MessagePosted])),
             [
@@ -274,58 +261,6 @@ mod tests {
                 MessageKind::Ambient
             ]
         );
-    }
-
-    /// dev-a's ambient message `text`, posted at `when` from another session.
-    fn ambient_at(project: &TestProject, when: chrono::DateTime<chrono::Utc>, text: &str) {
-        post(
-            &project.deps.log,
-            &FixedClock::new(when),
-            &project.deps.ids,
-            NewMessage {
-                author: "dev-a".to_string(),
-                agent_id: Some("dev-a".to_string()),
-                kind: MessageKind::Ambient,
-                text: text.to_string(),
-                mentions: Vec::new(),
-                task_id: None,
-                thread: None,
-                in_reply_to: None,
-                session_id: Some("session-0".to_string()),
-            },
-        )
-        .expect("posted");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn counts_the_allowance_per_sprint() {
-        // Yesterday's message, inside the open sprint, spends today's allowance too.
-        let project = TestProject::new("channel-sprint", &a_team_of_three(|_| {}));
-        project.filed("CTV-1", "in_progress", "task", None);
-        project.open_sprint("S1", None, &[]);
-        ambient_at(
-            &project,
-            at() - Duration::days(1),
-            "Yesterday's, in the sprint.",
-        );
-
-        say(&project, "CTV-1 is in review.").expect("the reaction");
-        let refused = say(&project, "Today's.").expect_err("the sprint's allowance is spent");
-
-        assert!(
-            matches!(&refused, ToolError::Refused { reason } if reason.starts_with("channel_limit: ")),
-            "{refused:?}"
-        );
-
-        // A message from before the sprint started, even today, spends nothing of it.
-        let project = TestProject::new("channel-sprint-before", &a_team_of_three(|_| {}));
-        project.filed("CTV-1", "in_progress", "task", None);
-        ambient_at(&project, at(), "Before the sprint.");
-        project.open_sprint("S1", None, &[]);
-
-        say(&project, "CTV-1 is in review.").expect("the reaction");
-        say(&project, "Today's.").expect("the sprint's allowance is whole");
     }
 
     #[test]

@@ -5982,12 +5982,13 @@ pub(super) mod tests {
     fn lists_each_allowance_with_its_use_and_period() {
         let (harness, _) = keeping_an_allowance_kit("allow-list");
         connected(&harness, "dev-a", &kit_server(), &json!({}));
+        // A sprint from before ADR 0062 is open, and the period is the day all the same.
         harness.open_sprint("S1", &[]);
         made(&harness, 3, false);
         assert_eq!(
             allowance_rows(&harness),
             json!({
-                "period": { "kind": "sprint", "sprint_id": "S1" },
+                "period": { "kind": "day", "day": "2026-09-22" },
                 "rows": [{
                     "agent": "dev-a", "server": "fixture", "tool": "make",
                     "what": "pictures", "used": 3, "of": 20
@@ -6030,19 +6031,6 @@ pub(super) mod tests {
             })
             .count();
         assert_eq!(counted, 4, "a granted call is among them");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn says_the_day_with_no_sprint_open() {
-        let (harness, _) = keeping_an_allowance_kit("allow-list-day");
-        connected(&harness, "dev-a", &kit_server(), &json!({}));
-        let listed = allowance_rows(&harness);
-        assert_eq!(
-            listed["period"],
-            json!({ "kind": "day", "day": "2026-09-22" })
-        );
-        assert_eq!(listed["rows"][0]["used"], 0);
     }
 
     #[test]

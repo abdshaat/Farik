@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, UNKNOWN_QUERY};
-use crate::allowances::{AllowancePeriod, allowance_period};
+use crate::allowances::allowance_period;
 use crate::chat::{ChatWaiting, chat_page, chat_waiting};
 use crate::tools::ToolDeps;
 
@@ -473,13 +473,11 @@ fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
 
 /// `allowances.list {}`: each allowance of a connected kit connector of an active agent with the
 /// calls made of its tool this period, counted as the hook counts them (ADR 0037): through the
-/// daemon's counts, so the page and the hook never disagree. The period is the open sprint's, or
-/// else the UTC day's.
+/// daemon's counts, so the page and the hook never disagree. The period is the UTC day.
 pub(super) fn allowances(state: &DaemonState, deps: &ToolDeps) -> Result<Value, Failure> {
     deps.projections.catch_up().map_err(|e| internal(&e))?;
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
-    let period = allowance_period(&deps.log, &deps.projections, deps.clock.now())
-        .map_err(|e| internal(&e))?;
+    let period = allowance_period(deps.clock.now());
     let connected: Vec<(String, String)> = super::team::connector_states(state, deps, &team)
         .into_iter()
         .filter(|row| row["state"] == "connected" && row["source"] == "kit")
@@ -518,12 +516,7 @@ pub(super) fn allowances(state: &DaemonState, deps: &ToolDeps) -> Result<Value, 
             }
         }
     }
-    let period = match &period {
-        AllowancePeriod::Sprint { sprint_id, .. } => {
-            json!({ "kind": "sprint", "sprint_id": sprint_id })
-        }
-        AllowancePeriod::Day { day, .. } => json!({ "kind": "day", "day": day.to_string() }),
-    };
+    let period = json!({ "kind": "day", "day": period.day.to_string() });
     Ok(json!({ "period": period, "rows": rows }))
 }
 
