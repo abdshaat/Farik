@@ -214,6 +214,33 @@ pub(super) struct SessionAsk<'a> {
     pub(super) initial_prompt: String,
 }
 
+/// Why a session is stopped when another's cost spends the day (ADR 0064).
+const DAY_SPENT_STOP: &str = "the team's daily budget is spent";
+
+/// When `crossed` holds the day's budget, stops the other sessions for it (ADR 0064).
+fn stop_when_the_day_is_crossed(
+    deps: &OrchestratorDeps,
+    own: &str,
+    crossed: impl IntoIterator<Item = BudgetScope>,
+) {
+    if crossed
+        .into_iter()
+        .any(|scope| scope == BudgetScope::DayUsd)
+    {
+        stop_the_others(deps, own, DAY_SPENT_STOP);
+    }
+}
+
+/// Asks every session the daemon answers for in this process, but `own`, to stop for `reason`;
+/// each ends `aborted` through its own end, its task keeping its status.
+fn stop_the_others(deps: &OrchestratorDeps, own: &str, reason: &str) {
+    for id in deps.daemon.session_ids() {
+        if id != own {
+            deps.daemon.request_stop(&id, reason);
+        }
+    }
+}
+
 /// How a session ended.
 pub(super) struct SessionEnd {
     /// The session.
@@ -306,6 +333,11 @@ pub(super) async fn run_session(
     )
     .await;
     super::work::session_ran(&deps.work).await;
+    // A session a tick started on budgets read before this one's cost was recorded is registered
+    // by now, as the tick gives the turn back only after registering it: stop it too.
+    if let Ok(end) = &ended {
+        stop_when_the_day_is_crossed(deps, &spec.session_id, end.crossed.iter().copied());
+    }
     deps.daemon.end_session(&spec.session_id);
     let closed = browser.map_or(Ok(()), |browser| {
         close_preview(deps, &ids, browser.as_ref(), "the session ended")
@@ -1544,6 +1576,7 @@ async fn read_to_end(
                 }
                 let now = record(&before, &held)?;
                 crossed.extend(now.iter().map(|exhausted| exhausted.scope));
+                stop_when_the_day_is_crossed(deps, &spec.session_id, now.iter().map(|e| e.scope));
                 // A task's last session may finish (5.5): what it stops is the next session.
                 if now
                     .iter()
