@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/no-sprints` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md`, every section below; hard rule 8
 Depends on: plans 1 to 7 of this folder (committed on this branch); `fix/plans-need-no-review`'s revision 0.115 on the branch after the rebase
-Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16 (one round, against `docs/standards/workflow.md` stage 2)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -33,15 +33,17 @@ so. The past revision notes stay as they are (history). Words only, no code, no 
   4.4, 5.2, 5.3, 5.5, 5.7, 5.8, 5.9, 5.11, 5.12, 5.14, 5.16, 5.17, 6.1, 6.2, 6.3, 6.5, 6.6, 6.7,
   6.9, 7, 8.2, 8.4, 8.5, 8.6, 10, 11, 12, 13; F3, F7, F11, F12, F17)." The event-kind total in
   8.5 goes up by two.
-- What stays about sprints in the spec, each said once, in 8.4 and 8.5: logs made before ADR 0062
+- What stays about sprints in the spec, each said once, in 8.4 and 8.5 (with 5.11's list of the
+  fields that change after a freeze still naming the contract's `sprint`, and 5.12 naming the two
+  old keys as read and not written): logs made before ADR 0062
   may hold `sprint.started`, `sprint.planned`, `sprint.ended` and sessions in the `planning` and
   `standup` threads, which Catervas reads and never writes; `team.yaml`'s `plan_in_sprints` and
   `ambient_messages_per_sprint` are read and not written; a contract's `sprint` field is read and
   ignored; `.catervas/sprints/` is left as it is. Nothing else in the spec says sprint, standup or
   Backlog (as a hold).
 - 6.9 (the DevOps Engineer, not built): "a sprint's start approves its deploys" and the incident
-  fix's exception are replaced by one sentence: "How a deploy is approved without sprints is decided
-  when phase 13 is planned (ADR 0062)." Chose this over inventing an approval here: the DevOps
+  fix's exception are replaced by one sentence: "How a deploy is approved is decided when phase 13
+  is planned (ADR 0062)." Chose this over inventing an approval here: the DevOps
   Engineer is planned, not built, and its plans are re-planned in phase 13.
 - 11 (milestones): Milestone 1's "team sprint" becomes "the team's work"; that the milestone run
   shows a delivery's review and retro.
@@ -138,7 +140,7 @@ the replacement says "(changed in 0.116)".
 
 ```
 grep -n -i 'sprint\|standup' docs/SPEC.md | grep -v '^[0-9]*:Version 0\.2' | grep -v '^[0-9]*:Revision 0\.'
-# expected: only lines of 5.12, 8.4 and 8.5 naming what an old log or team file may hold, and 12's resolved question
+# expected: only lines of 5.11 (the contract's `sprint` field), 5.12, 8.4 and 8.5 naming what an old contract, log or team file may hold, and 12's resolved question
 grep -c '^Revision 0.116 ' docs/SPEC.md
 # expected: 1
 cargo xtask check

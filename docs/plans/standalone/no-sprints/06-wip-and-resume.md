@@ -4,7 +4,7 @@ Status: draft
 Branch: `feat/no-sprints` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.2, 5.12 (`wip_limit_per_agent`), 8.5; recorded by plan 8 (revision 0.116)
 Depends on: plans 1 to 5 of this folder (committed on this branch)
-Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: Opus 5.5 readiness review, 2026-10-16 (one round, against `docs/standards/workflow.md` stage 2)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -29,9 +29,12 @@ Ada's section 5, with these corrections and additions:
 
 - Counted: a task an agent holds (`assignee_id`) in `assigned`, `in_progress`, `verifying` or
   `rejected`, whose row is not `waiting_on_human`, the epic `under` left out as today. Not counted:
-  `blocked`, `escalated`, `accepted`, `cancelled`, and any other status. `has_room` and the
-  governor's `AssignmentInput::assignee_open_tasks` both read `transitions::open_tasks`; its
-  comment and the field's doc say so.
+  `blocked`, `escalated`, `accepted`, `cancelled`, and any other status. The rule is written once,
+  in the store, as `TaskProjection::counts_towards_wip(&self) -> bool` (a counted status and not
+  `waiting_on_human`), beside `counted_status(status: TaskStatus) -> bool` (the four statuses),
+  which the projection's `counted_seq` (below), `transitions::open_tasks` and the activity (Task 4)
+  all read. `has_room` and the governor's `AssignmentInput::assignee_open_tasks` both read
+  `transitions::open_tasks`; its comment and the field's doc say so.
 - "When each last became counted" needs a fact the board does not hold, so the projection gains
   `counted_seq` (added to Ada's design): migration `0016_counted_seq.sql`, `ALTER TABLE
   task_projections ADD COLUMN counted_seq INTEGER;` with no replay; `TaskProjection.counted_seq:
@@ -56,10 +59,12 @@ Ada's section 5, with these corrections and additions:
   to <to>: <from> has no room" }`. With no candidate the task waits with its assignee and is tried
   on every tick. When the previous assignee has room again the row is within its limit and simply
   goes on.
-- `task.reassigned { from, to, reason: "resumed" }`, about one task (its id on the envelope), its
-  body naming no actor (the governor reassigns). The projection sets `assignee_id = to` and
-  `counted_seq`; `Transitions::reassign` also writes the contract file's `assignee`, as
-  `record_move` does for an assignment. The reviewer is unchanged. The worktree and branch are the
+- `task.reassigned { from, to, reason: "resumed" }`, about one task (its id on the envelope:
+  `is_about_one_contract` true), its body naming no actor (the governor reassigns: `attribution`
+  none). `taskReassignedBody`: `additionalProperties: false`, all three required, `from` and `to`
+  strings, `reason` the enum `["resumed"]`. The projection sets `assignee_id = to` and
+  `counted_seq`; `Transitions::reassign` writes the contract file's `assignee` first and then
+  appends the event, as `record_move` writes the contract before the move. The reviewer is unchanged. The worktree and branch are the
   task's (`.catervas/local/worktrees/<id>`), so the new assignee's next session resumes from the
   last commit and note through `rules::resume`, unchanged.
 - `check_reassignment` (core, pure) refuses, each reason in words as `check_assignment`'s are: a
@@ -74,14 +79,18 @@ Ada's section 5, with these corrections and additions:
   row's current assignee.
 - Activity: after the resting check and before the waiting one, an agent with no session running
   that holds a counted row in `assigned`, `in_progress` or `rejected` within its limit is `working`,
-  line `Building <title>`, `task_id` that row (the lowest `counted_seq`), no `session_id`.
+  line `Building <title>`, `task_id` that row, no `session_id`. The store does not compute the
+  runtime's `within_limit` (the store cannot read the runtime): it orders the agent's non-epic rows
+  with `counts_towards_wip()` by (`counted_seq` or 0, the task's number), keeps the first
+  `max(wip_limit_per_agent, 1)`, as `within_limit` does, and takes the first of those in `assigned`,
+  `in_progress` or `rejected`.
 
 ## File map
 
 ```
 docs/schemas/event.schema.json, crates/protocol/src/{lib,event}.rs, src/event/fixtures.rs   modifies: task.reassigned (Task 1)
 crates/store/src/migrations/0016_counted_seq.sql, src/migrations.rs   creates, modifies (Task 1)
-crates/store/src/projections.rs                      modifies: counted_seq, task.reassigned (Task 1)
+crates/store/src/projections.rs, src/lib.rs          modifies: counted_seq, counted_status, counts_towards_wip, task.reassigned (Task 1)
 crates/runtime/src/transitions.rs                    modifies: open_tasks counts (Task 2); within_limit, reassign (Task 3)
 crates/runtime/src/orchestrator/rules.rs             modifies: has_room's doc (Task 2); within_limit filters, resume_elsewhere (Task 3); tests (Tasks 2, 3)
 crates/core/src/governor/gates.rs                    modifies: assignee_open_tasks doc (Task 2); ReassignmentInput, check_reassignment (Task 3)
@@ -114,13 +123,15 @@ pub(crate) fn open_tasks(board: &[TaskProjection], agent_id: &str, under: Option
 /// The rows rules 3, 6 and 7 may work: each agent's first counted rows up to its limit, and epics.
 pub(crate) fn within_limit(team: &Team, board: &[TaskProjection]) -> BTreeSet<TaskId>;
 impl Transitions {
-    /// Hands `task_id` to `to` after `check_reassignment`: `task.reassigned`, then the contract's assignee.
+    /// Hands `task_id` to `to` after `check_reassignment`: the contract's assignee, then `task.reassigned`.
     pub fn reassign(&self, task_id: &TaskId, to: &str, team: &Team) -> Result<ReassignOutcome, TransitionError>;
 }
 pub enum ReassignOutcome { Reassigned(CatervasEvent), Refused(Vec<String>) }
 
-// catervas_store
+// catervas_store (Task 1)
 pub struct TaskProjection { /* … */ pub counted_seq: Option<u64> }
+impl TaskProjection { #[must_use] pub fn counts_towards_wip(&self) -> bool; }
+#[must_use] pub fn counted_status(status: TaskStatus) -> bool;   // re-exported from the crate root
 ```
 
 ## Tasks
@@ -128,7 +139,7 @@ pub struct TaskProjection { /* … */ pub counted_seq: Option<u64> }
 ### Task 1: the event and the counting fact
 
 Files as the map's Task 1. The kind follows `delivery.closed`'s precedent (plan 3), but about one
-task; its fixture body `{ "from": "dev-a", "to": "dev-b", "reason": "resumed" }`.
+task (as the Decisions say); its fixture body `{ "from": "dev-a", "to": "dev-b", "reason": "resumed" }`.
 
 - `reads_an_event_of_every_kind_and_gives_the_body_its_own_kind_back` (existing) — watched to fail
   for `task.reassigned`, then passes.
@@ -142,19 +153,22 @@ task; its fixture body `{ "from": "dev-a", "to": "dev-b", "reason": "resumed" }`
 
 ### Task 2: a stuck task frees its agent
 
-Files: `transitions.rs` (`open_tasks` counts as the Decisions say), `gates.rs` (the field's doc),
-`rules.rs` (`has_room`'s doc). Existing tests that counted a blocked task as held
-(`leaves_cancelled_work_out_of_the_wip_limit` and any the suite shows) keep their cancelled part and
-lose the blocked part.
+Files: `transitions.rs` (`open_tasks` reads `counts_towards_wip`), `gates.rs` (the field's doc),
+`rules.rs` (`has_room`'s doc). An existing test that `cargo xtask check --integration` shows
+counting a blocked, escalated or waiting task as held loses that part and keeps the rest; the commit
+body names each.
 
 - `an_agent_whose_task_is_blocked_or_escalated_takes_the_next_ready_task` (rules.rs, ignored "needs
   the git program", epic C2 (b)) — the `Harness` team (Developers `dev-a` and `dev-b`) with
   `wip_limit_per_agent` 1 and `dev-b` holding CTV-3 `in_progress` throughout, so `dev-a` is the only
   Developer who could take CTV-2: CTV-1 held by `dev-a` and moved `in_progress -> blocked`, CTV-2
-  `ready`; with the transcript `plan_assigns_ctv_2` (it assigns `dev-a`, reviewer `dev-b`), the first tick runs the plan session of CTV-2
-  and CTV-2 is then `assigned` to `dev-a`. The same again with CTV-1 moved `in_progress ->
+  `ready`; with the transcript `plan_assigns_ctv_2` (it assigns `dev-a`, reviewer `dev-b`), one tick
+  scoped to CTV-2 (`tick_within(&TickScope { task_id: Some(CTV-2), rules: TickRules::All })`, so
+  rule 6 does not first run a session of CTV-1 or CTV-3) runs the plan session of CTV-2 and CTV-2 is
+  then `assigned` to `dev-a`. The same again with CTV-1 moved `in_progress ->
   escalated`, and again with CTV-1 `in_progress` and a `question.asked` on it unanswered: each time
-  CTV-2 goes to `dev-a`. With CTV-1 `in_progress` and no wait, no plan session starts.
+  CTV-2 goes to `dev-a`. With CTV-1 `in_progress` and no wait, the same scoped tick starts no
+  session and CTV-2 stays `ready`.
 
 - [ ] `feat(runtime): a blocked, escalated or waiting task leaves its agent free`
 
@@ -166,8 +180,9 @@ input.
 
 - `a_cleared_task_resumes_with_its_agent_or_another_free_one` (rules.rs, ignored as above, epic C2
   (c); a team of `pm`, `dev-a`, `dev-b`, `dev-c`, limit 1; CTV-1's reviewer `dev-c`) — (1) CTV-1 held
-  by `dev-a`, blocked then moved `blocked -> in_progress` by the human, nothing else held: the next
-  tick starts an implement session of `dev-a` on CTV-1 and appends no `task.reassigned`. (2) CTV-1
+  by `dev-a`, blocked then moved `blocked -> in_progress` by the human, nothing else held: with the
+  transcript `reads_a_file`, the next tick starts an implement session of `dev-a` on CTV-1 and
+  appends no `task.reassigned`. (2) CTV-1
   blocked, then CTV-2 assigned to `dev-a` and moved to `in_progress`, then CTV-1 moved back to
   `in_progress`: the next tick appends one `task.reassigned { from: "dev-a", to: "dev-b", reason:
   "resumed" }`, the row's `assignee_id` is `dev-b` and the contract file's `assignee` is `dev-b`;

@@ -48,5 +48,5 @@ Never edit this repository's `.catervas/`: its leftover `plan_in_sprints` key is
 
 - C1 (`pnpm run check`) and C2 (`cargo xtask check --integration`): every plan's verification.
 - C2 (a): plan 5 Task 1. C2 (b) and (c): plan 6 Tasks 2 and 3. C2 (d): plan 2 Task 2.
-- C3: plan 4 (the page, the journey, `en.ts`) and plan 5 Task 6 (`team-template.schema.json`).
+- C3: plan 4 (the page, the journey, `en.ts`) and plan 5 Task 5 (`team-template.schema.json`).
 - C4: plan 1 Task 1.
