@@ -29,6 +29,7 @@ use crate::preview::RunningPreview;
 use crate::session::{SessionPurpose, works_on_a_task};
 use crate::transitions::Transitions;
 
+mod bugs;
 mod channel;
 mod chat;
 mod connections;
@@ -256,6 +257,11 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             "catervas_request_connection",
             Read,
             "Ask the owner to connect a service your kit offers that your work needs, and why. The owner sees it on Today; carry on without it.",
+        ),
+        tool::<bugs::FileBugInput>(
+            "catervas_file_bug",
+            Read,
+            "In a bug hunt: file one bug you found, with where it is, the steps, what you expected, what happened, its severity and the evidence. It goes to the Product Manager as a request. At most 10 per hunt.",
         ),
         tool::<folders::WriteFolderDocInput>(
             "catervas_write_folder_doc",
@@ -492,6 +498,7 @@ pub async fn call_tool(
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
         "catervas_request_connection" => connections::request_connection(&call, &parse(input)?),
+        "catervas_file_bug" => bugs::file_bug(&call, &parse(input)?),
         "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
         "catervas_append_retro" => retro::append_retro(&call, &parse(input)?),
@@ -833,6 +840,7 @@ mod tests {
             "catervas_write_note",
             "catervas_ask_human",
             "catervas_request_connection",
+            "catervas_file_bug",
             "catervas_write_folder_doc",
             "catervas_post_message",
             "catervas_append_retro",
@@ -879,7 +887,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..36] {
+        for tool in &tools[..37] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

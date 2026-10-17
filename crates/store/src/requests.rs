@@ -932,7 +932,10 @@ fn file(
 
 /// The events a request is filed with: `task.created`, and the triage that follows at once for a
 /// task of an epic and for a request that raises a marketing plan's budget.
-#[allow(clippy::too_many_lines, reason = "one triage per way a request is filed")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one triage per way a request is filed"
+)]
 fn creation_bodies(
     contract: &TaskContract,
     filing: Filing<'_>,

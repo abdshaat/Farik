@@ -248,7 +248,7 @@ assignee by `moved("CTV-1", "assigned", "in_progress", &json!({ "assignee": "dev
   above) is given `catervas_file_bug`; its refine session of that contract, and its implement
   session of a contract whose `allowed_paths` are `["src/**"]`, are not.
 
-- [ ] `feat(runtime): a hunt files the bugs it finds, ten at most and none twice`
+- [x] `feat(runtime): a hunt files the bugs it finds, ten at most and none twice`
 
 ### Task 4: the task page says Catervas checks a hunt
 
