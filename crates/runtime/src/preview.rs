@@ -38,6 +38,57 @@ pub const OWNER_ORIGINS: [&str; 2] = [
     "https://host.docker.internal:*",
 ];
 
+/// The owner's environment file for the preview, from the project folder (ADR 0067).
+pub const PREVIEW_ENV: &str = ".catervas/local/preview.env";
+
+/// The owner's environment file for the preview: where it is, and its values, kept only to hide
+/// them from the text Catervas records. Docker reads the file itself.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PreviewEnv {
+    path: PathBuf,
+    values: Vec<String>,
+}
+
+impl PreviewEnv {
+    /// The file under `root` when it is a file (a link is followed), else `None`.
+    #[must_use]
+    pub fn read(root: &Path) -> Option<Self> {
+        let path = std::path::absolute(root.join(PREVIEW_ENV)).ok()?;
+        if !path.is_file() {
+            return None;
+        }
+        // Docker's env-file rules, for hiding only: a line without `=` has no value, and a file
+        // that is not UTF-8 text has none (Docker reads it, or refuses it in its own words).
+        let values = std::fs::read_to_string(&path)
+            .map(|text| {
+                text.lines()
+                    .map(str::trim_start)
+                    .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                    .filter_map(|line| line.split_once('=').map(|(_, value)| value.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(Self { path, values })
+    }
+
+    /// Where the file is, absolute.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl fmt::Debug for PreviewEnv {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "PreviewEnv {{ path: {}, values: {} }}",
+            self.path.display(),
+            self.values.len()
+        )
+    }
+}
+
 /// axe-core, as `packages/ui` pins it for the web tests, which the page check runs in the page.
 pub const AXE_SOURCE: &str = include_str!("../assets/axe.min.js");
 
@@ -138,7 +189,8 @@ pub trait PreviewFactory: Send + Sync {
     /// for every factory but `PolledPreviews`.
     fn settle(&self) {}
     /// Prepares the preview when `preview.prepare` is set, then starts it and waits for it to
-    /// answer. `tree` is the task branch's `HEAD^{tree}` the preview is of.
+    /// answer. `tree` is the task branch's `HEAD^{tree}` the preview is of. `env` is the owner's
+    /// environment file, passed to `prepare` and `start` alone (ADR 0067).
     ///
     /// # Errors
     ///
@@ -150,6 +202,7 @@ pub trait PreviewFactory: Send + Sync {
         worktree: &Path,
         preview: &Preview,
         tree: &str,
+        env: Option<&PreviewEnv>,
     ) -> Result<Box<dyn RunningPreview>, PreviewError>;
 }
 
@@ -168,6 +221,7 @@ impl PreviewFactory for NoPreviews {
         _worktree: &Path,
         _preview: &Preview,
         _tree: &str,
+        _env: Option<&PreviewEnv>,
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         Err(PreviewError::DockerUnavailable {
             detail: "Catervas runs without Docker's sandbox".to_string(),
@@ -283,9 +337,10 @@ impl PreviewFactory for PolledPreviews {
         worktree: &Path,
         preview: &Preview,
         tree: &str,
+        env: Option<&PreviewEnv>,
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         self.inner
-            .start(project_id, task_id, worktree, preview, tree)
+            .start(project_id, task_id, worktree, preview, tree, env)
     }
 }
 
@@ -649,7 +704,7 @@ pub(crate) mod fixtures {
     use catervas_core::contract::TaskId;
     use catervas_core::team::Preview;
 
-    use super::{CheckError, PreviewError, PreviewFactory, RunningPreview, Spawn};
+    use super::{CheckError, PreviewEnv, PreviewError, PreviewFactory, RunningPreview, Spawn};
 
     /// A factory that starts `NamedPreview`s, or fails with `fails`, and keeps each `prepare` it
     /// was asked to run.
@@ -686,6 +741,7 @@ pub(crate) mod fixtures {
             _worktree: &Path,
             preview: &Preview,
             _tree: &str,
+            _env: Option<&PreviewEnv>,
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             crate::locked(&self.prepared).push(preview.prepare.clone());
             match &self.fails {
@@ -713,6 +769,7 @@ pub(crate) mod fixtures {
             _worktree: &Path,
             _preview: &Preview,
             _tree: &str,
+            _env: Option<&PreviewEnv>,
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a preview factory was asked to start a preview");
         }
@@ -802,6 +859,7 @@ pub(crate) mod fixtures {
             _worktree: &Path,
             _preview: &Preview,
             _tree: &str,
+            _env: Option<&PreviewEnv>,
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a held factory was asked to start a preview");
         }
