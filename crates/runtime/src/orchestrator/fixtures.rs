@@ -1745,12 +1745,22 @@ impl HeldAdapter {
 
     /// Starts `agent`'s oldest held session on the inner adapter. Panics when none is held.
     pub(crate) fn release(&self, agent: &str) {
+        self.release_where(agent, |_| true);
+    }
+
+    /// Starts `agent`'s oldest held session of `purpose` on the inner adapter. Panics when none is
+    /// held.
+    pub(crate) fn release_purpose(&self, agent: &str, purpose: crate::session::SessionPurpose) {
+        self.release_where(agent, |held| held.spec.purpose == purpose);
+    }
+
+    fn release_where(&self, agent: &str, wanted: impl Fn(&Held) -> bool) {
         let (held, sender) = {
             let mut held = self.held.lock().expect("no test panics holding it");
             let at = held
                 .iter()
-                .position(|(held, _)| held.agent == agent)
-                .unwrap_or_else(|| panic!("{agent} has no held session"));
+                .position(|(held, _)| held.agent == agent && wanted(held))
+                .unwrap_or_else(|| panic!("{agent} has no such held session"));
             held.remove(at)
         };
         held.state

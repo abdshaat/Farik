@@ -29,6 +29,26 @@ pub const DEFAULT_SESSION_LIMITS: SessionLimits = SessionLimits {
     max_tool_calls: 200,
 };
 
+/// A one-to-one chat's own bounds, so that it answers quickly (ADR 0064): 100,000 input and 4,000
+/// output tokens, three minutes, twelve tool calls.
+pub const CHAT_SESSION_LIMITS: SessionLimits = SessionLimits {
+    max_input_tokens: 100_000,
+    max_output_tokens: 4_000,
+    max_wall_clock: Duration::from_mins(3),
+    max_tool_calls: 12,
+};
+
+/// Each of `limits`' fields, no larger than `cap`'s.
+#[must_use]
+pub fn tighter(limits: SessionLimits, cap: SessionLimits) -> SessionLimits {
+    SessionLimits {
+        max_input_tokens: limits.max_input_tokens.min(cap.max_input_tokens),
+        max_output_tokens: limits.max_output_tokens.min(cap.max_output_tokens),
+        max_wall_clock: limits.max_wall_clock.min(cap.max_wall_clock),
+        max_tool_calls: limits.max_tool_calls.min(cap.max_tool_calls),
+    }
+}
+
 /// The session limits a role gets by default: the Scrum Master half the tokens of the team
 /// default, every other role the team default.
 #[must_use]
@@ -209,6 +229,7 @@ mod tests {
         BudgetConsequence as C, BudgetScope as B, BudgetState, DEFAULT_SESSION_LIMITS, Exhausted,
         SessionLedger, SessionLimits, add_usage, check_budgets, default_session_limits,
     };
+    use super::{CHAT_SESSION_LIMITS, tighter};
     use crate::contract::Role;
     use crate::pricing::Usage;
 
@@ -227,6 +248,30 @@ mod tests {
 
     fn exhausted(scope: B, consequence: C) -> Exhausted {
         Exhausted { scope, consequence }
+    }
+
+    #[test]
+    fn takes_each_limit_at_its_smaller() {
+        assert_eq!(
+            tighter(DEFAULT_SESSION_LIMITS, CHAT_SESSION_LIMITS),
+            CHAT_SESSION_LIMITS
+        );
+        let longer = SessionLimits {
+            max_wall_clock: Duration::from_mins(60),
+            ..CHAT_SESSION_LIMITS
+        };
+        assert_eq!(
+            tighter(CHAT_SESSION_LIMITS, longer).max_wall_clock,
+            CHAT_SESSION_LIMITS.max_wall_clock
+        );
+        let smaller = SessionLimits {
+            max_input_tokens: 50_000,
+            ..DEFAULT_SESSION_LIMITS
+        };
+        assert_eq!(
+            tighter(smaller, CHAT_SESSION_LIMITS).max_input_tokens,
+            50_000
+        );
     }
 
     #[test]

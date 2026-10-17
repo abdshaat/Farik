@@ -33,7 +33,7 @@ use super::messages::{
     DeliveredTask, Digest, ProductFiles, Resume, architecture_refresh_message, ceremony_message,
     delivery_review_message, implement_message, mention_message, owners_folder_lines,
     owners_folder_words, plan_message, posts_heard, product_refresh_message, retro_message,
-    task_cost, with_the_approved_plan,
+    task_cost, with_the_approved_plan, work_summary,
 };
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
@@ -955,7 +955,7 @@ async fn chat(
     pending.sort_by_key(|(seq, _)| *seq);
     for (seq, agent) in pending {
         if day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-            | unavailable(deps, agent, &mut waiting.slept)?
+            | asleep_or_chatting(deps, agent, &mut waiting.slept)?
         {
             continue;
         }
@@ -971,6 +971,7 @@ async fn chat(
                 _ => None,
             })
             .unwrap_or_default();
+        let summary = work_summary(deps, agent)?;
         let end = run_session(
             deps,
             team,
@@ -987,7 +988,7 @@ async fn chat(
                 thread: None,
                 initial_prompt: format!(
                     "{}, the user wrote to you in your one-to-one chat. Answer the newest \
-                     message.\n\n{text}",
+                     message.\n\n{summary}\n\n{text}",
                     agent.display_name.as_str()
                 ),
             },
@@ -1041,7 +1042,7 @@ async fn open_the_interview(
         });
     if began
         || day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
-            | unavailable(deps, agent, &mut waiting.slept)?
+            | asleep_or_chatting(deps, agent, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -1469,6 +1470,28 @@ pub(super) fn unavailable(
     if deps.work.is_busy(agent.id.as_str()) {
         return Ok(true);
     }
+    asleep(deps, agent, slept)
+}
+
+/// Whether `agent` can start no chat fork now (ADR 0064): one of its chats runs, or it is asleep
+/// (5.5). Its running work session does not stop one. Kept in `slept` as `unavailable` keeps it.
+pub(super) fn asleep_or_chatting(
+    deps: &OrchestratorDeps,
+    agent: &Agent,
+    slept: &mut Option<(DateTime<Utc>, String)>,
+) -> Result<bool, OrchestratorError> {
+    if deps.work.is_chatting(agent.id.as_str()) {
+        return Ok(true);
+    }
+    asleep(deps, agent, slept)
+}
+
+/// Whether `agent` is asleep until its model provider's limit resets.
+fn asleep(
+    deps: &OrchestratorDeps,
+    agent: &Agent,
+    slept: &mut Option<(DateTime<Utc>, String)>,
+) -> Result<bool, OrchestratorError> {
     let Some(until) = asleep_until(&deps.tools.log, agent.id.as_str(), deps.tools.clock.now())?
     else {
         return Ok(false);

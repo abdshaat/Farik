@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
-use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
+use catervas_core::budget::{
+    BudgetScope, BudgetState, CHAT_SESSION_LIMITS, SessionLedger, SessionLimits, add_usage, tighter,
+};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
 use catervas_core::folders::{is_hunt, role_folder};
 use catervas_core::governor::gates::DesignerBrowser;
@@ -233,10 +235,12 @@ pub(super) async fn run_session(
     team: &Team,
     ask: SessionAsk<'_>,
 ) -> Result<SessionEnd, OrchestratorError> {
-    // First of all: one agent has one session at a time (ADR 0064).
+    // First of all: one agent has one work session at a time, and one chat fork beside it
+    // (ADR 0064).
     let _claim = deps.work.claim(
         ask.agent.id.as_str(),
         ask.contract.map(|contract| &contract.id),
+        ask.purpose,
     )?;
     let left_out = refresh_signed_in(deps, team, &ask).await;
     let mut spec = session_spec_without(deps, team, &ask, &left_out)?;
@@ -1197,6 +1201,44 @@ fn with_the_interview(
     })
 }
 
+/// The limits of the session `ask` asks for: the budget's, and a chat's own bounds where they are
+/// tighter, so that it answers quickly (ADR 0064). The interview writes the product plan, so it
+/// keeps the team's.
+fn session_limits_of(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+    interviewing: bool,
+) -> Result<SessionLimits, OrchestratorError> {
+    let limits = budget_state(
+        &deps.tools.projections,
+        team,
+        Role::from(ask.agent.role),
+        ask.contract,
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )?
+    .session_limits;
+    Ok(if ask.purpose == SessionPurpose::Chat && !interviewing {
+        tighter(limits, CHAT_SESSION_LIMITS)
+    } else {
+        limits
+    })
+}
+
+/// The task branches the integration branch already has the work of, for the rules' line about
+/// committing: none for a chat, which commits nothing and makes no `git` call (ADR 0064).
+// ponytail: the runtime has no log to warn in, so a git error leaves the line out; warn there once
+// it has one.
+fn stale_twins_of(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<String> {
+    if ask.purpose == SessionPurpose::Chat {
+        return Vec::new();
+    }
+    integration_branch(team, &deps.tools.git)
+        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
+        .unwrap_or_default()
+}
+
 /// [`session_spec`], leaving out the custom connectors `left_out` names, as a refresh that did not
 /// finish does for this session alone.
 fn session_spec_without(
@@ -1259,9 +1301,7 @@ fn session_spec_without(
         .collect();
     // ponytail: the runtime has no log to warn in, so a git error leaves the line out; warn
     // there once it has one.
-    let stale_twins = integration_branch(team, &deps.tools.git)
-        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
-        .unwrap_or_default();
+    let stale_twins = stale_twins_of(deps, team, ask);
     let (members, own_repo) = member_lines(deps, ask);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
@@ -1289,15 +1329,7 @@ fn session_spec_without(
         own_repo,
         document_format: team.document_format(),
     })?;
-    let limits = budget_state(
-        &deps.tools.projections,
-        team,
-        role_id,
-        ask.contract,
-        &SessionLedger::default(),
-        deps.tools.clock.now(),
-    )?
-    .session_limits;
+    let limits = session_limits_of(deps, team, ask, interviewing)?;
     Ok(SessionSpec {
         read_roots: read_root_paths(deps, ask),
         session_id: deps.session_ids.session_id(),

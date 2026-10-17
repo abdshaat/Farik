@@ -1858,13 +1858,96 @@ mod tests {
         .await;
         let starts = adapter.starts();
         assert_eq!(starts.len(), 3, "{starts:?}");
-        for start in &starts {
+        for start in starts
+            .iter()
+            .filter(|start| start.purpose != crate::session::SessionPurpose::Chat)
+        {
             assert!(!start.alongside.contains(&start.agent), "{start:?}");
         }
         assert_eq!(
             harness.events(&[EventKind::SessionStarted]).len(),
             3,
             "three sessions were recorded as started"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_chat_while_its_agent_works() {
+        use crate::orchestrator::fixtures::HeldAdapter;
+        use crate::recorded::fixtures::chat_answers_with_a_request;
+        use crate::session::SessionPurpose;
+        use catervas_core::budget::CHAT_SESSION_LIMITS;
+        use catervas_core::team::Effort;
+
+        let harness = Harness::new("parallel-chat-fork", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let inner = harness.recorded(vec![chat_answers_with_a_request()]);
+        let adapter = HeldAdapter::new(inner.clone());
+        let orchestrator = std::sync::Arc::new(harness.orchestrator(adapter.clone()));
+        until(&orchestrator, |p| {
+            started_of(p, "dev-a", Some("CTV-1"), "implement")
+        })
+        .await;
+        let deps = &harness.project.deps;
+        for text in ["What are you on?", "And after that?"] {
+            crate::chat::post_chat(
+                &deps.log,
+                deps.clock.as_ref(),
+                &deps.ids,
+                crate::chat::NewChatMessage {
+                    heard: None,
+                    chat: "dev-a".to_string(),
+                    author: "human".to_string(),
+                    text: text.to_string(),
+                    in_reply_to: None,
+                    request: None,
+                    session_id: None,
+                    as_task: false,
+                },
+            )
+            .expect("the chat message is recorded");
+        }
+        until(&orchestrator, |p| started_of(p, "dev-a", None, "chat")).await;
+        assert_eq!(
+            adapter.starts().last().expect("a start").alongside,
+            ["dev-a"]
+        );
+        adapter.release_purpose("dev-a", SessionPurpose::Chat);
+        until(&orchestrator, |p| {
+            matches!(p, super::Progress::Ticked(super::TickReport::Chat { agent_id, .. })
+                if agent_id == "dev-a")
+        })
+        .await;
+        let replies: Vec<_> = harness
+            .events(&[EventKind::ChatMessagePosted])
+            .into_iter()
+            .filter(|event| match &event.body {
+                EventBody::ChatMessagePosted(body) => body.author == "dev-a",
+                _ => false,
+            })
+            .collect();
+        assert_eq!(replies.len(), 1, "{replies:?}");
+        assert!(
+            !harness
+                .events(&[EventKind::SessionEnded])
+                .iter()
+                .any(|event| event.envelope.ids.task_id.is_some()),
+            "the work session has not ended"
+        );
+        assert_eq!(adapter.running(), ["dev-a"]);
+        assert_eq!(adapter.starts().len(), 2, "no second fork started");
+        let spec = &inner.started()[0];
+        assert_eq!(spec.purpose, SessionPurpose::Chat);
+        assert_eq!(spec.effort, Effort::Low);
+        assert_eq!(spec.limits, CHAT_SESSION_LIMITS);
+        assert!(
+            spec.initial_prompt.contains(&format!(
+                "What you are doing now: CTV-1 \"{}\" (In progress).",
+                harness.row("CTV-1").title
+            )) && spec.initial_prompt.ends_with("And after that?"),
+            "{}",
+            spec.initial_prompt
         );
     }
 }
