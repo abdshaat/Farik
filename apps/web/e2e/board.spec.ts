@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { events, startServe } from "./fixtures/serve.ts";
+import { events, mergeByHand, startServe } from "./fixtures/serve.ts";
 import { screenshots, smallLinks } from "./fixtures/shots.ts";
 
 /** The lanes, as the board names their headings (`lane-<lane>-title`), in the order a task moves. */
@@ -95,7 +95,8 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 				() => (window as unknown as { lanesSeen: string[] }).lanesSeen,
 			),
 		).toEqual(["planning", "todo", "in_progress", "review", "done"]);
-		await expect(done.getByText("Accepted")).toBeVisible();
+		// Catervas never merges: accepted, it waits in Done for the owner's merge.
+		await expect(done.getByText("Waiting on you")).toBeVisible();
 		await screenshots(page, "board");
 
 		// 4. The task's five tabs, each with what the run left.
@@ -138,10 +139,17 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		).toBeVisible();
 		const cost = page.getByRole("region", { name: "Cost so far" });
 		await expect(cost.getByRole("row", { name: /^Building/ })).toBeVisible();
+		// The owner merges the branch on their own checkout and adds the task.
+		mergeByHand(serve.project, "feature/CTV-1");
+		await page.getByRole("button", { name: "Add to the project" }).click();
 		await expect(page.getByText(/^Added on /)).toBeVisible({
 			timeout: 15_000,
 		});
 		await screenshots(page, "task");
+		await page.goto(at("/board"));
+		await expect(
+			page.getByRole("region", { name: "Done" }).getByText("Accepted"),
+		).toBeVisible();
 
 		// 5. The sprint ended by itself once its one task was accepted, and its meetings are listed.
 		await expect

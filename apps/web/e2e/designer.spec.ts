@@ -103,12 +103,9 @@ test("a Designer's task and a design review run through the real server and brow
 
 		// 5. Theo's change to site/style.css is checked in the browser before Ada reviews it.
 		await send(page, "Darken the page's heading", "CTV-2");
+		// No plan waits for the owner: the team goes from the request to the review by itself.
 		await page.getByRole("link", { name: "Today" }).first().click();
-		await expect(page.getByText(/^Approve the plan for /)).toBeVisible({
-			timeout: 30_000,
-		});
-		await page.getByRole("link", { name: "Review" }).click();
-		await page.getByRole("button", { name: "Approve the plan" }).click();
+		await expect(page.getByText(/^Approve the plan for /)).toHaveCount(0);
 		// "Checking the screens" is not asserted here: it shows only between Theo's commit and
 		// Iris's review, a few seconds the fake models can finish before the page has loaded. The
 		// task page and the daemon's task.get tests hold that wording.

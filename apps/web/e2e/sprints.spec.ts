@@ -43,8 +43,8 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 			"triage_ctv_1_small_by_pm",
 			"ask_with_choices_ctv_1",
 			"refine_writes_task_for_theo_ctv_1",
-			// CTV-2, the epic: sized, written, approved by the user, then broken down
-			// outside a sprint into CTV-3.
+			// CTV-2, the epic: sized, written, then broken down outside a sprint into CTV-3,
+			// with no approval from the user.
 			"triage_ctv_1_large",
 			"refine_writes_epic_ctv_1",
 			"plan_breaks_down_ctv_2",
@@ -77,7 +77,7 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 		await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
 		await expect(page.getByText("Mira").first()).toBeVisible();
 
-		// 1. The small request: Mira asks, the user answers, and Ada checks the plan.
+		// 1. The small request: Mira asks, the user answers, and the plan is ready.
 		await file(
 			page,
 			"Add a done.txt at the root, so a run can be checked for it",
@@ -88,19 +88,12 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 			.poll(() => moves("CTV-1"), { timeout: 30_000 })
 			.toContain("refining -> ready");
 
-		// 2. The epic: the user approves its plan, and Mira breaks it down outside a sprint.
+		// 2. The epic: no one approves its plan, and Mira breaks it down outside a sprint.
 		await file(
 			page,
 			"Add a done.txt at the root, and a check that it is there",
 		);
 		await expect(page).toHaveURL(/\/requests\/CTV-2$/);
-		await page.getByRole("link", { name: "Today" }).first().click();
-		await expect(page.getByText(/^Approve the plan for /)).toBeVisible({
-			timeout: 30_000,
-		});
-		await page.getByRole("link", { name: "Review" }).click();
-		await expect(page).toHaveURL(/\/tasks\/CTV-2\/plan$/);
-		await page.getByRole("button", { name: "Approve the plan" }).click();
 		await expect
 			.poll(() => moves("CTV-3"), { timeout: 30_000 })
 			.toContain("refining -> ready");

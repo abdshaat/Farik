@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { events, startServe } from "./fixtures/serve.ts";
 import { screenshots } from "./fixtures/shots.ts";
 
-test("a plan is read, edited with a live check, saved back to refining, then approved", async ({
+test("a big request's plan goes ahead without approval, and is still there to read", async ({
 	page,
 }) => {
 	const serve = await startServe({
@@ -10,7 +10,7 @@ test("a plan is read, edited with a live check, saved back to refining, then app
 		transcripts: [
 			"triage_ctv_1_large",
 			"refine_writes_epic_ctv_1",
-			"refine_writes_epic_ctv_1",
+			"plan_breaks_down_ctv_1",
 		],
 	});
 	try {
@@ -26,11 +26,32 @@ test("a plan is read, edited with a live check, saved back to refining, then app
 			page.getByText("Mira sized it as a big request"),
 		).toBeVisible();
 
-		await page.getByRole("link", { name: "Today" }).first().click();
-		await expect(page.getByText(/^Approve the plan for /)).toBeVisible();
-		await page.getByRole("link", { name: "Review" }).click();
+		// The plan is ready and broken into tasks with no one's approval.
+		await expect
+			.poll(
+				() =>
+					events(serve.project).filter(
+						(e) => e.kind === "task.created" && e.task_id === "CTV-2",
+					).length,
+				{ timeout: 40_000 },
+			)
+			.toBe(1);
+		const log = events(serve.project);
+		expect(log.filter((e) => e.kind === "human.accepted")).toHaveLength(0);
+		expect(
+			log.some(
+				(e) =>
+					e.task_id === "CTV-1" &&
+					e.kind === "task.transitioned" &&
+					e.body.to === "escalated",
+			),
+		).toBe(false);
+		await page.goto(`http://127.0.0.1:${serve.port}/`);
+		await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
+		await expect(page.getByText(/^Approve the plan for /)).toHaveCount(0);
 
-		await expect(page).toHaveURL(/\/tasks\/CTV-1\/plan$/);
+		// The owner can still read the plan, but there is nothing to approve in it.
+		await page.goto(`http://127.0.0.1:${serve.port}/tasks/CTV-1/plan`);
 		await expect(
 			page.getByText(
 				"A done.txt file at the root of your project, so that anyone can see the run finished. Catervas checks that the file is there.",
@@ -38,51 +59,23 @@ test("a plan is read, edited with a live check, saved back to refining, then app
 			),
 		).toBeVisible();
 		await expect(
+			page.getByRole("heading", {
+				name: "The plan for Add a done.txt at the root, and a check that it is there",
+			}),
+		).toBeVisible();
+		await expect(
 			page.getByText("Mira, your Product Manager, wrote this for you"),
 		).toBeVisible();
 		await expect(
 			page.getByRole("heading", { name: "What Catervas checked" }),
 		).toBeVisible();
-		await screenshots(page, "plan");
-
-		await page.getByRole("link", { name: "Edit the plan yourself" }).click();
-		await expect(page).toHaveURL(/\/tasks\/CTV-1\/plan\/edit$/);
-		const verdict = page
-			.getByRole("region", { name: "Ready to approve?" })
-			.getByText(/ checks pass\./);
-		const intent = page.getByLabel(/^Why you want it/);
-		await expect(verdict).toHaveText(/^(\d+) of \1 checks pass\.$/);
-		const passing = await verdict.textContent();
-		// An empty intent fails a check once Catervas has read it; a new one passes again.
-		await intent.fill("");
-		await expect(verdict).toHaveText(
-			/^0 of 1 checks pass\. The one left: .*shorter than 20 characters$/,
-		);
-		await intent.fill(
-			"The repository has a done.txt at its root, so that anyone can see a run finished.",
-		);
-		await expect(verdict).toHaveText(passing ?? "");
-		await screenshots(page, "plan-editor");
-		await page.getByRole("button", { name: "Save" }).click();
 		await expect(
-			page.getByText(
-				"Saved. Mira checks the plan again, then it comes back to you to approve.",
-			),
+			page.getByRole("button", { name: "Approve the plan" }),
+		).toHaveCount(0);
+		await expect(
+			page.getByText(/^This does not wait on you now\./),
 		).toBeVisible();
-
-		// Mira writes the plan again; then it waits on the user once more.
-		await page.goto(`http://127.0.0.1:${serve.port}/tasks/CTV-1/plan`);
-		const approve = page.getByRole("button", { name: "Approve the plan" });
-		await expect(approve).toBeVisible({ timeout: 15_000 });
-		await approve.click();
-		await expect(page).toHaveURL(/:\d+\/$/);
-		await expect
-			.poll(() =>
-				events(serve.project)
-					.filter((e) => e.kind === "human.accepted")
-					.map((e) => e.body.subject),
-			)
-			.toEqual(["contract"]);
+		await screenshots(page, "plan");
 	} finally {
 		await serve.stop();
 	}

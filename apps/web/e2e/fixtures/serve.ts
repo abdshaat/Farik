@@ -135,6 +135,28 @@ export function commitFiles(
 }
 
 /**
+ * Merges `branch` into the project's branch, as the owner does on their own checkout when no
+ * `origin` holds a pull request for them to merge. Catervas never merges.
+ */
+export function mergeByHand(project: string, branch: string): void {
+	execFileSync(
+		"git",
+		[
+			"-c",
+			"user.name=t",
+			"-c",
+			"user.email=t@example.com",
+			"merge",
+			"--no-ff",
+			"-m",
+			`By hand: ${branch}`,
+			branch,
+		],
+		{ cwd: project },
+	);
+}
+
+/**
  * `catervas-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
  * With `project: false` it starts in an empty folder, for the first-run wizard: `HOME` is `home`,
  * which holds Catervas's state folder too, the fake `claude` and `docker` come first on `PATH`, no

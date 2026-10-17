@@ -1,5 +1,11 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { commitFiles, events, startServe } from "./fixtures/serve.ts";
+import {
+	catervas,
+	commitFiles,
+	events,
+	mergeByHand,
+	startServe,
+} from "./fixtures/serve.ts";
 import { screenshots } from "./fixtures/shots.ts";
 
 /** The Files page's screenshots are taken at 1440, as the chats' are. */
@@ -81,11 +87,11 @@ test("the owner reads and edits the team's documents, through the real server an
 		await expect(page.getByText("Now: pie pre-orders.")).toBeVisible();
 		await page.getByRole("button", { name: "For you" }).click();
 
-		// 4. Edit, a new line, Save: the owner's change, then Mira brings the team's version up to date.
+		// 4. Edit, a new line, Save: the owner's change goes out in a pull request, and waits for a hand merge.
 		await page.getByRole("button", { name: "Edit" }).click();
 		await expect(
 			page.getByText(
-				"Saving keeps your change at once. Mira will update the team’s version.",
+				"Saving puts your change in a pull request; it is in your project once that is merged. Then Mira updates the team’s version.",
 			),
 		).toBeVisible();
 		const box = page.getByLabel("Roadmap text");
@@ -97,15 +103,32 @@ test("the owner reads and edits the team's documents, through the real server an
 		await expect(page.getByText("Changed by you just now")).toBeVisible({
 			timeout: 15_000,
 		});
-		const log = events(serve.project);
+		// Catervas never merges: the change waits for the owner's hand, and nothing follows it yet.
+		await expect(
+			page.getByText("Saved. It goes out with a pull request."),
+		).toBeVisible();
+		const waiting = events(serve.project);
 		expect(
-			log.filter(
+			waiting.filter(
 				(e) => e.kind === "folder_doc.edited" && e.body.path === ROADMAP,
 			),
 		).toHaveLength(1);
 		expect(
-			log.filter((e) => e.kind === "folder_change.integrated"),
-		).toHaveLength(1);
+			waiting.filter((e) => e.kind === "folder_change.integrated"),
+		).toHaveLength(0);
+		// The owner merges it on their own checkout, then tells Catervas to look.
+		mergeByHand(serve.project, "docs/folder-1");
+		catervas(serve.project, ["integrate", "folder-1"]);
+		await expect
+			.poll(
+				() =>
+					events(serve.project).filter(
+						(e) => e.kind === "folder_change.integrated",
+					).length,
+				{ timeout: 30_000 },
+			)
+			.toBe(1);
+		const log = events(serve.project);
 		expect(
 			log.filter((e) => e.kind === "task.created" && e.body.rederives === TWIN),
 		).toHaveLength(1);
