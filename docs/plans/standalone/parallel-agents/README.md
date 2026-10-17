@@ -1,6 +1,6 @@
 # Standalone: agents work in parallel
 
-Status: draft
+Status: done
 Branch: `feat/parallel-agents` (work outside a phase, one pull request to `main`)
 Decision: ADR 0064 (`docs/decisions/0064-agents-work-in-parallel.md`)
 Depends on: `origin/main` at `74b4a5af` (#45 merged), then `fix/plans-need-no-review` (ADR 0061,
