@@ -167,7 +167,7 @@ export function SetupTeam() {
 	const picked = pickOf(draft, cards);
 	const shown = draft.members
 		.map((member, index) => ({ member, index }))
-		.filter(({ member }) => !member.more || member.on);
+		.filter(({ member }) => !member.more || member.on || member.added);
 	const on = draft.members.filter((m) => m.on);
 	const unnamed = on.some((m) => !m.agent.displayName.trim());
 	const at = (member: Member) =>
@@ -201,7 +201,10 @@ export function SetupTeam() {
 		const key = Math.max(-1, ...draft.members.map((m) => m.key)) + 1;
 		change({
 			...draft,
-			members: [...draft.members, { agent, on: true, key, more: true }],
+			members: [
+				...draft.members,
+				{ agent, on: true, key, more: true, added: true },
+			],
 		});
 		setOpen(draft.members.length);
 	};
@@ -382,6 +385,8 @@ export function SetupTeam() {
 				onChange={(next) => update(open, { agent: next })}
 				onRole={(role) =>
 					update(open, {
+						// A job this computer cannot run starts off the team, as a suggested row does.
+						on: !unavailable.includes(role),
 						agent: {
 							...agentOfRole(
 								proposed,

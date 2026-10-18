@@ -1437,6 +1437,28 @@ describe("team setup's team picker", () => {
 		expect("solo" in team.policy).toBe(false);
 	});
 
+	it("an_added_designer_starts_off_the_team_without_docker", async () => {
+		const { s } = await picker(
+			[CODE],
+			NO_FOLDER,
+			{ unavailable: [{ agent_id: "iris", reason: "designer_needs_sandbox" }] },
+			(team) => {
+				team.agents = [...FIVE.slice(0, 4), IRIS];
+			},
+		);
+		await screen.findByRole("button", { name: "Change Theo" });
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		fireEvent.change(sheet().getByRole("combobox", { name: en.sheetJob }), {
+			target: { value: "ui_ux_designer" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.sheetDone }));
+		const added = screen.getAllByRole("button", { name: /^Change / }).at(-1);
+		expect(added?.textContent).toContain(en.whoNeedsDocker);
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		const team = await validatedTeam(s);
+		expect(team.agents.map((a) => a.role)).not.toContain("ui_ux_designer");
+	});
+
 	it("holds_the_designer_off_without_docker_and_asks_how_to_open_the_app_with_it", async () => {
 		const withDesigner =
 			(preview?: unknown) => (team: Record<string, unknown>) => {

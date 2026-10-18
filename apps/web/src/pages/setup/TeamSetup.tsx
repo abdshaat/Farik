@@ -79,7 +79,14 @@ export type Draft = {
 	 * Every suggested or added agent, whether it is on the team, its row's own key, and whether it
 	 * is a role Catervas does not suggest, offered under "More roles".
 	 */
-	members: { agent: Agent; on: boolean; key: number; more: boolean }[];
+	members: {
+		agent: Agent;
+		on: boolean;
+		key: number;
+		more: boolean;
+		/** Added on the team step with "Add someone": shown even while it is off the team. */
+		added?: boolean;
+	}[];
 	criteria: Library;
 	/** The two permission questions, unanswered until the user answers them. */
 	answers: { commands?: boolean; push?: boolean };
