@@ -57,7 +57,7 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 
 		await page.goto(inA("/settings/allowed-actions"));
 		const may = page.getByRole("region", { name: "What agents may do" });
-		await may.getByLabel(/^Yes, on its own branches/).check();
+		await may.getByLabel(/^Yes, to its own branches/).check();
 		await may.getByRole("button", { name: "Save changes" }).click();
 		await expect.poll(() => teamOf(a.project)).toMatch(/push: true/);
 
@@ -97,7 +97,7 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 			name: "What they may do, from Three of us",
 		});
 		await expect(carried).toContainText(
-			"The Developer may send work to its own branches online.",
+			"It sends its own branches to GitHub while it works.",
 		);
 		await pageB.getByRole("button", { name: "Start the team" }).click();
 		// An existing project is offered a Catervafication; "Later" goes on to Today.

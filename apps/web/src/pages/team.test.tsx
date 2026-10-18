@@ -896,7 +896,7 @@ describe("team page", () => {
 		}) as HTMLButtonElement;
 		expect(save.disabled).toBe(true);
 		fireEvent.click(
-			within(may).getByRole("radio", { name: /^Yes, on its own branches/ }),
+			within(may).getByRole("radio", { name: /^Yes, to its own branches/ }),
 		);
 		const effect = "Developers may now push their work and open pull requests.";
 		const draft = await validated(s, [effect]);
@@ -932,7 +932,9 @@ describe("team page", () => {
 			),
 		).toBe(true);
 		expect(
-			picked(within(may).getByRole("radio", { name: /^No, keep everything/ })),
+			picked(
+				within(may).getByRole("radio", { name: /^No, keep work in progress/ }),
+			),
 		).toBe(true);
 		fireEvent.click(within(may).getByRole("button", { name: en.agentSave }));
 		await waitFor(() => expect(s.calls("team.save")).toHaveLength(2));
@@ -973,12 +975,20 @@ describe("team page", () => {
 	});
 
 	it("says_finished_work_opens_a_pull_request_from_settings", async () => {
-		const { part } = await settings(TEAM, "/settings/work");
+		const { part } = await settings(TEAM, "/settings/work", { online: true });
 
-		// Finished work always opens a pull request (ADR 0061): said, and nothing to choose.
+		// Finished work opens a pull request when the project is online (ADR 0061): said, and
+		// nothing to choose.
 		const finish = part(en.rulesFinish);
-		expect(within(finish).getByText(en.rulesFinishPullRequest)).toBeTruthy();
+		expect(within(finish).getByText(en.finishLead)).toBeTruthy();
 		expect(within(finish).queryByRole("radio")).toBeNull();
+		cleanup();
+
+		// Not online: it waits on this computer for a merge by hand.
+		const local = await settings(TEAM, "/settings/work", { online: false });
+		expect(
+			within(local.part(en.rulesFinish)).getByText(en.finishLeadLocal),
+		).toBeTruthy();
 	});
 
 	it("sets_the_integration_branch", async () => {

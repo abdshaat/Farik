@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expectNoAxeViolations } from "@catervas/ui/test";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -314,6 +316,74 @@ describe("board", () => {
 			.getByRole("link", { name: "Launch post" })
 			.closest("li") as HTMLElement;
 		expect(within(row).getByText(en.markPlanning)).toBeTruthy();
+	});
+
+	it("names_who_is_thinking_on_a_card", async () => {
+		media.set(WIDE, true);
+		const thinking = (purpose: string) => ({
+			activity: [
+				{
+					agent_id: "mira",
+					state: "working",
+					line: "Writing the plan",
+					task_id: "CTV-3",
+					session_id: "s-2",
+					purpose,
+				},
+				...ACTIVITY.activity,
+				{
+					agent_id: "theo",
+					state: "working",
+					line: "Building CTV-4",
+					task_id: "CTV-4",
+				},
+			],
+		});
+		const { container } = await board(TASKS, thinking("refine"));
+		const card = (title: string) =>
+			screen.getByRole("link", { name: title }).closest("li") as HTMLElement;
+		expect(
+			within(card("Gift cards")).getByText(/Mira · Product Manager — thinking/),
+		).toBeTruthy();
+		expect(within(card("Gift cards")).getByText(en.markWriting)).toBeTruthy();
+		expect(
+			within(card("Launch post")).getByText(
+				/Kai · Marketing Specialist — thinking/,
+			),
+		).toBeTruthy();
+		expect(card("Gift card page").textContent).not.toContain("thinking");
+		for (const dots of container.querySelectorAll(`.${styles.dots}`))
+			expect(dots.getAttribute("aria-hidden")).toBe("true");
+		const css = readFileSync(
+			join(import.meta.dirname, "Board.module.css"),
+			"utf8",
+		).replace(/\s+/g, " ");
+		expect(css).toMatch(/\.dots span \{[^}]*animation:/);
+		expect(css).toMatch(
+			/@media \(prefers-reduced-motion: reduce\) \{ \.dots span \{ animation: none;/,
+		);
+		await expectNoAxeViolations(container);
+	});
+
+	it("shows_planning_on_a_card_whose_agent_plans", async () => {
+		media.set(WIDE, true);
+		await board(TASKS, {
+			activity: [
+				{
+					agent_id: "mira",
+					state: "working",
+					line: "Planning",
+					task_id: "CTV-3",
+					session_id: "s-2",
+					purpose: "plan",
+				},
+				...ACTIVITY.activity,
+			],
+		});
+		const card = screen
+			.getByRole("link", { name: "Gift cards" })
+			.closest("li") as HTMLElement;
+		expect(within(card).getByText(en.markPlanning)).toBeTruthy();
 	});
 
 	it("marks_a_task_waiting_on_the_designer", async () => {

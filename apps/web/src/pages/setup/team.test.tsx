@@ -1097,7 +1097,9 @@ describe("team setup", () => {
 		fireEvent.click(radio(/^No, nobody may/));
 		await answerQuery(s, "settings.defaults", RECOMMENDED);
 		await waitFor(() =>
-			expect(radio(/^No, keep everything on this computer/).checked).toBe(true),
+			expect(radio(/^No, keep work in progress on this computer/).checked).toBe(
+				true,
+			),
 		);
 		expect(radio(/^No, nobody may/).checked).toBe(true);
 	});
@@ -1124,7 +1126,7 @@ describe("team setup", () => {
 		expect(
 			(
 				screen.getByRole("radio", {
-					name: /^No, keep everything on this computer/,
+					name: /^No, keep work in progress on this computer/,
 				}) as HTMLInputElement
 			).checked,
 		).toBe(true);
@@ -1493,16 +1495,13 @@ describe("team setup", () => {
 			team: { ...proposed().team, rules: {} },
 			agents: [],
 			max_agents: 7,
+			online: true,
 		});
 		await answerQuery(r, "settings.defaults", RECOMMENDED);
 		const finish = await screen.findByRole("region", {
 			name: en.rulesFinish,
 		});
-		expect(
-			within(finish).getByText(
-				"Finished work opens a pull request for you to merge.",
-			),
-		).toBeTruthy();
+		expect(within(finish).getByText(en.finishLead)).toBeTruthy();
 		expect(within(finish).queryByRole("radio")).toBeNull();
 		expect(within(finish).queryByRole("button")).toBeNull();
 	});
@@ -1698,7 +1697,7 @@ describe("team setup", () => {
 		expect(
 			(
 				screen.getByRole("radio", {
-					name: /^No, keep everything/,
+					name: /^No, keep work in progress/,
 				}) as HTMLInputElement
 			).checked,
 		).toBe(true);
@@ -2016,6 +2015,25 @@ describe("team setup's four starts", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("finish_says_what_happens_to_finished_work", async () => {
+		const asFinish = async (online: boolean) => {
+			const { socket } = await renderApp("/setup/finish");
+			const s = socket as FakeSocket;
+			await answerQuery(s, "team.propose", proposed());
+			await answerStatus(s, false, 1, { setup_pending: true });
+			await answerQuery(s, "team.get", { team: proposed().team, online });
+			await screen.findByRole("heading", { name: en.finishTitle });
+		};
+		await asFinish(true);
+		expect(await screen.findByText(en.finishLead)).toBeTruthy();
+		expect(screen.queryByText(en.finishLeadLocal)).toBeNull();
+		cleanup();
+		await asFinish(false);
+		expect(await screen.findByText(en.finishLeadLocal)).toBeTruthy();
+		expect(screen.queryByText(en.finishLead)).toBeNull();
+		cleanup();
+	});
+
 	it("starts_from_a_saved_team", async () => {
 		const { container, socket } = await renderApp("/setup/team");
 		const s = socket as FakeSocket;
@@ -2077,6 +2095,13 @@ describe("team setup's four starts", () => {
 		).toBe("20");
 		fireEvent.click(screen.getByRole("button", { name: en.continue }));
 		await screen.findByRole("heading", { name: en.finishTitle });
+		await answerQuery(s, "team.get", { team: proposed().team, online: true });
+		// The lead says what finished work does; the summary speaks of work in progress.
+		expect(
+			await screen.findByText(
+				`${en.finishLead} ${t("finishLeadSaved", { name: "Three of us" })}`,
+			),
+		).toBeTruthy();
 		const carried = screen.getByRole("region", {
 			name: t("finishCarried", { name: "Three of us" }),
 		});

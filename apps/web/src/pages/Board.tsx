@@ -15,7 +15,7 @@ import {
 	taskNumber,
 } from "../app/lanes.ts";
 import { useQuery } from "../app/store.ts";
-import { statusWord } from "../app/words.ts";
+import { roleWord, statusWord } from "../app/words.ts";
 import { useWide } from "../shell/Shell.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
@@ -28,6 +28,7 @@ type Activity = {
 	state: string;
 	taskId?: string;
 	purpose?: string;
+	sessionId?: string;
 };
 type Waiting = { taskId: string; kind: string };
 type Mark = { word: string; tone: "done" | "working" | "waiting" };
@@ -47,6 +48,7 @@ const DOING: Record<string, keyof typeof en> = {
 	implement: "markBuilding",
 	verify: "markReviewing",
 	explore: "markPlanning",
+	plan: "markPlanning",
 };
 
 /** How many of Done's cards that wait on nobody show before "Show all". */
@@ -137,6 +139,12 @@ export function Board() {
 
 	const row = (task: TaskRow) => {
 		const who = agents.find((a) => a.id === task.assigneeId);
+		const thinker = activity.activity.find(
+			(a) => a.state === "working" && a.sessionId && a.taskId === task.taskId,
+		);
+		const thinkingAgent = thinker
+			? agents.find((a) => a.id === thinker.agentId)
+			: undefined;
 		const mark = markOf(task);
 		const parts = partsOf(task);
 		const parent = task.parent ? byId.get(task.parent) : undefined;
@@ -169,6 +177,21 @@ export function Board() {
 									"{done}",
 									String(parts.filter((p) => p.status === "accepted").length),
 								)}
+						</span>
+					)}
+					{thinker && (
+						<span className={styles.thinking}>
+							{thinkingAgent
+								? t("boardThinking", {
+										name: thinkingAgent.displayName,
+										role: roleWord(thinkingAgent.role),
+									})
+								: t("boardThinkingBare", { name: thinker.agentId })}
+							<span className={styles.dots} aria-hidden="true">
+								<span />
+								<span />
+								<span />
+							</span>
 						</span>
 					)}
 					{mark ? (
