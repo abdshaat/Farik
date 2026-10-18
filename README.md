@@ -126,10 +126,10 @@ On your first visit, follow the setup screens to:
 
 Catervas remembers your project. To use it again, open Terminal in the `Catervas` folder and run the same `serve` command. Keep that Terminal window open while using Catervas. To stop it, return to Terminal and press **Ctrl+C**.
 
-To run Catervas in the background instead, use the two scripts in `scripts/`:
+Or let a script do all of it, in the background: `scripts/catervas-start.sh` installs what is missing (Rust, Node, pnpm and Claude Code, in your home folder; it tells you how to get git and Docker), builds Catervas, and starts it. Later runs rebuild only what changed; `--no-build` starts the last build.
 
 ```bash
-scripts/catervas-start.sh   # starts it, prints the link to open
+scripts/catervas-start.sh   # builds and starts it, prints the link to open
 scripts/catervas-stop.sh    # stops it and everything it started
 ```
 
