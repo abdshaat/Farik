@@ -62,7 +62,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `team.test.tsx`, `writes_out_what_hides_text_in_an_agents_activity_line` keeps its `state: "idle"` row and passes unchanged (an idle line is shown whole, still written out by `visibly`). In `shows_the_designer_card_in_its_colour` (line 241, whose `team.activity` answer is at line 260), add a second row `{ agent_id: "kai", state: "waiting", line: "Waiting on you: Kai asks which branch", task_id: "CTV-3" }` (Kai is in the file's `TEAM`, as `writes_out_what_hides_text_in_an_agents_activity_line` uses him) and assert Kai's card (`getByText("Kai persona").closest("li")`) shows "Waiting on you" and not "which branch". Fails first for the same reason.
 - No Playwright journey changes: none asserts a band line, and whether an agent is `waiting` at a given moment of a journey depends on the store's precedence (a task under way ranks first), so the unit tests carry this change.
 
-- [ ] `feat(web): a waiting agent's line on Today and the Team page says only "Waiting on you"`
+- [x] `feat(web): a waiting agent's line on Today and the Team page says only "Waiting on you"`
 
 ## Verification
 

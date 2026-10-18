@@ -1,6 +1,7 @@
 import { AVATAR_URLS, type AvatarKey, Button, RoleTag } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
+import { agentLine } from "../app/agentLine.ts";
 import { useConnection } from "../app/connection.tsx";
 import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
@@ -154,7 +155,7 @@ export function Team() {
 	const { team, effective, most, again } = useTeam();
 	const status = useStatus();
 	const { data: activity } = useQuery<{
-		activity: { agentId: string; line: string }[];
+		activity: { agentId: string; state: string; line: string }[];
 	}>("team.activity", {});
 	const [open, setOpen] = useState<"save" | "use">();
 	const [savedAs, setSavedAs] = useState<string>();
@@ -208,6 +209,7 @@ export function Team() {
 				{agents.map((agent) => {
 					const name = agent.displayName;
 					const paused = agent.status === "paused";
+					const doing = activity?.activity.find((a) => a.agentId === agent.id);
 					const avatar = AVATAR_URLS[agent.avatar as AvatarKey];
 					return (
 						<li key={agent.id} className={styles.card}>
@@ -228,10 +230,7 @@ export function Team() {
 							<p className={styles.muted}>
 								{paused
 									? t("agentPaused")
-									: visibly(
-											activity?.activity.find((a) => a.agentId === agent.id)
-												?.line ?? t("agentActive"),
-										)}
+									: visibly(doing ? agentLine(doing) : t("agentActive"))}
 							</p>
 							<dl className={styles.facts}>
 								<dt>{t("agentModel")}</dt>

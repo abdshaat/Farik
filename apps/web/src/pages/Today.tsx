@@ -2,6 +2,7 @@ import mark from "@catervas/brand/assets/logo-mark-1254.png";
 import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { agentLine } from "../app/agentLine.ts";
 import { useCommand } from "../app/command.ts";
 import { useConnection } from "../app/connection.tsx";
 import { type ProductPlanState, projectName } from "../app/productPlan.ts";
@@ -490,13 +491,16 @@ function AgentEntry({
 	agent: Agent | undefined;
 }) {
 	const name = agent?.displayName ?? one.agentId;
+	const shown = visibly(agentLine(one));
 	return (
 		<li className={styles.agent}>
 			<AgentPicture agent={agent} size={48} />
 			<span className={styles.who}>
 				<strong>{name}</strong> {agent && <RoleTag role={agent.role} />}
 			</span>
-			<span className={styles.line}>{one.line}</span>
+			<span className={styles.line} title={shown}>
+				{shown}
+			</span>
 		</li>
 	);
 }

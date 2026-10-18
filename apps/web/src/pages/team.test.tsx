@@ -265,12 +265,23 @@ describe("team page", () => {
 					line: "Waiting for Mira to approve a plan",
 					task_id: "CTV-21",
 				},
+				{
+					agent_id: "kai",
+					state: "waiting",
+					line: "Waiting on you: Kai asks which branch",
+					task_id: "CTV-3",
+				},
 			],
 		});
 		expect(
 			await within(card).findByText("Waiting for Mira to approve a plan"),
 		).toBeTruthy();
 		expect(within(card).queryByText(en.agentActive)).toBeNull();
+		const kai = within(list)
+			.getByText("Kai persona")
+			.closest("li") as HTMLElement;
+		expect(await within(kai).findByText("Waiting on you")).toBeTruthy();
+		expect(kai.textContent).not.toContain("which branch");
 		expect(face.style.getPropertyValue("--ring")).toBe(
 			"var(--catervas-color-role-ui-ux-designer)",
 		);

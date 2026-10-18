@@ -60,6 +60,7 @@ import {
 } from "../test/render-app.tsx";
 import { bodyOf, refusedBy } from "../test/schema.ts";
 import styles from "./PostGoingOut.module.css";
+import todayStyles from "./Today.module.css";
 import { Today } from "./Today.tsx";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
@@ -134,7 +135,19 @@ describe("today", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
 	it("shows_the_team_band", async () => {
-		const { container } = await today({});
+		const { container } = await today({
+			activity: {
+				activity: [
+					...ACTIVITY.activity.slice(0, 2),
+					{
+						agent_id: "theo",
+						state: "waiting",
+						line: "Waiting on you: Could you run git checkout in the worktree, then tell me so I can request verifying?",
+						task_id: "CTV-7",
+					},
+				],
+			},
+		});
 		const band = await screen.findByRole("list", { name: en.teamBand });
 		const entries = within(band).getAllByRole("listitem");
 		expect(entries).toHaveLength(3);
@@ -157,6 +170,10 @@ describe("today", () => {
 			within(ada as HTMLElement).getByText("Resting until 15:40 UTC"),
 		).toBeTruthy();
 		expect(within(theo as HTMLElement).getByTitle("Developer")).toBeTruthy();
+		const waiting = within(theo as HTMLElement).getByText("Waiting on you");
+		expect(waiting.getAttribute("title")).toBe("Waiting on you");
+		expect(waiting.className).toContain(todayStyles.line);
+		expect(within(theo as HTMLElement).queryByText(/git checkout/)).toBeNull();
 		picturesOpenTheirAgents(band, TEAM.agents);
 		await expectNoAxeViolations(container);
 	});
