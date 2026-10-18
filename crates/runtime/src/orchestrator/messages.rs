@@ -1153,6 +1153,8 @@ pub(super) struct ReviewBrief<'a> {
     /// What Catervas refused of the reviewer's own requests since the task entered `verifying`,
     /// oldest first (ADR 0069).
     pub(super) refused: &'a [String],
+    /// The UI/UX Designer's latest design review since the task entered `verifying`, as JSON.
+    pub(super) design_review: Option<&'a str>,
 }
 
 /// The reviewer's `verify` session's message: the task's id and title, what is still unanswered
@@ -1197,8 +1199,13 @@ pub(super) fn review_message(brief: &ReviewBrief<'_>) -> String {
     format!(
         "{message}\n\nCatervas {ran}, as its \
          reviewer: {results}\n\n{rubrics}\n\nThe assignee's completion note: \
-         {note}\n\n{changes}\n\nWrite the review note with `catervas_write_note` of kind \
+         {note}\n\n{designer}{changes}\n\nWrite the review note with `catervas_write_note` of kind \
          `review`, mapping each criterion to its evidence.",
+        designer = brief.design_review.map_or_else(String::new, |checks| format!(
+            "The UI/UX Designer checked this change in the running app before you. How its pages \
+             look and behave is their check, not yours: {}\n\n",
+            untrusted_block("design_review", checks, RESULTS_CAP_BYTES)
+        )),
         results = untrusted_block("results", &results_text(brief.results), RESULTS_CAP_BYTES),
         rubrics = rubrics(contract),
         note = untrusted_block(
@@ -1682,6 +1689,7 @@ mod tests {
             changes: Changes::Diff(""),
             unanswered: &[],
             refused: &[],
+            design_review: None,
         });
         assert!(
             message.contains("The diff from the integration branch to docs/CTV-1: "),
@@ -1766,6 +1774,7 @@ mod tests {
             changes: Changes::Folder(&files),
             unanswered: &[],
             refused: &[],
+            design_review: None,
         });
 
         // A workbook is read with the sheet tool, a note with `Read`, each beside its copy from
@@ -1798,6 +1807,7 @@ mod tests {
             changes: Changes::Folder(&workbooks),
             unanswered: &[],
             refused: &[],
+            design_review: None,
         });
         assert!(!message.contains("`Read`"), "{message}");
         assert!(message.contains("`baseline: true`"), "{message}");
@@ -1821,6 +1831,7 @@ mod tests {
             changes: Changes::Folder(&files),
             unanswered: &[],
             refused: &[],
+            design_review: None,
         });
 
         // The list is the files' words and sits in one untrusted block, which no name can close.
@@ -1863,6 +1874,7 @@ mod tests {
             changes: Changes::Diff(&diff),
             unanswered: &[],
             refused: &[],
+            design_review: None,
         });
 
         let kept = message.matches('+').count();
@@ -1901,6 +1913,35 @@ mod tests {
         let task = refine_message(&contract(), true, &[], None);
         assert!(!task.contains(ask), "{task}");
         assert!(task.contains(", a task, "), "{task}");
+    }
+
+    #[test]
+    fn shows_the_reviewer_the_designers_checks() {
+        let contract = contract();
+        let brief = |design_review| ReviewBrief {
+            contract: &contract,
+            results: &[],
+            completion_note: None,
+            changes: Changes::Diff("+ a line"),
+            unanswered: &[],
+            refused: &[],
+            design_review,
+        };
+        let message = review_message(&brief(Some(
+            "{\"pass\":true,\"reasons\":\"fits at 375 and 1024\",\"checks\":[]}",
+        )));
+        assert!(
+            message.contains("How its pages look and behave is their check"),
+            "{message}"
+        );
+        assert!(
+            message.contains("<untrusted source=\"design_review\">"),
+            "{message}"
+        );
+        assert!(message.contains("fits at 375 and 1024"), "{message}");
+        let plain = review_message(&brief(None));
+        assert!(!plain.contains("How its pages look and behave"), "{plain}");
+        assert!(!plain.contains("fits at 375 and 1024"), "{plain}");
     }
 
     #[test]

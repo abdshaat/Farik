@@ -654,6 +654,16 @@ async fn review(
             _ => None,
         })
         .collect();
+    // The Designer's checks since the task entered `verifying`, which are its to make and the
+    // reviewer's to read (ADR 0069).
+    let design_review = history
+        .iter()
+        .rev()
+        .take_while(|event| event.envelope.seq > since)
+        .find_map(|event| match &event.body {
+            EventBody::DesignReviewRecorded(body) => serde_json::to_string(body).ok(),
+            _ => None,
+        });
     // A task in a private folder has no branch to diff: its reviewer is told which files changed
     // in the folder, and reads each beside its copy from the start of the task (6.6).
     let (diff, files);
@@ -684,6 +694,7 @@ async fn review(
         changes,
         unanswered,
         refused: &refused,
+        design_review: design_review.as_deref(),
     });
     let end = run_session(
         deps,
@@ -1239,7 +1250,15 @@ mod tests {
             "the design review is told where the preview is: {}",
             review.initial_prompt
         );
-        // The Architect's review is not the Designer's: no browser, no page check.
+        // The Architect's review is not the Designer's: no browser, no page check, but the
+        // Designer's checks are in its first message.
+        assert!(
+            started[2]
+                .initial_prompt
+                .contains("The UI/UX Designer checked this change"),
+            "{}",
+            started[2].initial_prompt
+        );
         assert!(started[2].mcp_servers.is_empty());
         assert!(
             !started[2]
