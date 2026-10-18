@@ -37,7 +37,7 @@ The old "suggested six" start is gone: "Software product" gains the UI/UX Design
 **The agent's sheet** (a dialog on a desktop, full screen on a phone):
 - the picture, large, and the name in a text field;
 - **Job**, the role: fixed for a team's agent (shown as text), a choice for one agent alone;
-- **Model**, a segmented control of the newest model of each family the price table knows, named as Anthropic names them: "Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5". Its ⓘ says, in bullets, what each is for and that the dearer ones cost more per day;
+- **Model**, a segmented control of the newest model of each family the price table knows, named as Anthropic names them: "Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 4.5". (Haiku 5.5 is priced in two tiers, by the prompt's length, which the price table cannot hold; until it can, it is not offered, rather than counted at the lower price.) Its ⓘ says, in bullets, what each is for and that the dearer ones cost more per day;
 - **Effort**, a segmented control of the five levels Claude Code accepts: "Low", "Medium", "High", "Extra high", "Max". Its ⓘ says, in bullets, that more effort thinks longer and costs more;
 - **Temperature**, a row that reads "Set by the model", with an ⓘ: "Claude 5 models choose their own temperature. Catervas can't change it." (section 4);
 - **What it focuses on**, the persona, in a text box;
@@ -61,7 +61,7 @@ How it works is in section 6, after the runtime's paths were mapped.
 
 The owner asked to choose each agent's temperature. Catervas cannot, and the sheet says so rather than offer a control that does nothing:
 - Agents run in Claude Code, whose command line takes a model and an effort and no temperature.
-- Every model Catervas offers (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) refuses a temperature other than its own default (the API answers 400).
+- Every current model (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) refuses a temperature other than its own default (the API answers 400).
 So the row shows the fact, and the control waits for an engine and a model that take one (phase 12, engines and providers).
 
 ### 5. Suggesting a team from the folder
