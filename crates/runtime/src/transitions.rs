@@ -710,6 +710,15 @@ impl Transitions {
             work,
             blocker: ask.blocker.clone(),
             blocker_resolution: ask.blocker_resolution.clone(),
+            blocked_from: last_move_into(&history, TaskStatus::Blocked).and_then(|event| {
+                match &event.body {
+                    EventBody::TaskTransitioned(body) => {
+                        TaskStatus::from_str(&body.from.to_string()).ok()
+                    }
+                    _ => None,
+                }
+            }),
+            pull_request_conflicts: Vec::new(),
             blocked_at: last_move_into(&history, TaskStatus::Blocked)
                 .map(|event| event.envelope.recorded_at),
             now,
@@ -1363,6 +1372,7 @@ fn gate_wire(gate: GateId) -> GateWire {
         GateId::IterationLimitReached => GateWire::IterationLimitReached,
         GateId::GovernorEscalation => GateWire::GovernorEscalation,
         GateId::HumanRejection => GateWire::HumanRejection,
+        GateId::PullRequestConflicted => GateWire::PullRequestConflicted,
     }
 }
 

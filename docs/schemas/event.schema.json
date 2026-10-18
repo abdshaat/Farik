@@ -498,7 +498,7 @@
       "title": "Gate Id",
       "description": "The gate of the row a move took (docs/SPEC.md section 5.2); none for a row with no gate.",
       "type": "string",
-      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection"]
+      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection", "pull_request_conflicted"]
     },
     "blockerWire": {
       "title": "Blocker Wire",
