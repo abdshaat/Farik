@@ -729,8 +729,12 @@ fn the_e2e_binary_serves_with_recorded_sessions() {
 
     let repository = a_team("serve-e2e");
     let port = free_port();
+    // Its own settings folder and no keychain, so that the real ones are not written to.
+    let (home, state) = (scratch("serve-e2e-home"), scratch("serve-e2e-state"));
     let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
-        .args(["--port", &port])
+        .args(["--port", &port, "--no-keychain"])
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &state)
         .current_dir(&repository.path)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -796,14 +800,22 @@ fn answers_the_setup_page_while_docker_info_hangs() {
     .expect("the settings are written");
 
     let port = free_port();
+    // Its own settings folder and no keychain, so that the real ones are not written to.
+    let (home, state) = (
+        scratch("serve-docker-hangs-home"),
+        scratch("serve-docker-hangs-state"),
+    );
     let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
         .args([
             "--port",
             &port,
+            "--no-keychain",
             "--sandbox-image",
             "catervas-sandbox-unused",
         ])
         .env("PATH", path)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &state)
         .current_dir(&repository.path)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

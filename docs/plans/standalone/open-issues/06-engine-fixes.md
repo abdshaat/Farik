@@ -165,7 +165,7 @@ Files: modified `crates/cli/tests/serving.rs`. A test-only change: its check is 
 serving -- --ignored the_e2e_binary_serves the_setup_page_while_docker_info_hangs` runs the two
 tests (list it with `ls -la --time-style=full-iso` before and after and paste both).
 
-- [ ] `test(cli): the serving tests write their own settings folder, not the real one`
+- [x] `test(cli): the serving tests write their own settings folder, not the real one`
 
 ### Task 22: a pull request's body is short
 
