@@ -436,6 +436,28 @@ impl Transitions {
         Ok(ReassignOutcome::Reassigned(Box::new(appended)))
     }
 
+    /// Records `branch` as the task's, unless its contract already records one, and answers the
+    /// recorded one either way (ADR 0066). It is read and written under the same lock as every
+    /// other write of a contract here, on the contract as the file holds it now. No event is
+    /// recorded.
+    ///
+    /// # Errors
+    ///
+    /// `Files` when the contract cannot be read or written, or `branch` is not one the schema
+    /// takes.
+    pub fn record_branch(&self, task_id: &TaskId, branch: &str) -> Result<String, TransitionError> {
+        let _held = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut contract = self.files.read_contract(task_id)?;
+        if let Some(recorded) = &contract.branch {
+            return Ok(recorded.as_str().to_string());
+        }
+        contract.branch = Some(branch.parse().map_err(|_| TransitionError::Files {
+            detail: format!("{branch} is not a branch name a contract can hold"),
+        })?);
+        self.files.write_contract(&contract)?;
+        Ok(branch.to_string())
+    }
+
     /// Writes the moved contract, then records the move and any escalation it raises. A move that
     /// integrates nothing, a task in a private folder reaching `accepted` (6.6), records the files
     /// the task changed in `folder`, so that its page keeps them whatever later tasks change.

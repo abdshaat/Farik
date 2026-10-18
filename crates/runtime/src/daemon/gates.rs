@@ -525,6 +525,9 @@ fn task_diff(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, Fa
     let mut answer = json!({
         "diff": diff.diff, "files": diff.files, "added": diff.added, "removed": diff.removed,
     });
+    if let Some(branch) = &diff.branch {
+        answer["branch"] = json!(branch);
+    }
     // A task in a private folder shows its files' names and no diff (6.6).
     if diff.private_folder {
         answer["private_folder"] = json!(true);
@@ -1083,7 +1086,10 @@ fn judged(deps: &ToolDeps, params: &Value) -> Result<(TaskId, Vec<String>, Value
     let contract = contract_of(deps, &task_id)?;
     let row = row(deps, &task_id)?;
     let edited = &params["contract"];
-    let changed = changed_fields(&before, edited);
+    let mut changed = changed_fields(&before, edited);
+    // The branch is Catervas's, recorded when the worktree is first made (ADR 0066): an editor
+    // opened before then does not have it, and a save writes over the file as it is now.
+    changed.retain(|field| field != "branch");
     // Locking is recorded as `contract.locked`/`contract.unlocked`, which a save does not write.
     if changed.iter().any(|field| field == "locked") {
         return Err(Failure::new(
@@ -3873,6 +3879,36 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_save_keeps_the_recorded_branch() {
+        let harness = driven("gates-save-branch");
+        harness.file("CTV-1", "refining", |wire| {
+            wire["branch"] = json!("feat/add-a-login-page");
+        });
+        let got = query(
+            &harness.daemon,
+            "contract.get",
+            &json!({ "task_id": "CTV-1" }),
+            "contractGetResult",
+        );
+        // An editor opened before the start has no `branch`; the save must not clear it.
+        let mut edited = got["contract"].clone();
+        edited.as_object_mut().expect("an object").remove("branch");
+        edited["intent"] =
+            json!("A person signs in with an email and a password, and stays signed in.");
+        let saved = call(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "CTV-1", "contract": edited }),
+            "contractSaveResult",
+        );
+        assert_eq!(saved["saved"], true, "{saved}");
+        let file = harness.project.file("CTV-1");
+        assert_eq!(file["intent"], edited["intent"]);
+        assert_eq!(file["branch"], "feat/add-a-login-page");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_save_it_cannot_make() {
         let harness = driven("gates-save-refused");
         harness.file("CTV-1", "refining", |_| {});
@@ -3985,6 +4021,7 @@ pub(super) mod tests {
         );
 
         assert_eq!(diff["files"], json!(["src/a.rs"]), "{diff}");
+        assert_eq!(diff["branch"], json!(harness.branch("CTV-1")), "{diff}");
     }
 
     #[test]

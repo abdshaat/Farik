@@ -137,6 +137,7 @@ export async function openedGate(
 			files: ["src/gift.ts", "src/receipt.ts", "src/email.ts"],
 			added: 142,
 			removed: 18,
+			branch: "feat/gift-cards",
 		},
 		"task.tries": { try: 1, of: 4 },
 		"waiting.list": { waiting },

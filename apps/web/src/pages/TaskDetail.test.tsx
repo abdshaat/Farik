@@ -260,7 +260,7 @@ describe("task detail", () => {
 		fireEvent.click(screen.getByRole("tab", { name: "Code changes" }));
 		expect(
 			within(panel()).getByText(
-				"3 files, +142 −18, on the branch feature/CTV-1.",
+				"3 files, +142 −18, on the branch feat/gift-cards.",
 			),
 		).toBeTruthy();
 		expect(
@@ -477,7 +477,7 @@ describe("task detail", () => {
 		expect(within(panel()).getByText("Iris wrote a plan.")).toBeTruthy();
 		fireEvent.click(screen.getByRole("tab", { name: "Code changes" }));
 		expect(
-			within(panel()).getByText(/on the branch feature\/CTV-1\./),
+			within(panel()).getByText(/on the branch feat\/gift-cards\./),
 		).toBeTruthy();
 		cleanup();
 

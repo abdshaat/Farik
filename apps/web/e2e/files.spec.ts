@@ -117,7 +117,11 @@ test("the owner reads and edits the team's documents, through the real server an
 			waiting.filter((e) => e.kind === "folder_change.integrated"),
 		).toHaveLength(0);
 		// The owner merges it on their own checkout, then tells Catervas to look.
-		mergeByHand(serve.project, "docs/folder-1");
+		const edited = waiting.find((e) => e.kind === "folder_doc.edited");
+		const branch = String(edited?.body.branch);
+		expect(branch).toMatch(/^docs\/[a-z0-9-]+$/);
+		expect(branch).not.toContain("folder-");
+		mergeByHand(serve.project, branch);
 		catervas(serve.project, ["integrate", "folder-1"]);
 		await expect
 			.poll(

@@ -1780,6 +1780,11 @@
       "description": "The numbers of the proposals one decision covers; a proposal's number is its event's seq."
     },
     "folderChangeNumber": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+    "folderChangeBranch": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^docs/[a-z0-9]+(-[a-z0-9]+)*$"
+    },
     "folderDocWrittenBody": {
       "title": "Folder Doc Written Body",
       "description": "An agent wrote a document of its own folder at a delivery's ceremony through catervas_write_folder_doc (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha; the team's integration policy then adds it to the project. The envelope names the agent and its session and no task.",
@@ -1790,7 +1795,8 @@
         "path": { "$ref": "#/$defs/folderDocPath" },
         "written_by": { "type": "string" },
         "change": { "$ref": "#/$defs/folderChangeNumber" },
-        "sha": { "type": "string", "minLength": 1 }
+        "sha": { "type": "string", "minLength": 1 },
+        "branch": { "description": "The branch the change was made on (ADR 0066); absent in a log from before 0.119, where it is docs/folder-<change>.", "$ref": "#/$defs/folderChangeBranch" }
       }
     },
     "folderDocProposedBody": {
@@ -1818,6 +1824,7 @@
         "proposals": { "$ref": "#/$defs/folderDocProposals" },
         "change": { "$ref": "#/$defs/folderChangeNumber" },
         "sha": { "type": "string", "minLength": 1 },
+        "branch": { "description": "The branch the change was made on (ADR 0066); absent in a log from before 0.119, where it is docs/folder-<change>.", "$ref": "#/$defs/folderChangeBranch" },
         "note": { "type": "string", "maxLength": 600 }
       }
     },
@@ -1841,7 +1848,8 @@
       "properties": {
         "path": { "$ref": "#/$defs/folderDocPath" },
         "change": { "$ref": "#/$defs/folderChangeNumber" },
-        "sha": { "type": "string", "minLength": 1 }
+        "sha": { "type": "string", "minLength": 1 },
+        "branch": { "description": "The branch the change was made on (ADR 0066); absent in a log from before 0.119, where it is docs/folder-<change>.", "$ref": "#/$defs/folderChangeBranch" }
       }
     },
     "folderChangeOpenedBody": {

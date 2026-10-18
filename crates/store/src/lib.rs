@@ -5,6 +5,8 @@
 pub mod activity;
 /// The copy of a private folder a task is judged against.
 pub mod baseline;
+/// The branch names a new branch may not take.
+pub mod branches;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// What the store refuses, and why.
