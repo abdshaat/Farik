@@ -672,6 +672,7 @@ async fn open_preview(
         },
         ..preview.clone()
     };
+    let env = crate::preview::PreviewEnv::read(tools.files.root());
     let (previews, project, task, worktree_owned, tree_owned) = (
         Arc::clone(&deps.previews),
         tools.ids.project_id.clone(),
@@ -681,7 +682,14 @@ async fn open_preview(
     );
     let started = std::time::Instant::now();
     let running = tokio::task::spawn_blocking(move || {
-        previews.start(&project, &task, &worktree_owned, &asked, &tree_owned)
+        previews.start(
+            &project,
+            &task,
+            &worktree_owned,
+            &asked,
+            &tree_owned,
+            env.as_ref(),
+        )
     })
     .await
     .map_err(|error| OrchestratorError::Refused {
@@ -759,7 +767,9 @@ fn preview_failed(
     ids: &EventIds,
     error: &PreviewError,
 ) -> Result<SessionEnd, OrchestratorError> {
-    let why = error.to_string();
+    // The text holds none of the owner's values (ADR 0067): every path a failure takes starts here.
+    let why = crate::preview::PreviewEnv::read(deps.tools.files.root())
+        .map_or_else(|| error.to_string(), |env| env.hide(&error.to_string()));
     stopped(deps, ids, &why)?;
     deps.tools.transitions.request(
         &TransitionRequest {
@@ -2405,6 +2415,71 @@ mod tests {
                 panic!("the preview's stop");
             };
             assert!(body.reason.contains(tail), "{name}: {}", body.reason);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_failed_preview_never_shows_the_environment_values() {
+        use catervas_protocol::event::EscalationRaisedBodyReason;
+
+        use crate::preview::PreviewError;
+        use crate::preview::fixtures::FakePreviews;
+
+        let mut harness = Harness::new("preview-env-hidden", browsing);
+        let previews = Arc::new(FakePreviews::failing(PreviewError::NeverAnswered {
+            tail: "booting with service-role-secret-0123 on 300".to_string(),
+        }));
+        harness.previews = previews.clone();
+        harness.in_progress("CTV-1", "iris", "ada");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &orchestrator.deps;
+        let root = deps.tools.files.root().to_path_buf();
+        std::fs::create_dir_all(root.join(".catervas/local")).expect("the folder is made");
+        let file = root.join(crate::preview::PREVIEW_ENV);
+        std::fs::write(
+            &file,
+            "SUPABASE_SERVICE_ROLE=service-role-secret-0123\nPORT=300\n",
+        )
+        .expect("the file is written");
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+
+        run_session(deps, &team, exploring(&harness, &team, &contract))
+            .await
+            .expect("a preview that fails is an answer");
+
+        assert_eq!(
+            *crate::locked(&previews.envs),
+            [Some(std::path::absolute(&file).expect("an absolute path"))]
+        );
+        let raised = harness.events(&[EventKind::EscalationRaised]);
+        let EventBody::EscalationRaised(body) = &raised[0].body else {
+            panic!("an escalation");
+        };
+        assert_eq!(body.reason, EscalationRaisedBodyReason::Preview);
+        assert!(
+            body.detail.contains("booting with [hidden] on 300"),
+            "{}",
+            body.detail
+        );
+        let stopped = harness.events(&[EventKind::PreviewStopped]);
+        let EventBody::PreviewStopped(body) = &stopped[0].body else {
+            panic!("the preview's stop");
+        };
+        assert!(
+            body.reason.contains("booting with [hidden] on 300"),
+            "{}",
+            body.reason
+        );
+        for event in harness.events(&[]) {
+            let text = serde_json::to_string(&event).expect("an event serialises");
+            assert!(!text.contains("service-role-secret-0123"), "{text}");
         }
     }
 

@@ -1,5 +1,6 @@
 //! A task's preview in Docker (`docs/SPEC.md` 8.3): `prepare` in a container of the sandbox image
-//! with the network on, `start` in one with it off, and both, with the browser's, removed by name.
+//! with the network on, `start` in one on the bridge too, the owner's computer at
+//! `host.docker.internal`, and all, with the browser's, removed by name.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -11,7 +12,7 @@ use catervas_core::team::Preview;
 
 use crate::exec::supervise;
 use crate::preview::{
-    AVAILABLE_FOR, PreviewError, PreviewFactory, RunningPreview, browser_container,
+    AVAILABLE_FOR, PreviewEnv, PreviewError, PreviewFactory, RunningPreview, browser_container,
 };
 use crate::sandbox::SandboxError;
 use crate::sandbox::docker::{docker, docker_name, id, removed, stderr_of};
@@ -33,6 +34,67 @@ const TAIL_LINES: usize = 40;
 /// printed, so that a long install still ends with what failed.
 const PREPARE_SCRIPT: &str = "timeout -k 2 900 sh -c \"$1\" > /tmp/catervas-prepare.log 2>&1; \
      code=$?; tail -n 40 /tmp/catervas-prepare.log; exit $code";
+
+/// The owner's computer as the preview's containers name it (ADR 0067).
+const HOST_MAPPING: &str = "host.docker.internal:host-gateway";
+
+/// What `prepare`'s and `start`'s `docker run` share.
+pub(crate) struct Launch<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) mount: &'a str,
+    pub(crate) user: &'a str,
+    pub(crate) labels: &'a [String],
+    pub(crate) image: &'a str,
+    /// The owner's environment file, given to Docker as `--env-file`.
+    pub(crate) env: Option<&'a Path>,
+}
+
+/// The options both containers take before their image: the network, the owner's computer, the
+/// owner's environment file, the worktree, the user.
+fn shared_args(launch: &Launch<'_>) -> Vec<String> {
+    let mut args: Vec<String> = ["--network", "bridge", "--add-host", HOST_MAPPING]
+        .map(String::from)
+        .to_vec();
+    if let Some(env) = launch.env {
+        args.extend(["--env-file".to_string(), env.display().to_string()]);
+    }
+    args.extend(
+        [
+            "--mount",
+            launch.mount,
+            "-w",
+            "/workspace",
+            "--user",
+            launch.user,
+        ]
+        .map(String::from),
+    );
+    for label in launch.labels {
+        args.extend(["--label".to_string(), label.clone()]);
+    }
+    args
+}
+
+/// `start`'s `docker run`, detached, labelled with the tree it is of.
+pub(crate) fn start_args(launch: &Launch<'_>, tree_label: &str, start: &str) -> Vec<String> {
+    let mut args: Vec<String> = ["run", "-d", "--init", "--name", launch.name]
+        .map(String::from)
+        .to_vec();
+    args.extend(shared_args(launch));
+    args.extend(["--label".to_string(), tree_label.to_string()]);
+    args.extend([launch.image, "sh", "-c", start].map(String::from));
+    args
+}
+
+/// `prepare`'s `docker run`, removed when it ends, its command run by `PREPARE_SCRIPT`.
+pub(crate) fn prepare_args(launch: &Launch<'_>, prepare: &str) -> Vec<String> {
+    let mut args: Vec<String> = ["run", "--rm", "--name", launch.name]
+        .map(String::from)
+        .to_vec();
+    args.extend(shared_args(launch));
+    args.extend([launch.image, "sh", "-c", PREPARE_SCRIPT, "sh", prepare].map(String::from));
+    args
+}
 
 /// Prints each file in `$@` that exists and always succeeds: a kernel without IPv6 has no
 /// `/proc/net/tcp6`, and `/proc/net/tcp` must still be read (ADR 0054).
@@ -105,6 +167,7 @@ impl PreviewFactory for DockerPreviewFactory {
         worktree: &Path,
         preview: &Preview,
         tree: &str,
+        env: Option<&PreviewEnv>,
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         let unavailable = |detail: String| PreviewError::DockerUnavailable { detail };
         // `--mount` splits on commas and wants an absolute source.
@@ -158,23 +221,25 @@ impl PreviewFactory for DockerPreviewFactory {
         };
         let mount = format!("type=bind,src={},dst=/workspace", worktree.display());
         if let Some(prepare) = &preview.prepare {
-            running.prepare(&preparing, &mount, &self.image, prepare)?;
+            running.prepare(
+                &preparing,
+                &mount,
+                &self.image,
+                prepare,
+                env.map(PreviewEnv::path),
+            )?;
         }
         let tree_label = format!("catervas.tree={tree}");
-        let mut args = vec!["run", "-d", "--init", "--name", &running.name];
-        args.extend(["--network", "none", "--mount", &mount, "-w", "/workspace"]);
-        args.extend(["--user", &running.user]);
-        for label in &running.labels {
-            args.extend(["--label", label]);
-        }
-        args.extend([
-            "--label",
-            &tree_label,
-            &self.image,
-            "sh",
-            "-c",
-            &preview.start,
-        ]);
+        let launch = Launch {
+            name: &running.name,
+            mount: &mount,
+            user: &running.user,
+            labels: &running.labels,
+            image: &self.image,
+            env: env.map(PreviewEnv::path),
+        };
+        let args = start_args(&launch, &tree_label, &preview.start);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let started = run(&args)?;
         if !started.status.success() {
             return Err(unavailable(stderr_of(&started)));
@@ -212,7 +277,8 @@ struct DockerPreview {
 }
 
 impl DockerPreview {
-    /// Runs `prepare` in a container of `image` named `preparing`, with the network on and the
+    /// Runs `prepare` in a container of `image` named `preparing`, with the network on, the owner's
+    /// environment file when there is one, and the
     /// worktree mounted, for at most `PREPARE_LIMIT`.
     fn prepare(
         &self,
@@ -220,14 +286,18 @@ impl DockerPreview {
         mount: &str,
         image: &str,
         prepare: &str,
+        env: Option<&Path>,
     ) -> Result<(), PreviewError> {
+        let launch = Launch {
+            name: preparing,
+            mount,
+            user: &self.user,
+            labels: &self.labels,
+            image,
+            env,
+        };
         let mut client = Command::new("docker");
-        client.args(["run", "--rm", "--name", preparing, "--network", "bridge"]);
-        client.args(["--mount", mount, "-w", "/workspace", "--user", &self.user]);
-        for label in &self.labels {
-            client.args(["--label", label]);
-        }
-        client.args([image, "sh", "-c", PREPARE_SCRIPT, "sh", prepare]);
+        client.args(prepare_args(&launch, prepare));
         let finished = supervise(
             &mut client,
             PREPARE_LIMIT.saturating_add(CLIENT_GRACE),
@@ -383,8 +453,95 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use super::{DockerPreviewFactory, LISTENING_SCRIPT, daemon_answers, listening_ports};
-    use crate::preview::PreviewFactory;
+    use super::{
+        DockerPreviewFactory, LISTENING_SCRIPT, Launch, daemon_answers, listening_ports,
+        prepare_args, start_args,
+    };
+    use crate::preview::{PREVIEW_ENV, PreviewEnv, PreviewFactory};
+
+    fn occurrences(args: &[String], one: &str) -> usize {
+        args.iter().filter(|arg| *arg == one).count()
+    }
+
+    fn before_image(args: &[String]) -> &[String] {
+        let image = args.iter().position(|arg| arg == "img").expect("the image");
+        &args[..image]
+    }
+
+    #[test]
+    fn starts_the_preview_on_the_network_with_the_owners_environment_file() {
+        let root = std::env::temp_dir().join(format!("catervas-envfile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".catervas/local")).expect("the folder is made");
+        assert!(PreviewEnv::read(&root).is_none());
+        let labels = vec!["catervas.project=p".to_string()];
+        let launch = |env| Launch {
+            name: "n",
+            mount: "type=bind,src=/w,dst=/workspace",
+            user: "1:1",
+            labels: &labels,
+            image: "img",
+            env,
+        };
+        let held = |args: &[String]| {
+            let before = before_image(args);
+            assert_eq!(occurrences(before, "--network"), 1, "{args:?}");
+            assert!(
+                before
+                    .windows(2)
+                    .any(|pair| pair[0] == "--network" && pair[1] == "bridge"),
+                "{args:?}"
+            );
+            assert_eq!(occurrences(before, "--add-host"), 1, "{args:?}");
+            assert_eq!(
+                occurrences(before, "host.docker.internal:host-gateway"),
+                1,
+                "{args:?}"
+            );
+        };
+        let bare = [
+            start_args(&launch(None), "catervas.tree=t", "npm start"),
+            prepare_args(&launch(None), "npm ci"),
+        ];
+        for args in &bare {
+            held(args);
+            assert_eq!(occurrences(args, "--env-file"), 0, "{args:?}");
+        }
+
+        std::fs::write(
+            root.join(PREVIEW_ENV),
+            "NEXT_PUBLIC_SUPABASE_URL=http://host.docker.internal:54321\nSUPABASE_SERVICE_ROLE=service-role-secret-0123\n",
+        )
+        .expect("the file is written");
+        let env = PreviewEnv::read(&root).expect("the file is there");
+        assert!(env.path().is_absolute());
+        assert!(env.path().ends_with(PREVIEW_ENV));
+        let path = env.path().display().to_string();
+        let with = [
+            start_args(&launch(Some(env.path())), "catervas.tree=t", "npm start"),
+            prepare_args(&launch(Some(env.path())), "npm ci"),
+        ];
+        for args in &with {
+            held(args);
+            let before = before_image(args);
+            assert_eq!(occurrences(before, "--env-file"), 1, "{args:?}");
+            assert_eq!(occurrences(args, "--env-file"), 1, "{args:?}");
+            let at = before
+                .iter()
+                .position(|arg| arg == "--env-file")
+                .expect("flag");
+            assert_eq!(before[at + 1], path);
+            assert!(
+                args.iter()
+                    .all(|arg| !arg.contains("service-role-secret-0123")),
+                "{args:?}"
+            );
+        }
+        let shown = format!("{env:?}");
+        assert!(!shown.contains("service-role-secret-0123"), "{shown}");
+        assert!(!shown.contains("54321"), "{shown}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// A folder holding an executable `docker` that runs `body` under `sh`, answering its path.
     /// A child process writes it, so that no write descriptor lives in this process: another test
