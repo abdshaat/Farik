@@ -220,7 +220,7 @@ Tests:
   before a closed delivery and accepted again after it does not count towards the next delivery;
   a task accepted only after it does.
 
-- [ ] `fix(runtime): a delivery counts a task once however often it is accepted`
+- [x] `fix(runtime): a delivery counts a task once however often it is accepted`
 
 ## Verification
 

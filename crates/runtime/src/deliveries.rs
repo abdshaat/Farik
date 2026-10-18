@@ -169,14 +169,23 @@ pub fn due_delivery(
     let changelog = changelog_tasks(log)?;
     let board = projections.board()?;
     let mut accepted: Vec<TaskId> = Vec::new();
+    // A task accepted before the last delivery closed was counted in it; accepted again (its pull
+    // request stopped merging, ADR 0069), it is not counted twice.
+    let mut counted: Vec<TaskId> = Vec::new();
     for event in log.read(&EventQuery {
         kinds: vec![EventKind::TaskTransitioned],
-        after_seq: Some(since_seq),
         ..EventQuery::default()
     })? {
-        if let Some(task_id) = event.envelope.ids.task_id.clone()
-            && is_move_into(&event, TaskStatus::Accepted)
-            && !changelog.contains(&task_id)
+        let Some(task_id) = event.envelope.ids.task_id.clone() else {
+            continue;
+        };
+        if !is_move_into(&event, TaskStatus::Accepted) {
+            continue;
+        }
+        if event.envelope.seq <= since_seq {
+            counted.push(task_id);
+        } else if !changelog.contains(&task_id)
+            && !counted.contains(&task_id)
             && !accepted.contains(&task_id)
         {
             accepted.push(task_id);
@@ -361,7 +370,7 @@ pub fn delivery_events(
 mod tests {
     use serde_json::json;
 
-    use super::closed_delivery;
+    use super::{closed_delivery, due_delivery};
     use crate::tools::fixtures::{TestProject, a_team_of_three};
 
     #[test]
@@ -411,5 +420,68 @@ mod tests {
             .expect("the log reads")
             .expect("D1 closed");
         assert_eq!(delivery.reviewed_by, ["sm", "pm"]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_a_task_accepted_again_once() {
+        // A pull request that stopped merging sends its task back, and it is accepted a second
+        // time (ADR 0069): the delivery that counted it already does not count it again.
+        let project = TestProject::new("deliveries-counted-once", &a_team_of_three(|_| {}));
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.filed("CTV-1", "verifying", "task", None);
+        project.moved("CTV-1", "verifying", "accepted", &people);
+        project.record(
+            "",
+            "delivery.closed",
+            &json!({
+                "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": ["CTV-1"]
+            }),
+        );
+        project.record_in(
+            Some("pm"),
+            Some("s-1"),
+            "",
+            "session.started",
+            &json!({
+                "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                "thread": "retro"
+            }),
+        );
+        project.record_in(
+            Some("pm"),
+            Some("s-1"),
+            "",
+            "session.ended",
+            &json!({ "reason": "completed", "detail": "" }),
+        );
+        for (from, to) in [
+            ("accepted", "assigned"),
+            ("assigned", "in_progress"),
+            ("in_progress", "verifying"),
+            ("verifying", "accepted"),
+        ] {
+            project.moved("CTV-1", from, to, &people);
+        }
+        let team = a_team_of_three(|_| {});
+        let due = |project: &TestProject| {
+            project
+                .deps
+                .projections
+                .catch_up()
+                .expect("the board catches up");
+            due_delivery(&project.deps.log, &project.deps.projections, &team)
+                .expect("the log reads")
+        };
+
+        assert_eq!(due(&project), None, "CTV-1 is in D1 already");
+
+        project.filed("CTV-2", "verifying", "task", None);
+        project.moved("CTV-2", "verifying", "accepted", &people);
+
+        let due = due(&project).expect("CTV-2 is accepted since D1");
+        let ids: Vec<&str> = due.task_ids.iter().map(|id| id.as_str()).collect();
+        assert_eq!(ids, ["CTV-2"]);
+        assert_eq!(due.delivery_id, "D2");
     }
 }
