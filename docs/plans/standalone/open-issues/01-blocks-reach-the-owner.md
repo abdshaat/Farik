@@ -1,6 +1,6 @@
 # Standalone (open issues), plan 1: whoever holds a task reaches the owner
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.2, 5.7 (recorded in plan 8's revision 0.122)
 Depends on: `fix/stray-changes` at `6ba32d2a` (ADR 0068's blocked rows and choices)

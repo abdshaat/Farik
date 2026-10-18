@@ -1,6 +1,6 @@
 # Standalone: the open issues of the note-chat2 journey
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, one pull request to `main`), cut from
 `fix/stray-changes` (ADRs 0061 to 0064, 0066 to 0068 executed; SPEC 0.121)
 Decision: ADR 0069 (`docs/decisions/0069-the-open-issues-of-the-note-chat2-journey.md`)

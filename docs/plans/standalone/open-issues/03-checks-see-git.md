@@ -1,6 +1,6 @@
 # Standalone (open issues), plan 3: the checks Catervas runs can read git
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.4, 8.3 (recorded in plan 8's revision 0.122)
 Depends on: plan 2 of this folder (committed on this branch)

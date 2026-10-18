@@ -1,6 +1,6 @@
 # Standalone (open issues), plan 2: no refusal parks a task in silence
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.2, 5.4, 6.8 (recorded in plan 8's revision 0.122)
 Depends on: plan 1 of this folder (committed on this branch)

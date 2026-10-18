@@ -1,6 +1,6 @@
 # Standalone (open issues), plan 5: a pull request that stops merging goes back to its author
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.2, 5.14, 8.5 (recorded in plan 8's revision 0.122)
 Depends on: plans 1 (the `accepted -> assigned` row and its gate) and 4 (`Git::is_merging`, the

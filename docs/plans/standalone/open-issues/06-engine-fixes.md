@@ -1,6 +1,6 @@
 # Standalone (open issues), plan 6: six fixes in the engine
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 4.1, 5.14, 6.7, 8.6 (recorded in plan 8's revision 0.122)
 Depends on: plan 5 of this folder (committed on this branch)

@@ -1,6 +1,6 @@
 # Standalone (open issues), plan 8: the spec records the fixes
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md`, revision 0.122
 Depends on: plans 1 to 7 of this folder (committed on this branch)
@@ -86,7 +86,7 @@ Consumes: what plans 1 to 7 committed, and their Decisions. Produces: nothing a 
 Files: as the file map says. No test: documents only (ADR 0060's one test per functionality has
 nothing to test here).
 
-- [ ] `docs(spec): blocked work reaches the owner, checks see git, pull requests stay mergeable, revision 0.122`
+- [x] `docs(spec): blocked work reaches the owner, checks see git, pull requests stay mergeable, revision 0.122`
 
 ## Verification
 

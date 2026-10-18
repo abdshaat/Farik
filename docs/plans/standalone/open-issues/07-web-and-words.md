@@ -1,6 +1,6 @@
 # Standalone (open issues), plan 7: the web app's fixes and its stale words
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 4.1, 5.12, 7 F8 (recorded in plan 8's revision 0.122)
 Depends on: plan 6 of this folder (committed on this branch)

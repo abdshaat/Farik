@@ -1,6 +1,6 @@
 # Standalone (open issues), plan 4: Catervas tidies before each work session
 
-Status: draft
+Status: done
 Branch: `fix/open-issues` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` 5.2 (recorded in plan 8's revision 0.122)
 Depends on: plan 3 of this folder (committed on this branch)
