@@ -1,10 +1,11 @@
 //! What the first-run wizard's "Checking your computer" finds (`docs/SPEC.md` section 4.1):
 //! Claude Code, git, Docker, and Catervas's sandbox image, which it can build on request.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::os::unix::process::CommandExt as _;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::SANDBOX_IMAGE;
@@ -33,6 +34,8 @@ pub enum ItemState {
     TooOld,
     /// Docker is there, but its daemon does not answer.
     NotRunning,
+    /// Being built in the background (ADR 0070).
+    Preparing,
 }
 
 /// One thing checked, and the version it said, when it said one.
@@ -43,20 +46,33 @@ pub struct Item {
     /// The version it reported.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// The build step reached, while `Preparing` and the build has said.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done: Option<u32>,
+    /// The build's steps in all, with `done`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub of: Option<u32>,
+    /// Docker's last words, on a `Missing` item whose last build failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed: Option<String>,
 }
 
 impl Item {
     fn missing() -> Item {
-        Item {
-            state: ItemState::Missing,
-            version: None,
-        }
+        Item::bare(ItemState::Missing)
     }
 
     fn bare(state: ItemState) -> Item {
+        Item::versioned(state, None)
+    }
+
+    fn versioned(state: ItemState, version: Option<String>) -> Item {
         Item {
             state,
-            version: None,
+            version,
+            done: None,
+            of: None,
+            failed: None,
         }
     }
 }
@@ -86,24 +102,20 @@ pub fn check_computer(env: &BTreeMap<String, String>, designer: bool) -> Compute
         Some((true, output)) => {
             let version = output.split_whitespace().next().map(str::to_string);
             match check_version(&output) {
-                Ok(()) => Item {
-                    state: ItemState::Ready,
-                    version,
-                },
-                Err(RuntimeError::VersionTooOld { .. }) => Item {
-                    state: ItemState::TooOld,
-                    version,
-                },
+                Ok(()) => Item::versioned(ItemState::Ready, version),
+                Err(RuntimeError::VersionTooOld { .. }) => {
+                    Item::versioned(ItemState::TooOld, version)
+                }
                 Err(_) => Item::missing(),
             }
         }
         _ => Item::missing(),
     };
     let git = match run(env, "git", &["--version"]) {
-        Some((true, output)) => Item {
-            state: ItemState::Ready,
-            version: Some(output.trim().trim_start_matches("git version ").to_string()),
-        },
+        Some((true, output)) => Item::versioned(
+            ItemState::Ready,
+            Some(output.trim().trim_start_matches("git version ").to_string()),
+        ),
         _ => Item::missing(),
     };
     let docker = match run(env, "docker", &["version"]) {
@@ -161,44 +173,165 @@ pub fn pull_browser_image(env: &BTreeMap<String, String>) -> Result<String, Stri
     }
 }
 
-/// Builds `SANDBOX_IMAGE` with `docker build -t <image> -`, the Dockerfile on standard input, and
-/// answers the image.
-///
-/// # Errors
-///
-/// The sentence to show when docker is missing or the build fails.
-pub async fn build_sandbox_image(env: &BTreeMap<String, String>) -> Result<String, String> {
-    use tokio::io::AsyncWriteExt as _;
+/// How the background build of `SANDBOX_IMAGE` stands (ADR 0070).
+#[derive(Debug, Default)]
+enum Building {
+    /// None runs; the last one, if any, ended well.
+    #[default]
+    Idle,
+    /// `docker build` runs, at the step it last said.
+    Running { done: Option<u32>, of: Option<u32> },
+    /// The last build failed, with Docker's last words.
+    Failed(String),
+}
 
-    let docker = on_path("docker", env).ok_or("Docker is not installed")?;
-    let failed = |why: String| format!("the sandbox image could not be built: {why}");
+/// The sandbox image's build, run in the background by the daemon, one at a time (ADR 0070).
+#[derive(Debug, Default)]
+pub struct ImageBuild {
+    now: Arc<Mutex<Building>>,
+}
+
+impl ImageBuild {
+    /// Starts `docker build -t <image> -`, the Dockerfile on standard input, in the background, or
+    /// joins the one that runs. Must be called inside the async runtime.
+    ///
+    /// # Errors
+    ///
+    /// The sentence to show when docker is missing.
+    pub fn start(&self, env: &BTreeMap<String, String>) -> Result<(), String> {
+        let docker = on_path("docker", env).ok_or("Docker is not installed")?;
+        {
+            let mut now = crate::locked(&self.now);
+            if matches!(*now, Building::Running { .. }) {
+                return Ok(());
+            }
+            *now = Building::Running {
+                done: None,
+                of: None,
+            };
+        }
+        let mut env = env.clone();
+        env.insert("BUILDKIT_PROGRESS".to_string(), "plain".to_string());
+        let now = Arc::clone(&self.now);
+        tokio::spawn(async move {
+            let ended = match build(&docker, &env, &now).await {
+                Ok(()) => Building::Idle,
+                Err(why) => {
+                    Building::Failed(format!("the sandbox image could not be built: {why}"))
+                }
+            };
+            *crate::locked(&now) = ended;
+        });
+        Ok(())
+    }
+
+    /// The check's sandbox image item with the job laid over it (ADR 0070, 2): a running build
+    /// reads `Preparing`, whatever Docker says of the image; a failed one gives its words to an
+    /// image that is still missing.
+    #[must_use]
+    pub fn over(&self, checked: Item) -> Item {
+        match &*crate::locked(&self.now) {
+            Building::Running { done, of } => Item {
+                done: *done,
+                of: *of,
+                ..Item::bare(ItemState::Preparing)
+            },
+            Building::Failed(words) if checked.state != ItemState::Ready => Item {
+                failed: Some(words.clone()),
+                ..checked
+            },
+            Building::Idle | Building::Failed(_) => checked,
+        }
+    }
+}
+
+/// How many of Docker's last stderr lines a failed build keeps.
+const FAILED_LINES: usize = 20;
+
+/// Runs the build, raising the job's step as the output says it, and answers why it failed.
+async fn build(
+    docker: &std::path::Path,
+    env: &BTreeMap<String, String>,
+    now: &Arc<Mutex<Building>>,
+) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+
     let mut child = tokio::process::Command::new(docker)
         .args(["build", "-t", SANDBOX_IMAGE, "-"])
         .env_clear()
         .envs(env)
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|error| failed(error.to_string()))?;
+        .map_err(|error| error.to_string())?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(DOCKERFILE.as_bytes())
             .await
-            .map_err(|error| failed(error.to_string()))?;
+            .map_err(|error| error.to_string())?;
     }
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|error| failed(error.to_string()))?;
-    if output.status.success() {
-        Ok(SANDBOX_IMAGE.to_string())
+    let step = |line: &str| {
+        if let Some((k, m)) = build_step(line) {
+            let mut now = crate::locked(now);
+            if let Building::Running { done, of } = &mut *now {
+                *done = Some(done.map_or(k, |seen| seen.max(k)));
+                *of = Some(m);
+            }
+        }
+    };
+    let stdout = child.stdout.take().map(BufReader::new);
+    let stderr = child.stderr.take().map(BufReader::new);
+    let read_out = async {
+        if let Some(out) = stdout {
+            let mut lines = out.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                step(&line);
+            }
+        }
+    };
+    let read_err = async {
+        let mut tail = VecDeque::new();
+        if let Some(err) = stderr {
+            let mut lines = err.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                step(&line);
+                if tail.len() == FAILED_LINES {
+                    tail.pop_front();
+                }
+                tail.push_back(line);
+            }
+        }
+        tail
+    };
+    let ((), tail) = tokio::join!(read_out, read_err);
+    let status = child.wait().await.map_err(|error| error.to_string())?;
+    if status.success() {
+        Ok(())
     } else {
-        Err(failed(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ))
+        Err(tail.into_iter().collect::<Vec<_>>().join("\n"))
     }
+}
+
+/// The step a build line says it is on, as `(step, steps in all)`: `BuildKit`'s
+/// `#6 [2/4] RUN ...` and `#6 [stage-1 2/4] ...`, and the legacy builder's `Step 2/4 : ...`.
+fn build_step(line: &str) -> Option<(u32, u32)> {
+    let pair = |text: &str| {
+        let (k, m) = text.split_once('/')?;
+        Some((k.parse::<u32>().ok()?, m.parse::<u32>().ok()?))
+    };
+    let line = line.trim_start();
+    if let Some(rest) = line.strip_prefix("Step ") {
+        return pair(rest.split_whitespace().next()?);
+    }
+    let rest = line.strip_prefix('#')?;
+    let after = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+    if after.len() == rest.len() {
+        return None;
+    }
+    let inside = after.trim_start().strip_prefix('[')?;
+    pair(inside.split(']').next()?.split_whitespace().next_back()?)
 }
 
 /// Runs `program` with `args`, and answers whether it succeeded and what it printed; `None` when
@@ -269,7 +402,7 @@ mod tests {
     use std::os::unix::fs::OpenOptionsExt as _;
     use std::time::Duration;
 
-    use super::{ItemState, check_computer, run};
+    use super::{ItemState, build_step, check_computer, run};
 
     /// A folder of programs, each a shell script, as the `PATH` of an environment.
     fn programs(test: &str, scripts: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -368,5 +501,14 @@ mod tests {
         let ran = run(&env, "git", &["--version"]);
         writer.join().expect("the writer lets go");
         assert_eq!(ran, Some((true, "git version 2.43.0\n".to_string())));
+    }
+
+    #[test]
+    fn reads_the_step_from_either_builders_line() {
+        assert_eq!(build_step("#6 [2/4] RUN apt-get update"), Some((2, 4)));
+        assert_eq!(build_step("#6 [stage-1 3/5] COPY x y"), Some((3, 5)));
+        assert_eq!(build_step("Step 2/4 : RUN true"), Some((2, 4)));
+        assert_eq!(build_step("#1 [internal] load build definition"), None);
+        assert_eq!(build_step("#6 0.5 Reading package lists"), None);
     }
 }

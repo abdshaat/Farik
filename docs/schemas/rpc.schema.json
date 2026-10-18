@@ -1806,11 +1806,26 @@
             "ready",
             "missing",
             "too_old",
-            "not_running"
+            "not_running",
+            "preparing"
           ]
         },
         "version": {
           "type": "string"
+        },
+        "done": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The build step reached, while preparing and the build has said."
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The build's steps in all."
+        },
+        "failed": {
+          "type": "string",
+          "description": "Docker's last words, on a missing item whose last build failed."
         }
       },
       "required": [
