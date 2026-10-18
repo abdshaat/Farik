@@ -9,6 +9,7 @@ use catervas_core::contract::{
 };
 use catervas_core::folders::{is_plan_task, plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
+use catervas_core::governor::gates::Blocker;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Agent, AgentStatus, Team, changes_code, task_private_folder};
@@ -171,9 +172,10 @@ pub(super) async fn refining(
         .iter()
         .any(|event| event.envelope.seq > began && event.body.kind() == EventKind::QuestionAsked);
     let failures = last_readiness_failures(&history, began);
+    let stuck = came_back_from_a_block(&history);
     let initial_prompt = match lead {
-        Some(agent) => given_task_message(&contract, agent, !asked, &failures),
-        None => refine_message(&contract, !asked, &failures),
+        Some(agent) => given_task_message(&contract, agent, !asked, &failures, stuck.as_ref()),
+        None => refine_message(&contract, !asked, &failures, stuck.as_ref()),
     };
     let end = run_session(
         deps,
@@ -1110,6 +1112,26 @@ fn record_epic_review(
             passed: true,
         }),
     )
+}
+
+/// The blocker that sent the task back to its plan, when its last move into `refining` came from
+/// `blocked` (ADR 0069).
+fn came_back_from_a_block(history: &[CatervasEvent]) -> Option<Blocker> {
+    let back = last_move_into(history, TaskStatus::Refining)?;
+    let EventBody::TaskTransitioned(body) = &back.body else {
+        return None;
+    };
+    if body.from.to_string() != "blocked" {
+        return None;
+    }
+    let blocking = last_move_into(history, TaskStatus::Blocked)?;
+    match &blocking.body {
+        EventBody::TaskTransitioned(body) => body.blocker.as_ref().map(|blocker| Blocker {
+            description: blocker.description.clone(),
+            needed: blocker.needed.clone(),
+        }),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

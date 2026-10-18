@@ -119,7 +119,8 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
         "This session writes the contract you were given, or improves it. Write it with \
          `catervas_write_contract` and end the session once it is written. For an epic whose \
          questions are not yet answered, ask them first with `catervas_ask_human` and end your turn \
-         after asking. After asking for a move, post one or two sentences \
+         after asking. If you cannot write it without something only the owner can give, end it \
+         with `catervas_declare_blocked`. After asking for a move, post one or two sentences \
          about it with `catervas_post_message`, in your persona's voice, naming the task.",
     ),
     (
@@ -155,7 +156,12 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
          write the review note with `catervas_write_note` of kind `review`, mapping each criterion to \
          its evidence, and request `rejected` with `catervas_request_transition` only if a criterion \
          failed, naming each one that failed. If you are the Product Manager and the first message \
-         says the review passed, request `accepted` with `catervas_request_transition`. After asking for a move, post one or two sentences \
+         says the review passed, request `accepted` with `catervas_request_transition`. If something you \
+         cannot change stops your review, a check Catervas could not run or something only the owner \
+         can give, end it with `catervas_declare_blocked`, saying what is in the way and what is \
+         needed. How a page looks and behaves in a browser is the UI/UX Designer's check, shown in \
+         the first message when the change touches the interface; never ask the owner to run a \
+         command or look at a page. After asking for a move, post one or two sentences \
          about it with `catervas_post_message`, in your persona's voice, naming the task.",
     ),
     (
@@ -1366,9 +1372,12 @@ mod tests {
             "`rejected`",
             "only if a criterion failed",
             "`accepted`",
+            "catervas_declare_blocked",
+            "never ask the owner",
         ] {
             assert!(verify.contains(named), "{named} in {verify}");
         }
+        assert!(closing(SessionPurpose::Refine).contains("catervas_declare_blocked"));
 
         for purpose in [
             SessionPurpose::Triage,

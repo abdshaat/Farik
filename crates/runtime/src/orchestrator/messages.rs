@@ -5,6 +5,7 @@ use catervas_core::branch::task_branch;
 use catervas_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use catervas_core::folders::{DocumentFormat, with_format};
 use catervas_core::governor::done::CriterionResult;
+use catervas_core::governor::gates::Blocker;
 use catervas_core::marketing::network_name;
 use catervas_core::team::{Agent, Team, task_private_folder};
 use catervas_protocol::event::{
@@ -178,6 +179,7 @@ pub(super) fn refine_message(
     contract: &TaskContract,
     ask_first: bool,
     failures: &[String],
+    stuck: Option<&Blocker>,
 ) -> String {
     let task = contract.id.as_str();
     let kind = match contract.kind {
@@ -200,6 +202,17 @@ pub(super) fn refine_message(
             failures.join("\n")
         );
     }
+    if let Some(blocker) = stuck {
+        message = format!(
+            "This task came back to its plan because the agent working on it was stuck:\n{}\n\n\
+             Change the contract so the work can be done.\n\n{message}",
+            untrusted_block(
+                "blocker",
+                &format!("{}\nNeeded: {}", blocker.description, blocker.needed),
+                RESULTS_CAP_BYTES
+            )
+        );
+    }
     message
 }
 
@@ -214,13 +227,14 @@ pub(super) fn given_task_message(
     agent: &Agent,
     first: bool,
     failures: &[String],
+    stuck: Option<&Blocker>,
 ) -> String {
     format!(
         "{}\n\n{}",
         GIVEN_TASK_LEAD
             .replace("{name}", agent.display_name.as_str())
             .replace("{role}", &agent.role.to_string()),
-        refine_message(contract, first, failures)
+        refine_message(contract, first, failures, stuck)
     )
 }
 
@@ -1316,6 +1330,7 @@ fn listed(ids: &[String]) -> String {
 mod tests {
     use catervas_core::contract::fixtures::a_contract_wire;
     use catervas_core::contract::{Role, TaskContract, TaskKind, validate_contract};
+    use catervas_core::governor::gates::Blocker;
     use catervas_protocol::event::{CatervasEvent, event_from_value};
     use catervas_store::git::HeadSummary;
     use serde_json::{Value, json};
@@ -1863,14 +1878,40 @@ mod tests {
     #[test]
     fn asks_for_questions_first_only_of_an_epic_that_has_not_asked() {
         let ask = "ask the user every question you need";
-        let first = refine_message(&an_epic(), true, &[]);
+        let first = refine_message(&an_epic(), true, &[], None);
         assert!(first.starts_with("This is an epic: "), "{first}");
         assert!(first.contains(ask), "{first}");
-        let asked = refine_message(&an_epic(), false, &[]);
+        let asked = refine_message(&an_epic(), false, &[], None);
         assert!(!asked.contains(ask), "{asked}");
-        let task = refine_message(&contract(), true, &[]);
+        let task = refine_message(&contract(), true, &[], None);
         assert!(!task.contains(ask), "{task}");
         assert!(task.contains(", a task, "), "{task}");
+    }
+
+    #[test]
+    fn tells_the_plan_why_the_work_came_back() {
+        let blocker = Blocker {
+            description: "the contract allows colour only, the contrast comes from the fade-in"
+                .to_string(),
+            needed: "allow components/BoardDemo.tsx".to_string(),
+        };
+        let message = refine_message(&contract(), true, &[], Some(&blocker));
+        assert!(message.contains("came back to its plan"), "{message}");
+        assert!(
+            message.contains("<untrusted source=\"blocker\">"),
+            "{message}"
+        );
+        assert!(
+            message.contains("the contrast comes from the fade-in"),
+            "{message}"
+        );
+        assert!(
+            message.contains("allow components/BoardDemo.tsx"),
+            "{message}"
+        );
+        assert!(message.contains("Change the contract"), "{message}");
+        let plain = refine_message(&contract(), true, &[], None);
+        assert!(!plain.contains("came back to its plan"), "{plain}");
     }
 
     #[test]
