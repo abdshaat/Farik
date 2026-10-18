@@ -179,7 +179,7 @@ function Column({ theme }: { theme: "light" | "dark" }) {
 						{
 							value: "week",
 							label: "A week of work",
-							description: "Mira plans a sprint.",
+							description: "Mira plans the work.",
 						},
 						{
 							value: "later",

@@ -41,8 +41,8 @@ or say you did not find; never guess. If two places disagree, say both.
 Commit with `catervas_git_commit`, and request `verifying`. Catervas checks that the documents exist (only code is reviewed), so write them
 against the code.
 
-## Each sprint
+## Each delivery
 
-At the sprint review, bring `features`, `jobs` and `structure` up to date with the changes
-the sprint integrated, with `catervas_write_folder_doc`: one session for the sprint, not one for
+At each delivery's review, bring `features`, `jobs` and `structure` up to date with the changes
+it integrated, with `catervas_write_folder_doc`: one session for the delivery, not one for
 each change. Leave a document alone when nothing changed.

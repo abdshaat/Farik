@@ -37,7 +37,7 @@ describe("refusal sentences", () => {
 				en.refuseNotWaiting,
 			"not_awaiting_approval: CTV-1 is ready and no approval is asked of the human":
 				en.refuseNotWaiting,
-			"not_escalated: CTV-1 is ready, and only an escalation is resolved":
+			"not_escalated: CTV-1 is ready, and only an escalation or a blocked task is resolved":
 				en.refuseNotWaiting,
 			"review_first: the reviewer has not finished; send back once the review is in":
 				en.refuseReviewFirst,
@@ -52,8 +52,6 @@ describe("refusal sentences", () => {
 			"same_status: CTV-1 is already ready": en.refuseSameStatus,
 			"agent_retired: Theo has retired, and a past teammate's chat is read-only":
 				en.refuseAgentRetired,
-			"sprint_open: sprint S2 is open": en.refuseSprintOpen,
-			"no_sprint_open: no sprint is open": en.refuseNoSprintOpen,
 			"triage_refused: CTV-1 is already ready": en.refuseTriage,
 			"lock_refused: CTV-1 is accepted": en.refuseLock,
 			// A code the page does not know, a failure with none, a not-found: one plain sentence.

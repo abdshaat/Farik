@@ -88,6 +88,7 @@
         "question.answered",
         "human.accepted",
         "escalation.resolved",
+        "task.room_granted",
         "agent.updated",
         "sprint.started",
         "sprint.planned",
@@ -171,7 +172,13 @@
         "repo.added",
         "repo.removed",
         "repo.moved",
-        "document_rewrite.started"
+        "document_rewrite.started",
+        "delivery.closed",
+        "task.reassigned",
+        "connection.requested",
+        "worktree.tidied",
+        "pull_request.conflicted",
+        "pull_request.refreshed"
       ]
     },
     "eventBodyWire": {
@@ -209,6 +216,7 @@
         { "$ref": "#/$defs/questionAnsweredBody" },
         { "$ref": "#/$defs/humanAcceptedBody" },
         { "$ref": "#/$defs/escalationResolvedBody" },
+        { "$ref": "#/$defs/taskRoomGrantedBody" },
         { "$ref": "#/$defs/agentUpdatedBody" },
         { "$ref": "#/$defs/sprintStartedBody" },
         { "$ref": "#/$defs/sprintPlannedBody" },
@@ -282,7 +290,13 @@
         { "$ref": "#/$defs/repoAddedBody" },
         { "$ref": "#/$defs/repoRemovedBody" },
         { "$ref": "#/$defs/repoMovedBody" },
-        { "$ref": "#/$defs/documentRewriteStartedBody" }
+        { "$ref": "#/$defs/documentRewriteStartedBody" },
+        { "$ref": "#/$defs/deliveryClosedBody" },
+        { "$ref": "#/$defs/taskReassignedBody" },
+        { "$ref": "#/$defs/connectionRequestedBody" },
+        { "$ref": "#/$defs/worktreeTidiedBody" },
+        { "$ref": "#/$defs/pullRequestConflictedBody" },
+        { "$ref": "#/$defs/pullRequestRefreshedBody" }
       ]
     },
     "contractSummary": {
@@ -304,7 +318,7 @@
     },
     "taskCreatedBody": {
       "title": "Task Created Body",
-      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request skips the sprint queue and is worked on at once, outside any sprint (ADR 0028's exception).",
+      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. With given_to, from_chat_message is the owner's own message in that chat, and created_by is human or that agent. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request is worked on as filed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["summary", "created_by"],
@@ -313,10 +327,21 @@
         "created_by": { "type": "string", "description": "The agent id that filed the request, or human." },
         "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "raises": { "$ref": "#/$defs/marketingPlanId" },
+        "found_by": {
+          "type": "string",
+          "pattern": "^CTV-[0-9]{1,6}$",
+          "description": "The hunt that found this bug (ADR 0063); written by catervas_file_bug alone."
+        },
+        "given_to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The agent the owner gave this task to in its one-to-one chat (ADR 0063): from_chat_message names that message, the agent writes the contract and is assigned it."
+        },
         "product_plan": {
           "type": "boolean",
           "const": true,
-          "description": "This request is a new project's product plan task, filed by the owner's word (docs/SPEC.md 4.3); such a request skips the sprint queue as a raise does, and is judged as filed. Only Catervas writes it."
+          "description": "This request is a new project's product plan task, filed by the owner's word (docs/SPEC.md 4.3); such a request is worked on as filed. Only Catervas writes it."
         },
         "rederives": {
           "type": "string",
@@ -326,8 +351,8 @@
         },
         "filed_as": {
           "type": "string",
-          "enum": ["owner_change", "document_rewrite"],
-          "description": "This request is a whole contract Catervas filed for the owner, judged as filed with no refine session (docs/SPEC.md 5.17): owner_change is the owner's ask on the Files page for the role that owns a document to change it; document_rewrite is the task that rewrites a folder's Markdown documents as HTML. Only Catervas writes it."
+          "enum": ["owner_change", "document_rewrite", "changelog"],
+          "description": "This request is a whole contract Catervas filed for the owner, judged as filed with no refine session (docs/SPEC.md 5.17): owner_change is the owner's ask on the Files page for the role that owns a document to change it; document_rewrite is the task that rewrites a folder's Markdown documents as HTML; changelog is the Product Manager's task to add a closed delivery to the changelog. Only Catervas writes it."
         }
       }
     },
@@ -477,7 +502,7 @@
       "title": "Gate Id",
       "description": "The gate of the row a move took (docs/SPEC.md section 5.2); none for a row with no gate.",
       "type": "string",
-      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection"]
+      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection", "pull_request_conflicted"]
     },
     "blockerWire": {
       "title": "Blocker Wire",
@@ -695,6 +720,18 @@
         "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 }
       }
     },
+    "taskRoomGrantedBody": {
+      "title": "Task Room Granted Body",
+      "description": "The human gave a task whose dollars or sessions are spent more room when resolving its escalation (ADR 0062, amending ADR 0024): the task's caps grow by sessions and cost_usd, which are the contract's own, for the rest of its life. granted_by is the actor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions", "cost_usd", "granted_by"],
+      "properties": {
+        "sessions": { "type": "integer", "minimum": 1 },
+        "cost_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "granted_by": { "type": "string" }
+      }
+    },
     "agentUpdatedBody": {
       "title": "Agent Updated Body",
       "description": "An agent's status changed in the team file (docs/SPEC.md F1): a paused agent takes no work and its sessions end at their next tool call.",
@@ -790,12 +827,13 @@
     },
     "retroAppendedBody": {
       "title": "Retro Appended Body",
-      "description": "The retro ceremony of sprint sprint_id, the latest ended, recorded what the next planning should know (docs/SPEC.md 5.9): text, appended to .catervas/team/retro.md under the sprint's section, by appended_by. One per sprint, whichever retro session appends it. It is about no one contract.",
+      "description": "The retro ceremony of delivery delivery_id, the latest closed (or of sprint sprint_id in an older log), recorded what the team should remember next time (docs/SPEC.md 5.9): text, appended to .catervas/team/retro.md under that section, by appended_by. One per delivery, whichever retro session appends it. It is about no one contract. A new event carries delivery_id alone; an old one carries sprint_id alone.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["sprint_id", "text", "appended_by"],
+      "required": ["text", "appended_by"],
       "properties": {
         "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "delivery_id": { "type": "string", "pattern": "^D[1-9][0-9]{0,5}$" },
         "text": { "type": "string" },
         "appended_by": { "type": "string" }
       }
@@ -947,7 +985,8 @@
         "text": { "type": "string" },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "request": { "$ref": "#/$defs/proposedRequest" },
-        "heard": { "$ref": "#/$defs/heard" }
+        "heard": { "$ref": "#/$defs/heard" },
+        "as_task": { "type": "boolean", "const": true, "description": "The owner sent this message as a task for the chat's agent (ADR 0063); the chat does not answer it." }
       }
     },
     "heard": {
@@ -1747,9 +1786,14 @@
       "description": "The numbers of the proposals one decision covers; a proposal's number is its event's seq."
     },
     "folderChangeNumber": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+    "folderChangeBranch": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^docs/[a-z0-9]+(-[a-z0-9]+)*$"
+    },
     "folderDocWrittenBody": {
       "title": "Folder Doc Written Body",
-      "description": "An agent wrote a document of its own folder at a sprint ceremony through catervas_write_folder_doc (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha; the team's integration policy then adds it to the project. The envelope names the agent and its session and no task.",
+      "description": "An agent wrote a document of its own folder at a delivery's ceremony through catervas_write_folder_doc (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha; the team's integration policy then adds it to the project. The envelope names the agent and its session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "written_by", "change", "sha"],
@@ -1757,12 +1801,13 @@
         "path": { "$ref": "#/$defs/folderDocPath" },
         "written_by": { "type": "string" },
         "change": { "$ref": "#/$defs/folderChangeNumber" },
-        "sha": { "type": "string", "minLength": 1 }
+        "sha": { "type": "string", "minLength": 1 },
+        "branch": { "description": "The branch the change was made on (ADR 0066); absent in a log from before 0.119, where it is docs/folder-<change>.", "$ref": "#/$defs/folderChangeBranch" }
       }
     },
     "folderDocProposedBody": {
       "title": "Folder Doc Proposed Body",
-      "description": "An agent proposed a change to a document the owner approves, at the sprint review (docs/SPEC.md 5.7, 5.17): text is the version for people, agent_text its .agent.md version, summary what changed and why, for the owner, and sprint_id the sprint the review was about. The event's seq is the proposal's number. Nothing is written until the owner approves. The envelope names the agent and its session and no task.",
+      "description": "An agent proposed a change to a document the owner approves, at a delivery's review (docs/SPEC.md 5.7, 5.17): text is the version for people, agent_text its .agent.md version, summary what changed and why, for the owner, and sprint_id the number of the review it was made at (an older log's sprint, S4; the field is read and no longer written). The event's seq is the proposal's number. Nothing is written until the owner approves. The envelope names the agent and its session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "text", "agent_text", "summary", "sprint_id", "proposed_by"],
@@ -1785,12 +1830,13 @@
         "proposals": { "$ref": "#/$defs/folderDocProposals" },
         "change": { "$ref": "#/$defs/folderChangeNumber" },
         "sha": { "type": "string", "minLength": 1 },
+        "branch": { "description": "The branch the change was made on (ADR 0066); absent in a log from before 0.119, where it is docs/folder-<change>.", "$ref": "#/$defs/folderChangeBranch" },
         "note": { "type": "string", "maxLength": 600 }
       }
     },
     "folderDocReturnedBody": {
       "title": "Folder Doc Returned Body",
-      "description": "The owner sent proposals back (docs/SPEC.md 5.7): reason is the owner's own words, which the agent's next sprint review reads as the owner's, not as untrusted text. The envelope names no agent, no session and no task.",
+      "description": "The owner sent proposals back (docs/SPEC.md 5.7): reason is the owner's own words, which the agent's next review reads as the owner's, not as untrusted text. The envelope names no agent, no session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["proposals", "reason"],
@@ -1808,7 +1854,8 @@
       "properties": {
         "path": { "$ref": "#/$defs/folderDocPath" },
         "change": { "$ref": "#/$defs/folderChangeNumber" },
-        "sha": { "type": "string", "minLength": 1 }
+        "sha": { "type": "string", "minLength": 1 },
+        "branch": { "description": "The branch the change was made on (ADR 0066); absent in a log from before 0.119, where it is docs/folder-<change>.", "$ref": "#/$defs/folderChangeBranch" }
       }
     },
     "folderChangeOpenedBody": {
@@ -1914,6 +1961,79 @@
           "maxItems": 6,
           "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
         }
+      }
+    },
+    "deliveryClosedBody": {
+      "title": "Delivery Closed Body",
+      "description": "The governor closed a delivery (ADR 0062): the first time since the previous one that an epic was accepted, five tasks with no parent were accepted, or the team ran out of work. since_seq is the seq after which its review, refreshes and retro read the log; task_ids are the tasks accepted since, each once, changelog tasks left out. It is about no one contract and names no actor: the governor closes it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["delivery_id", "trigger", "since_seq", "task_ids"],
+      "properties": {
+        "delivery_id": { "type": "string", "pattern": "^D[1-9][0-9]{0,5}$" },
+        "trigger": { "type": "string", "enum": ["epic_accepted", "tasks_accepted", "team_quiet"] },
+        "since_seq": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "task_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
+        }
+      }
+    },
+    "taskReassignedBody": {
+      "title": "Task Reassigned Body",
+      "description": "The governor handed a task whose wait had cleared from one agent to another (ADR 0062, docs/SPEC.md 5.2): from is the agent that held it, to the agent that holds it from now on, reason why (resumed: the previous holder had no room when the wait cleared, so the first free agent of the role took the task). The reviewer is unchanged. It is about one task and names no actor: the governor reassigns.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "reason"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "reason": { "type": "string", "enum": ["resumed"] }
+      }
+    },
+    "connectionRequestedBody": {
+      "title": "Connection Requested Body",
+      "description": "An agent's ask for a service of its own kit (ADR 0063), shown on Today. The envelope names the agent, the session and the task when the session has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "why"],
+      "properties": {
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "why": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "worktreeTidiedBody": {
+      "title": "Worktree Tidied Body",
+      "description": "Catervas put back, from the task branch's last commit, the files a tool changed or made in the task's worktree outside the task's allowed paths, before it judged a move that needs a clean worktree (ADR 0068, docs/SPEC.md 5.2): put_back is the tracked files it restored, removed the untracked files (neither tracked nor ignored) it deleted, each relative to the worktree, sorted, each once, and at least one of the two not empty. Changes inside the allowed paths are never touched. It is about one task and names no actor: Catervas tidies.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["put_back", "removed"],
+      "properties": {
+        "put_back": { "type": "array", "items": { "type": "string" } },
+        "removed": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "pullRequestConflictedBody": {
+      "title": "Pull Request Conflicted Body",
+      "description": "An accepted task's pull request no longer merges into the integration branch (ADR 0069, docs/SPEC.md 5.14): Catervas merged into the branch, left the conflicts in the task's worktree and sent the task back to its assignee. url is the pull request, into the branch it should merge into, paths the conflicted files, relative to the worktree. It is about one task and names no actor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "into", "paths"],
+      "properties": {
+        "url": { "type": "string" },
+        "into": { "type": "string" },
+        "paths": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string" } }
+      }
+    },
+    "pullRequestRefreshedBody": {
+      "title": "Pull Request Refreshed Body",
+      "description": "An accepted task's pull request stopped merging, and Catervas brought its branch up to date with a clean merge and pushed it (ADR 0069, docs/SPEC.md 5.14): url is the pull request, sha the merge commit now at the branch's tip. It is about one task and names no actor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha"],
+      "properties": {
+        "url": { "type": "string" },
+        "sha": { "type": "string" }
       }
     },
     "connectorTag": {

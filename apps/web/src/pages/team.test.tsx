@@ -152,7 +152,6 @@ const DEFAULTS = {
 	policy: {
 		integration: "auto_merge",
 		permissions: { run_commands: true, push: false },
-		plan_in_sprints: true,
 	},
 	ui_paths: UI_PATHS,
 };
@@ -160,7 +159,11 @@ const DEFAULTS = {
 const RULES_PAGES = ["allowed-actions", "spending", "work"];
 
 /** A Settings section, with the queries it asks answered: a rules page asks for the defaults. */
-async function settings(team: object = TEAM, path = "/settings/work") {
+async function settings(
+	team: object = TEAM,
+	path = "/settings/work",
+	answer: object = {},
+) {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
@@ -171,6 +174,7 @@ async function settings(team: object = TEAM, path = "/settings/work") {
 			team,
 			agents: EFFECTIVE,
 			max_agents: 7,
+			...answer,
 		});
 	if (isRules) await answerQuery(s, "settings.defaults", DEFAULTS);
 	const main = await screen.findByRole("main");
@@ -778,6 +782,36 @@ describe("team page", () => {
 		expect(await screen.findByText(en.yourAppNone)).toBeTruthy();
 	});
 
+	it("says_whether_the_apps_settings_file_is_there", async () => {
+		const present = t("previewEnvPresent", { designer: "Iris" });
+		const absent = en.previewEnvAbsent;
+		const region = async () =>
+			await screen.findByRole("region", { name: en.previewTitle });
+		await settings(WITH_IRIS, "/settings/your-app", {
+			preview_env_present: true,
+		});
+		let preview = await region();
+		expect(within(preview).getByText(present)).toBeTruthy();
+		expect(within(preview).queryByText(absent)).toBeNull();
+		const tip = document.getElementById("previewEnv-info");
+		expect(tip).not.toBeNull();
+		for (const line of en.previewEnvMore.split("\n"))
+			expect(
+				within(preview)
+					.getAllByRole("listitem")
+					.map((item) => item.textContent),
+			).toContain(line);
+		cleanup();
+
+		for (const answer of [{ preview_env_present: false }, {}]) {
+			await settings(WITH_IRIS, "/settings/your-app", answer);
+			preview = await region();
+			expect(within(preview).getByText(absent)).toBeTruthy();
+			expect(within(preview).queryByText(present)).toBeNull();
+			cleanup();
+		}
+	});
+
 	it("edits_the_ui_paths_in_advanced", async () => {
 		// With Advanced off the page does not ask for the patterns.
 		await settings(WITH_IRIS, "/settings/work");
@@ -928,64 +962,51 @@ describe("team page", () => {
 		expect(within(finish).queryByRole("radio")).toBeNull();
 	});
 
-	it("reads_an_old_team_as_not_planning_in_sprints", async () => {
-		// TEAM has no plan_in_sprints, as a team file from before step 15; the default is on.
-		expect("plan_in_sprints" in TEAM.policy).toBe(false);
-		const { part } = await settings(TEAM, "/settings/work");
-		const toggle = within(part(en.rulesPlanning)).getByRole("switch", {
-			name: en.planInSprints,
-		});
-		expect(toggle.getAttribute("aria-checked")).toBe("false");
-	});
-
-	it("switches_planning_in_sprints", async () => {
-		const on = { ...TEAM, policy: { ...TEAM.policy, plan_in_sprints: true } };
-		const { container, s, main, part } = await settings(on, "/settings/work");
-		// The section sits after "How finished work is added", before the plan check.
-		const headings = within(main)
-			.getAllByRole("heading", { level: 3 })
-			.map((h) => h.textContent);
-		expect(headings.indexOf(en.rulesPlanning)).toBe(
-			headings.indexOf(en.rulesFinish) + 1,
-		);
-		const planning = part(en.rulesPlanning);
-		const toggle = within(planning).getByRole("switch", {
-			name: en.planInSprints,
-		});
-		expect(toggle.getAttribute("aria-checked")).toBe("true");
-		for (const line of en.planInSprintsNote.split("\n")) onlyInTips(line);
-		await expectNoAxeViolations(container);
-
-		fireEvent.click(toggle);
-		expect(toggle.getAttribute("aria-checked")).toBe("false");
-		const effects = [
-			"Ready work starts as soon as someone is free, without waiting for a sprint.",
-			"The 2 pieces of work in the Backlog, Gift cards at checkout and Sold-out badge on the menu, can start now.",
-			"You can still start sprints from the Board.",
-		];
-		const off = await validated(s, effects);
-		expect(off.policy).toMatchObject({ plan_in_sprints: false });
-		for (const line of effects)
-			expect(await within(planning).findByText(line)).toBeTruthy();
-		await expectNoAxeViolations(container);
-
-		// "Put back the default" turns it on again: nothing to save.
-		fireEvent.click(within(planning).getByRole("button", { name: en.putBack }));
-		expect(toggle.getAttribute("aria-checked")).toBe("true");
+	it("sets_the_integration_branch", async () => {
+		const { s, part } = await settings(TEAM, "/settings/work");
+		const branch = part(en.rulesBranch);
+		const field = within(branch).getByLabelText(en.rulesBranchLabel);
+		fireEvent.change(field, { target: { value: "catervas/next" } });
+		await validated(s, ["Finished work goes into catervas/next."]);
 		const save = () =>
-			within(planning).getByRole("button", {
+			within(branch).getByRole("button", {
 				name: en.agentSave,
 			}) as HTMLButtonElement;
-		expect(save().disabled).toBe(true);
-
-		fireEvent.click(toggle);
-		await validated(s, effects);
 		await waitFor(() => expect(save().disabled).toBe(false));
 		fireEvent.click(save());
 		expect((await saved(s)).policy).toMatchObject({
-			integration: "auto_merge",
-			plan_in_sprints: false,
+			integration_branch: "catervas/next",
 		});
+		cleanup();
+
+		// Emptied, the key is left out and finished work goes to the main branch again.
+		const named = {
+			...TEAM,
+			policy: { ...TEAM.policy, integration_branch: "catervas/next" },
+		};
+		const again = await settings(named, "/settings/work");
+		const second = again.part(en.rulesBranch);
+		const input = within(second).getByLabelText(
+			en.rulesBranchLabel,
+		) as HTMLInputElement;
+		expect(input.value).toBe("catervas/next");
+		fireEvent.change(input, { target: { value: "" } });
+		await validated(again.s, []);
+		const clear = within(second).getByRole("button", {
+			name: en.agentSave,
+		}) as HTMLButtonElement;
+		await waitFor(() => expect(clear.disabled).toBe(false));
+		fireEvent.click(clear);
+		expect("integration_branch" in (await saved(again.s)).policy).toBe(false);
+		cleanup();
+
+		// A project of several repositories keeps each one's branch in its own file.
+		const members = await settings(TEAM, "/settings/work", {
+			members_present: true,
+		});
+		expect(
+			within(members.main).queryByRole("region", { name: en.rulesBranch }),
+		).toBeNull();
 	});
 
 	it("switches_the_document_format", async () => {
@@ -1212,18 +1233,20 @@ describe("team page", () => {
 			s.calls("query").filter((q) => q.params.name === "team.validate"),
 		).toHaveLength(1);
 
-		// A draft in one part survives another part's save and the page's re-read.
-		const sprints = () =>
-			within(part(en.rulesPlanning)).getByRole("switch", {
-				name: en.planInSprints,
-			});
-		expect(sprints().getAttribute("aria-checked")).toBe("false");
-		fireEvent.click(sprints());
-		expect(sprints().getAttribute("aria-checked")).toBe("true");
+		// A draft survives until it is saved or cancelled.
 		const documents = () => part(en.rulesDocuments);
 		const html = () =>
 			within(documents()).getByRole("switch", { name: en.documentsHtml });
 		expect(html().getAttribute("aria-checked")).toBe("true");
+		fireEvent.click(html());
+		await validated(s, ["New documents are written in Markdown."]);
+		// Cancel drops the draft: the part shows the team's own answer again.
+		fireEvent.click(
+			within(documents()).getByRole("button", { name: en.agentCancel }),
+		);
+		await waitFor(() =>
+			expect(html().getAttribute("aria-checked")).toBe("true"),
+		);
 		fireEvent.click(html());
 		await validated(s, ["New documents are written in Markdown."]);
 		fireEvent.click(
@@ -1249,17 +1272,6 @@ describe("team page", () => {
 		});
 		await waitFor(() =>
 			expect(html().getAttribute("aria-checked")).toBe("false"),
-		);
-		expect(sprints().getAttribute("aria-checked")).toBe("true");
-
-		// Cancel drops the draft: the part shows the team's own answer again.
-		fireEvent.click(
-			within(part(en.rulesPlanning)).getByRole("button", {
-				name: en.agentCancel,
-			}),
-		);
-		await waitFor(() =>
-			expect(sprints().getAttribute("aria-checked")).toBe("false"),
 		);
 	});
 

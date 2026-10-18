@@ -22,7 +22,7 @@ No other role's task names a path under `docs/catervas/marketing/`; others read 
 ## 1. Research before you write
 
 Read what the product is and what shipped in the Product Manager's folder, `docs/catervas/product/`:
-its agent versions and its sprint reports. You read nothing else of the project.
+its agent versions and its delivery reports. You read nothing else of the project.
 
 Use your network access to check what competitors say, what terms the audience already uses, and
 what has changed since the last time you wrote about this. Cite what you found in the document

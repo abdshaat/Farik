@@ -29,6 +29,26 @@ pub const DEFAULT_SESSION_LIMITS: SessionLimits = SessionLimits {
     max_tool_calls: 200,
 };
 
+/// A one-to-one chat's own bounds, so that it answers quickly (ADR 0064): 100,000 input and 4,000
+/// output tokens, three minutes, twelve tool calls.
+pub const CHAT_SESSION_LIMITS: SessionLimits = SessionLimits {
+    max_input_tokens: 100_000,
+    max_output_tokens: 4_000,
+    max_wall_clock: Duration::from_mins(3),
+    max_tool_calls: 12,
+};
+
+/// Each of `limits`' fields, no larger than `cap`'s.
+#[must_use]
+pub fn tighter(limits: SessionLimits, cap: SessionLimits) -> SessionLimits {
+    SessionLimits {
+        max_input_tokens: limits.max_input_tokens.min(cap.max_input_tokens),
+        max_output_tokens: limits.max_output_tokens.min(cap.max_output_tokens),
+        max_wall_clock: limits.max_wall_clock.min(cap.max_wall_clock),
+        max_tool_calls: limits.max_tool_calls.min(cap.max_tool_calls),
+    }
+}
+
 /// The session limits a role gets by default: the Scrum Master half the tokens of the team
 /// default, every other role the team default.
 #[must_use]
@@ -96,8 +116,6 @@ pub enum BudgetScope {
     TaskUsd,
     /// The task's sessions, `max_sessions` in the contract.
     TaskSessions,
-    /// The sprint's dollars.
-    SprintUsd,
     /// The team's dollars for the day.
     DayUsd,
 }
@@ -131,10 +149,6 @@ pub struct BudgetState {
     pub task_sessions: u32,
     /// The contract's `max_sessions`.
     pub task_max_sessions: u32,
-    /// What the sprint has cost so far, in dollars.
-    pub sprint_spent_usd: f64,
-    /// The sprint's budget.
-    pub sprint_max_usd: f64,
     /// What the team has spent today, in dollars.
     pub day_spent_usd: f64,
     /// The team's daily budget.
@@ -155,9 +169,8 @@ pub struct Exhausted {
 /// at its last token rather than one past it and a task with `max_sessions` sessions gets no
 /// more, and a spend that is not a number counts as exhausted, because a broken figure is no
 /// licence to keep spending. Every one is reported, because the consequences act on different
-/// things and none subsumes another: a sprint that stops new assignments does not end the
-/// session that is already running, and the shipped sprint budget is smaller than the shipped
-/// daily one, so reporting only the first would mean the team never pauses.
+/// things and none subsumes another: a task budget that escalates the task does not pause the
+/// team, so reporting only the first would mean the team never pauses.
 #[must_use]
 pub fn check_budgets(state: &BudgetState) -> Vec<Exhausted> {
     let session = &state.session;
@@ -190,11 +203,6 @@ pub fn check_budgets(state: &BudgetState) -> Vec<Exhausted> {
             state.task_sessions >= state.task_max_sessions,
         ),
         (
-            BudgetScope::SprintUsd,
-            BudgetConsequence::StopNewAssignments,
-            has_reached(state.sprint_spent_usd, state.sprint_max_usd),
-        ),
-        (
             BudgetScope::DayUsd,
             BudgetConsequence::PauseTeam,
             has_reached(state.day_spent_usd, state.day_max_usd),
@@ -221,6 +229,7 @@ mod tests {
         BudgetConsequence as C, BudgetScope as B, BudgetState, DEFAULT_SESSION_LIMITS, Exhausted,
         SessionLedger, SessionLimits, add_usage, check_budgets, default_session_limits,
     };
+    use super::{CHAT_SESSION_LIMITS, tighter};
     use crate::contract::Role;
     use crate::pricing::Usage;
 
@@ -232,8 +241,6 @@ mod tests {
             task_max_usd: 5.0,
             task_sessions: 1,
             task_max_sessions: 12,
-            sprint_spent_usd: 3.0,
-            sprint_max_usd: 15.0,
             day_spent_usd: 4.0,
             day_max_usd: 20.0,
         }
@@ -241,6 +248,30 @@ mod tests {
 
     fn exhausted(scope: B, consequence: C) -> Exhausted {
         Exhausted { scope, consequence }
+    }
+
+    #[test]
+    fn takes_each_limit_at_its_smaller() {
+        assert_eq!(
+            tighter(DEFAULT_SESSION_LIMITS, CHAT_SESSION_LIMITS),
+            CHAT_SESSION_LIMITS
+        );
+        let longer = SessionLimits {
+            max_wall_clock: Duration::from_mins(60),
+            ..CHAT_SESSION_LIMITS
+        };
+        assert_eq!(
+            tighter(CHAT_SESSION_LIMITS, longer).max_wall_clock,
+            CHAT_SESSION_LIMITS.max_wall_clock
+        );
+        let smaller = SessionLimits {
+            max_input_tokens: 50_000,
+            ..DEFAULT_SESSION_LIMITS
+        };
+        assert_eq!(
+            tighter(smaller, CHAT_SESSION_LIMITS).max_input_tokens,
+            50_000
+        );
     }
 
     #[test]
@@ -375,16 +406,6 @@ mod tests {
     }
 
     #[test]
-    fn stops_new_assignments_when_the_sprint_runs_out() {
-        let mut state = a_state();
-        state.sprint_spent_usd = 15.0;
-        assert_eq!(
-            check_budgets(&state),
-            [exhausted(B::SprintUsd, C::StopNewAssignments)]
-        );
-    }
-
-    #[test]
     fn pauses_the_team_when_the_day_runs_out() {
         let mut state = a_state();
         state.day_spent_usd = 20.0;
@@ -436,28 +457,12 @@ mod tests {
         let mut state = a_state();
         state.session.tool_calls = 200;
         state.task_spent_usd = 5.0;
-        state.sprint_spent_usd = 15.0;
         state.day_spent_usd = 20.0;
         assert_eq!(
             check_budgets(&state),
             [
                 exhausted(B::SessionToolCalls, C::EndSessionWithNote),
                 exhausted(B::TaskUsd, C::EscalateTask),
-                exhausted(B::SprintUsd, C::StopNewAssignments),
-                exhausted(B::DayUsd, C::PauseTeam),
-            ]
-        );
-    }
-
-    #[test]
-    fn pauses_the_team_even_though_the_sprint_ran_out_first() {
-        let mut state = a_state();
-        state.sprint_spent_usd = 15.0;
-        state.day_spent_usd = 100.0;
-        assert_eq!(
-            check_budgets(&state),
-            [
-                exhausted(B::SprintUsd, C::StopNewAssignments),
                 exhausted(B::DayUsd, C::PauseTeam),
             ]
         );

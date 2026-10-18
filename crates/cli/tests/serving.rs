@@ -217,10 +217,12 @@ fn keeps_serving_when_the_board_is_idle() {
             })
     });
 
-    // Back in its idle wait, with no permit left, so the stop lands before any other tick.
-    waiting
-        .recv_timeout(Duration::from_secs(30))
-        .unwrap_or_else(|_| panic!("serve waits again once the board is idle\n{}", out.text()));
+    // Back in its idle wait, with no permit left, so the stop lands before any other tick. The
+    // sleeper is also entered while a session runs (the next tick waits for it, ADR 0064), so the
+    // idle line itself says that the board is idle again.
+    until("serve says it is idle again", || {
+        out.idle_lines().len() == 2
+    });
     let stopped = run(&repository.path, &["stop"]);
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     let ran = joined(serving, "the serve");
@@ -727,8 +729,12 @@ fn the_e2e_binary_serves_with_recorded_sessions() {
 
     let repository = a_team("serve-e2e");
     let port = free_port();
+    // Its own settings folder and no keychain, so that the real ones are not written to.
+    let (home, state) = (scratch("serve-e2e-home"), scratch("serve-e2e-state"));
     let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
-        .args(["--port", &port])
+        .args(["--port", &port, "--no-keychain"])
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &state)
         .current_dir(&repository.path)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -794,14 +800,22 @@ fn answers_the_setup_page_while_docker_info_hangs() {
     .expect("the settings are written");
 
     let port = free_port();
+    // Its own settings folder and no keychain, so that the real ones are not written to.
+    let (home, state) = (
+        scratch("serve-docker-hangs-home"),
+        scratch("serve-docker-hangs-state"),
+    );
     let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
         .args([
             "--port",
             &port,
+            "--no-keychain",
             "--sandbox-image",
             "catervas-sandbox-unused",
         ])
         .env("PATH", path)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &state)
         .current_dir(&repository.path)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -944,7 +958,7 @@ fn admits_a_local_browser_without_a_code_in_preview_mode() {
     assert!(interrupted.success());
     // What a serve that Ctrl-C ended exits with.
     assert_eq!(status.code(), Some(130), "{status:?}");
-    assert!(team.contains("plan_in_sprints: false"), "{team}");
+    assert!(!team.contains("plan_in_sprints"), "{team}");
 }
 
 #[cfg(not(feature = "e2e"))]

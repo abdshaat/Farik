@@ -217,7 +217,7 @@ pub fn day_spent(
 /// its place. The task's come from its contract, and a session with no task is bounded by none;
 /// its sessions allowance grows by 4 for every extra try the human granted it (ADR 0024). The
 /// day is the UTC date of `now`, and a team that sets no daily budget has an unbounded day (ADR
-/// 0015). The sprint's is the open sprint's, and unbounded with none open or one with no budget.
+/// 0015).
 ///
 /// # Errors
 ///
@@ -251,7 +251,7 @@ pub fn budget_state(
             let spent = spent_by(projections, CostScope::Task, &contract.id.to_string())?;
             let resolved = projections.log().read(&EventQuery {
                 task_id: Some(contract.id.clone()),
-                kinds: vec![EventKind::EscalationResolved],
+                kinds: vec![EventKind::EscalationResolved, EventKind::TaskRoomGranted],
                 ..EventQuery::default()
             })?;
             // A session the provider refused the key of is not the task's (5.5): it is not counted.
@@ -274,21 +274,15 @@ pub fn budget_state(
                     .as_ref()
                     .map_or(0, |row| row.sessions)
                     .saturating_sub(u32::try_from(refused).unwrap_or(u32::MAX)),
-                contract.budget.max_cost_usd,
+                contract.budget.max_cost_usd + room_granted(&resolved).1,
                 u32::try_from(contract.budget.max_sessions.get())
                     .unwrap_or(u32::MAX)
-                    .saturating_add(extra_tries(&resolved).saturating_mul(4)),
+                    .saturating_add(extra_tries(&resolved).saturating_mul(4))
+                    .saturating_add(room_granted(&resolved).0),
             )
         }
     };
     let day = spent_by(projections, CostScope::Day, &now.date_naive().to_string())?;
-    let (sprint_spent_usd, sprint_max_usd) = match projections.open_sprint()? {
-        None => (0.0, f64::INFINITY),
-        Some(open) => (
-            spent_by(projections, CostScope::Sprint, &open.sprint_id)?.map_or(0.0, |row| row.usd),
-            open.budget_usd.unwrap_or(f64::INFINITY),
-        ),
-    };
     Ok(BudgetState {
         session: *session,
         session_limits,
@@ -296,11 +290,26 @@ pub fn budget_state(
         task_max_usd,
         task_sessions,
         task_max_sessions,
-        sprint_spent_usd,
-        sprint_max_usd,
         day_spent_usd: day.map_or(0.0, |row| row.usd),
         day_max_usd: team.budgets.daily_usd.unwrap_or(f64::INFINITY),
     })
+}
+
+/// The sessions and dollars the human granted over `history`'s `task.room_granted` events
+/// (ADR 0062), added to the contract's own caps.
+pub(crate) fn room_granted(history: &[CatervasEvent]) -> (u32, f64) {
+    history
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::TaskRoomGranted(body) => Some(body),
+            _ => None,
+        })
+        .fold((0, 0.0), |(sessions, usd), body| {
+            (
+                sessions.saturating_add(u32::try_from(body.sessions.get()).unwrap_or(u32::MAX)),
+                usd + body.cost_usd,
+            )
+        })
 }
 
 /// The more tries the human granted over `history`'s `escalation.resolved` events (ADR 0024).
@@ -348,10 +357,6 @@ pub fn record_exhaustion(
             BudgetScope::DayUsd => format!(
                 "the daily budget is spent (${:.2} of ${:.2}): the team pauses until tomorrow (UTC)",
                 after.day_spent_usd, after.day_max_usd
-            ),
-            BudgetScope::SprintUsd => format!(
-                "the sprint's budget is spent (${:.2} of ${:.2}): no new work is assigned",
-                after.sprint_spent_usd, after.sprint_max_usd
             ),
             _ => continue,
         };
@@ -412,7 +417,6 @@ fn scope_wire(scope: BudgetScope) -> BudgetExhaustedBodyScope {
         BudgetScope::SessionToolCalls => BudgetExhaustedBodyScope::SessionToolCalls,
         BudgetScope::TaskUsd => BudgetExhaustedBodyScope::TaskUsd,
         BudgetScope::TaskSessions => BudgetExhaustedBodyScope::TaskSessions,
-        BudgetScope::SprintUsd => BudgetExhaustedBodyScope::SprintUsd,
         BudgetScope::DayUsd => BudgetExhaustedBodyScope::DayUsd,
     }
 }
@@ -443,11 +447,10 @@ mod tests {
     use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
     use catervas_core::team::{Team, validate_team};
     use catervas_protocol::clock::FixedClock;
-    use catervas_protocol::event::fixtures::{a_new_event, an_event_wire};
+    use catervas_protocol::event::fixtures::a_new_event;
     use catervas_protocol::event::{
         BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CatervasEvent,
-        CostRecordedBodyPurpose, EventBody, EventIds, EventKind, MessageKind, NewEvent,
-        event_from_value,
+        CostRecordedBodyPurpose, EventBody, EventIds, EventKind, MessageKind,
     };
     use catervas_store::{
         CostScope, EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections,
@@ -602,7 +605,6 @@ mod tests {
             (BudgetScope::SessionToolCalls, "session_tool_calls"),
             (BudgetScope::TaskUsd, "task_usd"),
             (BudgetScope::TaskSessions, "task_sessions"),
-            (BudgetScope::SprintUsd, "sprint_usd"),
             (BudgetScope::DayUsd, "day_usd"),
         ] {
             assert_eq!(
@@ -832,8 +834,6 @@ mod tests {
         assert_eq!(read.task_max_sessions, 3);
         assert!(close(read.day_spent_usd, 4.0), "{}", read.day_spent_usd);
         assert!(close(read.day_max_usd, 20.0));
-        assert!(read.sprint_max_usd.is_infinite() && read.sprint_max_usd > 0.0);
-        assert!(close(read.sprint_spent_usd, 0.0));
     }
 
     #[test]
@@ -871,46 +871,6 @@ mod tests {
             Some(&contract),
         );
         assert_eq!(read.task_sessions, 1);
-    }
-
-    #[test]
-    fn fills_the_sprint_budget_from_the_open_sprint() {
-        let (log, projections) = a_board();
-        filed(&log, &projections, "CTV-1");
-        let team = a_team(None);
-        let none = state(&projections, &team, Role::SoftwareDeveloper, None);
-        assert!(none.sprint_max_usd.is_infinite() && none.sprint_max_usd > 0.0);
-        assert!(close(none.sprint_spent_usd, 0.0));
-
-        // S1 open with ten dollars, holding CTV-1.
-        let mut started = an_event_wire(EventKind::SprintStarted);
-        started["body"]["budget_usd"] = json!(10.0);
-        let started = event_from_value(&started).expect("the fixture is schema-valid");
-        let started = NewEvent {
-            recorded_at: started.envelope.recorded_at,
-            ids: started.envelope.ids,
-            body: started.body,
-        };
-        for event in [started, a_new_event(EventKind::SprintPlanned)] {
-            let appended = log.append(&event).expect("appends");
-            projections.apply(&appended).expect("projects");
-        }
-        record_session_cost(
-            &log,
-            &projections,
-            &source(ids(Some("CTV-1"), "a")),
-            &usage(4_000_000, 0),
-            &prices(),
-            &clock(),
-        )
-        .expect("recorded");
-        let read = state(&projections, &team, Role::SoftwareDeveloper, None);
-        assert!(close(read.sprint_max_usd, 10.0), "{}", read.sprint_max_usd);
-        assert!(
-            close(read.sprint_spent_usd, 4.0),
-            "{}",
-            read.sprint_spent_usd
-        );
     }
 
     #[test]
@@ -1065,33 +1025,17 @@ mod tests {
         let team = a_team(None);
         let before = BudgetState {
             day_spent_usd: 19.0,
-            sprint_spent_usd: 9.0,
-            sprint_max_usd: 10.0,
             ..state(&projections, &team, Role::SoftwareDeveloper, None)
         };
         let day = BudgetState {
             day_spent_usd: 21.0,
             ..before
         };
-        let sprint = BudgetState {
-            sprint_spent_usd: 11.0,
-            ..day
-        };
-
         record_exhaustion(
             &log,
             &projections,
             &before,
             &day,
-            &ids(None, "s1"),
-            &clock(),
-        )
-        .expect("recorded");
-        record_exhaustion(
-            &log,
-            &projections,
-            &day,
-            &sprint,
             &ids(None, "s1"),
             &clock(),
         )
@@ -1113,8 +1057,7 @@ mod tests {
                 other => panic!("a message, not {other:?}"),
             })
             .collect();
-        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert_eq!(texts.len(), 1, "{texts:?}");
         assert!(texts[0].contains("daily budget"), "{texts:?}");
-        assert!(texts[1].contains("sprint's budget"), "{texts:?}");
     }
 }

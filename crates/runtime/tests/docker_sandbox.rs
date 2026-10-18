@@ -328,3 +328,96 @@ fn removes_a_container_by_name() {
         .remove(&project, &task())
         .expect("removing what is gone is no error");
 }
+
+/// An image that has git: Catervas's own sandbox image when this machine has it, else `alpine`
+/// with git added, built once and kept by Docker's cache.
+fn image_with_git() -> String {
+    let sandbox = catervas_runtime::SANDBOX_IMAGE;
+    if Command::new("docker")
+        .args(["image", "inspect", sandbox])
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        return sandbox.to_owned();
+    }
+    let tag = "catervas-test-alpine-git:1";
+    let mut build = Command::new("docker")
+        .args(["build", "-t", tag, "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("docker build runs");
+    std::io::Write::write_all(
+        build.stdin.as_mut().expect("a pipe"),
+        b"FROM alpine:3.22\nRUN apk add --no-cache git\n",
+    )
+    .expect("the Dockerfile is sent");
+    assert!(build.wait().expect("the build ends").success());
+    tag.to_owned()
+}
+
+#[test]
+#[ignore = "needs docker and the git program"]
+fn a_check_reads_git_and_an_agent_does_not() {
+    use catervas_store::git::fixtures::TempRepo;
+
+    let repository = TempRepo::new("docker-git-store");
+    let git = repository.adapter();
+    let worktree = repository.path.join(".catervas/local/worktrees/CTV-1");
+    git.create_worktree(&worktree, "catervas/CTV-1", "main")
+        .expect("the worktree is made");
+    let store = git.common_dir(&worktree).expect("the store is found");
+    let head = |directory: &std::path::Path| {
+        String::from_utf8_lossy(
+            &Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(directory)
+                .output()
+                .expect("git runs")
+                .stdout,
+        )
+        .into_owned()
+    };
+    let before = head(&repository.path);
+    let factory = DockerSandboxFactory {
+        image: image_with_git(),
+    };
+    let project = project("git-store");
+
+    let checking = factory
+        .create_checking(&project, &task(), &worktree, false, &[], &store)
+        .unwrap_or_else(|error| panic!("the checks' sandbox could not be made: {error}"));
+    let run = |sandbox: &dyn Sandbox, command: &str| {
+        sandbox
+            .run(command, ".", 30 * SECOND, &no_env())
+            .expect("the command runs")
+    };
+    assert_eq!(
+        run(checking.as_ref(), "git ls-files --error-unmatch README.md").exit_code,
+        0
+    );
+    assert_eq!(
+        run(checking.as_ref(), "git check-ignore -q README.md").exit_code,
+        1
+    );
+    let commit = run(
+        checking.as_ref(),
+        "git -c user.name=x -c user.email=x@x commit --allow-empty -m x",
+    );
+    assert_ne!(commit.exit_code, 0, "{}", commit.stdout);
+    assert_eq!(head(&repository.path), before, "the store is unchanged");
+    checking.discard().expect("the container is removed");
+
+    let agent = factory
+        .create(&project, &task(), &worktree, false, &[])
+        .unwrap_or_else(|error| panic!("the agent's sandbox could not be made: {error}"));
+    let status = run(agent.as_ref(), "git status");
+    assert_eq!(status.exit_code, 128, "{}", status.stderr);
+    assert!(
+        status.stderr.contains("not a git repository"),
+        "{}",
+        status.stderr
+    );
+    agent.discard().expect("the container is removed");
+}

@@ -1,5 +1,6 @@
 import { Button, Dialog, TextArea, TextField } from "@catervas/ui";
 import { useState } from "react";
+import { useCommand } from "../../app/command.ts";
 import { t } from "../../strings/t.ts";
 import { calendarDay, todayIso } from "../orders.ts";
 import styles from "../pages.module.css";
@@ -7,7 +8,6 @@ import { emailFault, type Mailbox, type OrderSend } from "../sellerMail.ts";
 import { Ask } from "./Ask.tsx";
 import { useSteps } from "./AskTeam.tsx";
 import { SendFields } from "./SellerMessage.tsx";
-import { useCommand } from "./StartSprint.tsx";
 import { visibly } from "./ToolApproval.tsx";
 
 /**

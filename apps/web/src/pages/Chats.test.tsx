@@ -99,7 +99,6 @@ async function chats(
 	if (path === "/channel") {
 		await answerQuery(s, "channel.messages", { messages: [] });
 		await answerQuery(s, "waiting.list", { waiting: [] });
-		await answerQuery(s, "sprint.current", null);
 	} else if (path !== "/channel/nobody")
 		await answerQuery(s, "chat.messages", {
 			messages: fields.messages ?? [],
@@ -206,6 +205,38 @@ describe("chats", () => {
 		expect(links[4]?.textContent).toContain(
 			"Kai has left the team. Kept to read.",
 		);
+	});
+
+	it("opens_the_chats_at_chats", async () => {
+		media.set(WIDE, true);
+		// `/channel` stays the chats' place: `/chats` and `/chats/theo` open it.
+		const team = await renderApp("/chats");
+		const t = team.socket as FakeSocket;
+		await answerStatus(t, false);
+		await answerQuery(t, "team.get", { team: TEAM });
+		await answerQuery(t, "chats.list", LIST);
+		await answerQuery(t, "channel.messages", { messages: [] });
+		await answerQuery(t, "waiting.list", { waiting: [] });
+		const list = await screen.findByRole("navigation", { name: en.chats });
+		expect(
+			within(list).getByRole("link", { current: "page" }).getAttribute("href"),
+		).toBe("/channel");
+		expect(screen.queryByText(en.noPage)).toBeNull();
+		cleanup();
+
+		const one = await renderApp("/chats/theo");
+		const o = one.socket as FakeSocket;
+		await answerStatus(o, false);
+		await answerQuery(o, "team.get", { team: TEAM });
+		await answerQuery(o, "chats.list", LIST);
+		await answerQuery(o, "chat.messages", { messages: [], waiting: null });
+		expect(
+			await screen.findByRole("heading", {
+				level: 1,
+				name: "Talking with Theo",
+			}),
+		).toBeTruthy();
+		expect(screen.queryByText(en.noPage)).toBeNull();
 	});
 
 	it("fills_the_window_on_the_chats", async () => {
@@ -538,6 +569,74 @@ describe("chats", () => {
 				command: { command: "message_post", body: { text: "Morning, all." } },
 			}),
 		);
+	});
+
+	it("sends_a_message_as_a_task", async () => {
+		const { s } = await chats("/channel/mira");
+		const box = (await screen.findByRole("textbox", {
+			name: "Message Mira",
+		})) as HTMLTextAreaElement;
+		const text = "Add a dark mode switch to the settings page";
+		fireEvent.change(box, { target: { value: text } });
+		fireEvent.click(screen.getByRole("button", { name: en.chatsSendTask }));
+		const sent = await waitFor(() => {
+			const f = s.calls("command")[0];
+			if (!f) throw new Error("no command was sent");
+			return f;
+		});
+		expect(sent.params).toEqual({
+			command: {
+				command: "chat_message_post",
+				body: { agent_id: "mira", text, as_task: true },
+			},
+		});
+		await s.reply(sent, {
+			said: "given to Mira as CTV-7",
+			events: [9, 10, 11],
+		});
+		await waitFor(() => expect(box.value).toBe(""));
+
+		// What it does is behind the info button.
+		const info = screen.getByRole("button", { name: "More about this" });
+		expect(info.getAttribute("aria-describedby")).toBe("chat-task-info");
+		fireEvent.click(info);
+		expect(info.getAttribute("aria-expanded")).toBe("true");
+		expect(document.getElementById("chat-task-info")?.textContent).toBe(
+			en.chatsTaskInfo.replace("{name}", "Mira"),
+		);
+
+		// A refusal reads in plain words.
+		fireEvent.change(box, { target: { value: "too short" } });
+		fireEvent.click(screen.getByRole("button", { name: en.chatsSendTask }));
+		await waitFor(() => expect(s.calls("command")).toHaveLength(2));
+		await s.reply(s.calls("command")[1] as never, {
+			error: {
+				kind: "refused",
+				detail: "task_too_short: say a little more: at least 20 characters",
+			},
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.refuseTaskTooShort,
+		);
+	});
+
+	it("shows_the_task_a_message_became", async () => {
+		const { container } = await chats("/channel/mira", {
+			messages: [
+				chat("human", "Add a dark mode switch to the settings page", {
+					sent_as: "CTV-7",
+				}),
+			],
+			waiting: null,
+		});
+		const link = await screen.findByRole("link", {
+			name: "Given to Mira as CTV-7",
+		});
+		expect(link.getAttribute("href")).toBe("/tasks/CTV-7");
+		expect(
+			screen.queryByText(en.chatsAnswering.replace("{name}", "Mira")),
+		).toBeNull();
+		await expectNoAxeViolations(container);
 	});
 
 	it("shows_no_such_teammate", async () => {
@@ -1073,7 +1172,7 @@ describe("chats", () => {
 		});
 		expect(
 			await screen.findByText(
-				"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+				"To start the product plan, your team needs an Architect or a Scrum Master. Add one on the Team page.",
 			),
 		).toBeTruthy();
 	});
@@ -1092,7 +1191,7 @@ describe("chats", () => {
 			],
 			[
 				"product_plan_no_reviewer",
-				"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+				"To start the product plan, your team needs an Architect or a Scrum Master. Add one on the Team page.",
 			],
 		] as const;
 		for (const [code, words] of plan) {
@@ -1119,6 +1218,9 @@ describe("chats", () => {
 		const open = await chats("/channel/mira", {
 			messages: [
 				chat("human", "Could customers also pay with Apple Pay?"),
+				chat("human", "Add a dark mode switch to the settings page", {
+					sent_as: "CTV-7",
+				}),
 				chat("mira", "Yes.", { request: APPLE }),
 				chat("mira", "Done.", { request: APPLE, sent_as: "CTV-12" }),
 				chat("mira", "Short answer.\n\n- **One**\n- Two\n\nCTV-12 is next."),

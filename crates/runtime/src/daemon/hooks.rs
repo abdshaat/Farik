@@ -586,11 +586,9 @@ fn plan_gate(
         .iter()
         .find(|agent| agent.id.as_str() == registration.agent_id)
         .map_or(Role::Human, |agent| Role::from(agent.role));
-    design_plan_gate(&deps.log, role, tier, registration.task_id.as_ref()).map_err(|error| {
-        match error {
-            ToolError::Refused { reason } => reason,
-            other => format!("design_plan_unreadable: {other}"),
-        }
+    design_plan_gate(deps, role, tier, registration.task_id.as_ref()).map_err(|error| match error {
+        ToolError::Refused { reason } => reason,
+        other => format!("design_plan_unreadable: {other}"),
     })
 }
 
@@ -719,8 +717,7 @@ fn calls_made(
 ) -> Result<u32, Denial> {
     let unreadable =
         |error: catervas_store::StoreError| Denial::from(format!("allowance_unreadable: {error}"));
-    let period =
-        allowance_period(&deps.log, &deps.projections, deps.clock.now()).map_err(unreadable)?;
+    let period = allowance_period(deps.clock.now());
     state
         .allowance_counts()
         .used(&deps.log, &period, agent, server, tool)
@@ -1771,6 +1768,104 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(folder.join(".history/CTV-2/books.xlsx")).ok(),
             Some("books".to_string())
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn no_agent_reads_the_preview_environment_file() {
+        use crate::daemon::{ReadRoot, SessionRegistration};
+
+        let daemon = TestDaemon::new("hook-preview-env", |_| {});
+        let project = daemon
+            .project
+            .repo
+            .path
+            .canonicalize()
+            .expect("the project folder");
+        let file = project.join(crate::preview::PREVIEW_ENV);
+        std::fs::write(&file, "SUPABASE_SERVICE_ROLE=service-role-secret-0123\n").expect("written");
+        let absolute = file.display().to_string();
+        let session = |id: &str, cwd: std::path::PathBuf, task: bool, roots: Vec<ReadRoot>| {
+            daemon.state.register_session(SessionRegistration {
+                read_roots: roots,
+                session_id: id.to_string(),
+                agent_id: "dev-a".to_string(),
+                task_id: task.then(|| "CTV-1".parse().expect("a task id")),
+                purpose: if task {
+                    crate::session::SessionPurpose::Implement
+                } else {
+                    crate::session::SessionPurpose::Chat
+                },
+                in_reply_to: None,
+                thread: None,
+                skills: Vec::new(),
+                skills_root: None,
+                cwd,
+                executor: None,
+                limits: DEFAULT_SESSION_LIMITS,
+                catervas_tools: Vec::new(),
+                tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+                connectors: Vec::new(),
+                preview: None,
+            });
+        };
+        let hook = |id: &str, tool: &str, input: Value| {
+            decide_pre_tool_use(&daemon.call(id, tool, &input), &daemon.state)
+        };
+
+        // A task's session, in its worktree: the file is outside it.
+        denied_for(
+            &decide_pre_tool_use(
+                &daemon.dev_call("Read", &json!({ "file_path": absolute })),
+                &daemon.state,
+            ),
+            "path_outside_workspace",
+        );
+        denied_for(
+            &decide_pre_tool_use(
+                &daemon.dev_call(
+                    "Grep",
+                    &json!({ "pattern": "x", "path": project.join(".catervas/local").display().to_string() }),
+                ),
+                &daemon.state,
+            ),
+            "path_outside_workspace",
+        );
+        // A session in the project folder.
+        session("session-chat", project.clone(), false, Vec::new());
+        for path in [crate::preview::PREVIEW_ENV, absolute.as_str()] {
+            denied_for(
+                &hook("session-chat", "Read", json!({ "file_path": path })),
+                "path_protected",
+            );
+        }
+        // A task session that reads the project folder as a root.
+        session(
+            "session-root",
+            daemon.worktree.clone(),
+            true,
+            vec![ReadRoot {
+                name: "project".to_string(),
+                path: project.clone(),
+            }],
+        );
+        denied_for(
+            &hook("session-root", "Read", json!({ "file_path": absolute })),
+            "path_protected",
+        );
+
+        // The web learns only that the file is there.
+        let got = crate::daemon::gates::tests::query(
+            &daemon.state,
+            "team.get",
+            &json!({}),
+            "teamGetResult",
+        );
+        assert_eq!(got["preview_env_present"], json!(true));
+        assert!(
+            !got.to_string().contains("service-role-secret-0123"),
+            "{got}"
         );
     }
 
@@ -2888,29 +2983,20 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn resets_with_the_sprint() {
-        let daemon = TestDaemon::new("hook-allowance-sprint", |_| {});
-        allowing_github(&daemon, 2);
-        assert!(issue(&daemon, 1).allow);
-        assert!(issue(&daemon, 2).allow);
-        denied_for(&issue(&daemon, 3), "approval_needed");
-        // The calls before the sprint started are not its.
-        daemon.project.open_sprint("S1", None, &[]);
-        // The ask stopped that session; the agent's next one makes its calls.
-        allowing_session(&daemon, "session-next", "dev-a", "CTV-1", Some(2));
-        let next = |n: u32| create_issue(&daemon, "session-next", &json!({ "title": n }));
-        assert!(next(4).allow);
-        assert!(next(5).allow);
-        denied_for(&next(6), "approval_needed");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn counts_per_utc_day_with_no_sprint_open() {
+    fn counts_by_the_utc_day_even_with_a_sprint_from_before_open() {
         use chrono::{TimeZone, Utc};
 
         let daemon = TestDaemon::new("hook-allowance-day", |_| {});
         allowing_github(&daemon, 2);
+        // A project made before ADR 0062: a sprint opened yesterday and never ended.
+        daemon.project.record_at(
+            Utc.with_ymd_and_hms(2026, 9, 21, 12, 0, 0)
+                .single()
+                .expect("a time"),
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S1", "budget_usd": null, "started_by": "human" }),
+        );
         let yesterday = Utc
             .with_ymd_and_hms(2026, 9, 21, 23, 59, 0)
             .single()
@@ -2936,58 +3022,6 @@ mod tests {
         assert!(
             issue(&daemon, 1).allow,
             "yesterday's call does not count, today's does"
-        );
-        denied_for(&issue(&daemon, 2), "approval_needed");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn counts_from_the_sprints_end_on_the_day_it_ended() {
-        use chrono::{TimeZone, Utc};
-
-        let at_hour = |hour| {
-            Utc.with_ymd_and_hms(2026, 9, 22, hour, 0, 0)
-                .single()
-                .expect("a time")
-        };
-        let daemon = TestDaemon::new("hook-allowance-ended", |_| {}).on_the_clock(at_hour(17));
-        allowing_github(&daemon, 2);
-        daemon.project.record_at(
-            at_hour(8),
-            "",
-            "sprint.started",
-            &json!({ "sprint_id": "S1", "budget_usd": null, "started_by": "human" }),
-        );
-        called_at(
-            &daemon,
-            "dev-a",
-            "github",
-            "mcp__github__create_issue",
-            at_hour(9),
-        );
-        called_at(
-            &daemon,
-            "dev-a",
-            "github",
-            "mcp__github__create_issue",
-            at_hour(10),
-        );
-        daemon.project.record_at(
-            at_hour(15),
-            "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
-        );
-        called_at(
-            &daemon,
-            "dev-a",
-            "github",
-            "mcp__github__create_issue",
-            at_hour(16),
-        );
-        assert!(
-            issue(&daemon, 1).allow,
-            "the sprint's two calls are not today's"
         );
         denied_for(&issue(&daemon, 2), "approval_needed");
     }

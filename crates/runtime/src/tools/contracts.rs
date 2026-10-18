@@ -1,4 +1,4 @@
-//! Triage, contract writing, filing tasks, and planning a sprint: the tools that decide what a task
+//! Triage, contract writing, and filing tasks: the tools that decide what a task
 //! is and when it is worked on.
 
 use catervas_core::contract::{
@@ -10,11 +10,12 @@ use catervas_core::governor::gates::{
     check_contract_write, check_repo_write,
 };
 use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::team::AgentStatus;
 use catervas_protocol::event::{
-    ContractWrittenBody, EventBody, EventKind, RequestTriagedBody, RequestTriagedBodySize, Thread,
+    ContractWrittenBody, EventBody, EventKind, RequestTriagedBody, RequestTriagedBodySize,
 };
 use catervas_store::EventQuery;
-use catervas_store::requests::{RequestError, file_request, summary_of};
+use catervas_store::requests::{RequestError, file_request, given_to, summary_of};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -22,7 +23,6 @@ use serde_json::{Map, Value, json};
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 use crate::session::SessionPurpose;
-use crate::sprints::{self, PlannedBy, SprintError};
 
 /// How big a request is (5.16).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -74,14 +74,6 @@ pub(crate) struct CreateTaskInput {
     contract: Map<String, Value>,
     /// The epic this is a task of, when it is one.
     parent: Option<String>,
-}
-
-/// `catervas_plan_sprint`'s input.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct PlanSprintInput {
-    /// The ready tasks and approved epics to put in the open sprint.
-    task_ids: Vec<String>,
 }
 
 /// Sizes the session's request (5.16). The Scrum Master triages an untriaged `draft` without a
@@ -153,7 +145,7 @@ pub(super) fn write_contract(
 ) -> Result<Value, ToolError> {
     let task = call.task()?;
     let (contract, row) = call.contract(task)?;
-    let actor = contract_writer(call, &contract)?;
+    let actor = contract_writer(call, &contract, row.status)?;
     if contract.kind == TaskKind::Epic && has_asked(call, task)? {
         return Err(Refusal::QuestionUnanswered {
             task_id: task.to_string(),
@@ -188,6 +180,7 @@ pub(super) fn write_contract(
         object.insert("exit_criteria".to_string(), Value::Array(criteria));
     }
     fill_reviewer_role(call, object, contract.kind);
+    check_given_task_fixed(call, &contract, &before, &after)?;
     let changed = changed_fields(&before, &after);
     match check_contract_write(contract.kind, row.status, row.locked, &actor, &changed) {
         Ok(ContractWriteOutcome::Allowed) => {}
@@ -281,71 +274,31 @@ pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Val
         other => failed(other),
     })?;
     deps.projections.catch_up().map_err(failed)?;
-    let mut answer = json!({ "task_id": filed.id.as_str(), "status": "draft" });
-    // The task is filed whatever the join says: an error here would have the agent file it again.
-    if parent.is_some()
-        && let Err(error) = sprints::join_epics_sprint(deps, &filed.id)
-    {
-        answer["warning"] = json!(format!(
-            "{} is filed and joined no sprint: {error}",
-            filed.id.as_str()
-        ));
-    }
+    let answer = json!({ "task_id": filed.id.as_str(), "status": "draft" });
     Ok(answer)
 }
 
-/// Plans the open sprint as the assigner (5.5), through `sprints::plan_sprint`, in a planning
-/// ceremony session alone, where the digest and the retro are in front of it, and answers the
-/// sprint and every task now in it.
-pub(super) fn plan_sprint(call: &Call<'_>, input: &PlanSprintInput) -> Result<Value, ToolError> {
-    if call.context.thread != Some(Thread::Planning) {
-        return Err(ToolError::Refused {
-            reason: "sprint_plan_refused: only the planning ceremony plans a sprint".to_string(),
-        });
-    }
-    let task_ids = input
-        .task_ids
-        .iter()
-        .map(|id| {
-            id.parse::<TaskId>()
-                .map_err(|error| ToolError::InvalidInput {
-                    detail: format!("{id} is not a task id: {error}"),
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let sprint = sprints::plan_sprint(
-        call.deps(),
-        &task_ids,
-        &PlannedBy::Assigner(call.agent_id().to_string()),
-    )
-    .map_err(sprint_failed)?;
-    Ok(json!({
-        "sprint_id": sprint.id.as_str(),
-        "task_ids": sprint.task_ids.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-    }))
-}
-
-/// A sprint's refusal as the tool's, and its files' or store's failure as the tool's failure.
-fn sprint_failed(error: SprintError) -> ToolError {
-    match error {
-        SprintError::Files(error) => failed(error),
-        SprintError::Store(error) => failed(error),
-        SprintError::Refused { reason } => ToolError::Refused { reason },
-        other => ToolError::Refused {
-            reason: format!("sprint_plan_refused: {other}"),
-        },
-    }
-}
-
 /// Which actor a contract write is judged as: by role first, then by relation to the contract.
+///
+/// The agent the owner gave a task in its chat (ADR 0063) writes it with the Product Manager's
+/// standing while it is `draft` or `refining`, and then no longer.
 fn contract_writer(
     call: &Call<'_>,
     contract: &TaskContract,
+    status: TaskStatus,
 ) -> Result<ContractWriteActor, ToolError> {
     let me = call.agent_id();
     let kind = match call.role() {
         Role::ProductManager => TransitionActor::ProductManager,
         Role::ScrumMaster => TransitionActor::ScrumMaster,
+        _ if matches!(status, TaskStatus::Draft | TaskStatus::Refining)
+            && given_to(&call.deps().log, &contract.id)
+                .map_err(failed)?
+                .as_deref()
+                == Some(me) =>
+        {
+            TransitionActor::ProductManager
+        }
         _ if contract.assignee.as_deref() == Some(me) => TransitionActor::Assignee,
         _ if contract.reviewer.as_deref() == Some(me) => TransitionActor::Reviewer,
         _ => {
@@ -360,6 +313,66 @@ fn contract_writer(
         kind,
         agent_id: Some(me.to_string()),
     })
+}
+
+/// Refuses a write, by anybody, that changes what a task given in a chat keeps (ADR 0063): its
+/// assignee role is the given agent's, its reviewer role is the usual one, and its intent is the
+/// owner's words. A task is given while its agent is on the team and not retired and its
+/// assignee role is still the agent's; the human's `contract.save` may change it back to an
+/// ordinary task.
+fn check_given_task_fixed(
+    call: &Call<'_>,
+    contract: &TaskContract,
+    before: &Value,
+    after: &Value,
+) -> Result<(), ToolError> {
+    let Some(given) = given_to(&call.deps().log, &contract.id).map_err(failed)? else {
+        return Ok(());
+    };
+    let Some(agent) = call
+        .team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == given && agent.status != AgentStatus::Retired)
+    else {
+        return Ok(());
+    };
+    let role = Role::from(agent.role);
+    if before["assignee_role"].as_str() != Some(role.to_string().as_str()) {
+        return Ok(());
+    }
+    let task = contract.id.as_str();
+    let fixed = |kind: &'static str, field: &str, stays: &str| -> Result<(), ToolError> {
+        Err(Refusal::GivenTaskFixed {
+            kind,
+            detail: format!(
+                "{task} was given to {given} in its chat, so its {field} stays {stays}"
+            ),
+        }
+        .into())
+    };
+    if after["assignee_role"] != before["assignee_role"] {
+        return fixed("given_task_role_fixed", "assignee_role", &role.to_string());
+    }
+    let usual = catervas_roles::default_reviewer_role(&call.team, TaskKind::Task, role)
+        .map(|reviewer| reviewer.to_string())
+        .or_else(|| before["reviewer_role"].as_str().map(str::to_string))
+        .unwrap_or_default();
+    if after["reviewer_role"] != before["reviewer_role"]
+        && after["reviewer_role"].as_str() != Some(usual.as_str())
+    {
+        return fixed("given_task_reviewer_fixed", "reviewer_role", &usual);
+    }
+    if after["intent"] != before["intent"] {
+        return Err(Refusal::GivenTaskFixed {
+            kind: "given_task_intent_fixed",
+            detail: format!(
+                "{task} was given to {given} in its chat, so its intent stays the owner's words"
+            ),
+        }
+        .into());
+    }
+    Ok(())
 }
 
 /// Whether a question about `task` is still open: asked, and named by no `question.answered`
@@ -431,7 +444,7 @@ pub(crate) fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
 mod tests {
     use catervas_core::criteria::fixtures::a_criteria_library_wire;
     use catervas_core::criteria::validate_criteria;
-    use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, Thread};
+    use catervas_protocol::event::{CatervasEvent, EventBody, EventKind};
     use serde_json::{Value, json};
 
     use crate::session::SessionPurpose;
@@ -778,6 +791,83 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn only_its_agent_writes_a_given_task() {
+        let project = a_project("tools-write-given");
+        project.filed_given_to("CTV-1", "refining", "dev-a", |wire| {
+            wire["assignee_role"] = json!("software_developer");
+        });
+        let write = |agent: &str, fields: Value| {
+            project.call_in(
+                SessionPurpose::Refine,
+                agent,
+                Some("CTV-1"),
+                "catervas_write_contract",
+                json!({ "fields": fields }),
+            )
+        };
+        let scope =
+            json!({ "scope": { "in_scope": ["the settings page"], "out_of_scope": ["the rest"] } });
+        write("dev-a", scope.clone()).expect("the given agent writes its contract");
+        assert_eq!(project.events(&[EventKind::ContractWritten]).len(), 1);
+        refused_with(write("dev-b", scope.clone()), "not_a_contract_writer");
+
+        let fixed = |result: Result<Value, ToolError>, code: &str, words: &str| match result {
+            Err(ToolError::Refused { reason }) => {
+                assert_eq!(
+                    reason,
+                    format!("{code}: CTV-1 was given to dev-a in its chat, so {words}")
+                );
+            }
+            other => panic!("expected {code}, got {other:?}"),
+        };
+        fixed(
+            write("dev-a", json!({ "assignee_role": "product_manager" })),
+            "given_task_role_fixed",
+            "its assignee_role stays software_developer",
+        );
+        fixed(
+            write("pm", json!({ "assignee_role": "architect" })),
+            "given_task_role_fixed",
+            "its assignee_role stays software_developer",
+        );
+        fixed(
+            write("dev-a", json!({ "reviewer_role": "product_manager" })),
+            "given_task_reviewer_fixed",
+            "its reviewer_role stays software_developer",
+        );
+        fixed(
+            write(
+                "dev-a",
+                json!({ "intent": "Something else entirely, and longer." }),
+            ),
+            "given_task_intent_fixed",
+            "its intent stays the owner's words",
+        );
+        fixed(
+            write(
+                "pm",
+                json!({ "intent": "Something else entirely, and longer." }),
+            ),
+            "given_task_intent_fixed",
+            "its intent stays the owner's words",
+        );
+        assert_eq!(project.events(&[EventKind::ContractWritten]).len(), 1);
+
+        project.filed_given_to("CTV-2", "ready", "dev-a", |_| {});
+        refused_with(
+            project.call_in(
+                SessionPurpose::Refine,
+                "dev-a",
+                Some("CTV-2"),
+                "catervas_write_contract",
+                json!({ "fields": scope }),
+            ),
+            "not_a_contract_writer",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_contract_write_from_a_bystander() {
         let project = a_project("tools-write-bystander");
         project.filed("CTV-1", "in_progress", "task", None);
@@ -996,347 +1086,6 @@ mod tests {
             "gate_failed",
         );
         assert_eq!(project.event_count(), before);
-    }
-
-    /// `filed` in `status`, of `kind`, with a budget of `usd` dollars.
-    fn filed_at(project: &TestProject, task: &str, status: &str, kind: &str, usd: f64) {
-        project.filed_with(task, status, kind, None, |wire| {
-            wire["budget"]["max_cost_usd"] = json!(usd);
-        });
-    }
-
-    /// `agent` calls `catervas_plan_sprint` of `tasks` from a planning ceremony session.
-    fn plan(project: &TestProject, agent: &str, tasks: &[&str]) -> Result<Value, ToolError> {
-        let mut context = project.context(agent, None);
-        context.purpose = SessionPurpose::Ceremony;
-        context.thread = Some(Thread::Planning);
-        run(
-            &context,
-            "catervas_plan_sprint",
-            json!({ "task_ids": tasks }),
-        )
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_plan_outside_the_planning_ceremony() {
-        let project = a_project_with_scrum_master("tools-plan-ceremony");
-        project.filed("CTV-1", "ready", "task", None);
-        project.open_sprint("S1", None, &[]);
-        let before = project.event_count();
-
-        for purpose in [SessionPurpose::Plan, SessionPurpose::Refine] {
-            let mut context = project.context("sm", None);
-            context.purpose = purpose;
-            let refused = run(
-                &context,
-                "catervas_plan_sprint",
-                json!({ "task_ids": ["CTV-1"] }),
-            )
-            .expect_err("only the planning ceremony plans");
-            assert_eq!(
-                refused,
-                ToolError::Refused {
-                    reason: "sprint_plan_refused: only the planning ceremony plans a sprint"
-                        .to_string()
-                },
-                "{purpose:?}"
-            );
-        }
-
-        assert_eq!(project.event_count(), before, "nothing is recorded");
-        assert_eq!(sprint_of(&project, "CTV-1"), Value::Null);
-    }
-
-    /// The sprint the contract file of `task` names.
-    fn sprint_of(project: &TestProject, task: &str) -> Value {
-        project.file(task)["sprint"].clone()
-    }
-
-    /// Each `sprint.planned`, as its wire.
-    fn planned(project: &TestProject) -> Vec<Value> {
-        project
-            .events(&[EventKind::SprintPlanned])
-            .iter()
-            .map(|event| match &event.body {
-                EventBody::SprintPlanned(body) => serde_json::to_value(body).expect("a body"),
-                other => panic!("a sprint.planned, got {other:?}"),
-            })
-            .collect()
-    }
-
-    /// The task ids sprint `sprint`'s file lists.
-    fn held_by(project: &TestProject, sprint: &str) -> Vec<String> {
-        project
-            .deps
-            .files
-            .read_sprint(sprint)
-            .expect("the sprint reads")
-            .task_ids
-            .iter()
-            .map(|id| id.as_str().to_string())
-            .collect()
-    }
-
-    /// A refusal of `sprint_plan_refused` that says each of `words`, with nothing recorded.
-    fn plan_refused(project: &TestProject, agent: &str, tasks: &[&str], words: &[&str]) {
-        let before = project.event_count();
-        match plan(project, agent, tasks) {
-            Err(ToolError::Refused { reason }) => {
-                assert!(reason.starts_with("sprint_plan_refused: "), "{reason}");
-                for word in words {
-                    assert!(reason.contains(word), "{word} in {reason}");
-                }
-            }
-            other => panic!("expected a sprint_plan_refused, got {other:?}"),
-        }
-        assert_eq!(project.event_count(), before, "nothing is recorded");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn plans_ready_tasks_into_the_sprint() {
-        let project = a_project_with_scrum_master("tools-plan");
-        project.filed("CTV-1", "ready", "task", None);
-        project.filed("CTV-2", "ready", "task", None);
-        project.open_sprint("S1", None, &[]);
-
-        let answer = plan(&project, "sm", &["CTV-1", "CTV-2"]).expect("the Scrum Master plans");
-
-        assert_eq!(
-            answer,
-            json!({ "sprint_id": "S1", "task_ids": ["CTV-1", "CTV-2"] })
-        );
-        assert_eq!(sprint_of(&project, "CTV-1"), "S1");
-        assert_eq!(sprint_of(&project, "CTV-2"), "S1");
-        assert_eq!(held_by(&project, "S1"), ["CTV-1", "CTV-2"]);
-        assert_eq!(
-            planned(&project),
-            [json!({ "sprint_id": "S1", "task_ids": ["CTV-1", "CTV-2"], "planned_by": "sm" })]
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_plan_past_the_sprint_budget() {
-        let project = a_project_with_scrum_master("tools-plan-budget");
-        filed_at(&project, "CTV-1", "ready", "task", 6.0);
-        filed_at(&project, "CTV-2", "ready", "task", 5.0);
-        project.open_sprint("S1", Some(10.0), &["CTV-1"]);
-
-        plan_refused(&project, "sm", &["CTV-2"], &["budget", "S1"]);
-
-        assert_eq!(sprint_of(&project, "CTV-2"), Value::Null);
-        assert_eq!(held_by(&project, "S1"), ["CTV-1"]);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_task_that_is_not_ready() {
-        let project = a_project_with_scrum_master("tools-plan-not-ready");
-        project.filed("CTV-1", "refining", "task", None);
-        project.open_sprint("S1", None, &[]);
-
-        plan_refused(&project, "sm", &["CTV-1"], &["CTV-1", "refining"]);
-        assert_eq!(sprint_of(&project, "CTV-1"), Value::Null);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_task_with_a_parent() {
-        let project = a_project_with_scrum_master("tools-plan-parent");
-        project.filed("CTV-1", "in_progress", "epic", None);
-        project.filed("CTV-2", "ready", "task", Some("CTV-1"));
-        project.open_sprint("S1", None, &[]);
-
-        plan_refused(&project, "sm", &["CTV-2"], &["CTV-2", "CTV-1"]);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_task_already_in_a_sprint() {
-        let project = a_project_with_scrum_master("tools-plan-in-a-sprint");
-        project.filed("CTV-1", "ready", "task", None);
-        project.open_sprint("S1", None, &["CTV-1"]);
-
-        plan_refused(&project, "sm", &["CTV-1"], &["CTV-1", "already in S1"]);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_plan_by_anyone_but_the_assigner() {
-        let project = a_project_with_scrum_master("tools-plan-assigner");
-        project.filed("CTV-1", "ready", "task", None);
-        project.open_sprint("S1", None, &[]);
-
-        plan_refused(&project, "dev-a", &["CTV-1"], &["dev-a"]);
-        plan_refused(&project, "pm", &["CTV-1"], &["pm", "Scrum Master"]);
-        assert_eq!(sprint_of(&project, "CTV-1"), Value::Null);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_second_plan() {
-        let project = a_project_with_scrum_master("tools-plan-second");
-        project.filed("CTV-1", "ready", "task", None);
-        project.filed("CTV-2", "ready", "task", None);
-        project.open_sprint("S1", None, &["CTV-1"]);
-
-        plan_refused(&project, "sm", &["CTV-2"], &["S1"]);
-        assert_eq!(sprint_of(&project, "CTV-2"), Value::Null);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_plan_into_a_sprint_that_is_ending() {
-        let project = a_project_with_scrum_master("tools-plan-ending");
-        project.filed("CTV-1", "ready", "task", None);
-        project.open_sprint("S1", None, &[]);
-        // An end has written S1's file and not yet recorded `sprint.ended`.
-        let mut ending = catervas_core::sprint::fixtures::an_open_sprint_wire();
-        ending["id"] = json!("S1");
-        ending["status"] = json!("ended");
-        ending["ended_at"] = json!("2026-09-24T01:00:00Z");
-        project
-            .deps
-            .files
-            .write_sprint(&catervas_core::sprint::validate_sprint(&ending).expect("a sprint"))
-            .expect("S1 is written");
-
-        plan_refused(&project, "sm", &["CTV-1"], &["S1", "ended"]);
-        assert_eq!(sprint_of(&project, "CTV-1"), Value::Null);
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn plans_an_epics_tasks_with_it() {
-        let project = a_project_with_scrum_master("tools-plan-epic");
-        project.filed("CTV-1", "ready", "epic", None);
-        project.filed("CTV-3", "in_progress", "epic", None);
-        project.moved(
-            "CTV-3",
-            "assigned",
-            "in_progress",
-            &json!({ "assignee": "sm", "reviewer": "pm" }),
-        );
-        project.filed("CTV-4", "ready", "task", Some("CTV-3"));
-        project.open_sprint("S1", None, &[]);
-
-        plan(&project, "sm", &["CTV-1"]).expect("an approved epic is planned");
-
-        assert_eq!(held_by(&project, "S1"), ["CTV-1"]);
-        assert_eq!(sprint_of(&project, "CTV-4"), Value::Null);
-        // Work under an epic that began before the sprint goes on.
-        project
-            .call(
-                "sm",
-                None,
-                "catervas_assign_task",
-                json!({ "task_id": "CTV-4", "assignee_id": "dev-a", "reviewer_id": "dev-b" }),
-            )
-            .expect("CTV-4 is assigned while S1 is open");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn plans_an_epic_with_the_tasks_already_under_it() {
-        let project = a_project_with_scrum_master("tools-plan-epic-children");
-        project.filed("CTV-1", "ready", "epic", None);
-        project.filed("CTV-2", "ready", "task", Some("CTV-1"));
-        project.open_sprint("S1", None, &[]);
-
-        let answer = plan(&project, "sm", &["CTV-1"]).expect("an approved epic is planned");
-
-        assert_eq!(
-            answer,
-            json!({ "sprint_id": "S1", "task_ids": ["CTV-1", "CTV-2"] })
-        );
-        assert_eq!(held_by(&project, "S1"), ["CTV-1", "CTV-2"]);
-        assert_eq!(sprint_of(&project, "CTV-2"), "S1");
-        let row = project
-            .deps
-            .projections
-            .task(&"CTV-2".parse().expect("a task id"))
-            .expect("the board reads")
-            .expect("a row");
-        assert_eq!(row.sprint.as_deref(), Some("S1"));
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn puts_an_epics_new_task_in_its_sprint() {
-        let project = a_project("tools-child-sprint");
-        project.filed("CTV-1", "in_progress", "epic", None);
-        project.moved(
-            "CTV-1",
-            "assigned",
-            "in_progress",
-            &json!({ "assignee": "pm" }),
-        );
-        project.open_sprint("S1", None, &["CTV-1"]);
-
-        project
-            .call(
-                "pm",
-                None,
-                "catervas_create_task",
-                json!({ "contract": a_request(), "parent": "CTV-1" }),
-            )
-            .expect("the epic's assignee files its tasks");
-
-        assert_eq!(sprint_of(&project, "CTV-2"), "S1");
-        let row = project
-            .deps
-            .projections
-            .task(&"CTV-2".parse().expect("a task id"))
-            .expect("the board reads")
-            .expect("a row");
-        assert_eq!(row.sprint.as_deref(), Some("S1"));
-        assert_eq!(held_by(&project, "S1"), ["CTV-1", "CTV-2"]);
-        assert_eq!(
-            planned(&project).last(),
-            Some(&json!({ "sprint_id": "S1", "task_ids": ["CTV-2"], "planned_by": "governor" }))
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn files_a_task_whose_join_fails_and_says_so() {
-        let project = a_project("tools-child-sprint-ending");
-        project.filed("CTV-1", "in_progress", "epic", None);
-        project.moved(
-            "CTV-1",
-            "assigned",
-            "in_progress",
-            &json!({ "assignee": "pm" }),
-        );
-        project.open_sprint("S1", None, &["CTV-1"]);
-        // The human's end has written S1's file and not yet recorded `sprint.ended`.
-        let mut ending = catervas_core::sprint::fixtures::an_open_sprint_wire();
-        ending["id"] = json!("S1");
-        ending["task_ids"] = json!(["CTV-1"]);
-        ending["status"] = json!("ended");
-        ending["ended_at"] = json!("2026-09-24T01:00:00Z");
-        project
-            .deps
-            .files
-            .write_sprint(&catervas_core::sprint::validate_sprint(&ending).expect("a sprint"))
-            .expect("S1 is written");
-
-        let answer = project
-            .call(
-                "pm",
-                None,
-                "catervas_create_task",
-                json!({ "contract": a_request(), "parent": "CTV-1" }),
-            )
-            .expect("the task is filed though it joins no sprint");
-
-        assert_eq!(answer["task_id"], "CTV-2");
-        let warning = answer["warning"].as_str().expect("a warning");
-        assert!(warning.contains("S1 has ended"), "{warning}");
-        assert_eq!(sprint_of(&project, "CTV-2"), Value::Null);
-        assert_eq!(planned(&project).len(), 1, "only the fixture's plan");
     }
 
     /// A request as its author writes it.

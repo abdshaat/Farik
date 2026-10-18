@@ -255,6 +255,20 @@
 	outline-offset: 2px;
 }
 
+/* Send, and Send as a task beside its info button, one above the other: the box keeps its row on a phone. */
+.actions {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: var(--catervas-space-2);
+}
+
+.task {
+	display: flex;
+	align-items: center;
+	gap: var(--catervas-space-2);
+}
+
 .send {
 	display: flex;
 	flex-wrap: wrap;

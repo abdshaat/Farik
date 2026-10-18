@@ -1,5 +1,6 @@
 //! A task's commands in a Docker container of their own, with the worktree mounted at
-//! `/workspace` (`docs/SPEC.md` 8.3). Docker is the `docker` program, driven as git is.
+//! `/workspace` (`docs/SPEC.md` 8.3). Docker is the `docker` program, driven as git is. The
+//! container made for Catervas's checks also sees the repository's git store, read-only.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -42,19 +43,19 @@ impl DockerSandbox {
             container_name(project_id, task_id),
             project_id,
             task_id,
-            (worktree, &[]),
+            (worktree, &[], None),
             network,
             image,
         )
     }
 
-    /// `create`, under the container name `name`, with `mounts` as the worktree and the other
-    /// repositories it can read.
+    /// `create`, under the container name `name`, with `mounts` as the worktree, the other
+    /// repositories it can read, and the git store it sees read-only.
     fn start(
         name: String,
         project_id: &str,
         task_id: &TaskId,
-        (worktree, reads): (&Path, &[(String, PathBuf)]),
+        (worktree, reads, git_store): (&Path, &[(String, PathBuf)], Option<&Path>),
         network: bool,
         image: &str,
     ) -> Result<DockerSandbox, SandboxError> {
@@ -63,7 +64,9 @@ impl DockerSandbox {
             ("catervas.task".to_string(), task_id.as_str().to_string()),
         ];
         let user = format!("{}:{}", id("-u")?, id("-g")?);
-        let arguments = run_args(&name, worktree, reads, network, &user, &labels, image)?;
+        let arguments = run_args(
+            &name, worktree, reads, git_store, network, &user, &labels, image,
+        )?;
         if !docker(&["version"]).is_ok_and(|output| output.status.success()) {
             return Err(SandboxError::DockerUnavailable);
         }
@@ -91,16 +94,23 @@ impl DockerSandbox {
 }
 
 /// The arguments of the `docker run` that starts a sandbox: `worktree` at `/workspace`, then each
-/// of `reads` read-only at `/repos/<name>` (8.3), with the container's `name`, `user` and `labels`.
+/// of `reads` read-only at `/repos/<name>` (8.3), then `git_store` read-only at its own path, so
+/// that a linked worktree's `.git` file resolves (ADR 0069), with the container's `name`, `user`
+/// and `labels`.
 ///
 /// # Errors
 ///
 /// `ContainerFailed` when a folder to mount is relative or holds a comma, which `--mount` splits
 /// on.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "every part of the one `docker run` line"
+)]
 pub(crate) fn run_args(
     name: &str,
     worktree: &Path,
     reads: &[(String, PathBuf)],
+    git_store: Option<&Path>,
     network: bool,
     user: &str,
     labels: &[(String, String)],
@@ -138,6 +148,16 @@ pub(crate) fn run_args(
         arguments.push(format!(
             "type=bind,src={},dst=/repos/{member},readonly",
             path.display()
+        ));
+    }
+    if let Some(store) = git_store {
+        if !mountable(store) {
+            return Err(refuse("the git store", store));
+        }
+        arguments.push("--mount".to_string());
+        arguments.push(format!(
+            "type=bind,src={0},dst={0},readonly",
+            store.display()
         ));
     }
     arguments.extend(["-w", "/workspace", "--user", user].map(ToString::to_string));
@@ -231,7 +251,27 @@ impl SandboxFactory for DockerSandboxFactory {
             container_name(project_id, task_id),
             project_id,
             task_id,
-            (worktree, reads),
+            (worktree, reads, None),
+            network,
+            &self.image,
+        )?;
+        Ok(Box::new(sandbox))
+    }
+
+    fn create_checking(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+        reads: &[(String, PathBuf)],
+        git_store: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        let sandbox = DockerSandbox::start(
+            container_name(project_id, task_id),
+            project_id,
+            task_id,
+            (worktree, reads, Some(git_store)),
             network,
             &self.image,
         )?;
@@ -248,7 +288,7 @@ impl SandboxFactory for DockerSandboxFactory {
             base_container_name(project_id, task_id),
             project_id,
             task_id,
-            (worktree, &[]),
+            (worktree, &[], None),
             false,
             &self.image,
         )?;
@@ -363,10 +403,12 @@ mod tests {
             "infra".to_string(),
             std::path::PathBuf::from("/home/me/infra"),
         )];
+        let store = Path::new("/home/me/p/.git");
         let arguments = run_args(
             "c",
             Path::new("/home/me/wt"),
             &reads,
+            Some(store),
             false,
             "1000:1000",
             &labels,
@@ -375,29 +417,44 @@ mod tests {
         .expect("the arguments");
         let own = "type=bind,src=/home/me/wt,dst=/workspace".to_string();
         let sibling = "type=bind,src=/home/me/infra,dst=/repos/infra,readonly".to_string();
+        // The checks' container also sees the git store, read-only at its own path (ADR 0069).
+        let git = "type=bind,src=/home/me/p/.git,dst=/home/me/p/.git,readonly".to_string();
         let mounts: Vec<&String> = arguments
             .windows(2)
             .filter(|pair| pair[0] == "--mount")
             .map(|pair| &pair[1])
             .collect();
-        assert_eq!(mounts, [&own, &sibling]);
+        assert_eq!(mounts, [&own, &sibling, &git]);
         // A folder with a comma cannot be named to `--mount`.
         let comma = [("x".to_string(), std::path::PathBuf::from("/home/me/a,b"))];
         let refused = run_args(
             "c",
             Path::new("/home/me/wt"),
             &comma,
+            None,
             false,
             "1000:1000",
             &labels,
             "image",
         );
         assert!(refused.is_err(), "{refused:?}");
-        // With no reads the arguments are the worktree's alone.
+        let refused = run_args(
+            "c",
+            Path::new("/home/me/wt"),
+            &[],
+            Some(Path::new("/home/me/a,b/.git")),
+            false,
+            "1000:1000",
+            &labels,
+            "image",
+        );
+        assert!(refused.is_err(), "{refused:?}");
+        // With no reads and no store the arguments are the worktree's alone.
         let alone = run_args(
             "c",
             Path::new("/home/me/wt"),
             &[],
+            None,
             true,
             "1000:1000",
             &labels,

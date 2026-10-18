@@ -1046,7 +1046,7 @@ fn a_kit(script: &std::path::Path, oauth_url: Option<&str>) -> catervas_runtime:
     a_kit_of(script, oauth_url, false)
 }
 
-/// [`a_kit`], and, when `allowing`, with a spending tool `make` that may run 20 times a sprint
+/// [`a_kit`], and, when `allowing`, with a spending tool `make` that may run 20 times a day
 /// unasked and a `post` that always asks.
 fn a_kit_of(
     script: &std::path::Path,

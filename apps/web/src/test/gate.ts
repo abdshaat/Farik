@@ -137,6 +137,7 @@ export async function openedGate(
 			files: ["src/gift.ts", "src/receipt.ts", "src/email.ts"],
 			added: 142,
 			removed: 18,
+			branch: "feat/gift-cards",
 		},
 		"task.tries": { try: 1, of: 4 },
 		"waiting.list": { waiting },
@@ -144,6 +145,9 @@ export async function openedGate(
 			choices: [
 				{
 					label: "Give 2 more tries",
+					next: "Theo picks up CTV-1 again with 2 more tries.",
+					suggested: true,
+					kind: "command",
 					body: {
 						command: "escalation_resolve",
 						body: { task_id: "CTV-1", to: "in_progress", extra_tries: 2 },
@@ -151,9 +155,22 @@ export async function openedGate(
 				},
 				{
 					label: "Ask Mira to change the plan",
+					next: "Mira rewrites the plan and asks you to approve it again.",
+					suggested: false,
+					kind: "command",
 					body: {
 						command: "escalation_resolve",
 						body: { task_id: "CTV-1", to: "refining" },
+					},
+				},
+				{
+					label: "Cancel the task",
+					next: "CTV-1 stops and nothing more is spent on it.",
+					suggested: false,
+					kind: "command",
+					body: {
+						command: "escalation_resolve",
+						body: { task_id: "CTV-1", to: "cancelled" },
 					},
 				},
 			],

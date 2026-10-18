@@ -113,6 +113,19 @@ pub enum CommitOutcome {
     Linked(String),
 }
 
+/// One uncommitted path of a working tree, as `Git::uncommitted_in` reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Uncommitted {
+    /// A file the last commit holds, changed, deleted or retyped, staged or not: putting it back
+    /// from that commit undoes the change whole.
+    Changed(String),
+    /// A file git neither tracks nor ignores.
+    Untracked(String),
+    /// Anything else: an added, renamed, copied or conflicted path, which Catervas does not put
+    /// back.
+    Other(String),
+}
+
 /// One repository, at a path.
 ///
 /// Every method runs `git` as a child process. Catervas does not reimplement git: a repository is the
@@ -206,6 +219,35 @@ impl Git {
             .to_string())
     }
 
+    /// Every branch name, local and remote-tracking, without `refs/heads/` or
+    /// `refs/remotes/<remote>/`; a remote's `HEAD` is left out. A name held both ways is listed
+    /// twice.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed`.
+    pub fn branch_names(&self) -> Result<Vec<String>, GitError> {
+        self.require_repository()?;
+        let listing = self.at_root(&[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ])?;
+        let mut names = Vec::new();
+        for reference in listing.lines() {
+            if let Some(local) = reference.strip_prefix("refs/heads/") {
+                names.push(local.to_string());
+            } else if let Some(remote) = reference.strip_prefix("refs/remotes/")
+                && let Some((_, name)) = remote.split_once('/')
+                && name != "HEAD"
+            {
+                names.push(name.to_string());
+            }
+        }
+        Ok(names)
+    }
+
     /// Makes a branch at `from`, without checking it out.
     ///
     /// # Errors
@@ -228,6 +270,20 @@ impl Git {
         self.require_repository()?;
         let path = path_argument(path)?;
         self.at_root(&["worktree", "add", "-b", branch, &path, from])?;
+        Ok(())
+    }
+
+    /// Makes a worktree at `path` with the existing local branch `branch` checked out: a task's
+    /// kept branch, whose worktree was removed when the task was accepted.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the path is taken, the branch does not exist, or it is checked out
+    /// in another worktree.
+    pub fn add_worktree(&self, path: &Path, branch: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        let path = path_argument(path)?;
+        self.at_root(&["worktree", "add", &path, branch])?;
         Ok(())
     }
 
@@ -384,6 +440,84 @@ impl Git {
         self.require_repository()?;
         self.require_worktree_of_this_repository(path)?;
         run_git(path, &["status", "--porcelain", "--untracked-files=normal"])
+    }
+
+    /// Every uncommitted path of the tree at `path`, one entry per file (`--untracked-files=all`),
+    /// in the order git lists them. What `is_clean` counts, read path by path.
+    ///
+    /// # Errors
+    ///
+    /// As `status`.
+    pub fn uncommitted_in(&self, path: &Path) -> Result<Vec<Uncommitted>, GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(path)?;
+        let listed = run_git_untrimmed(
+            path,
+            &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        )?;
+        let mut entries = Vec::new();
+        let mut fields = listed.split('\0').filter(|field| !field.is_empty());
+        while let Some(field) = fields.next() {
+            let (Some(code), Some(file)) = (field.get(..2), field.get(3..)) else {
+                continue;
+            };
+            let file = file.to_string();
+            let mut code = code.chars();
+            let (staged, unstaged) = (code.next().unwrap_or(' '), code.next().unwrap_or(' '));
+            entries.push(match (staged, unstaged) {
+                ('?', '?') => Uncommitted::Untracked(file),
+                ('R' | 'C', _) => {
+                    // A rename or copy names its source next.
+                    fields.next();
+                    Uncommitted::Other(file)
+                }
+                ('A' | 'U', _) | (_, 'U') | ('D', 'D') => Uncommitted::Other(file),
+                _ => Uncommitted::Changed(file),
+            });
+        }
+        Ok(entries)
+    }
+
+    /// Puts `paths` of the tree at `path` back as its last commit holds them, in the index and on
+    /// disk (`git restore --source=HEAD --staged --worktree`), each read as a path, never a pattern.
+    /// Every path must be one the last commit holds.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `path` is not a working tree of this repository or a path is not in
+    /// the last commit.
+    pub fn put_back(&self, path: &Path, paths: &[String]) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(path)?;
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut restore = vec![
+            "--literal-pathspecs",
+            "restore",
+            "--source=HEAD",
+            "--staged",
+            "--worktree",
+            "--",
+        ];
+        restore.extend(paths.iter().map(String::as_str));
+        run_git(path, &restore).map(|_| ())
+    }
+
+    /// Whether a merge is in progress in the worktree at `worktree`: it has a `MERGE_HEAD`.
+    ///
+    /// # Errors
+    ///
+    /// As `status`.
+    pub fn is_merging(&self, worktree: &Path) -> Result<bool, GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(worktree)?;
+        match run_git(worktree, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]) {
+            Ok(_) => Ok(true),
+            // `-q` makes git exit 1 and say nothing when there is no such reference.
+            Err(GitError::CommandFailed { stderr, .. }) if stderr.is_empty() => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 
     /// Commits `paths` of the tree at `path` with `message`, and answers the new commit's sha.
@@ -737,6 +871,31 @@ impl Git {
         from: &str,
         message: &str,
     ) -> Result<MergeOutcome, GitError> {
+        self.merge_in_worktree(worktree, from, message, false)
+    }
+
+    /// As `merge_in`, but a conflicted merge is left in progress in the worktree, its markers in
+    /// the files, for whoever resolves it (ADR 0069); the paths are answered all the same.
+    ///
+    /// # Errors
+    ///
+    /// As `merge_in`.
+    pub fn merge_keeping_conflicts(
+        &self,
+        worktree: &Path,
+        from: &str,
+        message: &str,
+    ) -> Result<MergeOutcome, GitError> {
+        self.merge_in_worktree(worktree, from, message, true)
+    }
+
+    fn merge_in_worktree(
+        &self,
+        worktree: &Path,
+        from: &str,
+        message: &str,
+        keep_conflicts: bool,
+    ) -> Result<MergeOutcome, GitError> {
         self.require_repository()?;
         self.require_worktree_of_this_repository(worktree)?;
         match run_git(
@@ -753,7 +912,9 @@ impl Git {
                 if conflicts.is_empty() {
                     return Err(refusal);
                 }
-                run_git(worktree, &["merge", "--abort"])?;
+                if !keep_conflicts {
+                    run_git(worktree, &["merge", "--abort"])?;
+                }
                 Ok(MergeOutcome::Conflicts(conflicts))
             }
         }
@@ -982,6 +1143,46 @@ impl Git {
         }
     }
 
+    /// The git store a worktree of this repository uses, as an absolute path: what the checks'
+    /// container mounts read-only so that the worktree's `.git` file resolves (ADR 0069).
+    ///
+    /// # Errors
+    ///
+    /// When `worktree` is not a working tree of this repository, or git fails.
+    pub fn common_dir(&self, worktree: &Path) -> Result<PathBuf, GitError> {
+        self.require_worktree_of_this_repository(worktree)?;
+        Ok(PathBuf::from(run_git(worktree, &COMMON_DIRECTORY)?))
+    }
+
+    /// Whether the repository's settings hold a password: a remote URL with a user part, or an
+    /// `http.*.extraheader`. A store that does is never shown to a container that has the network
+    /// (ADR 0069).
+    ///
+    /// # Errors
+    ///
+    /// When git cannot be run.
+    pub fn config_holds_a_secret(&self) -> Result<bool, GitError> {
+        let urls = self.settings_matching(r"^remote\..*\.(push)?url$")?;
+        let headers = self.settings_matching(r"^http\..*extraheader$")?;
+        Ok(!headers.is_empty()
+            || urls.iter().any(|line| {
+                line.split_once(char::is_whitespace)
+                    .is_some_and(|(_, url)| url_has_user_part(url.trim()))
+            }))
+    }
+
+    /// The lines `git config --get-regexp` prints for `pattern`; none when nothing matches, which
+    /// git reports as exit 1 with nothing said.
+    fn settings_matching(&self, pattern: &str) -> Result<Vec<String>, GitError> {
+        match self.at_root(&["config", "--get-regexp", pattern]) {
+            Ok(lines) => Ok(lines.lines().map(str::to_string).collect()),
+            Err(GitError::CommandFailed { stderr, .. }) if stderr.trim().is_empty() => {
+                Ok(Vec::new())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Refuses a path that is not a working tree of this repository: another repository's own tree,
     /// or a directory that is not one at all.
     ///
@@ -1019,6 +1220,16 @@ impl Git {
     fn at_root(&self, arguments: &[&str]) -> Result<String, GitError> {
         run_git(&self.root, arguments)
     }
+}
+
+/// Whether a remote URL carries a user part: text between `://` and the next `/` holding `@`. An
+/// `scp`-style address (`git@host:path`) has no `://` and so none.
+fn url_has_user_part(url: &str) -> bool {
+    url.split_once("://").is_some_and(|(_, rest)| {
+        rest.split('/')
+            .next()
+            .is_some_and(|host| host.contains('@'))
+    })
 }
 
 /// Who Catervas commits as when git knows nobody (`docs/SPEC.md` 5.14), as `-c` options before a

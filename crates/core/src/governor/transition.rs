@@ -26,7 +26,7 @@ use crate::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState,
     check_assignment, check_blocker_resolved, check_blocker_written, check_children_done,
     check_criteria_recorded, check_design_rejection, check_failed_criterion_ids,
-    check_rejection_reasons,
+    check_pull_request_conflicted, check_rejection_reasons,
 };
 use crate::governor::readiness::{ReadinessContext, evaluate_readiness};
 use crate::governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions};
@@ -80,6 +80,12 @@ pub struct TransitionContext {
     pub blocker: Option<Blocker>,
     /// What cleared the blocker.
     pub blocker_resolution: Option<String>,
+    /// The status the task was in when it last moved into `blocked`, which is where an answer
+    /// sends it back (ADR 0069). `None` with no such move.
+    pub blocked_from: Option<TaskStatus>,
+    /// The files in which the task's pull request conflicts with the integration branch, for the
+    /// `accepted -> assigned` gate. Empty when it merges.
+    pub pull_request_conflicts: Vec<String>,
     /// When the task blocked, if it is blocked.
     pub blocked_at: Option<DateTime<Utc>>,
     /// The runtime's clock, passed in because `catervas-core` reads no clock of its own.
@@ -91,10 +97,7 @@ pub struct TransitionContext {
     pub done: DoneEvidence,
     /// What the reviewer wrote when it rejected the work.
     pub rejection: Option<Rejection>,
-    /// Every budget's spend and limit. What is left of the sprint appears three times in this
-    /// context — here, in `readiness`, and in `assignment` — because each of those answers its own
-    /// question; the runtime derives all three from one figure, or the Definition of Ready and the
-    /// assignment gate could disagree about the same sprint.
+    /// Every budget's spend and limit.
     pub budget: BudgetState,
     /// Whether a permission was denied on an action the task requires.
     pub permission_denied: bool,
@@ -267,7 +270,7 @@ pub fn evaluate_transition(
         let checked = if the_designer_rejects && row.gate == GateId::RejectionReasons {
             check_design_rejection(&context.contract, context.rejection.as_ref())
         } else {
-            check_gate(row.gate, request.actor, context)
+            check_gate(row.gate, request.actor, request.to, context)
         };
         match checked {
             Ok(()) => {
@@ -332,7 +335,12 @@ fn named_agent(actor: TransitionActor, contract: &TaskContract) -> Option<&str> 
 }
 
 /// Whether one gate opens, and everything it says when it does not.
-fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext) -> GateResult {
+fn check_gate(
+    gate: GateId,
+    actor: TransitionActor,
+    to: TaskStatus,
+    context: &TransitionContext,
+) -> GateResult {
     governor_may_verify(gate, actor, context)?;
     match gate {
         GateId::None => Ok(()),
@@ -369,7 +377,11 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
             }
         }
         GateId::BlockerWritten => check_blocker_written(context.blocker.as_ref()),
-        GateId::BlockerResolved => check_blocker_resolved(context.blocker_resolution.as_deref()),
+        GateId::BlockerResolved => check_blocker_resolved(
+            context.blocker_resolution.as_deref(),
+            context.blocked_from,
+            to,
+        ),
         GateId::BlockedAge => blocked_long_enough(context),
         GateId::DefinitionOfDone => {
             evaluate_done(&context.contract, &context.done).map_err(|failures| {
@@ -427,6 +439,9 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
             context.rejection.as_ref().map_or(Ok(()), |rejection| {
                 check_failed_criterion_ids(&context.contract, &rejection.failed_criterion_ids)
             })
+        }
+        GateId::PullRequestConflicted => {
+            check_pull_request_conflicted(&context.pull_request_conflicts)
         }
     }
 }
@@ -583,7 +598,6 @@ fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationR
             | BudgetScope::SessionTokens
             | BudgetScope::SessionWallClock
             | BudgetScope::SessionToolCalls
-            | BudgetScope::SprintUsd
             | BudgetScope::DayUsd => EscalationReason::Budget,
         });
     }
@@ -619,7 +633,11 @@ fn effects(gate: GateId, to: TaskStatus, context: &TransitionContext) -> Vec<Tra
             gate, context,
         )));
     }
-    if to == TaskStatus::InProgress {
+    let leaves_a_block = matches!(
+        context.contract.status,
+        TaskStatus::Blocked | TaskStatus::Escalated
+    ) && matches!(to, TaskStatus::Verifying | TaskStatus::Refining);
+    if to == TaskStatus::InProgress || leaves_a_block {
         effects.push(TransitionEffect::ResetBlocker);
     }
     if to == TaskStatus::Blocked {
@@ -664,7 +682,8 @@ fn escalation_reason(gate: GateId, context: &TransitionContext) -> EscalationRea
         | GateId::DefinitionOfDone
         | GateId::RejectionReasons
         | GateId::IterationBelowLimit
-        | GateId::HumanRejection => EscalationReason::ExplicitRequest,
+        | GateId::HumanRejection
+        | GateId::PullRequestConflicted => EscalationReason::ExplicitRequest,
     }
 }
 
@@ -711,15 +730,9 @@ mod tests {
             reviewer_role: Role::Architect,
             assignee_open_tasks: 0,
             wip_limit: 2,
-            remaining_sprint_budget_usd: 15.0,
-            open_sprint: None,
-            task_sprint: None,
-            parent_sprint: None,
-            plan_in_sprints: false,
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
-            skips_sprints: false,
             lane_builder: None,
         }
     }
@@ -741,8 +754,6 @@ mod tests {
             task_max_usd: 5.0,
             task_sessions: 1,
             task_max_sessions: 12,
-            sprint_spent_usd: 3.0,
-            sprint_max_usd: 15.0,
             day_spent_usd: 4.0,
             day_max_usd: 20.0,
         }
@@ -774,6 +785,8 @@ mod tests {
                 needed: "A password for the staging database.".to_string(),
             }),
             blocker_resolution: Some("The password is in the vault.".to_string()),
+            blocked_from: None,
+            pull_request_conflicts: Vec::new(),
             blocked_at: Some(at(1)),
             now: at(2),
             blocked_limit: DEFAULT_BLOCKED_LIMIT,
@@ -1311,6 +1324,125 @@ mod tests {
     }
 
     #[test]
+    fn lets_every_holder_block_its_task() {
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        let block = ask(TaskStatus::Blocked, A::Reviewer, Some("arch-1"));
+        assert_eq!(
+            effects(&block, &context),
+            [TransitionEffect::StampBlockedAt]
+        );
+        assert!(matches!(
+            decide(
+                &ask(TaskStatus::Blocked, A::Reviewer, Some("dev-1")),
+                &context
+            ),
+            Err(TransitionRefusal::NotTheNamedAgent { .. })
+        ));
+        let mut refining = a_context();
+        refining.contract.status = TaskStatus::Refining;
+        let plan = ask(TaskStatus::Blocked, A::ProductManager, None);
+        assert_eq!(
+            effects(&plan, &refining),
+            [TransitionEffect::StampBlockedAt]
+        );
+        context.blocker = None;
+        refining.blocker = None;
+        assert_eq!(one_gate(&block, &context).0, GateId::BlockerWritten);
+        assert_eq!(one_gate(&plan, &refining).0, GateId::BlockerWritten);
+    }
+
+    #[test]
+    fn returns_a_blocked_task_where_its_block_came_from() {
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Blocked;
+        context.blocked_from = Some(TaskStatus::Verifying);
+        let human = |to| ask(to, A::Human, None);
+        assert_eq!(
+            effects(&human(TaskStatus::Verifying), &context),
+            [TransitionEffect::ResetBlocker]
+        );
+        let (gate, details) = one_gate(&human(TaskStatus::InProgress), &context);
+        assert_eq!(gate, GateId::BlockerResolved);
+        assert!(
+            details[0].contains("sends it back to verifying"),
+            "{details:?}"
+        );
+        // An escalated block answered back into its review leaves no blocker behind.
+        let mut escalated = context.clone();
+        escalated.contract.status = TaskStatus::Escalated;
+        assert_eq!(
+            effects(&human(TaskStatus::Verifying), &escalated),
+            [TransitionEffect::ResetBlocker]
+        );
+        context.blocked_from = Some(TaskStatus::InProgress);
+        assert_eq!(
+            effects(&human(TaskStatus::InProgress), &context),
+            [TransitionEffect::ResetBlocker]
+        );
+        assert_eq!(
+            one_gate(&human(TaskStatus::Verifying), &context).0,
+            GateId::BlockerResolved
+        );
+        context.blocked_from = None;
+        assert_eq!(
+            effects(&human(TaskStatus::InProgress), &context),
+            [TransitionEffect::ResetBlocker]
+        );
+        context.blocker_resolution = None;
+        for from in [
+            None,
+            Some(TaskStatus::Verifying),
+            Some(TaskStatus::InProgress),
+        ] {
+            context.blocked_from = from;
+            for to in [
+                TaskStatus::Refining,
+                TaskStatus::Verifying,
+                TaskStatus::InProgress,
+            ] {
+                assert_eq!(
+                    one_gate(&human(to), &context).0,
+                    GateId::BlockerResolved,
+                    "{from:?} {to:?}"
+                );
+            }
+        }
+        context.blocker_resolution = Some("The password is in the vault.".to_string());
+        for from in [
+            None,
+            Some(TaskStatus::Verifying),
+            Some(TaskStatus::InProgress),
+        ] {
+            context.blocked_from = from;
+            assert_eq!(
+                effects(&human(TaskStatus::Refining), &context),
+                [TransitionEffect::ResetBlocker]
+            );
+        }
+    }
+
+    #[test]
+    fn sends_back_an_accepted_task_whose_pull_request_conflicts() {
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Accepted;
+        context.pull_request_conflicts = vec!["components/NoteInput.tsx".to_string()];
+        let back = ask(TaskStatus::Assigned, A::Governor, None);
+        assert_eq!(effects(&back, &context), []);
+        assert_eq!(
+            decide(&ask(TaskStatus::Assigned, A::Human, None), &context),
+            Err(TransitionRefusal::ActorNotAllowed {
+                actor: A::Human,
+                allowed: vec![A::Governor]
+            })
+        );
+        context.pull_request_conflicts.clear();
+        let (gate, details) = one_gate(&back, &context);
+        assert_eq!(gate, GateId::PullRequestConflicted);
+        assert!(details[0].contains("merges"), "{details:?}");
+    }
+
+    #[test]
     fn escalates_a_task_blocked_for_the_limit_or_longer() {
         let mut context = a_context();
         context.contract.status = TaskStatus::Blocked;
@@ -1577,8 +1709,7 @@ mod tests {
             )
         );
         // Spec 5.5 gives every budget its own consequence, and only the task's carry escalation:
-        // the session's end the session and block the task, the sprint's stops new assignments,
-        // and the day's pauses the team. Escalating one task for any of those would be the wrong
+        // the session's end the session and block the task, and the day's pauses the team. Escalating one task for any of those would be the wrong
         // answer to the wrong question.
         for elsewhere in [
             |budget: &mut BudgetState| {
@@ -1590,7 +1721,6 @@ mod tests {
             |budget: &mut BudgetState| {
                 budget.session.tool_calls = budget.session_limits.max_tool_calls;
             },
-            |budget: &mut BudgetState| budget.sprint_spent_usd = budget.sprint_max_usd,
             |budget: &mut BudgetState| budget.day_spent_usd = budget.day_max_usd,
         ] {
             context.budget = a_budget();
@@ -1767,7 +1897,7 @@ mod tests {
     }
 
     /// One case per row of `TRANSITION_TABLE`, in its order.
-    fn every_row() -> [Case; 24] {
+    fn every_row() -> [Case; 30] {
         use TaskStatus as S;
         let no_change: fn(&mut TransitionContext) = |_| {};
         [
@@ -1784,48 +1914,60 @@ mod tests {
                 context.readiness_failed_attempts = 0;
                 context.contract.risk = Risk::High;
             }),
-            case(4, S::Ready, S::Assigned, A::ScrumMaster, no_change),
-            case(5, S::Ready, S::Assigned, A::ProductManager, |context| {
+            case(4, S::Refining, S::Blocked, A::ProductManager, no_change),
+            case(5, S::Ready, S::Assigned, A::ScrumMaster, no_change),
+            case(6, S::Ready, S::Assigned, A::ProductManager, |context| {
                 let assignment = context.assignment.as_mut().expect("the fixture assigns");
                 assignment.requested_by = AssignmentRequester::ProductManager;
                 assignment.has_active_scrum_master = false;
             }),
-            case(6, S::Assigned, S::InProgress, A::Assignee, no_change),
-            case(7, S::InProgress, S::Verifying, A::Assignee, no_change),
-            case(8, S::InProgress, S::Blocked, A::Assignee, no_change),
-            case(9, S::Assigned, S::Blocked, A::Assignee, no_change),
-            case(10, S::Blocked, S::InProgress, A::ScrumMaster, no_change),
-            case(11, S::Blocked, S::InProgress, A::Human, no_change),
-            case(12, S::Blocked, S::Escalated, A::Governor, |context| {
+            case(7, S::Assigned, S::InProgress, A::Assignee, no_change),
+            case(8, S::InProgress, S::Verifying, A::Assignee, no_change),
+            case(9, S::InProgress, S::Blocked, A::Assignee, no_change),
+            case(10, S::Assigned, S::Blocked, A::Assignee, no_change),
+            case(11, S::Blocked, S::InProgress, A::ScrumMaster, no_change),
+            case(12, S::Blocked, S::InProgress, A::Human, no_change),
+            case(13, S::Blocked, S::Verifying, A::ScrumMaster, |context| {
+                context.blocked_from = Some(S::Verifying);
+            }),
+            case(14, S::Blocked, S::Verifying, A::Human, |context| {
+                context.blocked_from = Some(S::Verifying);
+            }),
+            case(15, S::Blocked, S::Refining, A::Human, no_change),
+            case(16, S::Blocked, S::Escalated, A::Governor, |context| {
                 context.blocked_limit = Duration::from_secs(3600);
             }),
-            case(13, S::Verifying, S::Accepted, A::ProductManager, no_change),
+            case(17, S::Verifying, S::Accepted, A::ProductManager, no_change),
             case(
-                14,
+                18,
                 S::Verifying,
                 S::Accepted,
                 A::Governor,
                 a_task_no_agent_reviews,
             ),
-            case(15, S::Verifying, S::Rejected, A::Reviewer, no_change),
+            case(19, S::Verifying, S::Rejected, A::Reviewer, no_change),
             case(
-                16,
+                20,
                 S::Verifying,
                 S::Rejected,
                 A::Governor,
                 a_task_no_agent_reviews,
             ),
-            case(17, S::Verifying, S::Rejected, A::Human, no_change),
-            case(18, S::Rejected, S::InProgress, A::Governor, no_change),
-            case(19, S::Rejected, S::Escalated, A::Governor, |context| {
+            case(21, S::Verifying, S::Rejected, A::Human, no_change),
+            case(22, S::Verifying, S::Blocked, A::Reviewer, no_change),
+            case(23, S::Rejected, S::InProgress, A::Governor, no_change),
+            case(24, S::Rejected, S::Escalated, A::Governor, |context| {
                 context.contract.iteration = 3;
             }),
-            case(20, S::InProgress, S::Escalated, A::Governor, |context| {
+            case(25, S::Accepted, S::Assigned, A::Governor, |context| {
+                context.pull_request_conflicts = vec!["src/login/form.rs".to_string()];
+            }),
+            case(26, S::InProgress, S::Escalated, A::Governor, |context| {
                 context.permission_denied = true;
             }),
-            case(21, S::InProgress, S::Escalated, A::Human, no_change),
-            case(22, S::InProgress, S::Cancelled, A::Human, no_change),
-            case(23, S::Escalated, S::Ready, A::Human, no_change),
+            case(27, S::InProgress, S::Escalated, A::Human, no_change),
+            case(28, S::InProgress, S::Cancelled, A::Human, no_change),
+            case(29, S::Escalated, S::Ready, A::Human, no_change),
         ]
     }
 

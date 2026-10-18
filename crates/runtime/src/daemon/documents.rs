@@ -22,7 +22,8 @@ use catervas_store::marketing::marketing_plans;
 use catervas_store::requests::rederive_tasks;
 use serde_json::{Value, json};
 
-use catervas_protocol::event::{EventBody, TaskCreatedBodyFiledAs};
+use catervas_protocol::event::{EventBody, EventKind, TaskCreatedBodyFiledAs};
+use catervas_store::EventQuery;
 use catervas_store::requests::{
     change_request, file_small_request, placeholder_budget_usd, rewrite_request, rewrite_tasks,
 };
@@ -173,7 +174,7 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         Err(LandRefusal::Git(detail)) => return Err(Failure::new(INTERNAL_ERROR, detail)),
     };
     let body = serde_json::from_value(json!({
-        "path": path, "change": landed.change, "sha": landed.sha,
+        "path": path, "change": landed.change, "sha": landed.sha, "branch": landed.branch,
     }))
     .map_err(|e| internal(&e))?;
     append(deps, EventBody::FolderDocEdited(body))?;
@@ -561,6 +562,22 @@ fn last_change(
                     None => (None, None, false),
                 }
             }
+            Some(Named::PullRequest(number)) => match named_by_pull_request(deps, number)? {
+                Some(Named::Task(id)) => {
+                    match deps.projections.task(&id).map_err(|e| internal(&e))? {
+                        Some(row) => (Some(id.to_string()), row.assignee_id, false),
+                        None => (None, None, false),
+                    }
+                }
+                Some(Named::FolderChange(number)) => {
+                    match docs.changes.iter().find(|change| change.change == number) {
+                        Some(change) if change.edited => (None, None, true),
+                        Some(change) => (None, writer_of(docs, change), false),
+                        None => (None, None, false),
+                    }
+                }
+                _ => (None, None, false),
+            },
             None => (None, None, false),
         }
     };
@@ -571,6 +588,39 @@ fn last_change(
         "author": commit.author_name,
         "by_you": by_you,
     }))
+}
+
+/// What pull request `number` was opened for in the project folder, newest first; `None` when the
+/// log opened none with that number. A task's pull request counts only when its contract names no
+/// `repo`: a member's pull request numbers are the member's, not the project folder's.
+fn named_by_pull_request(deps: &ToolDeps, number: u64) -> Result<Option<Named>, Failure> {
+    let opened = deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::PullRequestOpened, EventKind::FolderChangeOpened],
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
+    for event in opened {
+        match &event.body {
+            EventBody::PullRequestOpened(body) if body.number == number => {
+                let Some(task) = event.envelope.ids.task_id.clone() else {
+                    continue;
+                };
+                let in_a_member = deps
+                    .files
+                    .read_contract(&task)
+                    .is_ok_and(|contract| contract.repo.is_some());
+                return Ok((!in_a_member).then_some(Named::Task(task)));
+            }
+            EventBody::FolderChangeOpened(body) if body.number.get() == number => {
+                return Ok(Some(Named::FolderChange(body.change.get())));
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
 }
 
 /// The agent that wrote a folder change, or whose proposals the owner approved in it.
@@ -621,7 +671,7 @@ fn waiting_change(deps: &ToolDeps, docs: &FolderDocs, path: &str) -> Option<(u64
                 && !change.escalated
                 && change.paths.iter().any(|p| p == path)
         })
-        .map(|change| (change.change, format!("docs/folder-{}", change.change)))
+        .map(|change| (change.change, change.branch.clone()))
         .filter(|(_, held)| deps.git.tree(held).is_ok())
 }
 
@@ -964,7 +1014,7 @@ mod tests {
         );
     }
 
-    /// What a save of the owner's leaves, as `files.save` does it: folder change `docs/folder-<n>`
+    /// What a save of the owner's leaves, as `files.save` does it: folder change on its own branch
     /// holding `text` for `path`, and `folder_doc.edited`.
     fn owner_edit(harness: &Harness, path: &str, text: &str) -> u64 {
         let deps = &harness.project.deps;
@@ -982,7 +1032,7 @@ mod tests {
         harness.project.record(
             "",
             "folder_doc.edited",
-            &json!({ "path": path, "change": landed.change, "sha": landed.sha }),
+            &json!({ "path": path, "change": landed.change, "sha": landed.sha, "branch": landed.branch }),
         );
         landed.change
     }
@@ -1184,6 +1234,76 @@ mod tests {
         assert_eq!(overview["document"]["last_change"]["by_you"], false);
     }
 
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn names_who_made_a_change_merged_by_pull_request() {
+        let harness = project("files-read-pr", "pull_request");
+        put_documents(&harness);
+        harness.project.moved(
+            "CTV-1",
+            "draft",
+            "assigned",
+            &json!({ "assignee": "pm", "reviewer": "dev-b" }),
+        );
+        // A task's pull request, merged on the forge with a merge commit.
+        git(&harness, &["checkout", "-b", "feat/pie-pre-orders"]);
+        write(&harness, ROADMAP, "a new roadmap\n");
+        commit(&harness, "update the roadmap");
+        git(&harness, &["checkout", "main"]);
+        git(
+            &harness,
+            &[
+                "merge",
+                "--no-ff",
+                "-m",
+                "Merge pull request #4 from me/feat/pie-pre-orders",
+                "feat/pie-pre-orders",
+            ],
+        );
+        harness.project.record(
+            "CTV-1",
+            "pull_request.opened",
+            &json!({
+                "url": "https://github.com/pie/shop/pull/4", "number": 4,
+                "branch": "feat/pie-pre-orders"
+            }),
+        );
+        let last = read_path(&harness, ROADMAP)["document"]["last_change"].clone();
+        assert_eq!(
+            (&last["task_id"], &last["agent_id"], &last["by_you"]),
+            (&json!("CTV-1"), &json!("pm"), &json!(false))
+        );
+
+        // A folder change's pull request, squashed on the forge.
+        git(&harness, &["checkout", "-b", "docs/overview"]);
+        write(&harness, OVERVIEW, "a rewritten overview\n");
+        commit(&harness, "docs(architecture): overview.md by Ada");
+        git(&harness, &["checkout", "main"]);
+        git(&harness, &["merge", "--squash", "docs/overview"]);
+        commit(&harness, "Docs: Update Overview (#9)");
+        harness.project.record_in(
+            Some("ada"),
+            Some("session-1"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": OVERVIEW, "written_by": "ada", "change": 2,
+                "sha": git_output(&harness, &["rev-parse", "docs/overview"]),
+                "branch": "docs/overview"
+            }),
+        );
+        harness.project.record(
+            "",
+            "folder_change.opened",
+            &json!({ "change": 2, "url": "https://github.com/pie/shop/pull/9", "number": 9 }),
+        );
+        let last = read_overview(&harness)["document"]["last_change"].clone();
+        assert_eq!(
+            (&last["task_id"], &last["agent_id"], &last["by_you"]),
+            (&Value::Null, &json!("ada"), &json!(false))
+        );
+    }
+
     fn read_path(harness: &Harness, path: &str) -> Value {
         read(&harness.daemon, path)
     }
@@ -1213,20 +1333,28 @@ mod tests {
         let waiting = read_path(&harness, ROADMAP);
         assert_eq!(
             waiting["waiting"],
-            json!({ "change": 1, "branch": "docs/folder-1" })
+            json!({ "change": 1, "branch": "docs/roadmap" })
         );
         assert_eq!(waiting["document"]["text"], "the owner's roadmap\n");
         assert_eq!(
             waiting["document"]["blob"],
-            git_output(
-                &harness,
-                &["rev-parse", &format!("docs/folder-1:{ROADMAP}")]
-            )
+            git_output(&harness, &["rev-parse", &format!("docs/roadmap:{ROADMAP}")])
         );
         assert_eq!(waiting["document"]["last_change"]["by_you"], true);
         assert_eq!(waiting["stale"], false);
 
-        harness.merge_branch_by_hand("docs/folder-1");
+        // Merged by hand with a message that names the change, as an older history does; a pull
+        // request's merge is read by its number (`names_who_made_a_change_merged_by_pull_request`).
+        git(
+            &harness,
+            &[
+                "merge",
+                "--no-ff",
+                "-m",
+                "Merge docs/folder-1: roadmap.md",
+                "docs/roadmap",
+            ],
+        );
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1337,14 +1465,14 @@ mod tests {
         );
         assert_eq!(
             saved["result"],
-            json!({ "change": 1, "branch": "docs/folder-1" }),
+            json!({ "change": 1, "branch": "docs/roadmap" }),
             "{saved}"
         );
         assert_eq!(
-            git_output(&harness, &["show", &format!("docs/folder-1:{path}")]),
+            git_output(&harness, &["show", &format!("docs/roadmap:{path}")]),
             "<h1>new roadmap</h1>"
         );
-        harness.merge_branch_by_hand("docs/folder-1");
+        harness.merge_branch_by_hand("docs/roadmap");
         ticks(&harness);
         let read = read(&harness.daemon, &path);
         assert_eq!(read["document"]["text"], "<h1>new roadmap</h1>\n");
@@ -1467,22 +1595,22 @@ mod tests {
         conforms(&saved["result"], "filesSaveResult", &saved);
         assert_eq!(
             saved["result"],
-            json!({ "change": 1, "branch": "docs/folder-1" })
+            json!({ "change": 1, "branch": "docs/overview" })
         );
         assert_eq!(
-            git_output(&harness, &["rev-list", "--count", "main..docs/folder-1"]),
+            git_output(&harness, &["rev-list", "--count", "main..docs/overview"]),
             "1"
         );
         assert_eq!(
-            git_output(&harness, &["log", "-1", "--format=%s", "docs/folder-1"]),
+            git_output(&harness, &["log", "-1", "--format=%s", "docs/overview"]),
             "docs(architecture): edit overview.md"
         );
         assert_eq!(
-            git_output(&harness, &["log", "-1", "--format=%an", "docs/folder-1"]),
+            git_output(&harness, &["log", "-1", "--format=%an", "docs/overview"]),
             "Catervas Test"
         );
         assert_eq!(
-            git_output(&harness, &["show", &format!("docs/folder-1:{OVERVIEW}")]),
+            git_output(&harness, &["show", &format!("docs/overview:{OVERVIEW}")]),
             "the owner's overview"
         );
         let edited = harness.project.events(&[EventKind::FolderDocEdited]);
@@ -1492,7 +1620,8 @@ mod tests {
             json!({
                 "path": OVERVIEW,
                 "change": 1,
-                "sha": git_output(&harness, &["rev-parse", "docs/folder-1"])
+                "sha": git_output(&harness, &["rev-parse", "docs/overview"]),
+                "branch": "docs/overview"
             })
         );
         assert_eq!(edited[0].envelope.ids.agent_id, None);
@@ -1503,7 +1632,7 @@ mod tests {
             "main holds the old text until the owner merges the branch"
         );
 
-        harness.merge_branch_by_hand("docs/folder-1");
+        harness.merge_branch_by_hand("docs/overview");
         ticks(&harness);
         assert_eq!(
             git_output(&harness, &["show", &format!("main:{OVERVIEW}")]),
@@ -1584,10 +1713,7 @@ mod tests {
                     .events(&[EventKind::FolderDocEdited])
                     .is_empty()
             );
-            assert_eq!(
-                git_output(&harness, &["branch", "--list", "docs/folder-*"]),
-                ""
-            );
+            assert_eq!(git_output(&harness, &["branch", "--list", "docs/*"]), "");
             reply
         };
         for outside in [

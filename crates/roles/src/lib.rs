@@ -1694,12 +1694,12 @@ mod tests {
         );
     }
 
-    /// `CHANGELOG.md` is the Product Manager's (step 02): filed as a docs task at each sprint
-    /// review.
+    /// `CHANGELOG.md` is the Product Manager's (step 02): Catervas files a docs task of its at each
+    /// delivery's close.
     #[test]
     fn the_product_manager_keeps_the_changelog() {
         let definition = loaded(Role::ProductManager);
-        let sentence = "At each sprint review, file a docs task of yours whose `allowed_paths` name `CHANGELOG.md`";
+        let sentence = "Each time a delivery closes, Catervas files a docs task of yours whose `allowed_paths` name `CHANGELOG.md`";
         assert!(
             flattened(&definition.system_prompt).contains(sentence),
             "{}",
@@ -1713,6 +1713,39 @@ mod tests {
             .expect("the skill");
         let release = &release.session_files["SKILL.md"];
         assert!(flattened(release).contains(sentence), "{release}");
+    }
+
+    /// Deliveries replace sprints (ADR 0062): no role file, kit or skill speaks of a sprint, a
+    /// standup or "Start sprint".
+    #[test]
+    fn no_role_text_speaks_of_sprints_or_standups() {
+        fn files(dir: &Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("the roles folder reads") {
+                let path = entry.expect("an entry").path();
+                if path.is_dir() {
+                    files(&path, found);
+                } else {
+                    found.push(path);
+                }
+            }
+        }
+        let mut found = Vec::new();
+        files(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("roles"),
+            &mut found,
+        );
+        assert!(found.len() > 50, "{found:?}");
+        let mut hits = Vec::new();
+        for path in found {
+            let text = std::fs::read_to_string(&path).expect("a role file is text");
+            for (number, line) in text.lines().enumerate() {
+                let lower = line.to_lowercase();
+                if lower.contains("sprint") || lower.contains("standup") {
+                    hits.push(format!("{}:{}: {line}", path.display(), number + 1));
+                }
+            }
+        }
+        assert!(hits.is_empty(), "{}", hits.join("\n"));
     }
 
     /// `text` with every run of whitespace made one space.

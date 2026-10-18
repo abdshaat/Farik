@@ -1,4 +1,4 @@
-import { Button, Choice, TextArea } from "@catervas/ui";
+import { Button, TextArea } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -17,11 +17,16 @@ import own from "./PlanPage.module.css";
 import type { Contract } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
 import type { Team } from "./setup/TeamSetup.tsx";
+import today from "./Today.module.css";
 
-/** One of `escalation.choices`: its label, and the command sent with the message added. */
+/** One of `escalation.choices`: what it is called, what happens next, and what pressing it does. */
 type EscalationChoice = {
 	label: string;
-	body: { command: string; body: Record<string, unknown> };
+	next: string;
+	suggested: boolean;
+	kind: "command" | "open";
+	body?: { command: string; body: Record<string, unknown> };
+	path?: string;
 };
 
 /** The reasons the governor raises in its own words, not an agent's (SPEC 5.7). */
@@ -46,7 +51,6 @@ export function HelpNeeded() {
 	const { data: offered, error: e5 } = useQuery<{
 		choices: EscalationChoice[];
 	}>("escalation.choices", task);
-	const [picked, setPicked] = useState("0");
 	const [note, setNote] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
@@ -64,7 +68,17 @@ export function HelpNeeded() {
 	const name = builder?.displayName ?? t("you");
 	const reviewer =
 		contract.reviewerRole && active(agents, contract.reviewerRole);
-	const raised = events.findLast((e) => e.kind === "escalation.raised");
+	// A task its agent blocked waits on the owner with the agent's words (ADR 0068).
+	const blocked =
+		contract.status === "blocked"
+			? events.findLast(
+					(e) => e.kind === "task.transitioned" && e.body.to === "blocked",
+				)
+			: undefined;
+	const raised = blocked
+		? undefined
+		: events.findLast((e) => e.kind === "escalation.raised");
+	const waitingSince = blocked ?? raised;
 	const catervass =
 		!raised?.agentId || CATERVASS.includes(raised.body.reason ?? "");
 	// What was tried since the human last answered an escalation of this task.
@@ -75,16 +89,19 @@ export function HelpNeeded() {
 			e.seq > since && e.kind === "note.written" && e.body.kind === "progress",
 	);
 	const choices = offered.choices;
-	const choice = choices[Number(picked)];
 
-	const resolve = async () => {
-		if (!client || !choice) return;
+	const resolve = async (choice: EscalationChoice) => {
+		if (!client || !choice.body) return;
 		setBusy(true);
 		setRefusal(undefined);
+		const { command, body } = choice.body;
 		try {
 			const reply = await client.command({
-				command: choice.body.command,
-				body: { ...choice.body.body, message: note.trim() || choice.label },
+				command,
+				body:
+					command === "escalation_resolve"
+						? { ...body, message: note.trim() || choice.label }
+						: body,
 			} as never);
 			if ("error" in reply) setRefusal(sentence(reply.error.detail));
 			else navigate("/");
@@ -104,6 +121,21 @@ export function HelpNeeded() {
 				</h1>
 				<p className={styles.muted}>{id}</p>
 			</div>
+			{blocked && (
+				<section className={own.letter} aria-labelledby="explains">
+					<p id="explains" className={styles.muted}>
+						{builder
+							? signed("helpExplains", builder)
+							: t("helpCatervasExplains")}
+					</p>
+					<p>{blocked.body.blocker?.description ?? t("helpBlockedNoWords")}</p>
+					{blocked.body.blocker?.needed && (
+						<p>
+							{t("helpBlockedNeeds", { needed: blocked.body.blocker.needed })}
+						</p>
+					)}
+				</section>
+			)}
 			{raised && (
 				<section className={own.letter} aria-labelledby="explains">
 					<p id="explains" className={styles.muted}>
@@ -124,29 +156,46 @@ export function HelpNeeded() {
 					</ul>
 				</section>
 			)}
-			{choices.length > 0 && (
-				<Choice
-					name="help-choice"
-					legend={t("helpNow")}
-					options={choices.map((c, n) => ({
-						value: String(n),
-						label: c.label,
-					}))}
-					value={picked}
-					onChange={setPicked}
-				/>
-			)}
 			{choices.length > 0 ? (
-				<TextArea
-					id="help-note"
-					label={t("helpNote", { name })}
-					value={note}
-					onChange={setNote}
-				/>
-			) : raised?.body.reason === "approval" ? (
-				<p>
-					<Link to={`/tasks/${id}/plan`}>{t("helpReadPlan")}</Link>
-				</p>
+				<>
+					<TextArea
+						id="help-note"
+						label={t("helpNote", { name })}
+						value={note}
+						onChange={setNote}
+					/>
+					<section className={styles.section} aria-labelledby="now">
+						<h2 id="now">{t("helpNow")}</h2>
+						<ul aria-labelledby="now" className={own.choices}>
+							{choices.map((c, n) => (
+								<li key={c.label} className={own.choice}>
+									{c.kind === "open" ? (
+										<Link
+											to={c.path ?? "/"}
+											className={today.action}
+											aria-describedby={`next-${n}`}
+										>
+											{c.label}
+										</Link>
+									) : (
+										<Button
+											kind={c.suggested ? "primary" : "secondary"}
+											busy={busy}
+											aria-describedby={`next-${n}`}
+											onClick={() => resolve(c)}
+										>
+											{c.label}
+										</Button>
+									)}
+									{c.suggested && <span>{t("helpSuggested")}</span>}
+									<p id={`next-${n}`} className={styles.muted}>
+										{c.next}
+									</p>
+								</li>
+							))}
+						</ul>
+					</section>
+				</>
 			) : (
 				<p className={styles.muted}>{t("helpNothing")}</p>
 			)}
@@ -155,19 +204,14 @@ export function HelpNeeded() {
 					{refusal}
 				</p>
 			)}
-			{choice && (
-				<div className={styles.actions}>
-					<Button kind="primary" busy={busy} onClick={resolve}>
-						{choice.label}
-					</Button>
-				</div>
-			)}
 			<section className={styles.section} aria-labelledby="about">
 				<h2 id="about">{t("gateAbout")}</h2>
 				<dl className={own.facts}>
 					<dt>{t("helpWaiting")}</dt>
 					<dd>
-						{raised ? `${raised.recordedAt.slice(11, 16)} UTC` : t("notYet")}
+						{waitingSince
+							? `${waitingSince.recordedAt.slice(11, 16)} UTC`
+							: t("notYet")}
 					</dd>
 					<dt>{t("gateTries")}</dt>
 					<dd>

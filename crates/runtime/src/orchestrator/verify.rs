@@ -30,7 +30,7 @@ use super::messages::{
     Changes, ReviewBrief, accept_message, design_review_message, review_message,
 };
 use super::requests;
-use super::rules::{Waiting, acted, active, asleep, spent};
+use super::rules::{Waiting, acted, active, spent, unavailable};
 use super::session::{SessionAsk, run_session};
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, repository_refused, session_dir,
@@ -68,8 +68,11 @@ pub(super) async fn verifying(
     let deps = &orchestrator.deps;
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
+    // Only a refusal of the governor's own parks the task: an agent's refused request is told to
+    // its reviewer's next session instead (ADR 0069).
     if history.iter().any(|event| {
-        event.envelope.seq > since && matches!(event.body, EventBody::TransitionRefused(_))
+        event.envelope.seq > since
+            && matches!(&event.body, EventBody::TransitionRefused(body) if body.requested_by == GOVERNOR)
     }) {
         return Ok(None);
     }
@@ -242,11 +245,20 @@ pub(super) fn decide_alone(
         TransitionOutcome::Moved(_) => {
             "accepted it on its criteria, which Catervas ran: only code is reviewed".to_string()
         }
-        TransitionOutcome::Refused(refusal) => format!(
-            "the governor would not {} it: {}",
-            if rejecting { "reject" } else { "accept" },
-            refusal_details(&refusal).join("; ")
-        ),
+        // Nobody else can move a task Catervas verifies alone, so its refusal goes to the owner
+        // rather than parking the task (ADR 0069).
+        TransitionOutcome::Refused(refusal) => {
+            return escalate(
+                deps,
+                team,
+                row,
+                &format!(
+                    "Catervas could not {} it: {}",
+                    if rejecting { "reject" } else { "accept" },
+                    refusal_details(&refusal).join("; ")
+                ),
+            );
+        }
     };
     Ok(Some(TickReport::Acted {
         task_id: row.task_id.clone(),
@@ -325,65 +337,79 @@ async fn run_what_catervas_runs(
         &repository.integration_branch,
         &contract.id,
     );
-    for criterion in &pending {
-        let mut alone = contract.clone();
-        alone.exit_criteria = vec![(*criterion).clone()];
-        let sandbox = orchestrator.sandbox_for(&contract.id, team)?;
-        let factory = Arc::clone(&deps.sandboxes);
-        let root = repository.git.root().to_path_buf();
-        let project = deps.tools.git.root().to_path_buf();
-        let project_id = deps.tools.ids.project_id.clone();
-        let base = base.clone();
-        let outcomes = tokio::task::spawn_blocking(move || {
-            let git = Git::open(root);
-            let base_worktree = project
-                .join(".catervas/local/worktrees")
-                .join(format!("{}-base", alone.id.as_str()));
-            let head = task_branch(&alone);
-            let input = NewTestsInput {
-                git: &git,
-                base_worktree: &base_worktree,
-                base: &base,
-                head: &head,
-                sandboxes: factory.as_ref(),
-                project_id: &project_id,
-                task_id: &alone.id,
+    // The checks' container sees the repository's git store read-only, unless its settings hold a
+    // password (ADR 0069).
+    let git_store = if repository.git.config_holds_a_secret()? {
+        None
+    } else {
+        Some(repository.git.common_dir(&worktree(deps, &contract.id))?)
+    };
+    // The checks' container is dropped after them on every path out, an error included, so that
+    // no session of an agent is ever given it.
+    let ran = async {
+        for criterion in &pending {
+            let mut alone = contract.clone();
+            alone.exit_criteria = vec![(*criterion).clone()];
+            let sandbox =
+                orchestrator.sandbox_for_checks(&contract.id, team, git_store.as_deref())?;
+            let factory = Arc::clone(&deps.sandboxes);
+            let root = repository.git.root().to_path_buf();
+            let project = deps.tools.git.root().to_path_buf();
+            let project_id = deps.tools.ids.project_id.clone();
+            let base = base.clone();
+            let outcomes = tokio::task::spawn_blocking(move || {
+                let git = Git::open(root);
+                let base_worktree = project
+                    .join(".catervas/local/worktrees")
+                    .join(format!("{}-base", alone.id.as_str()));
+                let head = task_branch(&alone);
+                let input = NewTestsInput {
+                    git: &git,
+                    base_worktree: &base_worktree,
+                    base: &base,
+                    head: &head,
+                    sandboxes: factory.as_ref(),
+                    project_id: &project_id,
+                    task_id: &alone.id,
+                };
+                run_criteria(&alone, sandbox.as_ref(), RunBy::Reviewer, Some(&input))
+            })
+            .await
+            .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()));
+            let results = match outcomes {
+                Ok(outcomes) => outcomes
+                    .into_iter()
+                    .filter_map(|outcome| match outcome {
+                        CriterionOutcome::Result(result) => Some(result),
+                        CriterionOutcome::NeedsReview { .. }
+                        | CriterionOutcome::NeedsHuman { .. } => None,
+                    })
+                    .collect(),
+                Err(error) if fails_the_criterion(&error) => {
+                    orchestrator.forget_sandbox(&contract.id);
+                    vec![CriterionResult {
+                        criterion_id: criterion.id.to_string(),
+                        passed: false,
+                        evidence: error.to_string(),
+                        run_by: RunBy::Reviewer,
+                    }]
+                }
+                Err(error) => {
+                    return Ok(CatervasRan::Unrunnable(format!(
+                        "Catervas could not run {} for the reviewer: {error}",
+                        criterion.id.as_str()
+                    )));
+                }
             };
-            run_criteria(&alone, sandbox.as_ref(), RunBy::Reviewer, Some(&input))
-        })
-        .await
-        .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()));
-        let results = match outcomes {
-            Ok(outcomes) => outcomes
-                .into_iter()
-                .filter_map(|outcome| match outcome {
-                    CriterionOutcome::Result(result) => Some(result),
-                    CriterionOutcome::NeedsReview { .. } | CriterionOutcome::NeedsHuman { .. } => {
-                        None
-                    }
-                })
-                .collect(),
-            Err(error) if fails_the_criterion(&error) => {
-                orchestrator.forget_sandbox(&contract.id);
-                vec![CriterionResult {
-                    criterion_id: criterion.id.to_string(),
-                    passed: false,
-                    evidence: error.to_string(),
-                    run_by: RunBy::Reviewer,
-                }]
+            for result in results {
+                record_run(deps, contract, result)?;
             }
-            Err(error) => {
-                return Ok(CatervasRan::Unrunnable(format!(
-                    "Catervas could not run {} for the reviewer: {error}",
-                    criterion.id.as_str()
-                )));
-            }
-        };
-        for result in results {
-            record_run(deps, contract, result)?;
         }
+        Ok::<_, OrchestratorError>(CatervasRan::Criteria(pending.len()))
     }
-    Ok(CatervasRan::Criteria(pending.len()))
+    .await;
+    orchestrator.forget_sandbox(&contract.id);
+    ran
 }
 
 /// Records `result` as the reviewer's run, which Catervas made.
@@ -532,7 +558,7 @@ async fn design_review_first(
         return Ok(Some(ran_criteria(row, ran)));
     };
     if spent(deps, team, contract, &mut waiting.day_spent)?
-        | asleep(deps, designer, &mut waiting.slept)?
+        | unavailable(deps, designer, &mut waiting.slept)?
     {
         return Ok(Some(ran_criteria(row, ran)));
     }
@@ -625,13 +651,33 @@ async fn review(
     let deps = &orchestrator.deps;
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, reviewer, &mut waiting.slept)?
+        | unavailable(deps, reviewer, &mut waiting.slept)?
     {
         return Ok(ran_criteria(row, ran));
     }
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
     let context = context(deps, team, &row.task_id)?;
+    let refused: Vec<String> = history
+        .iter()
+        .filter(|event| event.envelope.seq > since)
+        .filter_map(|event| match &event.body {
+            EventBody::TransitionRefused(body) if body.requested_by == reviewer.id.as_str() => {
+                Some(body.details.join("; "))
+            }
+            _ => None,
+        })
+        .collect();
+    // The Designer's checks since the task entered `verifying`, which are its to make and the
+    // reviewer's to read (ADR 0069).
+    let design_review = history
+        .iter()
+        .rev()
+        .take_while(|event| event.envelope.seq > since)
+        .find_map(|event| match &event.body {
+            EventBody::DesignReviewRecorded(body) => serde_json::to_string(body).ok(),
+            _ => None,
+        });
     // A task in a private folder has no branch to diff: its reviewer is told which files changed
     // in the folder, and reads each beside its copy from the start of the task (6.6).
     let (diff, files);
@@ -661,6 +707,8 @@ async fn review(
         completion_note: context.done.completion_note.as_deref(),
         changes,
         unanswered,
+        refused: &refused,
+        design_review: design_review.as_deref(),
     });
     let end = run_session(
         deps,
@@ -812,7 +860,7 @@ async fn accept(
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, product_manager, &mut waiting.slept)?
+        | unavailable(deps, product_manager, &mut waiting.slept)?
     {
         return Ok(ran_criteria(row, ran));
     }
@@ -1118,6 +1166,45 @@ mod tests {
             .state
     }
 
+    /// A `transition.refused` of `verifying -> blocked` on CTV-2 that `by` asked for.
+    fn refused_blocking(harness: &Harness, by: &str) {
+        harness.project.record(
+            "CTV-2",
+            "transition.refused",
+            &json!({
+                "from": "verifying",
+                "to": "blocked",
+                "actor": "assignee",
+                "requested_by": by,
+                "refusal": "no_such_transition",
+                "details": ["no such transition: from verifying to blocked"]
+            }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn reviews_again_after_the_reviewers_request_was_refused() {
+        let harness = a_harness("review-after-refusal", browsing);
+        a_developers_change(&harness, "done.txt");
+        refused_blocking(&harness, "ada");
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 1).await;
+        assert_eq!(who(&started), [("ada", SessionPurpose::Verify)]);
+        let prompt = &started[0].initial_prompt;
+        assert!(
+            prompt.contains("Catervas refused your last request"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("no such transition"), "{prompt}");
+
+        // The governor's own refusal still passes the task over.
+        let harness = a_harness("review-after-governor-refusal", browsing);
+        a_developers_change(&harness, "done.txt");
+        refused_blocking(&harness, "governor");
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 2).await;
+        assert!(started.is_empty(), "{:?}", who(&started));
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn checks_a_ui_change_before_the_architect() {
@@ -1177,7 +1264,15 @@ mod tests {
             "the design review is told where the preview is: {}",
             review.initial_prompt
         );
-        // The Architect's review is not the Designer's: no browser, no page check.
+        // The Architect's review is not the Designer's: no browser, no page check, but the
+        // Designer's checks are in its first message.
+        assert!(
+            started[2]
+                .initial_prompt
+                .contains("The UI/UX Designer checked this change"),
+            "{}",
+            started[2].initial_prompt
+        );
         assert!(started[2].mcp_servers.is_empty());
         assert!(
             !started[2]
@@ -1718,6 +1813,57 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_what_the_governor_would_not_accept_alone() {
+        let harness = a_harness("verify-alone-escalates", browsing);
+        // A Developer's task that no agent reviews, flagged as a change to the interface on a team
+        // with a Designer: the governor's acceptance waits for a design review it never gets.
+        harness.file("CTV-3", "ready", |wire| {
+            wire["assignee_role"] = json!("software_developer");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["ui_change"] = json!(true);
+            wire["allowed_paths"] = json!(["docs/catervas/engineering/bug-hunt.html"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The report exists.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "docs/catervas/engineering/bug-hunt.html" }
+            }]);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "pm" });
+        harness.project.moved("CTV-3", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-3", "assigned", "in_progress", &people);
+        let git = &harness.project.deps.git;
+        let worktree = harness.worktree("CTV-3");
+        git.create_worktree(&worktree, &harness.branch("CTV-3"), "main")
+            .expect("the task's worktree is made");
+        let path = "docs/catervas/engineering/bug-hunt.html";
+        std::fs::create_dir_all(worktree.join(path).parent().expect("a folder")).expect("made");
+        std::fs::write(worktree.join(path), "# Report\n").expect("written");
+        git.commit(&worktree, "The report", &[path.to_string()])
+            .expect("committed");
+        harness.project.record(
+            "CTV-3",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Wrote it.\n\nWrote it.", "written_by": "dev-a" }),
+        );
+        harness
+            .project
+            .moved("CTV-3", "in_progress", "verifying", &people);
+        let (started, _) = ticked(&harness, Vec::new(), 3).await;
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::Escalated);
+        let raised = harness.events(&[EventKind::EscalationRaised]);
+        assert!(
+            raised.iter().any(|event| matches!(&event.body,
+                EventBody::EscalationRaised(body) if body.detail.contains("Catervas could not accept it"))),
+            "{raised:?}"
+        );
     }
 
     #[tokio::test]

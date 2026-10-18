@@ -77,7 +77,7 @@ mod tests {
                 "the contract is held by the human, and a contract's content is the holder's alone \
                  (5.11): catervas contract unlock gives it back to the team",
                 "the contract is frozen: once a task leaves refining only its status, assignee, \
-                 reviewer, iteration, sprint and notes change (5.11), and this would change title \
+                 reviewer, iteration and notes change (5.11), and this would change title \
                  and risk",
                 "the task is accepted, and nothing leaves that status (5.2): its notes are all that \
                  still change",

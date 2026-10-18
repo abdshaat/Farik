@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
-use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
+use catervas_core::budget::{
+    BudgetScope, BudgetState, CHAT_SESSION_LIMITS, SessionLedger, SessionLimits, add_usage, tighter,
+};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
-use catervas_core::folders::role_folder;
+use catervas_core::folders::{is_hunt, role_folder};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 use catervas_core::governor::transition::TransitionRequest;
@@ -184,7 +186,7 @@ pub(super) const TRIAGE_TOOL: &str = "catervas_triage_request";
 pub(super) struct SessionAsk<'a> {
     /// The agent the session is.
     pub(super) agent: &'a Agent,
-    /// The task it is about, when it is about one: a sprint's planning session is about none.
+    /// The task it is about, when it is about one: a ceremony's session is about none.
     pub(super) contract: Option<&'a TaskContract>,
     /// Why it runs.
     pub(super) purpose: SessionPurpose,
@@ -212,6 +214,33 @@ pub(super) struct SessionAsk<'a> {
     pub(super) initial_prompt: String,
 }
 
+/// Why a session is stopped when another's cost spends the day (ADR 0064).
+const DAY_SPENT_STOP: &str = "the team's daily budget is spent";
+
+/// When `crossed` holds the day's budget, stops the other sessions for it (ADR 0064).
+fn stop_when_the_day_is_crossed(
+    deps: &OrchestratorDeps,
+    own: &str,
+    crossed: impl IntoIterator<Item = BudgetScope>,
+) {
+    if crossed
+        .into_iter()
+        .any(|scope| scope == BudgetScope::DayUsd)
+    {
+        stop_the_others(deps, own, DAY_SPENT_STOP);
+    }
+}
+
+/// Asks every session the daemon answers for in this process, but `own`, to stop for `reason`;
+/// each ends `aborted` through its own end, its task keeping its status.
+fn stop_the_others(deps: &OrchestratorDeps, own: &str, reason: &str) {
+    for id in deps.daemon.session_ids() {
+        if id != own {
+            deps.daemon.request_stop(&id, reason);
+        }
+    }
+}
+
 /// How a session ended.
 pub(super) struct SessionEnd {
     /// The session.
@@ -233,6 +262,13 @@ pub(super) async fn run_session(
     team: &Team,
     ask: SessionAsk<'_>,
 ) -> Result<SessionEnd, OrchestratorError> {
+    // First of all: one agent has one work session at a time, and one chat fork beside it
+    // (ADR 0064).
+    let _claim = deps.work.claim(
+        ask.agent.id.as_str(),
+        ask.contract.map(|contract| &contract.id),
+        ask.purpose,
+    )?;
     let left_out = refresh_signed_in(deps, team, &ask).await;
     let mut spec = session_spec_without(deps, team, &ask, &left_out)?;
     let role = Role::from(ask.agent.role);
@@ -280,6 +316,12 @@ pub(super) async fn run_session(
         connectors,
         preview: browser.clone(),
     });
+    // From here the session runs beside the others; its end is recorded under the turn again.
+    super::work::session_runs(super::work::Started {
+        agent_id: spec.agent_id.clone(),
+        task_id: spec.task_id.clone(),
+        purpose: crate::sessions::purpose_wire(spec.purpose).to_string(),
+    });
     let ended = drive(
         deps,
         team,
@@ -290,6 +332,12 @@ pub(super) async fn run_session(
         &spec,
     )
     .await;
+    super::work::session_ran(&deps.work).await;
+    // A session a tick started on budgets read before this one's cost was recorded is registered
+    // by now, as the tick gives the turn back only after registering it: stop it too.
+    if let Ok(end) = &ended {
+        stop_when_the_day_is_crossed(deps, &spec.session_id, end.crossed.iter().copied());
+    }
     deps.daemon.end_session(&spec.session_id);
     let closed = browser.map_or(Ok(()), |browser| {
         close_preview(deps, &ids, browser.as_ref(), "the session ended")
@@ -624,6 +672,7 @@ async fn open_preview(
         },
         ..preview.clone()
     };
+    let env = crate::preview::PreviewEnv::read(tools.files.root());
     let (previews, project, task, worktree_owned, tree_owned) = (
         Arc::clone(&deps.previews),
         tools.ids.project_id.clone(),
@@ -633,7 +682,14 @@ async fn open_preview(
     );
     let started = std::time::Instant::now();
     let running = tokio::task::spawn_blocking(move || {
-        previews.start(&project, &task, &worktree_owned, &asked, &tree_owned)
+        previews.start(
+            &project,
+            &task,
+            &worktree_owned,
+            &asked,
+            &tree_owned,
+            env.as_ref(),
+        )
     })
     .await
     .map_err(|error| OrchestratorError::Refused {
@@ -711,7 +767,9 @@ fn preview_failed(
     ids: &EventIds,
     error: &PreviewError,
 ) -> Result<SessionEnd, OrchestratorError> {
-    let why = error.to_string();
+    // The text holds none of the owner's values (ADR 0067): every path a failure takes starts here.
+    let why = crate::preview::PreviewEnv::read(deps.tools.files.root())
+        .map_or_else(|| error.to_string(), |env| env.hide(&error.to_string()));
     stopped(deps, ids, &why)?;
     deps.tools.transitions.request(
         &TransitionRequest {
@@ -813,10 +871,7 @@ fn leave_note(
             BudgetScope::SessionTokens => "the session's input or output tokens",
             BudgetScope::SessionWallClock => "the session's wall clock",
             BudgetScope::SessionToolCalls => "the session's tool calls",
-            BudgetScope::TaskUsd
-            | BudgetScope::TaskSessions
-            | BudgetScope::SprintUsd
-            | BudgetScope::DayUsd => continue,
+            BudgetScope::TaskUsd | BudgetScope::TaskSessions | BudgetScope::DayUsd => continue,
         });
     }
     if causes.is_empty() {
@@ -922,10 +977,16 @@ pub(super) const CHECK_PAGE_TOOL: &str = "catervas_check_page";
 
 /// The one tool that writes in a chat, offered in a chat session alone.
 const CHAT_REPLY_TOOL: &str = "catervas_chat_reply";
+/// The tool that takes the owner's request as the agent's own task, offered in a chat session
+/// alone (ADR 0063).
+const TAKE_TASK_TOOL: &str = "catervas_take_task";
 
 /// The tool that proposes a marketing plan, offered in the Marketing Specialist's implement
 /// session about a task alone (ADR 0042).
 const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
+/// The tool a bug hunt's assignee files a bug with, offered in the implement session of a hunt
+/// alone (ADR 0063).
+const FILE_BUG_TOOL: &str = "catervas_file_bug";
 /// The tool that schedules a social post, the Marketing Specialist's alone (ADR 0042).
 const SCHEDULE_POST_TOOL: &str = "catervas_schedule_post";
 
@@ -956,7 +1017,7 @@ const DRAFT_SELLER_MESSAGE_TOOL: &str = "catervas_draft_seller_message";
 /// the implement session of a task and in its chat.
 const READ_SELLER_MESSAGES_TOOL: &str = "catervas_read_seller_messages";
 const READ_SELLER_REPLIES_TOOL: &str = "catervas_read_seller_replies";
-/// The tool that writes a document of the caller's folder at a sprint planning, review or retro.
+/// The tool that writes a document of the caller's folder at a delivery's review or retro.
 const WRITE_FOLDER_DOC_TOOL: &str = "catervas_write_folder_doc";
 
 /// The tool that replaces the agent's notebook.
@@ -996,6 +1057,12 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         .filter(|tool| tool.name != WRITE_MEMORY_TOOL || !reviews_its_own_task(ask))
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
+        .filter(|tool| tool.name != TAKE_TASK_TOOL || ask.purpose == SessionPurpose::Chat)
+        // A bug is filed in the implement session of a hunt (ADR 0063).
+        .filter(|tool| {
+            tool.name != FILE_BUG_TOOL
+                || (ask.purpose == SessionPurpose::Implement && ask.contract.is_some_and(is_hunt))
+        })
         // A marketing plan is proposed by the Marketing Specialist, working on a task (ADR 0042).
         .filter(|tool| {
             (tool.name != PROPOSE_MARKETING_PLAN_TOOL && tool.name != SCHEDULE_POST_TOOL)
@@ -1032,14 +1099,11 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                     && (works_on_a_task(ask.purpose, ask.contract.is_some())
                         || ask.purpose == SessionPurpose::Chat)
             }
-            // A folder document is written at a planning, a review or a retro (not the standup)
+            // A folder document is written at a review or a retro
             // by a role that owns a folder.
             WRITE_FOLDER_DOC_TOOL => {
                 ask.purpose == SessionPurpose::Ceremony
-                    && matches!(
-                        ask.thread,
-                        Some(Thread::Planning | Thread::Review | Thread::Retro)
-                    )
+                    && matches!(ask.thread, Some(Thread::Review | Thread::Retro))
                     && role_folder(Role::from(ask.agent.role)).is_some()
             }
             _ => true,
@@ -1179,6 +1243,44 @@ fn with_the_interview(
     })
 }
 
+/// The limits of the session `ask` asks for: the budget's, and a chat's own bounds where they are
+/// tighter, so that it answers quickly (ADR 0064). The interview writes the product plan, so it
+/// keeps the team's.
+fn session_limits_of(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+    interviewing: bool,
+) -> Result<SessionLimits, OrchestratorError> {
+    let limits = budget_state(
+        &deps.tools.projections,
+        team,
+        Role::from(ask.agent.role),
+        ask.contract,
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )?
+    .session_limits;
+    Ok(if ask.purpose == SessionPurpose::Chat && !interviewing {
+        tighter(limits, CHAT_SESSION_LIMITS)
+    } else {
+        limits
+    })
+}
+
+/// The task branches the integration branch already has the work of, for the rules' line about
+/// committing: none for a chat, which commits nothing and makes no `git` call (ADR 0064).
+// ponytail: the runtime has no log to warn in, so a git error leaves the line out; warn there once
+// it has one.
+fn stale_twins_of(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<String> {
+    if ask.purpose == SessionPurpose::Chat {
+        return Vec::new();
+    }
+    integration_branch(team, &deps.tools.git)
+        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
+        .unwrap_or_default()
+}
+
 /// [`session_spec`], leaving out the custom connectors `left_out` names, as a refresh that did not
 /// finish does for this session alone.
 fn session_spec_without(
@@ -1241,9 +1343,7 @@ fn session_spec_without(
         .collect();
     // ponytail: the runtime has no log to warn in, so a git error leaves the line out; warn
     // there once it has one.
-    let stale_twins = integration_branch(team, &deps.tools.git)
-        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
-        .unwrap_or_default();
+    let stale_twins = stale_twins_of(deps, team, ask);
     let (members, own_repo) = member_lines(deps, ask);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
@@ -1271,15 +1371,7 @@ fn session_spec_without(
         own_repo,
         document_format: team.document_format(),
     })?;
-    let limits = budget_state(
-        &deps.tools.projections,
-        team,
-        role_id,
-        ask.contract,
-        &SessionLedger::default(),
-        deps.tools.clock.now(),
-    )?
-    .session_limits;
+    let limits = session_limits_of(deps, team, ask, interviewing)?;
     Ok(SessionSpec {
         read_roots: read_root_paths(deps, ask),
         session_id: deps.session_ids.session_id(),
@@ -1494,14 +1586,12 @@ async fn read_to_end(
                 }
                 let now = record(&before, &held)?;
                 crossed.extend(now.iter().map(|exhausted| exhausted.scope));
-                // A task's last session and in-progress work past the sprint's budget may finish
-                // (5.5): what those stop is the next session and the next assignment.
-                if now.iter().any(|exhausted| {
-                    !matches!(
-                        exhausted.scope,
-                        BudgetScope::TaskSessions | BudgetScope::SprintUsd
-                    )
-                }) {
+                stop_when_the_day_is_crossed(deps, &spec.session_id, now.iter().map(|e| e.scope));
+                // A task's last session may finish (5.5): what it stops is the next session.
+                if now
+                    .iter()
+                    .any(|exhausted| !matches!(exhausted.scope, BudgetScope::TaskSessions))
+                {
                     handle.abort()?;
                 }
             }
@@ -1552,7 +1642,7 @@ mod tests {
         SessionAsk, SessionEnd, TRIAGE_TOOL, offered_connector, offered_tools, run_session,
         session_spec, sleep,
     };
-    use crate::orchestrator::rules::{CEREMONY_TOOLS, PLANNING_TOOLS, RETRO_TOOLS};
+    use crate::orchestrator::rules::{CEREMONY_TOOLS, RETRO_TOOLS};
     use crate::prompt::{CEREMONY_INSTRUCTIONS, CLOSING_INSTRUCTIONS};
     use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
@@ -1628,7 +1718,6 @@ mod tests {
         };
         let ceremony = SessionPurpose::Ceremony;
         for (thread, list) in [
-            (Thread::Planning, PLANNING_TOOLS),
             (Thread::Review, CEREMONY_TOOLS),
             (Thread::Retro, RETRO_TOOLS),
         ] {
@@ -1637,13 +1726,6 @@ mod tests {
                 "{thread:?}"
             );
         }
-        // The standup is given the review's list and still does not write documents.
-        assert!(!offers(
-            "sm",
-            ceremony,
-            Some(Thread::Standup),
-            Some(CEREMONY_TOOLS)
-        ));
         assert!(!offers("sm", SessionPurpose::Chat, None, None));
         assert!(!offers("sm", SessionPurpose::Implement, None, None));
         // A role without a folder is offered it nowhere.
@@ -2338,6 +2420,71 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_failed_preview_never_shows_the_environment_values() {
+        use catervas_protocol::event::EscalationRaisedBodyReason;
+
+        use crate::preview::PreviewError;
+        use crate::preview::fixtures::FakePreviews;
+
+        let mut harness = Harness::new("preview-env-hidden", browsing);
+        let previews = Arc::new(FakePreviews::failing(PreviewError::NeverAnswered {
+            tail: "booting with service-role-secret-0123 on 300".to_string(),
+        }));
+        harness.previews = previews.clone();
+        harness.in_progress("CTV-1", "iris", "ada");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &orchestrator.deps;
+        let root = deps.tools.files.root().to_path_buf();
+        std::fs::create_dir_all(root.join(".catervas/local")).expect("the folder is made");
+        let file = root.join(crate::preview::PREVIEW_ENV);
+        std::fs::write(
+            &file,
+            "SUPABASE_SERVICE_ROLE=service-role-secret-0123\nPORT=300\n",
+        )
+        .expect("the file is written");
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+
+        run_session(deps, &team, exploring(&harness, &team, &contract))
+            .await
+            .expect("a preview that fails is an answer");
+
+        assert_eq!(
+            *crate::locked(&previews.envs),
+            [Some(std::path::absolute(&file).expect("an absolute path"))]
+        );
+        let raised = harness.events(&[EventKind::EscalationRaised]);
+        let EventBody::EscalationRaised(body) = &raised[0].body else {
+            panic!("an escalation");
+        };
+        assert_eq!(body.reason, EscalationRaisedBodyReason::Preview);
+        assert!(
+            body.detail.contains("booting with [hidden] on 300"),
+            "{}",
+            body.detail
+        );
+        let stopped = harness.events(&[EventKind::PreviewStopped]);
+        let EventBody::PreviewStopped(body) = &stopped[0].body else {
+            panic!("the preview's stop");
+        };
+        assert!(
+            body.reason.contains("booting with [hidden] on 300"),
+            "{}",
+            body.reason
+        );
+        for event in harness.events(&[]) {
+            let text = serde_json::to_string(&event).expect("an event serialises");
+            assert!(!text.contains("service-role-secret-0123"), "{text}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_a_session_to_the_teams_permission_answers() {
         // A "No" to commands reaches the session's registration, which every hook and tool call
         // decides by, and the tools it is offered; a "Yes" to pushing does too.
@@ -2841,6 +2988,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_file_bug_to_a_hunts_implement_session_alone() {
+        let harness = Harness::new("session-file-bug-tool", |_| {});
+        harness.file("CTV-1", "ready", |wire| {
+            wire["allowed_paths"] = json!(["docs/catervas/engineering/bug-hunt.html"]);
+        });
+        harness.ready("CTV-2");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let read = |task: &str| {
+            deps.tools
+                .files
+                .read_contract(&task.parse().expect("an id"))
+                .expect("the contract")
+        };
+        let (hunt, ordinary) = (read("CTV-1"), read("CTV-2"));
+        let offered = |purpose: SessionPurpose, about| {
+            let ask = asked(deps, agent(&team, "dev-a"), purpose, about);
+            session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .catervas_tools
+                .iter()
+                .any(|tool| tool == "catervas_file_bug")
+        };
+        assert!(offered(SessionPurpose::Implement, Some(&hunt)));
+        assert!(!offered(SessionPurpose::Refine, Some(&hunt)));
+        assert!(!offered(SessionPurpose::Implement, Some(&ordinary)));
     }
 
     #[test]
@@ -3392,7 +3570,9 @@ mod tests {
         ] {
             let given = tools(asked(deps, who, purpose, about));
             assert!(
-                !given.iter().any(|tool| tool == "catervas_chat_reply"),
+                !given
+                    .iter()
+                    .any(|tool| tool == "catervas_chat_reply" || tool == "catervas_take_task"),
                 "{purpose:?}: {given:?}"
             );
         }
@@ -3422,6 +3602,7 @@ mod tests {
                     in_reply_to: None,
                     request: None,
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("recorded")
@@ -3647,6 +3828,7 @@ mod tests {
                     in_reply_to: None,
                     request: None,
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("recorded");
@@ -3760,6 +3942,7 @@ mod tests {
                     in_reply_to: None,
                     request: None,
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("recorded");
@@ -3871,7 +4054,7 @@ mod tests {
         let team = deps.tools.files.read_team().expect("the team");
         let pm = team.active_agents().next().expect("an agent");
 
-        run_session(deps, &team, a_ceremony(deps, pm, Thread::Standup))
+        run_session(deps, &team, a_ceremony(deps, pm, Thread::Review))
             .await
             .expect("the session runs");
 
@@ -3879,7 +4062,7 @@ mod tests {
         let EventBody::SessionStarted(start) = &starts[0].body else {
             panic!("a session's start");
         };
-        assert_eq!(start.thread, Some(Thread::Standup));
+        assert_eq!(start.thread, Some(Thread::Review));
         // The daemon gives its tool calls the thread it was registered with.
         let posted = harness.events(&[EventKind::MessagePosted]);
         let EventBody::MessagePosted(post) = &posted[0].body else {
@@ -3887,7 +4070,7 @@ mod tests {
         };
         assert_eq!(
             (post.kind, post.thread),
-            (MessageKind::Ceremony, Some(Thread::Standup))
+            (MessageKind::Ceremony, Some(Thread::Review))
         );
     }
 
@@ -3905,7 +4088,7 @@ mod tests {
         let team = deps.tools.files.read_team().expect("the team");
         let pm = team.active_agents().next().expect("an agent");
 
-        run_session(deps, &team, a_ceremony(deps, pm, Thread::Standup))
+        run_session(deps, &team, a_ceremony(deps, pm, Thread::Review))
             .await
             .expect("the session runs");
 
@@ -3924,7 +4107,7 @@ mod tests {
         let pm = team.active_agents().next().expect("an agent");
 
         let spec =
-            session_spec(deps, &team, &a_ceremony(deps, pm, Thread::Planning)).expect("the spec");
+            session_spec(deps, &team, &a_ceremony(deps, pm, Thread::Review)).expect("the spec");
 
         assert_eq!(
             (spec.model.as_str(), spec.effort),
@@ -3941,12 +4124,7 @@ mod tests {
         let team = deps.tools.files.read_team().expect("the team");
         let pm = team.active_agents().next().expect("an agent");
 
-        for thread in [
-            Thread::Planning,
-            Thread::Standup,
-            Thread::Review,
-            Thread::Retro,
-        ] {
+        for thread in [Thread::Review, Thread::Retro] {
             let spec = session_spec(deps, &team, &a_ceremony(deps, pm, thread)).expect("the spec");
             let closing = CEREMONY_INSTRUCTIONS
                 .iter()
@@ -4094,7 +4272,7 @@ mod tests {
             only_tool,
             tools: None,
             in_reply_to: None,
-            thread: (purpose == SessionPurpose::Ceremony).then_some(Thread::Standup),
+            thread: (purpose == SessionPurpose::Ceremony).then_some(Thread::Review),
             initial_prompt: String::new(),
         }
     }

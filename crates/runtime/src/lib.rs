@@ -12,6 +12,8 @@ pub mod ceremonies;
 pub mod channel;
 /// The user's one-to-one chats with each agent, kept apart from the channel.
 pub mod chat;
+/// What the human may do about an escalation, in words, one choice suggested.
+pub mod choices;
 /// The Claude Code program as a runtime: its command line, credential, and version.
 #[cfg(unix)]
 pub mod claude;
@@ -31,6 +33,8 @@ pub mod criteria;
 /// The local service: the hooks around every tool call, and Catervas's tools over MCP.
 #[cfg(unix)]
 pub mod daemon;
+/// Closing a delivery and the changelog task it files (ADR 0062).
+pub mod deliveries;
 /// Catervas's own server over eBay's Browse API (ADR 0038, ADR 0043).
 pub mod ebay;
 /// Commands run on an agent's behalf, and what came of them.
@@ -98,8 +102,6 @@ pub mod sign_in;
 pub mod skills;
 /// An agent asleep until its model provider's limit resets.
 pub mod sleep;
-/// Starting and ending a sprint.
-pub mod sprints;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
 /// Saved team templates, kept privately in Catervas's state folder.

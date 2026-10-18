@@ -31,10 +31,9 @@ const TEAM = {
 const SUMMARY = {
 	today_usd: 6.12,
 	daily_limit_usd: null,
-	sprint: { sprint_id: "S2", status: "open", spent_usd: 11.84, budget_usd: 20 },
 	agents: [
-		{ agent_id: "mira", today_usd: 1.48, sprint_usd: 2.35 },
-		{ agent_id: "theo", today_usd: 2.94, sprint_usd: 6.1 },
+		{ agent_id: "mira", today_usd: 1.48 },
+		{ agent_id: "theo", today_usd: 2.94 },
 	],
 	conversations_today_usd: 0.42,
 };
@@ -103,9 +102,6 @@ async function costs(summary: unknown = SUMMARY, metrics: unknown = EMPTY) {
 	return { container, s };
 }
 
-const metricsAsked = (s: FakeSocket) =>
-	s.calls("query").filter((f) => f.params.name === "metrics");
-
 describe("costs page", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
@@ -125,13 +121,8 @@ describe("costs page", () => {
 				"Today the team has spent $6.12, with no daily limit set.",
 			),
 		).toBeTruthy();
-		expect(
-			screen.getByText("Sprint 2 has spent $11.84 of its $20.00 limit."),
-		).toBeTruthy();
-		// Why the sprint's figure and the day's differ.
-		expect(screen.getByText(en.costsSprintWhy)).toBeTruthy();
 
-		// One row per agent: today, this sprint, and what it is doing right now.
+		// One row per agent: today, and what it is doing right now.
 		const table = screen.getByRole("table", { name: en.costsByAgent });
 		const row = (name: string) =>
 			within(table).getByText(name).closest("tr") as HTMLElement;
@@ -139,12 +130,12 @@ describe("costs page", () => {
 			within(row("Theo"))
 				.getAllByRole("cell")
 				.map((c) => c.textContent),
-		).toEqual(["$2.94", "$6.10", "Building CTV-7"]);
+		).toEqual(["$2.94", "Building CTV-7"]);
 		expect(
 			within(row("Mira"))
 				.getAllByRole("cell")
 				.map((c) => c.textContent),
-		).toEqual(["$1.48", "$2.35", "Nothing to do yet"]);
+		).toEqual(["$1.48", "Nothing to do yet"]);
 
 		// With no work accepted, every rate says so.
 		const how = screen.getByRole("region", { name: en.costsHowWell });
@@ -154,11 +145,10 @@ describe("costs page", () => {
 		cleanup();
 
 		// With a limit, the line names it; with numbers, the rates say them.
-		await costs({ ...SUMMARY, daily_limit_usd: 10, sprint: null }, METRICS);
+		await costs({ ...SUMMARY, daily_limit_usd: 10 }, METRICS);
 		expect(
 			screen.getByText("Today the team has spent $6.12, of $10.00 a day."),
 		).toBeTruthy();
-		expect(screen.queryByText(/^Sprint 2 has spent/)).toBeNull();
 		const rates = screen.getByRole("region", { name: en.costsHowWell });
 		expect(within(rates).queryByText(en.metricNotYet)).toBeNull();
 		expect(within(rates).getByText("6 of 9")).toBeTruthy();
@@ -179,42 +169,16 @@ describe("costs page", () => {
 		).toBeTruthy();
 		cleanup();
 
-		// An open sprint with no limit; every task passed first time, so none was sent back.
-		await costs(
-			{ ...SUMMARY, sprint: { ...SUMMARY.sprint, budget_usd: null } },
-			{ ...METRICS, first_pass_acceptance_rate: 1 },
-		);
-		expect(
-			screen.getByText("Sprint 2 has spent $11.84, with no limit."),
-		).toBeTruthy();
+		// Every task passed first time, so none was sent back.
+		await costs(SUMMARY, { ...METRICS, first_pass_acceptance_rate: 1 });
 		expect(screen.getByText("9 of 9")).toBeTruthy();
 		expect(screen.queryByText(en.metricFirstTryNote)).toBeNull();
-		cleanup();
-
-		// Once the sprint ends, its figures stay, under its name rather than "This sprint".
-		await costs({
-			...SUMMARY,
-			sprint: { ...SUMMARY.sprint, status: "ended", budget_usd: null },
-		});
 		expect(
-			screen.getByText("Sprint 2 has ended. It spent $11.84, with no limit."),
-		).toBeTruthy();
-		const ended = screen.getByRole("table", { name: en.costsByAgent });
-		expect(
-			within(ended)
+			within(screen.getByRole("table", { name: en.costsByAgent }))
 				.getAllByRole("columnheader")
 				.map((h) => h.textContent),
-		).toEqual(["Agent", "Today", "Sprint 2", "Right now"]);
-		cleanup();
-		await costs({
-			...SUMMARY,
-			sprint: { ...SUMMARY.sprint, status: "ended" },
-		});
-		expect(
-			screen.getByText(
-				"Sprint 2 has ended. It spent $11.84 of its $20.00 limit.",
-			),
-		).toBeTruthy();
+		).toEqual(["Agent", "Today", "Right now"]);
+		expect(document.body.textContent).not.toMatch(/sprint/i);
 	});
 
 	it("sets_a_daily_limit", async () => {
@@ -311,27 +275,5 @@ describe("costs page", () => {
 		expect(team.agents).toHaveLength(2);
 		await s.reply(frame, {});
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-	});
-
-	it("shows_one_sprints_metrics", async () => {
-		const { s } = await costs();
-		expect(metricsAsked(s).at(-1)?.params.params).toEqual({});
-		const toggle = screen.getByRole("button", {
-			name: "Show sprint 2 only",
-		});
-		expect(toggle.getAttribute("aria-pressed")).toBe("false");
-		expect(screen.getByText(en.costsWholeProject)).toBeTruthy();
-		fireEvent.click(toggle);
-		await waitFor(() =>
-			expect(metricsAsked(s).at(-1)?.params.params).toEqual({
-				sprint_id: "S2",
-			}),
-		);
-		expect(toggle.getAttribute("aria-pressed")).toBe("true");
-		expect(screen.getByText("In sprint 2 only.")).toBeTruthy();
-		fireEvent.click(toggle);
-		await waitFor(() =>
-			expect(metricsAsked(s).at(-1)?.params.params).toEqual({}),
-		);
 	});
 });

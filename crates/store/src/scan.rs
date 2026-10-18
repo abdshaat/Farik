@@ -683,6 +683,12 @@ const TOOLCHAINS: &[Toolchain] = &[
         commands: Commands::Scripts,
     },
     Toolchain {
+        marker: "bun.lock",
+        name: "bun",
+        language: "TypeScript",
+        commands: Commands::Scripts,
+    },
+    Toolchain {
         marker: "bun.lockb",
         name: "bun",
         language: "TypeScript",
@@ -816,7 +822,15 @@ impl Reading {
         let toolchain = TOOLCHAINS
             .iter()
             .find(|toolchain| present(toolchain) && Some(toolchain.language) == language)
-            .or_else(|| TOOLCHAINS.iter().find(present));
+            .or_else(|| TOOLCHAINS.iter().find(present))
+            // A tracked manifest and no lockfile is npm's, which needs none (ADR 0069).
+            .or_else(|| {
+                tracked
+                    .iter()
+                    .any(|path| path == "package.json")
+                    .then(|| TOOLCHAINS.iter().find(|toolchain| toolchain.name == "npm"))
+                    .flatten()
+            });
         let is_workspace = tracked
             .iter()
             .any(|path| WORKSPACE_MARKERS.contains(&path.as_str()))
@@ -1478,6 +1492,52 @@ mod tests {
             reading.criteria().expect("no criteria is not a refusal"),
             []
         );
+    }
+
+    #[test]
+    fn a_package_json_without_a_lockfile_is_an_npm_project() {
+        let root =
+            std::env::temp_dir().join(format!("catervas-scan-no-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a directory");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{ "scripts": { "lint": "eslint .", "test": "vitest" } }"#,
+        )
+        .expect("a manifest");
+
+        let reading =
+            Reading::of(&root, &strings(&["package.json", "index.ts"])).expect("it reads");
+        let names: Vec<String> = reading
+            .criteria()
+            .expect("criteria")
+            .iter()
+            .map(|criterion| format!("{criterion:?}"))
+            .collect();
+        assert_eq!(
+            reading.toolchain.map(|toolchain| toolchain.name),
+            Some("npm")
+        );
+        assert!(
+            names
+                .iter()
+                .any(|criterion| criterion.contains("npm run lint")),
+            "{names:?}"
+        );
+        assert!(
+            names
+                .iter()
+                .any(|criterion| criterion.contains("npm run test")),
+            "{names:?}"
+        );
+
+        let bun = Reading::of(&root, &strings(&["package.json", "index.ts", "bun.lock"]))
+            .expect("it reads");
+        assert_eq!(bun.toolchain.map(|toolchain| toolchain.name), Some("bun"));
+
+        let none = Reading::of(&root, &strings(&["main.swift"])).expect("it reads");
+        assert!(none.toolchain.is_none(), "no package.json, no lockfile");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A reading of a project on `toolchain` (none for `None`) whose manifest has `scripts`.

@@ -36,8 +36,6 @@ pub enum ReadinessRule {
     NoReviewOutsideCode,
     /// Every `command` and `test` criterion has a command that is not blank.
     CommandCriteriaComplete,
-    /// The budget does not exceed the remaining sprint budget.
-    BudgetWithinSprint,
     /// Someone other than the assignee can review: the human, for an epic only; otherwise one
     /// active agent of the reviewer role, or two when it is the assignee's role (one, for a role
     /// that reviews its own task in a fresh session: the Product Manager).
@@ -81,8 +79,7 @@ pub enum ReadinessRule {
     /// A task for a role with a private folder is reviewed by the Product Manager alone: the
     /// folder is its role's and the Product Manager's, as the reviewer, and no other role's.
     PrivateFolderReviewer,
-    /// A task's budget does not exceed the team's cap on a task; an epic is bounded by the
-    /// sprint budget instead.
+    /// A task's budget does not exceed the team's cap on a task.
     BudgetWithinTeamMax,
     /// An epic has no parent.
     NoParentForEpic,
@@ -133,8 +130,6 @@ pub struct ParentState {
     reason = "each flag is one fact the runtime read from the world about this contract"
 )]
 pub struct ReadinessContext {
-    /// What is left of the sprint's budget, in dollars.
-    pub remaining_sprint_budget_usd: f64,
     /// The status of every task the contract may list as a dependency, by task id.
     pub dependency_statuses: BTreeMap<String, TaskStatus>,
     /// How many active agents the team has of each role.
@@ -163,13 +158,12 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 30] = [
+const CHECKS: [Check; 29] = [
     intent_present,
     criteria_present,
     criteria_methods_valid,
     no_review_outside_code,
     command_criteria_complete,
-    budget_within_sprint,
     reviewer_available,
     assignee_available,
     repo_not_allowed,
@@ -350,25 +344,6 @@ fn exceeds(cost: f64, ceiling: f64) -> bool {
         cost.partial_cmp(&ceiling),
         Some(Ordering::Less | Ordering::Equal)
     )
-}
-
-fn budget_within_sprint(
-    contract: &TaskContract,
-    context: &ReadinessContext,
-) -> Option<ReadinessFailure> {
-    if exceeds(
-        contract.budget.max_cost_usd,
-        context.remaining_sprint_budget_usd,
-    ) {
-        return Some(failure(
-            ReadinessRule::BudgetWithinSprint,
-            format!(
-                "the budget of {} USD exceeds the {} USD left in the sprint",
-                contract.budget.max_cost_usd, context.remaining_sprint_budget_usd
-            ),
-        ));
-    }
-    None
 }
 
 fn reviewer_available(
@@ -1273,26 +1248,6 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_budget_above_the_remaining_sprint_budget() {
-        let mut context = a_ready_context();
-        context.remaining_sprint_budget_usd = 4.0;
-        assert_eq!(
-            failed_rules(&a_contract(), &context),
-            [R::BudgetWithinSprint]
-        );
-    }
-
-    #[test]
-    fn fits_any_budget_in_a_sprint_with_no_limit() {
-        // ADR 0015: a team with no sprint budget has an infinite one left, however much it spent.
-        let mut context = a_ready_context();
-        context.remaining_sprint_budget_usd = f64::INFINITY;
-        let mut contract = a_contract();
-        contract.budget.max_cost_usd = 1000.0;
-        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
-    }
-
-    #[test]
     fn refuses_a_budget_that_cannot_be_compared_at_every_ceiling() {
         // Spec 5.5: a figure that cannot be compared counts as exhausted, which `budget` and step
         // 08's assignment gate both read that way. A contract that was ready with such a budget
@@ -1305,11 +1260,7 @@ mod tests {
         context.rules.max_task_budget_usd = Some(5.0);
         assert_eq!(
             failed_rules(&contract, &context),
-            [
-                R::BudgetWithinSprint,
-                R::BudgetWithinTeamMax,
-                R::BudgetWithinParent
-            ]
+            [R::BudgetWithinTeamMax, R::BudgetWithinParent]
         );
     }
 
@@ -2694,15 +2645,10 @@ mod tests {
         let mut contract = a_contract();
         contract.exit_criteria.clear();
         let mut context = a_ready_context();
-        context.remaining_sprint_budget_usd = 1.0;
         context.rules.required_criteria = vec!["human".to_string()];
         assert_eq!(
             failed_rules(&contract, &context),
-            [
-                R::CriteriaPresent,
-                R::BudgetWithinSprint,
-                R::RequiredCriteriaPresent,
-            ]
+            [R::CriteriaPresent, R::RequiredCriteriaPresent,]
         );
     }
 }

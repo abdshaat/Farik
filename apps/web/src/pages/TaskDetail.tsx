@@ -1,13 +1,13 @@
 import { Button, DiffView, StatusWord } from "@catervas/ui";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { useQuery } from "../app/store.ts";
 import { movedWords, roleWord, statusWord } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { DesignReview, type Recorded, type Review } from "./DesignReview.tsx";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import {
 	approvesPlan,
 	dollars,
@@ -21,10 +21,10 @@ import { type Contract, day } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
 import page from "./TaskDetail.module.css";
+import today from "./Today.module.css";
 
 /** The contract fields this page reads beyond the plan pages'. */
 type Detail = Contract & {
-	sprint?: string;
 	assignee?: string;
 	reviewer?: string;
 	change?: "feature" | "fix";
@@ -42,6 +42,8 @@ type Diff = {
 	removed: number;
 	/** A task in its role's private folder: no diff, only the names of what changed. */
 	privateFolder?: boolean;
+	/** The branch Catervas recorded at the task's start (ADR 0066). */
+	branch?: string;
 };
 type Waiting = { taskId: string; kind: string };
 type Activity = {
@@ -96,7 +98,6 @@ const TOLD: Record<string, keyof typeof en> = {
 	"transition.refused": "toldRefused",
 	"escalation.aged": "toldAged",
 	"pull_request.opened": "toldPullRequest",
-	"sprint.planned": "toldPlanned",
 	"drift.detected": "toldDrift",
 	"message.posted": "toldSaid",
 	"tool.denied": "toldDenied",
@@ -104,6 +105,8 @@ const TOLD: Record<string, keyof typeof en> = {
 	"design_plan.approved": "toldDesignApproved",
 	"design_plan.returned": "toldDesignReturned",
 	"catervafication.started": "toldCatervafication",
+	"connection.requested": "toldConnectionRequested",
+	"worktree.tidied": "toldTidied",
 };
 
 /** The body fields that name who did it, one per kind that has one. */
@@ -139,13 +142,33 @@ const NOTES = [
 	["escalation", "helpExplains"],
 ] as const;
 
+/** Whether the contract is a bug hunt: its `allowedPaths` are exactly its assignee's hunt report
+ * (`catervas_core::folders::is_hunt`, ADR 0063). */
+export function isHunt(contract: Contract): boolean {
+	const [only, ...more] = contract.allowedPaths;
+	const stem =
+		contract.assigneeRole === "software_developer"
+			? "docs/catervas/engineering/bug-hunt"
+			: contract.assigneeRole === "ui_ux_designer"
+				? "docs/catervas/design/ui-bug-hunt"
+				: undefined;
+	return (
+		contract.kind !== "epic" &&
+		stem !== undefined &&
+		more.length === 0 &&
+		(only === `${stem}.md` || only === `${stem}.html`)
+	);
+}
+
 /** Whether an agent reviews the contract's result: a task, not an epic, whose assignee's role
- * changes code (`catervas_core::team::reviewed_by_an_agent`, ADR 0061). */
+ * changes code, and which is not a bug hunt
+ * (`catervas_core::team::reviewed_by_an_agent`, ADR 0061 and 0063). */
 export function reviewedByAnAgent(contract: Contract): boolean {
 	return (
 		contract.kind !== "epic" &&
 		(contract.assigneeRole === "software_developer" ||
-			contract.assigneeRole === "ui_ux_designer")
+			contract.assigneeRole === "ui_ux_designer") &&
+		!isHunt(contract)
 	);
 }
 
@@ -218,11 +241,7 @@ export function TaskDetail() {
 		: t("taskChecked");
 	const who = [doing, reviews].filter(Boolean).join(", and ");
 	const lead = [
-		contract.sprint
-			? t("taskInSprint")
-					.replace("{id}", id)
-					.replace("{n}", contract.sprint.slice(1))
-			: `${id}.`,
+		`${id}.`,
 		who && `${who}.`,
 		plans
 			? plans <= NTH.length
@@ -254,12 +273,13 @@ export function TaskDetail() {
 	)?.sessionId;
 	const cancellable =
 		contract.status !== "accepted" && contract.status !== "cancelled";
-	// The branch as `catervas_core::branch::task_branch` names it.
-	const branch =
-		contract.assigneeRole === "software_developer" ||
-		contract.assigneeRole === "ui_ux_designer"
-			? `${contract.change === "fix" ? "fix" : "feature"}/${id}`
-			: `docs/${id}`;
+	// A task its agent blocked shows the agent's words and the owner's answer (ADR 0068).
+	const blockedBy =
+		contract.status === "blocked"
+			? events.findLast(
+					(e) => e.kind === "task.transitioned" && e.body.to === "blocked",
+				)
+			: undefined;
 
 	const design = detail.designPlan;
 	const proposal = events.findLast((e) => e.kind === "design_plan.proposed");
@@ -345,7 +365,11 @@ export function TaskDetail() {
 				"{status}",
 				e.body.to ? statusWord(e.body.to as Contract["status"]) : "",
 			)
-			.replace("{usd}", dollars(e.body.costUsd ?? 0));
+			.replace("{usd}", dollars(e.body.costUsd ?? 0))
+			.replace(
+				"{files}",
+				[...(e.body.putBack ?? []), ...(e.body.removed ?? [])].join(", "),
+			);
 	};
 
 	const onKey = (e: KeyboardEvent) => {
@@ -552,7 +576,7 @@ export function TaskDetail() {
 								.replace("{added}", String(diff.added))
 								.replace("{removed}", String(diff.removed)),
 						)
-						.replace("{branch}", branch)}
+						.replace("{branch}", diff.branch ?? "")}
 				</p>
 				<DiffView diff={diff.diff} label={t("gateChanges")} />
 			</>
@@ -592,6 +616,7 @@ export function TaskDetail() {
 							contract.status === "accepted" || contract.status === "cancelled"
 								? "done"
 								: contract.status === "escalated" ||
+										contract.status === "blocked" ||
 										contract.status === "verifying"
 									? "waiting"
 									: "working"
@@ -601,6 +626,19 @@ export function TaskDetail() {
 					</StatusWord>
 					<p className={styles.muted}>{lead}</p>
 					{checking && <p>{t("designCheckingNote", names)}</p>}
+					{blockedBy && (
+						<section className={styles.section} aria-labelledby="blocked">
+							<h2 id="blocked">{t("taskBlockedTitle")}</h2>
+							<p>
+								{blockedBy.body.blocker?.description ?? t("helpBlockedNoWords")}
+							</p>
+							<p>
+								<Link to={`/tasks/${id}/help`} className={today.action}>
+									{t("taskBlockedAnswer")}
+								</Link>
+							</p>
+						</section>
+					)}
 					{onDesigner && (
 						<>
 							<p>{t("designOnDesignerNote", names)}</p>

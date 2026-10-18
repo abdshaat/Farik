@@ -1,8 +1,8 @@
 import { Button, type Role } from "@catervas/ui";
 import { useId } from "react";
+import { useCommand } from "../app/command.ts";
 import { t } from "../strings/t.ts";
 import styles from "./CatervaficationCard.module.css";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 
 /** What `catervafication.get` answers: whether the offer stands, and the roles that would write. */
 export type Catervafication = { offered: boolean; roles: Role[] };

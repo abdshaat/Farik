@@ -27,6 +27,8 @@ test("a Designer's task and a design review run through the real server and brow
 	test.setTimeout(300_000);
 	const serve = await startServe({
 		team: "pm-architect-developer-designer",
+		// Accepting CTV-1 closes no delivery: the second request is CTV-2, not a changelog task.
+		deliveryClosed: true,
 		transcripts: [
 			"triage_ctv_1_small_by_pm",
 			"refine_writes_page_task_for_iris_ctv_1",

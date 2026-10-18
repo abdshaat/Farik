@@ -45,7 +45,6 @@ const PAGE = [
 ];
 const CONTRACT = {
 	...TASK,
-	sprint: "S2",
 	assignee: "theo",
 	reviewer: "ada",
 	exit_criteria: [
@@ -194,7 +193,7 @@ describe("task detail", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByText(
-				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 		const tabs = screen.getAllByRole("tab");
@@ -261,7 +260,7 @@ describe("task detail", () => {
 		fireEvent.click(screen.getByRole("tab", { name: "Code changes" }));
 		expect(
 			within(panel()).getByText(
-				"3 files, +142 −18, on the branch feature/CTV-1.",
+				"3 files, +142 −18, on the branch feat/gift-cards.",
 			),
 		).toBeTruthy();
 		expect(
@@ -304,10 +303,6 @@ describe("task detail", () => {
 			],
 			["escalation.aged", { raised_seq: 10, hours: 24 }],
 			["pull_request.opened", { url: "u", number: 3, branch: "feature/CTV-1" }],
-			[
-				"sprint.planned",
-				{ sprint_id: "S2", task_ids: ["CTV-1"], planned_by: "mira" },
-			],
 			["drift.detected", { drift: "lock_mismatch", detail: "d" }],
 			[
 				"message.posted",
@@ -358,6 +353,84 @@ describe("task detail", () => {
 			.getAllByRole("listitem")
 			.map((line) => line.querySelector("span")?.textContent);
 		expect(told).toEqual(["Catervas filed it to document the project."]);
+	});
+
+	it("names_a_connection_request_in_a_tasks_history", async () => {
+		await opened(CONTRACT, [], {
+			"task.history": {
+				events: [
+					event(
+						21,
+						"connection.requested",
+						{ server: "buffer", why: "The plan posts every Tuesday." },
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		const told = within(screen.getByRole("tabpanel"))
+			.getAllByRole("listitem")
+			.map((line) => line.querySelector("span")?.textContent);
+		expect(told).toEqual([en.toldConnectionRequested]);
+	});
+
+	it("names_the_files_catervas_put_back_in_a_tasks_history", async () => {
+		await opened(CONTRACT, [], {
+			"task.history": {
+				events: [
+					event(
+						22,
+						"worktree.tidied",
+						{ put_back: ["tsconfig.json"], removed: ["build-info.txt"] },
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		const told = within(screen.getByRole("tabpanel"))
+			.getAllByRole("listitem")
+			.map((line) => line.querySelector("span")?.textContent);
+		expect(told).toEqual([
+			"Catervas put back files a tool changed outside this task: tsconfig.json, build-info.txt.",
+		]);
+	});
+
+	it("shows_why_a_blocked_task_is_stuck_and_how_to_answer", async () => {
+		await opened({ ...CONTRACT, status: "blocked" }, [], {
+			"task.history": {
+				events: [
+					event(
+						23,
+						"task.transitioned",
+						{
+							from: "in_progress",
+							to: "blocked",
+							requested_by: "theo",
+							blocker: {
+								description: "next build rewrote tsconfig.json",
+								needed: "the file put back",
+							},
+						},
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		const stuck = await screen.findByRole("region", {
+			name: en.taskBlockedTitle,
+		});
+		expect(
+			within(stuck).getByText("next build rewrote tsconfig.json"),
+		).toBeTruthy();
+		expect(
+			within(stuck)
+				.getByRole("link", { name: en.taskBlockedAnswer })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-1/help");
 	});
 
 	it("shows_the_designers_plan_and_who_approved_it", async () => {
@@ -432,7 +505,7 @@ describe("task detail", () => {
 		// The lead counts the Designer's plans, in place of the tries.
 		expect(
 			screen.getByText(
-				"CTV-1 in sprint 2. Iris is doing it, and Ada reviews it. First plan.",
+				"CTV-1. Iris is doing it, and Ada reviews it. First plan.",
 			),
 		).toBeTruthy();
 		let plan = await toPlan();
@@ -461,7 +534,7 @@ describe("task detail", () => {
 		expect(within(panel()).getByText("Iris wrote a plan.")).toBeTruthy();
 		fireEvent.click(screen.getByRole("tab", { name: "Code changes" }));
 		expect(
-			within(panel()).getByText(/on the branch feature\/CTV-1\./),
+			within(panel()).getByText(/on the branch feat\/gift-cards\./),
 		).toBeTruthy();
 		cleanup();
 
@@ -569,7 +642,7 @@ describe("task detail", () => {
 		);
 		expect(
 			await screen.findByText(
-				"CTV-1 in sprint 2. Iris is doing it, and Ada reviews it. Second plan.",
+				"CTV-1. Iris is doing it, and Ada reviews it. Second plan.",
 			),
 		).toBeTruthy();
 		plan = await toPlan();
@@ -871,7 +944,7 @@ describe("task detail", () => {
 		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
 		expect(
 			screen.getByText(
-				"CTV-1 in sprint 2. Ada is doing it, and Catervas checks it. Try 1 of 4.",
+				"CTV-1. Ada is doing it, and Catervas checks it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 		expect(screen.queryByText(/reviews it/)).toBeNull();
@@ -885,7 +958,26 @@ describe("task detail", () => {
 		await opened();
 		expect(
 			await screen.findByText(
-				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+	});
+
+	it("says_catervas_checks_a_hunt", async () => {
+		const hunt = (allowed_paths: string[]) => ({ ...CONTRACT, allowed_paths });
+		await opened(hunt(["docs/catervas/engineering/bug-hunt.html"]));
+		expect(
+			await screen.findByText(
+				"CTV-1. Theo is doing it, and Catervas checks it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/reviews it/)).toBeNull();
+		cleanup();
+
+		await opened(hunt(["docs/catervas/engineering/bug-hunt.html", "src/**"]));
+		expect(
+			await screen.findByText(
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 	});

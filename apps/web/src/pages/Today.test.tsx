@@ -98,14 +98,13 @@ async function today(fields: {
 	activity?: unknown;
 	waiting?: unknown[];
 	moved?: unknown[];
-	sprint?: unknown;
 	team?: unknown;
-	backlog?: unknown;
 	docs?: unknown;
 	plan?: unknown;
 	catervafication?: unknown;
 	kits?: unknown[];
 	hiddenSuggestions?: unknown[];
+	requestedConnections?: unknown[];
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -116,12 +115,13 @@ async function today(fields: {
 		...(fields.hiddenSuggestions && {
 			hidden_suggestions: fields.hiddenSuggestions,
 		}),
+		...(fields.requestedConnections && {
+			requested_connections: fields.requestedConnections,
+		}),
 	});
 	await answerQuery(s, "team.activity", fields.activity ?? ACTIVITY);
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
 	await answerQuery(s, "moved.since", { moved: fields.moved ?? [] });
-	await answerQuery(s, "sprint.current", fields.sprint ?? null);
-	if (fields.backlog) await answerQuery(s, "backlog.summary", fields.backlog);
 	if (fields.docs)
 		await answerQuery(s, "folder_doc_proposals.list", fields.docs);
 	if (fields.plan) await answerQuery(s, "product_plan.state", fields.plan);
@@ -134,9 +134,7 @@ describe("today", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
 	it("shows_the_team_band", async () => {
-		const { container } = await today({
-			sprint: { sprint_id: "S2", done: 4, total: 7 },
-		});
+		const { container } = await today({});
 		const band = await screen.findByRole("list", { name: en.teamBand });
 		const entries = within(band).getAllByRole("listitem");
 		expect(entries).toHaveLength(3);
@@ -159,9 +157,6 @@ describe("today", () => {
 			within(ada as HTMLElement).getByText("Resting until 15:40 UTC"),
 		).toBeTruthy();
 		expect(within(theo as HTMLElement).getByTitle("Developer")).toBeTruthy();
-		expect(
-			screen.getByText("Sprint 2 is running: 4 of 7 tasks done"),
-		).toBeTruthy();
 		picturesOpenTheirAgents(band, TEAM.agents);
 		await expectNoAxeViolations(container);
 	});
@@ -303,7 +298,7 @@ describe("today", () => {
 					kind: "integration",
 					folder_change: 1,
 					agent_id: "mira",
-					title: "Roadmap and Product description from the sprint 4 review",
+					title: "Roadmap and Product description from review 4",
 					line: "You approved it; it waits for you to add it",
 				},
 				{
@@ -321,7 +316,7 @@ describe("today", () => {
 		) as HTMLElement[];
 		expect(
 			within(folder as HTMLElement).getByText(
-				"Add Roadmap and Product description from the sprint 4 review to your project",
+				"Add Roadmap and Product description from review 4 to your project",
 			),
 		).toBeTruthy();
 		expect(
@@ -342,7 +337,7 @@ describe("today", () => {
 		const describedBy = add.getAttribute("aria-describedby");
 		expect(describedBy).toBeTruthy();
 		expect(document.getElementById(describedBy as string)?.textContent).toBe(
-			"Add Roadmap and Product description from the sprint 4 review to your project",
+			"Add Roadmap and Product description from review 4 to your project",
 		);
 		fireEvent.click(add);
 		const sent = await sentCommand(s);
@@ -377,7 +372,7 @@ describe("today", () => {
 		expect(start.getAttribute("aria-describedby")).toBe(title.id);
 		expect(
 			screen.getByText(
-				"A first sprint where your team reads your project and writes down what it learns, before building anything.",
+				"A first piece of work where your team reads your project, writes down what it learns, looks for bugs and starts your marketing.",
 			),
 		).toBeTruthy();
 		// It follows the request box, and is no "Waiting on you" item.
@@ -485,24 +480,17 @@ describe("today", () => {
 	});
 
 	it("says_the_team_waits_for_the_plan", async () => {
-		const sprint = { sprint_id: "S2", done: 4, total: 7 };
-		await today({
-			plan: INTERVIEWING,
-			sprint,
-			backlog: { plan_in_sprints: true, count: 2 },
-		});
+		await today({ plan: INTERVIEWING });
 		const line = await screen.findByRole("link", {
 			name: "Little Oak Cakes: your team waits for your product plan",
 		});
 		// The mockup draws it as a link: to the Product Manager's chat.
 		expect(line.getAttribute("href")).toBe("/channel/mira");
 		expect(line.closest("p")?.textContent).toBe(line.textContent);
-		expect(screen.queryByText(/Sprint 2 is running/)).toBeNull();
-		expect(screen.queryByText(/wait in the Backlog/)).toBeNull();
 		cleanup();
 
-		await today({ plan: APPROVED, sprint });
-		expect(await screen.findByText(/Sprint 2 is running/)).toBeTruthy();
+		await today({ plan: APPROVED });
+		await screen.findByRole("list", { name: en.teamBand });
 		expect(
 			screen.queryByText(/your team waits for your product plan/),
 		).toBeNull();
@@ -556,7 +544,7 @@ describe("today", () => {
 				"/tasks/CTV-2/accept",
 			],
 			["question", "Mira has a question", "Answer", "/tasks/CTV-3/questions"],
-			["help", "Theo needs your help", "Help", "/tasks/CTV-4/help"],
+			["help", "Theo needs your help", "Answer", "/tasks/CTV-4/help"],
 			[
 				"integration",
 				"Add the photos to your project",
@@ -981,65 +969,6 @@ describe("today", () => {
 		).toBeTruthy();
 	});
 
-	it("counts_the_backlog_on_today", async () => {
-		const band = async () =>
-			(await screen.findByRole("list", { name: en.teamBand }))
-				.parentElement as HTMLElement;
-		const first = await today({ backlog: { plan_in_sprints: true, count: 2 } });
-		const line = await within(await band()).findByText(
-			/^2 pieces of work are ready and wait in the Backlog\./,
-		);
-		expect(line.textContent).toBe(
-			"2 pieces of work are ready and wait in the Backlog. Start a sprint to begin them.",
-		);
-		expect(
-			within(line)
-				.getByRole("link", { name: en.todayBacklogStart })
-				.getAttribute("href"),
-		).toBe("/board?start=sprint");
-		await expectNoAxeViolations(first.container);
-		cleanup();
-
-		await today({ backlog: { plan_in_sprints: true, count: 1 } });
-		expect(
-			(
-				await within(await band()).findByText(
-					/^1 piece of work is ready and waits in the Backlog\./,
-				)
-			).textContent,
-		).toBe(
-			"1 piece of work is ready and waits in the Backlog. Start a sprint to begin it.",
-		);
-		cleanup();
-
-		// While a sprint runs, the late work waits for the next one.
-		const second = await today({
-			sprint: { sprint_id: "S3", done: 1, total: 5 },
-			backlog: { plan_in_sprints: true, count: 1 },
-		});
-		const sprint = await screen.findByRole("link", {
-			name: "Sprint 3 is running: 1 of 5 tasks done",
-		});
-		expect(sprint.getAttribute("href")).toBe("/sprints/S3");
-		await waitFor(() =>
-			expect(sprint.parentElement?.textContent).toBe(
-				"Sprint 3 is running: 1 of 5 tasks done. 1 more waits in the Backlog for the next sprint.",
-			),
-		);
-		await expectNoAxeViolations(second.container);
-		cleanup();
-
-		// Nothing waits, or the team does not plan in sprints: no line.
-		for (const backlog of [
-			{ plan_in_sprints: true, count: 0 },
-			{ plan_in_sprints: false, count: 0 },
-		]) {
-			await today({ backlog });
-			await act(async () => {});
-			expect(within(await band()).queryByText(/Backlog/)).toBeNull();
-			cleanup();
-		}
-	});
 	/** The row `waiting.list` gives while Kai's marketing plan waits on the owner. */
 	const PLAN_ROW = {
 		task_id: "CTV-31",
@@ -2450,6 +2379,45 @@ describe("suggested connections", () => {
 		const describedBy = connect.getAttribute("aria-describedby") ?? "";
 		expect(document.getElementById(describedBy)?.textContent).toBe("Notion");
 		expect(within(row).queryByRole("img", { name: "Mira" })).toBeNull();
+	});
+
+	it("lists_an_asked_connection_first_with_its_reason", async () => {
+		const asked = {
+			agent: "mira",
+			server: "linear",
+			why: "I need it to track the bugs the team files.",
+		};
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+			requestedConnections: [asked],
+		});
+		const [first, second] = items() as [HTMLElement, HTMLElement];
+		expect(first.textContent).toContain("Linear");
+		expect(first.textContent).toContain(
+			"Mira asks: I need it to track the bugs the team files.",
+		);
+		expect(
+			within(first)
+				.getByRole("link", { name: en.suggestionsConnect })
+				.getAttribute("href"),
+		).toBe("/team/mira?connect=linear");
+		expect(second.textContent).toContain("Notion");
+		expect(second.textContent).toContain(KIT_NOTION.about);
+	});
+
+	it("keeps_a_requested_connection_hidden_when_the_user_said_not_now", async () => {
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+			requestedConnections: [
+				{ agent: "mira", server: "linear", why: "I need it to track bugs." },
+			],
+			hiddenSuggestions: [{ agent: "mira", server: "linear" }],
+		});
+		expect(items()).toHaveLength(1);
+		expect(items()[0]?.textContent).toContain("Notion");
+		expect(screen.queryByText(/Linear/)).toBeNull();
 	});
 
 	it("does_not_suggest_what_is_held_at_launch_hidden_or_a_paused_agents", async () => {

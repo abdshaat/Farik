@@ -208,7 +208,6 @@ describe("settings directory", () => {
 			policy: {
 				integration: "auto_merge",
 				permissions: { run_commands: true, push: false },
-				plan_in_sprints: true,
 			},
 			ui_paths: ["**/*.tsx"],
 		};
@@ -216,7 +215,7 @@ describe("settings directory", () => {
 			en.rulesMay,
 			en.rulesSpendTitle,
 			en.rulesFinish,
-			en.rulesPlanning,
+			en.rulesBranch,
 			en.rulesDocuments,
 			en.uiPathsTitle,
 		];
@@ -226,7 +225,7 @@ describe("settings directory", () => {
 			[
 				"work",
 				en.sectionWork,
-				[en.rulesFinish, en.rulesPlanning, en.rulesDocuments],
+				[en.rulesFinish, en.rulesBranch, en.rulesDocuments],
 			],
 		] as const;
 		for (const [path, name, held] of pages) {

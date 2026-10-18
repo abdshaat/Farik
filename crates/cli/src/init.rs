@@ -90,7 +90,7 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
                 team_name: project.team.name.to_string(),
                 updated_by: HUMAN.to_string(),
                 template: None,
-                plan_in_sprints: Some(project.team.plans_in_sprints()),
+                plan_in_sprints: None,
             }),
             now,
             None,
@@ -366,9 +366,11 @@ mod tests {
     }
 
     #[test]
-    fn writes_a_starter_team_that_plans_in_sprints() {
-        // The founder's answer 1 (ADR 0028): `catervas run` on a new project waits for a sprint.
-        assert!(starter_team("notes").expect("a team").plans_in_sprints());
+    fn writes_a_starter_team_with_no_sprint_keys() {
+        // ADR 0062: nothing is planned in sprints, so a new team file names neither old key.
+        let team = starter_team("notes").expect("a team");
+        assert_eq!(team.policy.plan_in_sprints, None);
+        assert_eq!(team.policy.ambient_messages_per_sprint, None);
     }
 
     #[test]

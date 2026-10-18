@@ -80,8 +80,6 @@ function proposed(change: (team: Record<string, unknown>) => void = () => {}) {
 				judge: "auto",
 			},
 			permissions: { run_commands: true, push: false },
-			// team.propose answers it for every new team (step 15).
-			plan_in_sprints: true,
 		},
 		rules: { require_new_tests: false },
 	};
@@ -225,7 +223,7 @@ describe("team setup", () => {
 		// Each row says the role's job, as the approved mockup does.
 		expect(
 			within(list).getByText(
-				"Keeps the project well built, and reviews the work before you see it.",
+				"Keeps the project well built, and reviews every change to its code.",
 			),
 		).toBeTruthy();
 		expect(within(list).queryByText("Ada persona")).toBeNull();
@@ -330,7 +328,7 @@ describe("team setup", () => {
 		expect(include.checked).toBe(true);
 		expect(
 			within(include.closest("li") as HTMLElement).getByText(
-				"Looks at your app the way a customer does, plans changes to its screens, and makes them once Mira agrees. Checks every screen Theo builds.",
+				"Looks at your app the way a customer does, plans changes to its screens and makes them. Checks every screen Theo builds.",
 			),
 		).toBeTruthy();
 		expect(
@@ -1389,9 +1387,7 @@ describe("team setup", () => {
 		await answerStatus(s, false, 1, { setup_pending: true });
 		await screen.findByRole("heading", { name: en.finishTitle });
 		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
-		fireEvent.click(
-			await screen.findByRole("switch", { name: en.planInSprints }),
-		);
+		fireEvent.click(await screen.findByRole("switch", { name: en.ruleTests }));
 		expect(sessionStorage.getItem("catervas.setupDraft")).not.toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		await s.reply(await sent(s, "team.start"), {});
@@ -1412,8 +1408,11 @@ describe("team setup", () => {
 			target: { value: "20" },
 		});
 		expect(
-			screen.getByText("Today the team has spent $12.80, of $20.00 a day."),
+			screen.getByText(
+				"Say the team spends $12.80 in a day: $7.20 of $20.00 is left.",
+			),
 		).toBeTruthy();
+		expect(screen.queryByText(/Today the team has spent/)).toBeNull();
 		expect(
 			screen.getByText("At $20.00, everyone pauses and you get a message."),
 		).toBeTruthy();
@@ -1425,7 +1424,7 @@ describe("team setup", () => {
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		const meter = screen.getByRole("meter", {
-			name: "Today the team has spent $12.80, of $20.00 a day.",
+			name: "Say the team spends $12.80 in a day: $7.20 of $20.00 is left.",
 		}) as HTMLMeterElement;
 		expect(meter.value).toBeCloseTo(12.8);
 		expect(meter.max).toBe(20);
@@ -1734,67 +1733,52 @@ describe("team setup", () => {
 		expect(start.team.policy).toMatchObject(DEFAULTS.policy);
 	});
 
-	it("starts_a_team_that_plans_in_sprints", async () => {
+	it("setup_and_settings_never_ask_about_sprints", async () => {
 		const first = await renderApp("/setup/finish");
 		const s = first.socket as FakeSocket;
-		await answerQuery(s, "team.propose", proposed());
+		// team.propose still answers plan_in_sprints (plan 5 takes it off the wire).
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				(team.policy as Record<string, unknown>).plan_in_sprints = true;
+			}),
+		);
 		await answerStatus(s, false, 1, { setup_pending: true });
 		await screen.findByRole("heading", { name: en.finishTitle });
-		const box = screen.getByRole("region", { name: en.finishSprints });
-		expect(within(box).getByText(en.finishSprintsNote)).toBeTruthy();
-		expect(within(box).getByText(en.finishSprintsChange)).toBeTruthy();
-		await expectNoAxeViolations(first.container);
-
-		// Behind advanced settings, the same switch as in Settings, on.
 		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
-		const adv = () =>
-			within(document.getElementById("finish-advanced") as HTMLElement);
-		const toggle = await adv().findByRole("switch", {
-			name: en.planInSprints,
-		});
-		expect(toggle.getAttribute("aria-checked")).toBe("true");
-		expect(adv().getByRole("heading", { name: en.rulesPlanning })).toBeTruthy();
+		await screen.findByRole("button", { name: en.checkAdd });
+		expect(screen.queryByRole("switch", { name: /sprint/i })).toBeNull();
+		expect(document.body.textContent).not.toMatch(/sprint/i);
 		await expectNoAxeViolations(first.container);
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
-		const on = (await sent(s, "team.start")).params as {
+		const start = (await sent(s, "team.start")).params as {
 			team: { policy: Record<string, unknown> };
 		};
-		expect(on.team.policy.plan_in_sprints).toBe(true);
+		expect("plan_in_sprints" in start.team.policy).toBe(false);
 		cleanup();
 
-		const second = await renderApp("/setup/finish");
+		const second = await renderApp("/settings/work");
 		const s2 = second.socket as FakeSocket;
-		await answerQuery(s2, "team.propose", proposed());
-		await answerStatus(s2, false, 1, { setup_pending: true });
-		fireEvent.click(
-			await screen.findByRole("button", { name: en.advancedSwitch }),
-		);
-		fireEvent.click(
-			await adv().findByRole("switch", { name: en.planInSprints }),
-		);
-		expect(
-			adv()
-				.getByRole("switch", { name: en.planInSprints })
-				.getAttribute("aria-checked"),
-		).toBe("false");
-		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
-		const off = (await sent(s2, "team.start")).params as {
-			team: { policy: Record<string, unknown> };
-		};
-		expect(off.team.policy.plan_in_sprints).toBe(false);
+		await answerStatus(s2, false);
+		await answerQuery(s2, "team.get", {
+			team: proposed().team,
+			agents: [],
+			max_agents: 7,
+		});
+		await answerQuery(s2, "settings.defaults", {
+			...RECOMMENDED,
+			policy: { ...RECOMMENDED.policy, integration: "auto_merge" },
+		});
+		const main = await screen.findByRole("main");
+		await within(main).findByRole("region", { name: en.rulesDocuments });
+		expect(within(main).queryByRole("switch", { name: /sprint/i })).toBeNull();
+		expect(main.textContent).not.toMatch(/sprint/i);
+	});
 
-		// A saved team brings its own answer.
+	it("keeps_a_saved_teams_documents_choice_and_drops_its_sprint_answer", () => {
 		const wire = toCamel(proposed()) as Proposed;
 		const template = toCamel(THREE.template) as Template;
-		expect(
-			draftOf(wire, "saved", {
-				...template,
-				policy: { ...template.policy, planInSprints: false },
-			}).team.policy.planInSprints,
-		).toBe(false);
-		expect(draftOf(wire, "saved", template).team.policy.planInSprints).toBe(
-			true,
-		);
 		expect(
 			draftOf(wire, "saved", {
 				...template,
@@ -2132,8 +2116,7 @@ describe("team setup's four starts", () => {
 		});
 		expect(start.team.policy.integration).toBe("pull_request");
 		expect(start.team.budgets).toEqual({ daily_usd: 20 });
-		// A saved team without the sprint answer plans in sprints, as any new team.
-		expect(start.team.policy.plan_in_sprints).toBe(true);
+		expect("plan_in_sprints" in start.team.policy).toBe(false);
 		expect(
 			s.calls("query").filter((f) => f.params.name === "template.preview"),
 		).toHaveLength(0);

@@ -17,7 +17,7 @@ export type AllowanceRow = {
 	of: number;
 };
 export type Allowances = {
-	period: { kind: "sprint"; sprintId: string } | { kind: "day"; day: string };
+	period: { kind: "day"; day: string };
 	rows: AllowanceRow[];
 };
 
@@ -41,17 +41,9 @@ export const countSaid = (row: AllowanceRow) =>
  * number, or past it, that the agent asks first. Past it, the extras were ones the user approved,
  * since each call beyond the number waited for a yes.
  */
-export function boardLine(
-	row: AllowanceRow,
-	name: string,
-	period: Allowances["period"],
-) {
+export function boardLine(row: AllowanceRow, name: string) {
 	const fill = { name, used: row.used, of: row.of, what: row.what };
-	if (row.used < row.of)
-		return t(
-			period.kind === "day" ? "allowBoardDay" : "allowBoardSprint",
-			fill,
-		);
+	if (row.used < row.of) return t("allowBoardDay", fill);
 	return row.used > row.of
 		? `${t("allowBoardAsks", fill)} ${t("allowBoardExtra", fill)}`
 		: t("allowBoardAsks", fill);
@@ -91,7 +83,7 @@ export const offersOf = (service: KitService): Offer[] =>
 
 /**
  * One number field for each tool the kit gives an allowance: what it makes, the tool in the user's
- * words, the number, "each sprint", and how many were made so far when that is known. A field that
+ * words, the number, "each day", and how many were made so far when that is known. A field that
  * holds more than 1,000 says so at itself.
  */
 export function AllowanceFields({

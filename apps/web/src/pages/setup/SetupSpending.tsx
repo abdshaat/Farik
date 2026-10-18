@@ -63,8 +63,9 @@ export function useDailyLimit(kept: number | undefined) {
 				<figure className={styles.example}>
 					<figcaption>{t("spendExample")}</figcaption>
 					<p id="limit-example-line">
-						{t("costsTodayOf", {
+						{t("spendExampleLine", {
 							spent: money(dollars * EXAMPLE_SPENT),
+							left: money(dollars - dollars * EXAMPLE_SPENT),
 							limit: money(dollars),
 						})}
 					</p>

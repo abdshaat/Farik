@@ -37,7 +37,7 @@ The UI/UX Designer takes the project's colours and voice from the brand kit.
 - The brand kit and the brand persona.
 - A marketing plan, proposed to the owner with its budget, dates, post slots and measures.
 - Customer-facing release notes and announcements, and README copy, as documents under
-  `docs/catervas/marketing/`, written from the Product Manager's roadmap and sprint reports.
+  `docs/catervas/marketing/`, written from the Product Manager's roadmap and delivery reports.
 - Positioning decisions.
 - Completion notes, through `catervas_write_note`, kind `completion`.
 

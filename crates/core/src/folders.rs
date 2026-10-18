@@ -141,6 +141,36 @@ pub fn is_plan_task(contract: &crate::contract::TaskContract) -> bool {
     })
 }
 
+/// The report a role's bug hunt writes, in this format (ADR 0063): the Developer's
+/// `docs/catervas/engineering/bug-hunt.<x>` and the UI/UX Designer's
+/// `docs/catervas/design/ui-bug-hunt.<x>`; no other role hunts.
+#[must_use]
+pub fn hunt_report(role: Role, format: DocumentFormat) -> Option<String> {
+    let stem = match role {
+        Role::SoftwareDeveloper => "docs/catervas/engineering/bug-hunt",
+        Role::UiUxDesigner => "docs/catervas/design/ui-bug-hunt",
+        _ => return None,
+    };
+    Some(with_format(stem, format))
+}
+
+/// Whether the contract is a bug hunt: a task whose `allowed_paths` are exactly its assignee's
+/// hunt report, in either format. No agent reviews it; the governor checks its criteria.
+#[must_use]
+pub fn is_hunt(contract: &crate::contract::TaskContract) -> bool {
+    contract.kind == crate::contract::TaskKind::Task
+        && [DocumentFormat::Markdown, DocumentFormat::Html]
+            .into_iter()
+            .filter_map(|format| hunt_report(contract.assignee_role, format))
+            .any(|report| {
+                contract
+                    .allowed_paths
+                    .iter()
+                    .map(ToString::to_string)
+                    .eq([report])
+            })
+}
+
 /// Whether the path is the Architect's plan for the epic, in either format.
 #[must_use]
 pub fn is_plan_of(path: &str, epic: &str) -> bool {
@@ -399,7 +429,7 @@ pub fn folder_doc_message(
 
 /// The documents with a fixed name, by stem, in the order the Files page lists them. A step that
 /// adds a document adds its name here.
-pub const DOCUMENT_STEMS: [(&str, &str); 12] = [
+pub const DOCUMENT_STEMS: [(&str, &str); 15] = [
     ("docs/catervas/product/spec", "Product description"),
     ("docs/catervas/product/roadmap", "Roadmap"),
     ("docs/catervas/architecture/overview", "Overview"),
@@ -408,10 +438,13 @@ pub const DOCUMENT_STEMS: [(&str, &str); 12] = [
     ("docs/catervas/architecture/structure", "Structure"),
     ("docs/catervas/engineering/conventions", "Conventions"),
     ("docs/catervas/engineering/workflow", "Workflow"),
+    ("docs/catervas/engineering/bug-hunt", "Bug hunt"),
     ("docs/catervas/design/ui-inventory", "UI inventory"),
-    ("docs/catervas/delivery/cadence", "Sprint rhythm"),
+    ("docs/catervas/design/ui-bug-hunt", "UI bug hunt"),
+    ("docs/catervas/delivery/cadence", "Delivery rhythm"),
     ("docs/catervas/marketing/brand/brand-kit", "Brand kit"),
     ("docs/catervas/marketing/brand/persona", "Brand persona"),
+    ("docs/catervas/marketing/kickoff", "Marketing kickoff"),
 ];
 
 /// A file stem or folder name as words: `-` and `_` as spaces, the first letter upper case.
@@ -436,12 +469,34 @@ fn without_member(path: &str) -> String {
         )
 }
 
+/// The number of the delivery whose report `path` is: `docs/catervas/product/reports/D<n>` in
+/// either format, the agent version too, in the project or in a member's place.
+fn delivery_report_number(path: &str) -> Option<String> {
+    let path = normalise(path).unwrap_or_else(|| path.to_string());
+    let project_wide = without_member(&path);
+    let file = project_wide.strip_prefix("docs/catervas/product/reports/")?;
+    let stem = stem_of(file)?;
+    let stem = stem.strip_suffix(".agent").unwrap_or(stem);
+    let digits = stem.strip_prefix('D')?;
+    (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| digits.to_string())
+}
+
+/// Whether `path` is a delivery's report (ADR 0069), a document named by its delivery.
+#[must_use]
+pub fn is_delivery_report(path: &str) -> bool {
+    delivery_report_number(path).is_some()
+}
+
 /// What the Files page calls a document: its fixed name, "Plan: <title>" for a file directly in a
 /// folder's `plans/` whose stem `title_of` knows, else its file stem as [`plain_name`] has it.
 #[must_use]
 pub fn document_name(path: &str, title_of: &dyn Fn(&str) -> Option<String>) -> String {
     let path = normalise(path).unwrap_or_else(|| path.to_string());
     let project_wide = without_member(&path);
+    if let Some(number) = delivery_report_number(&path) {
+        return format!("Report for delivery {number}");
+    }
     if let Some((_, name)) = DOCUMENT_STEMS
         .iter()
         .find(|(known, _)| stem_of(&project_wide) == Some(*known))
@@ -532,6 +587,9 @@ pub enum Named {
     Task(TaskId),
     /// A folder change, as `folder-<n>` or `Folder change <n>`.
     FolderChange(u64),
+    /// A pull request, as `Merge pull request #<n>` or a trailing `(#<n>)`: the forge's own words
+    /// for a merge, which carry no task id (ADR 0066).
+    PullRequest(u64),
 }
 
 fn number_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
@@ -543,9 +601,27 @@ fn number_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 /// The first task or folder change a commit's subject names, in subject order; a name counts
-/// only at the start of a word.
+/// only at the start of a word. A subject that names none is read for a pull request number: it
+/// starts `Merge pull request #<n>` or ends `(#<n>)`.
 #[must_use]
 pub fn named_in_subject(subject: &str) -> Option<Named> {
+    named_by_id(subject).or_else(|| pull_request_in(subject))
+}
+
+fn pull_request_in(subject: &str) -> Option<Named> {
+    let subject = subject.trim();
+    if let Some(n) = number_after(subject, "Merge pull request #") {
+        return n.parse().ok().map(Named::PullRequest);
+    }
+    let digits = subject.strip_suffix(')')?;
+    let start = digits.rfind("(#")?;
+    let n = &digits[start + 2..];
+    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        .then(|| n.parse().ok().map(Named::PullRequest))
+        .flatten()
+}
+
+fn named_by_id(subject: &str) -> Option<Named> {
     subject
         .char_indices()
         .filter(|(i, _)| !subject[..*i].ends_with(char::is_alphanumeric))
@@ -784,8 +860,9 @@ mod tests {
     use super::{
         DocumentFormat, FolderDocPathRefusal, FormatRefusal, OWNER_ACCEPTED_STEMS, ROLE_FOLDERS,
         agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
-        folder_doc_message, folder_of, folders_line, format_line, human_of_twin, is_human_document,
-        is_plan_of, pair_changed_alone, plan_stem, role_folder, stem_of, with_format,
+        folder_doc_message, folder_of, folders_line, format_line, human_of_twin, hunt_report,
+        is_human_document, is_hunt, is_plan_of, pair_changed_alone, plan_stem, role_folder,
+        stem_of, with_format,
     };
     use super::{LineChange, ShownLine, artifact_marks, changed_lines, is_heading};
     use super::{
@@ -793,6 +870,48 @@ mod tests {
         plain_name, stale_line, twin_is_stale,
     };
     use crate::team::Role;
+
+    #[test]
+    fn knows_a_hunt_by_its_report_alone() {
+        use super::DocumentFormat::{Html, Markdown};
+        use crate::contract::TaskKind;
+        use crate::governor::readiness::fixtures::a_contract;
+        use crate::team::reviewed_by_an_agent;
+
+        assert_eq!(
+            hunt_report(Role::SoftwareDeveloper, Html).as_deref(),
+            Some("docs/catervas/engineering/bug-hunt.html")
+        );
+        assert_eq!(
+            hunt_report(Role::UiUxDesigner, Markdown).as_deref(),
+            Some("docs/catervas/design/ui-bug-hunt.md")
+        );
+        assert_eq!(hunt_report(Role::Architect, Html), None);
+
+        let mut hunt = a_contract();
+        hunt.kind = TaskKind::Task;
+        hunt.assignee_role = Role::SoftwareDeveloper;
+        hunt.allowed_paths = vec!["docs/catervas/engineering/bug-hunt.html".to_string()];
+        assert!(is_hunt(&hunt));
+        assert!(!reviewed_by_an_agent(&hunt));
+
+        let mut more = hunt.clone();
+        more.allowed_paths.push("src/**".to_string());
+        assert!(!is_hunt(&more));
+        assert!(reviewed_by_an_agent(&more));
+
+        let mut glob = hunt.clone();
+        glob.allowed_paths = vec!["docs/catervas/engineering/**".to_string()];
+        assert!(!is_hunt(&glob));
+
+        let mut epic = hunt.clone();
+        epic.kind = TaskKind::Epic;
+        assert!(!is_hunt(&epic));
+
+        let mut designer = hunt;
+        designer.assignee_role = Role::UiUxDesigner;
+        assert!(!is_hunt(&designer));
+    }
 
     #[test]
     fn names_an_epics_plan() {
@@ -935,8 +1054,24 @@ mod tests {
         assert_eq!(name("product/spec.md"), "Product description");
         assert_eq!(name("architecture/jobs.md"), "Scheduled jobs");
         assert_eq!(name("marketing/brand/persona.md"), "Brand persona");
-        assert_eq!(name("delivery/cadence.md"), "Sprint rhythm");
+        assert_eq!(name("delivery/cadence.md"), "Delivery rhythm");
         assert_eq!(name("design/ui-inventory.md"), "UI inventory");
+        // The hunts' reports and the marketing kickoff sit in their folder's order (ADR 0063).
+        assert_eq!(super::DOCUMENT_STEMS.len(), 15);
+        let place = |path: &str| document_order(&format!("docs/catervas/{path}")).0;
+        assert_eq!(
+            place("engineering/bug-hunt.md"),
+            place("engineering/workflow.md") + 1
+        );
+        assert_eq!(
+            place("design/ui-bug-hunt.html"),
+            place("design/ui-inventory.md") + 1
+        );
+        assert_eq!(
+            place("marketing/kickoff.md"),
+            place("marketing/brand/persona.md") + 1
+        );
+        assert_eq!(name("marketing/kickoff.md"), "Marketing kickoff");
         assert_eq!(name("delivery/ceremony-notes.md"), "Ceremony notes");
         assert_eq!(name("engineering/how_we_test.md"), "How we test");
         assert_eq!(plain_name("product"), "Product");
@@ -1068,6 +1203,13 @@ mod tests {
             named_in_subject("Merge docs/folder-3: architecture/plans/CTV-12.md"),
             change(3)
         );
+        let request = |n| Some(Named::PullRequest(n));
+        assert_eq!(named_in_subject("Feat: Gift cards (#4)"), request(4));
+        assert_eq!(
+            named_in_subject("Merge pull request #12 from me/docs/roadmap"),
+            request(12)
+        );
+        assert_eq!(named_in_subject("Docs: Update Roadmap (#9) again"), None);
         assert_eq!(named_in_subject("subfolder-3"), None);
         assert_eq!(named_in_subject("ACTV-1: x"), None);
         assert_eq!(named_in_subject("docs(product): edit roadmap.md"), None);

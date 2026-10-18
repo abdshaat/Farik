@@ -1,5 +1,5 @@
 //! `catervas_read_costs` (`docs/SPEC.md` 6.6): the Finance Specialist reads what the team has spent
-//! on AI, summed by task, agent, sprint, day or purpose, from the costs the log already keeps.
+//! on AI, summed by task, agent, day or purpose, from the costs the log already keeps.
 
 use catervas_core::contract::Role;
 use catervas_store::{CostScope, CostWindow};
@@ -15,7 +15,7 @@ use super::{Call, ToolError, failed};
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadCostsInput {
-    /// What to sum by: `task`, `agent`, `sprint`, `day` or `purpose`.
+    /// What to sum by: `task`, `agent`, `day` or `purpose`.
     by: CostsBy,
     /// The first day to count, as YYYY-MM-DD in UTC. Give it with `to`, or neither.
     #[serde(default)]
@@ -33,8 +33,6 @@ pub(crate) enum CostsBy {
     Task,
     /// By agent id.
     Agent,
-    /// By the sprint the task was in when the cost was recorded.
-    Sprint,
     /// By the UTC day the cost was recorded on.
     Day,
     /// By what the session was for, such as `implement` or `chat`.
@@ -90,7 +88,6 @@ pub(super) fn read_costs(call: &Call<'_>, input: &ReadCostsInput) -> Result<Valu
     let scope = match input.by {
         CostsBy::Task => CostScope::Task,
         CostsBy::Agent => CostScope::Agent,
-        CostsBy::Sprint => CostScope::Sprint,
         CostsBy::Day => CostScope::Day,
         CostsBy::Purpose => CostScope::Purpose,
     };
@@ -123,11 +120,10 @@ mod tests {
     };
 
     /// A project whose finance agent `fin` can read the costs of `CTV-1`, spent by `dev-a` and
-    /// `dev-b` over two days, and of a sprint that holds it.
+    /// `dev-b` over two days.
     fn a_project_with_costs(name: &str) -> TestProject {
         let project = TestProject::new(name, &a_team_of_three(with_the_finance_specialist));
         project.filed("CTV-1", "in_progress", "task", None);
-        project.open_sprint("S1", None, &["CTV-1"]);
         project.spent("dev-a", Some("CTV-1"), "s1", "2026-10-01", (1.0, 100));
         project.spent("dev-a", Some("CTV-1"), "s2", "2026-10-02", (2.0, 200));
         project.spent("dev-b", Some("CTV-1"), "s3", "2026-10-02", (4.0, 400));
@@ -164,11 +160,7 @@ mod tests {
                 json!({ "key": "2026-10-02", "usd": 6.0, "input_tokens": 600, "output_tokens": 60, "sessions": 2 }),
             ]
         );
-        for (by, key) in [
-            ("task", "CTV-1"),
-            ("sprint", "S1"),
-            ("purpose", "implement"),
-        ] {
+        for (by, key) in [("task", "CTV-1"), ("purpose", "implement")] {
             let answer = read(json!({ "by": by }));
             let rows = rows(&answer);
             assert_eq!(rows.len(), 1, "{by}: {rows:?}");

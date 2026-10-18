@@ -122,30 +122,8 @@ impl Projections {
     /// `Store` when a projection cannot be read; `Files` when an accepted row's contract cannot,
     /// which fails the whole call rather than leaving the row out of the count.
     pub fn metrics(&self, files: &ProjectFiles) -> Result<HarnessMetrics, MetricsError> {
-        self.metrics_over(files, None)
-    }
-
-    /// The same five metrics, over only the rows whose `sprint` is `sprint_id` and the costs
-    /// whose `sprint` is: a cost with no task, or of a task never in a sprint, is in none of them.
-    ///
-    /// # Errors
-    ///
-    /// As `metrics`.
-    pub fn metrics_for_sprint(
-        &self,
-        files: &ProjectFiles,
-        sprint_id: &str,
-    ) -> Result<HarnessMetrics, MetricsError> {
-        self.metrics_over(files, Some(sprint_id))
-    }
-
-    fn metrics_over(
-        &self,
-        files: &ProjectFiles,
-        sprint_id: Option<&str>,
-    ) -> Result<HarnessMetrics, MetricsError> {
-        let counts = self.board_counts(sprint_id)?;
-        let (spent, days) = self.spending(sprint_id)?;
+        let counts = self.board_counts()?;
+        let (spent, days) = self.spending()?;
         // The contracts are read with the connection released: they are files, not rows.
         let (mut mechanical, mut criteria) = (0_u32, 0_u32);
         for task_id in &counts.accepted_rows {
@@ -184,12 +162,12 @@ impl Projections {
             mechanically_verified_criteria_share: (counts.accepted_tasks > 0 && criteria > 0)
                 .then(|| f64::from(mechanical) / f64::from(criteria)),
             active_weeks: active_weeks(&days)?,
-            messages: self.message_counts(sprint_id)?,
+            messages: self.message_counts()?,
         })
     }
 
-    /// Board rows: every one, or only `sprint_id`'s when there is one.
-    fn board_counts(&self, sprint_id: Option<&str>) -> Result<BoardCounts, MetricsError> {
+    /// Every board row.
+    fn board_counts(&self) -> Result<BoardCounts, MetricsError> {
         let connection = self.connection();
         let (accepted_tasks, first_pass, interventions): (i64, i64, i64) = connection.query_row(
             "SELECT
@@ -197,17 +175,16 @@ impl Projections {
                  COALESCE(SUM(kind = 'task' AND status = 'accepted'
                               AND verifications = 1 AND rejections = 0), 0),
                  COALESCE(SUM(interventions), 0)
-             FROM task_projections
-             WHERE ?1 IS NULL OR sprint = ?1",
-            (sprint_id,),
+             FROM task_projections",
+            (),
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         let mut statement = connection.prepare(
             "SELECT task_id FROM task_projections
-             WHERE status = 'accepted' AND (?1 IS NULL OR sprint = ?1)",
+             WHERE status = 'accepted'",
         )?;
         let mut accepted_rows = Vec::new();
-        for id in statement.query_map((sprint_id,), |row| row.get::<_, String>(0))? {
+        for id in statement.query_map((), |row| row.get::<_, String>(0))? {
             let id = id?;
             accepted_rows.push(TaskId::from_str(&id).map_err(|_| StoreError::InvalidEvent {
                 detail: format!("the board holds {id:?} as a task id"),
@@ -221,19 +198,15 @@ impl Projections {
         })
     }
 
-    /// What was spent per purpose, and the distinct days anything was: every cost, or only
-    /// `sprint_id`'s when there is one.
+    /// What was spent per purpose, and the distinct days anything was: every cost.
     fn spending(
         &self,
-        sprint_id: Option<&str>,
     ) -> Result<(BTreeMap<CostRecordedBodyPurpose, f64>, Vec<String>), MetricsError> {
         let connection = self.connection();
-        let mut statement = connection.prepare(
-            "SELECT purpose, SUM(cost_usd) FROM cost_records
-             WHERE ?1 IS NULL OR sprint = ?1 GROUP BY purpose",
-        )?;
+        let mut statement = connection
+            .prepare("SELECT purpose, SUM(cost_usd) FROM cost_records GROUP BY purpose")?;
         let mut spent = BTreeMap::new();
-        for row in statement.query_map((sprint_id,), |row| {
+        for row in statement.query_map((), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
         })? {
             let (purpose, usd) = row?;
@@ -244,32 +217,24 @@ impl Projections {
             })?;
             spent.insert(purpose, usd);
         }
-        let mut statement = connection
-            .prepare("SELECT DISTINCT day FROM cost_records WHERE ?1 IS NULL OR sprint = ?1")?;
+        let mut statement = connection.prepare("SELECT DISTINCT day FROM cost_records")?;
         let days = statement
-            .query_map((sprint_id,), |row| row.get::<_, String>(0))?
+            .query_map((), |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok((spent, days))
     }
 
     /// The channel's messages by kind, read from the log's events, since messages are not
-    /// projected: every one, or only those after `sprint_id`'s `sprint.started` and, once it has
-    /// ended, before its `sprint.ended`. A sprint the log never started has none.
-    fn message_counts(&self, sprint_id: Option<&str>) -> Result<MessageCounts, MetricsError> {
+    /// projected: every one.
+    fn message_counts(&self) -> Result<MessageCounts, MetricsError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT json_extract(body, '$.kind'), COUNT(*) FROM events
              WHERE kind = 'message.posted'
-               AND (?1 IS NULL OR (
-                   seq > (SELECT MIN(seq) FROM events WHERE kind = 'sprint.started'
-                          AND json_extract(body, '$.sprint_id') = ?1)
-                   AND seq < COALESCE((SELECT MIN(seq) FROM events WHERE kind = 'sprint.ended'
-                                       AND json_extract(body, '$.sprint_id') = ?1),
-                                      seq + 1)))
              GROUP BY 1",
         )?;
         let mut counts = MessageCounts::default();
-        for row in statement.query_map((sprint_id,), |row| {
+        for row in statement.query_map((), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })? {
             let (kind, number) = row?;

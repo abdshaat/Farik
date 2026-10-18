@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { Board } from "../pages/Board.tsx";
 import { Chats } from "../pages/Chats.tsx";
+import { ChatsAlias } from "../pages/ChatsAlias.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
@@ -15,7 +16,6 @@ import { PlanPage } from "../pages/PlanPage.tsx";
 import { ProcurementMailbox } from "../pages/ProcurementMailbox.tsx";
 import { Questions } from "../pages/Questions.tsx";
 import { RequestFiled } from "../pages/RequestFiled.tsx";
-import { SprintPage } from "../pages/SprintPage.tsx";
 import { Account } from "../pages/settings/Account.tsx";
 import { AllowedActions } from "../pages/settings/AllowedActions.tsx";
 import { Computer } from "../pages/settings/Computer.tsx";
@@ -81,9 +81,10 @@ export function App() {
 				<Route path="/board" element={<Board />} />
 				<Route path="/channel" element={<Chats />} />
 				<Route path="/channel/:id" element={<Chats />} />
+				<Route path="/chats" element={<Navigate to="/channel" replace />} />
+				<Route path="/chats/:id" element={<ChatsAlias />} />
 				<Route path="/files" element={<Files />} />
 				<Route path="/files/*" element={<Files />} />
-				<Route path="/sprints/:id" element={<SprintPage />} />
 				<Route path="/costs" element={<Costs />} />
 				<Route path="/events" element={<Events />} />
 				<Route path="/marketing/plans/:id" element={<MarketingPlan />} />
