@@ -29,6 +29,10 @@ Every decision is ADR 0069's (decision 4); this section pins how.
 - **Rule 2, a task's pull request `Open { Conflicting }`** (`through_the_forge`, which gains
   `team: &Team` from `integrate_locked`), under the integration lock it already holds:
   1. `target.git.fetch_fast_forward("origin", into)`; a failure escalates as a merged one's does.
+     Then, when `target.git.commit_count(&branch, into)? == 0` (the branch already holds all of
+     `into`, so GitHub's answer is stale, as it is for a while after a push), answer
+     `AwaitingForge` and do nothing else: this is what keeps a refresh from repeating on every
+     tick.
   2. `target.git.add_worktree(&worktree, &branch)` at `.catervas/local/worktrees/<id>` (rule 1 removed
      it at acceptance; an existing one is reused).
   3. `target.git.merge_keeping_conflicts(&worktree, into, &format!("chore: bring up to date with
@@ -42,6 +46,10 @@ Every decision is ADR 0069's (decision 4); this section pins how.
      and answer the new `IntegrationOutcome::SentBack { paths }`. The worktree keeps the merge with
      its markers. A refusal removes the worktree and escalates with the refusal's words.
   `Open { Mergeable }` and `Open { Unknown }` answer `AwaitingForge`, as `Open` did.
+- **Leaving `accepted` clears `awaiting_integration`.** The projection's `CASE` (`projections.rs`,
+  "Nothing leaves `accepted`") gains `WHEN status = 'accepted' THEN 0` before its `ELSE`, so a task
+  sent back is not listed on Today as waiting for a merge; its next acceptance sets it again. The
+  comment says the one row out of `accepted` (ADR 0069).
 - **After the move**, rule 7 finds the worktree (`assigned` reuses one that is there) and moves the
   task to `in_progress` as its assignee; rule 6 starts the implement session. The task keeps its
   assignee, reviewer and branch. Its iteration is not counted: this is not a rejection.
@@ -80,7 +88,7 @@ crates/store/src/git.rs                        modifies: Git::add_worktree, Git:
 crates/store/tests/git.rs                      tests:    merges_into_a_kept_branch_and_leaves_its_conflicts (Task 13)
 docs/schemas/event.schema.json                 modifies: the two kinds and bodies (Task 14)
 crates/protocol/src/event.rs, lib.rs, event/fixtures.rs   modifies: the two kinds (Task 14)
-crates/store/src/projections.rs                modifies: ignores them (Task 14)
+crates/store/src/projections.rs                modifies: ignores them; a move out of accepted clears awaiting_integration (Task 14)
 crates/runtime/src/transitions.rs              modifies: TransitionAsk.pull_request_conflicts into the context (Task 14)
 crates/runtime/src/orchestrator.rs             modifies: IntegrationOutcome::SentBack (Task 14)
 crates/runtime/src/orchestrator/integrate.rs   modifies: through_the_forge refreshes or sends back (Task 14)
@@ -173,11 +181,14 @@ Tests:
   the task's branch changed, and `FakeGh` answers `pr view` with `mergeable: "CONFLICTING"`; after a
   tick: `pull_request.conflicted` names the file, the task is `assigned` with the move's gate
   `pull_request_conflicted` and actor `governor`, and its worktree holds the markers with a merge in
-  progress; after the next tick it is `in_progress`. Fails first: nothing is recorded.
+  progress; its board row's `awaiting_integration` is `false`; after the next tick it is
+  `in_progress`. Fails first: nothing is recorded.
 - `refreshes_a_pull_request_that_merges_again` (same set-up, the integration branch's commit
-  touching another file, `CONFLICTING` answered once) — after a tick: `pull_request.refreshed`
+  touching another file) — after a tick: `pull_request.refreshed`
   holds a sha that `origin`'s task branch now points at, whose parents are the old tip and the
-  integration branch; the task stays `accepted` and its worktree is gone.
+  integration branch; the task stays `accepted` and its worktree is gone. `FakeGh` keeps
+  answering `CONFLICTING` (a stale answer): a further tick appends no second
+  `pull_request.refreshed` and makes no worktree.
 
 - [ ] `feat(runtime): bring a pull request that stopped merging up to date or send it back`
 

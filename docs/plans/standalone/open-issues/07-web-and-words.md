@@ -30,7 +30,11 @@ Every decision is ADR 0069's (decision 8); this section pins how.
   200 characters). Backend, in `checked` (`daemon/team.rs`), when the wire team sets it: a name
   `deps.git.check_branch_name` refuses is the error `integration_branch_name` at
   `/policy/integration_branch`; a name with no local branch (`deps.git.has_local_branch`) is
-  `integration_branch_missing` there; `code_of` maps both, as it maps its other codes.
+  `integration_branch_missing` there; `code_of` maps both, as it maps its other codes. A project of
+  several repositories (ADR 0057) keeps each member's branch in `repos.yaml`: `team.get` gains
+  `members_present: bool` (`teamGetResult` in `docs/schemas/rpc.schema.json`, required), true when
+  the project folder's `repos.yaml` lists members (read as `daemon/repos.rs` reads it); there the
+  field is not shown and `checked` makes neither check.
   `describe_change` (`crates/core/src/team/describe.rs`) says "Finished work goes into {branch}." when
   the value changes to a name, and "Finished work goes into the repository's main branch." when it is
   removed. Web: `IntegrationBranch` in `pages/TeamRules.tsx`, a `TextField` as `UiPaths` has, saved
@@ -70,7 +74,8 @@ Every decision is ADR 0069's (decision 8); this section pins how.
 ```
 apps/web/src/pages/setup/SetupSpending.tsx      modifies: the example line (Task 23)
 apps/web/src/pages/setup/team.test.tsx          tests:    shows_an_example_of_the_limit amended (Task 23)
-crates/runtime/src/daemon/team.rs               modifies: checked's two refusals, code_of (Task 24)
+crates/runtime/src/daemon/team.rs               modifies: checked's two refusals, code_of, team.get's members_present (Task 24)
+docs/schemas/rpc.schema.json                    modifies: teamGetResult.members_present (Task 24)
 crates/runtime/src/daemon/team.rs               tests:    refuses_an_integration_branch_the_project_does_not_have (Task 24)
 crates/core/src/team/describe.rs                modifies: the effect line (Task 24)
 apps/web/src/pages/TeamRules.tsx, pages/settings/Work.tsx, pages/setup/TeamSetup.tsx, app/refusals.ts  modifies (Task 24)
@@ -114,11 +119,13 @@ Tests:
 - `refuses_an_integration_branch_the_project_does_not_have` (`daemon/team.rs`, ignored "needs the git
   program") — `team.validate` with `policy.integration_branch` `"catervas/next"` answers
   `integration_branch_missing` until a local branch `catervas/next` exists, then no error and the
-  effect "Finished work goes into catervas/next."; `"bad..name"` answers `integration_branch_name`.
+  effect "Finished work goes into catervas/next."; `"bad..name"` answers `integration_branch_name`;
+  `team.get` answers `members_present: false`.
 - `sets_the_integration_branch` (`settings.test.tsx`) — on `/settings/work`, typing `catervas/next`
   and saving calls `team.save` with `policy.integrationBranch` `"catervas/next"`; clearing it and
   saving calls `team.save` with no `integrationBranch`; the section lists `en.rulesFinish`,
-  `en.rulesBranch`, `en.rulesDocuments` (line 224's expectation). Fails first: no field.
+  `en.rulesBranch`, `en.rulesDocuments` (line 224's expectation); with `membersPresent: true` the
+  field is absent. Fails first: no field.
 
 - [ ] `feat(web): settings sets the branch finished work goes into`
 

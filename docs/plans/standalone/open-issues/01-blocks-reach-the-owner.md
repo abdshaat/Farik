@@ -40,8 +40,9 @@ Every decision is ADR 0069's (decisions 1, 2 and 4); this section pins how.
   resolution and when `to` is `Refining` or `return_from_block(blocked_from)`; otherwise it says
   "the task was blocked while {from}, so an answer sends it back to {return}". `check_gate` gains a
   `to: TaskStatus` parameter for it.
-- **Effects.** `ResetBlocker` is recorded for a move to `in_progress` (as now) and for a move out of
-  `blocked` into `verifying` or `refining`. `StampBlockedAt` stays on every move into `blocked`.
+- **Effects.** `ResetBlocker` is recorded for a move to `in_progress` (as now) and for any move out
+  of `blocked` or `escalated` into `verifying` or `refining` (an escalated block answered back into
+  its review leaves no blocker behind). `StampBlockedAt` stays on every move into `blocked`.
   `accepted -> assigned` records no effect.
 - **The conflicts gate** (plan 5 fills its input): `TransitionContext` gains
   `pull_request_conflicts: Vec<String>`; `check_pull_request_conflicted(conflicts: &[String])`
@@ -51,8 +52,12 @@ Every decision is ADR 0069's (decisions 1, 2 and 4); this section pins how.
 - **The holder blocks as itself.** `declare_blocked` asks with `actor_for(call, &contract,
   TaskStatus::Blocked)` instead of `TransitionActor::Assignee`: the reviewer of a `verifying` task
   as `Reviewer`, the Product Manager (or the given agent, which writes with its standing while
-  `refining`, ADR 0063) as `ProductManager`. A caller who holds nothing on the task is refused
-  `actor_not_allowed` with nothing recorded, as `request_transition` is.
+  `refining`, ADR 0063) as `ProductManager`. For that, `actor_for`'s `ProductManager` arm also
+  matches when the contract is `draft` or `refining` and `given_to(&call.deps().log, &contract.id)`
+  names the caller, the rule `contract_writer` (`tools/contracts.rs`) applies to contract writes
+  (make `given_to` `pub(super)` if it is private); `actor_for` stops being a plain `find` because
+  that check can fail. A caller who holds nothing on the task is refused `actor_not_allowed` with
+  nothing recorded, as `request_transition` is.
 - **Who is stuck** is the agent of the last move into `blocked` (its envelope's `agent_id`), else
   the assignee. Today's line ("{agent} is stuck: …", `catervas_store::waiting`) and the choices'
   `who` both use it.
@@ -167,7 +172,8 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   `dev-1` is `NotTheNamedAgent`; `refining -> blocked` as `ProductManager` moves; with no blocker
   each is `GateFailed` on `BlockerWritten`. Fails first: `no_such_transition`.
 - `returns_a_blocked_task_where_its_block_came_from` — `blocked_from: Some(Verifying)` with a
-  resolution: Human to `verifying` moves with `[ResetBlocker]`, Human to `in_progress` is
+  resolution: Human to `verifying` moves with `[ResetBlocker]` (and an `escalated` task's Human move
+  to `verifying` records `ResetBlocker` too), Human to `in_progress` is
   `GateFailed` whose detail contains "sends it back to verifying"; `Some(InProgress)`: to
   `in_progress` moves, to `verifying` refused; `None`: to `in_progress` moves; any of them to
   `refining` moves with `[ResetBlocker]`; no resolution refuses every one.
@@ -190,9 +196,11 @@ Tests:
 
 - `blocks_a_task_as_its_reviewer` — a task in `verifying` whose reviewer is the session's agent:
   `catervas_declare_blocked` moves it to `blocked`, and the `task.transitioned` body has
-  `actor: reviewer` and `requested_by` the reviewer's id; from a session of an agent that is neither
-  assignee nor reviewer, the call is refused `actor_not_allowed` and no `transition.refused` is
-  appended. Fails first: the move is refused with `actor: assignee`.
+  `actor: reviewer` and `requested_by` the reviewer's id; a `refining` task given to a developer in
+  its chat (as the ADR 0063 tests of `contracts.rs` give one) is blocked by that developer with
+  `actor: product_manager`; from a session of an agent that holds nothing on the task, the call is
+  refused `actor_not_allowed` and no `transition.refused` is appended. Fails first: the move is
+  refused with `actor: assignee`.
 
 - [ ] `fix(runtime): an agent blocks a task as the one who holds it`
 
@@ -220,7 +228,8 @@ Tests:
   reviewer `grace` recorded the move into `blocked` with description "the checks cannot run git":
   its row's line is "Grace is stuck: the checks cannot run git" and its agent is `grace`.
 - `a_reviewers_block_is_answered_back_into_its_review` (`orchestrator/human.rs`, ignored "needs the
-  git program", built as the ADR 0068 blocked-task test at line ~3948 is) — a `verifying` task the
+  git program", built as the ADR 0068 blocked-task test at line ~3948 is; that test is amended for
+  the third choice, "Ask … to change the plan") — a `verifying` task the
   reviewer blocked: `escalation_resolve` to `verifying` with "Here is the output" moves it to
   `verifying` and records `escalation.resolved`; `escalation_resolve` to `in_progress` on the same
   kind of block is refused and nothing moves.

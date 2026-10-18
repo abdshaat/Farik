@@ -39,9 +39,13 @@ Every decision is ADR 0069's (decision 6); this section pins how.
 - **Only for checks.** `SandboxFactory` gains `create_checking`, whose default calls `create` (the
   host sandbox has git; the fakes need nothing). `DockerSandboxFactory` overrides it. The
   orchestrator gains `sandbox_for_checks`, which builds the task's sandbox as `sandbox_for` does,
-  through `create_checking` when it has a store, and holds it in the same slot.
-  `run_what_catervas_runs` already forgets the task's sandbox before its checks; it now forgets it
-  after them too, so the assignee's or reviewer's next session gets a container with no store.
+  through `create_checking` when it has a store. **The guarantee is structural:** the held map's
+  entry becomes `Held { sandbox: Arc<dyn Sandbox>, for_checks: bool }`; `sandbox_for` (every agent
+  session's path) reuses only an entry with `for_checks: false` and otherwise removes the held
+  container (as `forget_sandbox` does) and makes a new one; `sandbox_for_checks` likewise reuses
+  only `for_checks: true`. So whatever path leaves `run_what_catervas_runs` (an error included), no
+  agent session can get the checks' container. `run_what_catervas_runs` still forgets the sandbox
+  after its loop, to free the container early.
 - **Network unchanged**: the checks' container keeps the network the task's sandbox has (ADR 0061,
   research is free). That is why a store with a secret is never mounted.
 - Rejected: running git criteria on the host (a criterion is any shell text an agent wrote); a
@@ -57,7 +61,8 @@ crates/store/tests/git.rs                  tests:    finds_a_worktrees_git_store
 crates/runtime/src/sandbox.rs              modifies: SandboxFactory::create_checking with its default (Task 10)
 crates/runtime/src/sandbox/docker.rs       modifies: run_args(.., git_store), create_checking (Task 10)
 crates/runtime/src/sandbox/docker.rs       tests:    mounts_each_other_member_read_only_after_the_worktree amended (Task 10)
-crates/runtime/src/orchestrator.rs         modifies: sandbox_for_checks (Task 10)
+crates/runtime/src/orchestrator.rs         modifies: Held, sandbox_for_checks, sandbox_for drops a checks sandbox (Task 10)
+crates/runtime/src/orchestrator.rs         tests:    an_agent_session_never_reuses_the_checks_sandbox (Task 10)
 crates/runtime/src/orchestrator/verify.rs  modifies: run_what_catervas_runs finds the store and forgets the sandbox after (Task 10)
 crates/runtime/tests/docker_sandbox.rs     tests:    a_check_reads_git_and_an_agent_does_not (Task 10)
 ```
@@ -147,6 +152,10 @@ Tests:
   `git commit --allow-empty -m x` exits non-zero with the store unchanged (its `HEAD` sha the same
   after); in the container from `create` for the same worktree, `git status` exits 128 and its
   standard error contains "not a git repository". Fails first: the first command exits 128.
+- `an_agent_session_never_reuses_the_checks_sandbox` (`orchestrator.rs` tests, with
+  `CountingSandboxFactory`) — `sandbox_for_checks(task, team, Some(store))` then `sandbox_for(task,
+  team)` answer two different sandboxes (`!Arc::ptr_eq`), the first removed; a second
+  `sandbox_for` reuses the agent's one. Fails first: `sandbox_for_checks` does not exist.
 
 - [ ] `fix(runtime): the checks catervas runs read the repository's git store`
 

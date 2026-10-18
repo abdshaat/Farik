@@ -95,12 +95,12 @@ pub fn folder_change_title(paths: &[&str], names: &str) -> String;
 pub const PULL_REQUEST_BODY_CAP: usize = 1500;
 pub fn pull_request_body(changed: &str, checks: &[String], review: Option<(&str, &str)>) -> String;
 // crates/runtime/src/daemon/team.rs
-fn with_role_defaults(deps: &DaemonDeps, wire: &mut Value) -> Result<(), Failure>;
+fn with_role_defaults(deps: &ToolDeps, wire: &mut Value) -> Result<(), Failure>;
 // crates/cli/src/run.rs
 fn credential_line(kind: CredentialKind, source: Source) -> String;
 ```
 
-(`DaemonDeps` and `Failure` are the names `checked` takes and returns; use the same.)
+(`ToolDeps` and `Failure` are what `checked` takes and returns.)
 
 ## Tasks
 

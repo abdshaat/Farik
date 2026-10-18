@@ -35,8 +35,10 @@ Every decision is ADR 0069's (decisions 3 and 5); this section pins how.
 - **The governor's own refusal escalates.** In `decide_alone`, a `TransitionOutcome::Refused` calls
   `escalate(deps, team, row, &why)` with `why` "Catervas could not accept it: {details}" (or
   "reject"), details `refusal_details(&refusal).join("; ")`. `escalate` records it as the
-  `criterion_unrunnable` escalation it already raises, which the owner answers on Today. A refusal of
-  that escalation leaves the task passed over, as now.
+  `criterion_unrunnable` escalation it already raises (reason `explicit_request`), which the owner
+  answers on Today; its choices are "Carry on" back to `verifying` (Catervas runs the checks and
+  asks again), "Change the plan" and "Cancel the task". A refusal of that escalation leaves the task
+  passed over, as now.
 - **Documents are not UI.** `is_ui_change` drops every changed path under `docs/catervas/` before it
   matches the UI globs; a contract's `ui_change: Some(true)` still counts. The constant:
   `pub const TEAM_DOCUMENTS: &str = "docs/catervas/";` in `team_rules.rs`.
