@@ -98,7 +98,7 @@ Tests:
 
 - `keeps_the_work_line_while_a_chat_fork_runs` (new) — an agent with an open `implement` session on CTV-1 and a later open `chat` session: its activity is `Working`, "Building <title>", `task_id` CTV-1, purpose `implement`; once the implement session ends, the chat's "Answering your chat" with no task. Fails first because the newest open session, the chat, wins. No existing test asserts a chat line beside a work session (none in `activity.rs`, none in `Today.test.tsx`), so none changes.
 
-- [ ] `fix(store): an agent's chat fork leaves its work line`
+- [x] `fix(store): an agent's chat fork leaves its work line`
 
 ### Task 2: the board says who is thinking
 
@@ -112,7 +112,7 @@ Tests:
 - `names_who_is_thinking_on_a_card` (new) — wide; activity: Mira `refine` on CTV-3 (session s-2), Kai `implement` on CTV-7 (as `ACTIVITY`), Theo `working` on CTV-4 with no session. "Gift cards" reads "Mira · Product Manager — thinking" and the mark `markWriting`; "Launch post" reads "Kai · Marketing Specialist — thinking"; "Gift card page" has no "thinking"; each `.dots` is `aria-hidden="true"`; `Board.module.css` read raw holds the dots' `animation` and `@media (prefers-reduced-motion: reduce) { .dots span { animation: none; …` (as `Shell.test.tsx`'s `keeps_the_connected_dot_still_under_reduced_motion`); rendered again with Mira's entry's purpose `plan`, "Gift cards" shows `markPlanning`; no axe violations. Fails first because no card names who works on it.
 - `apps/web/e2e/board.spec.ts`: unchanged; re-run.
 
-- [ ] `feat(web): a board card says which agent is thinking on it`
+- [x] `feat(web): a board card says which agent is thinking on it`
 
 ### Task 3: a waiting merge is checked every 15 seconds
 
@@ -122,7 +122,7 @@ Tests:
 
 - `caps_a_wait_at_fifteen_seconds_while_a_merge_waits` (new, beside `caps_a_wait_at_a_minute_so_the_board_is_rechecked`, which stays) — `harness.accepted("CTV-1")`; `waited` an hour ahead: `Reached`, and the clock moved by 15 s. Fails first because the cap is 60 s.
 
-- [ ] `fix(runtime): check a waiting merge every fifteen seconds`
+- [x] `fix(runtime): check a waiting merge every fifteen seconds`
 
 ### Task 4: the merge row checks at once
 
@@ -135,7 +135,7 @@ Tests:
 - `checks_a_merge_from_its_row` (new) — `waiting.list` one `integration` row for CTV-4: no "Add" link, and its title is a link to `/tasks/CTV-4/accept`; pressing "I merged it" sends `task_integrate` with `{ taskId: "CTV-4" }`; a reply `{ said, events: [] }` shows `waitingNotMergedYet`; pressed again, a refusal `not_merged: …` shows `refuseNotMerged` as an alert; pressed again, a reply with events, an event arrives and `waiting.list` answers empty: the row is gone and `waitingNone` shows; axe passes. `lists_what_waits_on_you` is updated where it reads the integration row's "Add" link. Fails first because the row is a link.
 - `accept.spec.ts` — after `mergeByHand`, presses the button "I merged it" on Today (no Gate); `task.integrated` is recorded once and the "Add … to your project" row is gone.
 
-- [ ] `feat(web): a finished task's merge is checked from its row on Today`
+- [x] `feat(web): a finished task's merge is checked from its row on Today`
 
 ### Task 5: the safe box is prepared in the background (ADR 0070)
 
@@ -147,7 +147,7 @@ Tests:
 
 - `prepares_the_sandbox_image_in_the_background` (new, `web.rs`) — a scripted `docker` whose `build` records its args and stdin, prints `#6 [2/4] RUN true` to stderr, waits for a file the test makes, then exits 0, and whose `image inspect` succeeds only once that file is there: `sandbox.build` answers `{ image }` before the file exists; a second `sandbox.build` starts no second build (one args record); `computer.check` conforms and its `sandbox_image` is `{ state: "preparing", done: 2, of: 4 }`; the file made, the check (asked until it changes, 5 s at most) reads `ready`; a `build` that prints `boom` and exits 1 leaves `{ state: "missing", failed: "…boom…" }`. `answers_the_computer_check` keeps its args and stdin assertions, read once the check stops reading `preparing`. Fails first because `sandbox.build` answers only when the build ends.
 
-- [ ] `feat(runtime): prepare the sandbox image in the background and report its steps`
+- [x] `feat(runtime): prepare the sandbox image in the background and report its steps`
 
 ### Task 6: the safe box's progress bar
 
@@ -160,7 +160,7 @@ Tests:
 
 - `shows_the_safe_box_being_prepared` (new) — the check answers the image `missing`; pressing Prepare sends `sandbox.build`; replied, the next check answers `preparing` 2 of 4: a progressbar named "Preparing the safe box" with `value` 2 and `max` 4, "Step 2 of 4" in the row, Continue disabled, no Prepare button; within 3 s the page asks `computer.check` again unprompted, answered `preparing` with no step: the bar has no `value` and `imagePreparing` shows; asked again, answered `ready`: the row reads Ready, Continue is enabled, and "Check again" was never pressed; then a fresh render answering `missing` with `failed: "boom"` shows `setupBuildFailed` and Prepare; axe passes at each. Fails first because the row knows no `preparing`.
 
-- [ ] `feat(web): setup shows the safe box being prepared and goes on by itself`
+- [x] `feat(web): setup shows the safe box being prepared and goes on by itself`
 
 ### Task 7: `team.get` says whether the project is online
 
@@ -170,7 +170,7 @@ Tests:
 
 - `team_get_says_whether_the_project_is_online` (new, beside `team_get_says_whether_sessions_run_in_the_sandbox`) — the harness's repository: `online` false; after `git remote add origin <a bare repository>` in it: true. Every `team.get` test conforms to the schema, which requires `online`. Fails first because there is no `online`.
 
-- [ ] `feat(runtime): team.get says whether the project is online`
+- [x] `feat(runtime): team.get says whether the project is online`
 
 ### Task 8: the finish words say what happens
 
@@ -190,7 +190,7 @@ Tests:
 - `finish_says_what_happens_to_finished_work` (new, `team.test.tsx`) — a ready-made team (as `starts_from_a_ready_made_team`), `team.get` answering `online: true`: the lead reads `finishLead` + `finishLeadSaved`, and the summary reads `finishPush`, "No.", `finishPushNo`, with no "stays on this computer" beside a pull request; `online: false`: `finishLeadLocal`. Settings' Work page with `online: false` reads `finishLeadLocal` in "How finished work is added". Fails first because the lead does not depend on `online`.
 - `setup-team.spec.ts` — its project has no `origin`: line 73 expects `finishLeadLocal`, line 110 the same in Settings; the permission step's `^No, keep everything on this computer` label becomes `^No, keep work in progress on this computer`.
 
-- [ ] `fix(web): setup and Settings say what happens to finished work`
+- [x] `fix(web): setup and Settings say what happens to finished work`
 
 ### Task 9: SPEC 0.124
 
@@ -199,7 +199,7 @@ Files: `docs/SPEC.md`, `docs/design/web-ui.md`
 - Header, after 0.123: "Revision 0.124 (2026-10-18) records four owner-facing fixes (standalone plan `owner-polish`, ADR 0070): in F3 a card an agent has a session on names it, its role and that it is thinking; in 4.2 a finished task's merge row checks the merge with "I merged it", and in 5.14 Catervas checks a waiting merge every 15 seconds; in 4.1 the sandbox image is prepared in the background with its steps shown, and the last screen says finished work opens a pull request when the project is online and waits on the computer otherwise, the push question being about work in progress; `team.get` gains `online`; no new event or command."
 - 4.1 (line 117): the background build, `preparing`, the bar, Ready by itself. 4.1 (line 123, step 8): the two finish lines by `online`. 4.2: the merge row's button. 5.6 (line 385): "The setup screen … say" sentence names `online` and that the push question concerns work in progress. 5.14 (line 579): "once a tick" plus "and an idle Catervas ticks at least every 15 seconds while a merge waits". F3: the thinking line. `web-ui.md`'s board and Today rows, one clause each.
 
-- [ ] `docs(spec): owner polish, revision 0.124`
+- [x] `docs(spec): owner polish, revision 0.124`
 
 ## Verification
 
