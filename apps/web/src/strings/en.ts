@@ -126,6 +126,10 @@ export const en = {
 		"Or continue without it: your agents’ commands then run directly on this computer.",
 	imageMissing: "Catervas prepares it once. It takes a few minutes.",
 	prepare: "Prepare it",
+	preparingWord: "Preparing",
+	imageStep: "Step {done} of {of}. The first time takes a few minutes.",
+	imagePreparing: "Getting it ready. The first time takes a few minutes.",
+	imagePreparingLabel: "Preparing the safe box",
 	computerBrowser: "Browser for the UI/UX Designer",
 	browserMissing:
 		"Your UI/UX Designer opens your app in this browser, inside the safe box. Catervas fetches it once. It takes a few minutes.",

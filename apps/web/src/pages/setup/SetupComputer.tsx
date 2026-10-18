@@ -1,5 +1,5 @@
-import { Button, StatusWord } from "@catervas/ui";
-import { useState } from "react";
+import { Button, InfoTip, StatusWord } from "@catervas/ui";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { daemonSaid } from "../../app/refusals.ts";
@@ -10,8 +10,13 @@ import styles from "./setup.module.css";
 import { keepNoSandbox, Wizard } from "./Wizard.tsx";
 
 type Item = {
-	state: "ready" | "missing" | "too_old" | "not_running";
+	state: "ready" | "missing" | "too_old" | "not_running" | "preparing";
 	version?: string;
+	/** The build step reached, and the steps in all, while preparing. */
+	done?: number;
+	of?: number;
+	/** Docker's last words, when the last build failed. */
+	failed?: string;
 };
 type Check = {
 	claude: Item;
@@ -28,6 +33,7 @@ const WORD: Record<Item["state"], Key> = {
 	missing: "notFound",
 	too_old: "tooOld",
 	not_running: "notRunning",
+	preparing: "preparingWord",
 };
 
 function Row(props: {
@@ -43,7 +49,13 @@ function Row(props: {
 			<span>{t(props.what)}</span>
 			{item ? (
 				<StatusWord
-					tone={item.state === "ready" ? "done" : "waiting"}
+					tone={
+						item.state === "ready"
+							? "done"
+							: item.state === "preparing"
+								? "working"
+								: "waiting"
+					}
 					pill={item.state === "ready"}
 				>
 					{t(WORD[item.state])}
@@ -70,9 +82,20 @@ export function SetupComputer() {
 	const navigate = useNavigate();
 	const { data, again } = useQuery<Check>("computer.check", {});
 	const [building, setBuilding] = useState(false);
+	const askAgain = useRef(again);
+	askAgain.current = again;
 	const [buildError, setBuildError] = useState<string>();
 	const [fetching, setFetching] = useState(false);
 	const [fetchError, setFetchError] = useState<string>();
+
+	// While the safe box is being prepared the page asks again by itself (ADR 0070).
+	const preparing = data?.sandboxImage.state === "preparing";
+	// biome-ignore lint/correctness/useExhaustiveDependencies: each answer is a new `data`, and the next ask is timed from it
+	useEffect(() => {
+		if (!preparing) return;
+		const timer = setTimeout(() => askAgain.current(), 1000);
+		return () => clearTimeout(timer);
+	}, [data, preparing]);
 
 	const basics = data?.claude.state === "ready" && data.git.state === "ready";
 	const docker = data?.docker.state === "ready";
@@ -135,12 +158,40 @@ export function SetupComputer() {
 						item={data?.sandboxImage}
 						fix={{ missing: "imageMissing" }}
 					>
-						{data?.sandboxImage.state !== "ready" && (
+						{preparing && data && (
+							<>
+								<progress
+									className={styles.progress}
+									aria-label={t("imagePreparingLabel")}
+									{...(data.sandboxImage.of
+										? {
+												value: data.sandboxImage.done ?? 0,
+												max: data.sandboxImage.of,
+											}
+										: {})}
+								/>
+								<p>
+									{data.sandboxImage.of
+										? t("imageStep", {
+												done: String(data.sandboxImage.done ?? 0),
+												of: String(data.sandboxImage.of),
+											})
+										: t("imagePreparing")}
+								</p>
+							</>
+						)}
+						{data && !preparing && data.sandboxImage.state !== "ready" && (
 							<Button busy={building} onClick={prepare}>
 								{t("prepare")}
 							</Button>
 						)}
 						{buildError && <p role="alert">{buildError}</p>}
+						{!buildError && data?.sandboxImage.failed && (
+							<p role="alert">
+								{t("setupBuildFailed")}{" "}
+								<InfoTip id="image-failed">{data.sandboxImage.failed}</InfoTip>
+							</p>
+						)}
 					</Row>
 				)}
 				{docker && data?.designerBrowser && (
