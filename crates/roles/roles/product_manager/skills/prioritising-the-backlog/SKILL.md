@@ -15,7 +15,7 @@ none, say so.
 
 ## 2. The cost of waiting
 
-Ask what gets worse if it waits a sprint: a deadline passes, users keep hitting a fault, other
+Ask what gets worse if it waits until the next delivery: a deadline passes, users keep hitting a fault, other
 work stays blocked. Work with a real cost of waiting moves up.
 
 ## 3. No ties
@@ -31,5 +31,5 @@ Ask the user (`catervas_ask_human`) when a guess decides the order and they woul
 ## 5. Record it
 
 Catervas keeps no priority field. When the session lets you post, put the order and each reason in the
-team channel with `catervas_post_message`, without naming anyone; the sprint's planning reads the
+team channel with `catervas_post_message`, without naming anyone; the team's assigner reads the
 channel. Say only what changed since your last order.

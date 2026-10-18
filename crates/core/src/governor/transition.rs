@@ -91,10 +91,7 @@ pub struct TransitionContext {
     pub done: DoneEvidence,
     /// What the reviewer wrote when it rejected the work.
     pub rejection: Option<Rejection>,
-    /// Every budget's spend and limit. What is left of the sprint appears three times in this
-    /// context — here, in `readiness`, and in `assignment` — because each of those answers its own
-    /// question; the runtime derives all three from one figure, or the Definition of Ready and the
-    /// assignment gate could disagree about the same sprint.
+    /// Every budget's spend and limit.
     pub budget: BudgetState,
     /// Whether a permission was denied on an action the task requires.
     pub permission_denied: bool,
@@ -583,7 +580,6 @@ fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationR
             | BudgetScope::SessionTokens
             | BudgetScope::SessionWallClock
             | BudgetScope::SessionToolCalls
-            | BudgetScope::SprintUsd
             | BudgetScope::DayUsd => EscalationReason::Budget,
         });
     }
@@ -711,15 +707,9 @@ mod tests {
             reviewer_role: Role::Architect,
             assignee_open_tasks: 0,
             wip_limit: 2,
-            remaining_sprint_budget_usd: 15.0,
-            open_sprint: None,
-            task_sprint: None,
-            parent_sprint: None,
-            plan_in_sprints: false,
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
-            skips_sprints: false,
             lane_builder: None,
         }
     }
@@ -741,8 +731,6 @@ mod tests {
             task_max_usd: 5.0,
             task_sessions: 1,
             task_max_sessions: 12,
-            sprint_spent_usd: 3.0,
-            sprint_max_usd: 15.0,
             day_spent_usd: 4.0,
             day_max_usd: 20.0,
         }
@@ -1577,8 +1565,7 @@ mod tests {
             )
         );
         // Spec 5.5 gives every budget its own consequence, and only the task's carry escalation:
-        // the session's end the session and block the task, the sprint's stops new assignments,
-        // and the day's pauses the team. Escalating one task for any of those would be the wrong
+        // the session's end the session and block the task, and the day's pauses the team. Escalating one task for any of those would be the wrong
         // answer to the wrong question.
         for elsewhere in [
             |budget: &mut BudgetState| {
@@ -1590,7 +1577,6 @@ mod tests {
             |budget: &mut BudgetState| {
                 budget.session.tool_calls = budget.session_limits.max_tool_calls;
             },
-            |budget: &mut BudgetState| budget.sprint_spent_usd = budget.sprint_max_usd,
             |budget: &mut BudgetState| budget.day_spent_usd = budget.day_max_usd,
         ] {
             context.budget = a_budget();

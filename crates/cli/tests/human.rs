@@ -18,14 +18,13 @@ use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
 use catervas_protocol::event::{EventBody, EventKind, HumanAcceptedBodySubject};
 use catervas_runtime::orchestrator::CommandError;
 use catervas_runtime::recorded::fixtures::tool_runner;
-use catervas_runtime::sprints::{PlannedBy, plan_sprint};
 use catervas_runtime::{RecordedAdapter, RuntimeAdapter};
 use serde_json::{Value, json};
 
 use project::{
     LiveDriver, a_project, a_task_with_a_human_criterion_verifying, a_team, events, filed,
     files_of, hold_the_run_lock, joined, moved, record, record_as, recorded, run, run_with,
-    status_of, tool_deps,
+    status_of,
 };
 
 /// Records a question from `pm` on `task`, and answers its sequence number.
@@ -139,6 +138,92 @@ fn cancels_and_resolves_for_the_human() {
 
     let ran = run(&repository.path, &["resolve", &second, "finished", "x"]);
     assert_eq!(ran.code, 2, "{}", ran.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn the_end_of_a_run_names_a_command_for_each_choice() {
+    let repository = a_team("human-choices");
+    let task = filed(&repository, "Add done.txt");
+    let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+    moved(&repository, &task, "draft", "refining", &json!({}));
+    moved(&repository, &task, "refining", "ready", &json!({}));
+    moved(&repository, &task, "ready", "assigned", &people);
+    moved(&repository, &task, "assigned", "in_progress", &people);
+    moved(&repository, &task, "in_progress", "escalated", &people);
+    record(
+        &repository,
+        &task,
+        "escalation.raised",
+        &json!({ "reason": "iterations", "detail": "rejected three times" }),
+    );
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let lines: Vec<&str> = ran
+        .out
+        .lines()
+        .skip_while(|line| !line.starts_with(&format!("{task} is escalated")))
+        .collect();
+    assert_eq!(
+        lines[0],
+        format!("{task} is escalated (iterations): choose one")
+    );
+    let first =
+        format!("  catervas resolve {task} in_progress --extra-tries 2 \"<your message>\"  # ");
+    assert!(lines[1].starts_with(&first), "{}", lines[1]);
+    assert!(lines[1].ends_with(" (suggested)"), "{}", lines[1]);
+    assert!(
+        lines[2].starts_with(&format!(
+            "  catervas resolve {task} refining \"<your message>\"  # "
+        )),
+        "{}",
+        lines[2]
+    );
+    assert!(
+        lines[3].starts_with(&format!(
+            "  catervas resolve {task} cancelled \"<your message>\"  # "
+        )),
+        "{}",
+        lines[3]
+    );
+    assert!(
+        !lines[2].contains("(suggested)") && !lines[3].contains("(suggested)"),
+        "{}",
+        ran.out
+    );
+
+    let ran = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
+    let offered = &last["waiting_on_you"][0]["choices"];
+    assert_eq!(offered.as_array().map(Vec::len), Some(3), "{last}");
+    assert_eq!(offered[0]["suggested"], true);
+
+    // The first printed command, with the message filled in, is runnable.
+    let printed = lines[1]
+        .trim_start()
+        .split("  # ")
+        .next()
+        .and_then(|command| command.strip_prefix("catervas "))
+        .and_then(|command| command.strip_suffix(" \"<your message>\""))
+        .expect("a command");
+    let mut args: Vec<&str> = printed.split(' ').collect();
+    args.extend(["Go", "on."]);
+    let ran = run(&repository.path, &args);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let resolved = events(&repository, &[EventKind::EscalationResolved]);
+    let EventBody::EscalationResolved(body) = &resolved[0].body else {
+        panic!("a resolution");
+    };
+    assert_eq!(body.to.to_string(), "in_progress");
+    assert_eq!(body.extra_tries.map(std::num::NonZero::get), Some(2));
+    assert_eq!(body.message, "Go on.");
 }
 
 #[test]
@@ -456,30 +541,6 @@ fn holds_the_run_lock_while_it_handles_a_command_here() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn starts_and_shows_a_sprint_from_the_command_line() {
-    let repository = a_team("human-sprint");
-
-    let started = run(&repository.path, &["sprint", "start", "--budget", "20"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-    let shown = run(&repository.path, &["sprint", "show"]);
-    assert_eq!(shown.code, 0, "{}", shown.err);
-    for said in ["S1", "open", "budget $20", "spent $0"] {
-        assert!(shown.out.contains(said), "{said} in {}", shown.out);
-    }
-
-    let ended = run(&repository.path, &["sprint", "end"]);
-    assert_eq!(ended.code, 0, "{}", ended.err);
-    let shown = run(&repository.path, &["sprint", "show"]);
-    assert_eq!(shown.code, 0, "{}", shown.err);
-    assert!(
-        shown.out.contains("S1") && shown.out.contains("ended"),
-        "{}",
-        shown.out
-    );
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
 fn pauses_and_resumes_from_the_command_line() {
     let repository = a_team("human-pause");
 
@@ -522,129 +583,6 @@ fn run_on_a_paused_team_says_so_and_exits() {
         ran.out
     );
     assert!(events(&repository, &[EventKind::SessionStarted]).is_empty());
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn says_an_empty_sprint_whose_planning_is_spent_waits_for_its_end() {
-    let repository = a_team("human-sprint-empty");
-    let started = run(&repository.path, &["sprint", "start"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-    let empty = "empty: end it with catervas sprint end";
-    let shown = run(&repository.path, &["sprint", "show"]);
-    assert!(!shown.out.contains(empty), "{}", shown.out);
-
-    record_as(
-        &repository,
-        "",
-        Some(("pm", "session-1")),
-        "session.started",
-        &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
-    );
-    // A planning session is spent once it ends other than at a limit.
-    record_as(
-        &repository,
-        "",
-        Some(("pm", "session-1")),
-        "session.ended",
-        &json!({ "reason": "completed", "detail": "done" }),
-    );
-    let shown = run(&repository.path, &["sprint", "show"]);
-
-    assert_eq!(shown.code, 0, "{}", shown.err);
-    assert!(shown.out.contains(empty), "{}", shown.out);
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn joins_a_task_the_human_files_under_a_sprints_epic() {
-    let repository = a_team("human-sprint-child");
-    let epic = an_epic_in_the_open_sprint(&repository);
-
-    let ran = file_under(&repository, &epic);
-
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    let contract = files_of(&repository)
-        .read_contract(&"CTV-2".parse().expect("a task id"))
-        .expect("the child is written");
-    assert_eq!(contract.sprint.as_deref(), Some("S1"));
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn files_a_task_whose_join_fails_and_says_so() {
-    let repository = a_team("human-sprint-child-ending");
-    let epic = an_epic_in_the_open_sprint(&repository);
-    // The human's end has written S1's file and not yet recorded `sprint.ended`.
-    let path = repository.path.join(".catervas/sprints/S1.yaml");
-    let text = std::fs::read_to_string(&path).expect("S1 reads");
-    let ending = text.replace(
-        "status: open",
-        "status: ended\nended_at: 2026-09-24T01:00:00Z",
-    );
-    assert_ne!(ending, text, "{text}");
-    std::fs::write(&path, ending).expect("S1 is written");
-
-    let ran = file_under(&repository, &epic);
-
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    assert!(ran.out.contains("CTV-2 filed"), "{}", ran.out);
-    assert!(ran.out.contains("S1 has ended"), "{}", ran.out);
-    let contract = files_of(&repository)
-        .read_contract(&"CTV-2".parse().expect("a task id"))
-        .expect("the child is written");
-    assert_eq!(contract.sprint, None);
-}
-
-/// An epic, in progress with the Product Manager, planned into S1, which is open.
-fn an_epic_in_the_open_sprint(repository: &catervas_store::git::fixtures::TempRepo) -> String {
-    let epic = filed(repository, "A whole board");
-    let ran = run(
-        &repository.path,
-        &["triage", &epic, "large", "--reason", "Two parts."],
-    );
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    moved(repository, &epic, "draft", "refining", &json!({}));
-    moved(repository, &epic, "refining", "ready", &json!({}));
-    moved(
-        repository,
-        &epic,
-        "ready",
-        "assigned",
-        &json!({ "assignee": "pm" }),
-    );
-    moved(
-        repository,
-        &epic,
-        "assigned",
-        "in_progress",
-        &json!({ "assignee": "pm" }),
-    );
-    let started = run(&repository.path, &["sprint", "start"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-    plan_sprint(
-        &tool_deps(repository),
-        &[epic.parse().expect("a task id")],
-        &PlannedBy::Governor,
-    )
-    .expect("the epic is planned");
-    epic
-}
-
-/// `catervas task create` of a request under `epic`.
-fn file_under(repository: &catervas_store::git::fixtures::TempRepo, epic: &str) -> project::Ran {
-    let child = repository.path.join("child.yaml");
-    std::fs::write(&child, project::a_request("One row of the board")).expect("written");
-    run(
-        &repository.path,
-        &[
-            "task",
-            "create",
-            child.to_str().expect("a path"),
-            "--parent",
-            epic,
-        ],
-    )
 }
 
 #[test]

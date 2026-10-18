@@ -2,7 +2,7 @@
 //! contract is judged by `catervas-core`'s governor on facts read from Catervas's own store, never on
 //! evidence the requester supplies, and the answer is recorded either way.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -19,7 +19,7 @@ use catervas_core::governor::done::{CriterionResult, DesignReviewNeed, DoneEvide
 use catervas_core::governor::escalation::EscalationReason;
 use catervas_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
-    FolderWork, Rejection, WorkState, waits_for_a_sprint,
+    FolderWork, ReassignmentInput, Rejection, WorkState, check_reassignment,
 };
 use catervas_core::governor::readiness::{LanedTask, ParentState, ReadinessContext};
 use catervas_core::governor::team_rules::is_ui_change;
@@ -34,8 +34,9 @@ use catervas_protocol::event::{
     BlockerWire, CatervasEvent, ContractEvaluatedBody, ContractEvaluatedBodyGate,
     CriterionRecordedBodyRunBy, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody,
     EventIds, EventKind, GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind, RejectionWire,
-    TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
+    TaskReassignedBody, TaskReassignedBodyReason, TaskStatusWire, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TransitionActorWire, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal, new_event,
 };
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
@@ -135,6 +136,15 @@ pub struct TransitionAsk {
     /// the folder (6.6): it has no commit to show its work, and the gate reads these from the
     /// folder.
     pub workbooks: Option<Vec<String>>,
+}
+
+/// The governor's answer to a hand-over of a task whose wait cleared.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReassignOutcome {
+    /// The task is the new agent's from now on; this is the event that says so.
+    Reassigned(Box<CatervasEvent>),
+    /// The task stayed with its holder, for these reasons; nothing was recorded.
+    Refused(Vec<String>),
 }
 
 /// The governor's answer, which is recorded either way.
@@ -359,6 +369,73 @@ impl Transitions {
         }
     }
 
+    /// Hands `task_id` to `to` after `check_reassignment` (ADR 0062): the contract's assignee is
+    /// written first, then `task.reassigned`, as a move writes the contract before it records the
+    /// move. The task's reviewer, worktree and branch are unchanged, so the new assignee's next
+    /// session resumes from the last commit and note. A refusal records nothing.
+    ///
+    /// # Errors
+    ///
+    /// Only when the store, the files or the clock's event fail; a refusal is an `Ok`.
+    pub fn reassign(
+        &self,
+        task_id: &TaskId,
+        to: &str,
+        team: &Team,
+    ) -> Result<ReassignOutcome, TransitionError> {
+        let _held = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        let board = self.projections.board()?;
+        let Some(row) = board.iter().find(|row| &row.task_id == task_id) else {
+            return Err(TransitionError::Store {
+                detail: format!("{} is not on the board", task_id.as_str()),
+            });
+        };
+        let mut contract = self.files.read_contract(task_id)?;
+        let from = row.assignee_id.clone().unwrap_or_default();
+        let candidate = team.agents.iter().find(|agent| agent.id.as_str() == to);
+        let input = ReassignmentInput {
+            kind: contract.kind,
+            status: row.status,
+            returning: row.counts_towards_wip() && !within_limit(team, &board).contains(task_id),
+            has_lane: contract.lane.is_some(),
+            from: from.clone(),
+            to: to.to_string(),
+            to_role: candidate.map_or(Role::Human, |agent| Role::from(agent.role)),
+            to_active: candidate.is_some_and(|agent| agent.status == AgentStatus::Active),
+            to_open_tasks: open_tasks(&board, to, row.parent.as_ref()),
+            wip_limit: u32::try_from(team.policy.wip_limit_per_agent).unwrap_or(u32::MAX),
+            reviewer_id: row.reviewer_id.clone(),
+        };
+        if let Err(reasons) = check_reassignment(&contract, &input) {
+            return Ok(ReassignOutcome::Refused(reasons));
+        }
+        let now = self.clock.now();
+        contract.assignee = Some(to.to_string());
+        contract.updated_at = Some(now);
+        self.files.write_contract(&contract)?;
+        let ids = EventIds {
+            task_id: Some(task_id.clone()),
+            agent_id: None,
+            session_id: None,
+            ..self.ids.clone()
+        };
+        let event = new_event(
+            EventBody::TaskReassigned(TaskReassignedBody {
+                from,
+                to: to.to_string(),
+                reason: TaskReassignedBodyReason::Resumed,
+            }),
+            now,
+            ids,
+        )
+        .map_err(|error| TransitionError::Event {
+            detail: format!("{error:?}"),
+        })?;
+        let appended = self.log.append(&event)?;
+        self.projections.apply(&appended)?;
+        Ok(ReassignOutcome::Reassigned(Box::new(appended)))
+    }
+
     /// Writes the moved contract, then records the move and any escalation it raises. A move that
     /// integrates nothing, a task in a private folder reaching `accepted` (6.6), records the files
     /// the task changed in `folder`, so that its page keeps them whatever later tasks change.
@@ -548,8 +625,7 @@ impl Transitions {
         })?;
         let now = self.clock.now();
 
-        let (budget, open_sprint, sprint_left, readiness) =
-            self.readiness_parts(&board, row, &history, team, &contract, now)?;
+        let (budget, readiness) = self.readiness_parts(&board, &history, team, &contract, now)?;
 
         let named = ask.workbooks.as_deref().unwrap_or_default();
         let (work, changed_paths) = self.work(&contract, team, named)?;
@@ -559,7 +635,6 @@ impl Transitions {
             team,
             &board,
             row,
-            (open_sprint, sprint_left),
             dependency_states(&contract, &board),
             || self.designer_browser(team),
         );
@@ -702,27 +777,25 @@ impl Transitions {
         contract: &TaskContract,
     ) -> Result<ReadinessContext, TransitionError> {
         let board = self.projections.board()?;
-        let row = row_of(&board, &contract.id)?;
         let history = self.log.read(&EventQuery {
             task_id: Some(contract.id.clone()),
             ..EventQuery::default()
         })?;
         let now = self.clock.now();
         Ok(self
-            .readiness_parts(&board, row, &history, team, contract, now)?
-            .3)
+            .readiness_parts(&board, &history, team, contract, now)?
+            .1)
     }
 
-    /// The budgets, the open sprint, what is left of it, and the readiness context of `contract`.
+    /// The budgets and the readiness context of `contract`.
     fn readiness_parts(
         &self,
         board: &[TaskProjection],
-        row: &TaskProjection,
         history: &[CatervasEvent],
         team: &Team,
         contract: &TaskContract,
         now: DateTime<Utc>,
-    ) -> Result<(BudgetState, Option<String>, f64, ReadinessContext), TransitionError> {
+    ) -> Result<(BudgetState, ReadinessContext), TransitionError> {
         let budget = budget_state(
             &self.projections,
             team,
@@ -731,18 +804,7 @@ impl Transitions {
             &SessionLedger::default(),
             now,
         )?;
-        let open_sprint = self.projections.open_sprint()?.map(|open| open.sprint_id);
-        // Infinite with no sprint open or one with no budget (ADR 0015).
-        let sprint_left = (budget.sprint_max_usd - budget.sprint_spent_usd).max(0.0);
-
         let readiness = ReadinessContext {
-            // The contract's own sprint (5.3), and none for a contract in no sprint: what goes into
-            // a sprint is checked against its budget when the sprint is planned.
-            remaining_sprint_budget_usd: if row.sprint.is_some() && row.sprint == open_sprint {
-                sprint_left
-            } else {
-                f64::INFINITY
-            },
             dependency_statuses: contract
                 .dependencies
                 .iter()
@@ -765,7 +827,7 @@ impl Transitions {
             }),
         };
 
-        Ok((budget, open_sprint, sprint_left, readiness))
+        Ok((budget, readiness))
     }
 
     /// What the task's branch holds, read from git only when its worktree
@@ -1253,8 +1315,7 @@ fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<D
 }
 
 /// The pair an assignment would name, from the ask's ids and the team's roles, when the ask names
-/// an assignee, with the sprint `row` and its epic are in, beside the open sprint and what is left
-/// of its budget, and whether the team's Designer can have its browser, which only an assignment
+/// an assignee, and whether the team's Designer can have its browser, which only an assignment
 /// to a Designer asks (`designer_browser` is called for that alone: it may ask Docker, and the
 /// governor reads the answer for a Designer only). `requested_by` is the governor's to set from
 /// the request's actor.
@@ -1263,7 +1324,6 @@ fn assignment(
     team: &Team,
     board: &[TaskProjection],
     row: &TaskProjection,
-    (open_sprint, sprint_left_usd): (Option<String>, f64),
     dependencies: Vec<DependencyState>,
     designer_browser: impl FnOnce() -> DesignerBrowser,
 ) -> Option<AssignmentInput> {
@@ -1282,24 +1342,8 @@ fn assignment(
         assignee_role,
         reviewer_id,
         reviewer_role,
-        assignee_open_tasks: open_tasks(
-            team,
-            open_sprint.as_deref(),
-            board,
-            assignee_id,
-            row.parent.as_ref(),
-        ),
+        assignee_open_tasks: open_tasks(board, assignee_id, row.parent.as_ref()),
         wip_limit: u32::try_from(team.policy.wip_limit_per_agent).unwrap_or(u32::MAX),
-        remaining_sprint_budget_usd: sprint_left_usd,
-        open_sprint,
-        task_sprint: row.sprint.clone(),
-        parent_sprint: row.parent.as_ref().map(|parent| {
-            board
-                .iter()
-                .find(|epic| &epic.task_id == parent)
-                .and_then(|epic| epic.sprint.clone())
-        }),
-        plan_in_sprints: team.plans_in_sprints(),
         dependencies,
         designer_browser: if assignee_role == Role::UiUxDesigner {
             designer_browser()
@@ -1308,7 +1352,6 @@ fn assignment(
         },
         // Filled by `context`, which reads the contracts of the tasks that might hold the folder.
         private_folder_busy: false,
-        skips_sprints: row.skips_sprints,
         // Filled by `context`, which reads the contracts of the tasks in the lane.
         lane_builder: None,
     })
@@ -1369,8 +1412,7 @@ pub(crate) fn lane_builder(
 /// an agent, whose own contract names a role with that folder, in any status but `accepted` and
 /// `cancelled`. The task's role is the one that holds the folder, not its agent's current one, so
 /// an agent no longer on the team does not free it. It is not `open_tasks`, which counts one
-/// agent's tasks and leaves out those waiting for a sprint: a task in the Backlog that was
-/// assigned still has its copy of the folder, and holds it.
+/// agent's tasks: a task that was assigned still has its copy of the folder, and holds it.
 ///
 /// # Errors
 ///
@@ -1425,26 +1467,60 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
         .map_or(Role::Human, |agent| Role::from(agent.role))
 }
 
-/// The tasks an agent holds that are neither accepted nor cancelled (5.2), leaving out one that
-/// waits for a sprint while `open_sprint` is open: it is not being worked (ADR 0028), and the epic
-/// `under`, when one is named: an epic does not hold its own tasks back from its assignee.
-pub(crate) fn open_tasks(
-    team: &Team,
-    open_sprint: Option<&str>,
-    board: &[TaskProjection],
-    agent_id: &str,
-    under: Option<&TaskId>,
-) -> u32 {
+/// The tasks an agent holds and works: assigned, in progress, verifying or rejected, and not
+/// waiting on the human (`TaskProjection::counts_towards_wip`, ADR 0062), leaving out the epic
+/// `under`, when one is named: an epic does not hold its own tasks back from its assignee. A
+/// blocked or escalated task, or one that waits on the human, leaves its agent free. The one place
+/// the limit is counted: `has_room` and the governor's `assignee_open_tasks` both read it.
+pub(crate) fn open_tasks(board: &[TaskProjection], agent_id: &str, under: Option<&TaskId>) -> u32 {
     let held = board
         .iter()
         .filter(|row| {
             row.assignee_id.as_deref() == Some(agent_id)
                 && under != Some(&row.task_id)
-                && !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
-                && !waits_for_a_sprint(&crate::sprints::sprint_hold(team, open_sprint, row))
+                && row.counts_towards_wip()
         })
         .count();
     u32::try_from(held).unwrap_or(u32::MAX)
+}
+
+/// The rows rules 3, 6 and 7 may work (ADR 0062): for each active agent, the first
+/// `max(wip_limit_per_agent, 1)` of the non-epic tasks it holds and works (`open_tasks`), ordered
+/// by when each last began to count (`counted_seq`, 0 for a row made before it was kept) and then
+/// by the board's order of task numbers, which `board` is in; every epic, whose assignee
+/// coordinates it and is never replaced; and every row whose holder is not an active agent, which
+/// the limit does not govern. Chose a floor of one so that a team that set the limit to 0 to stop
+/// new work still finishes the task under way. A counted row outside the set is "returning": its
+/// agent began other tasks first.
+pub(crate) fn within_limit(team: &Team, board: &[TaskProjection]) -> BTreeSet<TaskId> {
+    let limit = usize::try_from(team.policy.wip_limit_per_agent)
+        .unwrap_or(usize::MAX)
+        .max(1);
+    let mut allowed: BTreeSet<TaskId> = board
+        .iter()
+        .filter(|row| {
+            row.kind == TaskKind::Epic
+                || !row.counts_towards_wip()
+                || !team
+                    .active_agents()
+                    .any(|agent| Some(agent.id.as_str()) == row.assignee_id.as_deref())
+        })
+        .map(|row| row.task_id.clone())
+        .collect();
+    for agent in team.active_agents() {
+        let mut held: Vec<&TaskProjection> = board
+            .iter()
+            .filter(|row| {
+                row.kind != TaskKind::Epic
+                    && row.counts_towards_wip()
+                    && row.assignee_id.as_deref() == Some(agent.id.as_str())
+            })
+            .collect();
+        // A stable sort keeps the board's order of numbers among equal ranks.
+        held.sort_by_key(|row| row.counted_seq.unwrap_or(0));
+        allowed.extend(held.into_iter().take(limit).map(|row| row.task_id.clone()));
+    }
+    allowed
 }
 
 /// The failed Definition of Ready evaluations since refining last started over: the later of the
@@ -2035,9 +2111,6 @@ mod tests {
         assert_eq!(assignment.assignee_open_tasks, 1);
         assert_eq!(assignment.wip_limit, 2);
         assert!(!assignment.has_active_scrum_master);
-        // No sprint is open, so none bounds it, whatever the day has left.
-        let left = assignment.remaining_sprint_budget_usd;
-        assert!(left.is_infinite() && left > 0.0, "{left}");
     }
 
     /// Two Finance Specialists, `fin-1` and `fin-2`, and `maya`, each allowed two tasks.
@@ -2115,17 +2188,11 @@ mod tests {
 
         let board = project.projections.board().expect("the board reads");
         let epic = "CTV-1".parse().expect("a task id");
-        assert_eq!(
-            open_tasks(&project.team, None, &board, "maya", Some(&epic)),
-            0
-        );
-        assert_eq!(open_tasks(&project.team, None, &board, "maya", None), 1);
+        assert_eq!(open_tasks(&board, "maya", Some(&epic)), 0);
+        assert_eq!(open_tasks(&board, "maya", None), 1);
         // Another epic's task does not lift the exception: `maya`'s own epic still counts.
         let other = "CTV-4".parse().expect("a task id");
-        assert_eq!(
-            open_tasks(&project.team, None, &board, "maya", Some(&other)),
-            1
-        );
+        assert_eq!(open_tasks(&board, "maya", Some(&other)), 1);
 
         let asking = |task: &str| {
             project.ask(
@@ -2364,7 +2431,9 @@ mod tests {
                 .assignment
                 .expect("an assignment");
             assert!(assignment.private_folder_busy, "{held}");
-            assert_eq!(assignment.assignee_open_tasks, 1, "{held}");
+            // A blocked or escalated task keeps the folder busy but leaves its agent free.
+            let works = u32::from(!matches!(held, "blocked" | "escalated"));
+            assert_eq!(assignment.assignee_open_tasks, works, "{held}");
             assert_eq!(assignment.wip_limit, 2, "{held}");
             let TransitionOutcome::Refused(refusal) = project.ask(&request, &second) else {
                 panic!("{held}: the second task was assigned");
@@ -2527,7 +2596,6 @@ mod tests {
             "folder-backlog",
             a_team(|wire| {
                 wire["policy"]["wip_limit_per_agent"] = json!(2);
-                wire["policy"]["plan_in_sprints"] = json!(true);
                 for id in ["fin-1", "fin-2"] {
                     wire["agents"]
                         .as_array_mut()
@@ -2584,26 +2652,15 @@ mod tests {
         project.file("CTV-1", |_| {});
         project.created("CTV-1", "ready");
         project.spent("CTV-1", 1000.0);
-        let readiness = project.context(
+        let context = project.context(
             &a_request("CTV-1", TaskStatus::Ready, TransitionActor::Governor, None),
             &TransitionAsk::default(),
         );
-        let left = readiness.readiness.remaining_sprint_budget_usd;
-        assert!(left.is_infinite() && left > 0.0, "{left}");
-        let context = project.context(
-            &a_request(
-                "CTV-1",
-                TaskStatus::Assigned,
-                TransitionActor::ProductManager,
-                Some("maya"),
-            ),
-            &assigning("dev-a", "dev-b"),
+        assert!(
+            context.budget.day_max_usd.is_infinite() && context.budget.day_max_usd > 0.0,
+            "{}",
+            context.budget.day_max_usd
         );
-        let left = context
-            .assignment
-            .expect("an assignment")
-            .remaining_sprint_budget_usd;
-        assert!(left.is_infinite() && left > 0.0, "{left}");
     }
 
     #[test]
@@ -2918,7 +2975,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn reads_the_epics_remaining_budget_and_the_sprints_remainder() {
+    fn reads_the_epics_remaining_budget() {
         let project = Project::new("epic-budget", a_team(|_| {}), at(12));
         project.file("CTV-1", |wire| {
             wire["kind"] = json!("epic");
@@ -2953,21 +3010,6 @@ mod tests {
             parent.allowed_paths,
             vec!["src/**".to_string(), "docs/**".to_string()]
         );
-        // In no sprint, the child is held to none, whatever the day has left.
-        let left = context.readiness.remaining_sprint_budget_usd;
-        assert!(left.is_infinite() && left > 0.0, "{left}");
-
-        // In S1, to what S1 has left: twenty, less the 2.50 spent in it.
-        project.open_sprint("S1", 20.0, &["CTV-1", "CTV-2"]);
-        project.spent("CTV-1", 2.5);
-        let context = project.context(&request, &TransitionAsk::default());
-        assert!((context.readiness.remaining_sprint_budget_usd - 17.5).abs() < 1e-9);
-
-        // A sprint spent past its budget leaves nothing, not less than nothing.
-        project.spent("CTV-1", 30.0);
-        let context = project.context(&request, &TransitionAsk::default());
-        assert!(context.readiness.remaining_sprint_budget_usd.abs() < 1e-12);
-        assert!(context.readiness.remaining_sprint_budget_usd >= 0.0);
     }
 
     #[test]
@@ -3176,53 +3218,6 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn checks_readiness_against_the_contracts_own_sprint() {
-        let project = Project::new("readiness-sprint", a_team(|_| {}), at(12));
-        project.file("CTV-1", |wire| {
-            wire["kind"] = json!("epic");
-            wire["budget"]["max_cost_usd"] = json!(12);
-        });
-        project.created_under("CTV-1", "in_progress", "epic", None);
-        project.file("CTV-2", |wire| {
-            wire["parent"] = json!("CTV-1");
-            wire["budget"]["max_cost_usd"] = json!(3);
-        });
-        project.created_under("CTV-2", "refining", "task", Some("CTV-1"));
-        project.file("CTV-3", |wire| wire["budget"]["max_cost_usd"] = json!(3));
-        project.created("CTV-3", "refining");
-        project.open_sprint("S1", 10.0, &["CTV-1", "CTV-2"]);
-        project.spent("CTV-1", 8.0);
-        let refuses_on_the_sprint = |task: &str, team: &Team| {
-            let context = project
-                .transitions
-                .context(
-                    &a_request(task, TaskStatus::Ready, TransitionActor::Governor, None),
-                    &TransitionAsk::default(),
-                    team,
-                )
-                .expect("the context reads");
-            let contract = project
-                .files
-                .read_contract(&task.parse().expect("a task id"))
-                .expect("the file reads");
-            evaluate_readiness(&contract, &context.readiness)
-                .err()
-                .unwrap_or_default()
-                .iter()
-                .any(|failure| failure.rule == ReadinessRule::BudgetWithinSprint)
-        };
-
-        // The breakdown's task is in S1, which has two dollars left.
-        assert!(refuses_on_the_sprint("CTV-2", &project.team));
-        // A contract in no sprint is not held to the open one's budget.
-        assert!(!refuses_on_the_sprint("CTV-3", &project.team));
-        // Nor to what is left of the day, which `spent` enforces instead.
-        let poor = a_team(|wire| wire["budgets"]["daily_usd"] = json!(9));
-        assert!(!refuses_on_the_sprint("CTV-3", &poor));
     }
 
     #[test]

@@ -7,12 +7,11 @@ mandate: >-
   small. Judge each refining contract's Definition of Ready judgment: whether the task fits its
   budget, and whether its criteria would actually detect the failure its intent worries about, not
   just that something ran. Assign each ready task within the team's WIP limit, every task of a lane
-  to one builder. Run planning, standup, review, and retro, and keep escalations clean.
+  to one builder. Run each delivery's review and retro, and keep escalations clean.
 produces:
   - triage decisions
   - assignments, a lane's tasks to one builder
-  - sprint plans
-  - standup summaries
+  - review summaries
   - retro notes
   - escalation digests
 forbidden:

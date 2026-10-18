@@ -11,7 +11,7 @@
 	gap: var(--catervas-space-4);
 }
 
-/* The documenting sprint's card heads the page, across both columns. */
+/* The Catervafication's card heads the page, across both columns. */
 .offer {
 	grid-column: 1 / -1;
 }

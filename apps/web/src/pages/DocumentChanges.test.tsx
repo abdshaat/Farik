@@ -32,7 +32,7 @@ describe("the product plan's changes on Today", () => {
 		});
 		const region = await card();
 		expect(
-			within(region).getByText("From Mira, after the sprint 4 review"),
+			within(region).getByText("From Mira, after the team's review"),
 		).toBeTruthy();
 		expect(within(region).getByText(en.docChangesLegend)).toBeTruthy();
 		const roadmap = within(region).getByRole("list", { name: "Roadmap" });

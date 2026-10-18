@@ -20,8 +20,8 @@ pub use crate::generated::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk,
     ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody, CostRecordedBody,
     CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DecisionWrittenBody, DesignPlanProposedBody, DesignReviewCheck,
-    DesignReviewRecordedBody, DocumentRewriteStartedBody, DriftDetectedBody,
+    CriterionRecordedBodyRunBy, DecisionWrittenBody, DeliveryClosedBody, DesignPlanProposedBody,
+    DesignReviewCheck, DesignReviewRecordedBody, DocumentRewriteStartedBody, DriftDetectedBody,
     DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
     EscalationResolvedBody, EventKind, Heard, HumanAcceptedBody, HumanAcceptedBodySubject,
     JudgmentAnswer, MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope,
@@ -38,11 +38,12 @@ pub use crate::generated::event::{
     SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
     SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody, SprintEndedBody,
     SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskCreatedBodyFiledAs, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy,
-    TeamPausedBodyReason, TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody,
-    ToolApprovalRequestedBody, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
+    TaskCreatedBodyFiledAs, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskReassignedBody,
+    TaskReassignedBodyReason, TaskRoomGrantedBody, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
+    TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
+    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `catervas-core`'s own types of the same name.
@@ -180,6 +181,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::QuestionAnswered => "questionAnsweredBody",
         EventKind::HumanAccepted => "humanAcceptedBody",
         EventKind::EscalationResolved => "escalationResolvedBody",
+        EventKind::TaskRoomGranted => "taskRoomGrantedBody",
         EventKind::AgentUpdated => "agentUpdatedBody",
         EventKind::SprintStarted => "sprintStartedBody",
         EventKind::SprintPlanned => "sprintPlannedBody",
@@ -264,6 +266,8 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::RepoRemoved => "repoRemovedBody",
         EventKind::RepoMoved => "repoMovedBody",
         EventKind::DocumentRewriteStarted => "documentRewriteStartedBody",
+        EventKind::DeliveryClosed => "deliveryClosedBody",
+        EventKind::TaskReassigned => "taskReassignedBody",
     }
 }
 
@@ -292,6 +296,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::PullRequestOpened
             | EventKind::HumanAccepted
             | EventKind::EscalationResolved
+            | EventKind::TaskRoomGranted
             | EventKind::EscalationAged
             | EventKind::DesignPlanProposed
             | EventKind::DesignPlanApproved
@@ -322,6 +327,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::DataPipelineRequested
             | EventKind::SellerMessageDrafted
             | EventKind::CatervaficationStarted
+            | EventKind::TaskReassigned
     )
 }
 
@@ -375,6 +381,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::QuestionAnswered(body) => Some(("answered_by", &mut body.answered_by)),
         EventBody::HumanAccepted(body) => Some(("accepted_by", &mut body.accepted_by)),
         EventBody::EscalationResolved(body) => Some(("resolved_by", &mut body.resolved_by)),
+        EventBody::TaskRoomGranted(body) => Some(("granted_by", &mut body.granted_by)),
         EventBody::AgentUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::SprintStarted(body) => Some(("started_by", &mut body.started_by)),
         EventBody::SprintPlanned(body) => Some(("planned_by", &mut body.planned_by)),
@@ -471,13 +478,15 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::RepoAdded(_)
         | EventBody::RepoRemoved(_)
         | EventBody::RepoMoved(_)
-        | EventBody::DocumentRewriteStarted(_) => None,
+        | EventBody::DocumentRewriteStarted(_)
+        | EventBody::DeliveryClosed(_)
+        | EventBody::TaskReassigned(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 115] = [
+pub const EVERY_KIND: [EventKind; 118] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -509,6 +518,7 @@ pub const EVERY_KIND: [EventKind; 115] = [
     EventKind::QuestionAnswered,
     EventKind::HumanAccepted,
     EventKind::EscalationResolved,
+    EventKind::TaskRoomGranted,
     EventKind::AgentUpdated,
     EventKind::SprintStarted,
     EventKind::SprintPlanned,
@@ -593,6 +603,8 @@ pub const EVERY_KIND: [EventKind; 115] = [
     EventKind::RepoRemoved,
     EventKind::RepoMoved,
     EventKind::DocumentRewriteStarted,
+    EventKind::DeliveryClosed,
+    EventKind::TaskReassigned,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -724,6 +736,9 @@ pub enum EventBody {
     /// The human resolved an escalation.
     #[serde(rename = "escalation.resolved")]
     EscalationResolved(EscalationResolvedBody),
+    /// The human gave a task whose dollars or sessions are spent more room.
+    #[serde(rename = "task.room_granted")]
+    TaskRoomGranted(TaskRoomGrantedBody),
     /// An agent's status changed in the team file.
     #[serde(rename = "agent.updated")]
     AgentUpdated(AgentUpdatedBody),
@@ -979,6 +994,12 @@ pub enum EventBody {
     /// The owner asked the team to rewrite its Markdown documents as HTML: the tasks filed.
     #[serde(rename = "document_rewrite.started")]
     DocumentRewriteStarted(DocumentRewriteStartedBody),
+    /// The governor closed a delivery.
+    #[serde(rename = "delivery.closed")]
+    DeliveryClosed(DeliveryClosedBody),
+    /// The governor handed a task whose wait had cleared to another agent.
+    #[serde(rename = "task.reassigned")]
+    TaskReassigned(TaskReassignedBody),
 }
 
 impl EventBody {
@@ -1018,6 +1039,7 @@ impl EventBody {
             Self::QuestionAnswered(_) => EventKind::QuestionAnswered,
             Self::HumanAccepted(_) => EventKind::HumanAccepted,
             Self::EscalationResolved(_) => EventKind::EscalationResolved,
+            Self::TaskRoomGranted(_) => EventKind::TaskRoomGranted,
             Self::AgentUpdated(_) => EventKind::AgentUpdated,
             Self::SprintStarted(_) => EventKind::SprintStarted,
             Self::SprintPlanned(_) => EventKind::SprintPlanned,
@@ -1102,6 +1124,8 @@ impl EventBody {
             Self::RepoRemoved(_) => EventKind::RepoRemoved,
             Self::RepoMoved(_) => EventKind::RepoMoved,
             Self::DocumentRewriteStarted(_) => EventKind::DocumentRewriteStarted,
+            Self::DeliveryClosed(_) => EventKind::DeliveryClosed,
+            Self::TaskReassigned(_) => EventKind::TaskReassigned,
         }
     }
 }
@@ -2122,7 +2146,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 115);
+        assert_eq!(EVERY_KIND.len(), 118);
     }
 
     #[test]
@@ -2151,7 +2175,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 115);
+        assert_eq!(EVERY_KIND.len(), 118);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2539,7 +2563,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 115);
+        assert_eq!(EVERY_KIND.len(), 118);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2680,7 +2704,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 115);
+        assert_eq!(EVERY_KIND.len(), 118);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -2995,7 +3019,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 115);
+        assert_eq!(EVERY_KIND.len(), 118);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

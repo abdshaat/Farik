@@ -13,7 +13,6 @@ import {
 	type PreviewForm,
 	previewOf,
 } from "./setup/PreviewFields.tsx";
-import { SprintsSwitch } from "./setup/SetupAdvanced.tsx";
 import { PermissionChoices } from "./setup/SetupPermissions.tsx";
 import { useDailyLimit } from "./setup/SetupSpending.tsx";
 import setup from "./setup/setup.module.css";
@@ -224,30 +223,6 @@ export function Finish() {
 	return (
 		<Part id="rules-finish" title={t("rulesFinish")}>
 			<p>{t("rulesFinishPullRequest")}</p>
-		</Part>
-	);
-}
-
-export function Planning(part: Part) {
-	const { saved, defaults } = part;
-	const [mine, setMine] = useState<boolean>();
-	// An old team file without the key does not plan in sprints.
-	const was = saved.policy.planInSprints === true;
-	const now = mine ?? was;
-	const next =
-		now === was
-			? saved
-			: { ...saved, policy: { ...saved.policy, planInSprints: now } };
-	const { foot } = useChange(part, next);
-	return (
-		<Part id="rules-planning" title={t("rulesPlanning")}>
-			<SprintsSwitch on={now} onChange={setMine} />
-			<PutBack
-				onClick={
-					defaults && (() => setMine(defaults.policy.planInSprints === true))
-				}
-			/>
-			{foot}
 		</Part>
 	);
 }

@@ -1,10 +1,10 @@
 import { Button, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentChanges.module.css";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
 import { docKey, fileRoute, isHtml } from "./files.ts";
 import type { Agent } from "./setup/TeamSetup.tsx";
@@ -15,7 +15,7 @@ import type { Agent } from "./setup/TeamSetup.tsx";
  */
 export type Integration = "auto_merge" | "pull_request" | "manual";
 
-/** One card of `folder_doc_proposals.list`: an agent's changes to the product plan after one sprint review. */
+/** One card of `folder_doc_proposals.list`: an agent's changes to the product plan after one review. */
 export type DocumentChangesCard = {
 	sprintId: string;
 	agentId: string;
@@ -108,12 +108,7 @@ export function DocumentChanges({
 				<AgentPicture agent={agent} size={48} />
 				<div className={styles.headText}>
 					<strong id={`${id}-title`}>{t("docChangesTitle")}</strong>
-					<p className={styles.muted}>
-						{t("docChangesFrom", {
-							name,
-							n: card.sprintId.replace(/^S/, ""),
-						})}
-					</p>
+					<p className={styles.muted}>{t("docChangesFrom", { name })}</p>
 					<p>{visibly(card.summary)}</p>
 				</div>
 			</div>

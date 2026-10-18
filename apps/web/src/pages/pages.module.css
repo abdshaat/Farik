@@ -369,33 +369,9 @@
 	white-space: nowrap;
 }
 
-/* "Start a sprint": what waits in the Backlog, one ruled row each (step 15's mockup). */
 .subheading {
 	margin: 0;
 	font-size: inherit;
-}
-
-.waiting {
-	margin: var(--catervas-space-2) 0 0;
-	padding: 0;
-	list-style: none;
-	border-top: 1px solid var(--catervas-color-rule);
-}
-
-.waiting li {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--catervas-space-1) var(--catervas-space-4);
-	padding: var(--catervas-space-2) 0;
-	border-bottom: 1px solid var(--catervas-color-rule);
-}
-
-.waiting li span:nth-child(2) {
-	flex: 1 1 12rem;
-}
-
-.waiting li span:first-child {
-	font-family: var(--catervas-type-code-family);
 }
 
 /* An agent's connectors and ConnectorAdd's tools: one ruled row each (phase 7 step 01's mockups). */

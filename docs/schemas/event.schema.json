@@ -88,6 +88,7 @@
         "question.answered",
         "human.accepted",
         "escalation.resolved",
+        "task.room_granted",
         "agent.updated",
         "sprint.started",
         "sprint.planned",
@@ -171,7 +172,9 @@
         "repo.added",
         "repo.removed",
         "repo.moved",
-        "document_rewrite.started"
+        "document_rewrite.started",
+        "delivery.closed",
+        "task.reassigned"
       ]
     },
     "eventBodyWire": {
@@ -209,6 +212,7 @@
         { "$ref": "#/$defs/questionAnsweredBody" },
         { "$ref": "#/$defs/humanAcceptedBody" },
         { "$ref": "#/$defs/escalationResolvedBody" },
+        { "$ref": "#/$defs/taskRoomGrantedBody" },
         { "$ref": "#/$defs/agentUpdatedBody" },
         { "$ref": "#/$defs/sprintStartedBody" },
         { "$ref": "#/$defs/sprintPlannedBody" },
@@ -282,7 +286,9 @@
         { "$ref": "#/$defs/repoAddedBody" },
         { "$ref": "#/$defs/repoRemovedBody" },
         { "$ref": "#/$defs/repoMovedBody" },
-        { "$ref": "#/$defs/documentRewriteStartedBody" }
+        { "$ref": "#/$defs/documentRewriteStartedBody" },
+        { "$ref": "#/$defs/deliveryClosedBody" },
+        { "$ref": "#/$defs/taskReassignedBody" }
       ]
     },
     "contractSummary": {
@@ -304,7 +310,7 @@
     },
     "taskCreatedBody": {
       "title": "Task Created Body",
-      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request skips the sprint queue and is worked on at once, outside any sprint (ADR 0028's exception).",
+      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request is worked on as filed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["summary", "created_by"],
@@ -316,7 +322,7 @@
         "product_plan": {
           "type": "boolean",
           "const": true,
-          "description": "This request is a new project's product plan task, filed by the owner's word (docs/SPEC.md 4.3); such a request skips the sprint queue as a raise does, and is judged as filed. Only Catervas writes it."
+          "description": "This request is a new project's product plan task, filed by the owner's word (docs/SPEC.md 4.3); such a request is worked on as filed. Only Catervas writes it."
         },
         "rederives": {
           "type": "string",
@@ -326,8 +332,8 @@
         },
         "filed_as": {
           "type": "string",
-          "enum": ["owner_change", "document_rewrite"],
-          "description": "This request is a whole contract Catervas filed for the owner, judged as filed with no refine session (docs/SPEC.md 5.17): owner_change is the owner's ask on the Files page for the role that owns a document to change it; document_rewrite is the task that rewrites a folder's Markdown documents as HTML. Only Catervas writes it."
+          "enum": ["owner_change", "document_rewrite", "changelog"],
+          "description": "This request is a whole contract Catervas filed for the owner, judged as filed with no refine session (docs/SPEC.md 5.17): owner_change is the owner's ask on the Files page for the role that owns a document to change it; document_rewrite is the task that rewrites a folder's Markdown documents as HTML; changelog is the Product Manager's task to add a closed delivery to the changelog. Only Catervas writes it."
         }
       }
     },
@@ -695,6 +701,18 @@
         "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 }
       }
     },
+    "taskRoomGrantedBody": {
+      "title": "Task Room Granted Body",
+      "description": "The human gave a task whose dollars or sessions are spent more room when resolving its escalation (ADR 0062, amending ADR 0024): the task's caps grow by sessions and cost_usd, which are the contract's own, for the rest of its life. granted_by is the actor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions", "cost_usd", "granted_by"],
+      "properties": {
+        "sessions": { "type": "integer", "minimum": 1 },
+        "cost_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "granted_by": { "type": "string" }
+      }
+    },
     "agentUpdatedBody": {
       "title": "Agent Updated Body",
       "description": "An agent's status changed in the team file (docs/SPEC.md F1): a paused agent takes no work and its sessions end at their next tool call.",
@@ -790,12 +808,13 @@
     },
     "retroAppendedBody": {
       "title": "Retro Appended Body",
-      "description": "The retro ceremony of sprint sprint_id, the latest ended, recorded what the next planning should know (docs/SPEC.md 5.9): text, appended to .catervas/team/retro.md under the sprint's section, by appended_by. One per sprint, whichever retro session appends it. It is about no one contract.",
+      "description": "The retro ceremony of delivery delivery_id, the latest closed (or of sprint sprint_id in an older log), recorded what the team should remember next time (docs/SPEC.md 5.9): text, appended to .catervas/team/retro.md under that section, by appended_by. One per delivery, whichever retro session appends it. It is about no one contract. A new event carries delivery_id alone; an old one carries sprint_id alone.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["sprint_id", "text", "appended_by"],
+      "required": ["text", "appended_by"],
       "properties": {
         "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "delivery_id": { "type": "string", "pattern": "^D[1-9][0-9]{0,5}$" },
         "text": { "type": "string" },
         "appended_by": { "type": "string" }
       }
@@ -1749,7 +1768,7 @@
     "folderChangeNumber": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
     "folderDocWrittenBody": {
       "title": "Folder Doc Written Body",
-      "description": "An agent wrote a document of its own folder at a sprint ceremony through catervas_write_folder_doc (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha; the team's integration policy then adds it to the project. The envelope names the agent and its session and no task.",
+      "description": "An agent wrote a document of its own folder at a delivery's ceremony through catervas_write_folder_doc (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha; the team's integration policy then adds it to the project. The envelope names the agent and its session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "written_by", "change", "sha"],
@@ -1762,7 +1781,7 @@
     },
     "folderDocProposedBody": {
       "title": "Folder Doc Proposed Body",
-      "description": "An agent proposed a change to a document the owner approves, at the sprint review (docs/SPEC.md 5.7, 5.17): text is the version for people, agent_text its .agent.md version, summary what changed and why, for the owner, and sprint_id the sprint the review was about. The event's seq is the proposal's number. Nothing is written until the owner approves. The envelope names the agent and its session and no task.",
+      "description": "An agent proposed a change to a document the owner approves, at a delivery's review (docs/SPEC.md 5.7, 5.17): text is the version for people, agent_text its .agent.md version, summary what changed and why, for the owner, and sprint_id the number of the review it was made at (an older log's sprint, S4; the field is read and no longer written). The event's seq is the proposal's number. Nothing is written until the owner approves. The envelope names the agent and its session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "text", "agent_text", "summary", "sprint_id", "proposed_by"],
@@ -1790,7 +1809,7 @@
     },
     "folderDocReturnedBody": {
       "title": "Folder Doc Returned Body",
-      "description": "The owner sent proposals back (docs/SPEC.md 5.7): reason is the owner's own words, which the agent's next sprint review reads as the owner's, not as untrusted text. The envelope names no agent, no session and no task.",
+      "description": "The owner sent proposals back (docs/SPEC.md 5.7): reason is the owner's own words, which the agent's next review reads as the owner's, not as untrusted text. The envelope names no agent, no session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["proposals", "reason"],
@@ -1914,6 +1933,34 @@
           "maxItems": 6,
           "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
         }
+      }
+    },
+    "deliveryClosedBody": {
+      "title": "Delivery Closed Body",
+      "description": "The governor closed a delivery (ADR 0062): the first time since the previous one that an epic was accepted, five tasks with no parent were accepted, or the team ran out of work. since_seq is the seq after which its review, refreshes and retro read the log; task_ids are the tasks accepted since, each once, changelog tasks left out. It is about no one contract and names no actor: the governor closes it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["delivery_id", "trigger", "since_seq", "task_ids"],
+      "properties": {
+        "delivery_id": { "type": "string", "pattern": "^D[1-9][0-9]{0,5}$" },
+        "trigger": { "type": "string", "enum": ["epic_accepted", "tasks_accepted", "team_quiet"] },
+        "since_seq": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "task_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
+        }
+      }
+    },
+    "taskReassignedBody": {
+      "title": "Task Reassigned Body",
+      "description": "The governor handed a task whose wait had cleared from one agent to another (ADR 0062, docs/SPEC.md 5.2): from is the agent that held it, to the agent that holds it from now on, reason why (resumed: the previous holder had no room when the wait cleared, so the first free agent of the role took the task). The reviewer is unchanged. It is about one task and names no actor: the governor reassigns.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "reason"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "reason": { "type": "string", "enum": ["resumed"] }
       }
     },
     "connectorTag": {

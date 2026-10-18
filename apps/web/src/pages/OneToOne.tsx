@@ -8,6 +8,7 @@ import {
 	useState,
 } from "react";
 import { Link, useNavigate } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { useConnection } from "../app/connection.tsx";
 import type { ProductPlanState } from "../app/productPlan.ts";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
@@ -21,7 +22,6 @@ import { useWide } from "../shell/Shell.tsx";
 import { t } from "../strings/t.ts";
 import channel from "./Channel.module.css";
 import styles from "./Chats.module.css";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import { Heard, type HeardSummary } from "./Heard.tsx";
 import type { Agent } from "./setup/TeamSetup.tsx";
 

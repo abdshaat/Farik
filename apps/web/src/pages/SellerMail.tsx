@@ -1,13 +1,13 @@
 import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { useQuery } from "../app/store.ts";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import { AskTeam } from "./dialogs/AskTeam.tsx";
 import { SellerMessage, SendFields } from "./dialogs/SellerMessage.tsx";
 import { FromLine, SellerReply } from "./dialogs/SellerReply.tsx";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
 import {
 	failedWords,

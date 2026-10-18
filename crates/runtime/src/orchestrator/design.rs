@@ -467,6 +467,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Two more plans, then.".to_string(),
                 extra_tries: Some(2),
+                extra_room: false,
             })
             .await
             .expect("the escalation is resolved with more tries");

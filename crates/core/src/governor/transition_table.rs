@@ -33,7 +33,7 @@ pub enum GateId {
     ReadinessExhausted,
     /// The contract itself needs the human's acceptance: high risk, policy, or an epic.
     ContractRequiresHuman,
-    /// Assignee role, sprint budget, WIP limit, and integrated dependencies (spec 5.2, 5.14).
+    /// Assignee role, WIP limit, and integrated dependencies (spec 5.2, 5.14).
     Assignment,
     /// Every criterion has the assignee's own result and the work is committed; for an epic,
     /// its tasks are done (spec 5.16).

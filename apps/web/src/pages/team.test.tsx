@@ -152,7 +152,6 @@ const DEFAULTS = {
 	policy: {
 		integration: "auto_merge",
 		permissions: { run_commands: true, push: false },
-		plan_in_sprints: true,
 	},
 	ui_paths: UI_PATHS,
 };
@@ -928,66 +927,6 @@ describe("team page", () => {
 		expect(within(finish).queryByRole("radio")).toBeNull();
 	});
 
-	it("reads_an_old_team_as_not_planning_in_sprints", async () => {
-		// TEAM has no plan_in_sprints, as a team file from before step 15; the default is on.
-		expect("plan_in_sprints" in TEAM.policy).toBe(false);
-		const { part } = await settings(TEAM, "/settings/work");
-		const toggle = within(part(en.rulesPlanning)).getByRole("switch", {
-			name: en.planInSprints,
-		});
-		expect(toggle.getAttribute("aria-checked")).toBe("false");
-	});
-
-	it("switches_planning_in_sprints", async () => {
-		const on = { ...TEAM, policy: { ...TEAM.policy, plan_in_sprints: true } };
-		const { container, s, main, part } = await settings(on, "/settings/work");
-		// The section sits after "How finished work is added", before the plan check.
-		const headings = within(main)
-			.getAllByRole("heading", { level: 3 })
-			.map((h) => h.textContent);
-		expect(headings.indexOf(en.rulesPlanning)).toBe(
-			headings.indexOf(en.rulesFinish) + 1,
-		);
-		const planning = part(en.rulesPlanning);
-		const toggle = within(planning).getByRole("switch", {
-			name: en.planInSprints,
-		});
-		expect(toggle.getAttribute("aria-checked")).toBe("true");
-		for (const line of en.planInSprintsNote.split("\n")) onlyInTips(line);
-		await expectNoAxeViolations(container);
-
-		fireEvent.click(toggle);
-		expect(toggle.getAttribute("aria-checked")).toBe("false");
-		const effects = [
-			"Ready work starts as soon as someone is free, without waiting for a sprint.",
-			"The 2 pieces of work in the Backlog, Gift cards at checkout and Sold-out badge on the menu, can start now.",
-			"You can still start sprints from the Board.",
-		];
-		const off = await validated(s, effects);
-		expect(off.policy).toMatchObject({ plan_in_sprints: false });
-		for (const line of effects)
-			expect(await within(planning).findByText(line)).toBeTruthy();
-		await expectNoAxeViolations(container);
-
-		// "Put back the default" turns it on again: nothing to save.
-		fireEvent.click(within(planning).getByRole("button", { name: en.putBack }));
-		expect(toggle.getAttribute("aria-checked")).toBe("true");
-		const save = () =>
-			within(planning).getByRole("button", {
-				name: en.agentSave,
-			}) as HTMLButtonElement;
-		expect(save().disabled).toBe(true);
-
-		fireEvent.click(toggle);
-		await validated(s, effects);
-		await waitFor(() => expect(save().disabled).toBe(false));
-		fireEvent.click(save());
-		expect((await saved(s)).policy).toMatchObject({
-			integration: "auto_merge",
-			plan_in_sprints: false,
-		});
-	});
-
 	it("switches_the_document_format", async () => {
 		// TEAM has no document_format: a team without the key writes HTML.
 		expect("document_format" in TEAM.policy).toBe(false);
@@ -1212,18 +1151,20 @@ describe("team page", () => {
 			s.calls("query").filter((q) => q.params.name === "team.validate"),
 		).toHaveLength(1);
 
-		// A draft in one part survives another part's save and the page's re-read.
-		const sprints = () =>
-			within(part(en.rulesPlanning)).getByRole("switch", {
-				name: en.planInSprints,
-			});
-		expect(sprints().getAttribute("aria-checked")).toBe("false");
-		fireEvent.click(sprints());
-		expect(sprints().getAttribute("aria-checked")).toBe("true");
+		// A draft survives until it is saved or cancelled.
 		const documents = () => part(en.rulesDocuments);
 		const html = () =>
 			within(documents()).getByRole("switch", { name: en.documentsHtml });
 		expect(html().getAttribute("aria-checked")).toBe("true");
+		fireEvent.click(html());
+		await validated(s, ["New documents are written in Markdown."]);
+		// Cancel drops the draft: the part shows the team's own answer again.
+		fireEvent.click(
+			within(documents()).getByRole("button", { name: en.agentCancel }),
+		);
+		await waitFor(() =>
+			expect(html().getAttribute("aria-checked")).toBe("true"),
+		);
 		fireEvent.click(html());
 		await validated(s, ["New documents are written in Markdown."]);
 		fireEvent.click(
@@ -1249,17 +1190,6 @@ describe("team page", () => {
 		});
 		await waitFor(() =>
 			expect(html().getAttribute("aria-checked")).toBe("false"),
-		);
-		expect(sprints().getAttribute("aria-checked")).toBe("true");
-
-		// Cancel drops the draft: the part shows the team's own answer again.
-		fireEvent.click(
-			within(part(en.rulesPlanning)).getByRole("button", {
-				name: en.agentCancel,
-			}),
-		);
-		await waitFor(() =>
-			expect(sprints().getAttribute("aria-checked")).toBe("false"),
 		);
 	});
 

@@ -231,9 +231,8 @@ fn makes_a_project_out_of_a_repository() {
         panic!("a team.updated first");
     };
     assert_eq!(
-        updated.plan_in_sprints,
-        Some(true),
-        "the starter team plans in sprints, and its team.updated says so (SPEC 8.5)"
+        updated.plan_in_sprints, None,
+        "the starter team names no sprint policy (ADR 0062)"
     );
     assert!(
         repository.path.join(".catervas/local/.gitignore").is_file(),
@@ -1338,6 +1337,14 @@ fn refuses_an_invocation_it_cannot_use() {
     assert_eq!(ran.code, 2, "two is what a wrong command line exits with");
     assert!(ran.err.contains("nonsense"), "{}", ran.err);
     assert!(ran.out.is_empty(), "{}", ran.out);
+}
+
+#[test]
+fn refuses_the_sprint_command() {
+    let ran = run_in(Path::new("."), &["sprint", "start"]);
+
+    assert_eq!(ran.code, 2, "{}", ran.err);
+    assert!(ran.err.contains("sprint"), "{}", ran.err);
 }
 
 #[test]

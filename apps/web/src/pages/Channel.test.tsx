@@ -59,8 +59,6 @@ async function channel(
 	messages: unknown[],
 	fields: {
 		waiting?: unknown[];
-		sprint?: unknown;
-		meetings?: unknown[];
 		path?: string;
 	} = {},
 ) {
@@ -70,18 +68,6 @@ async function channel(
 	await answerQuery(s, "team.get", { team: TEAM });
 	await answerQuery(s, "channel.messages", { messages });
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
-	await answerQuery(s, "sprint.current", fields.sprint ?? null);
-	if (fields.sprint)
-		await answerQuery(s, "sprint.get", {
-			sprint_id: "S2",
-			status: "open",
-			started_at: "2026-09-21T09:00:00Z",
-			spent_usd: 0,
-			task_count: 0,
-			done_count: 0,
-			tasks: [],
-			meetings: fields.meetings ?? [],
-		});
 	return { container, s };
 }
 
@@ -143,7 +129,7 @@ describe("channel", () => {
 	it("shows_each_kind_of_message", async () => {
 		const { container } = await channel([
 			message("theo", "reaction", "Started on the menu page."),
-			message("catervas", "system", "Sprint 2 started."),
+			message("catervas", "system", "The team started."),
 			message("human", "human", "Thanks, all."),
 			message("theo", "reply", "Glad to.", { in_reply_to: seq }),
 		]);
@@ -161,7 +147,7 @@ describe("channel", () => {
 				.map((li) => li.textContent),
 		).toEqual([
 			expect.stringContaining("Started on the menu page."),
-			expect.stringContaining("Sprint 2 started."),
+			expect.stringContaining("The team started."),
 			expect.stringContaining("Thanks, all."),
 			expect.stringContaining("Glad to."),
 		]);
@@ -174,7 +160,7 @@ describe("channel", () => {
 		expect(within(theo).getByText("09:02")).toBeTruthy();
 
 		// Catervas's line: small and muted, with no avatar and no role.
-		const system = row("Sprint 2 started.");
+		const system = row("The team started.");
 		expect(system.className).toBe(styles.system);
 		expect(within(system).queryByRole("img")).toBeNull();
 		expect(within(system).getByText(en.brand)).toBeTruthy();
@@ -225,48 +211,35 @@ describe("channel", () => {
 	it("groups_ceremonies_into_threads", async () => {
 		const [yesterday, today] = [day(-1), day(0)];
 		const at = (date: string, time: string) => `${date}T${time}:00Z`;
-		const { container } = await channel(
-			[
-				message("sol", "ceremony", "Here is the plan.", {
-					thread: "planning",
-					at: at(yesterday, "09:00"),
-				}),
-				message("mira", "ceremony", "Looks right.", {
-					thread: "planning",
-					at: at(yesterday, "09:05"),
-				}),
-				message("sol", "ceremony", "Yesterday's standup.", {
-					thread: "standup",
-					at: at(yesterday, "10:00"),
-				}),
-				message("theo", "ambient", "Coffee first.", {
-					at: at(today, "08:00"),
-				}),
-				message("sol", "ceremony", "Today's standup.", {
-					thread: "standup",
-					at: at(today, "09:00"),
-				}),
-				message("theo", "ceremony", "Menu page today.", {
-					thread: "standup",
-					at: at(today, "09:01"),
-				}),
-				message("sol", "ceremony", "Thanks.", {
-					thread: "standup",
-					at: at(today, "09:02"),
-				}),
-			],
-			{
-				sprint: { sprint_id: "S2", done: 0, total: 1 },
-				meetings: [
-					{
-						thread: "planning",
-						first_seq: 1,
-						at: at(yesterday, "09:00"),
-						posts: 2,
-					},
-				],
-			},
-		);
+		const { container } = await channel([
+			message("sol", "ceremony", "Here is the plan.", {
+				thread: "planning",
+				at: at(yesterday, "09:00"),
+			}),
+			message("mira", "ceremony", "Looks right.", {
+				thread: "planning",
+				at: at(yesterday, "09:05"),
+			}),
+			message("sol", "ceremony", "Yesterday's standup.", {
+				thread: "standup",
+				at: at(yesterday, "10:00"),
+			}),
+			message("theo", "ambient", "Coffee first.", {
+				at: at(today, "08:00"),
+			}),
+			message("sol", "ceremony", "Today's standup.", {
+				thread: "standup",
+				at: at(today, "09:00"),
+			}),
+			message("theo", "ceremony", "Menu page today.", {
+				thread: "standup",
+				at: at(today, "09:01"),
+			}),
+			message("sol", "ceremony", "Thanks.", {
+				thread: "standup",
+				at: at(today, "09:02"),
+			}),
+		]);
 		const list = await screen.findByRole("list", { name: en.channelMessages });
 		const toggle = (name: string) =>
 			within(list).getByRole("button", { name: new RegExp(`^${name}`) });
@@ -288,16 +261,8 @@ describe("channel", () => {
 		expect(planning.getAttribute("aria-expanded")).toBe("true");
 		expect(screen.getByText("Here is the plan.")).toBeTruthy();
 
-		// Each block has an anchor, and the side panel links to the sprint's meetings.
+		// Each block has an anchor.
 		expect(container.querySelector(`#thread-standup-${today}`)).toBeTruthy();
-		const side = screen.getByRole("complementary", {
-			name: en.channelMeetings,
-		});
-		expect(
-			within(side)
-				.getByRole("link", { name: `Planning, ${weekday(yesterday)}` })
-				.getAttribute("href"),
-		).toBe(`#thread-planning-${yesterday}`);
 		await expectNoAxeViolations(container);
 	});
 
@@ -631,90 +596,6 @@ describe("channel", () => {
 		]);
 	});
 
-	it("folds_the_meetings_below_1440", async () => {
-		const { container, s } = await channel([], {
-			sprint: { sprint_id: "S2", done: 0, total: 1 },
-			meetings: [
-				{
-					thread: "planning",
-					first_seq: 1,
-					at: "2026-09-21T09:01:00Z",
-					posts: 2,
-				},
-			],
-		});
-		const link = { name: `Planning, ${weekday("2026-09-21")}` };
-		const side = await screen.findByRole("complementary", {
-			name: en.channelMeetings,
-		});
-		const folded = side.querySelector("details") as HTMLDetailsElement;
-		expect(folded.open).toBe(false);
-		expect(folded.querySelector("summary")?.textContent).toBe(
-			en.channelMeetings,
-		);
-		expect(within(folded).getByRole("link", link)).toBeTruthy();
-		expect(within(side).queryByRole("heading", { level: 2 })).toBeNull();
-		await expectNoAxeViolations(container);
-
-		// The meetings move to the other side of the chat, and ask for themselves again there.
-		act(() => media.set("(min-width: 1440px)", true));
-		await answerQuery(s, "sprint.get", {
-			sprint_id: "S2",
-			status: "open",
-			started_at: "2026-09-21T09:00:00Z",
-			spent_usd: 0,
-			task_count: 0,
-			done_count: 0,
-			tasks: [],
-			meetings: [
-				{
-					thread: "planning",
-					first_seq: 1,
-					at: "2026-09-21T09:01:00Z",
-					posts: 2,
-				},
-			],
-		});
-		const beside = await screen.findByRole("complementary", {
-			name: en.channelMeetings,
-		});
-		expect(beside.querySelector("details")).toBeNull();
-		expect(
-			within(beside).getByRole("heading", {
-				level: 2,
-				name: en.channelMeetings,
-			}),
-		).toBeTruthy();
-		expect(within(beside).getByRole("link", link)).toBeTruthy();
-		await expectNoAxeViolations(container);
-	});
-
-	it("stays_at_the_bottom_when_the_meetings_fold_opens", async () => {
-		stubBox();
-		await channel([message("theo", "ambient", "Morning.")], {
-			sprint: { sprint_id: "S2", done: 0, total: 1 },
-			meetings: [
-				{
-					thread: "planning",
-					first_seq: 1,
-					at: "2026-09-21T09:01:00Z",
-					posts: 2,
-				},
-			],
-		});
-		const region = await screen.findByRole("region", { name: en.channel });
-		const side = await screen.findByRole("complementary", {
-			name: en.channelMeetings,
-		});
-		region.scrollTop = 1980;
-		fireEvent.scroll(region);
-		// A native details changes the box's height without a render of the page.
-		const folded = side.querySelector("details") as HTMLDetailsElement;
-		folded.open = true;
-		fireEvent(folded, new Event("toggle"));
-		expect(region.scrollTop).toBe(2000);
-	});
-
 	it("keeps_the_box_to_one_row_on_a_phone", async () => {
 		media.set("(min-width: 1024px)", false);
 		await channel([]);
@@ -795,30 +676,6 @@ describe("channel", () => {
 			expect(region.scrollTop).toBe(300);
 		});
 
-		it("opens_a_thread_from_the_side_panel", async () => {
-			const { s } = await channel(full(), {
-				sprint: { sprint_id: "S2", done: 0, total: 1 },
-				meetings: [
-					{
-						thread: "planning",
-						first_seq: 1,
-						at: `${old}T09:01:00Z`,
-						posts: 2,
-					},
-				],
-			});
-			const side = await screen.findByRole("complementary", {
-				name: en.channelMeetings,
-			});
-			fireEvent.click(
-				await within(side).findByRole("link", {
-					name: `Planning, ${weekday(old)}`,
-				}),
-			);
-			await answerEarlier(s, planning);
-			await opened();
-		});
-
 		it("stops_paging_once_the_pages_are_older_than_its_day", async () => {
 			const before = full().map((m) => ({ ...m, at: `${day(-5)}T09:00:00Z` }));
 			const { s } = await channel(before, { path: `/channel#${anchor}` });
@@ -848,7 +705,7 @@ describe("channel", () => {
 				message("theo", "reaction", "An older one."),
 				message("mira", "ambient", "The plan is nearly done."),
 				message("human", "human", "Thanks, Mira."),
-				message("catervas", "system", "Sprint 2 started."),
+				message("catervas", "system", "The team started."),
 			],
 		});
 		const preview = await screen.findByRole("region", {
@@ -859,7 +716,7 @@ describe("channel", () => {
 		expect(within(preview).getByText("Thanks, Mira.")).toBeTruthy();
 		expect(within(preview).getByText(en.channelYou)).toBeTruthy();
 		expect(within(preview).queryByText("An older one.")).toBeNull();
-		expect(within(preview).queryByText("Sprint 2 started.")).toBeNull();
+		expect(within(preview).queryByText("The team started.")).toBeNull();
 		expect(
 			within(preview)
 				.getByRole("link", { name: en.channelOpen })

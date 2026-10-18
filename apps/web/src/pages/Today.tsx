@@ -2,6 +2,7 @@ import mark from "@catervas/brand/assets/logo-mark-1254.png";
 import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { useCommand } from "../app/command.ts";
 import { useConnection } from "../app/connection.tsx";
 import { type ProductPlanState, projectName } from "../app/productPlan.ts";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
@@ -12,7 +13,6 @@ import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
 import { type Allowances, useAllowances } from "./allowances.tsx";
-import { type Backlog, moreWaits } from "./Board.tsx";
 import {
 	type Catervafication,
 	CatervaficationCard,
@@ -24,7 +24,6 @@ import {
 } from "./DocumentChanges.tsx";
 import { DataPipeline, type PipelineAsk } from "./dialogs/DataPipeline.tsx";
 import { isScript, ScriptWarning } from "./dialogs/ScriptWarning.tsx";
-import { useCommand } from "./dialogs/StartSprint.tsx";
 import {
 	ToolApproval,
 	type ToolAsk,
@@ -96,7 +95,6 @@ type Waiting = {
 	Partial<OrderAsk> &
 	Partial<PipelineAsk>;
 type Moved = { at: string; by: string; line: string };
-type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
 
 /** Each kind's title, button word and page (the step 08 plan's routes); `line` in place of the daemon's. */
@@ -120,7 +118,7 @@ const KINDS: Record<
 		word: "waitingAnswer",
 		page: "questions",
 	},
-	help: { title: "waitingHelp", word: "waitingHelpButton", page: "help" },
+	help: { title: "waitingHelp", word: "waitingHelpAnswer", page: "help" },
 	integration: {
 		title: "waitingIntegration",
 		word: "waitingAdd",
@@ -192,7 +190,7 @@ export function Today() {
 	const { data: posts, again: askPostsAgain } = useQuery<{
 		posts: GoingOutPost[];
 	}>("social_posts.list", {});
-	// The product plan's changes, one card for each sprint review and agent that proposed them.
+	// The product plan's changes, one card for each review and agent that proposed them.
 	const { data: planChanges, again: askPlanChangesAgain } = useQuery<{
 		cards: DocumentChangesCard[];
 	}>("folder_doc_proposals.list", {});
@@ -201,13 +199,9 @@ export function Today() {
 	// are written, the plan's acceptance row is shown as the plan itself.
 	const { data: plan } = useQuery<ProductPlanState>("product_plan.state", {});
 	const interviewing = !!plan?.newProject && !plan.approved;
-	// "Later" leaves a quiet card here until the owner starts the documenting sprint.
+	// "Later" leaves a quiet card here until the owner starts the documenting work.
 	const { data: documenting, again: askDocumentingAgain } =
 		useQuery<Catervafication>("catervafication.get", {});
-	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
-	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
-	// The daemon counts nothing while the team does not plan in sprints.
-	const waits = backlog?.count ?? 0;
 	// While the provider refuses the key the team is paused, and one row says so first.
 	const { data: account } = useQuery<{ keyRefused?: boolean }>(
 		"account.status",
@@ -234,28 +228,7 @@ export function Today() {
 							waitsForPlan
 						)}
 					</p>
-				) : sprint ? (
-					<p>
-						<Link to={`/sprints/${sprint.sprintId}`}>
-							{t("sprintLine", {
-								n: sprint.sprintId.replace(/^S/, ""),
-								done: String(sprint.done),
-								total: String(sprint.total),
-							})}
-						</Link>
-						{waits > 0 && <>. {moreWaits(waits)}</>}
-					</p>
-				) : (
-					waits > 0 && (
-						<p>
-							{waits === 1
-								? t("todayBacklogOne")
-								: t("todayBacklog", { count: waits })}{" "}
-							<Link to="/board?start=sprint">{t("todayBacklogStart")}</Link>{" "}
-							{t(waits === 1 ? "todayBacklogBeginOne" : "todayBacklogBegin")}
-						</p>
-					)
-				)}
+				) : null}
 				<ul className={styles.agents} aria-label={t("teamBand")}>
 					{activity?.activity.map((one) => (
 						<AgentEntry

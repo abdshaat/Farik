@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr as _;
 
-use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::marketing::{CapScope, network_name};
 use catervas_core::team::{AgentStatus, Team};
 use catervas_protocol::event::{
@@ -92,6 +92,10 @@ pub fn activity(
         })
         .unwrap_or(false);
     let titles = titles(projections)?;
+    let board = projections.board()?;
+    let limit = usize::try_from(team.policy.wip_limit_per_agent)
+        .unwrap_or(usize::MAX)
+        .max(1);
     let waiting = crate::waiting::waiting(projections, log, files, team)?;
     let proposals = folder_docs(log)?.proposals;
     let mut all = Vec::new();
@@ -137,6 +141,18 @@ pub fn activity(
                 until.format("%H:%M")
             );
             all.push(one(ActivityState::Resting, line, None, Some(until)));
+            continue;
+        }
+        // A task of its own under way keeps an agent working past a stuck one (ADR 0062): the
+        // first of its counted tasks, up to its limit and in the order they began to count, that
+        // is not yet with a reviewer. The runtime's `within_limit`, which the store cannot read.
+        if let Some(row) = under_way(&board, id, limit) {
+            all.push(one(
+                ActivityState::Working,
+                format!("Building {}", row.title),
+                Some(row.task_id.clone()),
+                None,
+            ));
             continue;
         }
         if let Some(item) = waiting
@@ -209,6 +225,32 @@ fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> Str
         ),
         (None, None) => format!("Waiting on you: {}", item.line),
     }
+}
+
+/// The task `agent` has under way without a session running: its non-epic tasks that count
+/// towards the work-in-progress limit (`TaskProjection::counts_towards_wip`), ordered by when each
+/// began to count and then by the board's order, the first `limit` of them, and of those the first
+/// `assigned`, `in_progress` or `rejected`.
+fn under_way<'a>(
+    board: &'a [crate::TaskProjection],
+    agent: &str,
+    limit: usize,
+) -> Option<&'a crate::TaskProjection> {
+    let mut held: Vec<&crate::TaskProjection> = board
+        .iter()
+        .filter(|row| {
+            row.kind != TaskKind::Epic
+                && row.counts_towards_wip()
+                && row.assignee_id.as_deref() == Some(agent)
+        })
+        .collect();
+    held.sort_by_key(|row| row.counted_seq.unwrap_or(0));
+    held.into_iter().take(limit).find(|row| {
+        matches!(
+            row.status,
+            TaskStatus::Assigned | TaskStatus::InProgress | TaskStatus::Rejected
+        )
+    })
 }
 
 /// What `agent` is doing in its session that has started and not ended, on which task, in which
@@ -418,8 +460,9 @@ pub fn moved_since(
     Ok(moved.into_iter().map(|(_, moved)| moved).collect())
 }
 
-/// Who proposed changes to the product plan since `since`: one line for each agent and sprint
-/// review, with the latest proposal's sequence number and time, and `k` the distinct documents.
+/// Who proposed changes to the product plan since `since`: one line for each agent and review (a
+/// proposal of an older log carries its sprint, which tells reviews apart), with the latest
+/// proposal's sequence number and time, and `k` the distinct documents.
 fn proposal_moves(
     log: &EventLog,
     who: &impl Fn(&str) -> String,
@@ -449,9 +492,8 @@ fn proposal_moves(
                 k => format!("{k} changes"),
             };
             let line = format!(
-                "{} proposed {what} to the product plan from the sprint {} review.",
-                who(&latest.agent_id),
-                latest.sprint_id.trim_start_matches('S')
+                "{} proposed {what} to the product plan at the team's review.",
+                who(&latest.agent_id)
             );
             (
                 latest.proposal,
@@ -465,19 +507,17 @@ fn proposal_moves(
         .collect())
 }
 
-/// An Architect's `review` session, the sprint it came after, and its latest write: its seq and
-/// time.
+/// An Architect's `review` session and its latest write: its seq and time.
 struct ReviewSession {
     session: String,
     agent: String,
-    sprint: String,
     wrote: Option<(u64, DateTime<Utc>)>,
 }
 
 /// Where the Architect brought its notes up to date since `since`: one line for each of its `review`
-/// sessions that wrote a folder document, at its latest write, naming the sprint of the last
-/// `sprint.ended` before the session started. Under the `pull_request` policy the change reaches
-/// the project only when it is merged, and the line says it was sent as a pull request.
+/// sessions that wrote a folder document, at its latest write. Under the `pull_request` policy the
+/// change reaches the project only when it is merged, and the line says it was sent as a pull
+/// request.
 fn architecture_moves(
     log: &EventLog,
     team: &Team,
@@ -485,11 +525,7 @@ fn architecture_moves(
     since: DateTime<Utc>,
 ) -> Result<Vec<(u64, Moved)>, StoreError> {
     let events = log.read(&EventQuery {
-        kinds: vec![
-            EventKind::SprintEnded,
-            EventKind::SessionStarted,
-            EventKind::FolderDocWritten,
-        ],
+        kinds: vec![EventKind::SessionStarted, EventKind::FolderDocWritten],
         ..EventQuery::default()
     })?;
     let is_architect = |agent: &str| {
@@ -497,22 +533,18 @@ fn architecture_moves(
             .iter()
             .any(|each| each.id.as_str() == agent && Role::from(each.role) == Role::Architect)
     };
-    let mut last_ended: Option<String> = None;
-    // Each review session of an Architect, with the sprint it came after, and its latest write.
+    // Each review session of an Architect, and its latest write.
     let mut sessions: Vec<ReviewSession> = Vec::new();
     for event in &events {
         let ids = &event.envelope.ids;
         match &event.body {
-            EventBody::SprintEnded(body) => last_ended = Some(body.sprint_id.as_str().to_string()),
             EventBody::SessionStarted(body) if body.thread == Some(Thread::Review) => {
-                if let (Some(agent), Some(session), Some(sprint)) =
-                    (&ids.agent_id, &ids.session_id, &last_ended)
+                if let (Some(agent), Some(session)) = (&ids.agent_id, &ids.session_id)
                     && is_architect(agent)
                 {
                     sessions.push(ReviewSession {
                         session: session.clone(),
                         agent: agent.clone(),
-                        sprint: sprint.clone(),
                         wrote: None,
                     });
                 }
@@ -531,10 +563,9 @@ fn architecture_moves(
         .into_iter()
         .filter_map(|each| {
             let (seq, at) = each.wrote?;
-            let (agent, n) = (&each.agent, each.sprint.trim_start_matches('S'));
             let line = format!(
-                "{} sent the architecture notes for sprint {n} as a pull request",
-                who(agent)
+                "{} sent the architecture notes as a pull request after the team's review",
+                who(&each.agent)
             );
             Some((
                 seq,
@@ -823,7 +854,7 @@ mod tests {
             [(
                 at(10, 2),
                 "ada".to_string(),
-                "Ada proposed a change to the product plan from the sprint 4 review.".to_string()
+                "Ada proposed a change to the product plan at the team's review.".to_string()
             )]
         );
 
@@ -833,7 +864,7 @@ mod tests {
             [(
                 at(10, 3),
                 "ada".to_string(),
-                "Ada proposed 2 changes to the product plan from the sprint 4 review.".to_string()
+                "Ada proposed 2 changes to the product plan at the team's review.".to_string()
             )]
         );
     }
@@ -933,8 +964,75 @@ mod tests {
             [(
                 at(10, 3),
                 "ada".to_string(),
-                "Ada sent the architecture notes for sprint 4 as a pull request".to_string()
+                "Ada sent the architecture notes as a pull request after the team's review"
+                    .to_string()
             )]
+        );
+    }
+
+    #[test]
+    fn says_what_a_review_did_without_naming_a_sprint() {
+        let board = Board::new("moved-review-without-sprint");
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
+        wire["agents"] = json!([
+            { "id": "ada", "display_name": "Ada", "role": "architect", "status": "active" },
+            { "id": "pm", "display_name": "Pat", "role": "product_manager", "status": "active" },
+            { "id": "dev", "display_name": "Dee", "role": "software_developer", "status": "active" },
+        ]);
+        wire["policy"]["integration"] = json!("pull_request");
+        let team = validate_team(&wire).expect("the fixture is a team");
+        // Two proposals an older log holds, of Ada's, after `since`.
+        proposes(&board, at(10, 1), "S4", SPEC);
+        proposes(&board, at(10, 2), "S4", ROADMAP);
+        // A delivery closes; Ada's review session writes an architecture note.
+        board.put(
+            at(11, 0),
+            None,
+            None,
+            "delivery.closed",
+            json!({
+                "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": ["CTV-1"]
+            }),
+        );
+        board.session(
+            at(11, 1),
+            None,
+            "ada",
+            "session-2",
+            "session.started",
+            json!({
+                "purpose": "ceremony", "model": "claude-opus-5", "effort": "high",
+                "thread": "review"
+            }),
+        );
+        board.session(
+            at(11, 2),
+            None,
+            "ada",
+            "session-2",
+            "folder_doc.written",
+            json!({
+                "path": "docs/catervas/architecture/structure.html", "written_by": "ada",
+                "change": 1, "sha": "abc123"
+            }),
+        );
+
+        let lines: Vec<String> = moved_since(&board.log, &board.projections, &team, at(9, 0))
+            .expect("the store reads")
+            .into_iter()
+            .map(|one| one.line)
+            .collect();
+
+        assert_eq!(
+            lines,
+            [
+                "Ada proposed 2 changes to the product plan at the team's review.",
+                "Ada sent the architecture notes as a pull request after the team's review"
+            ]
+        );
+        assert!(
+            lines.iter().all(|line| !line.contains("sprint")),
+            "{lines:?}"
         );
     }
 
@@ -1099,7 +1197,9 @@ mod tests {
             json!({ "purpose": "ceremony", "model": "claude-opus-5", "effort": "low", "thread": "standup" }),
         );
         let now = states(&board);
-        assert_eq!(now[1].2, "Nothing to do right now");
+        // Its task is still under way, so with no session it is still Building (ADR 0062).
+        assert_eq!(now[1].1, ActivityState::Working);
+        assert_eq!(now[1].2, "Building Login form");
         assert_eq!(now[3].2, "Running the standup");
         let later = activity(
             &board.log,
@@ -1185,12 +1285,13 @@ mod tests {
             "design_plan.proposed",
             json!({ "plan": "A plan." }),
         );
+        // Its task is still under way, so with no session it is still Building (ADR 0062).
         assert_eq!(
             iris(&board),
             (
-                ActivityState::Idle,
-                "Nothing to do right now".to_string(),
-                None
+                ActivityState::Working,
+                "Building A calmer menu page".to_string(),
+                Some("CTV-1".to_string())
             )
         );
     }
@@ -1717,5 +1818,66 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn an_agent_with_a_stuck_task_and_another_under_way_is_working() {
+        let board = Board::new("activity-stuck-and-working");
+        let team = five();
+        board.file("CTV-1", "Login form", |_| {});
+        board.moved(
+            at(9, 1),
+            "CTV-1",
+            ("draft", "blocked"),
+            "linus",
+            (Some("linus"), Some("grace")),
+        );
+        board.session(
+            at(9, 2),
+            Some("CTV-1"),
+            "linus",
+            "session-1",
+            "question.asked",
+            json!({ "question": "Which colour?", "asked_by": "linus" }),
+        );
+        board.file("CTV-2", "Logout page", |_| {});
+        board.moved(
+            at(9, 3),
+            "CTV-2",
+            ("draft", "in_progress"),
+            "linus",
+            (Some("linus"), Some("grace")),
+        );
+        let linus = |board: &Board| {
+            activity(
+                &board.log,
+                &board.projections,
+                &board.files,
+                &team,
+                at(12, 0),
+            )
+            .expect("the store reads")
+            .into_iter()
+            .find(|one| one.agent_id == "linus")
+            .expect("linus is on the team")
+        };
+
+        let one = linus(&board);
+        assert_eq!(one.state, ActivityState::Working);
+        assert_eq!(one.line, "Building Logout page");
+        assert_eq!(
+            one.task_id.map(|id| id.to_string()),
+            Some("CTV-2".to_string())
+        );
+        assert_eq!(one.session_id, None);
+
+        board.moved(
+            at(9, 4),
+            "CTV-2",
+            ("in_progress", "accepted"),
+            "linus",
+            (Some("linus"), Some("grace")),
+        );
+        assert_eq!(linus(&board).state, ActivityState::Waiting);
     }
 }

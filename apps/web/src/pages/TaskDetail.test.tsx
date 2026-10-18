@@ -45,7 +45,6 @@ const PAGE = [
 ];
 const CONTRACT = {
 	...TASK,
-	sprint: "S2",
 	assignee: "theo",
 	reviewer: "ada",
 	exit_criteria: [
@@ -194,7 +193,7 @@ describe("task detail", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByText(
-				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 		const tabs = screen.getAllByRole("tab");
@@ -304,10 +303,6 @@ describe("task detail", () => {
 			],
 			["escalation.aged", { raised_seq: 10, hours: 24 }],
 			["pull_request.opened", { url: "u", number: 3, branch: "feature/CTV-1" }],
-			[
-				"sprint.planned",
-				{ sprint_id: "S2", task_ids: ["CTV-1"], planned_by: "mira" },
-			],
 			["drift.detected", { drift: "lock_mismatch", detail: "d" }],
 			[
 				"message.posted",
@@ -432,7 +427,7 @@ describe("task detail", () => {
 		// The lead counts the Designer's plans, in place of the tries.
 		expect(
 			screen.getByText(
-				"CTV-1 in sprint 2. Iris is doing it, and Ada reviews it. First plan.",
+				"CTV-1. Iris is doing it, and Ada reviews it. First plan.",
 			),
 		).toBeTruthy();
 		let plan = await toPlan();
@@ -569,7 +564,7 @@ describe("task detail", () => {
 		);
 		expect(
 			await screen.findByText(
-				"CTV-1 in sprint 2. Iris is doing it, and Ada reviews it. Second plan.",
+				"CTV-1. Iris is doing it, and Ada reviews it. Second plan.",
 			),
 		).toBeTruthy();
 		plan = await toPlan();
@@ -871,7 +866,7 @@ describe("task detail", () => {
 		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
 		expect(
 			screen.getByText(
-				"CTV-1 in sprint 2. Ada is doing it, and Catervas checks it. Try 1 of 4.",
+				"CTV-1. Ada is doing it, and Catervas checks it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 		expect(screen.queryByText(/reviews it/)).toBeNull();
@@ -885,7 +880,7 @@ describe("task detail", () => {
 		await opened();
 		expect(
 			await screen.findByText(
-				"CTV-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 	});

@@ -944,7 +944,7 @@ fn admits_a_local_browser_without_a_code_in_preview_mode() {
     assert!(interrupted.success());
     // What a serve that Ctrl-C ended exits with.
     assert_eq!(status.code(), Some(130), "{status:?}");
-    assert!(team.contains("plan_in_sprints: false"), "{team}");
+    assert!(!team.contains("plan_in_sprints"), "{team}");
 }
 
 #[cfg(not(feature = "e2e"))]
@@ -2040,10 +2040,15 @@ fn changes_project_from_the_browser() {
     });
 
     assert_eq!(status["paused"], false, "{status}");
-    let written: Value = serde_json::from_str(
-        &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
-    )
-    .expect("JSON");
+    // The driver answers before it remembers the project, so wait for the write, not the answer.
+    let mut written = Value::Null;
+    until("the target is remembered", || {
+        written = std::fs::read_to_string(state.join("catervas/state.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        written["last_project"] == json!(root.display().to_string())
+    });
     assert_eq!(written["last_project"], json!(root.display().to_string()));
     assert!(!root.join(".catervas/local/setup-pending").exists());
     let stopped = run(&root, &["stop"]);

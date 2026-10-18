@@ -1,8 +1,8 @@
 import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useState } from "react";
+import { useCommand } from "../../app/command.ts";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
-import { useCommand } from "./StartSprint.tsx";
 
 /**
  * "Close PO-n without receiving it" (spec 6.10): the seller cancelled or refunded the order, or it

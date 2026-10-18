@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
-use crate::ceremonies::ended_sprint;
+use crate::deliveries::closed_delivery;
 
 /// `catervas_append_retro`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -21,8 +21,9 @@ pub(crate) struct AppendRetroInput {
 /// The most a retro says, in characters.
 const RETRO_CHARS: usize = 4_000;
 
-/// Appends the retro of the latest ended sprint to `team/retro.md` and records `retro.appended`,
-/// once per sprint, whichever session asks, in a retro ceremony session alone. Answers the sprint.
+/// Appends the retro of the last closed delivery to `team/retro.md` and records `retro.appended`,
+/// once per delivery, whichever session asks, in a retro ceremony session alone. Answers the
+/// delivery.
 pub(super) fn append_retro(call: &Call<'_>, input: &AppendRetroInput) -> Result<Value, ToolError> {
     if call.context.thread != Some(Thread::Retro) {
         return Err(refused("only the retro ceremony writes team/retro.md"));
@@ -36,27 +37,30 @@ pub(super) fn append_retro(call: &Call<'_>, input: &AppendRetroInput) -> Result<
         )));
     }
     let deps = call.deps();
-    let sprint = ended_sprint(&deps.log)
+    let delivery = closed_delivery(&deps.log)
         .map_err(failed)?
-        .ok_or_else(|| refused("no sprint has ended since the last one started"))?;
-    if sprint.retro_appended {
-        return Err(refused(&format!("{}'s retro is written", sprint.sprint_id)));
+        .ok_or_else(|| refused("no delivery has closed since the last retro"))?;
+    if delivery.retro_appended {
+        return Err(refused(&format!(
+            "{}'s retro is written",
+            delivery.delivery_id
+        )));
     }
     deps.files
         .append_retro(
-            &sprint.sprint_id,
+            &delivery.delivery_id,
             deps.clock.now().date_naive(),
             &input.text,
         )
         .map_err(failed)?;
     let body = serde_json::from_value(json!({
-        "sprint_id": sprint.sprint_id,
+        "delivery_id": delivery.delivery_id,
         "text": input.text,
         "appended_by": call.agent_id(),
     }))
     .map_err(failed)?;
     call.append(None, EventBody::RetroAppended(body))?;
-    Ok(json!({ "sprint_id": sprint.sprint_id }))
+    Ok(json!({ "delivery_id": delivery.delivery_id }))
 }
 
 /// A refusal of an append, saying why.
@@ -108,13 +112,14 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_a_second_retro_of_a_sprint() {
+    fn refuses_a_second_retro_of_a_delivery() {
         let project = TestProject::new("retro-second", &a_team_of_three(|_| {}));
-        project.open_sprint("S1", None, &[]);
         project.record(
             "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
+            "delivery.closed",
+            &json!({
+                "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": []
+            }),
         );
         let retro_session = |session_id: &str| {
             let mut context = project.context("pm", None);
@@ -129,7 +134,7 @@ mod tests {
             "catervas_append_retro",
             json!({ "text": "Keep them small." }),
         )
-        .expect("the sprint's retro");
+        .expect("the delivery's retro");
         let before = project.event_count();
 
         let refused = run(
@@ -137,12 +142,12 @@ mod tests {
             "catervas_append_retro",
             json!({ "text": "Again." }),
         )
-        .expect_err("a sprint gets one retro");
+        .expect_err("a delivery gets one retro");
 
         assert_eq!(
             refused,
             ToolError::Refused {
-                reason: "retro_refused: S1's retro is written".to_string()
+                reason: "retro_refused: D1's retro is written".to_string()
             }
         );
         assert_eq!(project.event_count(), before, "nothing is recorded");
@@ -152,11 +157,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_blank_or_long_retro() {
         let project = TestProject::new("retro-text", &a_team_of_three(|_| {}));
-        project.open_sprint("S1", None, &[]);
         project.record(
             "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
+            "delivery.closed",
+            &json!({
+                "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": []
+            }),
         );
         let mut context = project.context("pm", None);
         context.purpose = SessionPurpose::Ceremony;

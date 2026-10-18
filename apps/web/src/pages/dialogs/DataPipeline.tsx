@@ -1,8 +1,8 @@
 import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useState } from "react";
+import { useCommand } from "../../app/command.ts";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
-import { useCommand } from "./StartSprint.tsx";
 import { visibly } from "./ToolApproval.tsx";
 
 /** One data source the Product Manager passed to the owner, as `waiting.list` gives it. */

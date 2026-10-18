@@ -1,12 +1,6 @@
-import {
-	Avatar,
-	type AvatarKey,
-	Button,
-	KanbanColumn,
-	StatusWord,
-} from "@catervas/ui";
+import { Avatar, type AvatarKey, KanbanColumn, StatusWord } from "@catervas/ui";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link } from "react-router";
 import { LANES, type Lane, laneOf, type TaskRow } from "../app/lanes.ts";
 import { useQuery } from "../app/store.ts";
 import { statusWord } from "../app/words.ts";
@@ -15,9 +9,7 @@ import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { boardLine, useAllowances } from "./allowances.tsx";
 import styles from "./Board.module.css";
-import { EndSprint } from "./dialogs/EndSprint.tsx";
-import { StartSprint } from "./dialogs/StartSprint.tsx";
-import type { Agent, Team } from "./setup/TeamSetup.tsx";
+import type { Team } from "./setup/TeamSetup.tsx";
 
 type Activity = {
 	agentId: string;
@@ -26,14 +18,10 @@ type Activity = {
 	purpose?: string;
 };
 type Waiting = { taskId: string; kind: string };
-type Sprint = { sprintId: string; done: number; total: number } | null;
-/** `backlog.summary`: whether the team plans in sprints, and how much waits (step 15). */
-export type Backlog = { planInSprints: boolean; count: number };
 type Mark = { word: string; tone: "done" | "working" | "waiting" };
 
 const LANE_WORDS: Record<Lane, keyof typeof en> = {
 	planning: "statusPlanning",
-	backlog: "statusBacklog",
 	todo: "statusToDo",
 	in_progress: "statusInProgress",
 	stuck: "statusStuck",
@@ -49,10 +37,9 @@ const DOING: Record<string, keyof typeof en> = {
 	explore: "markPlanning",
 };
 
-type SprintPick = "all" | "this" | "none";
 type RiskPick = "any" | TaskRow["risk"];
 
-/** The team's work in lanes, with filters and the sprint's controls (step 09's plan). */
+/** The team's work in lanes, with filters (step 09's plan). */
 export function Board() {
 	const wide = useWide();
 	const { data: team } = useQuery<{ team: Team }>("team.get", {});
@@ -65,37 +52,15 @@ export function Board() {
 		"team.activity",
 		{},
 	);
-	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
-	const { data: sprints } = useQuery<{ sprints: unknown[] }>(
-		"sprints.list",
-		{},
-	);
-	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
 	// What agents made on other services, never waited for: the board draws without it.
 	const allowances = useAllowances();
 	const [who, setWho] = useState<string>();
 	const [mine, setMine] = useState(false);
 	const [epic, setEpic] = useState<string>();
-	const [inSprint, setInSprint] = useState<SprintPick>("all");
 	const [risk, setRisk] = useState<RiskPick>("any");
 	const [cancelled, setCancelled] = useState(false);
 	const [lane, setLane] = useState<Lane>("planning");
-	// Today's "Start a sprint" opens the board with the dialog open.
-	const [search] = useSearchParams();
-	const [dialog, setDialog] = useState<"start" | "end" | undefined>(
-		search.get("start") === "sprint" ? "start" : undefined,
-	);
-
-	if (
-		!team ||
-		!list ||
-		!waiting ||
-		!activity ||
-		sprint === undefined ||
-		!sprints ||
-		!backlog
-	)
-		return null;
+	if (!team || !list || !waiting || !activity) return null;
 	const agents = team.team.agents.filter((a) => a.status !== "retired");
 	const tasks = list.tasks;
 	const byId = new Map(tasks.map((task) => [task.taskId, task]));
@@ -144,22 +109,10 @@ export function Board() {
 			(!who || task.assigneeId === who) &&
 			(!mine || waitsOn.has(task.taskId)) &&
 			(!epic || task.taskId === epic || task.parent === epic) &&
-			(inSprint === "all" ||
-				(inSprint === "this"
-					? !!sprint && task.sprint === sprint.sprintId
-					: !task.sprint)) &&
 			(risk === "any" || task.risk === risk),
 	);
-	// A part of an epic in the Backlog waits under its epic, as its parts line.
-	const inLane = (l: Lane) =>
-		shown.filter(
-			(task) =>
-				laneOf(task) === l &&
-				!(l === "backlog" && task.parent && byId.get(task.parent)?.backlog),
-		);
-	const n = (sprint?.sprintId ?? `S${sprints.sprints.length + 1}`).slice(1);
-	const lanes = LANES.filter((l) => l !== "backlog" || backlog.planInSprints);
-	const waits = tasks.filter((task) => task.backlog && !task.parent);
+	const inLane = (l: Lane) => shown.filter((task) => laneOf(task) === l);
+	const lanes = LANES;
 	const partsOf = (task: TaskRow) =>
 		tasks.filter((p) => p.parent === task.taskId);
 
@@ -197,21 +150,11 @@ export function Board() {
 						<StatusWord tone="waiting">{t("designOnDesigner")}</StatusWord>
 					) : task.designReviewState === "designer_needs_browser" ? (
 						<StatusWord tone="waiting">{t("designNoBrowser")}</StatusWord>
-					) : (
-						task.backlog && <span>{waitWord(task, parts.length)}</span>
-					)}
+					) : null}
 				</div>
 			</li>
 		);
 	};
-
-	/** A Backlog card's word: ready, and waiting for the next sprint while one runs. */
-	const waitWord = (task: TaskRow, parts: number) =>
-		task.kind === "epic" && parts > 0
-			? parts === 1
-				? t("backlogEpicReadyOne")
-				: t("backlogEpicReady", { count: parts })
-			: t(sprint ? "backlogNextSprint" : "backlogReady");
 
 	const column = (l: Lane) => {
 		const rows = inLane(l);
@@ -222,11 +165,6 @@ export function Board() {
 				title={t(LANE_WORDS[l])}
 				count={rows.length}
 			>
-				{l === "backlog" && (
-					<p className={styles.small}>
-						{sprint ? t("laneBacklogLate") : t("laneBacklogNote")}
-					</p>
-				)}
 				{rows.length === 0 ? (
 					<p className={styles.small}>{t("laneEmpty")}</p>
 				) : (
@@ -252,19 +190,6 @@ export function Board() {
 		<div className={styles.page}>
 			<div className={styles.head}>
 				<h1 className={styles.title}>{t("board")}</h1>
-				{sprint ? (
-					<p>
-						<Link to={`/sprints/${sprint.sprintId}`}>
-							{t("sprintLine")
-								.replace("{n}", n)
-								.replace("{done}", String(sprint.done))
-								.replace("{total}", String(sprint.total))}
-						</Link>
-						{backlog.count > 0 && <>. {moreWaits(backlog.count)}</>}
-					</p>
-				) : (
-					<p>{t(backlog.planInSprints ? "sprintNoneBacklog" : "sprintNone")}</p>
-				)}
 				{allowances && allowances.rows.length > 0 && (
 					<section aria-label={t("allowBoardHeading")}>
 						<ul className={styles.allowances}>
@@ -274,19 +199,12 @@ export function Board() {
 										row,
 										agents.find((a) => a.id === row.agent)?.displayName ??
 											row.agent,
-										allowances.period,
 									)}
 								</li>
 							))}
 						</ul>
 					</section>
 				)}
-				<Button
-					kind={sprint ? "secondary" : "primary"}
-					onClick={() => setDialog(sprint ? "end" : "start")}
-				>
-					{t(sprint ? "sprintEndEarly" : "sprintStart")}
-				</Button>
 			</div>
 			<fieldset className={styles.filters}>
 				<legend className={styles.hidden}>{t("boardFilters")}</legend>
@@ -305,17 +223,6 @@ export function Board() {
 				)}
 				<details className={styles.more}>
 					<summary>{t("filterMore")}</summary>
-					<label>
-						{t("filterSprint")}{" "}
-						<select
-							value={inSprint}
-							onChange={(e) => setInSprint(e.target.value as SprintPick)}
-						>
-							<option value="all">{t("filterSprintAll")}</option>
-							<option value="this">{t("filterSprintThis")}</option>
-							<option value="none">{t("filterSprintNone")}</option>
-						</select>
-					</label>
 					<label>
 						{t("filterRisk")}{" "}
 						<select
@@ -358,49 +265,6 @@ export function Board() {
 					{column(lane)}
 				</>
 			)}
-			{dialog === "start" && (
-				<StartSprint
-					n={n}
-					planner={plannerOf(agents)}
-					backlog={
-						backlog.planInSprints
-							? waits.map((task) => ({
-									taskId: task.taskId,
-									title: task.title,
-									parts:
-										task.kind === "epic" ? partsOf(task).length : undefined,
-								}))
-							: undefined
-					}
-					ready={
-						tasks.filter(
-							(task) => task.status === "ready" && !task.parent && !task.sprint,
-						).length
-					}
-					onClose={() => setDialog(undefined)}
-				/>
-			)}
-			{dialog === "end" && sprint && (
-				<EndSprint
-					n={n}
-					unfinished={sprint.total - sprint.done}
-					planner={plannerOf(agents)}
-					backlog={backlog.planInSprints}
-					onClose={() => setDialog(undefined)}
-				/>
-			)}
 		</div>
 	);
-}
-
-/** "1 more waits in the Backlog for the next sprint.", Board's and Today's. */
-export function moreWaits(count: number): string {
-	return count === 1 ? t("sprintMoreOne") : t("sprintMore", { count });
-}
-
-/** The sprint's planner: the Scrum Master, or the Product Manager when there is none (spec 5.9). */
-export function plannerOf(agents: Agent[]): string {
-	const of = (role: Agent["role"]) =>
-		agents.find((a) => a.role === role)?.displayName;
-	return of("scrum_master") ?? of("product_manager") ?? "";
 }

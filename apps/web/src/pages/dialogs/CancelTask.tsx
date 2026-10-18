@@ -1,7 +1,7 @@
 import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useState } from "react";
+import { useCommand } from "../../app/command.ts";
 import { t } from "../../strings/t.ts";
-import { useCommand } from "./StartSprint.tsx";
 
 /** Cancelling a task, with its reason; an escalated task cancels by resolving its escalation. */
 export function CancelTask({
