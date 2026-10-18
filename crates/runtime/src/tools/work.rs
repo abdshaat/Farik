@@ -19,6 +19,7 @@ use super::{Call, ToolError, failed};
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, actor_wire, refusal_details, refusal_wire,
 };
+use catervas_store::requests::given_to;
 
 /// What is in the way, for a block.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -218,12 +219,15 @@ pub(super) fn assign_task(call: &Call<'_>, input: AssignTaskInput) -> Result<Val
     ask_governor(call, task, TaskStatus::Assigned, actor, ask)
 }
 
-/// Blocks the session's task as its assignee, with what is in the way and what is needed.
+/// Blocks the session's task as the agent that holds it: the assignee, the reviewer of a task in
+/// review, or the Product Manager writing its contract, with what is in the way and what is needed.
 pub(super) fn declare_blocked(
     call: &Call<'_>,
     input: DeclareBlockedInput,
 ) -> Result<Value, ToolError> {
     let task = call.task()?.clone();
+    let (contract, _) = call.contract(&task)?;
+    let actor = actor_for(call, &contract, TaskStatus::Blocked)?;
     let ask = TransitionAsk {
         blocker: Some(Blocker {
             description: input.description,
@@ -231,13 +235,7 @@ pub(super) fn declare_blocked(
         }),
         ..TransitionAsk::default()
     };
-    ask_governor(
-        call,
-        task,
-        TaskStatus::Blocked,
-        TransitionActor::Assignee,
-        ask,
-    )
+    ask_governor(call, task, TaskStatus::Blocked, actor, ask)
 }
 
 /// Records a criterion's result as the assignee's or the reviewer's run, by the caller's relation
@@ -392,34 +390,48 @@ fn actor_for(
 ) -> Result<TransitionActor, ToolError> {
     let me = Some(call.agent_id());
     let rows = find_transitions(contract.status, to);
-    rows.iter()
-        .map(|row| row.actor)
-        .find(|actor| match actor {
+    let mut found = None;
+    for row in &rows {
+        let is_it = match row.actor {
             TransitionActor::Assignee => contract.assignee.as_deref() == me,
             TransitionActor::Reviewer => contract.reviewer.as_deref() == me,
-            TransitionActor::ProductManager => call.role() == Role::ProductManager,
+            // The agent the owner gave a task in its chat holds its plan with the Product
+            // Manager's standing while it is drafted or refined (ADR 0063).
+            TransitionActor::ProductManager => {
+                call.role() == Role::ProductManager
+                    || (matches!(contract.status, TaskStatus::Draft | TaskStatus::Refining)
+                        && given_to(&call.deps().log, &contract.id)
+                            .map_err(failed)?
+                            .as_deref()
+                            == me)
+            }
             TransitionActor::ScrumMaster => call.role() == Role::ScrumMaster,
             TransitionActor::Governor | TransitionActor::Human => false,
-        })
-        .ok_or_else(|| {
-            let actors: Vec<String> = rows
-                .iter()
-                .map(|row| actor_wire(row.actor).to_string())
-                .collect();
-            Refusal::ActorNotAllowed {
-                detail: if actors.is_empty() {
-                    format!("nothing moves a {} task to {to}", contract.status)
-                } else {
-                    format!(
-                        "a {} task moves to {to} at the request of {}, and {} is none of them",
-                        contract.status,
-                        actors.join(", "),
-                        call.agent_id()
-                    )
-                },
-            }
-            .into()
-        })
+        };
+        if is_it {
+            found = Some(row.actor);
+            break;
+        }
+    }
+    found.ok_or_else(|| {
+        let actors: Vec<String> = rows
+            .iter()
+            .map(|row| actor_wire(row.actor).to_string())
+            .collect();
+        Refusal::ActorNotAllowed {
+            detail: if actors.is_empty() {
+                format!("nothing moves a {} task to {to}", contract.status)
+            } else {
+                format!(
+                    "a {} task moves to {to} at the request of {}, and {} is none of them",
+                    contract.status,
+                    actors.join(", "),
+                    call.agent_id()
+                )
+            },
+        }
+        .into()
+    })
 }
 
 /// Asks the door, with the session's id on every event it records.
@@ -582,6 +594,73 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Assigned);
         assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn blocks_a_task_as_its_reviewer() {
+        use crate::session::SessionPurpose::{Refine, Verify};
+        let project = a_project("tools-block-holder");
+        in_progress(&project);
+        project.moved(
+            "CTV-1",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let input =
+            json!({ "description": "the checks cannot run git", "needed": "git in the checks" });
+        let last_move = || {
+            let moved = project.events(&[EventKind::TaskTransitioned]);
+            let Some(EventBody::TaskTransitioned(body)) =
+                moved.last().map(|event| event.body.clone())
+            else {
+                panic!("a move");
+            };
+            body
+        };
+        // An agent that holds nothing on the task is refused, and nothing is recorded.
+        let before = project.event_count();
+        refused_with(
+            project.call_in(
+                Verify,
+                "pm",
+                Some("CTV-1"),
+                "catervas_declare_blocked",
+                input.clone(),
+            ),
+            "actor_not_allowed",
+        );
+        assert_eq!(project.event_count(), before);
+
+        project
+            .call_in(
+                Verify,
+                "dev-b",
+                Some("CTV-1"),
+                "catervas_declare_blocked",
+                input.clone(),
+            )
+            .expect("the reviewer blocks the task it reviews");
+        let body = last_move();
+        assert_eq!(body.actor, TransitionActorWire::Reviewer);
+        assert_eq!(body.requested_by, "dev-b");
+        assert_eq!(body.to.to_string(), "blocked");
+
+        // A task given to a developer in its chat is blocked by that developer, as the planner.
+        project.filed_given_to("CTV-2", "refining", "dev-a", |wire| {
+            wire["assignee_role"] = json!("software_developer");
+        });
+        project
+            .call_in(
+                Refine,
+                "dev-a",
+                Some("CTV-2"),
+                "catervas_declare_blocked",
+                input,
+            )
+            .expect("the given agent blocks its plan");
+        assert_eq!(last_move().actor, TransitionActorWire::ProductManager);
     }
 
     #[test]

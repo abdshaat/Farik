@@ -47,6 +47,7 @@ use catervas_store::git::stale_twins;
 use catervas_store::git::task_base;
 use catervas_store::product_plan::{is_the_product_plan, new_project, product_plan_tasks};
 use catervas_store::repos::{TaskRepositoryError, task_repository};
+use catervas_store::requests::given_to;
 
 /// Where the integration lock lives, under the project root.
 pub(crate) const INTEGRATION_LOCK: &str = ".catervas/local/integration.lock";
@@ -333,7 +334,23 @@ impl Transitions {
             self.put_back_strays(request, ask, team)?;
         }
         let context = self.context(request, ask, team)?;
-        let decided = match refused_before_the_governor(request, ask, team, &context.contract) {
+        // The agent the owner gave a task in its chat holds its plan with the Product Manager's
+        // standing while it is drafted or refined (ADR 0063).
+        let the_given_agent = request.actor == TransitionActor::ProductManager
+            && matches!(
+                context.contract.status,
+                TaskStatus::Draft | TaskStatus::Refining
+            )
+            && request.agent_id.is_some()
+            && given_to(&self.log, &request.task_id)?.as_deref()
+                == request.agent_id.as_deref().map(str::trim);
+        let decided = match refused_before_the_governor(
+            request,
+            ask,
+            team,
+            &context.contract,
+            the_given_agent,
+        ) {
             Some(refusal) => Err(refusal),
             None => evaluate_transition(request, &context),
         };
@@ -1157,6 +1174,7 @@ fn refused_before_the_governor(
     ask: &TransitionAsk,
     team: &Team,
     contract: &TaskContract,
+    the_given_agent: bool,
 ) -> Option<TransitionRefusal> {
     let role = match request.actor {
         TransitionActor::ProductManager => Role::ProductManager,
@@ -1166,14 +1184,15 @@ fn refused_before_the_governor(
         | TransitionActor::Governor
         | TransitionActor::Human => return None,
     };
-    let holds = request
-        .agent_id
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|id| {
-            team.active_agents()
-                .any(|agent| agent.id.as_str() == id && Role::from(agent.role) == role)
-        });
+    let holds = the_given_agent
+        || request
+            .agent_id
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|id| {
+                team.active_agents()
+                    .any(|agent| agent.id.as_str() == id && Role::from(agent.role) == role)
+            });
     if !holds {
         return Some(TransitionRefusal::NotTheNamedAgent {
             actor: request.actor,
