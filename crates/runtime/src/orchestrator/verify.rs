@@ -245,11 +245,20 @@ pub(super) fn decide_alone(
         TransitionOutcome::Moved(_) => {
             "accepted it on its criteria, which Catervas ran: only code is reviewed".to_string()
         }
-        TransitionOutcome::Refused(refusal) => format!(
-            "the governor would not {} it: {}",
-            if rejecting { "reject" } else { "accept" },
-            refusal_details(&refusal).join("; ")
-        ),
+        // Nobody else can move a task Catervas verifies alone, so its refusal goes to the owner
+        // rather than parking the task (ADR 0069).
+        TransitionOutcome::Refused(refusal) => {
+            return escalate(
+                deps,
+                team,
+                row,
+                &format!(
+                    "Catervas could not {} it: {}",
+                    if rejecting { "reject" } else { "accept" },
+                    refusal_details(&refusal).join("; ")
+                ),
+            );
+        }
     };
     Ok(Some(TickReport::Acted {
         task_id: row.task_id.clone(),
@@ -1771,6 +1780,57 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_what_the_governor_would_not_accept_alone() {
+        let harness = a_harness("verify-alone-escalates", browsing);
+        // A Developer's task that no agent reviews, flagged as a change to the interface on a team
+        // with a Designer: the governor's acceptance waits for a design review it never gets.
+        harness.file("CTV-3", "ready", |wire| {
+            wire["assignee_role"] = json!("software_developer");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["ui_change"] = json!(true);
+            wire["allowed_paths"] = json!(["docs/catervas/engineering/bug-hunt.html"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The report exists.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "docs/catervas/engineering/bug-hunt.html" }
+            }]);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "pm" });
+        harness.project.moved("CTV-3", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-3", "assigned", "in_progress", &people);
+        let git = &harness.project.deps.git;
+        let worktree = harness.worktree("CTV-3");
+        git.create_worktree(&worktree, &harness.branch("CTV-3"), "main")
+            .expect("the task's worktree is made");
+        let path = "docs/catervas/engineering/bug-hunt.html";
+        std::fs::create_dir_all(worktree.join(path).parent().expect("a folder")).expect("made");
+        std::fs::write(worktree.join(path), "# Report\n").expect("written");
+        git.commit(&worktree, "The report", &[path.to_string()])
+            .expect("committed");
+        harness.project.record(
+            "CTV-3",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Wrote it.\n\nWrote it.", "written_by": "dev-a" }),
+        );
+        harness
+            .project
+            .moved("CTV-3", "in_progress", "verifying", &people);
+        let (started, _) = ticked(&harness, Vec::new(), 3).await;
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::Escalated);
+        let raised = harness.events(&[EventKind::EscalationRaised]);
+        assert!(
+            raised.iter().any(|event| matches!(&event.body,
+                EventBody::EscalationRaised(body) if body.detail.contains("Catervas could not accept it"))),
+            "{raised:?}"
+        );
     }
 
     #[tokio::test]
