@@ -21,6 +21,7 @@ import { type Contract, day } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
 import page from "./TaskDetail.module.css";
+import today from "./Today.module.css";
 
 /** The contract fields this page reads beyond the plan pages'. */
 type Detail = Contract & {
@@ -272,6 +273,13 @@ export function TaskDetail() {
 	)?.sessionId;
 	const cancellable =
 		contract.status !== "accepted" && contract.status !== "cancelled";
+	// A task its agent blocked shows the agent's words and the owner's answer (ADR 0068).
+	const blockedBy =
+		contract.status === "blocked"
+			? events.findLast(
+					(e) => e.kind === "task.transitioned" && e.body.to === "blocked",
+				)
+			: undefined;
 
 	const design = detail.designPlan;
 	const proposal = events.findLast((e) => e.kind === "design_plan.proposed");
@@ -608,6 +616,7 @@ export function TaskDetail() {
 							contract.status === "accepted" || contract.status === "cancelled"
 								? "done"
 								: contract.status === "escalated" ||
+										contract.status === "blocked" ||
 										contract.status === "verifying"
 									? "waiting"
 									: "working"
@@ -617,6 +626,19 @@ export function TaskDetail() {
 					</StatusWord>
 					<p className={styles.muted}>{lead}</p>
 					{checking && <p>{t("designCheckingNote", names)}</p>}
+					{blockedBy && (
+						<section className={styles.section} aria-labelledby="blocked">
+							<h2 id="blocked">{t("taskBlockedTitle")}</h2>
+							<p>
+								{blockedBy.body.blocker?.description ?? t("helpBlockedNoWords")}
+							</p>
+							<p>
+								<Link to={`/tasks/${id}/help`} className={today.action}>
+									{t("taskBlockedAnswer")}
+								</Link>
+							</p>
+						</section>
+					)}
 					{onDesigner && (
 						<>
 							<p>{t("designOnDesignerNote", names)}</p>

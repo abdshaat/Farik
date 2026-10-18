@@ -1638,7 +1638,8 @@ fn mechanical_criteria_passed(
     Ok(())
 }
 
-/// Resolves an escalation (5.7): `escalated -> to` as the human, then, on the move,
+/// Resolves an escalation (5.7), or a task its agent blocked (ADR 0068, with the message as the
+/// blocker's resolution): `escalated -> to` or `blocked -> to` as the human, then, on the move,
 /// `escalation.resolved { to, message, extra_tries }`. Never to `ready` while the contract awaits
 /// approval, which is `HumanAccept`'s, nor for an epic whose contract the human has not approved,
 /// which reaches `ready` only by that approval (5.16 item 2). `extra_tries` is only for an
@@ -1654,15 +1655,7 @@ fn resolve(
 ) -> Result<CommandReport, CommandError> {
     written(message, "a resolution's message")?;
     let row = row_of(tools, task_id)?;
-    if row.status != TaskStatus::Escalated {
-        return Err(CommandError::Refused {
-            reason: format!(
-                "not_escalated: {} is {}, and only an escalation is resolved",
-                task_id.as_str(),
-                row.status
-            ),
-        });
-    }
+    let blocked = resolvable(task_id, row.status, extra_tries.is_some() || extra_room)?;
     if to == TaskStatus::Ready && row.awaiting_approval {
         return Err(CommandError::Refused {
             reason: format!(
@@ -1729,6 +1722,7 @@ fn resolve(
         &TransitionAsk {
             reason: Some(message.to_string()),
             grants_tries: extra_tries.is_some(),
+            blocker_resolution: blocked.then(|| message.to_string()),
             ..TransitionAsk::default()
         },
     )?);
@@ -1746,6 +1740,32 @@ fn resolve(
         said: format!("{} is resolved to {to}", task_id.as_str()),
         events,
     })
+}
+
+/// Whether a task in `status` may be resolved: an escalation, or a task its agent blocked, which
+/// is answered as an escalation is (ADR 0068), the message being the blocker's resolution, and
+/// which gets no more tries or room (`more`). Answers whether it is the blocked one.
+fn resolvable(task_id: &TaskId, status: TaskStatus, more: bool) -> Result<bool, CommandError> {
+    let blocked = status == TaskStatus::Blocked;
+    if status != TaskStatus::Escalated && !blocked {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "not_escalated: {} is {status}, and only an escalation or a blocked task is \
+                 resolved",
+                task_id.as_str()
+            ),
+        });
+    }
+    if blocked && more {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "not_escalated: {} is blocked, and more tries or room are given only to an \
+                 escalation",
+                task_id.as_str()
+            ),
+        });
+    }
+    Ok(blocked)
 }
 
 /// Appends `task.room_granted`: the contract's own sessions and dollars again, for a task that
@@ -3922,6 +3942,69 @@ mod tests {
         .await;
         assert!(governor.starts_with("transition_refused"), "{governor}");
         assert_eq!(harness.events(&[EventKind::EscalationResolved]).len(), 1);
+    }
+
+    /// ADR 0068: a task its agent blocked waits on the owner with the agent's words, offers
+    /// "Answer and carry on", and the owner's answer moves it back to `in_progress` with the
+    /// message for the next session.
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_blocked_task_waits_on_the_owner_and_carries_on_with_the_answer() {
+        let harness = Harness::new("human-blocked", |_| {});
+        harness.blocked("CTV-1", "dev-a", "dev-b");
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        let waiting =
+            catervas_store::waiting::waiting(&deps.projections, &deps.log, &deps.files, &team)
+                .expect("reads");
+        let row = waiting
+            .iter()
+            .find(|row| row.task_id.as_str() == "CTV-1")
+            .expect("the blocked task waits on the owner");
+        assert_eq!(row.kind, catervas_store::waiting::WaitingKind::Help);
+        assert!(row.line.contains("the API is down"), "{}", row.line);
+        let choices = crate::choices::offer_for(
+            &deps.log,
+            &deps.projections,
+            &deps.files,
+            &team,
+            &task("CTV-1"),
+        )
+        .expect("reads")
+        .expect("a blocked task has choices");
+        assert_eq!(choices[0].label, "Answer and carry on");
+        assert_eq!(
+            choices[0].action,
+            crate::choices::ChoiceAction::Resolve {
+                to: TaskStatus::InProgress,
+                extra_tries: None,
+                extra_room: false
+            }
+        );
+
+        let orchestrator = an_orchestrator(&harness);
+        handled(
+            &orchestrator,
+            Command::EscalationResolve {
+                task_id: task("CTV-1"),
+                to: TaskStatus::InProgress,
+                message: "Use the staging API.".to_string(),
+                extra_tries: None,
+                extra_room: false,
+            },
+        )
+        .await;
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+        let history = deps
+            .log
+            .read(&catervas_store::EventQuery {
+                task_id: Some(task("CTV-1")),
+                ..catervas_store::EventQuery::default()
+            })
+            .expect("reads");
+        let said = crate::orchestrator::messages::human_message(&history, "dev-a")
+            .expect("the answer reaches the next session");
+        assert!(said.contains("Use the staging API."), "{said}");
     }
 
     #[tokio::test]

@@ -35,6 +35,7 @@ export type HistoryEvent = {
 		detail?: string;
 		reason?: string;
 		putBack?: string[];
+		blocker?: { description: string; needed: string };
 		removed?: string[];
 	};
 };

@@ -676,6 +676,10 @@ export const en = {
 	helpTitle: "{name} needs your help with “{title}”",
 	helpExplains: "{name}, your {role}, explains what happened",
 	helpCatervasExplains: "Catervas explains what happened",
+	helpBlockedNoWords: "It did not say what is in the way.",
+	helpBlockedNeeds: "What it needs: {needed}",
+	taskBlockedTitle: "Why it is stuck",
+	taskBlockedAnswer: "Answer and carry on",
 	helpSuggested: "Suggested",
 	helpNothing: "There is nothing to choose here yet.",
 	helpTried: "What {name} tried",
@@ -905,7 +909,7 @@ export const en = {
 	taskAddNothing:
 		"Nothing to add: this task’s work stays in the {role}’s private files, and its acceptance was its end.",
 	taskAddHint:
-		"Once the task is accepted, Catervas adds its changes to your main branch, one task at a time.",
+		"Once the task is accepted, Catervas opens a pull request into your integration branch, for you to merge.",
 	taskAdd: "Add to the project",
 	taskAddNotYet: "Not yet: the task has not been accepted.",
 	taskAddByPullRequest:

@@ -399,6 +399,40 @@ describe("task detail", () => {
 		]);
 	});
 
+	it("shows_why_a_blocked_task_is_stuck_and_how_to_answer", async () => {
+		await opened({ ...CONTRACT, status: "blocked" }, [], {
+			"task.history": {
+				events: [
+					event(
+						23,
+						"task.transitioned",
+						{
+							from: "in_progress",
+							to: "blocked",
+							requested_by: "theo",
+							blocker: {
+								description: "next build rewrote tsconfig.json",
+								needed: "the file put back",
+							},
+						},
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		const stuck = await screen.findByRole("region", {
+			name: en.taskBlockedTitle,
+		});
+		expect(
+			within(stuck).getByText("next build rewrote tsconfig.json"),
+		).toBeTruthy();
+		expect(
+			within(stuck)
+				.getByRole("link", { name: en.taskBlockedAnswer })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-1/help");
+	});
+
 	it("shows_the_designers_plan_and_who_approved_it", async () => {
 		// The plan was written the day the page is read, so the page says "today".
 		vi.useFakeTimers({ toFake: ["Date"] });
