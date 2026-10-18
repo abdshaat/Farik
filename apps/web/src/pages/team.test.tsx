@@ -52,7 +52,7 @@ const TEAM = {
 };
 const OPUS = {
 	id: "claude-opus-5-5",
-	label: "Strongest model, thinks hard",
+	label: "Opus 5.5",
 };
 /** What the daemon works out for each agent: here, the team said No to commands. */
 const EFFECTIVE = [
@@ -62,7 +62,7 @@ const EFFECTIVE = [
 	["theo", OPUS, ["read", "write_workspace", "git_local"]],
 	[
 		"kai",
-		{ id: "claude-sonnet-5-5", label: "Everyday model" },
+		{ id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
 		["read", "network", "write_workspace", "git_local"],
 	],
 	["iris", OPUS, ["read", "write_workspace", "execute", "git_local"]],
@@ -74,8 +74,8 @@ const EFFECTIVE = [
 }));
 const MODELS = {
 	models: [
-		{ id: "claude-opus-5-5", label: "Strongest model, thinks hard" },
-		{ id: "claude-sonnet-5-5", label: "Everyday model" },
+		{ id: "claude-opus-5-5", label: "Opus 5.5" },
+		{ id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
 	],
 };
 
@@ -193,11 +193,10 @@ describe("team page", () => {
 		const list = await screen.findByRole("list", { name: en.teamMembers });
 		expect(within(list).getAllByRole("listitem")).toHaveLength(5);
 		expect(within(list).getByText("Ada persona")).toBeTruthy();
-		// Every agent's model in words, its own or its role's, never an id.
-		expect(
-			within(list).getAllByText("Strongest model, thinks hard"),
-		).toHaveLength(4);
-		expect(within(list).getByText("Everyday model")).toBeTruthy();
+		// Every agent's model by name and its effort in a word, its own or its role's, never an id.
+		expect(within(list).getAllByText("Opus 5.5")).toHaveLength(4);
+		expect(within(list).getByText("Sonnet 5.5")).toBeTruthy();
+		expect(within(list).getAllByText("High")).toHaveLength(5);
 		expect(within(list).queryByText(/claude-/)).toBeNull();
 		expect(
 			within(list)
@@ -224,6 +223,32 @@ describe("team page", () => {
 				body: { agent_id: "theo", status: "paused" },
 			},
 		});
+	});
+
+	it("gives_one_agent_alone_no_team_to_add_to", async () => {
+		await opened("/team");
+		await screen.findByRole("list", { name: en.teamMembers });
+		expect(screen.getByRole("button", { name: en.teamAdd })).toBeTruthy();
+		expect(
+			screen.getByRole("button", { name: en.templateUseOpen }),
+		).toBeTruthy();
+		cleanup();
+
+		const alone = {
+			...TEAM,
+			agents: [TEAM.agents[3] as (typeof TEAM.agents)[number]],
+			policy: { ...TEAM.policy, solo: true },
+		};
+		await opened("/team", alone);
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+		expect(screen.queryByRole("button", { name: en.teamAdd })).toBeNull();
+		expect(
+			screen.queryByRole("button", { name: en.templateUseOpen }),
+		).toBeNull();
+		expect(
+			screen.queryByRole("button", { name: en.templateSaveOpen }),
+		).toBeNull();
 	});
 
 	it("counts_no_agents_in_the_designer_cost_line_of_a_small_team", async () => {
@@ -482,7 +507,7 @@ describe("team page", () => {
 			name: en.agentSave,
 		})) as HTMLButtonElement;
 		expect(save.disabled).toBe(true);
-		fireEvent.click(screen.getByRole("radio", { name: /^Quick/ }));
+		fireEvent.click(screen.getByRole("radio", { name: "Low" }));
 		expect(save.disabled).toBe(false);
 		fireEvent.click(screen.getByRole("button", { name: en.agentCancel }));
 		expect(save.disabled).toBe(true);
@@ -510,7 +535,7 @@ describe("team page", () => {
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
 
-		fireEvent.click(screen.getByRole("radio", { name: /^Quick/ }));
+		fireEvent.click(screen.getByRole("radio", { name: "Low" }));
 		const checked = await validated(s, ["Theo now works quickly."]);
 		expect(one(checked, "theo").model).toEqual({
 			id: "claude-opus-5-5",
@@ -531,7 +556,7 @@ describe("team page", () => {
 		await screen.findByRole("heading", {
 			name: "Kai, your Marketing Specialist",
 		});
-		fireEvent.click(screen.getByRole("radio", { name: /^Quick/ }));
+		fireEvent.click(screen.getByRole("radio", { name: "Low" }));
 		const checked = await validated(s, ["Kai now works quickly."]);
 		expect(one(checked, "kai").model).toEqual({ effort: "low" });
 	});
@@ -539,15 +564,10 @@ describe("team page", () => {
 	it("opens_the_agent's_advanced_settings_under_its_button", async () => {
 		const { container } = await opened("/team/ada");
 		await screen.findByRole("heading", { name: "Ada, your Architect" });
-		const options = () =>
-			within(screen.getByRole("combobox", { name: en.agentModel }))
-				.getAllByRole("option")
-				.map((o) => o.textContent ?? "");
 		expect(screen.queryByRole("switch", { name: en.tierNetwork })).toBeNull();
 		expect(
 			screen.queryByRole("button", { name: en.connectorCustomAdd }),
 		).toBeNull();
-		expect(options().some((o) => o.includes("("))).toBe(false);
 
 		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		const list = screen.getByRole("list", { name: en.advanced });
@@ -555,7 +575,6 @@ describe("team page", () => {
 		expect(
 			within(list).getByRole("button", { name: en.connectorCustomAdd }),
 		).toBeTruthy();
-		expect(options().some((o) => o.includes("("))).toBe(true);
 		expect(screen.getByRole("button", { name: en.advancedHide })).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});
@@ -657,7 +676,7 @@ describe("team page", () => {
 		};
 
 		const edit = await opened("/team/theo");
-		fireEvent.click(await screen.findByRole("radio", { name: /^Quick/ }));
+		fireEvent.click(await screen.findByRole("radio", { name: "Low" }));
 		await validated(edit.s, []);
 		fireEvent.click(screen.getByRole("button", { name: en.agentSave }));
 		await sent(edit.s, "team.save");
@@ -2311,22 +2330,48 @@ describe("info buttons on the agent page", () => {
 			onlyInTips(say(key));
 	});
 
-	it("explains the effort levels once, by the legend", async () => {
-		await opened("/team/theo");
+	it("shows_the_model_effort_and_temperature_as_choices_on_the_editor", async () => {
+		const { container, s } = await opened("/team/theo");
 		await screen.findByRole("heading", { name: "Theo, your Developer" });
-		const group = screen.getByRole("group", {
-			name: "How carefully Theo works",
+		// The model by name and the five efforts, each a segmented group with one note behind info.
+		const model = screen.getByRole("group", { name: en.modelLegend });
+		expect(
+			within(model)
+				.getAllByRole("radio")
+				.map((r) => (r as HTMLInputElement).labels?.[0]?.textContent),
+		).toEqual(["Opus 5.5", "Sonnet 5.5"]);
+		expect(
+			(
+				within(model).getByRole("radio", {
+					name: "Opus 5.5",
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
+		const effort = screen.getByRole("group", { name: en.effortLegend });
+		const efforts = ["Low", "Medium", "High", "Extra high", "Max"];
+		expect(
+			within(effort)
+				.getAllByRole("radio")
+				.map((r) => (r as HTMLInputElement).labels?.[0]?.textContent),
+		).toEqual(efforts);
+		expect(
+			(within(effort).getByRole("radio", { name: "High" }) as HTMLInputElement)
+				.checked,
+		).toBe(true);
+		for (const line of en.effortInfo.split("\n")) onlyInTips(line);
+		// Temperature is a fact, not a control: the model sets it.
+		expect(screen.getByText(en.temperatureLegend)).toBeTruthy();
+		expect(screen.getByText(en.temperatureValue)).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		// Choosing the model and the top effort goes into the team as the ids the daemon takes.
+		fireEvent.click(within(model).getByRole("radio", { name: "Sonnet 5.5" }));
+		fireEvent.click(within(effort).getByRole("radio", { name: "Max" }));
+		const checked = await validated(s, []);
+		expect(one(checked, "theo").model).toEqual({
+			id: "claude-sonnet-5-5",
+			effort: "max",
 		});
-		for (const label of ["Quick", "Balanced", "Careful"])
-			expect(within(group).getByRole("radio", { name: label })).toBeTruthy();
-		const tips = within(group).getAllByRole("tooltip", { hidden: true });
-		expect(tips).toHaveLength(1);
-		for (const note of [
-			en.effortLowNote,
-			en.effortMediumNote,
-			en.effortHighNote,
-		])
-			expect(tips[0]?.textContent).toContain(note);
 	});
 
 	it("puts the Procurement Specialist's notes behind info", async () => {

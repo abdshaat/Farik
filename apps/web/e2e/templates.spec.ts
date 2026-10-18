@@ -80,14 +80,15 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 		await expect(pageB).toHaveURL(/\/setup\/scan$/);
 		await pageB.getByRole("button", { name: "That's right" }).click();
 		await expect(pageB).toHaveURL(/\/setup\/team$/);
-		await pageB.getByLabel(/^A saved team/).check();
-		await expect(pageB.getByLabel(/^Three of us/)).toBeChecked();
-		const names = pageB
-			.getByRole("list", { name: "Your team" })
-			.getByRole("textbox");
-		await expect(names).toHaveCount(3);
+		// The cards are labels around hidden radios: a click on the card chooses it.
+		await pageB.locator("label", { hasText: "Three of us" }).click();
+		await expect(
+			pageB.getByRole("radio", { name: /^Three of us/ }),
+		).toBeChecked();
+		const rows = pageB.getByRole("button", { name: /^Change / });
+		await expect(rows).toHaveCount(3);
 		for (const [i, name] of ["Mira", "Ada", "Theo"].entries())
-			await expect(names.nth(i)).toHaveValue(name);
+			await expect(rows.nth(i)).toHaveAccessibleName(`Change ${name}`);
 		await setupShots(pageB, "starts");
 		await pageB.getByRole("button", { name: /^Continue/ }).click();
 		await expect(pageB).toHaveURL(/\/setup\/spending$/);
