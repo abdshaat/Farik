@@ -1,9 +1,21 @@
-import { Avatar, type AvatarKey, KanbanColumn, StatusWord } from "@catervas/ui";
+import {
+	Avatar,
+	type AvatarKey,
+	Button,
+	KanbanColumn,
+	StatusWord,
+} from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
-import { LANES, type Lane, laneOf, type TaskRow } from "../app/lanes.ts";
+import {
+	LANES,
+	type Lane,
+	laneOf,
+	type TaskRow,
+	taskNumber,
+} from "../app/lanes.ts";
 import { useQuery } from "../app/store.ts";
-import { statusWord } from "../app/words.ts";
+import { roleWord, statusWord } from "../app/words.ts";
 import { useWide } from "../shell/Shell.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
@@ -16,6 +28,7 @@ type Activity = {
 	state: string;
 	taskId?: string;
 	purpose?: string;
+	sessionId?: string;
 };
 type Waiting = { taskId: string; kind: string };
 type Mark = { word: string; tone: "done" | "working" | "waiting" };
@@ -35,7 +48,11 @@ const DOING: Record<string, keyof typeof en> = {
 	implement: "markBuilding",
 	verify: "markReviewing",
 	explore: "markPlanning",
+	plan: "markPlanning",
 };
+
+/** How many of Done's cards that wait on nobody show before "Show all". */
+const DONE_SHOWN = 5;
 
 type RiskPick = "any" | TaskRow["risk"];
 
@@ -60,6 +77,10 @@ export function Board() {
 	const [risk, setRisk] = useState<RiskPick>("any");
 	const [cancelled, setCancelled] = useState(false);
 	const [lane, setLane] = useState<Lane>("planning");
+	// Done is opened for the filters it was opened under; another filter closes it again.
+	const [doneOpenFor, setDoneOpenFor] = useState<string>();
+	const filterKey = [who, mine, epic, risk, cancelled].join("|");
+	const doneOpen = doneOpenFor === filterKey;
 	if (!team || !list || !waiting || !activity) return null;
 	const agents = team.team.agents.filter((a) => a.status !== "retired");
 	const tasks = list.tasks;
@@ -118,9 +139,16 @@ export function Board() {
 
 	const row = (task: TaskRow) => {
 		const who = agents.find((a) => a.id === task.assigneeId);
+		const thinker = activity.activity.find(
+			(a) => a.state === "working" && a.sessionId && a.taskId === task.taskId,
+		);
+		const thinkingAgent = thinker
+			? agents.find((a) => a.id === thinker.agentId)
+			: undefined;
 		const mark = markOf(task);
 		const parts = partsOf(task);
 		const parent = task.parent ? byId.get(task.parent) : undefined;
+		const meta = parent ? `${task.taskId} · ${parent.title}` : task.taskId;
 		return (
 			<li key={task.taskId} className={styles.row}>
 				{who?.avatar && (
@@ -131,9 +159,16 @@ export function Board() {
 					/>
 				)}
 				<div className={styles.rowText}>
-					{parent && <span className={styles.small}>{parent.title}</span>}
-					<Link to={`/tasks/${task.taskId}`}>{task.title}</Link>
-					<span className={styles.small}>{task.taskId}</span>
+					<Link
+						to={`/tasks/${task.taskId}`}
+						className={styles.title3}
+						title={task.title}
+					>
+						{task.title}
+					</Link>
+					<span className={styles.meta} title={meta}>
+						{meta}
+					</span>
 					{task.kind === "epic" && (
 						<span className={styles.small}>
 							{t(parts.length === 1 ? "epicPartsOne" : "epicParts")
@@ -142,6 +177,21 @@ export function Board() {
 									"{done}",
 									String(parts.filter((p) => p.status === "accepted").length),
 								)}
+						</span>
+					)}
+					{thinker && (
+						<span className={styles.thinking}>
+							{thinkingAgent
+								? t("boardThinking", {
+										name: thinkingAgent.displayName,
+										role: roleWord(thinkingAgent.role),
+									})
+								: t("boardThinkingBare", { name: thinker.agentId })}
+							<span className={styles.dots} aria-hidden="true">
+								<span />
+								<span />
+								<span />
+							</span>
 						</span>
 					)}
 					{mark ? (
@@ -158,6 +208,22 @@ export function Board() {
 
 	const column = (l: Lane) => {
 		const rows = inLane(l);
+		// Done shows what waits on the owner and the most recent others.
+		const recent = new Set(
+			l === "done"
+				? rows
+						.filter((task) => !waitsOn.has(task.taskId))
+						.sort((a, b) => taskNumber(b.taskId) - taskNumber(a.taskId))
+						.slice(0, DONE_SHOWN)
+						.map((task) => task.taskId)
+				: [],
+		);
+		const kept = rows.filter(
+			(task) =>
+				l !== "done" || waitsOn.has(task.taskId) || recent.has(task.taskId),
+		);
+		const folds = kept.length < rows.length;
+		const visible = doneOpen ? rows : kept;
 		return (
 			<KanbanColumn
 				key={l}
@@ -168,7 +234,24 @@ export function Board() {
 				{rows.length === 0 ? (
 					<p className={styles.small}>{t("laneEmpty")}</p>
 				) : (
-					<ul className={styles.rows}>{rows.map(row)}</ul>
+					<ul
+						className={styles.rows}
+						{...(l === "done" ? { id: "lane-done-rows" } : {})}
+					>
+						{visible.map(row)}
+					</ul>
+				)}
+				{folds && (
+					<Button
+						kind="quiet"
+						expanded={doneOpen}
+						controls="lane-done-rows"
+						onClick={() => setDoneOpenFor(doneOpen ? undefined : filterKey)}
+					>
+						{doneOpen
+							? t("boardShowFewer")
+							: t("boardShowAll", { count: rows.length })}
+					</Button>
 				)}
 			</KanbanColumn>
 		);

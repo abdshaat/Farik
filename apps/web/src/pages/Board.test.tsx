@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expectNoAxeViolations } from "@catervas/ui/test";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -5,6 +7,7 @@ import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { media } from "../test/media.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import styles from "./Board.module.css";
 
 const WIDE = "(min-width: 1024px)";
 
@@ -190,7 +193,12 @@ describe("board", () => {
 				.getByRole("link", { name: "New checkout page" })
 				.getAttribute("href"),
 		).toBe("/tasks/CTV-9");
-		expect(within(review).getByText("CTV-9")).toBeTruthy();
+		expect(within(review).getByText("CTV-9").className).toContain(styles.meta);
+		const heading = within(review).getByRole("link", {
+			name: "New checkout page",
+		});
+		expect(heading.className).toContain(styles.title3);
+		expect(heading.getAttribute("title")).toBe("New checkout page");
 		expect(within(review).getByText(en.statusWaiting)).toBeTruthy();
 
 		const working = lane(en.statusInProgress);
@@ -210,11 +218,10 @@ describe("board", () => {
 		expect(
 			within(row(planning, "Gift cards")).getByText("2 parts, 1 done"),
 		).toBeTruthy();
-		expect(
-			within(row(lane(en.statusToDo), "Gift card page")).getByText(
-				"Gift cards",
-			),
-		).toBeTruthy();
+		const part = within(row(lane(en.statusToDo), "Gift card page")).getByText(
+			"CTV-4 · Gift cards",
+		);
+		expect(part.className).toContain(styles.meta);
 		const stuck = lane(en.statusStuck);
 		expect(
 			within(row(stuck, "Opening sale")).getByText(en.statusHelp),
@@ -241,6 +248,60 @@ describe("board", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("caps_done_and_shows_all", async () => {
+		media.set(WIDE, true);
+		const eight = [1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
+			task(n, `Done ${n}`, "accepted", { assignee_id: "theo" }),
+		);
+		const { container } = await board(eight, ACTIVITY, TEAM, {
+			waiting: [
+				{
+					task_id: "CTV-2",
+					kind: "integration",
+					agent_id: "theo",
+					title: "Done 2",
+					line: "",
+				},
+			],
+		});
+		const titles = () =>
+			within(screen.getByRole("region", { name: en.statusDone }))
+				.getAllByRole("listitem")
+				.map((li) => within(li).getByRole("link").textContent);
+		expect(
+			within(screen.getByRole("region", { name: en.statusDone })).getByRole(
+				"heading",
+				{ name: /8/ },
+			),
+		).toBeTruthy();
+		expect(titles()).toEqual([
+			"Done 2",
+			"Done 4",
+			"Done 5",
+			"Done 6",
+			"Done 7",
+			"Done 8",
+		]);
+		const all = screen.getByRole("button", { name: "Show all 8" });
+		expect(all.getAttribute("aria-expanded")).toBe("false");
+		fireEvent.click(all);
+		expect(titles()).toHaveLength(8);
+		expect(titles()[0]).toBe("Done 1");
+		expect(
+			screen
+				.getByRole("button", { name: en.boardShowFewer })
+				.getAttribute("aria-expanded"),
+		).toBe("true");
+		await expectNoAxeViolations(container);
+		fireEvent.click(screen.getByRole("button", { name: en.boardShowFewer }));
+
+		// On a phone, the Done tab shows the same six and the same button.
+		act(() => media.set(WIDE, false));
+		fireEvent.click(screen.getByRole("button", { name: `${en.statusDone} 8` }));
+		expect(titles()).toHaveLength(6);
+		expect(screen.getByRole("button", { name: "Show all 8" })).toBeTruthy();
+	});
+
 	it("says_planning_while_the_designer_explores", async () => {
 		media.set(WIDE, true);
 		const exploring = {
@@ -255,6 +316,74 @@ describe("board", () => {
 			.getByRole("link", { name: "Launch post" })
 			.closest("li") as HTMLElement;
 		expect(within(row).getByText(en.markPlanning)).toBeTruthy();
+	});
+
+	it("names_who_is_thinking_on_a_card", async () => {
+		media.set(WIDE, true);
+		const thinking = (purpose: string) => ({
+			activity: [
+				{
+					agent_id: "mira",
+					state: "working",
+					line: "Writing the plan",
+					task_id: "CTV-3",
+					session_id: "s-2",
+					purpose,
+				},
+				...ACTIVITY.activity,
+				{
+					agent_id: "theo",
+					state: "working",
+					line: "Building CTV-4",
+					task_id: "CTV-4",
+				},
+			],
+		});
+		const { container } = await board(TASKS, thinking("refine"));
+		const card = (title: string) =>
+			screen.getByRole("link", { name: title }).closest("li") as HTMLElement;
+		expect(
+			within(card("Gift cards")).getByText(/Mira · Product Manager — thinking/),
+		).toBeTruthy();
+		expect(within(card("Gift cards")).getByText(en.markWriting)).toBeTruthy();
+		expect(
+			within(card("Launch post")).getByText(
+				/Kai · Marketing Specialist — thinking/,
+			),
+		).toBeTruthy();
+		expect(card("Gift card page").textContent).not.toContain("thinking");
+		for (const dots of container.querySelectorAll(`.${styles.dots}`))
+			expect(dots.getAttribute("aria-hidden")).toBe("true");
+		const css = readFileSync(
+			join(import.meta.dirname, "Board.module.css"),
+			"utf8",
+		).replace(/\s+/g, " ");
+		expect(css).toMatch(/\.dots span \{[^}]*animation:/);
+		expect(css).toMatch(
+			/@media \(prefers-reduced-motion: reduce\) \{ \.dots span \{ animation: none;/,
+		);
+		await expectNoAxeViolations(container);
+	});
+
+	it("shows_planning_on_a_card_whose_agent_plans", async () => {
+		media.set(WIDE, true);
+		await board(TASKS, {
+			activity: [
+				{
+					agent_id: "mira",
+					state: "working",
+					line: "Planning",
+					task_id: "CTV-3",
+					session_id: "s-2",
+					purpose: "plan",
+				},
+				...ACTIVITY.activity,
+			],
+		});
+		const card = screen
+			.getByRole("link", { name: "Gift cards" })
+			.closest("li") as HTMLElement;
+		expect(within(card).getByText(en.markPlanning)).toBeTruthy();
 	});
 
 	it("marks_a_task_waiting_on_the_designer", async () => {

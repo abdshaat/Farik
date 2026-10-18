@@ -11,7 +11,7 @@ import { answerQuery } from "../../test/render-app.tsx";
 /** Today with `row` waiting; its "Raise the budget" opened, and the plan it asks for answered. */
 async function opened(row: object = BUDGET_ROW) {
 	const { container, s } = await todayWith({ waiting: [row], team: TEAM });
-	const list = await screen.findByRole("list", { name: en.waitingList });
+	const list = await screen.findByRole("list", { name: en.waitingGroupAnswer });
 	fireEvent.click(
 		within(list).getByRole("button", { name: "Raise the budget" }),
 	);

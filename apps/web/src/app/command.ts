@@ -3,11 +3,11 @@ import { useConnection } from "./connection.tsx";
 import { commandSaid } from "./refusals.ts";
 
 /**
- * Sends one command; closes on success, else keeps its refusal in words (`fill` fills the words'
+ * Sends one command; closes on success (`onDone` gets the reply), else keeps its refusal in words (`fill` fills the words'
  * `{placeholders}`) and the code the daemon refused it with.
  */
 export function useCommand(
-	onDone: () => void,
+	onDone: (done: { said: string; events: number[] }) => void,
 	fill: Record<string, string> = {},
 ) {
 	const { client } = useConnection();
@@ -24,7 +24,7 @@ export function useCommand(
 			if ("error" in reply) {
 				setRefusal(commandSaid(reply.error.detail, fill));
 				setCode(/^([a-z_]+): /.exec(reply.error.detail)?.[1]);
-			} else onDone();
+			} else onDone(reply);
 		} catch {
 			// The connection closed: the page shows that it is lost.
 		} finally {

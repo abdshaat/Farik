@@ -37,7 +37,32 @@ section.question {
 }
 
 .text {
+	display: grid;
+	gap: var(--catervas-space-2);
 	overflow-wrap: anywhere;
+}
+
+.choices {
+	display: grid;
+	gap: var(--catervas-space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.choices li {
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+
+.choices li > button {
+	justify-self: start;
+}
+
+@media not (min-width: 640px) {
+	.choices li > button {
+		justify-self: stretch;
+	}
 }
 
 .tag {

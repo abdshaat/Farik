@@ -529,7 +529,6 @@ describe("allowances on the screens", () => {
 			agents: [],
 			conversations_today_usd: 0.42,
 		});
-		await answerQuery(s, "team.activity", { activity: [] });
 		await answerQuery(s, "metrics", {
 			accepted_tasks: 0,
 			first_pass_acceptance_rate: null,
@@ -602,7 +601,6 @@ describe("allowances on the screens", () => {
 			agents: [],
 			conversations_today_usd: 0,
 		});
-		await answerQuery(s, "team.activity", { activity: [] });
 		await answerQuery(s, "metrics", {
 			accepted_tasks: 0,
 			first_pass_acceptance_rate: null,

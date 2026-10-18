@@ -260,11 +260,13 @@ fn at_work(
     agent: &str,
     titles: &BTreeMap<TaskId, String>,
 ) -> Option<(String, Option<TaskId>, String, SessionStartedBodyPurpose)> {
-    let (event, body, session) = events
+    // Newest first. A chat fork runs beside the work session (ADR 0064), so the work wins and a
+    // chat is the line only when it is the one session open.
+    let mut open = events
         .iter()
         .rev()
         .filter(|event| event.envelope.ids.agent_id.as_deref() == Some(agent))
-        .find_map(|event| {
+        .filter_map(|event| {
             let EventBody::SessionStarted(body) = &event.body else {
                 return None;
             };
@@ -274,7 +276,12 @@ fn at_work(
                     && later.envelope.ids.session_id.as_ref() == Some(session)
             });
             (!ended).then_some((event, body, session.clone()))
-        })?;
+        })
+        .peekable();
+    let first = open.peek().cloned()?;
+    let (event, body, session) = open
+        .find(|(_, body, _)| body.purpose.to_string() != "chat")
+        .unwrap_or(first);
     let task = event.envelope.ids.task_id.clone();
     let title = task
         .as_ref()
@@ -1879,5 +1886,70 @@ mod tests {
             (Some("linus"), Some("grace")),
         );
         assert_eq!(linus(&board).state, ActivityState::Waiting);
+    }
+
+    #[test]
+    fn keeps_the_work_line_while_a_chat_fork_runs() {
+        let board = Board::new("activity-chat-fork");
+        let team = five();
+        board.file("CTV-1", "Login form", |_| {});
+        board.moved(
+            at(9, 1),
+            "CTV-1",
+            ("draft", "in_progress"),
+            "linus",
+            (Some("linus"), Some("grace")),
+        );
+        board.session(
+            at(9, 2),
+            Some("CTV-1"),
+            "linus",
+            "session-1",
+            "session.started",
+            json!({ "purpose": "implement", "model": "claude-opus-5", "effort": "high" }),
+        );
+        board.session(
+            at(9, 3),
+            None,
+            "linus",
+            "session-chat",
+            "session.started",
+            json!({ "purpose": "chat", "model": "claude-opus-5", "effort": "high" }),
+        );
+        let linus = |board: &Board| {
+            let one = activity(
+                &board.log,
+                &board.projections,
+                &board.files,
+                &team,
+                at(12, 0),
+            )
+            .expect("the store reads")
+            .into_iter()
+            .find(|one| one.agent_id == "linus")
+            .expect("linus is on the team");
+            (
+                one.state,
+                one.line,
+                one.task_id.map(|id| id.to_string()),
+                one.session_id,
+            )
+        };
+        let (state, line, task, session) = linus(&board);
+        assert_eq!(state, ActivityState::Working);
+        assert_eq!(line, "Building Login form");
+        assert_eq!(task.as_deref(), Some("CTV-1"));
+        assert_eq!(session.as_deref(), Some("session-1"));
+        board.session(
+            at(9, 4),
+            Some("CTV-1"),
+            "linus",
+            "session-1",
+            "session.ended",
+            json!({ "reason": "completed", "detail": "done" }),
+        );
+        let (_, line, task, _) = linus(&board);
+        assert_eq!(line, "Answering your chat");
+        assert_eq!(task, None);
     }
 }

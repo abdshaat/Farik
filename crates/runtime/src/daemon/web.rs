@@ -33,7 +33,7 @@ use super::{
 };
 use super::{board, documents, gates, repos, team, templates};
 use crate::claude::CredentialKind;
-use crate::computer::{build_sandbox_image, check_computer, pull_browser_image};
+use crate::computer::{check_computer, pull_browser_image};
 use crate::credential::CredentialStore;
 use crate::locked;
 
@@ -787,7 +787,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         "serve.status" => return serve_status(state),
         "account.status" if state.host().is_none() => return team::account_status(state),
         "folders.list" | "computer.check" | "account.status" => {
-            return setup_query(host_of(state)?, name, params);
+            return wizard_query(state, host_of(state)?, name, params);
         }
         _ => {}
     }
@@ -971,13 +971,22 @@ fn host_of(state: &DaemonState) -> Result<&Arc<dyn SetupHost>, Failure> {
 }
 
 /// The wizard's queries, answered through the setup host.
-fn setup_query(host: &Arc<dyn SetupHost>, name: &str, params: &Value) -> Result<Value, Failure> {
+fn wizard_query(
+    state: &DaemonState,
+    host: &Arc<dyn SetupHost>,
+    name: &str,
+    params: &Value,
+) -> Result<Value, Failure> {
     match name {
         "folders.list" => list_folders(&host.home(), params["path"].as_str().unwrap_or_default())
             .map_err(|sentence| Failure::new(REFUSED, sentence)),
         // Setup proposes the six, the UI/UX Designer among them, so its browser is checked.
-        "computer.check" => serde_json::to_value(check_computer(&host.env(), true))
-            .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string())),
+        "computer.check" => {
+            let mut checked = check_computer(&host.env(), true);
+            checked.sandbox_image = state.image_build().over(checked.sandbox_image);
+            serde_json::to_value(checked)
+                .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))
+        }
         _ => Ok(match host.account() {
             Some((kind, source)) => {
                 json!({ "provider": "anthropic", "kind": kind, "source": source })
@@ -992,9 +1001,10 @@ fn setup_query(host: &Arc<dyn SetupHost>, name: &str, params: &Value) -> Result<
 async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result<Value, Failure> {
     let host = Arc::clone(host_of(state)?);
     if method == "sandbox.build" {
-        return build_sandbox_image(&host.env())
-            .await
-            .map(|image| json!({ "image": image }))
+        return state
+            .image_build()
+            .start(&host.env())
+            .map(|()| json!({ "image": crate::SANDBOX_IMAGE }))
             .map_err(|sentence| Failure::new(REFUSED, sentence));
     }
     let (method, params) = (method.to_string(), params.clone());
@@ -3178,6 +3188,14 @@ pub(super) mod tests {
             json!({ "image": crate::SANDBOX_IMAGE }),
             "{built}"
         );
+        // The build runs in the background: read what it recorded once the check stops saying so.
+        for _ in 0..100 {
+            let again = setup_query(&state, "computer.check", &json!({})).await;
+            if again["result"]["sandbox_image"]["state"] != "preparing" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         assert_eq!(
             std::fs::read_to_string(recorded.join("args")).expect("docker was run"),
             format!("build -t {} -\n", crate::SANDBOX_IMAGE)
@@ -3198,6 +3216,96 @@ pub(super) mod tests {
         assert_eq!(
             stopped["result"]["sandbox_image"]["state"], "missing",
             "{stopped}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prepares_the_sandbox_image_in_the_background() {
+        let bin = scratch("setup-image-background");
+        let recorded = bin.join("recorded");
+        std::fs::create_dir_all(&recorded).expect("the folder is made");
+        let go = recorded.join("go");
+        script(
+            &bin,
+            "docker",
+            &format!(
+                "case \"$1\" in\n  version) exit 0 ;;\n  image) [ -f '{0}/go' ] ;;\n  build) echo \"$@\" >> '{0}/args'; echo '#6 [2/4] RUN true' >&2; cat > '{0}/stdin'; while [ ! -f '{0}/go' ]; do sleep 0.05; done ;;\nesac",
+                recorded.display()
+            ),
+        );
+        let (state, _) = in_setup(&bin, &format!("{}:/usr/bin:/bin", bin.display()));
+        let sandbox_image = |checked: &Value| checked["result"]["sandbox_image"].clone();
+
+        // The call answers at once, with the build still running.
+        let (_, built) = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            asked(&state, "sandbox.build", &json!({})),
+        )
+        .await
+        .expect("sandbox.build answers before the build ends");
+        assert_eq!(built["result"], json!({ "image": crate::SANDBOX_IMAGE }));
+        // A second call joins the build that runs.
+        asked(&state, "sandbox.build", &json!({})).await;
+        let mut preparing = Value::Null;
+        for _ in 0..100 {
+            let checked = setup_query(&state, "computer.check", &json!({})).await;
+            conforms(&checked["result"], "computerCheckResult");
+            preparing = sandbox_image(&checked);
+            if preparing["done"] == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(
+            preparing,
+            json!({ "state": "preparing", "done": 2, "of": 4 })
+        );
+        assert_eq!(
+            std::fs::read_to_string(recorded.join("args"))
+                .expect("docker was run")
+                .lines()
+                .count(),
+            1,
+            "a second build was started"
+        );
+
+        // The build ends: Ready, with no press.
+        std::fs::write(&go, "").expect("the build may end");
+        let mut ready = Value::Null;
+        for _ in 0..100 {
+            let checked = setup_query(&state, "computer.check", &json!({})).await;
+            ready = sandbox_image(&checked);
+            if ready["state"] == "ready" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(ready, json!({ "state": "ready" }));
+
+        // A build that fails leaves Docker's last words.
+        std::fs::remove_file(&go).expect("go is removed");
+        script(
+            &bin,
+            "docker",
+            "case \"$1\" in\n  version) exit 0 ;;\n  image) exit 1 ;;\n  build) cat > /dev/null; echo boom >&2; exit 1 ;;\nesac",
+        );
+        asked(&state, "sandbox.build", &json!({})).await;
+        let mut failed = Value::Null;
+        for _ in 0..100 {
+            let checked = setup_query(&state, "computer.check", &json!({})).await;
+            conforms(&checked["result"], "computerCheckResult");
+            failed = sandbox_image(&checked);
+            if failed["state"] != "preparing" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(failed["state"], "missing", "{failed}");
+        assert!(
+            failed["failed"]
+                .as_str()
+                .is_some_and(|f| f.contains("boom")),
+            "{failed}"
         );
     }
 

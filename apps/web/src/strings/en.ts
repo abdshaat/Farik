@@ -126,6 +126,10 @@ export const en = {
 		"Or continue without it: your agents’ commands then run directly on this computer.",
 	imageMissing: "Catervas prepares it once. It takes a few minutes.",
 	prepare: "Prepare it",
+	preparingWord: "Preparing",
+	imageStep: "Step {done} of {of}. The first time takes a few minutes.",
+	imagePreparing: "Getting it ready. The first time takes a few minutes.",
+	imagePreparingLabel: "Preparing the safe box",
 	computerBrowser: "Browser for the UI/UX Designer",
 	browserMissing:
 		"Your UI/UX Designer opens your app in this browser, inside the safe box. Catervas fetches it once. It takes a few minutes.",
@@ -229,8 +233,7 @@ export const en = {
 	scanWrongSaved: "Saved. Your team reads it before it starts.",
 	scanRight: "That's right",
 	teamTitle: "Who should be on your team?",
-	teamLead:
-		"We suggest six, one for each job. You can rename them now or later. To add a second developer, choose “Add someone”.",
+	teamLead: "Six people, one for each job. Rename anyone now or later.",
 	teamMembers: "Your team",
 	teamInclude: "Include the {role}",
 	jobProductManager:
@@ -247,8 +250,7 @@ export const en = {
 	jobProcurement:
 		"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
 	setupMoreRoles: "More roles",
-	setupMoreRolesNote:
-		"Roles Catervas does not suggest. Tick one to add it to your team; a team has seven people at most.",
+	setupMoreRolesNote: "Tick one to add it. Seven people at most.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",
@@ -272,14 +274,14 @@ export const en = {
 	mayCommandsNoNote: "The team cannot test anything.",
 	mayStillChecks:
 		"Catervas still runs every check itself; the agents cannot run commands.",
-	mayPush: "May the Developer send its work to your online repository?",
+	mayPush: "May the Developer send its work in progress online?",
 	mayPushNoteOne:
-		"Only {name}, the Developer, sends code, and only to its own branches.\nNothing reaches your main branch without you.",
+		"Only {name}, the Developer, sends code, and only to its own branches.\nNothing reaches your main branch without you.\nEither way, Catervas itself opens a pull request for finished work when your project is online.",
 	mayPushNoteMany:
-		"Only the Developers send code, and only to their own branches.\nNothing reaches your main branch without you.",
-	mayPushYes: "Yes, on its own branches",
-	mayPushYesNote: "Useful if you review work on GitHub.",
-	mayPushNo: "No, keep everything on this computer",
+		"Only the Developers send code, and only to their own branches.\nNothing reaches your main branch without you.\nEither way, Catervas itself opens a pull request for finished work when your project is online.",
+	mayPushYes: "Yes, to its own branches",
+	mayPushYesNote: "Useful if you follow work on GitHub as it happens.",
+	mayPushNo: "No, keep work in progress on this computer",
 	mayPushNoNote: "The safer choice.",
 	mayAlready: "What each agent may do already",
 	mayAlreadyShow: "Show what each agent may do",
@@ -305,7 +307,9 @@ export const en = {
 	firstDay:
 		"A first full day for the suggested team of six costs about twenty-five dollars (an estimate) on your own key at today’s prices. A smaller team costs less.",
 	finishTitle: "When a piece of work is done, what happens to it?",
-	finishLead: "Accepted work opens a pull request for you to merge.",
+	finishLead: "Finished work opens a pull request on GitHub for you to merge.",
+	finishLeadLocal:
+		"Your project isn\u2019t online, so finished work stays on this computer for you to merge yourself.",
 	finishSafe:
 		"Rules for the whole team and the checks every piece of work must pass are already set to safe choices.",
 	startTeam: "Start the team",
@@ -339,8 +343,9 @@ export const en = {
 		"Say what must be true of finished work, in at least 10 characters.",
 	checkAdd: "Add a check",
 	team: "Team",
-	teamPageLead:
-		"{count} agents work on {name}. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
+	teamPageRules:
+		"A team needs a Product Manager.\nEveryone else is up to you.\nSeven people at most.",
+	teamPageLead: "{count} agents work on {name}.",
 	agentEditLink: "Edit {name}",
 	agentPause: "Pause {name}",
 	agentResume: "Resume {name}",
@@ -350,11 +355,11 @@ export const en = {
 	agentModelRole: "The role’s model",
 	teamChangesTitle: "Pause, retire or replace",
 	teamChangesBody:
-		"Pausing stops an agent from taking new work; it finishes nothing halfway. Retiring removes it from the team but keeps what it learned in your project, so whoever replaces it can read it. Changes start with the agent’s next piece of work, never in the middle of one.",
+		"Pause: the agent takes no new work and leaves nothing half done.\nRetire: it leaves the team; what it learned stays in your project for whoever replaces it.\nA change starts with the agent’s next piece of work.",
 	teamCostTitle: "What a team like this costs",
 	teamCostNote: "It is a guide, not a limit.",
 	teamCostDesigner:
-		"{designer} uses the same model as {developer}, so {designer} adds to what a day costs. Before {designer} changes a screen, {designer} looks at it and writes a plan, and that costs a little too.",
+		"{designer} uses the same model as {developer}, so a day costs more.\nBefore changing a screen, {designer} writes a plan, which costs a little too.",
 	teamCostLimitBefore: "Set a limit in ",
 	teamCostLimitAfter: ".",
 	agentBack: "Back to your team",
@@ -382,7 +387,7 @@ export const en = {
 	tierGitLocalNote: "Never your main branch.",
 	tierNetwork: "Use the internet",
 	tierNetworkNote: "Looks things up, reads web pages.",
-	tierGitRemote: "Push to GitHub and open pull requests",
+	tierGitRemote: "Send its own branches to GitHub while it works",
 	tierGitRemoteNote: "Off until you give it.",
 	tierExternal: "Do things outside your computer",
 	tierExternalNote: "Mail, posts, deploys. Only a payment asks you.",
@@ -442,7 +447,11 @@ export const en = {
 	suggestionsLine: "{agent} · {about}",
 	suggestionsAsked: "{agent} asks: {why}",
 	waitingTitle: "Waiting on you ({count})",
-	waitingList: "Waiting on you",
+	waitingGroupSetUp: "Needs setting up",
+	waitingGroupAnswer: "Needs your answer",
+	waitingGroupMerge: "Ready for you to merge",
+	waitingGroupCount: "{group} ({count})",
+	waitingAbout: "About “{title}”",
 	waitingNone: "Nothing waits on you.",
 	waitingApproval: "Approve the plan for {title}",
 	waitingAcceptance: "Accept {title}",
@@ -453,6 +462,9 @@ export const en = {
 	waitingAnswer: "Answer",
 	waitingHelpAnswer: "Answer",
 	waitingAdd: "Add",
+	waitingMerged: "I merged it",
+	waitingNotMergedYet:
+		"GitHub doesn\u2019t show it merged yet. Merge it there, then press again.",
 	waitingToolApproval: "{agent} wants to use {server}",
 	waitingToolApprovalLine:
 		"To {tool}, for {task} {title}. {agent} waits until you decide.",
@@ -533,7 +545,6 @@ export const en = {
 	laterQuestion: "{agent} shows this once you answer question {n}.",
 	suggests: "{agent} suggests",
 	ownWordsMany: "Or say it in your own words",
-	wordsWin: "Your own words are sent instead of the choice.",
 	ownWordsOne: "Or answer in your own words",
 	sendAnswer: "Send answer",
 	letDecide: "Let {agent} decide",
@@ -541,10 +552,8 @@ export const en = {
 	oneQuestionTitle: "{agent} has a question",
 	oneQuestionLead: "About {id}. {agent} stopped until you answer.",
 	asks: "{agent}, your {role}, asks",
-	aboutQuestions: "About questions",
-	aboutQuestionsBody:
-		"A question is not a problem. {agent} just needs your answer to carry on.",
-	aboutQuestionsNext: "Your answer goes straight into {agent}’s next session.",
+	aboutQuestionsTips:
+		"A question is not a problem: {agent} just needs your answer.\nYour answer goes straight into {agent}’s next session.",
 	approveTitle: "Approve the plan for {title}",
 	planTitle: "The plan for {title}",
 	approveLead: "Plan {id}.",
@@ -709,6 +718,8 @@ export const en = {
 	refuseAlreadyPaused: "The team is already paused.",
 	refuseNotPaused: "The team is already working.",
 	refuseAlreadyAnswered: "This question already has an answer.",
+	refuseNotMerged:
+		"It isn\u2019t merged yet. Merge it on this computer, then press again.",
 	refuseAlreadyAccepted: "You have already accepted this work.",
 	refuseNotWaiting:
 		"This is not waiting for you any more. Reload the page to see where it is now.",
@@ -789,8 +800,6 @@ export const en = {
 	rulesSpend: "Daily spending limit",
 	rulesSpendTitle: "What the team may spend",
 	rulesFinish: "How finished work is added",
-	rulesFinishPullRequest:
-		"Finished work opens a pull request for you to merge.",
 	rulesBranch: "Where finished work goes",
 	rulesBranchHint:
 		"The branch pull requests go into. Leave it empty for the repository’s main branch.",
@@ -812,6 +821,10 @@ export const en = {
 	filterCancelled: "Show cancelled",
 	laneTabs: "Lanes",
 	laneEmpty: "Nothing here right now.",
+	boardShowAll: "Show all {count}",
+	boardShowFewer: "Show fewer",
+	boardThinking: "{name} · {role} — thinking",
+	boardThinkingBare: "{name} — thinking",
 	markAccepted: "Accepted",
 	markWriting: "Writing",
 	markBuilding: "Building",
@@ -838,13 +851,17 @@ export const en = {
 	taskChecked: "Catervas checks it",
 	taskTry: "Try {try} of {of}.",
 	taskTabs: "About this task",
-	tabSummary: "Summary and checks",
+	tabSummary: "Summary",
 	tabHistory: "History",
 	tabPlan: "The plan",
 	tabChanges: "Code changes",
 	tabNotes: "Notes",
 	taskFor: "What this task is for",
-	taskChecks: "What Catervas checks",
+	taskChecks: "Checks",
+	checksSummary: "{passed} of {count} checks passed.",
+	checksFailedLast: "{n} failed last time.",
+	checksShowEach: "Show each check",
+	pageLoading: "Loading…",
 	checkFailed: "Failed last time",
 	checkNotRun: "Not run yet",
 	taskHistoryHint:
@@ -921,7 +938,6 @@ export const en = {
 	taskAddHint:
 		"Once the task is accepted, Catervas opens a pull request into your integration branch, for you to merge.",
 	taskAdd: "Add to the project",
-	taskAddNotYet: "Not yet: the task has not been accepted.",
 	taskAddByPullRequest:
 		"Accepted. Catervas opens a pull request for it, for you to merge.",
 	riskLowWhy: "Low. The team may accept it without you.",
@@ -946,12 +962,11 @@ export const en = {
 	costsByAgent: "By agent",
 	costsAgent: "Agent",
 	costsTodayColumn: "Today",
-	costsNow: "Right now",
 	costsResting:
-		"Resting is not a problem. An agent whose AI account reached its usage limit stops, writes down where it was, and picks up again at the time shown. The rest of the team keeps working.",
-	costsConversations: "Conversations today:",
-	costsConversationsWhy:
-		"Your chats with the team; they count toward the daily limit.",
+		"An agent whose AI account reached its usage limit rests.\nIt picks up again at the time Today shows.\nThe rest of the team keeps working.",
+	costsChatsRow: "Your chats with the team",
+	costsChatsInfo: "They count toward the daily limit.",
+	costsMore: "More numbers",
 	costsHowWell: "How well the team works",
 	costsWholeProject: "Across the whole project.",
 	metricNotYet: "Not yet: no work has been accepted",
@@ -1446,8 +1461,7 @@ export const en = {
 	waitingNeedsBrowser: "{agent}’s browser is off",
 	waitingNeedsBrowserLine:
 		"{designer} opens your app with Playwright. Turn Playwright on for {designer} on the Team page; until then {designer} takes no work, and nobody checks the screens {developer} builds.",
-	startsLegend:
-		"Start from the team Catervas suggests, from a ready-made team, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
+	startsLegend: "Where should your team come from?",
 	startSuggested: "The suggested team",
 	startSuggestedNote:
 		"Six people, one for each job. A good start for a first project.",
@@ -1485,18 +1499,18 @@ export const en = {
 		"{name} also holds your answers about what they may do, spending and checking plans. You will see them on the next screens, already chosen.",
 	templateMeta: "{names} · saved {date}",
 	finishLeadSaved:
-		"Accepted work opens a pull request for you to merge. {name}’s other answers are already chosen; change them if this project needs others.",
+		"{name}\u2019s other answers are already chosen; change them if this project needs others.",
 	finishCarried: "What they may do, from {name}",
 	finishCommands: "Run commands on this computer",
-	finishPush: "Send work to your online repository",
+	finishPush: "The Developer sends its work in progress online",
 	finishYes: "Yes.",
 	finishNo: "No.",
 	finishCommandsYes:
 		"The team may run commands, in a sealed box away from your other files.",
 	finishCommandsNo:
 		"Nobody runs commands; Catervas still runs every check itself.",
-	finishPushYes: "The Developer may send work to its own branches online.",
-	finishPushNo: "Everything stays on this computer.",
+	finishPushYes: "It sends its own branches to GitHub while it works.",
+	finishPushNo: "It keeps its work in progress on this computer.",
 	finishCarriedBefore:
 		"You answered these when you saved the team, so Catervas does not ask again. Change them any time in ",
 	finishCarriedAfter: ".",

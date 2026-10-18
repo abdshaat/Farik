@@ -205,6 +205,14 @@ describe("team page", () => {
 				.getAttribute("href"),
 		).toBe("/team/theo");
 		expect(screen.getByText(en.firstDay, { exact: false })).toBeTruthy();
+		expect(screen.getByText("5 agents work on Corner Bakery.")).toBeTruthy();
+		for (const line of en.teamPageRules.split("\n")) onlyInTips(line);
+		const changes = screen.getByRole("region", { name: en.teamChangesTitle });
+		expect(
+			within(changes)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual(en.teamChangesBody.split("\n"));
 		// The figure is the suggested six's; a team of another size is told how it compares.
 		expect(en.firstDay).toMatch(/A smaller team costs less\.$/);
 		await expectNoAxeViolations(container);
@@ -232,9 +240,7 @@ describe("team page", () => {
 		// A team of four has no sixth agent.
 		expect(cost.textContent).not.toMatch(/sixth/);
 		expect(
-			within(cost).getByText("so Iris adds to what a day costs", {
-				exact: false,
-			}),
+			within(cost).getByText("so a day costs more", { exact: false }),
 		).toBeTruthy();
 	});
 
@@ -265,23 +271,36 @@ describe("team page", () => {
 					line: "Waiting for Mira to approve a plan",
 					task_id: "CTV-21",
 				},
+				{
+					agent_id: "kai",
+					state: "waiting",
+					line: "Waiting on you: Kai asks which branch",
+					task_id: "CTV-3",
+				},
 			],
 		});
 		expect(
 			await within(card).findByText("Waiting for Mira to approve a plan"),
 		).toBeTruthy();
 		expect(within(card).queryByText(en.agentActive)).toBeNull();
+		const kai = within(list)
+			.getByText("Kai persona")
+			.closest("li") as HTMLElement;
+		expect(await within(kai).findByText("Waiting on you")).toBeTruthy();
+		expect(kai.textContent).not.toContain("which branch");
 		expect(face.style.getPropertyValue("--ring")).toBe(
 			"var(--catervas-color-role-ui-ux-designer)",
 		);
 		// The cost section says what the Designer, and its plans, add.
-		expect(
-			screen.getByText(
-				"Iris uses the same model as Theo, so Iris adds to what a day costs. Before Iris changes a screen, Iris looks at it and writes a plan, and that costs a little too.",
-				{ exact: false },
-			),
-		).toBeTruthy();
 		const cost = screen.getByRole("region", { name: en.teamCostTitle });
+		expect(
+			within(cost)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			"Iris uses the same model as Theo, so a day costs more.",
+			"Before changing a screen, Iris writes a plan, which costs a little too.",
+		]);
 		expect(
 			within(cost).getByRole("link", { name: "Costs" }).getAttribute("href"),
 		).toBe("/costs");
@@ -877,7 +896,7 @@ describe("team page", () => {
 		}) as HTMLButtonElement;
 		expect(save.disabled).toBe(true);
 		fireEvent.click(
-			within(may).getByRole("radio", { name: /^Yes, on its own branches/ }),
+			within(may).getByRole("radio", { name: /^Yes, to its own branches/ }),
 		);
 		const effect = "Developers may now push their work and open pull requests.";
 		const draft = await validated(s, [effect]);
@@ -913,7 +932,9 @@ describe("team page", () => {
 			),
 		).toBe(true);
 		expect(
-			picked(within(may).getByRole("radio", { name: /^No, keep everything/ })),
+			picked(
+				within(may).getByRole("radio", { name: /^No, keep work in progress/ }),
+			),
 		).toBe(true);
 		fireEvent.click(within(may).getByRole("button", { name: en.agentSave }));
 		await waitFor(() => expect(s.calls("team.save")).toHaveLength(2));
@@ -954,12 +975,20 @@ describe("team page", () => {
 	});
 
 	it("says_finished_work_opens_a_pull_request_from_settings", async () => {
-		const { part } = await settings(TEAM, "/settings/work");
+		const { part } = await settings(TEAM, "/settings/work", { online: true });
 
-		// Finished work always opens a pull request (ADR 0061): said, and nothing to choose.
+		// Finished work opens a pull request when the project is online (ADR 0061): said, and
+		// nothing to choose.
 		const finish = part(en.rulesFinish);
-		expect(within(finish).getByText(en.rulesFinishPullRequest)).toBeTruthy();
+		expect(within(finish).getByText(en.finishLead)).toBeTruthy();
 		expect(within(finish).queryByRole("radio")).toBeNull();
+		cleanup();
+
+		// Not online: it waits on this computer for a merge by hand.
+		const local = await settings(TEAM, "/settings/work", { online: false });
+		expect(
+			within(local.part(en.rulesFinish)).getByText(en.finishLeadLocal),
+		).toBeTruthy();
 	});
 
 	it("sets_the_integration_branch", async () => {
@@ -2200,9 +2229,8 @@ describe("team templates", () => {
 	it("says_the_team_needs_a_product_manager_alone", async () => {
 		await opened("/team");
 		const lead = await screen.findByText(/agents work on/);
-		expect(lead.textContent).toBe(
-			"5 agents work on Corner Bakery. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
-		);
+		expect(lead.textContent).toBe("5 agents work on Corner Bakery.");
+		onlyInTips("A team needs a Product Manager.");
 	});
 
 	it("refusedLine_knows_no_developer_rule", async () => {

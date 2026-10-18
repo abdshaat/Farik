@@ -14,7 +14,7 @@ async function opened(
 	row: object = ORDER_ROW,
 ) {
 	const { container, s } = await todayWithOrders({ waiting: [row] });
-	const list = await screen.findByRole("list", { name: en.waitingList });
+	const list = await screen.findByRole("list", { name: en.waitingGroupAnswer });
 	fireEvent.click(
 		within(within(list).getByRole("listitem")).getByRole("button", {
 			name: button,

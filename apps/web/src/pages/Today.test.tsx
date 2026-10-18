@@ -60,6 +60,7 @@ import {
 } from "../test/render-app.tsx";
 import { bodyOf, refusedBy } from "../test/schema.ts";
 import styles from "./PostGoingOut.module.css";
+import todayStyles from "./Today.module.css";
 import { Today } from "./Today.tsx";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
@@ -134,7 +135,19 @@ describe("today", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
 	it("shows_the_team_band", async () => {
-		const { container } = await today({});
+		const { container } = await today({
+			activity: {
+				activity: [
+					...ACTIVITY.activity.slice(0, 2),
+					{
+						agent_id: "theo",
+						state: "waiting",
+						line: "Waiting on you: Could you run git checkout in the worktree, then tell me so I can request verifying?",
+						task_id: "CTV-7",
+					},
+				],
+			},
+		});
 		const band = await screen.findByRole("list", { name: en.teamBand });
 		const entries = within(band).getAllByRole("listitem");
 		expect(entries).toHaveLength(3);
@@ -157,6 +170,10 @@ describe("today", () => {
 			within(ada as HTMLElement).getByText("Resting until 15:40 UTC"),
 		).toBeTruthy();
 		expect(within(theo as HTMLElement).getByTitle("Developer")).toBeTruthy();
+		const waiting = within(theo as HTMLElement).getByText("Waiting on you");
+		expect(waiting.getAttribute("title")).toBe("Waiting on you");
+		expect(waiting.className).toContain(todayStyles.line);
+		expect(within(theo as HTMLElement).queryByText(/git checkout/)).toBeNull();
 		picturesOpenTheirAgents(band, TEAM.agents);
 		await expectNoAxeViolations(container);
 	});
@@ -310,7 +327,9 @@ describe("today", () => {
 				},
 			],
 		});
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupMerge,
+		});
 		const [folder, task] = within(list).getAllByRole(
 			"listitem",
 		) as HTMLElement[];
@@ -345,12 +364,70 @@ describe("today", () => {
 			command: { command: "folder_change_integrate", body: { change: 1 } },
 		});
 		expect(refusedBy("folderChangeIntegrateBody", bodyOf(sent))).toEqual([]);
-		// A task's row still goes to its page.
+		// A task's row has no "Add" link: its title is the way to the task's page.
+		expect(
+			within(task as HTMLElement).queryByRole("link", { name: "Add" }),
+		).toBeNull();
 		expect(
 			within(task as HTMLElement)
-				.getByRole("link", { name: "Add" })
+				.getByRole("link", { name: "Add the photos to your project" })
 				.getAttribute("href"),
 		).toBe("/tasks/CTV-5/accept");
+	});
+
+	it("checks_a_merge_from_its_row", async () => {
+		const { s, container } = await today({
+			waiting: [
+				{
+					task_id: "CTV-4",
+					kind: "integration",
+					agent_id: "theo",
+					title: "the menu page",
+					line: "Accepted, waiting for you to merge it",
+				},
+			],
+		});
+		const merged = await screen.findByRole("button", {
+			name: en.waitingMerged,
+		});
+		expect(screen.queryByRole("link", { name: "Add" })).toBeNull();
+		expect(
+			screen
+				.getByRole("link", { name: "Add the menu page to your project" })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-4/accept");
+		await expectNoAxeViolations(container);
+
+		// The pull request is still open: nothing happened, and the row says so.
+		fireEvent.click(merged);
+		const first = await sentCommand(s);
+		expect(first.params).toEqual({
+			command: { command: "task_integrate", body: { task_id: "CTV-4" } },
+		});
+		await s.reply(first, { said: "waiting for GitHub", events: [] });
+		expect((await screen.findByRole("status")).textContent).toBe(
+			en.waitingNotMergedYet,
+		);
+
+		// No origin and the branch is not in: refused in words.
+		fireEvent.click(screen.getByRole("button", { name: en.waitingMerged }));
+		const second = await sentCommand(s, 2);
+		await s.reply(second, {
+			error: { kind: "refused", detail: "not_merged: not in main" },
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.refuseNotMerged,
+		);
+
+		// Merged: the command records it, and the next list no longer holds the row.
+		fireEvent.click(screen.getByRole("button", { name: en.waitingMerged }));
+		const third = await sentCommand(s, 3);
+		await s.reply(third, { said: "added", events: [41] });
+		await eventArrives(s, 41);
+		await answerQuery(s, "waiting.list", { waiting: [] });
+		expect(await screen.findByText(en.waitingNone)).toBeTruthy();
+		expect(screen.queryByRole("button", { name: en.waitingMerged })).toBeNull();
+		await expectNoAxeViolations(container);
 	});
 
 	it("keeps_a_quiet_card_until_it_starts", async () => {
@@ -383,8 +460,15 @@ describe("today", () => {
 		expect(
 			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
 		).toBeTruthy();
-		const waitingList = screen.getByRole("list", { name: en.waitingList });
-		expect(waitingList.contains(title)).toBe(false);
+		for (const name of [
+			en.waitingGroupSetUp,
+			en.waitingGroupAnswer,
+			en.waitingGroupMerge,
+		]) {
+			for (const list of screen.queryAllByRole("list", { name })) {
+				expect(list.contains(title)).toBe(false);
+			}
+		}
 		await expectNoAxeViolations(container);
 
 		fireEvent.click(start);
@@ -433,7 +517,7 @@ describe("today", () => {
 		expect(
 			await screen.findByRole("heading", { name: "Waiting on you (2)" }),
 		).toBeTruthy();
-		const list = screen.getByRole("list", { name: en.waitingList });
+		const list = screen.getByRole("list", { name: en.waitingGroupAnswer });
 		const items = within(list).getAllByRole("listitem") as HTMLElement[];
 		const region = await screen.findByRole("region", {
 			name: en.docChangesTitle,
@@ -516,6 +600,7 @@ describe("today", () => {
 				row("CTV-3", "question", "the launch post", "mira"),
 				row("CTV-4", "help", "the menu page", "theo"),
 				row("CTV-5", "integration", "the photos", "theo"),
+				row("CTV-6", "preview_missing", "the preview", "mira"),
 			],
 		});
 		// A key that works adds no row.
@@ -525,10 +610,19 @@ describe("today", () => {
 			source: "keychain",
 		});
 		expect(
-			await screen.findByRole("heading", { name: "Waiting on you (5)" }),
+			await screen.findByRole("heading", { name: "Waiting on you (6)" }),
 		).toBeTruthy();
 		expect(screen.queryByText(en.waitingKeyRefused)).toBeNull();
-		const list = screen.getByRole("list", { name: en.waitingList });
+		expect(
+			screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent),
+		).toEqual([
+			"Needs setting up (1)",
+			"Needs your answer (4)",
+			"Ready for you to merge (1)",
+		]);
+		const setUp = screen.getByRole("list", { name: en.waitingGroupSetUp });
+		const list = screen.getByRole("list", { name: en.waitingGroupAnswer });
+		const merge = screen.getByRole("list", { name: en.waitingGroupMerge });
 		const rows = within(list).getAllByRole("listitem") as HTMLElement[];
 		const expected = [
 			[
@@ -545,13 +639,8 @@ describe("today", () => {
 			],
 			["question", "Mira has a question", "Answer", "/tasks/CTV-3/questions"],
 			["help", "Theo needs your help", "Answer", "/tasks/CTV-4/help"],
-			[
-				"integration",
-				"Add the photos to your project",
-				"Add",
-				"/tasks/CTV-5/accept",
-			],
 		] as const;
+		expect(rows).toHaveLength(4);
 		expected.forEach(([kind, title, word, route], i) => {
 			const one = rows[i] as HTMLElement;
 			expect(within(one).getByText(title)).toBeTruthy();
@@ -559,7 +648,37 @@ describe("today", () => {
 			const link = within(one).getByRole("link", { name: word });
 			expect(link.getAttribute("href")).toBe(route);
 		});
-		picturesOpenTheirAgents(list, TEAM.agents);
+		// A question and a stuck task name their task and clamp the agent's words.
+		expect(
+			within(rows[2] as HTMLElement).getByText("About “the launch post”"),
+		).toBeTruthy();
+		expect(
+			within(rows[2] as HTMLElement).getByText("question line").className,
+		).toContain(todayStyles.clamp3);
+		expect(
+			within(rows[3] as HTMLElement).getByText("About “the menu page”"),
+		).toBeTruthy();
+		const setUpRow = within(setUp).getByRole("listitem");
+		expect(
+			within(setUpRow).getByText("Tell Catervas how to open your app"),
+		).toBeTruthy();
+		expect(
+			within(setUpRow)
+				.getByRole("link", { name: "Open Settings" })
+				.getAttribute("href"),
+		).toBe("/settings/your-app");
+		const mergeRow = within(merge).getByRole("listitem");
+		expect(
+			within(mergeRow)
+				.getByRole("link", { name: "Add the photos to your project" })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-5/accept");
+		expect(
+			within(mergeRow).getByRole("button", { name: en.waitingMerged }),
+		).toBeTruthy();
+		for (const group of [setUp, list, merge]) {
+			picturesOpenTheirAgents(group, TEAM.agents);
+		}
 		// The acceptance row says the checks passed, when every one did.
 		await answerQuery(s, "task.checks", {
 			checks: [1, 2, 3].map((n) => ({
@@ -598,6 +717,34 @@ describe("today", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("folds_the_merge_group_after_three", async () => {
+		await today({
+			waiting: [11, 12, 13, 14, 15].map((n) => ({
+				task_id: `CTV-${n}`,
+				kind: "integration",
+				agent_id: "theo",
+				title: `task ${n}`,
+				line: "waits",
+			})),
+		});
+		expect(
+			await screen.findByRole("heading", {
+				name: "Ready for you to merge (5)",
+			}),
+		).toBeTruthy();
+		const merge = () =>
+			screen.getByRole("list", { name: en.waitingGroupMerge });
+		expect(within(merge()).getAllByRole("listitem")).toHaveLength(3);
+		const all = screen.getByRole("button", { name: "Show all 5" });
+		expect(all.getAttribute("aria-expanded")).toBe("false");
+		fireEvent.click(all);
+		expect(within(merge()).getAllByRole("listitem")).toHaveLength(5);
+		const fewer = screen.getByRole("button", { name: en.suggestionsShowFewer });
+		expect(fewer.getAttribute("aria-expanded")).toBe("true");
+		fireEvent.click(fewer);
+		expect(within(merge()).getAllByRole("listitem")).toHaveLength(3);
+	});
+
 	it("today_skips_a_kind_it_does_not_know", async () => {
 		const { container } = await today({
 			waiting: [
@@ -618,7 +765,9 @@ describe("today", () => {
 			],
 		});
 
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		const rows = within(list).getAllByRole("listitem");
 		expect(rows).toHaveLength(1);
 		expect(
@@ -649,7 +798,9 @@ describe("today", () => {
 				},
 			],
 		});
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		const row = within(list).getByRole("listitem");
 		expect(within(row).getByText("Theo wants to use github")).toBeTruthy();
 		expect(
@@ -703,7 +854,9 @@ describe("today", () => {
 				],
 			},
 		});
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupSetUp,
+		});
 		const [missing, sandbox] = within(list).getAllByRole(
 			"listitem",
 		) as HTMLElement[];
@@ -753,7 +906,9 @@ describe("today", () => {
 				],
 			},
 		});
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupSetUp,
+		});
 		const [row] = within(list).getAllByRole("listitem") as HTMLElement[];
 		expect(
 			within(row as HTMLElement).getByText("Iris’s browser is off"),
@@ -782,7 +937,7 @@ describe("today", () => {
 		expect(
 			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
 		).toBeTruthy();
-		const list = screen.getByRole("list", { name: en.waitingList });
+		const list = screen.getByRole("list", { name: en.waitingGroupSetUp });
 		const [row] = within(list).getAllByRole("listitem") as HTMLElement[];
 		expect(
 			within(row as HTMLElement).getByText(
@@ -996,7 +1151,9 @@ describe("today", () => {
 			waiting: [PLAN_ROW],
 			team: WITH_KAI,
 		});
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		const row = within(list).getByRole("listitem");
 		expect(
 			within(row).getByText(`Marketing plan to approve: ${TITLE}`),
@@ -1019,7 +1176,9 @@ describe("today", () => {
 
 	it("review_opens_the_plan_page", async () => {
 		const { s } = await today({ waiting: [PLAN_ROW], team: WITH_KAI });
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		const review = within(list).getByRole("link", { name: en.waitingReview });
 		expect(review.getAttribute("href")).toBe("/marketing/plans/MP-3");
 		fireEvent.click(review);
@@ -1152,7 +1311,7 @@ describe("today's posts", () => {
 			await screen.findByRole("list", { name: en.didNotGoOutList }),
 		).getAllByRole("listitem");
 		const asking = within(
-			screen.getByRole("list", { name: en.waitingList }),
+			screen.getByRole("list", { name: en.waitingGroupAnswer }),
 		).getAllByRole("listitem");
 		expect([...going, ...over, ...asking]).toHaveLength(4 + 4 + 1);
 		for (const row of [...going, ...over, ...asking]) {
@@ -1232,7 +1391,9 @@ describe("today's posts", () => {
 	it("a_requested_post_offers_post_it_and_dont_post", async () => {
 		const { container, s } = await todayWith({ waiting: [POST_ROW] });
 
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		const row = within(list).getByRole("listitem");
 		expect(
 			within(row).getByText("Kai wants to post on Instagram"),
@@ -1358,7 +1519,9 @@ describe("a marketing plan's ads and their budget", () => {
 			waiting,
 			team: MARKETING_TEAM,
 		});
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		const [row] = within(list).getAllByRole("listitem");
 		return { container, s, row: row as HTMLElement };
 	}
@@ -1516,7 +1679,9 @@ describe("a purchase order the Procurement Specialist suggests", () => {
 	/** Today with the rows waiting; the rows of the waiting list. */
 	async function rowsOf(...waiting: unknown[]) {
 		const { container, s } = await todayWithOrders({ waiting });
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		return {
 			container,
 			s,
@@ -2229,7 +2394,9 @@ describe("a data pipeline waiting on the owner", () => {
 	afterEach(() => vi.useRealTimers());
 
 	const rowOf = async (name: string) => {
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		const found = within(list)
 			.getAllByRole("listitem")
 			.find((one) =>
@@ -2528,7 +2695,7 @@ describe("suggested connections", () => {
 		);
 	});
 
-	it("shows_four_then_all", async () => {
+	it("shows_two_then_all", async () => {
 		await today({
 			team: only(mira, ada, theo),
 			kits: [
@@ -2537,7 +2704,7 @@ describe("suggested connections", () => {
 				{ role: "software_developer", connectors: [KIT_NOTION, KIT_LINEAR] },
 			],
 		});
-		expect(items()).toHaveLength(4);
+		expect(items()).toHaveLength(2);
 		const all = screen.getByRole("button", { name: "Show all 6" });
 		expect(all.getAttribute("aria-expanded")).toBe("false");
 		expect(all.getAttribute("aria-controls")).toBe("suggestions-list");
@@ -2545,6 +2712,29 @@ describe("suggested connections", () => {
 		expect(items()).toHaveLength(6);
 		const fewer = screen.getByRole("button", { name: en.suggestionsShowFewer });
 		expect(fewer.getAttribute("aria-expanded")).toBe("true");
+	});
+
+	it("puts_what_moved_before_the_suggested_connections", async () => {
+		await today({
+			team: only(mira, ada),
+			kits: [
+				pmKit(KIT_NOTION, KIT_LINEAR),
+				{ role: "architect", connectors: [KIT_NOTION] },
+			],
+			moved: [
+				{ at: "2026-01-01T10:00:00Z", by: "mira", line: "Mira wrote a plan." },
+			],
+		});
+		const moved = await screen.findByRole("heading", { name: en.movedTitle });
+		const suggested = await screen.findByRole("heading", {
+			name: en.suggestionsTitle,
+		});
+		expect(
+			moved.compareDocumentPosition(suggested) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(items()).toHaveLength(2);
+		expect(screen.getByRole("button", { name: "Show all 3" })).toBeTruthy();
 	});
 
 	it("orders_by_team_then_kit", async () => {
@@ -2555,6 +2745,7 @@ describe("suggested connections", () => {
 				pmKit(KIT_LINEAR, KIT_NOTION),
 			],
 		});
+		fireEvent.click(await screen.findByRole("button", { name: "Show all 4" }));
 		expect(
 			items().map((row) => row.querySelector("strong")?.textContent),
 		).toEqual(["Linear", "Notion", "Notion", "Linear"]);
