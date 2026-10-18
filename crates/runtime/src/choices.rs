@@ -5,6 +5,7 @@
 use std::str::FromStr as _;
 
 use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::governor::gates::return_from_block;
 use catervas_core::team::Team;
 use catervas_protocol::event::{EventBody, EventKind};
 use catervas_store::activity::status_in_words;
@@ -32,6 +33,8 @@ pub struct Offer<'a> {
     pub max_sessions: u64,
     /// The contract's dollars, which "Give it more room" gives again.
     pub max_cost_usd: f64,
+    /// The status the task was in when it was blocked, when known: an answer goes back there.
+    pub blocked_from: Option<TaskStatus>,
 }
 
 /// What a choice does when it is picked.
@@ -191,6 +194,27 @@ fn carry_on(offer: &Offer<'_>, then: &str) -> Option<Choice> {
         })
 }
 
+/// A blocked task goes back where the block came from, or to the Product Manager to change the
+/// plan, unless the block came from the plan (ADR 0069).
+fn answer_a_block(offer: &Offer<'_>) -> Vec<Choice> {
+    let (id, who, pm) = (offer.task_id, offer.who, offer.product_manager);
+    let back = return_from_block(offer.blocked_from);
+    let mut offered = vec![choice(
+        "Answer and carry on",
+        format!("{who} reads your answer and carries on with {id}."),
+        resolve(back, None, false),
+    )];
+    if back != TaskStatus::Refining {
+        offered.push(choice(
+            &format!("Ask {pm} to change the plan"),
+            rewrite(offer),
+            resolve(TaskStatus::Refining, None, false),
+        ));
+    }
+    offered.push(cancel(offer));
+    offered
+}
+
 fn more_room(offer: &Offer<'_>) -> Vec<Choice> {
     let mut spent = Vec::new();
     if let Some(before) = offer.before {
@@ -242,23 +266,7 @@ pub fn escalation_choices(offer: &Offer<'_>) -> Vec<Choice> {
             cancel(offer),
         ],
         "budget" | "sessions" => more_room(offer),
-        "blocker_age" => vec![
-            choice(
-                "Answer and carry on",
-                format!("{who} reads your answer and carries on with {id}."),
-                resolve(TaskStatus::InProgress, None, false),
-            ),
-            change(offer),
-            cancel(offer),
-        ],
-        BLOCKED => vec![
-            choice(
-                "Answer and carry on",
-                format!("{who} reads your answer and carries on with {id}."),
-                resolve(TaskStatus::InProgress, None, false),
-            ),
-            cancel(offer),
-        ],
+        "blocker_age" | BLOCKED => answer_a_block(offer),
         "permission" | "explicit_request" => {
             let mut offered: Vec<Choice> = carry_on(offer, "is told what you wrote")
                 .into_iter()
@@ -335,9 +343,20 @@ pub fn offer_for(
             EventBody::TaskTransitioned(body) => TaskStatus::from_str(&body.from.to_string()).ok(),
             _ => None,
         });
-    let who = projections
-        .task(task_id)?
-        .and_then(|row| row.assignee_id)
+    // Whoever blocked the task is who the owner answers, and where it came from is where the
+    // answer goes (ADR 0069).
+    let blocking = if blocked || before == Some(TaskStatus::Blocked) {
+        last_move_into(&history, TaskStatus::Blocked)
+    } else {
+        None
+    };
+    let blocked_from = blocking.and_then(|event| match &event.body {
+        EventBody::TaskTransitioned(body) => TaskStatus::from_str(&body.from.to_string()).ok(),
+        _ => None,
+    });
+    let who = blocking
+        .and_then(|event| event.envelope.ids.agent_id.clone())
+        .or(projections.task(task_id)?.and_then(|row| row.assignee_id))
         .map_or_else(|| "The team".to_string(), |id| name_of(team, &id));
     let product_manager = team
         .active_agents()
@@ -359,6 +378,7 @@ pub fn offer_for(
         product_manager: &product_manager,
         max_sessions: contract.budget.max_sessions.get(),
         max_cost_usd: contract.budget.max_cost_usd,
+        blocked_from,
     })))
 }
 
@@ -392,11 +412,68 @@ mod tests {
             product_manager: "Mira",
             max_sessions: 4,
             max_cost_usd: 5.0,
+            blocked_from: None,
         }
     }
 
     fn words(choice: &Choice) -> (&str, &str) {
         (&choice.label, &choice.next)
+    }
+
+    #[test]
+    fn answers_a_block_where_it_came_from() {
+        let from = |reason, before, blocked_from| {
+            let mut offer = offer(reason, before);
+            offer.who = "Ada";
+            offer.blocked_from = blocked_from;
+            escalation_choices(&offer)
+        };
+        let reviewed = from("blocked", None, Some(TaskStatus::Verifying));
+        assert_eq!(
+            reviewed
+                .iter()
+                .map(|choice| choice.label.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Answer and carry on",
+                "Ask Mira to change the plan",
+                "Cancel the task"
+            ]
+        );
+        assert_eq!(
+            reviewed
+                .iter()
+                .map(|choice| choice.action.clone())
+                .collect::<Vec<_>>(),
+            [
+                resolve(TaskStatus::Verifying, None, false),
+                resolve(TaskStatus::Refining, None, false),
+                resolve(TaskStatus::Cancelled, None, false)
+            ]
+        );
+        assert_eq!(
+            reviewed[0].next,
+            "Ada reads your answer and carries on with CTV-14."
+        );
+        let planned = from("blocked", None, Some(TaskStatus::Refining));
+        assert_eq!(
+            planned
+                .iter()
+                .map(|choice| choice.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Answer and carry on", "Cancel the task"]
+        );
+        assert_eq!(
+            planned[0].action,
+            resolve(TaskStatus::Refining, None, false)
+        );
+        let aged = from(
+            "blocker_age",
+            Some(TaskStatus::Blocked),
+            Some(TaskStatus::InProgress),
+        );
+        assert_eq!(aged[0].action, resolve(TaskStatus::InProgress, None, false));
+        assert_eq!(aged[1].label, "Ask Mira to change the plan");
     }
 
     #[test]

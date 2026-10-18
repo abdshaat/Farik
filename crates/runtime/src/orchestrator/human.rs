@@ -3981,6 +3981,7 @@ mod tests {
                 extra_room: false
             }
         );
+        assert_eq!(choices[1].label, "Ask pm to change the plan");
 
         let orchestrator = an_orchestrator(&harness);
         handled(
@@ -4005,6 +4006,40 @@ mod tests {
         let said = crate::orchestrator::messages::human_message(&history, "dev-a")
             .expect("the answer reaches the next session");
         assert!(said.contains("Use the staging API."), "{said}");
+    }
+
+    /// ADR 0069: a task its reviewer blocked goes back into its review on the owner's answer, and
+    /// not to the assignee's work.
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_reviewers_block_is_answered_back_into_its_review() {
+        let harness = Harness::new("human-reviewer-blocked", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness
+            .project
+            .moved("CTV-1", "in_progress", "verifying", &people);
+        let mut body = people;
+        body["blocker"] = json!({ "description": "the checks cannot run git", "needed": "git" });
+        harness
+            .project
+            .moved("CTV-1", "verifying", "blocked", &body);
+        let orchestrator = an_orchestrator(&harness);
+        let resolve = |to| Command::EscalationResolve {
+            task_id: task("CTV-1"),
+            to,
+            message: "Here is the output".to_string(),
+            extra_tries: None,
+            extra_room: false,
+        };
+
+        refused(&orchestrator, resolve(TaskStatus::InProgress)).await;
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Blocked);
+        assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
+
+        handled(&orchestrator, resolve(TaskStatus::Verifying)).await;
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.events(&[EventKind::EscalationResolved]).len(), 1);
     }
 
     #[tokio::test]
