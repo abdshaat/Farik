@@ -456,6 +456,9 @@ export const en = {
 	waitingAnswer: "Answer",
 	waitingHelpAnswer: "Answer",
 	waitingAdd: "Add",
+	waitingMerged: "I merged it",
+	waitingNotMergedYet:
+		"GitHub doesn\u2019t show it merged yet. Merge it there, then press again.",
 	waitingToolApproval: "{agent} wants to use {server}",
 	waitingToolApprovalLine:
 		"To {tool}, for {task} {title}. {agent} waits until you decide.",
@@ -709,6 +712,8 @@ export const en = {
 	refuseAlreadyPaused: "The team is already paused.",
 	refuseNotPaused: "The team is already working.",
 	refuseAlreadyAnswered: "This question already has an answer.",
+	refuseNotMerged:
+		"It isn\u2019t merged yet. Merge it on this computer, then press again.",
 	refuseAlreadyAccepted: "You have already accepted this work.",
 	refuseNotWaiting:
 		"This is not waiting for you any more. Reload the page to see where it is now.",

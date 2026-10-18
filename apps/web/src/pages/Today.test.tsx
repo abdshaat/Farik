@@ -364,12 +364,70 @@ describe("today", () => {
 			command: { command: "folder_change_integrate", body: { change: 1 } },
 		});
 		expect(refusedBy("folderChangeIntegrateBody", bodyOf(sent))).toEqual([]);
-		// A task's row still goes to its page.
+		// A task's row has no "Add" link: its title is the way to the task's page.
+		expect(
+			within(task as HTMLElement).queryByRole("link", { name: "Add" }),
+		).toBeNull();
 		expect(
 			within(task as HTMLElement)
-				.getByRole("link", { name: "Add" })
+				.getByRole("link", { name: "Add the photos to your project" })
 				.getAttribute("href"),
 		).toBe("/tasks/CTV-5/accept");
+	});
+
+	it("checks_a_merge_from_its_row", async () => {
+		const { s, container } = await today({
+			waiting: [
+				{
+					task_id: "CTV-4",
+					kind: "integration",
+					agent_id: "theo",
+					title: "the menu page",
+					line: "Accepted, waiting for you to merge it",
+				},
+			],
+		});
+		const merged = await screen.findByRole("button", {
+			name: en.waitingMerged,
+		});
+		expect(screen.queryByRole("link", { name: "Add" })).toBeNull();
+		expect(
+			screen
+				.getByRole("link", { name: "Add the menu page to your project" })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-4/accept");
+		await expectNoAxeViolations(container);
+
+		// The pull request is still open: nothing happened, and the row says so.
+		fireEvent.click(merged);
+		const first = await sentCommand(s);
+		expect(first.params).toEqual({
+			command: { command: "task_integrate", body: { task_id: "CTV-4" } },
+		});
+		await s.reply(first, { said: "waiting for GitHub", events: [] });
+		expect((await screen.findByRole("status")).textContent).toBe(
+			en.waitingNotMergedYet,
+		);
+
+		// No origin and the branch is not in: refused in words.
+		fireEvent.click(screen.getByRole("button", { name: en.waitingMerged }));
+		const second = await sentCommand(s, 2);
+		await s.reply(second, {
+			error: { kind: "refused", detail: "not_merged: not in main" },
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.refuseNotMerged,
+		);
+
+		// Merged: the command records it, and the next list no longer holds the row.
+		fireEvent.click(screen.getByRole("button", { name: en.waitingMerged }));
+		const third = await sentCommand(s, 3);
+		await s.reply(third, { said: "added", events: [41] });
+		await eventArrives(s, 41);
+		await answerQuery(s, "waiting.list", { waiting: [] });
+		expect(await screen.findByText(en.waitingNone)).toBeTruthy();
+		expect(screen.queryByRole("button", { name: en.waitingMerged })).toBeNull();
+		await expectNoAxeViolations(container);
 	});
 
 	it("keeps_a_quiet_card_until_it_starts", async () => {
@@ -611,11 +669,13 @@ describe("today", () => {
 		).toBe("/settings/your-app");
 		const mergeRow = within(merge).getByRole("listitem");
 		expect(
-			within(mergeRow).getByText("Add the photos to your project"),
-		).toBeTruthy();
-		expect(
-			within(mergeRow).getByRole("link", { name: "Add" }).getAttribute("href"),
+			within(mergeRow)
+				.getByRole("link", { name: "Add the photos to your project" })
+				.getAttribute("href"),
 		).toBe("/tasks/CTV-5/accept");
+		expect(
+			within(mergeRow).getByRole("button", { name: en.waitingMerged }),
+		).toBeTruthy();
 		for (const group of [setUp, list, merge]) {
 			picturesOpenTheirAgents(group, TEAM.agents);
 		}

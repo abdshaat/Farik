@@ -61,11 +61,9 @@ test("a high-risk request needs no approval, and its accepted work waits for the
 		).toBeVisible();
 		await screenshots(page, "gate");
 
-		// The owner merges it on their own checkout, then adds it.
+		// The owner merges it on their own checkout, then says so from Today, with no detour.
 		mergeByHand(serve.project, branch);
-		await page.getByRole("link", { name: "Add", exact: true }).click();
-		await expect(page).toHaveURL(/\/tasks\/CTV-1\/accept$/);
-		await page.getByRole("button", { name: "Add to project" }).click();
+		await page.getByRole("button", { name: "I merged it" }).click();
 		await expect
 			.poll(
 				() =>
@@ -74,6 +72,7 @@ test("a high-risk request needs no approval, and its accepted work waits for the
 				{ timeout: 30_000 },
 			)
 			.toBe(1);
+		await expect(page.getByText(/^Add .* to your project$/)).toHaveCount(0);
 	} finally {
 		await serve.stop();
 	}

@@ -644,15 +644,25 @@ function WaitingRow({
 }) {
 	const kind = KINDS[item.kind as Kind];
 	const name = agent?.displayName ?? item.agentId ?? "";
-	const { busy, refusal, send } = useCommand(() => {});
+	const [notYet, setNotYet] = useState(false);
+	// A merge checked and not yet seen answers with no events (SPEC 4.2); the list refetches on any event.
+	const { busy, refusal, send } = useCommand((done) =>
+		setNotYet(done.events.length === 0),
+	);
 	const titleId = `waiting-${item.kind}-${item.taskId ?? `folder-${item.folderChange}`}`;
+	const title = t(kind.title, { title: item.title, agent: name });
+	const mergeCheck = item.kind === "integration" && item.taskId !== undefined;
 	return (
 		<li className={styles.row}>
 			<AgentPicture agent={agent} />
 			<div className={styles.rowText}>
-				<strong id={titleId}>
-					{t(kind.title, { title: item.title, agent: name })}
-				</strong>
+				{mergeCheck ? (
+					<Link to={`/tasks/${item.taskId}/accept`}>
+						<strong id={titleId}>{title}</strong>
+					</Link>
+				) : (
+					<strong id={titleId}>{title}</strong>
+				)}
 				{(item.kind === "question" || item.kind === "help") && (
 					<span className={styles.muted}>
 						{t("waitingAbout", { title: item.title })}
@@ -670,13 +680,35 @@ function WaitingRow({
 				{item.kind === "acceptance" && item.taskId && (
 					<ChecksPassed taskId={item.taskId} />
 				)}
-				{refusal && (
+				{refusal ? (
 					<p role="alert" className={styles.alert}>
 						{refusal}
 					</p>
+				) : (
+					notYet && (
+						<p role="status" className={styles.muted}>
+							{t("waitingNotMergedYet")}
+						</p>
+					)
 				)}
 			</div>
-			{item.folderChange !== undefined ? (
+			{mergeCheck ? (
+				<div className={styles.decide}>
+					<Button
+						busy={busy}
+						aria-describedby={titleId}
+						onClick={() => {
+							setNotYet(false);
+							send({
+								command: "task_integrate",
+								body: { taskId: item.taskId },
+							});
+						}}
+					>
+						{t("waitingMerged")}
+					</Button>
+				</div>
+			) : item.folderChange !== undefined ? (
 				<div className={styles.decide}>
 					<Button
 						busy={busy}
