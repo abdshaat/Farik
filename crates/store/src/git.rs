@@ -1086,6 +1086,46 @@ impl Git {
         }
     }
 
+    /// The git store a worktree of this repository uses, as an absolute path: what the checks'
+    /// container mounts read-only so that the worktree's `.git` file resolves (ADR 0069).
+    ///
+    /// # Errors
+    ///
+    /// When `worktree` is not a working tree of this repository, or git fails.
+    pub fn common_dir(&self, worktree: &Path) -> Result<PathBuf, GitError> {
+        self.require_worktree_of_this_repository(worktree)?;
+        Ok(PathBuf::from(run_git(worktree, &COMMON_DIRECTORY)?))
+    }
+
+    /// Whether the repository's settings hold a password: a remote URL with a user part, or an
+    /// `http.*.extraheader`. A store that does is never shown to a container that has the network
+    /// (ADR 0069).
+    ///
+    /// # Errors
+    ///
+    /// When git cannot be run.
+    pub fn config_holds_a_secret(&self) -> Result<bool, GitError> {
+        let urls = self.settings_matching(r"^remote\..*\.(push)?url$")?;
+        let headers = self.settings_matching(r"^http\..*extraheader$")?;
+        Ok(!headers.is_empty()
+            || urls.iter().any(|line| {
+                line.split_once(char::is_whitespace)
+                    .is_some_and(|(_, url)| url_has_user_part(url.trim()))
+            }))
+    }
+
+    /// The lines `git config --get-regexp` prints for `pattern`; none when nothing matches, which
+    /// git reports as exit 1 with nothing said.
+    fn settings_matching(&self, pattern: &str) -> Result<Vec<String>, GitError> {
+        match self.at_root(&["config", "--get-regexp", pattern]) {
+            Ok(lines) => Ok(lines.lines().map(str::to_string).collect()),
+            Err(GitError::CommandFailed { stderr, .. }) if stderr.trim().is_empty() => {
+                Ok(Vec::new())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Refuses a path that is not a working tree of this repository: another repository's own tree,
     /// or a directory that is not one at all.
     ///
@@ -1123,6 +1163,16 @@ impl Git {
     fn at_root(&self, arguments: &[&str]) -> Result<String, GitError> {
         run_git(&self.root, arguments)
     }
+}
+
+/// Whether a remote URL carries a user part: text between `://` and the next `/` holding `@`. An
+/// `scp`-style address (`git@host:path`) has no `://` and so none.
+fn url_has_user_part(url: &str) -> bool {
+    url.split_once("://").is_some_and(|(_, rest)| {
+        rest.split('/')
+            .next()
+            .is_some_and(|host| host.contains('@'))
+    })
 }
 
 /// Who Catervas commits as when git knows nobody (`docs/SPEC.md` 5.14), as `-c` options before a

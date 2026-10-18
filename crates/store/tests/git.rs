@@ -1883,3 +1883,42 @@ fn held_document_keeps_the_format_it_finds() {
         Some("docs/catervas/product/spec.md".to_string())
     );
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_a_worktrees_git_store_and_a_password_in_its_settings() {
+    let repository = TempRepo::new("common-dir-and-secret");
+    let git = repository.adapter();
+    let worktree = repository.path.join(".catervas/local/worktrees/CTV-1");
+    git.create_worktree(&worktree, "catervas/CTV-1", "main")
+        .expect("the worktree is made");
+
+    let store = git.common_dir(&worktree).expect("the store is found");
+    assert_eq!(
+        store,
+        repository
+            .path
+            .join(".git")
+            .canonicalize()
+            .expect("the store exists")
+    );
+
+    assert!(!git.config_holds_a_secret().expect("no remote reads"));
+    repository.git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://someone:tok3n@github.com/a/b.git",
+    ]);
+    assert!(git.config_holds_a_secret().expect("the read works"));
+    repository.git(&["remote", "set-url", "origin", "https://github.com/a/b.git"]);
+    assert!(!git.config_holds_a_secret().expect("the read works"));
+    repository.git(&["remote", "set-url", "origin", "git@github.com:a/b.git"]);
+    assert!(!git.config_holds_a_secret().expect("the read works"));
+    repository.git(&[
+        "config",
+        "http.https://github.com/.extraheader",
+        "AUTHORIZATION: basic eA==",
+    ]);
+    assert!(git.config_holds_a_secret().expect("the read works"));
+}
