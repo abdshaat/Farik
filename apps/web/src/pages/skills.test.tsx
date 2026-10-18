@@ -210,6 +210,7 @@ describe("skills on the agent page", () => {
 		expect(dialog.textContent).toContain(
 			"Theo stops using it, and its folder is deleted from the project.",
 		);
+		const before = teamAsked(s);
 		fireEvent.click(
 			within(dialog).getByRole("button", { name: "Remove old-skill" }),
 		);
@@ -223,7 +224,7 @@ describe("skills on the agent page", () => {
 		await s.reply(sent, { said: "Removed", events: [5] });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		// The team file's pins are read again, so a later Save cannot write the old ones back.
-		await waitFor(() => expect(teamAsked(s)).toBe(2));
+		await waitFor(() => expect(teamAsked(s)).toBe(before + 1));
 	});
 
 	it("skill_edit_adds_a_skill_for_one_agent", async () => {

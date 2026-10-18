@@ -176,15 +176,22 @@ export function Team() {
 	return (
 		<div className={styles.page}>
 			<div className={styles.titled}>
-				<h1 className={styles.title}>{t("teamMembers")}</h1>
+				<h1 className={styles.title}>
+					{t(solo ? "whoSoloTitle" : "teamMembers")}
+				</h1>
 				<InfoTip id="team-rules-info">
 					<Bullets text={t("teamPageRules")} />
 				</InfoTip>
 			</div>
 			<p>
-				{t("teamPageLead")
-					.replace("{count}", String(agents.length))
-					.replace("{name}", team.name)}
+				{solo
+					? t("teamPageLeadSolo", {
+							agent: agents[0]?.displayName ?? "",
+							name: team.name,
+						})
+					: t("teamPageLead")
+							.replace("{count}", String(agents.length))
+							.replace("{name}", team.name)}
 			</p>
 			{!solo && (
 				<div className={styles.actions}>
@@ -284,32 +291,36 @@ export function Team() {
 				})}
 			</ul>
 			{!solo && <AddSomeone team={team} most={most ?? 0} />}
-			<section className={styles.section} aria-labelledby="changes-heading">
-				<h2 id="changes-heading">{t("teamChangesTitle")}</h2>
-				<Bullets text={t("teamChangesBody")} />
-			</section>
-			<section className={styles.section} aria-labelledby="cost-heading">
-				<h2 id="cost-heading">{t("teamCostTitle")}</h2>
-				{designer && developer ? (
-					<>
-						<Bullets
-							text={t("teamCostDesigner", {
-								designer: designer.displayName,
-								developer: developer.displayName,
-							})}
-						/>
+			{!solo && (
+				<section className={styles.section} aria-labelledby="changes-heading">
+					<h2 id="changes-heading">{t("teamChangesTitle")}</h2>
+					<Bullets text={t("teamChangesBody")} />
+				</section>
+			)}
+			{!solo && (
+				<section className={styles.section} aria-labelledby="cost-heading">
+					<h2 id="cost-heading">{t("teamCostTitle")}</h2>
+					{designer && developer ? (
+						<>
+							<Bullets
+								text={t("teamCostDesigner", {
+									designer: designer.displayName,
+									developer: developer.displayName,
+								})}
+							/>
+							<p>
+								{t("teamCostLimitBefore")}
+								<Link to="/costs">{t("costs")}</Link>
+								{t("teamCostLimitAfter")}
+							</p>
+						</>
+					) : (
 						<p>
-							{t("teamCostLimitBefore")}
-							<Link to="/costs">{t("costs")}</Link>
-							{t("teamCostLimitAfter")}
+							{t("firstDay")} {t("teamCostNote")}
 						</p>
-					</>
-				) : (
-					<p>
-						{t("firstDay")} {t("teamCostNote")}
-					</p>
-				)}
-			</section>
+					)}
+				</section>
+			)}
 		</div>
 	);
 }

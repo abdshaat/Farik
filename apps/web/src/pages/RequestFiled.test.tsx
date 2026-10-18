@@ -71,6 +71,53 @@ const asked = (s: FakeSocket, name: string) =>
 	s.calls("query").filter((q) => q.params.name === name);
 
 describe("request page", () => {
+	it("speaks_of_the_one_agent_when_it_works_alone", async () => {
+		const { container, socket } = await renderApp("/requests/CTV-7");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		const solo = {
+			...TEAM,
+			agents: [agent("theo", "Theo", "software_developer")],
+			policy: { integration: "manual", solo: true },
+		};
+		await answerQuery(s, "team.get", { team: solo });
+		await answerQuery(s, "contract.get", {
+			contract: {
+				id: "CTV-7",
+				title: "Gift cards",
+				intent: INTENT,
+				status: "refining",
+			},
+		});
+		await answerQuery(s, "task.history", {
+			events: [
+				CREATED,
+				event(
+					4,
+					"request.triaged",
+					{ size: "small", reason: "given", triaged_by: "catervas" },
+					"2026-09-26T09:14:01Z",
+				),
+			],
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Theo has your request" }),
+		).toBeTruthy();
+		// No sizing and no Product Manager: Theo plans it and builds it.
+		expect(
+			screen.queryByRole("heading", { name: en.sizeLargeCard }),
+		).toBeNull();
+		const next = screen.getByRole("list", { name: en.nextTitle });
+		expect(within(next).getAllByRole("listitem")).toHaveLength(4);
+		expect(
+			within(next).getByText("Theo builds it, and Catervas runs the checks."),
+		).toBeTruthy();
+		const about = screen.getByRole("region", { name: en.aboutRequest });
+		expect(within(about).getByText("Theo, Developer")).toBeTruthy();
+		expect(within(about).queryByText(en.aboutSizedBy)).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+
 	it("shows_the_request_and_its_size", async () => {
 		const { container, s } = await opened("draft", [CREATED]);
 		expect(

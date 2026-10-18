@@ -726,8 +726,15 @@ function Editor({
 					<InfoTip id="agentReplaceNote-info">
 						{say("agentReplaceNote")}
 					</InfoTip>
-					<Button onClick={retire}>{say("agentRetire")}</Button>
-					<InfoTip id="agentRetireNote-info">{say("agentRetireNote")}</InfoTip>
+					{/* One agent alone cannot leave: there would be nobody to work (ADR 0071). */}
+					{!team.policy.solo && (
+						<>
+							<Button onClick={retire}>{say("agentRetire")}</Button>
+							<InfoTip id="agentRetireNote-info">
+								{say("agentRetireNote")}
+							</InfoTip>
+						</>
+					)}
 				</div>
 			</section>
 		</div>

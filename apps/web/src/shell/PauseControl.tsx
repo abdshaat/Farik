@@ -9,9 +9,12 @@ import styles from "./Shell.module.css";
 export function PauseControl({
 	paused,
 	short,
+	solo,
 }: {
 	paused: boolean;
 	short: boolean;
+	/** The one agent's name, when it works alone. */
+	solo?: string | undefined;
 }) {
 	const { client } = useConnection();
 	const [busy, setBusy] = useState(false);
@@ -35,7 +38,9 @@ export function PauseControl({
 	};
 	const label = short
 		? t(paused ? "resume" : "pause")
-		: t(paused ? "resumeTeam" : "pauseTeam");
+		: solo
+			? t(paused ? "resumeSolo" : "pauseSolo", { name: solo })
+			: t(paused ? "resumeTeam" : "pauseTeam");
 	return (
 		<div className={paused ? styles.resume : styles.pause}>
 			<Button busy={busy} onClick={run}>
