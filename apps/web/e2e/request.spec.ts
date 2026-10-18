@@ -128,8 +128,7 @@ test("a request is sized, its question answered by choice, and it becomes a task
 			page.getByText("The file only shows that the run finished."),
 		).toBeVisible();
 		await screenshots(page, "question");
-		await page.getByRole("radio", { name: /Leave it empty/ }).check();
-		await page.getByRole("button", { name: "Send answer" }).click();
+		await page.getByRole("button", { name: /Leave it empty/ }).click();
 		await expect
 			.poll(
 				() =>

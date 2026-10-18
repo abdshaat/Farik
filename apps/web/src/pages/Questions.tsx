@@ -1,9 +1,10 @@
-import { Button, Choice, TextArea } from "@catervas/ui";
+import { Button, InfoTip, TextArea } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { roleWord, sentence } from "../app/words.ts";
+import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
 import { Failed } from "./Failed.tsx";
 import styles from "./pages.module.css";
@@ -52,9 +53,14 @@ export function Questions() {
 			<div className={styles.page}>
 				{back}
 				<div className={styles.section}>
-					<h1 className={styles.title}>
-						{t("oneQuestionTitle", { agent: name })}
-					</h1>
+					<div className={styles.titled}>
+						<h1 className={styles.title}>
+							{t("oneQuestionTitle", { agent: name })}
+						</h1>
+						<InfoTip id="questions-info">
+							<Bullets text={t("aboutQuestionsTips", { agent: name })} />
+						</InfoTip>
+					</div>
 					<p className={styles.muted}>
 						{t("oneQuestionLead", { id, agent: name })}
 					</p>
@@ -64,11 +70,6 @@ export function Questions() {
 						{asks(name, agent)}
 					</p>
 					<Answer question={lead} name={name} own={t("ownWordsOne")} />
-				</section>
-				<section className={styles.section} aria-labelledby="about">
-					<h2 id="about">{t("aboutQuestions")}</h2>
-					<p>{t("aboutQuestionsBody", { agent: name })}</p>
-					<p>{t("aboutQuestionsNext", { agent: name })}</p>
 				</section>
 			</div>
 		);
@@ -133,7 +134,6 @@ function Answer({
 	own: string;
 }) {
 	const { client } = useConnection();
-	const [choice, setChoice] = useState("");
 	const [words, setWords] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
@@ -153,23 +153,44 @@ function Answer({
 			setBusy(false);
 		}
 	};
-	// Words the person wrote win over a choice they clicked first.
-	const answer = words.trim() || choice;
+	const answer = words.trim();
 	return (
 		<>
-			<strong className={own.text}>{question.text}</strong>
+			<div className={own.text}>
+				{question.text.split(/\n\s*\n/).map((paragraph) => (
+					<p key={paragraph}>{paragraph}</p>
+				))}
+			</div>
 			{question.choices.length > 0 && (
-				<Choice<string>
-					name={`question-${question.questionId}`}
-					legend={t("suggests", { agent: name })}
-					options={question.choices.map((c) => ({
-						value: c.label,
-						label: c.label,
-						...(c.hint ? { description: c.hint } : {}),
-					}))}
-					value={choice}
-					onChange={setChoice}
-				/>
+				<>
+					<p id={`suggests-${question.questionId}`} className={styles.muted}>
+						{t("suggests", { agent: name })}
+					</p>
+					<ul
+						aria-labelledby={`suggests-${question.questionId}`}
+						className={own.choices}
+					>
+						{question.choices.map((c, n) => {
+							const hintId = `hint-${question.questionId}-${n}`;
+							return (
+								<li key={c.label}>
+									<Button
+										busy={busy}
+										{...(c.hint ? { "aria-describedby": hintId } : {})}
+										onClick={() => send(c.label)}
+									>
+										{c.label}
+									</Button>
+									{c.hint && (
+										<p id={hintId} className={styles.muted}>
+											{c.hint}
+										</p>
+									)}
+								</li>
+							);
+						})}
+					</ul>
+				</>
 			)}
 			<TextArea
 				id={`words-${question.questionId}`}
@@ -177,7 +198,6 @@ function Answer({
 				value={words}
 				onChange={setWords}
 				rows={3}
-				{...(choice && words.trim() ? { hint: t("wordsWin") } : {})}
 			/>
 			{refusal && (
 				<p role="alert" className={own.alert}>

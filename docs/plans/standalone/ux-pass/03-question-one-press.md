@@ -51,7 +51,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `lets_the_agent_decide` (kept) — still passes; add one assertion: the text "A question is not a problem: Mira just needs your answer." is only inside a tip (`onlyInTips` from `apps/web/src/test/tips.ts`), and no heading "About questions" exists. Fails first because the about section shows the old words.
 - `e2e/request.spec.ts` lines 131-132: replace the radio check and "Send answer" click with one `await page.getByRole("button", { name: /Leave it empty/ }).click();`. The rest of the journey (the poll that the answer was recorded) is unchanged.
 
-- [ ] `feat(web): a suggested answer to a question sends with one press`
+- [x] `feat(web): a suggested answer to a question sends with one press`
 
 ## Verification
 

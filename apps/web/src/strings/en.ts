@@ -537,7 +537,6 @@ export const en = {
 	laterQuestion: "{agent} shows this once you answer question {n}.",
 	suggests: "{agent} suggests",
 	ownWordsMany: "Or say it in your own words",
-	wordsWin: "Your own words are sent instead of the choice.",
 	ownWordsOne: "Or answer in your own words",
 	sendAnswer: "Send answer",
 	letDecide: "Let {agent} decide",
@@ -545,10 +544,8 @@ export const en = {
 	oneQuestionTitle: "{agent} has a question",
 	oneQuestionLead: "About {id}. {agent} stopped until you answer.",
 	asks: "{agent}, your {role}, asks",
-	aboutQuestions: "About questions",
-	aboutQuestionsBody:
-		"A question is not a problem. {agent} just needs your answer to carry on.",
-	aboutQuestionsNext: "Your answer goes straight into {agent}’s next session.",
+	aboutQuestionsTips:
+		"A question is not a problem: {agent} just needs your answer.\nYour answer goes straight into {agent}’s next session.",
 	approveTitle: "Approve the plan for {title}",
 	planTitle: "The plan for {title}",
 	approveLead: "Plan {id}.",
