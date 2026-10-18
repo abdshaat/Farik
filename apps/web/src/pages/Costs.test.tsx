@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import { onlyInTips } from "../test/tips.ts";
+import own from "./Costs.module.css";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -36,17 +38,6 @@ const SUMMARY = {
 		{ agent_id: "theo", today_usd: 2.94 },
 	],
 	conversations_today_usd: 0.42,
-};
-const ACTIVITY = {
-	activity: [
-		{
-			agent_id: "theo",
-			state: "working",
-			line: "Building CTV-7",
-			task_id: "CTV-7",
-		},
-		{ agent_id: "mira", state: "idle", line: "Nothing to do yet" },
-	],
 };
 const EMPTY = {
 	accepted_tasks: 0,
@@ -96,7 +87,6 @@ async function costs(summary: unknown = SUMMARY, metrics: unknown = EMPTY) {
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team: TEAM });
 	await answerQuery(s, "costs.summary", summary);
-	await answerQuery(s, "team.activity", ACTIVITY);
 	await answerQuery(s, "metrics", metrics);
 	await screen.findByRole("heading", { level: 1, name: en.costs });
 	return { container, s };
@@ -104,15 +94,6 @@ async function costs(summary: unknown = SUMMARY, metrics: unknown = EMPTY) {
 
 describe("costs page", () => {
 	afterEach(() => vi.unstubAllGlobals());
-
-	it("shows_conversations_on_costs", async () => {
-		const { container } = await costs();
-		const amount = screen.getByText("$0.42", { selector: "strong" });
-		expect(amount.closest("p")?.textContent).toBe(
-			"Conversations today: $0.42. Your chats with the team; they count toward the daily limit.",
-		);
-		await expectNoAxeViolations(container);
-	});
 
 	it("shows_the_costs", async () => {
 		const first = await costs();
@@ -122,20 +103,38 @@ describe("costs page", () => {
 			),
 		).toBeTruthy();
 
-		// One row per agent: today, and what it is doing right now.
+		// One row per agent, highest spend first, then the chats: today's amount only.
 		const table = screen.getByRole("table", { name: en.costsByAgent });
+		expect(
+			within(table)
+				.getAllByRole("columnheader")
+				.map((h) => h.textContent),
+		).toEqual(["Agent", "Today"]);
+		const body = within(table).getAllByRole("row").slice(1);
 		const row = (name: string) =>
 			within(table).getByText(name).closest("tr") as HTMLElement;
+		expect(body[0]).toBe(row("Theo"));
+		expect(body[1]).toBe(row("Mira"));
+		expect(within(row("Theo")).getByTitle("Developer")).toBeTruthy();
 		expect(
 			within(row("Theo"))
 				.getAllByRole("cell")
 				.map((c) => c.textContent),
-		).toEqual(["$2.94", "Building CTV-7"]);
+		).toEqual(["$2.94"]);
+		const chats = body[2] as HTMLElement;
+		expect(within(chats).getByRole("rowheader").textContent).toContain(
+			"Your chats with the team",
+		);
 		expect(
-			within(row("Mira"))
+			within(chats)
 				.getAllByRole("cell")
 				.map((c) => c.textContent),
-		).toEqual(["$1.48", "Nothing to do yet"]);
+		).toEqual(["$0.42"]);
+		onlyInTips("They count toward the daily limit.");
+		for (const line of en.costsResting.split("\n")) onlyInTips(line);
+		expect(first.s.calls("query").map((q) => q.params.name)).not.toContain(
+			"team.activity",
+		);
 
 		// With no work accepted, every rate says so.
 		const how = screen.getByRole("region", { name: en.costsHowWell });
@@ -151,19 +150,24 @@ describe("costs page", () => {
 		).toBeTruthy();
 		const rates = screen.getByRole("region", { name: en.costsHowWell });
 		expect(within(rates).queryByText(en.metricNotYet)).toBeNull();
-		expect(within(rates).getByText("6 of 9")).toBeTruthy();
-		expect(within(rates).getByText(en.metricFirstTryNote)).toBeTruthy();
-		expect(within(rates).getByText("1.3")).toBeTruthy();
-		expect(within(rates).getByText("$3.07")).toBeTruthy();
+		for (const value of ["6 of 9", "1.3", "$3.07", "71%"]) {
+			expect(within(rates).getByText(value).className).toContain(own.value);
+		}
+		for (const note of [
+			en.metricFirstTryNote,
+			en.metricNeededNote,
+			en.metricChecksNote,
+			"Planning $0.62, Building $1.88, Checking $0.41, Meetings and talk $0.16.",
+		]) {
+			onlyInTips(note);
+		}
+		const more = within(rates).getByText("More numbers").closest("details");
+		expect(more).not.toBeNull();
 		expect(
-			within(rates).getByText(
-				"Planning $0.62, Building $1.88, Checking $0.41, Meetings and talk $0.16.",
-			),
+			within(more as HTMLElement).getByText("Active weeks: 2"),
 		).toBeTruthy();
-		expect(within(rates).getByText("71%")).toBeTruthy();
-		expect(within(rates).getByText("Active weeks: 2")).toBeTruthy();
 		expect(
-			within(rates).getByText(
+			within(more as HTMLElement).getByText(
 				"Messages: 4 reactions, 3 replies, 7 from meetings, 5 from you",
 			),
 		).toBeTruthy();
@@ -172,12 +176,7 @@ describe("costs page", () => {
 		// Every task passed first time, so none was sent back.
 		await costs(SUMMARY, { ...METRICS, first_pass_acceptance_rate: 1 });
 		expect(screen.getByText("9 of 9")).toBeTruthy();
-		expect(screen.queryByText(en.metricFirstTryNote)).toBeNull();
-		expect(
-			within(screen.getByRole("table", { name: en.costsByAgent }))
-				.getAllByRole("columnheader")
-				.map((h) => h.textContent),
-		).toEqual(["Agent", "Today", "Right now"]);
+		expect(document.body.textContent).not.toContain(en.metricFirstTryNote);
 		expect(document.body.textContent).not.toMatch(/sprint/i);
 	});
 

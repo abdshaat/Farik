@@ -51,7 +51,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `shows_conversations_on_costs` — deleted: the chats row is asserted in `shows_the_costs` above, and its sentence is gone. (One test per major functionality, ADR 0060.)
 - `allowances.test.tsx` lines 532 and 605: delete `await answerQuery(s, "team.activity", { activity: [] });` in the two tests that open `/costs`; nothing else changes. They fail first (waiting for a query never asked) only after the code change, so run them in the same red-green cycle.
 
-- [ ] `feat(web): Costs lists each agent's spend, highest first, with chats as the last row`
+- [x] `feat(web): Costs lists each agent's spend, highest first, with chats as the last row`
 
 ### Task 2: the four numbers as tiles
 
@@ -62,7 +62,7 @@ Tests:
 
 - `shows_the_costs` (its second and third parts updated) — with `METRICS`: the tile values "6 of 9", "1.3", "$3.07", "71%" each sit in a `dd` with the class `own.value`; `en.metricFirstTryNote`, `en.metricNeededNote`, `en.metricChecksNote` and "Planning $0.62, Building $1.88, Checking $0.41, Meetings and talk $0.16." are each only in a tip (`onlyInTips`); "Active weeks: 2" and "Messages: 4 reactions, 3 replies, 7 from meetings, 5 from you" are inside a `details` whose summary is "More numbers"; with `first_pass_acceptance_rate: 1`, "9 of 9" shows and `metricFirstTryNote` is absent from the page, tips included; with no work accepted, four `metricNotYet` as now. Fails first because the notes are visible lines.
 
-- [ ] `feat(web): Costs shows the team's four numbers as tiles, their notes behind ⓘ`
+- [x] `feat(web): Costs shows the team's four numbers as tiles, their notes behind ⓘ`
 
 ## Verification
 

@@ -952,12 +952,11 @@ export const en = {
 	costsByAgent: "By agent",
 	costsAgent: "Agent",
 	costsTodayColumn: "Today",
-	costsNow: "Right now",
 	costsResting:
-		"Resting is not a problem. An agent whose AI account reached its usage limit stops, writes down where it was, and picks up again at the time shown. The rest of the team keeps working.",
-	costsConversations: "Conversations today:",
-	costsConversationsWhy:
-		"Your chats with the team; they count toward the daily limit.",
+		"An agent whose AI account reached its usage limit rests.\nIt picks up again at the time Today shows.\nThe rest of the team keeps working.",
+	costsChatsRow: "Your chats with the team",
+	costsChatsInfo: "They count toward the daily limit.",
+	costsMore: "More numbers",
 	costsHowWell: "How well the team works",
 	costsWholeProject: "Across the whole project.",
 	metricNotYet: "Not yet: no work has been accepted",

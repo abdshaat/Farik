@@ -35,27 +35,61 @@
 	font-weight: 600;
 }
 
+.amount {
+	text-align: right;
+	font-family: var(--catervas-type-code-family);
+	white-space: nowrap;
+}
+
+.table thead th.amount {
+	text-align: right;
+}
+
+/* The four numbers as tiles: the value large, its label under it. */
 .metrics {
 	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
 	gap: var(--catervas-space-3);
 	margin: 0;
 }
 
-.metrics div {
-	display: grid;
+.tile {
+	display: flex;
+	flex-direction: column;
 	gap: var(--catervas-space-1);
+	padding: var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-raised);
 }
 
-.metrics dt {
+.tile dt {
 	color: var(--catervas-color-ink-muted);
+	font:
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
 }
 
-.metrics dd {
+.tile dd {
+	order: -1;
 	margin: 0;
 }
 
 .value {
-	font-weight: 600;
+	font:
+		var(--catervas-type-title-weight) var(--catervas-type-title-size) /
+		var(--catervas-type-title-line-height) var(--catervas-type-title-family);
+}
+
+.more summary {
+	cursor: pointer;
+	min-height: 24px;
+	color: var(--catervas-color-ink-muted);
+}
+
+.more summary:focus-visible {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: 2px;
 }
 
 /* On a phone each thing made stacks: who and where, the count, when. */

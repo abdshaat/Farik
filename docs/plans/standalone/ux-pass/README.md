@@ -28,6 +28,6 @@ Checklist (ticked in the commits that do them):
 - [x] Plan 3
 - [x] Plan 4
 - [x] Plan 5
-- [ ] Plan 6
+- [x] Plan 6
 - [ ] Plan 7
 - [ ] Plan 8
