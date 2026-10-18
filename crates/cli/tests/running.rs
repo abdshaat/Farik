@@ -20,8 +20,7 @@ use catervas_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
 use catervas_runtime::RuntimeAdapter;
 use catervas_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1,
-    planning_ceremony_ctv_1, refine_writes_task_ctv_1, reply_to_a_mention, review_writes_note,
-    standup,
+    refine_writes_task_ctv_1, reply_to_a_mention, review_writes_note,
 };
 use catervas_runtime::sleep::Sleeper;
 use catervas_store::git::fixtures::TempRepo;
@@ -90,6 +89,18 @@ fn a_small_request(repository: &TempRepo) -> String {
     );
     assert_eq!(ran.code, 0, "{}", ran.err);
     task
+}
+
+/// A delivery already closed with no task in it, and its retro yet to be held: a run that accepts
+/// the test's task closes no delivery of its own, and files no changelog task for the recorded
+/// adapter to play (ADR 0062).
+fn with_a_delivery_closed(repository: &TempRepo) {
+    record(
+        repository,
+        "",
+        "delivery.closed",
+        &json!({ "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": [] }),
+    );
 }
 
 /// The warning every start in no-sandbox mode prints.
@@ -355,6 +366,7 @@ fn passes_over_a_claude_that_is_not_executable() {
 fn runs_a_task_to_acceptance_and_says_what_waits() {
     let repository = a_team("run-to-acceptance");
     let task = a_small_request(&repository);
+    with_a_delivery_closed(&repository);
 
     let ran = run_with(&repository.path, &["run"], |io| {
         io.engine = recorded(vec![
@@ -393,19 +405,29 @@ fn runs_a_task_to_acceptance_and_says_what_waits() {
     );
     assert!(!daemon_file(&repository).exists());
 
+    // The branch is the one the contract records (ADR 0066): named from the title, no task id.
+    let contract = std::fs::read_to_string(
+        repository
+            .path
+            .join(format!(".catervas/contracts/{task}.yaml")),
+    )
+    .expect("the contract is there");
+    let branch = contract
+        .lines()
+        .find_map(|line| line.strip_prefix("branch: "))
+        .expect("the contract records its branch")
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    assert!(!branch.contains("CTV-"), "{branch}");
+
     // Catervas never merges: until the branch is merged by hand, integrating is refused.
     let ran = run(&repository.path, &["integrate", &task]);
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(ran.err.contains("not_merged: "), "{}", ran.err);
     assert!(
         std::process::Command::new("git")
-            .args([
-                "merge",
-                "--no-ff",
-                "-m",
-                "By hand",
-                &format!("feature/{task}")
-            ])
+            .args(["merge", "--no-ff", "-m", "By hand", &branch])
             .current_dir(&repository.path)
             .status()
             .expect("git runs")
@@ -483,7 +505,7 @@ fn stops_after_the_session_then_aborts_it_on_ctrl_c() {
 
     assert_eq!(ran.code, 130, "{}\n{}", ran.out, ran.err);
     assert!(
-        ran.err.contains("stopping after the current session"),
+        ran.err.contains("stopping after the running sessions"),
         "{}",
         ran.err
     );
@@ -497,6 +519,52 @@ fn stops_after_the_session_then_aborts_it_on_ctrl_c() {
     assert_eq!(status_of(&repository, &task), "refining");
     assert!(!daemon_file(&repository).exists());
     lock_is_free(&repository);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn runs_two_agents_at_once_and_stops_after_both() {
+    let repository = a_team("run-two-at-once");
+    let task = a_small_request(&repository);
+    let said = run(&repository.path, &["say", "@dev-a status?"]);
+    assert_eq!(said.code, 0, "{}", said.err);
+    let adapter = Arc::new(UsageThenWaitAdapter::waiting(Usage::default()));
+    let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
+    let root = repository.path.clone();
+    let engine = given(&adapter);
+
+    let running = std::thread::spawn(move || {
+        run_with(&root, &["run"], |io| {
+            io.engine = engine;
+            io.interrupts = Interrupts::Channel(interrupts);
+        })
+    });
+    wait_for(&repository, EventKind::SessionStarted, 2);
+    assert!(events(&repository, &[EventKind::SessionEnded]).is_empty());
+    interrupt.send(()).expect("the run listens");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(adapter.aborts(), 0);
+    assert!(!running.is_finished());
+    adapter.complete();
+    let ran = joined(running, "the run");
+
+    assert_eq!(ran.code, 130, "{}\n{}", ran.out, ran.err);
+    assert!(ran.out.lines().any(|line| line == "stopped"), "{}", ran.out);
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line == "dev-a: started its conversation session"),
+        "{}",
+        ran.out
+    );
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line == format!("{task}: pm started its refine session")),
+        "{}",
+        ran.out
+    );
+    assert_eq!(adapter.started().len(), 2);
 }
 
 #[test]
@@ -578,6 +646,7 @@ fn stops_a_plan_through_catervas_stop() {
 fn prints_the_wait() {
     let repository = a_team("run-wait");
     let task = a_small_request(&repository);
+    with_a_delivery_closed(&repository);
     walked(&repository, &task, &["refining", "ready"]);
     let until = at() + chrono::Duration::hours(1);
     record_as(
@@ -664,29 +733,6 @@ fn plans_without_starting_work() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn prints_a_sprint_line_for_a_planning_session() {
-    let repository = a_team("plan-sprint");
-    let task = a_small_request(&repository);
-    walked(&repository, &task, &["refining", "ready"]);
-    let started = run(&repository.path, &["sprint", "start"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-
-    let ran = run_with(&repository.path, &["plan"], |io| {
-        io.engine = recorded(vec![planning_ceremony_ctv_1(), plan_assigns_ctv_1()]);
-    });
-
-    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert!(
-        ran.out
-            .lines()
-            .any(|line| line.starts_with("S1: ") && line.contains("S1 holds CTV-1")),
-        "{}",
-        ran.out
-    );
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
 fn prints_a_conversation_line() {
     let repository = a_team("run-conversation");
     let said = run(&repository.path, &["say", "@dev-a status?"]);
@@ -757,7 +803,10 @@ fn lists_what_waits_on_the_human() {
         format!("question {n} on {first} from pm: "),
         format!("  catervas answer {n} <your answer>"),
         format!("{second} awaits your approval: catervas approve {second}"),
-        format!("{third} is escalated (iterations)"),
+        format!("{third} is escalated (iterations): choose one"),
+        format!("  catervas resolve {third} in_progress --extra-tries 2 "),
+        format!("  catervas resolve {third} refining "),
+        format!("  catervas resolve {third} cancelled "),
     ];
     assert_eq!(after.len(), expected.len(), "{}", ran.out);
     for (line, start) in after.iter().zip(&expected) {
@@ -855,66 +904,6 @@ fn lists_a_marketing_plan_that_waits_with_its_commands() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
     assert_eq!(last["waiting_on_you"][0]["plan"], "MP-1", "{last}");
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn says_the_backlog_waits() {
-    let repository = a_team_with("run-backlog", |wire| {
-        wire["policy"]["plan_in_sprints"] = json!(true);
-    });
-    let task = a_small_request(&repository);
-    walked(&repository, &task, &["refining", "ready"]);
-
-    let ran = run_with(&repository.path, &["run"], |io| {
-        io.engine = recorded(Vec::new());
-    });
-
-    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert!(
-        ran.out
-            .lines()
-            .any(|line| line == "idle: the ready work waits for a sprint"),
-        "{}",
-        ran.out
-    );
-    assert_eq!(
-        ran.out.lines().last(),
-        Some("start a sprint: 1 waits in the Backlog (`catervas sprint start`)"),
-        "{}",
-        ran.out
-    );
-    assert_eq!(status_of(&repository, &task), "ready");
-
-    let ran = run_with(&repository.path, &["--json", "run"], |io| {
-        io.engine = recorded(Vec::new());
-    });
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
-    assert_eq!(last, json!({ "backlog": { "count": 1 } }));
-
-    // With a sprint open, its Backlog waits for the next sprint, not for the human to start one.
-    // Its planning session posts and plans nothing, so the request stays in the Backlog.
-    let started = run_with(&repository.path, &["sprint", "start"], |_| {});
-    assert_eq!(started.code, 0, "{}", started.err);
-    let ran = run_with(&repository.path, &["run"], |io| {
-        io.engine = recorded(vec![standup()]);
-    });
-    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert!(
-        ran.out
-            .lines()
-            .any(|line| line == "idle: nothing on the board needs doing"),
-        "{}",
-        ran.out
-    );
-    assert!(!ran.out.contains("start a sprint"), "{}", ran.out);
-    let ran = run_with(&repository.path, &["--json", "run"], |io| {
-        io.engine = recorded(Vec::new());
-    });
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
-    assert_eq!(last, json!({ "waiting_on_you": [] }));
 }
 
 #[test]

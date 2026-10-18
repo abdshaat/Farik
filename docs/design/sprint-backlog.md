@@ -1,5 +1,7 @@
 # Sprints gather ready work
 
+Superseded by ADR 0062: sprints and the Backlog left the product.
+
 Status: decided by the founder on 2026-10-01, in conversation, with the answers to the open questions below given the same day.
 Mockups approved by: the founder, 2026-10-01 (BoardBacklog, TodayBacklog, SettingsSprints and SetupSprints, canvas version 1790857656-ceac).
 

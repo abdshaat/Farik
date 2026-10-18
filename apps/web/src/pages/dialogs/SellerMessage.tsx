@@ -1,11 +1,11 @@
 import { Button, Dialog, TextArea, TextField } from "@catervas/ui";
 import { useState } from "react";
+import { useCommand } from "../../app/command.ts";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 import type { Mailbox } from "../sellerMail.ts";
 import { adds as addsOf, emailFault, failedWords } from "../sellerMail.ts";
 import { isScript, ScriptWarning } from "./ScriptWarning.tsx";
-import { useCommand } from "./StartSprint.tsx";
 import { visibly } from "./ToolApproval.tsx";
 
 /**

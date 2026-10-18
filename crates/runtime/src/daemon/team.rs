@@ -35,7 +35,6 @@ use crate::connectors::{ConnectorEntry, ConnectorError, ListedTool, SecretAt, li
 use crate::credential::{CredentialError, credential_of_kind, load_credential, save_credential};
 use crate::pause::{key_refused, paused};
 use crate::session::session_model;
-use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
@@ -103,13 +102,24 @@ pub(super) fn query(
             let mut answer = effective(deps, &team)?;
             answer["connectors"] = json!(connector_states(state, deps, &team));
             answer["kits"] = json!(kits_of(deps, &team, state.registered_apps())?);
-            answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
+            answer["team"] =
+                serde_json::to_value(team.without_old_keys()).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(catervas_core::team::MAX_AGENTS);
             answer["sandboxed"] = json!(deps.transitions.sandboxed());
             answer["hidden_suggestions"] = json!(
                 crate::connectors::hidden_suggestions(deps.files.root())
                     .into_iter()
                     .map(|(agent, server)| json!({ "agent": agent, "server": server }))
+                    .collect::<Vec<_>>()
+            );
+            answer["members_present"] = json!(members_present(deps)?);
+            answer["preview_env_present"] =
+                json!(crate::preview::PreviewEnv::read(deps.files.root()).is_some());
+            answer["requested_connections"] = json!(
+                crate::connectors::requested_connections(&deps.log)
+                    .map_err(|e| internal(&e))?
+                    .into_iter()
+                    .map(|(agent, server, why)| json!({ "agent": agent, "server": server, "why": why }))
                     .collect::<Vec<_>>()
             );
             Ok(answer)
@@ -121,11 +131,7 @@ pub(super) fn query(
                 Ok((before, after)) => {
                     let mut answer = effective(deps, &after)?;
                     answer["errors"] = json!([]);
-                    let board = deps.projections.board().map_err(|e| internal(&e))?;
-                    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
-                    let open = open.as_ref().map(|open| open.sprint_id.as_str());
-                    let work = sprint_work(&before, open, &board);
-                    answer["effects"] = json!(describe_change(&before, &after, &work));
+                    answer["effects"] = json!(describe_change(&before, &after));
                     Ok(answer)
                 }
                 Err(Refused::Errors(errors)) => {
@@ -1343,14 +1349,14 @@ pub(super) fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failu
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))
 }
 
-/// `team.propose`: the team as it is, with the six in place of its agents and planning in sprints,
-/// and the criteria. The Designer comes with its Playwright connector on, and is listed
+/// `team.propose`: the team as it is, with the six in place of its agents, and the criteria. The Designer comes with its Playwright connector on, and is listed
 /// `unavailable` where it cannot have its browser for want of Docker's sandbox, which the page
 /// shows unticked (D3).
 fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     let current = deps.files.read_team().map_err(|e| internal(&e))?;
     let no_sandbox = deps.transitions.designer_browser(&current) == DesignerBrowser::NoSandbox;
-    let mut team = serde_json::to_value(current).map_err(|e| internal(&e))?;
+    let mut team =
+        serde_json::to_value(current.clone().without_old_keys()).map_err(|e| internal(&e))?;
     let agents = suggested()?;
     let unavailable: Vec<Value> = agents
         .iter()
@@ -1358,8 +1364,6 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
         .map(|agent| json!({ "agent_id": agent.id, "reason": "designer_needs_sandbox" }))
         .collect();
     team["agents"] = serde_json::to_value(agents).map_err(|e| internal(&e))?;
-    // Setup only ever makes a new team, and a new team plans in sprints (ADR 0028).
-    team["policy"]["plan_in_sprints"] = json!(true);
     // A team with no preview is proposed the one the scan found, if it found one (ADR 0054); a scan
     // that fails proposes none.
     let found = scan_project(&deps.git, deps.clock.now())
@@ -1395,6 +1399,36 @@ pub(super) fn suggested() -> Result<Vec<Agent>, Failure> {
             serde_json::from_value(agent).map_err(|e| internal(&e))
         })
         .collect()
+}
+
+/// An agent the saved team does not have yet gets its role's shipped persona when it came with
+/// none, and a UI/UX Designer the built-in browser when it came with no connectors, as the
+/// suggested team's agents have them (ADR 0069). An agent already saved is never touched, so a
+/// persona the owner cleared stays cleared.
+fn with_role_defaults(before: &Team, wire: &mut Value) -> Result<(), Failure> {
+    let Some(agents) = wire.get_mut("agents").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for agent in agents {
+        let id = agent["id"].as_str().unwrap_or_default();
+        if before.agents.iter().any(|saved| saved.id.as_str() == id) {
+            continue;
+        }
+        let Ok(role) = serde_json::from_value::<Role>(agent["role"].clone()) else {
+            continue;
+        };
+        if agent["persona"]
+            .as_str()
+            .is_none_or(|text| text.trim().is_empty())
+        {
+            let shipped = load_role(role).map_err(|e| internal(&e))?;
+            agent["persona"] = json!(shipped.persona);
+        }
+        if role == Role::UiUxDesigner && agent.get("mcp_servers").is_none() {
+            agent["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+        }
+    }
+    Ok(())
 }
 
 /// `models.list`: the newest model of each family the prices name.
@@ -1628,6 +1662,8 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["agents", _, "display_name"] => "name",
         ["agents", _, "revokes"] => "keeps_read",
         ["agents", _, "status"] if message == FROM_THE_CARD => "status_from_card",
+        ["policy", "integration_branch"] if message.starts_with(BRANCH_NAME) => BRANCH_NAME,
+        ["policy", "integration_branch"] if message.starts_with(BRANCH_MISSING) => BRANCH_MISSING,
         _ => "invalid",
     }
 }
@@ -1637,11 +1673,13 @@ fn code_of(error: &ValidationError) -> &'static str {
 /// seen work from is retired rather than removed, except in `setup`, whose starter team is
 /// replaced.
 fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), Refused> {
-    let mut after = validate_team(wire).map_err(Refused::Errors)?;
     let before = deps
         .files
         .read_team()
         .map_err(|e| Refused::Failed(internal(&e)))?;
+    let mut wire = wire.clone();
+    with_role_defaults(&before, &mut wire).map_err(Refused::Failed)?;
+    let mut after = validate_team(&wire).map_err(Refused::Errors)?;
     keep_pins(&before, &mut after);
     let mut errors = Vec::new();
     for (index, agent) in after.agents.iter().enumerate() {
@@ -1670,11 +1708,69 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
             }
         }
     }
+    errors.extend(integration_branch_errors(deps, &before, &after)?);
     if errors.is_empty() {
         Ok((before, after))
     } else {
         Err(Refused::Errors(errors))
     }
+}
+
+/// Words the integration branch's two refusals start with, which `code_of` reads.
+const BRANCH_NAME: &str = "integration_branch_name";
+const BRANCH_MISSING: &str = "integration_branch_missing";
+
+/// The refusals of a new integration branch (ADR 0069): a name git would not allow, and a name no
+/// local branch of the project has. A branch already saved is not asked again, and a project of
+/// several repositories keeps each member's branch in `repos.yaml`, so it is not asked there.
+fn integration_branch_errors(
+    deps: &ToolDeps,
+    before: &Team,
+    after: &Team,
+) -> Result<Vec<ValidationError>, Refused> {
+    let Some(branch) = after.policy.integration_branch.as_ref().map(|b| b.as_str()) else {
+        return Ok(Vec::new());
+    };
+    if before
+        .policy
+        .integration_branch
+        .as_ref()
+        .map(|b| b.as_str())
+        == Some(branch)
+        || members_present(deps).map_err(Refused::Failed)?
+    {
+        return Ok(Vec::new());
+    }
+    let said = |message: &str| {
+        vec![ValidationError {
+            path: "/policy/integration_branch".to_string(),
+            message: message.to_string(),
+        }]
+    };
+    if matches!(
+        deps.git.check_branch_name(branch),
+        Err(catervas_store::GitError::CommandFailed { .. })
+    ) {
+        return Ok(said(&format!(
+            "{BRANCH_NAME}: git does not allow {branch} as a branch name"
+        )));
+    }
+    match deps.git.has_local_branch(branch) {
+        Ok(true) => Ok(Vec::new()),
+        Ok(false) => Ok(said(&format!(
+            "{BRANCH_MISSING}: the project has no branch {branch}"
+        ))),
+        Err(error) => Err(Refused::Failed(internal(&error))),
+    }
+}
+
+/// Whether the project folder lists member repositories (ADR 0057).
+fn members_present(deps: &ToolDeps) -> Result<bool, Failure> {
+    Ok(deps
+        .files
+        .read_repos()
+        .map_err(|e| internal(&e))?
+        .is_some_and(|repos| !repos.repos.is_empty()))
 }
 
 /// `after`'s skills as `before` holds them, whatever the browser sent: only `skill_save`,
@@ -1810,7 +1906,7 @@ pub(super) fn team_updated(team: &Team, template: Option<&str>) -> EventBody {
             .collect(),
         updated_by: HUMAN.to_string(),
         template: template.map(str::to_string),
-        plan_in_sprints: Some(team.plans_in_sprints()),
+        plan_in_sprints: None,
     })
 }
 
@@ -2611,6 +2707,63 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn gives_an_added_agent_its_roles_persona_and_a_designer_its_browser() {
+        let harness = Harness::new("rpc-role-defaults", |_| {});
+        let mut sent = team_file(&harness);
+        let template = sent["agents"][1].clone();
+        // An agent already saved whose persona the save leaves out stays without one.
+        sent["agents"][1]
+            .as_object_mut()
+            .expect("an agent")
+            .remove("persona");
+        for (id, role) in [("noor", "software_developer"), ("iris", "ui_ux_designer")] {
+            let mut agent = template.clone();
+            let fields = agent.as_object_mut().expect("an agent");
+            fields.remove("persona");
+            fields.remove("mcp_servers");
+            fields.remove("skills");
+            agent["id"] = json!(id);
+            agent["display_name"] = json!(id);
+            agent["role"] = json!(role);
+            sent["agents"].as_array_mut().expect("agents").push(agent);
+        }
+
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": sent }),
+            "emptyResult",
+        );
+
+        let saved = team_file(&harness);
+        let agent = |id: &str| {
+            saved["agents"]
+                .as_array()
+                .expect("agents")
+                .iter()
+                .find(|agent| agent["id"] == id)
+                .unwrap_or_else(|| panic!("{id} is saved"))
+                .clone()
+        };
+        let shipped = |role| super::load_role(role).expect("the role ships").persona;
+        assert_eq!(
+            agent("noor")["persona"],
+            json!(shipped(super::Role::SoftwareDeveloper))
+        );
+        assert_eq!(
+            agent("iris")["persona"],
+            json!(shipped(super::Role::UiUxDesigner))
+        );
+        assert_eq!(
+            agent("iris")["mcp_servers"],
+            json!([{ "name": "playwright", "source": "builtin" }])
+        );
+        assert_eq!(agent("noor").get("mcp_servers"), None);
+        assert_eq!(agent("dev-a").get("persona"), None, "a saved agent is left");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn whole_team_saves_keep_pins() {
         let harness = Harness::new("rpc-skills-pins", |_| {});
         save_a_skill(&harness, None, "api-style", "");
@@ -2891,10 +3044,8 @@ pub(super) mod tests {
             ]
         );
         // The rest is the team as it is, and the checks the form edits beside it.
-        let mut team = team_file(&harness);
+        let team = team_file(&harness);
         assert_eq!(proposed["team"]["name"], team["name"]);
-        // Planning in sprints, as every new team does (ADR 0028).
-        team["policy"]["plan_in_sprints"] = json!(true);
         assert_eq!(proposed["team"]["policy"], team["policy"]);
         catervas_core::team::validate_team(&proposed["team"]).expect("a team");
         assert_eq!(
@@ -3721,8 +3872,7 @@ pub(super) mod tests {
         assert!(ads.store.load(&ads.at).expect("reads").is_none());
     }
 
-    /// Switching "Plan work in sprints" off frees the Backlog's work at once, not at the next
-    /// minute's look (the step 15 journey).
+    /// Saving the team wakes the team at once, not at the next minute's look.
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn wakes_the_team_when_the_team_is_saved() {
@@ -3825,8 +3975,7 @@ pub(super) mod tests {
             json!({
                 "team_name": "Catervas",
                 "agent_ids": ["pm", "dev-a", "dev-b"],
-                "updated_by": "human",
-                "plan_in_sprints": false
+                "updated_by": "human"
             })
         );
     }
@@ -3899,6 +4048,55 @@ pub(super) mod tests {
             checked["agents"][4]["tiers"],
             json!(["read", "write_workspace", "network", "git_local"])
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_integration_branch_the_project_does_not_have() {
+        let harness = driven("team-integration-branch");
+        let before = team_file(&harness);
+        let check = |branch: &str| {
+            let mut team = before.clone();
+            team["policy"]["integration_branch"] = json!(branch);
+            query(
+                &harness.daemon,
+                "team.validate",
+                &json!({ "team": team }),
+                "teamValidateResult",
+            )
+        };
+        let codes = |checked: &Value| -> Vec<String> {
+            checked["errors"]
+                .as_array()
+                .expect("errors")
+                .iter()
+                .map(|error| {
+                    format!(
+                        "{} {}",
+                        error["path"].as_str().unwrap_or_default(),
+                        error["code"].as_str().unwrap_or_default()
+                    )
+                })
+                .collect()
+        };
+
+        assert_eq!(
+            codes(&check("catervas/next")),
+            ["/policy/integration_branch integration_branch_missing"]
+        );
+        assert_eq!(
+            codes(&check("bad..name")),
+            ["/policy/integration_branch integration_branch_name"]
+        );
+        harness.project.repo.git(&["branch", "catervas/next"]);
+        let checked = check("catervas/next");
+        assert_eq!(codes(&checked), Vec::<String>::new());
+        assert_eq!(
+            checked["effects"],
+            json!(["Finished work goes into catervas/next."])
+        );
+        let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        assert_eq!(got["members_present"], json!(false));
     }
 
     #[test]
@@ -4226,87 +4424,6 @@ pub(super) mod tests {
         assert!(crate::pause::paused(&harness.project.deps.log).expect("reads"));
     }
 
-    /// `team.validate`'s effects of switching the sprint policy to `on`, on a board with the ready
-    /// CTV-1, CTV-2 under way since before the switch, CTV-3 under way in the open S2, and CTV-4,
-    /// which S1 left for the Backlog.
-    fn switching(name: &str, on: bool) -> Value {
-        let harness = crate::orchestrator::fixtures::Harness::new(name, |wire| {
-            wire["policy"]["plan_in_sprints"] = json!(!on);
-        });
-        harness.ready("CTV-1");
-        harness.file("CTV-2", "in_progress", |_| {});
-        harness.file("CTV-3", "in_progress", |_| {});
-        harness.file("CTV-4", "assigned", |_| {});
-        harness.open_sprint("S1", &["CTV-4"]);
-        harness.project.record(
-            "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S1", "ended_by": "human", "left": ["CTV-4"], "backlog": true }),
-        );
-        harness.open_sprint("S2", &["CTV-3"]);
-        let mut team = team_file(&harness);
-        team["policy"]["plan_in_sprints"] = json!(on);
-        query(
-            &harness.daemon,
-            "team.validate",
-            &json!({ "team": team }),
-            "teamValidateResult",
-        )["effects"]
-            .clone()
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn describes_the_work_a_switch_touches() {
-        assert_eq!(
-            switching("team-switch-on", true),
-            json!([
-                "Ready work now waits in the Backlog until you start a sprint.",
-                "The task already under way finishes first.",
-            ])
-        );
-        assert_eq!(
-            switching("team-switch-off", false),
-            json!([
-                "Ready work starts as soon as someone is free, without waiting for a sprint.",
-                "The 2 pieces of work in the Backlog, Add a login page and Add a login page, can \
-                 start now.",
-                "You can still start sprints from the Board.",
-            ])
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn proposes_sprints_for_a_new_team() {
-        let harness = driven("team-propose-sprints");
-        assert_eq!(team_file(&harness)["policy"].get("plan_in_sprints"), None);
-        let proposed = query(
-            &harness.daemon,
-            "team.propose",
-            &json!({}),
-            "teamProposeResult",
-        );
-        assert_eq!(
-            proposed["team"]["policy"]["plan_in_sprints"],
-            json!(true),
-            "{proposed}"
-        );
-        let defaults = query(
-            &harness.daemon,
-            "settings.defaults",
-            &json!({}),
-            "settingsDefaultsResult",
-        );
-        assert_eq!(defaults["policy"]["plan_in_sprints"], json!(true));
-        let start = json!({ "team": proposed["team"], "criteria": proposed["criteria"] });
-        call(&harness.daemon, "team.start", &start, "emptyResult");
-        assert_eq!(
-            team_file(&harness)["policy"]["plan_in_sprints"],
-            json!(true)
-        );
-    }
-
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn saves_the_checks() {
@@ -4614,11 +4731,9 @@ pub(super) mod tests {
                 "blocked_limit_hours": 24,
                 "max_iterations": 3,
                 "integration": "pull_request",
-                "ambient_messages_per_sprint": 1,
                 "escalation_age_hours": 24,
                 "memory_cap_tokens": 8000,
-                "permissions": { "run_commands": true, "push": false },
-                "plan_in_sprints": true
+                "permissions": { "run_commands": true, "push": false }
             })
         );
     }
@@ -5148,7 +5263,7 @@ pub(super) mod tests {
     const KIT_TAGS: fn() -> Value =
         || json!({ "search": "network", "env": "paid", "delete_repo": "denied" });
 
-    /// The fixture kit with a spending tool `make`, which may run 20 times a sprint unasked, and
+    /// The fixture kit with a spending tool `make`, which may run 20 times a day unasked, and
     /// `post`, which publishes and so always asks.
     fn allowance_kit(test: &str) -> catervas_roles::Kit {
         fixture_kit_with(
@@ -5392,6 +5507,37 @@ pub(super) mod tests {
                 .exists()
         );
         assert_eq!(harness.project.events(&[]).len(), seen);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_lists_requested_connections() {
+        let (harness, _) = keeping_a_kit("requested-connections");
+        let requested = |harness: &Harness| {
+            query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["requested_connections"]
+                .clone()
+        };
+        assert_eq!(requested(&harness), json!([]));
+        for (server, why) in [
+            ("fixture", "first reason, long enough"),
+            ("fixture", "second reason, long enough"),
+            ("other", "third reason, long enough"),
+        ] {
+            harness.project.record_by(
+                Some("dev-a"),
+                at(),
+                "CTV-1",
+                "connection.requested",
+                &json!({ "server": server, "why": why }),
+            );
+        }
+        assert_eq!(
+            requested(&harness),
+            json!([
+                { "agent": "dev-a", "server": "fixture", "why": "second reason, long enough" },
+                { "agent": "dev-a", "server": "other", "why": "third reason, long enough" }
+            ])
+        );
     }
 
     #[test]
@@ -6068,12 +6214,13 @@ pub(super) mod tests {
     fn lists_each_allowance_with_its_use_and_period() {
         let (harness, _) = keeping_an_allowance_kit("allow-list");
         connected(&harness, "dev-a", &kit_server(), &json!({}));
+        // A sprint from before ADR 0062 is open, and the period is the day all the same.
         harness.open_sprint("S1", &[]);
         made(&harness, 3, false);
         assert_eq!(
             allowance_rows(&harness),
             json!({
-                "period": { "kind": "sprint", "sprint_id": "S1" },
+                "period": { "kind": "day", "day": "2026-09-22" },
                 "rows": [{
                     "agent": "dev-a", "server": "fixture", "tool": "make",
                     "what": "pictures", "used": 3, "of": 20
@@ -6116,19 +6263,6 @@ pub(super) mod tests {
             })
             .count();
         assert_eq!(counted, 4, "a granted call is among them");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn says_the_day_with_no_sprint_open() {
-        let (harness, _) = keeping_an_allowance_kit("allow-list-day");
-        connected(&harness, "dev-a", &kit_server(), &json!({}));
-        let listed = allowance_rows(&harness);
-        assert_eq!(
-            listed["period"],
-            json!({ "kind": "day", "day": "2026-09-22" })
-        );
-        assert_eq!(listed["rows"][0]["used"], 0);
     }
 
     #[test]

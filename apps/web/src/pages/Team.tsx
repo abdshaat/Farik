@@ -58,7 +58,7 @@ export type KitService = {
 	labels: Record<string, string>;
 	auth: "keys" | "oauth";
 	credentialKeys: string[];
-	/** What the kit lets the user pre-approve: each spending tool with its default calls each sprint (ADR 0037). */
+	/** What the kit lets the user pre-approve: each spending tool with its default calls each day (ADR 0037). */
 	allowances?: { tool: string; calls: number; what: string }[];
 	/** The service signs in through Catervas Cloud, which comes with the web launch: this build cannot connect it yet (ADR 0044). */
 	atLaunch?: true;

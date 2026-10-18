@@ -8,7 +8,7 @@ use catervas_protocol::event::{EventBody, EventKind, ReasonBody};
 use catervas_store::{EventQuery, TaskProjection};
 
 use super::messages::explore_message;
-use super::rules::{Waiting, acted, asleep, governor_moves, refused_since_entering, spent};
+use super::rules::{Waiting, acted, governor_moves, refused_since_entering, spent, unavailable};
 use super::session::{SessionAsk, run_session};
 use super::verify::append;
 use super::{Orchestrator, OrchestratorError, TickReport, worktree};
@@ -149,7 +149,7 @@ async fn explore(
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     if spent(deps, team, contract, &mut waiting.day_spent)?
-        | asleep(deps, designer, &mut waiting.slept)?
+        | unavailable(deps, designer, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -261,6 +261,25 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_hunt_starts_in_its_implement_session() {
+        let report = "docs/catervas/design/ui-bug-hunt.html";
+        let harness = a_designers_task("design-hunt", |wire| {
+            wire["allowed_paths"] = json!([report]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The report exists.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": report, "must_contain": ["<h1"] }
+            }]);
+        });
+        let started = ticked(&harness, vec![implement_by_iris_ctv_1()], 1).await;
+
+        assert_eq!(who(&started), [("iris", SessionPurpose::Implement)]);
+        assert!(harness.events(&[EventKind::DesignPlanProposed]).is_empty());
     }
 
     #[tokio::test]
@@ -467,6 +486,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Two more plans, then.".to_string(),
                 extra_tries: Some(2),
+                extra_room: false,
             })
             .await
             .expect("the escalation is resolved with more tries");

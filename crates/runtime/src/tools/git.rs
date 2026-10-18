@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::TaskId;
+use catervas_core::forge_text::task_id_in;
 use catervas_core::governor::paths::{PathRefusal, check_allowed_paths, normalise};
 use catervas_core::governor::permissions::ToolRefusal;
 use catervas_store::git::task_base;
@@ -65,9 +66,22 @@ pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
 /// them would be committed.
 pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, ToolError> {
     let task = assignees_task(call)?;
+    // A task id stays inside Catervas (ADR 0066); checked first, so a refusal changes nothing.
+    if let Some(id) = task_id_in(&input.message) {
+        return Err(Refusal::CommitMessageNamesATask { id }.into());
+    }
     let worktree = worktree(call, task);
     if let Some(path) = input.paths.iter().find(|path| worktree.join(path).is_dir()) {
         return Err(Refusal::PathIsADirectory { path: path.clone() }.into());
+    }
+    // A merge Catervas left for the agent to resolve (ADR 0069) must not be committed with its
+    // markers still in the files.
+    if let Some(path) = input
+        .paths
+        .iter()
+        .find(|path| has_conflict_markers(&worktree.join(path)))
+    {
+        return Err(Refusal::ConflictMarkers { path: path.clone() }.into());
     }
     let removed = removals(&worktree, &input.removed)?;
     // A deletion is not undone by a refused verification, so the contract's paths are checked now.
@@ -107,6 +121,15 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
             Err(failed(error))
         }
     }
+}
+
+/// Whether the file at `path` has a line that opens or closes a conflict (`<<<<<<< ` or
+/// `>>>>>>> `). A file that is missing or is not text has none.
+fn has_conflict_markers(path: &std::path::Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|text| {
+        text.lines()
+            .any(|line| line.starts_with("<<<<<<< ") || line.starts_with(">>>>>>> "))
+    })
 }
 
 /// The removed paths, normalised, once each is a regular file inside the worktree with no link on
@@ -183,6 +206,50 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_commit_message_naming_a_task() {
+        let project = TestProject::new("tools-git-commit-id", &a_team_of_three(|_| {}));
+        project.filed("CTV-1", "assigned", "task", None);
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
+        let branch = project.branch("CTV-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, &branch, "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
+        let commit = |message: &str| {
+            project.call(
+                "dev-a",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({ "message": message, "paths": ["src/login/form.ts"] }),
+            )
+        };
+
+        match commit("feat: add the login form (CTV-1)") {
+            Err(ToolError::Refused { reason }) => assert!(
+                reason.starts_with("commit_message_names_a_task: CTV-1 is a task id"),
+                "{reason}"
+            ),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        let git = &project.deps.git;
+        assert_eq!(git.commit_count("main", &branch), Ok(0));
+
+        let committed = commit("feat: add the login form").expect("a message with no id commits");
+        assert!(committed["sha"].is_string(), "{committed}");
+        assert_eq!(git.commit_count("main", &branch), Ok(1));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn commits_through_the_tool_on_the_tasks_worktree() {
         let project = TestProject::new("tools-git-commit", &a_team_of_three(|_| {}));
         project.filed("CTV-1", "assigned", "task", None);
@@ -230,6 +297,58 @@ mod tests {
                 .contains("b/src/login/form.ts"),
             "{diff}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_commit_a_file_with_conflict_markers() {
+        let project = TestProject::new("tools-git-markers", &a_team_of_three(|_| {}));
+        project.filed("CTV-1", "assigned", "task", None);
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        let form = worktree.join("src/login/form.ts");
+        std::fs::write(
+            &form,
+            "<<<<<<< HEAD\nexport const a = 1;\n=======\nexport const a = 2;\n>>>>>>> main\n",
+        )
+        .expect("a file");
+        let head = catervas_store::git::fixtures::git_output_in(&worktree, &["rev-parse", "HEAD"]);
+        let commit = json!({ "message": "resolve it", "paths": ["src/login/form.ts"] });
+
+        let refused = project
+            .call(
+                "dev-a",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                commit.clone(),
+            )
+            .expect_err("markers are refused");
+
+        assert!(
+            format!("{refused:?}").contains("conflict_markers"),
+            "{refused:?}"
+        );
+        assert_eq!(
+            catervas_store::git::fixtures::git_output_in(&worktree, &["rev-parse", "HEAD"]),
+            head,
+            "no commit was made"
+        );
+
+        std::fs::write(&form, "export const a = 2;\n").expect("resolved");
+        project
+            .call("dev-a", Some("CTV-1"), "catervas_git_commit", commit)
+            .expect("the resolved file commits");
     }
 
     #[test]

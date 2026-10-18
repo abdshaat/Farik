@@ -5,15 +5,15 @@ import styles from "../pages.module.css";
 import {
 	Documents,
 	Finish,
-	Planning,
+	IntegrationBranch,
 	RulesTitle,
 	UiPaths,
 	useRuleParts,
 } from "../TeamRules.tsx";
 
-/** How work runs: how finished work is added, planning in sprints, and the UI patterns. */
+/** How work runs: how finished work is added, how documents are written, and the UI patterns. */
 export function Work() {
-	const { ready, part, key } = useRuleParts();
+	const { ready, part, key, membersPresent } = useRuleParts();
 	const [advanced, setAdvanced] = useState(false);
 	return (
 		<div className={styles.page}>
@@ -21,7 +21,9 @@ export function Work() {
 			{ready && (
 				<>
 					<Finish key={key("finish")} {...part("finish")} />
-					<Planning key={key("planning")} {...part("planning")} />
+					{!membersPresent && (
+						<IntegrationBranch key={key("branch")} {...part("branch")} />
+					)}
 					<Documents key={key("documents")} {...part("documents")} />
 					<ShowAdvanced
 						open={advanced}

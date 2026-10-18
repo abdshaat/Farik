@@ -134,6 +134,9 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::EscalationResolved
         | EventKind::MessagePosted
         | EventKind::ChatMessagePosted => a_human_body_wire(kind),
+        EventKind::TaskRoomGranted => {
+            json!({ "sessions": 4, "cost_usd": 5.0, "granted_by": "human" })
+        }
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
         EventKind::TeamPaused | EventKind::TeamResumed => json!({ "by": "human" }),
         EventKind::DesignPlanProposed
@@ -283,7 +286,8 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "path": "docs/catervas/delivery/cadence.md",
             "written_by": "sol",
             "change": 1,
-            "sha": "9f2b0c1d"
+            "sha": "9f2b0c1d",
+            "branch": "docs/delivery-cadence"
         }),
         EventKind::FolderDocProposed => json!({
             "path": "docs/catervas/product/roadmap.md",
@@ -312,9 +316,14 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::FolderDocEdited => json!({
             "path": "docs/catervas/product/roadmap.md",
             "change": 2,
-            "sha": "a1b2c3d4"
+            "sha": "a1b2c3d4",
+            "branch": "docs/roadmap"
         }),
         EventKind::CatervaficationStarted => json!({ "project": "existing" }),
+        EventKind::ConnectionRequested => json!({
+            "server": "buffer",
+            "why": "The plan posts to Instagram every Tuesday."
+        }),
         EventKind::RepoAdded => json!({
             "name": "shop-api",
             "path": "/home/me/Projects/shop-api",
@@ -326,6 +335,22 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "path": "/home/me/Code/shop-api"
         }),
         EventKind::DocumentRewriteStarted => json!({ "tasks": ["CTV-1", "CTV-2"] }),
+        EventKind::WorktreeTidied => json!({ "put_back": ["tsconfig.json"], "removed": [] }),
+        EventKind::PullRequestConflicted => json!({
+            "url": "https://github.com/o/r/pull/7",
+            "into": "main",
+            "paths": ["src/lib.rs"]
+        }),
+        EventKind::PullRequestRefreshed => json!({
+            "url": "https://github.com/o/r/pull/7",
+            "sha": "0123456789abcdef0123456789abcdef01234567"
+        }),
+        EventKind::TaskReassigned => {
+            json!({ "from": "dev-a", "to": "dev-b", "reason": "resumed" })
+        }
+        EventKind::DeliveryClosed => json!({
+            "delivery_id": "D1", "trigger": "team_quiet", "since_seq": 0, "task_ids": ["CTV-1"]
+        }),
         EventKind::ProjectStarted => json!({
             "name": "little-oak-cakes",
             "description": "A bakery that sells cakes online and bakes to order."

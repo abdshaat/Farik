@@ -11,22 +11,21 @@ use catervas_core::governor::gates::{Blocker, DesignerBrowser, Rejection};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::marketing::parse_amount;
-use catervas_core::sprint::{Sprint, SprintStatus};
 use catervas_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
 use catervas_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
 use catervas_protocol::event::{
     AgentUpdatedBody, ConnectorDisconnectedBody, DataPipelineApprovedBody, DataPipelineDecidedBy,
     DataPipelineDeclinedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody,
     EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind,
-    QuestionAnsweredBody, new_event,
+    QuestionAnsweredBody, TaskRoomGrantedBody, new_event,
 };
 use catervas_store::folder_docs::{ProposalState, folder_docs};
 use catervas_store::pipelines::{PipelineState, data_pipelines};
 use catervas_store::product_plan::{drafts_the_plan, new_project, product_plan_tasks};
 use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use catervas_store::requests::{
-    RequestError, file_product_plan_request, hold_contract, placeholder_budget_usd,
-    product_plan_request, triage_by_human,
+    RequestError, TOO_SHORT, file_given_task, file_product_plan_request, hold_contract,
+    placeholder_budget_usd, product_plan_request, triage_by_human,
 };
 use catervas_store::{EventQuery, TaskProjection};
 use serde_json::json;
@@ -37,7 +36,7 @@ use super::verify::{governor_results, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::catervafication::{self, Project};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
-use crate::chat::{ChatError, NewChatMessage, post_chat};
+use crate::chat::{ChatError, NewChatMessage, given_request, post_chat};
 use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
 use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
@@ -51,7 +50,6 @@ use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
     removed_sentence, save_skill, saved_sentence,
 };
-use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::tools::folders::{LandRefusal, land};
 use crate::transitions::{
@@ -110,7 +108,8 @@ pub(super) async fn handle(
             to,
             message,
             extra_tries,
-        } => resolve(tools, &task_id, to, &message, extra_tries),
+            extra_room,
+        } => resolve(tools, &task_id, to, &message, extra_tries, extra_room),
         Command::HumanSendBack {
             task_id,
             subject: AcceptSubject::Contract,
@@ -150,22 +149,16 @@ pub(super) async fn handle(
             update_agent(orchestrator, &agent_id, status)
         }
         Command::SessionStop { session_id } => stop_session(orchestrator, &session_id),
-        Command::SprintStart { budget_usd } => sprint(
-            tools,
-            start_sprint(tools, budget_usd, HUMAN),
-            EventKind::SprintStarted,
-        ),
-        Command::SprintEnd => sprint(
-            tools,
-            end_sprint(tools, EndedBy::Human),
-            EventKind::SprintEnded,
-        ),
         Command::TeamPause => pause(tools, true),
         Command::TeamResume => pause(tools, false),
         Command::ProductPlanDraft => draft_product_plan(tools),
         Command::CatervaficationStart => catervafication_start(tools),
         Command::MessagePost { text } => post_message(tools, text),
-        Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
+        Command::ChatMessagePost {
+            agent_id,
+            text,
+            as_task,
+        } => post_chat_message(tools, &agent_id, text, as_task),
         Command::ConnectorConnect {
             agent,
             server,
@@ -382,8 +375,8 @@ fn draft_for(tools: &ToolDeps, team: &Team) -> Result<CommandReport, CommandErro
 // ponytail: one lock for the process, as the product plan's draft has; the command line does not start one.
 static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// The owner's Start of the Catervafication of an existing repository (4.1, 5.16): the epic is filed,
-/// given a sprint of its own and approved by this order. Each refusal is `<code>: <words>`, in this
+/// The owner's Start of the Catervafication of an existing repository (4.1, 5.16): the epic is filed
+/// and approved by this order. Each refusal is `<code>: <words>`, in this
 /// order, and records nothing.
 fn catervafication_start(tools: &ToolDeps) -> Result<CommandReport, CommandError> {
     let team = tools.files.read_team().map_err(failed)?;
@@ -444,12 +437,9 @@ fn catervafication_start_for(tools: &ToolDeps, team: &Team) -> Result<CommandRep
         .iter()
         .map(|event| event.envelope.seq)
         .collect();
-    let in_sprint = started
-        .sprint
-        .map_or_else(String::new, |sprint| format!(" in {sprint}"));
     Ok(CommandReport {
         said: format!(
-            "Your team starts documenting the project{in_sprint}: {}.",
+            "Your team starts documenting the project: {}.",
             started.epic.as_str()
         ),
         events,
@@ -512,11 +502,13 @@ fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, Command
 }
 
 /// The human's message in their one-to-one chat with `agent_id` (4.3), which is refused for an
-/// agent not on the team or retired.
+/// agent not on the team or retired. Sent `as_task` (ADR 0063), it also files the request given to
+/// that agent, which must be active, from at least 20 characters.
 fn post_chat_message(
     tools: &ToolDeps,
     agent_id: &str,
     text: String,
+    as_task: bool,
 ) -> Result<CommandReport, CommandError> {
     let team = tools.files.read_team().map_err(failed)?;
     let Some(agent) = team
@@ -536,6 +528,11 @@ fn post_chat_message(
             ),
         });
     }
+    let contract = if as_task {
+        Some(given_contract(&team, agent, &text)?)
+    } else {
+        None
+    };
     let seq = post_chat(
         &tools.log,
         tools.clock.as_ref(),
@@ -548,55 +545,79 @@ fn post_chat_message(
             in_reply_to: None,
             request: None,
             session_id: None,
+            as_task,
         },
     )
     .map_err(|error| match error {
         ChatError::Refused { reason } => CommandError::Invalid { detail: reason },
         ChatError::Store(error) => failed(error),
     })?;
+    let Some(wire) = contract else {
+        return Ok(CommandReport {
+            said: format!("sent to {}", agent.display_name.as_str()),
+            events: vec![seq],
+        });
+    };
+    let task = file_given_task(
+        &tools.files,
+        &tools.log,
+        wire,
+        HUMAN,
+        agent_id,
+        seq,
+        tools.clock.now(),
+        &tools.ids,
+    )
+    .map_err(|error| from_request("task_refused", error))?;
+    tools.projections.catch_up().map_err(failed)?;
+    let mut events = vec![seq];
+    events.extend(
+        tools
+            .log
+            .read(&EventQuery {
+                task_id: Some(task.id.clone()),
+                ..EventQuery::default()
+            })
+            .map_err(failed)?
+            .iter()
+            .map(|event| event.envelope.seq),
+    );
     Ok(CommandReport {
-        said: format!("sent to {}", agent.display_name.as_str()),
-        events: vec![seq],
+        said: format!(
+            "given to {} as {}",
+            agent.display_name.as_str(),
+            task.id.as_str()
+        ),
+        events,
     })
 }
 
-/// What starting or ending a sprint did, as the human's report: the sprint and the event of
-/// `kind` it recorded last.
-fn sprint(
-    tools: &ToolDeps,
-    done: Result<Sprint, SprintError>,
-    kind: EventKind,
-) -> Result<CommandReport, CommandError> {
-    let sprint = done.map_err(|error| match error {
-        SprintError::AlreadyOpen { .. } => CommandError::Refused {
-            reason: format!("sprint_open: {error}"),
-        },
-        SprintError::NoneOpen => CommandError::Refused {
-            reason: format!("no_sprint_open: {error}"),
-        },
-        SprintError::Refused { reason } => CommandError::Refused { reason },
-        other => failed(other),
-    })?;
-    let recorded = tools
-        .log
-        .read(&EventQuery {
-            kinds: vec![kind],
-            ..EventQuery::default()
-        })
-        .map_err(failed)?;
-    let budget = sprint
-        .budget_usd
-        .map_or_else(|| "no budget".to_string(), |usd| format!("budget ${usd}"));
-    Ok(CommandReport {
-        said: match sprint.status {
-            SprintStatus::Open => format!("{} is open, {budget}", sprint.id.as_str()),
-            SprintStatus::Ended => format!("{} ended", sprint.id.as_str()),
-        },
-        events: recorded
-            .last()
-            .map(|event| event.envelope.seq)
-            .into_iter()
-            .collect(),
+/// The contract of the task the owner gives `agent` in its chat (ADR 0063): the owner's words as
+/// its intent, the agent's role as its assignee and the usual reviewer role. Refused, before
+/// anything is recorded, for an agent that is not active and for fewer than 20 characters.
+fn given_contract(
+    team: &Team,
+    agent: &Agent,
+    text: &str,
+) -> Result<serde_json::Value, CommandError> {
+    if agent.status != AgentStatus::Active {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "agent_not_active: {} is paused; resume them on the Team page to give them a task",
+                agent.display_name.as_str()
+            ),
+        });
+    }
+    given_request(team, agent, text, &team.rules()).map_err(|reason| {
+        if reason == TOO_SHORT {
+            CommandError::Refused {
+                reason: format!("task_too_short: {reason}"),
+            }
+        } else if reason.ends_with("reviewer role") {
+            failed(reason)
+        } else {
+            CommandError::Invalid { detail: reason }
+        }
     })
 }
 
@@ -1528,7 +1549,7 @@ fn send_plan_back(
     if !row.awaiting_approval {
         return Err(not_awaiting_approval(&row));
     }
-    resolve(tools, task_id, TaskStatus::Refining, message, None)
+    resolve(tools, task_id, TaskStatus::Refining, message, None, false)
 }
 
 /// Sends a result that waits on the human back to its assignee (ADR 0024): `verifying ->
@@ -1617,7 +1638,8 @@ fn mechanical_criteria_passed(
     Ok(())
 }
 
-/// Resolves an escalation (5.7): `escalated -> to` as the human, then, on the move,
+/// Resolves an escalation (5.7), or a task its agent blocked (ADR 0068, with the message as the
+/// blocker's resolution): `escalated -> to` or `blocked -> to` as the human, then, on the move,
 /// `escalation.resolved { to, message, extra_tries }`. Never to `ready` while the contract awaits
 /// approval, which is `HumanAccept`'s, nor for an epic whose contract the human has not approved,
 /// which reaches `ready` only by that approval (5.16 item 2). `extra_tries` is only for an
@@ -1629,18 +1651,11 @@ fn resolve(
     to: TaskStatus,
     message: &str,
     extra_tries: Option<u8>,
+    extra_room: bool,
 ) -> Result<CommandReport, CommandError> {
     written(message, "a resolution's message")?;
     let row = row_of(tools, task_id)?;
-    if row.status != TaskStatus::Escalated {
-        return Err(CommandError::Refused {
-            reason: format!(
-                "not_escalated: {} is {}, and only an escalation is resolved",
-                task_id.as_str(),
-                row.status
-            ),
-        });
-    }
+    let blocked = resolvable(task_id, row.status, extra_tries.is_some() || extra_room)?;
     if to == TaskStatus::Ready && row.awaiting_approval {
         return Err(CommandError::Refused {
             reason: format!(
@@ -1689,8 +1704,17 @@ fn resolve(
             });
         }
     }
+    if extra_room && extra_tries.is_some() {
+        return Err(CommandError::Refused {
+            reason: "extra_room_or_extra_tries: ask for one of them".to_string(),
+        });
+    }
+    let mut events = Vec::new();
+    if extra_room {
+        events.push(grant_room(tools, task_id)?);
+    }
     let team = tools.files.read_team().map_err(failed)?;
-    let mut events = human_moves(
+    events.extend(human_moves(
         tools,
         &team,
         task_id,
@@ -1698,9 +1722,10 @@ fn resolve(
         &TransitionAsk {
             reason: Some(message.to_string()),
             grants_tries: extra_tries.is_some(),
+            blocker_resolution: blocked.then(|| message.to_string()),
             ..TransitionAsk::default()
         },
-    )?;
+    )?);
     events.push(append(
         tools,
         Some(task_id.clone()),
@@ -1715,6 +1740,61 @@ fn resolve(
         said: format!("{} is resolved to {to}", task_id.as_str()),
         events,
     })
+}
+
+/// Whether a task in `status` may be resolved: an escalation, or a task its agent blocked, which
+/// is answered as an escalation is (ADR 0068), the message being the blocker's resolution, and
+/// which gets no more tries or room (`more`). Answers whether it is the blocked one.
+fn resolvable(task_id: &TaskId, status: TaskStatus, more: bool) -> Result<bool, CommandError> {
+    let blocked = status == TaskStatus::Blocked;
+    if status != TaskStatus::Escalated && !blocked {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "not_escalated: {} is {status}, and only an escalation or a blocked task is \
+                 resolved",
+                task_id.as_str()
+            ),
+        });
+    }
+    if blocked && more {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "not_escalated: {} is blocked, and more tries or room are given only to an \
+                 escalation",
+                task_id.as_str()
+            ),
+        });
+    }
+    Ok(blocked)
+}
+
+/// Appends `task.room_granted`: the contract's own sessions and dollars again, for a task that
+/// escalated for `budget` or `sessions` (ADR 0062).
+fn grant_room(tools: &ToolDeps, task_id: &TaskId) -> Result<u64, CommandError> {
+    let reason = escalated_for(tools, task_id)?;
+    if !matches!(
+        reason,
+        Some(EscalationRaisedBodyReason::Budget | EscalationRaisedBodyReason::Sessions)
+    ) {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "extra_room_only_for_spent: {} escalated for {}, and more room is granted only \
+                 to a task whose dollars or sessions are spent",
+                task_id.as_str(),
+                reason.map_or_else(|| "no recorded reason".to_string(), |r| r.to_string())
+            ),
+        });
+    }
+    let contract = tools.files.read_contract(task_id).map_err(failed)?;
+    append(
+        tools,
+        Some(task_id.clone()),
+        EventBody::TaskRoomGranted(TaskRoomGrantedBody {
+            sessions: contract.budget.max_sessions,
+            cost_usd: contract.budget.max_cost_usd,
+            granted_by: HUMAN.to_string(),
+        }),
+    )
 }
 
 /// The reason of the task's last escalation.
@@ -1794,6 +1874,11 @@ async fn integrate(
             "{}'s pull request is open on the forge, waiting for its merge",
             task_id.as_str()
         ),
+        Ok(IntegrationOutcome::SentBack { paths }) => format!(
+            "{} no longer merges: it went back to its assignee to resolve {}",
+            task_id.as_str(),
+            paths.join(", ")
+        ),
         Ok(IntegrationOutcome::AwaitingHand { branch, into }) => format!(
             "{}: {branch} waits for you to merge it into {into}",
             task_id.as_str()
@@ -1853,7 +1938,7 @@ pub(crate) fn folder_doc_decide(
     if !approve && said.is_empty() {
         return Err(order_refusal(
             "folder_doc_reason_needed",
-            "say why: the agent reads it at its next sprint review",
+            "say why: the agent reads it at its next review",
         ));
     }
     let _lock = crate::transitions::integration_lock(tools.files.root()).map_err(failed)?;
@@ -1898,7 +1983,7 @@ pub(crate) fn folder_doc_decide(
             .map_err(failed)?;
         let seq = append(tools, None, EventBody::FolderDocReturned(body))?;
         return Ok(CommandReport {
-            said: "Sent back. The agent reads your words at its next sprint review.".to_string(),
+            said: "Sent back. The agent reads your words at its next review.".to_string(),
             events: vec![seq],
         });
     }
@@ -1933,6 +2018,7 @@ pub(crate) fn folder_doc_decide(
         Ok(Some(landed)) => {
             body["change"] = json!(landed.change);
             body["sha"] = json!(landed.sha);
+            body["branch"] = json!(landed.branch);
             landed.next
         }
         Ok(None) => "Approved. The files already said it, so nothing was added.".to_string(),
@@ -1982,6 +2068,9 @@ async fn integrate_folder_change(
         }
         Ok(IntegrationOutcome::AwaitingForge) => {
             format!("{name}'s pull request is open on the forge, waiting for its merge")
+        }
+        Ok(IntegrationOutcome::SentBack { paths }) => {
+            format!("{name} no longer merges: {}", paths.join(", "))
         }
         Ok(IntegrationOutcome::AwaitingHand { branch, into }) => {
             format!("{name}: {branch} waits for you to merge it into {into}")
@@ -2696,12 +2785,9 @@ mod tests {
     };
     use serde_json::{Value, json};
 
-    use catervas_core::sprint::fixtures::an_open_sprint_wire;
-    use catervas_core::sprint::{SprintStatus, validate_sprint};
-    use catervas_protocol::event::SprintEndedBodyEndedBy;
-
     use crate::orchestrator::fixtures::{Harness, UsageThenWaitAdapter};
     use crate::orchestrator::{CommandError, CommandReport, Orchestrator};
+    use crate::recorded::fixtures::implement_stops_early;
 
     fn task(id: &str) -> catervas_core::contract::TaskId {
         id.parse().expect("a task id")
@@ -2757,6 +2843,7 @@ mod tests {
                 request: None,
                 heard: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the greeting is recorded");
@@ -2779,7 +2866,6 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn drafts_the_product_plan_on_the_owners_word() {
         let harness = a_new_project("human-product-plan", |wire| {
-            wire["policy"]["plan_in_sprints"] = json!(true);
             wire["agents"].as_array_mut().expect("agents").push(
                 catervas_core::team::fixtures::an_agent_wire("sam", "scrum_master"),
             );
@@ -2830,8 +2916,8 @@ mod tests {
             ]
         );
 
-        // Rule 10 and rule 9 move it to ready with no refine session; sprints are on and none is
-        // open, and it is not held: the Scrum Master's plan session takes it to assigned.
+        // Rule 10 and rule 9 move it to ready with no refine session: the Scrum Master's plan
+        // session takes it to assigned.
         for _ in 0..3 {
             orchestrator.tick().await.expect("the tick runs");
         }
@@ -2969,15 +3055,6 @@ mod tests {
         assert_eq!(product_plan_tasks(&harness), ["CTV-1", "CTV-2"]);
     }
 
-    /// The kinds of these events about `epic`, oldest first.
-    fn about(harness: &Harness, epic: &str, kinds: &[EventKind]) -> Vec<CatervasEvent> {
-        harness
-            .events(kinds)
-            .into_iter()
-            .filter(|event| event.envelope.ids.task_id == Some(task(epic)))
-            .collect()
-    }
-
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn starts_a_catervafication_on_the_owners_word() {
@@ -2989,16 +3066,14 @@ mod tests {
 
         assert_eq!(
             report.said,
-            "Your team starts documenting the project in S1: CTV-1."
+            "Your team starts documenting the project: CTV-1."
         );
-        // The epic is filed whole, then its sprint is opened and planned, and it moves into
+        // The epic is filed whole, and it moves into
         // refining as the Product Manager asks. No approval of the owner's follows (ADR 0061).
         let kinds = [
             EventKind::TaskCreated,
             EventKind::RequestTriaged,
             EventKind::CatervaficationStarted,
-            EventKind::SprintStarted,
-            EventKind::SprintPlanned,
             EventKind::TaskTransitioned,
         ];
         let seen: Vec<EventKind> = harness
@@ -3012,13 +3087,6 @@ mod tests {
             matches!(&created.body, EventBody::TaskCreated(body) if body.created_by == "human")
         );
         assert_eq!(created.envelope.ids.task_id, Some(task("CTV-1")));
-        let started = last(&harness, EventKind::SprintStarted).expect("a sprint is opened");
-        assert!(matches!(&started.body, EventBody::SprintStarted(body)
-            if body.sprint_id.as_str() == "S1" && body.started_by == "human"));
-        let planned = last(&harness, EventKind::SprintPlanned).expect("the epic is planned");
-        assert!(matches!(&planned.body, EventBody::SprintPlanned(body)
-            if body.planned_by == "governor"
-                && json!(body.task_ids) == json!(["CTV-1"])));
         let moved = last(&harness, EventKind::TaskTransitioned).expect("the epic moves");
         assert!(matches!(&moved.body, EventBody::TaskTransitioned(body)
             if body.to.to_string() == "refining" && body.requested_by == "pm"));
@@ -3034,18 +3102,136 @@ mod tests {
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
         assert_eq!(harness.row("CTV-1").assignee_id.as_deref(), Some("sm"));
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
 
-        // With a sprint already open, none is opened or planned, and the epic waits for one.
-        let open = Harness::with_the_suggested_six("human-catervafication-open");
-        open.open_sprint("S1", &[]);
-        let orchestrator = an_orchestrator(&open);
-        let report = handled(&orchestrator, Command::CatervaficationStart).await;
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one command, all its records and refusals"
+    )]
+    async fn gives_an_agent_a_task_from_its_chat() {
+        let harness = Harness::with_the_suggested_six("human-chat-task");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let text = "Add a dark mode switch to the settings page";
+        let as_task = |agent: &str, text: &str| Command::ChatMessagePost {
+            agent_id: agent.to_string(),
+            text: text.to_string(),
+            as_task: true,
+        };
+
+        let report = handled(&orchestrator, as_task("dev", text)).await;
+
+        let name = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team")
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "dev")
+            .map(|agent| agent.display_name.as_str().to_string())
+            .expect("dev");
+        assert_eq!(report.said, format!("given to {name} as CTV-1"));
+        let kinds = [
+            EventKind::ChatMessagePosted,
+            EventKind::TaskCreated,
+            EventKind::RequestTriaged,
+        ];
+        let seen = harness.events(&kinds);
         assert_eq!(
-            report.said,
-            "Your team starts documenting the project: CTV-1."
+            seen.iter()
+                .map(|event| event.body.kind())
+                .collect::<Vec<_>>(),
+            kinds
         );
-        assert_eq!(open.events(&[EventKind::SprintStarted]).len(), 1);
-        assert!(about(&open, "CTV-1", &[EventKind::SprintPlanned]).is_empty());
+        assert_eq!(
+            report.events,
+            seen.iter()
+                .map(|event| event.envelope.seq)
+                .collect::<Vec<_>>()
+        );
+        let EventBody::ChatMessagePosted(posted) = &seen[0].body else {
+            panic!("a chat message");
+        };
+        assert_eq!(
+            (posted.author.as_str(), posted.as_task),
+            ("human", Some(true))
+        );
+        let EventBody::TaskCreated(created) = &seen[1].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "human");
+        assert_eq!(
+            created.from_chat_message.map(std::num::NonZeroU64::get),
+            Some(seen[0].envelope.seq)
+        );
+        assert_eq!(
+            created.given_to.as_ref().map(|agent| agent.as_str()),
+            Some("dev")
+        );
+        let EventBody::RequestTriaged(triaged) = &seen[2].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.reason, "a task the owner gave dev in their chat");
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("CTV-1"))
+            .expect("the contract");
+        assert_eq!(
+            contract.assignee_role,
+            catervas_core::contract::Role::SoftwareDeveloper
+        );
+        assert_eq!(
+            contract.reviewer_role,
+            catervas_core::contract::Role::Architect
+        );
+        assert_eq!(contract.intent.as_str(), text);
+
+        let deps = &harness.project.deps;
+        let waiting = crate::chat::chat_waiting(
+            &deps.log,
+            &deps.projections,
+            &deps.files.read_team().expect("the team"),
+            "dev",
+            deps.clock.now(),
+        )
+        .expect("reads");
+        assert_eq!(waiting, None);
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // Each refusal records nothing more.
+        let before = harness
+            .events(&[EventKind::ChatMessagePosted, EventKind::TaskCreated])
+            .len();
+        let short = refused(&orchestrator, as_task("dev", "too short")).await;
+        assert!(short.starts_with("task_too_short: "), "{short}");
+        handled(
+            &orchestrator,
+            Command::AgentUpdate {
+                agent_id: "dev".to_string(),
+                status: AgentStatus::Paused,
+            },
+        )
+        .await;
+        let paused = refused(
+            &orchestrator,
+            as_task("dev", "Please add a light mode switch too"),
+        )
+        .await;
+        assert!(paused.starts_with("agent_not_active: "), "{paused}");
+        assert_eq!(
+            harness
+                .events(&[EventKind::ChatMessagePosted, EventKind::TaskCreated])
+                .len(),
+            before
+        );
     }
 
     #[tokio::test]
@@ -3138,6 +3324,11 @@ mod tests {
                 (
                     catervas_core::contract::Role::SoftwareDeveloper,
                     catervas_core::contract::Role::SoftwareDeveloper
+                ),
+                // The Developer's bug hunt, which the Product Manager is named to review.
+                (
+                    catervas_core::contract::Role::SoftwareDeveloper,
+                    catervas_core::contract::Role::ProductManager
                 ),
             ]
         );
@@ -3717,6 +3908,7 @@ mod tests {
             to,
             message: message.to_string(),
             extra_tries: None,
+            extra_room: false,
         };
 
         handled(
@@ -3760,6 +3952,104 @@ mod tests {
         assert_eq!(harness.events(&[EventKind::EscalationResolved]).len(), 1);
     }
 
+    /// ADR 0068: a task its agent blocked waits on the owner with the agent's words, offers
+    /// "Answer and carry on", and the owner's answer moves it back to `in_progress` with the
+    /// message for the next session.
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_blocked_task_waits_on_the_owner_and_carries_on_with_the_answer() {
+        let harness = Harness::new("human-blocked", |_| {});
+        harness.blocked("CTV-1", "dev-a", "dev-b");
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        let waiting =
+            catervas_store::waiting::waiting(&deps.projections, &deps.log, &deps.files, &team)
+                .expect("reads");
+        let row = waiting
+            .iter()
+            .find(|row| row.task_id.as_str() == "CTV-1")
+            .expect("the blocked task waits on the owner");
+        assert_eq!(row.kind, catervas_store::waiting::WaitingKind::Help);
+        assert!(row.line.contains("the API is down"), "{}", row.line);
+        let choices = crate::choices::offer_for(
+            &deps.log,
+            &deps.projections,
+            &deps.files,
+            &team,
+            &task("CTV-1"),
+        )
+        .expect("reads")
+        .expect("a blocked task has choices");
+        assert_eq!(choices[0].label, "Answer and carry on");
+        assert_eq!(
+            choices[0].action,
+            crate::choices::ChoiceAction::Resolve {
+                to: TaskStatus::InProgress,
+                extra_tries: None,
+                extra_room: false
+            }
+        );
+        assert_eq!(choices[1].label, "Ask pm to change the plan");
+
+        let orchestrator = an_orchestrator(&harness);
+        handled(
+            &orchestrator,
+            Command::EscalationResolve {
+                task_id: task("CTV-1"),
+                to: TaskStatus::InProgress,
+                message: "Use the staging API.".to_string(),
+                extra_tries: None,
+                extra_room: false,
+            },
+        )
+        .await;
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+        let history = deps
+            .log
+            .read(&catervas_store::EventQuery {
+                task_id: Some(task("CTV-1")),
+                ..catervas_store::EventQuery::default()
+            })
+            .expect("reads");
+        let said = crate::orchestrator::messages::human_message(&history, "dev-a")
+            .expect("the answer reaches the next session");
+        assert!(said.contains("Use the staging API."), "{said}");
+    }
+
+    /// ADR 0069: a task its reviewer blocked goes back into its review on the owner's answer, and
+    /// not to the assignee's work.
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_reviewers_block_is_answered_back_into_its_review() {
+        let harness = Harness::new("human-reviewer-blocked", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness
+            .project
+            .moved("CTV-1", "in_progress", "verifying", &people);
+        let mut body = people;
+        body["blocker"] = json!({ "description": "the checks cannot run git", "needed": "git" });
+        harness
+            .project
+            .moved("CTV-1", "verifying", "blocked", &body);
+        let orchestrator = an_orchestrator(&harness);
+        let resolve = |to| Command::EscalationResolve {
+            task_id: task("CTV-1"),
+            to,
+            message: "Here is the output".to_string(),
+            extra_tries: None,
+            extra_room: false,
+        };
+
+        refused(&orchestrator, resolve(TaskStatus::InProgress)).await;
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Blocked);
+        assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
+
+        handled(&orchestrator, resolve(TaskStatus::Verifying)).await;
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.events(&[EventKind::EscalationResolved]).len(), 1);
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn keeps_an_unapproved_epic_from_ready() {
@@ -3779,6 +4069,7 @@ mod tests {
             to: TaskStatus::Ready,
             message: "Go.".to_string(),
             extra_tries: None,
+            extra_room: false,
         };
 
         let unapproved = refused(&orchestrator, to_ready("CTV-1")).await;
@@ -3950,7 +4241,7 @@ mod tests {
         let harness = Harness::new("human-run-stop", |_| {});
         harness.ready("CTV-1");
         let adapter = harness.recorded(Vec::new());
-        let orchestrator = harness.orchestrator(adapter.clone());
+        let orchestrator = Arc::new(harness.orchestrator(adapter.clone()));
 
         let report = handled(&orchestrator, Command::RunStop).await;
         assert!(report.events.is_empty());
@@ -4522,93 +4813,6 @@ mod tests {
     }
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn starts_a_sprint() {
-        let harness = Harness::new("human-sprint-start", |_| {});
-        let orchestrator = an_orchestrator(&harness);
-
-        let report = handled(
-            &orchestrator,
-            Command::SprintStart {
-                budget_usd: Some(20.0),
-            },
-        )
-        .await;
-
-        let sprint = harness
-            .project
-            .deps
-            .files
-            .read_sprint("S1")
-            .expect("S1 is written");
-        assert_eq!(sprint.status, SprintStatus::Open);
-        assert_eq!(sprint.budget_usd, Some(20.0));
-        assert!(sprint.ended_at.is_none() && sprint.task_ids.is_empty());
-        let started = last(&harness, EventKind::SprintStarted).expect("the start is recorded");
-        let EventBody::SprintStarted(body) = &started.body else {
-            panic!("a start");
-        };
-        assert_eq!(
-            (
-                body.sprint_id.as_str(),
-                body.budget_usd,
-                body.started_by.as_str()
-            ),
-            ("S1", Some(20.0), "human")
-        );
-        assert_eq!(report.events, vec![started.envelope.seq]);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn numbers_a_sprint_after_the_files_and_the_log() {
-        let harness = Harness::new("human-sprint-numbers", |_| {});
-        let mut ended = an_open_sprint_wire();
-        ended["id"] = json!("S3");
-        ended["status"] = json!("ended");
-        ended["ended_at"] = json!("2026-09-24T01:00:00Z");
-        harness
-            .project
-            .deps
-            .files
-            .write_sprint(&validate_sprint(&ended).expect("a sprint"))
-            .expect("S3 is written");
-        let orchestrator = an_orchestrator(&harness);
-        handled(&orchestrator, Command::SprintStart { budget_usd: None }).await;
-        assert!(harness.project.deps.files.read_sprint("S4").is_ok());
-
-        let harness = Harness::new("human-sprint-numbers-log", |_| {});
-        harness.project.record(
-            "",
-            "sprint.started",
-            &json!({ "sprint_id": "S5", "budget_usd": null, "started_by": "human" }),
-        );
-        harness.project.record(
-            "",
-            "sprint.ended",
-            &json!({ "sprint_id": "S5", "ended_by": "human", "left": [] }),
-        );
-        let orchestrator = an_orchestrator(&harness);
-        handled(&orchestrator, Command::SprintStart { budget_usd: None }).await;
-        assert!(harness.project.deps.files.read_sprint("S6").is_ok());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn refuses_a_second_open_sprint() {
-        let harness = Harness::new("human-sprint-second", |_| {});
-        harness.open_sprint("S1", &[]);
-        let before = harness.events(&[]).len();
-        let orchestrator = an_orchestrator(&harness);
-
-        let reason = refused(&orchestrator, Command::SprintStart { budget_usd: None }).await;
-
-        assert!(reason.contains("S1"), "{reason}");
-        assert_eq!(harness.events(&[]).len(), before);
-        assert!(harness.project.deps.files.read_sprint("S2").is_err());
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn records_a_pause_the_human_asks_for() {
         let harness = Harness::new("human-pause", |_| {});
         let orchestrator = an_orchestrator(&harness);
@@ -4646,85 +4850,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn takes_the_human_commands_while_paused() {
         let harness = Harness::new("human-paused-commands", |_| {});
-        harness.open_sprint("S1", &[]);
         let orchestrator = an_orchestrator(&harness);
         handled(&orchestrator, Command::TeamPause).await;
 
-        handled(&orchestrator, Command::SprintEnd).await;
+        handled(&orchestrator, Command::TeamResume).await;
 
-        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
-        let EventBody::SprintEnded(body) = &ended.body else {
-            panic!("an end");
-        };
-        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Human);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn ends_a_sprint_leaving_its_unfinished_tasks() {
-        let harness = Harness::new("human-sprint-end", |_| {});
-        harness.accepted("CTV-1");
-        harness.in_progress("CTV-2", "dev-a", "dev-b");
-        harness.open_sprint("S1", &["CTV-1", "CTV-2"]);
-        let orchestrator = an_orchestrator(&harness);
-
-        let report = handled(&orchestrator, Command::SprintEnd).await;
-
-        let files = &harness.project.deps.files;
-        let sprint = files.read_sprint("S1").expect("S1 reads");
-        assert_eq!(sprint.status, SprintStatus::Ended);
-        assert!(sprint.ended_at.is_some());
-        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
-        let EventBody::SprintEnded(body) = &ended.body else {
-            panic!("an end");
-        };
-        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Human);
-        assert_eq!(
-            body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            vec!["CTV-2"]
-        );
-        // With the policy off, what the sprint leaves goes on: no Backlog mark (ADR 0028).
-        assert_eq!(body.backlog, None);
-        assert!(!harness.row("CTV-2").left_for_the_backlog);
-        assert_eq!(report.events, vec![ended.envelope.seq]);
-        let contract = files.read_contract(&task("CTV-2")).expect("CTV-2 reads");
-        assert_eq!(contract.sprint, None);
-        assert_eq!(harness.row("CTV-2").status, TaskStatus::InProgress);
-        assert_eq!(harness.row("CTV-2").sprint, None);
-        assert_eq!(harness.row("CTV-1").sprint.as_deref(), Some("S1"));
-
-        let again = refused(&orchestrator, Command::SprintEnd).await;
-        assert!(again.contains("no sprint is open"), "{again}");
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn ends_a_sprint_whose_file_omits_a_task_on_the_board() {
-        let harness = Harness::new("human-sprint-end-omitted", |_| {});
-        harness.in_progress("CTV-1", "dev-a", "dev-b");
-        harness.open_sprint("S1", &["CTV-1"]);
-        // S1's file restored from before CTV-1 was planned into it.
-        let files = &harness.project.deps.files;
-        let mut restored = an_open_sprint_wire();
-        restored["id"] = json!("S1");
-        files
-            .write_sprint(&validate_sprint(&restored).expect("a sprint"))
-            .expect("S1 is written");
-        let orchestrator = an_orchestrator(&harness);
-
-        handled(&orchestrator, Command::SprintEnd).await;
-
-        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
-        let EventBody::SprintEnded(body) = &ended.body else {
-            panic!("an end");
-        };
-        assert_eq!(
-            body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            vec!["CTV-1"]
-        );
-        let contract = files.read_contract(&task("CTV-1")).expect("CTV-1 reads");
-        assert_eq!(contract.sprint, None);
-        assert_eq!(harness.row("CTV-1").sprint, None);
+        assert_eq!(harness.events(&[EventKind::TeamResumed]).len(), 1);
     }
 
     /// What `handle` answers for the human's `text` in the channel.
@@ -4811,6 +4942,7 @@ mod tests {
         let chat = |agent: &str, text: String| Command::ChatMessagePost {
             agent_id: agent.to_string(),
             text,
+            as_task: false,
         };
 
         for (agent, text) in [
@@ -4858,6 +4990,7 @@ mod tests {
                     in_reply_to: None,
                     request: Some(crate::chat::ProposedRequest { title, text }),
                     session_id: None,
+                    as_task: false,
                 },
             );
             assert!(
@@ -5085,6 +5218,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Try again with the new API.".to_string(),
                 extra_tries: Some(2),
+                extra_room: false,
             },
         )
         .await;
@@ -5127,6 +5261,70 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn grants_room_to_a_spent_task() {
+        let harness = Harness::new("human-extra-room", |_| {});
+        harness.file("CTV-1", "ready", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-1", "assigned", "in_progress", &people);
+        harness.spent(Some("CTV-1"), "s-0", 0.01);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick escalates it");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
+        let max_cost = harness.project.file("CTV-1")["budget"]["max_cost_usd"]
+            .as_f64()
+            .expect("a dollar budget");
+        let resolve =
+            |extra_tries: Option<u8>, extra_room: bool, id: &str| Command::EscalationResolve {
+                task_id: task(id),
+                to: TaskStatus::InProgress,
+                message: "Carry on.".to_string(),
+                extra_tries,
+                extra_room,
+            };
+
+        handled(&orchestrator, resolve(None, true, "CTV-1")).await;
+
+        let events = harness.events(&[EventKind::TaskRoomGranted, EventKind::EscalationResolved]);
+        let kinds: Vec<EventKind> = events.iter().map(|event| event.body.kind()).collect();
+        assert_eq!(
+            kinds,
+            vec![EventKind::TaskRoomGranted, EventKind::EscalationResolved]
+        );
+        let EventBody::TaskRoomGranted(body) = &events[0].body else {
+            panic!("a grant");
+        };
+        assert_eq!(
+            (body.sessions.get(), body.granted_by.as_str()),
+            (1, "human")
+        );
+        assert!((body.cost_usd - max_cost).abs() < f64::EPSILON);
+        assert_eq!(max_sessions(&harness), 2);
+
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "the work starts again");
+        assert_eq!(harness.events(&[EventKind::EscalationRaised]).len(), 1);
+
+        // Room is for a spent task alone, and not with more tries.
+        harness.rejected("CTV-2", 3, "C1: done.txt missing");
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Escalated);
+        let reason = refused(&orchestrator, resolve(None, true, "CTV-2")).await;
+        assert!(reason.starts_with("extra_room_only_for_spent"), "{reason}");
+        let reason = refused(&orchestrator, resolve(Some(2), true, "CTV-2")).await;
+        assert!(reason.starts_with("extra_room_or_extra_tries"), "{reason}");
+        assert_eq!(harness.events(&[EventKind::TaskRoomGranted]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn refuses_extra_tries_for_other_reasons() {
         let harness = Harness::new("human-extra-tries-refused", |_| {});
         harness.file("CTV-1", "refining", |_| {});
@@ -5140,6 +5338,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Split it by page.".to_string(),
                 extra_tries: Some(2),
+                extra_room: false,
             },
         )
         .await;
@@ -5159,6 +5358,7 @@ mod tests {
                     to,
                     message: "Stop here.".to_string(),
                     extra_tries: Some(2),
+                    extra_room: false,
                 },
             )
             .await;
@@ -5177,6 +5377,7 @@ mod tests {
                 to: TaskStatus::InProgress,
                 message: "Go on.".to_string(),
                 extra_tries: Some(2),
+                extra_room: false,
             },
         )
         .await;
@@ -6655,7 +6856,7 @@ mod tests {
         })
     }
 
-    /// `agent`'s proposal of `path` at the sprint review, in its session, and its number.
+    /// `agent`'s proposal of `path` at the review, in its session, and its number.
     fn proposed_by(harness: &Harness, agent: &str, path: &str, text: &str) -> u64 {
         harness
             .project
@@ -6685,7 +6886,7 @@ mod tests {
         harness.project.repo.git_output(&[
             "branch",
             "--list",
-            "docs/folder-*",
+            "docs/*",
             "--format=%(refname:short)",
         ])
     }
@@ -6710,7 +6911,11 @@ mod tests {
 
         let repo = &harness.project.repo;
         assert_eq!(
-            repo.git_output(&["rev-list", "--count", "main..docs/folder-1"]),
+            repo.git_output(&[
+                "rev-list",
+                "--count",
+                "main..docs/roadmap-and-product-description"
+            ]),
             "1"
         );
         for (path, text) in [
@@ -6726,12 +6931,20 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                repo.git_output(&["show", &format!("docs/folder-1:{path}")]),
+                repo.git_output(&[
+                    "show",
+                    &format!("docs/roadmap-and-product-description:{path}")
+                ]),
                 text
             );
         }
         assert_eq!(
-            repo.git_output(&["log", "-1", "--format=%an <%ae>|%s", "docs/folder-1"]),
+            repo.git_output(&[
+                "log",
+                "-1",
+                "--format=%an <%ae>|%s",
+                "docs/roadmap-and-product-description"
+            ]),
             "Mira (Catervas) <catervas@localhost>|docs(product): roadmap.md, spec.md by Mira, approved by the owner"
         );
         let approved = harness.events(&[EventKind::FolderDocApproved]);
@@ -6742,12 +6955,13 @@ mod tests {
             wire_of(&approved[0])["body"],
             json!({
                 "proposals": [roadmap, spec], "change": 1,
-                "sha": repo.git_output(&["rev-parse", "docs/folder-1"]), "note": "Thanks"
+                "sha": repo.git_output(&["rev-parse", "docs/roadmap-and-product-description"]), "note": "Thanks",
+                "branch": "docs/roadmap-and-product-description"
             })
         );
         assert_eq!(
             report.said,
-            "docs/folder-1 waits for you to merge it into main."
+            "docs/roadmap-and-product-description waits for you to merge it into main."
         );
         assert_eq!(report.events, vec![approved[0].envelope.seq]);
         let docs = catervas_store::folder_docs::folder_docs(&harness.project.deps.log)
@@ -6759,7 +6973,7 @@ mod tests {
         );
 
         // Once the owner has merged change 1, the next tick records it, as it does a task's branch.
-        harness.merge_branch_by_hand("docs/folder-1");
+        harness.merge_branch_by_hand("docs/roadmap-and-product-description");
         let tick = orchestrator.tick().await.expect("the tick runs");
         assert!(
             matches!(

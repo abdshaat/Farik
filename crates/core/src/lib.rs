@@ -9,8 +9,12 @@ pub mod budget;
 pub mod contract;
 /// The criterion library and its validator.
 pub mod criteria;
+/// When a delivery closes (ADR 0062).
+pub mod delivery;
 /// Each role's folder under `docs/catervas/`, its human documents and their agent twins.
 pub mod folders;
+/// What leaves for the forge, with no task id in it (ADR 0066).
+pub mod forge_text;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
 /// The governor: every rule of `docs/SPEC.md` section 5 as pure functions.
@@ -29,8 +33,6 @@ pub mod renewals;
 pub mod repos;
 /// A skill's hash.
 pub mod skill;
-/// The sprint and its validator.
-pub mod sprint;
 /// The team, its rules, and its validator.
 pub mod team;
 /// Small shared pieces of English used in refusal messages, and how a text is counted in tokens.

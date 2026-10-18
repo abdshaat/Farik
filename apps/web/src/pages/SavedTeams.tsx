@@ -18,7 +18,6 @@ export type Template = {
 	policy: {
 		permissions: { runCommands: boolean; push: boolean };
 		integration: string;
-		planInSprints?: boolean;
 		documentFormat?: "html" | "markdown";
 	};
 	budgets: { dailyUsd?: number };

@@ -103,17 +103,13 @@
         "integration": {
           "$ref": "#/$defs/integration"
         },
-        "plan_in_sprints": {
-          "type": "boolean",
-          "description": "Whether the team plans its work in sprints (ADR 0028). Left out, applying the template keeps the project's answer, and setup from it plans in sprints."
-        },
         "document_format": {
           "type": "string",
           "enum": ["html", "markdown"],
           "description": "The format the team writes new documents in. Left out, applying the template keeps the project's answer."
         }
       },
-      "description": "Three of the four answers setup asks: what the agents may do, the plan check, and what happens to accepted work; whether the team plans in sprints; and the format its documents are written in."
+      "description": "What the agents may do, what happens to accepted work, and the format the documents are written in."
     },
     "templateBudgets": {
       "type": "object",
@@ -122,7 +118,7 @@
         "daily_usd": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "What the team may spend in a day before it pauses (spec 5.5). Left out, the day has no dollar limit: Catervas ships none (ADR 0015). A sprint's own budget belongs to the sprint, not here."
+          "description": "What the team may spend in a day before it pauses (spec 5.5). Left out, the day has no dollar limit: Catervas ships none (ADR 0015)."
         }
       },
       "description": "The fourth answer, spending. Left out, the day has no dollar limit."

@@ -150,6 +150,7 @@ impl Harness {
             session_ids,
             forge: Arc::new(forge),
             sleeper: Arc::new(NeverWakes),
+            work: Arc::default(),
         })
     }
 
@@ -209,6 +210,7 @@ impl Harness {
             session_ids: Arc::new(LaterIds(SequentialIds::new())),
             forge: Arc::new(self.gh.forge(&self.project.repo.path)),
             sleeper,
+            work: Arc::default(),
         })
     }
 
@@ -266,6 +268,33 @@ impl Harness {
                 }]);
                 change(wire);
             });
+    }
+
+    /// `file` for a task the owner gave `agent` in its chat (ADR 0063): no parent, its
+    /// `task.created` names `agent` in `given_to`.
+    pub(crate) fn file_given(
+        &self,
+        task: &str,
+        status: &str,
+        agent: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.project.filed_given_to(task, status, agent, |wire| {
+            wire["assignee_role"] = json!("software_developer");
+            wire["reviewer_role"] = json!("software_developer");
+            wire["allowed_paths"] = json!(["done.txt"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "done.txt exists.",
+                "satisfies": ["R1"],
+                "verification": {
+                    "method": "command",
+                    "command": "test -f done.txt",
+                    "expect": { "exit_code": 0 }
+                }
+            }]);
+            change(wire);
+        });
     }
 
     /// Files a request titled `title`, as the human does through `file_request`: step 11's CTV-1
@@ -415,20 +444,20 @@ impl Harness {
         self.file(task, "ready", |_| {});
     }
 
-    /// Files `task` `ready` as the request that raises the budget of marketing plan `plan`: one
-    /// that skips the sprint queue.
-    pub(crate) fn ready_raising(&self, task: &str, plan: &str) {
-        self.project
-            .filed_raising(task, ("ready", "task", None), Some(plan), |wire| {
-                wire["assignee_role"] = json!("software_developer");
-                wire["reviewer_role"] = json!("software_developer");
-                wire["allowed_paths"] = json!(["done.txt"]);
-            });
-    }
-
     /// Files `task` `ready` and moves it to `assigned` to `assignee`, reviewed by `reviewer`.
     pub(crate) fn assigned(&self, task: &str, assignee: &str, reviewer: &str) {
-        self.ready(task);
+        self.assigned_with(task, assignee, reviewer, |_| {});
+    }
+
+    /// `assigned` with `change` applied to the contract's wire, as `file` applies it.
+    pub(crate) fn assigned_with(
+        &self,
+        task: &str,
+        assignee: &str,
+        reviewer: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.file(task, "ready", change);
         self.project.moved(
             task,
             "ready",
@@ -454,7 +483,18 @@ impl Harness {
     /// Files `task` and moves it through `assigned` to `in_progress`, held by `assignee` and
     /// reviewed by `reviewer`, with its worktree made on its branch from `main`.
     pub(crate) fn in_progress(&self, task: &str, assignee: &str, reviewer: &str) {
-        self.assigned(task, assignee, reviewer);
+        self.in_progress_with(task, assignee, reviewer, |_| {});
+    }
+
+    /// `in_progress` with `change` applied to the contract's wire, its worktree made.
+    pub(crate) fn in_progress_with(
+        &self,
+        task: &str,
+        assignee: &str,
+        reviewer: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.assigned_with(task, assignee, reviewer, change);
         self.project.moved(
             task,
             "assigned",
@@ -563,8 +603,16 @@ impl Harness {
 
     /// `task` accepted in the repository at `member`, the member `repo` of the project folder when
     /// one is named: its worktree made by `member`'s git from `main` with `done.txt` committed,
-    /// and left in place.
+    /// and left in place. The delivery it would close is already closed, with no task in it, so
+    /// that a test about something else is not preempted by the governor's close; a test of the
+    /// delivery itself uses `accepted_awaiting_delivery`.
     pub(crate) fn accepted_in(&self, task: &str, member: &Path, repo: Option<&str>) {
+        self.accepted_in_awaiting_delivery(task, member, repo);
+        self.settle_delivery();
+    }
+
+    /// `accepted_in`, with the delivery it would close left for the governor to close.
+    fn accepted_in_awaiting_delivery(&self, task: &str, member: &Path, repo: Option<&str>) {
         self.verifying_in(
             task,
             true,
@@ -581,9 +629,79 @@ impl Harness {
         );
     }
 
+    /// Cancels each changelog task the governor has filed that is still open, as a test about the
+    /// work before a delivery does so as not to play the Product Manager's work on it.
+    pub(crate) fn cancel_changelogs(&self) {
+        let deps = &self.project.deps;
+        deps.projections.catch_up().expect("the board catches up");
+        for id in crate::deliveries::changelog_tasks(&deps.log).expect("the log reads") {
+            let row = deps
+                .projections
+                .task(&id)
+                .expect("the board reads")
+                .expect("the changelog task is on the board");
+            if !matches!(
+                row.status,
+                catervas_core::contract::TaskStatus::Accepted
+                    | catervas_core::contract::TaskStatus::Cancelled
+            ) {
+                self.project.moved(
+                    id.as_str(),
+                    &row.status.to_string(),
+                    "cancelled",
+                    &json!({}),
+                );
+            }
+        }
+    }
+
+    /// `Orchestrator::run_until_idle`, cancelling each changelog task at the tick that files it
+    /// (`cancel_changelogs`); at most 500 ticks, so that a run that never idles fails the test.
+    pub(crate) async fn run_until_idle_past_the_changelog(
+        &self,
+        orchestrator: &Orchestrator,
+    ) -> Result<(), OrchestratorError> {
+        for _ in 0..500 {
+            match orchestrator.tick().await? {
+                TickReport::Idle {
+                    until: Some(until), ..
+                } => {
+                    orchestrator.wait_until(until).await;
+                }
+                TickReport::Idle { until: None, .. } => return Ok(()),
+                TickReport::Delivery { .. } => self.cancel_changelogs(),
+                _ => {}
+            }
+        }
+        panic!("no idle tick in 500");
+    }
+
+    /// Records a `delivery.closed` with no task, as the next delivery after those closed so far.
+    pub(crate) fn settle_delivery(&self) {
+        let closed = self.events(&[EventKind::DeliveryClosed]).len();
+        self.project.record(
+            "",
+            "delivery.closed",
+            &json!({
+                "delivery_id": format!("D{}", closed + 1), "trigger": "team_quiet",
+                "since_seq": 0, "task_ids": []
+            }),
+        );
+    }
+
     /// `accepted_with_worktree`, with the worktree removed, so that no cleanup is left to do.
     pub(crate) fn accepted(&self, task: &str) {
         self.accepted_with_worktree(task);
+        self.project
+            .deps
+            .git
+            .remove_worktree(&self.worktree(task))
+            .expect("the task's worktree is removed");
+    }
+
+    /// `accepted`, with the delivery it would close left for the governor to close.
+    pub(crate) fn accepted_awaiting_delivery(&self, task: &str) {
+        self.accepted_in_awaiting_delivery(task, self.project.repo.path.as_path(), None);
         self.project
             .deps
             .git
@@ -649,6 +767,7 @@ impl Harness {
             "task.integrated",
             &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
         );
+        self.settle_delivery();
     }
 
     /// A bare repository beside the project, added to it as `origin`, with `main` pushed there.
@@ -769,9 +888,21 @@ impl Harness {
             Some("session-1"),
             "",
             "folder_doc.written",
-            &json!({ "path": path, "written_by": "sm", "change": landed.change, "sha": landed.sha }),
+            &json!({ "path": path, "written_by": "sm", "change": landed.change, "sha": landed.sha,
+                     "branch": landed.branch }),
         );
         landed.change
+    }
+
+    /// The branch folder change `change` was made on: the one the log records for it.
+    pub(crate) fn folder_branch(&self, change: u64) -> String {
+        catervas_store::folder_docs::folder_docs(&self.project.deps.log)
+            .expect("the log folds")
+            .changes
+            .into_iter()
+            .find(|held| held.change == change)
+            .map(|held| held.branch)
+            .expect("the change is in the log")
     }
 
     /// `origin` added at a path where there is no repository, so that every push to it fails.
@@ -918,9 +1049,9 @@ impl Harness {
         self.project.branch(task)
     }
 
-    /// Sprint `sprint` open with no budget and holding `tasks`, as starting and planning it would
-    /// leave it: its file, each task's contract naming it, `sprint.started` by the human, and
-    /// `sprint.planned` by the Product Manager when it holds a task.
+    /// Sprint `sprint` open with no budget and holding `tasks`, as a project made before ADR 0062
+    /// records it: `sprint.started` by the human, and `sprint.planned` by the Product Manager
+    /// when it holds a task.
     pub(crate) fn open_sprint(&self, sprint: &str, tasks: &[&str]) {
         self.project.open_sprint(sprint, None, tasks);
     }
@@ -1212,9 +1343,20 @@ pub(crate) struct CountingSandboxFactory {
     read: Mutex<BTreeMap<String, Vec<Reads>>>,
     based: Mutex<BTreeMap<String, u32>>,
     removed: Mutex<BTreeMap<String, u32>>,
+    checked: Mutex<BTreeMap<String, Vec<PathBuf>>>,
 }
 
 impl CountingSandboxFactory {
+    /// For each sandbox `create_checking` made for `task`, in order, the git store it was given.
+    pub(crate) fn stores(&self, task: &str) -> Vec<PathBuf> {
+        self.checked
+            .lock()
+            .expect("no test panics holding it")
+            .get(task)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// How many times `create_base` was called for `task`.
     pub(crate) fn based(&self, task: &str) -> u32 {
         self.based
@@ -1283,6 +1425,24 @@ impl SandboxFactory for CountingSandboxFactory {
             .or_default()
             .push(reads.to_vec());
         HostSandboxFactory.create(project_id, task_id, worktree, network, reads)
+    }
+
+    fn create_checking(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+        reads: &[(String, PathBuf)],
+        git_store: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        self.checked
+            .lock()
+            .expect("no test panics holding it")
+            .entry(task_id.as_str().to_string())
+            .or_default()
+            .push(git_store.to_path_buf());
+        self.create(project_id, task_id, worktree, network, reads)
     }
 
     fn create_base(
@@ -1563,5 +1723,231 @@ impl FakeGh {
     /// What the last call of `sub` was given on its standard input.
     pub(crate) fn stdin_of(&self, sub: &str) -> String {
         std::fs::read_to_string(self.dir.join(format!("{sub}.stdin"))).unwrap_or_default()
+    }
+}
+
+/// One start `HeldAdapter` was asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HeldStart {
+    /// The agent the session is of.
+    pub(crate) agent: String,
+    /// The task it is about, when there is one.
+    pub(crate) task: Option<String>,
+    /// What it is for.
+    pub(crate) purpose: crate::session::SessionPurpose,
+    /// The agents whose sessions were running when it started, sorted.
+    pub(crate) alongside: Vec<String>,
+}
+
+/// A session of `HeldAdapter` that is not released yet.
+struct Held {
+    agent: String,
+    spec: SessionSpec,
+    state: Arc<HeldState>,
+}
+
+/// What a held session and its handle share.
+#[derive(Default)]
+struct HeldState {
+    /// Whether the inner adapter started the session.
+    released: std::sync::atomic::AtomicBool,
+    /// Whether the session was aborted before its release.
+    aborted: std::sync::atomic::AtomicBool,
+    /// Asks the forwarding task to abort the inner session.
+    abort: tokio::sync::Notify,
+}
+
+/// A `RuntimeAdapter` over an inner one whose every session is held, unstarted, until the test
+/// releases it by agent (ADR 0064). `release` starts it on the inner adapter then and forwards
+/// every inner event, so it plays as the inner adapter plays it. A held session aborted before its
+/// release ends `aborted` at once; abort after release reaches the inner session. `resume` goes to
+/// the inner adapter, unheld. A session runs from its start until its `Ended` event is delivered.
+pub(crate) struct HeldAdapter {
+    inner: Arc<dyn RuntimeAdapter>,
+    held: Mutex<
+        Vec<(
+            Held,
+            tokio::sync::mpsc::Sender<crate::session::SessionEvent>,
+        )>,
+    >,
+    starts: Mutex<Vec<HeldStart>>,
+    running: Arc<Mutex<Vec<String>>>,
+}
+
+impl HeldAdapter {
+    pub(crate) fn new(inner: Arc<dyn RuntimeAdapter>) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            held: Mutex::new(Vec::new()),
+            starts: Mutex::new(Vec::new()),
+            running: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    /// Starts `agent`'s oldest held session on the inner adapter. Panics when none is held.
+    pub(crate) fn release(&self, agent: &str) {
+        self.release_where(agent, |_| true);
+    }
+
+    /// Starts `agent`'s oldest held session of `purpose` on the inner adapter. Panics when none is
+    /// held.
+    pub(crate) fn release_purpose(&self, agent: &str, purpose: crate::session::SessionPurpose) {
+        self.release_where(agent, |held| held.spec.purpose == purpose);
+    }
+
+    fn release_where(&self, agent: &str, wanted: impl Fn(&Held) -> bool) {
+        let (held, sender) = {
+            let mut held = self.held.lock().expect("no test panics holding it");
+            let at = held
+                .iter()
+                .position(|(held, _)| held.agent == agent && wanted(held))
+                .unwrap_or_else(|| panic!("{agent} has no such held session"));
+            held.remove(at)
+        };
+        held.state
+            .released
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut inner = self
+            .inner
+            .start_session(held.spec)
+            .expect("the inner adapter starts the held session");
+        let running = Arc::clone(&self.running);
+        let agent = held.agent;
+        let state = held.state;
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    event = inner.events().recv() => {
+                        let ended = matches!(
+                            event,
+                            Some(crate::session::SessionEvent::Ended { .. }) | None
+                        );
+                        if ended {
+                            forget(&running, &agent);
+                        }
+                        if let Some(event) = event {
+                            let _ = sender.send(event).await;
+                        }
+                        if ended {
+                            break;
+                        }
+                    }
+                    () = state.abort.notified() => {
+                        let _ = inner.abort();
+                    }
+                }
+            }
+        });
+    }
+
+    /// Every start, in order.
+    pub(crate) fn starts(&self) -> Vec<HeldStart> {
+        self.starts
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
+    }
+
+    /// The agents whose sessions run now, sorted.
+    pub(crate) fn running(&self) -> Vec<String> {
+        let mut running = self
+            .running
+            .lock()
+            .expect("no test panics holding it")
+            .clone();
+        running.sort();
+        running
+    }
+}
+
+fn forget(running: &Mutex<Vec<String>>, agent: &str) {
+    let mut running = running.lock().expect("no test panics holding it");
+    if let Some(at) = running.iter().position(|running| running == agent) {
+        running.remove(at);
+    }
+}
+
+impl RuntimeAdapter for HeldAdapter {
+    fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        let alongside = self.running();
+        let agent = spec.agent_id.clone();
+        self.running
+            .lock()
+            .expect("no test panics holding it")
+            .push(agent.clone());
+        self.starts
+            .lock()
+            .expect("no test panics holding it")
+            .push(HeldStart {
+                agent: agent.clone(),
+                task: spec.task_id.as_ref().map(|task| task.as_str().to_string()),
+                purpose: spec.purpose,
+                alongside,
+            });
+        let (sender, receiver) = tokio::sync::mpsc::channel(256);
+        let state = Arc::new(HeldState::default());
+        let session_id = spec.session_id.clone();
+        self.held.lock().expect("no test panics holding it").push((
+            Held {
+                agent: agent.clone(),
+                spec,
+                state: Arc::clone(&state),
+            },
+            sender.clone(),
+        ));
+        Ok(Box::new(HeldSession {
+            session_id,
+            agent,
+            receiver,
+            sender,
+            state,
+            running: Arc::clone(&self.running),
+        }))
+    }
+
+    fn resume(
+        &self,
+        session_id: &str,
+        prompt: &str,
+    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        self.inner.resume(session_id, prompt)
+    }
+}
+
+struct HeldSession {
+    session_id: String,
+    agent: String,
+    receiver: tokio::sync::mpsc::Receiver<crate::session::SessionEvent>,
+    sender: tokio::sync::mpsc::Sender<crate::session::SessionEvent>,
+    state: Arc<HeldState>,
+    running: Arc<Mutex<Vec<String>>>,
+}
+
+impl SessionHandle for HeldSession {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    fn events(&mut self) -> &mut tokio::sync::mpsc::Receiver<crate::session::SessionEvent> {
+        &mut self.receiver
+    }
+
+    fn send(&self, _text: &str) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn abort(&self) -> Result<(), RuntimeError> {
+        use std::sync::atomic::Ordering;
+        if self.state.released.load(Ordering::SeqCst) {
+            self.state.abort.notify_one();
+        } else if !self.state.aborted.swap(true, Ordering::SeqCst) {
+            forget(&self.running, &self.agent);
+            let _ = self.sender.try_send(crate::session::SessionEvent::Ended {
+                reason: crate::session::EndReason::Aborted,
+                detail: "aborted".to_string(),
+                resets_at: None,
+            });
+        }
+        Ok(())
     }
 }

@@ -119,7 +119,8 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
         "This session writes the contract you were given, or improves it. Write it with \
          `catervas_write_contract` and end the session once it is written. For an epic whose \
          questions are not yet answered, ask them first with `catervas_ask_human` and end your turn \
-         after asking. After asking for a move, post one or two sentences \
+         after asking. If you cannot write it without something only the owner can give, end it \
+         with `catervas_declare_blocked`. After asking for a move, post one or two sentences \
          about it with `catervas_post_message`, in your persona's voice, naming the task.",
     ),
     (
@@ -155,7 +156,12 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
          write the review note with `catervas_write_note` of kind `review`, mapping each criterion to \
          its evidence, and request `rejected` with `catervas_request_transition` only if a criterion \
          failed, naming each one that failed. If you are the Product Manager and the first message \
-         says the review passed, request `accepted` with `catervas_request_transition`. After asking for a move, post one or two sentences \
+         says the review passed, request `accepted` with `catervas_request_transition`. If something you \
+         cannot change stops your review, a check Catervas could not run or something only the owner \
+         can give, end it with `catervas_declare_blocked`, saying what is in the way and what is \
+         needed. How a page looks and behaves in a browser is the UI/UX Designer's check, shown in \
+         the first message when the change touches the interface; never ask the owner to run a \
+         command or look at a page. After asking for a move, post one or two sentences \
          about it with `catervas_post_message`, in your persona's voice, naming the task.",
     ),
     (
@@ -178,8 +184,10 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
          Never write a file's or a folder's path: name it in plain words, as the user knows it. \
          When a table or a diagram says it better, put it in the reply: Markdown tables and \
          `mermaid` diagrams are shown formatted. You can read the project and change nothing. When \
-         work is needed, put a request in your reply, a title and what it asks for, for the user to \
-         send. Then end the session.",
+         the message asks you for work your role does, take it with `catervas_take_task` and reply \
+         in one line naming the task. When it asks for work another role does, put a request in \
+         your reply, a title and what it asks for, for the user to send. Otherwise answer. Then \
+         end the session.",
     ),
 ];
 
@@ -189,33 +197,18 @@ pub const INTERVIEW_INSTRUCTION: &str = "This session is your interview of the o
 
 /// The `This session` section of each ceremony (5.9), by its thread: what it posts, and the tool
 /// it ends with. The channel is read by all, so each tells the agent to mention no one.
-pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [
-    (
-        Thread::Planning,
-        "This session is the sprint's planning ceremony. Choose, from the candidates in the first \
-         message, the tasks the team should finish in this sprint, keeping their `max_cost_usd` \
-         together within the sprint's budget when it has one; an epic brings its tasks with it. \
-         Post the plan and the digest in the first message with `catervas_post_message`, then plan \
-         the sprint with one call of `catervas_plan_sprint`, and end the session. Post at most three \
-         messages, and mention no one: the channel is read by all.",
-    ),
-    (
-        Thread::Standup,
-        "This session is the team's standup. Post one standup summary of the first message with \
-         `catervas_post_message`: what moved, what is blocked, and what waits on the human. Mention \
-         no one: the channel is read by all. Then end the session.",
-    ),
+pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 2] = [
     (
         Thread::Review,
-        "This session is the sprint's review. Post what the sprint delivered and what it did not, \
+        "This session is the delivery's review. Post what the delivery delivered and what it did not, \
          from the first message, with `catervas_post_message`, in at most three messages. Mention no \
          one: the channel is read by all. Then end the session.",
     ),
     (
         Thread::Retro,
-        "This session is the sprint's retro. Post the retro, what to keep and what to change, with \
-         `catervas_post_message`, in at most three messages, then record what the next planning should \
-         know with `catervas_append_retro`, and end the session. Mention no one: the channel is read \
+        "This session is the delivery's retro. Post the retro, what to keep and what to change, with \
+         `catervas_post_message`, in at most three messages, then record what the team should \
+         remember with `catervas_append_retro`, and end the session. Mention no one: the channel is read \
          by all.",
     ),
 ];
@@ -1379,9 +1372,12 @@ mod tests {
             "`rejected`",
             "only if a criterion failed",
             "`accepted`",
+            "catervas_declare_blocked",
+            "never ask the owner",
         ] {
             assert!(verify.contains(named), "{named} in {verify}");
         }
+        assert!(closing(SessionPurpose::Refine).contains("catervas_declare_blocked"));
 
         for purpose in [
             SessionPurpose::Triage,

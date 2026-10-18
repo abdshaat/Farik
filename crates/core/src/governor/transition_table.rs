@@ -33,7 +33,7 @@ pub enum GateId {
     ReadinessExhausted,
     /// The contract itself needs the human's acceptance: high risk, policy, or an epic.
     ContractRequiresHuman,
-    /// Assignee role, sprint budget, WIP limit, and integrated dependencies (spec 5.2, 5.14).
+    /// Assignee role, WIP limit, and integrated dependencies (spec 5.2, 5.14).
     Assignment,
     /// Every criterion has the assignee's own result and the work is committed; for an epic,
     /// its tasks are done (spec 5.16).
@@ -57,6 +57,8 @@ pub enum GateId {
     /// The result waits on the human's acceptance and, for a task, its review has passed: the
     /// human sends it back (ADR 0024).
     HumanRejection,
+    /// The pull request of an accepted task no longer merges (ADR 0069).
+    PullRequestConflicted,
 }
 
 /// A status pattern in a row: one status, or any status.
@@ -103,7 +105,7 @@ const fn row(from: Status, to: Status, actor: TransitionActor, gate: GateId) -> 
 
 /// The transition table of `docs/SPEC.md` section 5.2: the spec's lines in order, split where
 /// a line names two triggers or two actors, with the `any` rows last.
-pub static TRANSITION_TABLE: [TransitionRow; 24] = {
+pub static TRANSITION_TABLE: [TransitionRow; 30] = {
     use GateId as G;
     use Status::{Any, Is};
     use TaskStatus as S;
@@ -127,6 +129,12 @@ pub static TRANSITION_TABLE: [TransitionRow; 24] = {
             Is(S::Escalated),
             A::Governor,
             G::ContractRequiresHuman,
+        ),
+        row(
+            Is(S::Refining),
+            Is(S::Blocked),
+            A::ProductManager,
+            G::BlockerWritten,
         ),
         row(Is(S::Ready), Is(S::Assigned), A::ScrumMaster, G::Assignment),
         row(
@@ -166,6 +174,24 @@ pub static TRANSITION_TABLE: [TransitionRow; 24] = {
             A::Human,
             G::BlockerResolved,
         ),
+        row(
+            Is(S::Blocked),
+            Is(S::Verifying),
+            A::ScrumMaster,
+            G::BlockerResolved,
+        ),
+        row(
+            Is(S::Blocked),
+            Is(S::Verifying),
+            A::Human,
+            G::BlockerResolved,
+        ),
+        row(
+            Is(S::Blocked),
+            Is(S::Refining),
+            A::Human,
+            G::BlockerResolved,
+        ),
         row(Is(S::Blocked), Is(S::Escalated), A::Governor, G::BlockedAge),
         row(
             Is(S::Verifying),
@@ -198,6 +224,12 @@ pub static TRANSITION_TABLE: [TransitionRow; 24] = {
             G::HumanRejection,
         ),
         row(
+            Is(S::Verifying),
+            Is(S::Blocked),
+            A::Reviewer,
+            G::BlockerWritten,
+        ),
+        row(
             Is(S::Rejected),
             Is(S::InProgress),
             A::Governor,
@@ -209,6 +241,12 @@ pub static TRANSITION_TABLE: [TransitionRow; 24] = {
             A::Governor,
             G::IterationLimitReached,
         ),
+        row(
+            Is(S::Accepted),
+            Is(S::Assigned),
+            A::Governor,
+            G::PullRequestConflicted,
+        ),
         row(Any, Is(S::Escalated), A::Governor, G::GovernorEscalation),
         row(Any, Is(S::Escalated), A::Human, G::None),
         row(Any, Is(S::Cancelled), A::Human, G::None),
@@ -216,31 +254,34 @@ pub static TRANSITION_TABLE: [TransitionRow; 24] = {
     ]
 };
 
-/// The rows that apply to a move from `from` to `to`, in table order. Empty when `from` is
-/// terminal, because nothing leaves `accepted` or `cancelled`, and when `from` and `to` are the
-/// same status, because an `any` row never means staying put.
+/// The rows that apply to a move from `from` to `to`, in table order. A terminal status is left
+/// only by a row that names it (`accepted -> assigned`, ADR 0069), never by an `any` row, so
+/// nothing leaves `cancelled`; empty too when `from` and `to` are the same status, because an
+/// `any` row never means staying put.
 #[must_use]
 pub fn find_transitions(from: TaskStatus, to: TaskStatus) -> Vec<&'static TransitionRow> {
-    if from == to || is_terminal(from) {
+    if from == to {
         return Vec::new();
     }
     TRANSITION_TABLE
         .iter()
-        .filter(|row| row.from.matches(from) && row.to.matches(to))
+        .filter(|row| leaves(**row, from) && row.to.matches(to))
         .collect()
 }
 
-/// The rows that leave `from`, in table order. Empty when `from` is terminal; an `any` row
-/// whose target is `from` itself is not a way out, so it is left out.
+/// The rows that leave `from`, in table order. Only a row that names a terminal status leaves it;
+/// an `any` row whose target is `from` itself is not a way out, so it is left out.
 #[must_use]
 pub fn transitions_from(from: TaskStatus) -> Vec<&'static TransitionRow> {
-    if is_terminal(from) {
-        return Vec::new();
-    }
     TRANSITION_TABLE
         .iter()
-        .filter(|row| row.from.matches(from) && row.to != Status::Is(from))
+        .filter(|row| leaves(**row, from) && row.to != Status::Is(from))
         .collect()
+}
+
+/// Whether the row applies to a task in `from`: an `any` row never applies to a terminal status.
+fn leaves(row: TransitionRow, from: TaskStatus) -> bool {
+    row.from.matches(from) && (row.from != Status::Any || !is_terminal(from))
 }
 
 #[cfg(test)]
@@ -264,28 +305,29 @@ mod tests {
     }
 
     #[test]
-    fn has_exactly_twenty_four_distinct_rows() {
+    fn has_exactly_thirty_distinct_rows() {
         let distinct: BTreeSet<String> = TRANSITION_TABLE
             .iter()
             .map(|row| format!("{row:?}"))
             .collect();
-        assert_eq!(TRANSITION_TABLE.len(), 24);
-        assert_eq!(distinct.len(), 24);
+        assert_eq!(TRANSITION_TABLE.len(), 30);
+        assert_eq!(distinct.len(), 30);
     }
 
     #[test]
-    fn has_twenty_specific_rows_and_four_any_rows() {
+    fn has_twenty_six_specific_rows_and_four_any_rows() {
         let specific = TRANSITION_TABLE
             .iter()
             .filter(|row| is_specific(**row))
             .count();
-        assert_eq!(specific, 20);
+        assert_eq!(specific, 26);
         assert_eq!(TRANSITION_TABLE.len() - specific, 4);
     }
 
+    #[allow(clippy::too_many_lines)] // reason: the spec table, one line each
     #[test]
     fn matches_every_line_of_the_spec_table() {
-        let lines: [Line; 14] = [
+        let lines: [Line; 19] = [
             (S::Draft, S::Refining, &[(A::ProductManager, G::Triaged)]),
             (
                 S::Refining,
@@ -356,6 +398,30 @@ mod tests {
                 S::Escalated,
                 &[(A::Governor, G::IterationLimitReached)],
             ),
+            (
+                S::Refining,
+                S::Blocked,
+                &[(A::ProductManager, G::BlockerWritten)],
+            ),
+            (
+                S::Blocked,
+                S::Verifying,
+                &[
+                    (A::ScrumMaster, G::BlockerResolved),
+                    (A::Human, G::BlockerResolved),
+                ],
+            ),
+            (S::Blocked, S::Refining, &[(A::Human, G::BlockerResolved)]),
+            (
+                S::Verifying,
+                S::Blocked,
+                &[(A::Reviewer, G::BlockerWritten)],
+            ),
+            (
+                S::Accepted,
+                S::Assigned,
+                &[(A::Governor, G::PullRequestConflicted)],
+            ),
         ];
         for (from, to, expected) in lines {
             let rows: Vec<&TransitionRow> = find_transitions(from, to)
@@ -414,8 +480,12 @@ mod tests {
 
     #[test]
     fn refuses_to_leave_a_terminal_status() {
+        assert!(transitions_from(S::Cancelled).is_empty());
+        assert_eq!(
+            actors_and_gates(&transitions_from(S::Accepted)),
+            [(A::Governor, G::PullRequestConflicted)]
+        );
         for status in [S::Accepted, S::Cancelled] {
-            assert!(transitions_from(status).is_empty(), "{status}");
             assert!(
                 find_transitions(status, S::Escalated).is_empty(),
                 "{status}"
@@ -440,6 +510,9 @@ mod tests {
             actors_and_gates(&transitions_from(S::Blocked)),
             [
                 (A::ScrumMaster, G::BlockerResolved),
+                (A::Human, G::BlockerResolved),
+                (A::ScrumMaster, G::BlockerResolved),
+                (A::Human, G::BlockerResolved),
                 (A::Human, G::BlockerResolved),
                 (A::Governor, G::BlockedAge),
                 (A::Governor, G::GovernorEscalation),

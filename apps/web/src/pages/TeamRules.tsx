@@ -13,7 +13,6 @@ import {
 	type PreviewForm,
 	previewOf,
 } from "./setup/PreviewFields.tsx";
-import { SprintsSwitch } from "./setup/SetupAdvanced.tsx";
 import { PermissionChoices } from "./setup/SetupPermissions.tsx";
 import { useDailyLimit } from "./setup/SetupSpending.tsx";
 import setup from "./setup/setup.module.css";
@@ -39,7 +38,10 @@ type Part = {
  * each page draws its own parts with `key(name)`, so saving one starts only that one again.
  */
 export function useRuleParts() {
-	const { data, again } = useQuery<{ team: Team }>("team.get", {});
+	const { data, again } = useQuery<{ team: Team; membersPresent?: boolean }>(
+		"team.get",
+		{},
+	);
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
 		"team.validate",
@@ -63,7 +65,12 @@ export function useRuleParts() {
 		name === "spend"
 			? `spend-${rounds.spend ?? 0}-${data?.team.budgets.dailyUsd}`
 			: `${name}-${rounds[name] ?? 0}`;
-	return { ready: Boolean(data), part, key };
+	return {
+		ready: Boolean(data),
+		part,
+		key,
+		membersPresent: Boolean(data?.membersPresent),
+	};
 }
 
 /** A rules page's heading, with the note that a change starts with each agent's next work. */
@@ -228,24 +235,32 @@ export function Finish() {
 	);
 }
 
-export function Planning(part: Part) {
-	const { saved, defaults } = part;
-	const [mine, setMine] = useState<boolean>();
-	// An old team file without the key does not plan in sprints.
-	const was = saved.policy.planInSprints === true;
+/** The branch finished work goes into; empty is the repository's main branch (ADR 0069). */
+export function IntegrationBranch(part: Part) {
+	const { saved } = part;
+	const was = saved.policy.integrationBranch ?? "";
+	const [mine, setMine] = useState<string>();
 	const now = mine ?? was;
+	const { integrationBranch: _, ...rest } = saved.policy;
 	const next =
-		now === was
+		now.trim() === was
 			? saved
-			: { ...saved, policy: { ...saved.policy, planInSprints: now } };
+			: {
+					...saved,
+					policy: {
+						...rest,
+						...(now.trim() !== "" && { integrationBranch: now.trim() }),
+					},
+				};
 	const { foot } = useChange(part, next);
 	return (
-		<Part id="rules-planning" title={t("rulesPlanning")}>
-			<SprintsSwitch on={now} onChange={setMine} />
-			<PutBack
-				onClick={
-					defaults && (() => setMine(defaults.policy.planInSprints === true))
-				}
+		<Part id="rules-branch" title={t("rulesBranch")}>
+			<p className={styles.muted}>{t("rulesBranchHint")}</p>
+			<TextField
+				id="integration-branch"
+				label={t("rulesBranchLabel")}
+				value={now}
+				onChange={setMine}
 			/>
 			{foot}
 		</Part>
@@ -338,7 +353,10 @@ export function Documents(part: Part) {
  * asked only of a team with a UI/UX Designer, and saved on their own.
  */
 export function HowToOpen({ none }: { none?: ReactNode }) {
-	const { data, again } = useQuery<{ team: Team }>("team.get", {});
+	const { data, again } = useQuery<{
+		team: Team;
+		previewEnvPresent?: boolean;
+	}>("team.get", {});
 	const [round, setRound] = useState(0);
 	const designer = data?.team.agents.find(
 		(a) => a.role === "ui_ux_designer" && a.status !== "retired",
@@ -350,6 +368,7 @@ export function HowToOpen({ none }: { none?: ReactNode }) {
 			key={round}
 			saved={data.team}
 			designer={designer.displayName}
+			envPresent={data.previewEnvPresent === true}
 			done={() => {
 				setRound((n) => n + 1);
 				again();
@@ -361,10 +380,12 @@ export function HowToOpen({ none }: { none?: ReactNode }) {
 function Preview({
 	saved,
 	designer,
+	envPresent,
 	done,
 }: {
 	saved: Team;
 	designer: string;
+	envPresent: boolean;
 	done: () => void;
 }) {
 	const [mine, setMine] = useState<PreviewForm>();
@@ -393,6 +414,16 @@ function Preview({
 				errors={errors}
 				onChange={setMine}
 			/>
+			<div className={styles.titled}>
+				<p id="preview-env">
+					{envPresent
+						? t("previewEnvPresent", { designer })
+						: t("previewEnvAbsent")}
+				</p>
+				<InfoTip id="previewEnv-info">
+					<Bullets text={t("previewEnvMore")} />
+				</InfoTip>
+			</div>
 			{foot}
 		</section>
 	);

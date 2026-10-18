@@ -14,7 +14,7 @@ describe("ChatList", () => {
 						author: { name: "Ada", role: "architect", avatarKey: "architect" },
 						time: "09:15",
 						text: "Line one\nLine two",
-						thread: "Sprint 2",
+						thread: "Launch",
 					},
 					{ id: "2", author: { name: "Founder" }, time: "09:16", text: "ok" },
 				]}
@@ -28,7 +28,7 @@ describe("ChatList", () => {
 		// A free-form time has no machine-readable dateTime, so it is no <time>.
 		expect(container.querySelector("time")).toBeNull();
 		expect(first?.textContent).toContain("Line one\nLine two");
-		expect(first?.textContent).toContain("Sprint 2");
+		expect(first?.textContent).toContain("Launch");
 		expect(within(first as HTMLElement).getByAltText("Ada")).toBeTruthy();
 		expect(within(second as HTMLElement).queryByRole("img")).toBeNull();
 		await expectNoAxeViolations(container);

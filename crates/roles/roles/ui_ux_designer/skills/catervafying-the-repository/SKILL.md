@@ -1,6 +1,6 @@
 ---
 name: catervafying-the-repository
-description: Use when a task asks you to write the project's UI inventory, a task of its Catervafication.
+description: Use when a task asks you to write the project's UI inventory, a task of its Catervafication, or to hunt for bugs in its screens.
 ---
 
 # Catervafying the repository
@@ -37,3 +37,18 @@ a screen you did not find.
 
 Commit with `catervas_git_commit`, and request `verifying`. The reviewer checks the inventory
 against the code.
+
+## Hunting for bugs in the screens
+
+When your task is the bug hunt, its one allowed path is `docs/catervas/design/ui-bug-hunt` in the
+team's format, and you change no code.
+
+- Go through every screen of the preview with the browser at 375 and 1280 pixels wide, and run
+  `catervas_check_page`.
+- Look for broken layout, console errors, controls that do nothing, cut-off text, low contrast and
+  anything a keyboard cannot reach.
+- Your evidence is the address, the width, what the snapshot shows and the console's lines. File
+  each bug with `catervas_file_bug`: at most 10, never the same bug twice.
+- Write the report: what you checked, then a section headed "Bugs filed" with each id and title,
+  or "None found".
+- Commit with `catervas_git_commit`, and request `verifying`.

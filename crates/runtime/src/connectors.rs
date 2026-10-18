@@ -656,6 +656,33 @@ pub fn hidden_suggestions(root: &std::path::Path) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Each (agent id, server, why) an agent asked for with `connection.requested`: the newest why of
+/// a pair, the pairs ordered by their newest event (ADR 0063).
+///
+/// # Errors
+///
+/// The log could not be read.
+pub fn requested_connections(
+    log: &catervas_store::EventLog,
+) -> Result<Vec<(String, String, String)>, catervas_store::StoreError> {
+    let events = log.read(&catervas_store::EventQuery {
+        kinds: vec![catervas_protocol::event::EventKind::ConnectionRequested],
+        ..catervas_store::EventQuery::default()
+    })?;
+    let mut asked: Vec<(String, String, String)> = Vec::new();
+    for event in events {
+        let (Some(agent), catervas_protocol::event::EventBody::ConnectionRequested(body)) =
+            (event.envelope.ids.agent_id, event.body)
+        else {
+            continue;
+        };
+        let server = body.server.to_string();
+        asked.retain(|(held, held_server, _)| !(held == &agent && held_server == &server));
+        asked.push((agent, server, body.why.to_string()));
+    }
+    Ok(asked)
+}
+
 /// Why a server's tools could not be listed, or its launch not described.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectorError {

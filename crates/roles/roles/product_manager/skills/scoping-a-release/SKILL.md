@@ -18,7 +18,7 @@ Only work with a clear contract goes in the list.
 ## 2. Draw the cut line
 
 Write down where the line is: everything above ships, everything below does not. Put the line
-where the team's budget and the sprint's budget let you keep the promise.
+where the team's budget lets you keep the promise.
 
 ## 3. Say what is left out
 
@@ -30,4 +30,4 @@ written down comes back as an argument.
 Write the release notes from accepted tasks only, in the user's words: what changed for them. Do
 not list work that is still open or was sent back. The notes belong in your folder, `docs/catervas/product/`. Write them in a docs task of yours, `spec` and its agent version (or the notes) changed and committed together.
 
-At each sprint review, file a docs task of yours whose `allowed_paths` name `CHANGELOG.md`; in it, add what the sprint's accepted tasks changed, in the user's words. The Marketing Specialist writes the customer-facing release notes from your roadmap and sprint reports.
+Each time a delivery closes, Catervas files a docs task of yours whose `allowed_paths` name `CHANGELOG.md`; in it, add what the delivery's accepted tasks changed, in the user's words. The Marketing Specialist writes the customer-facing release notes from your roadmap and delivery reports.

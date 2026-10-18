@@ -5,6 +5,8 @@
 pub mod activity;
 /// The copy of a private folder a task is judged against.
 pub mod baseline;
+/// The branch names a new branch may not take.
+pub mod branches;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// What the store refuses, and why.
@@ -48,10 +50,10 @@ pub mod waiting;
 
 pub use error::StoreError;
 pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
-pub use git::{CommitOutcome, Git, GitError, HeadSummary, MergeOutcome};
+pub use git::{CommitOutcome, Git, GitError, HeadSummary, MergeOutcome, Uncommitted};
 pub use metrics::{CostSplit, HarnessMetrics, MetricsError};
 pub use projections::{
-    CostProjection, CostScope, CostWindow, Projections, SprintProjection, TaskProjection,
+    CostProjection, CostScope, CostWindow, Projections, TaskProjection, counted_status,
     open_projections,
 };
 pub use reconcile::{Drift, ReconcileError, reconcile};

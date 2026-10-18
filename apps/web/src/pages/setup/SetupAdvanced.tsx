@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
-import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
 import { slug } from "./SetupProject.tsx";
 import styles from "./setup.module.css";
@@ -17,25 +16,6 @@ import {
 	useDefaults,
 	useSetup,
 } from "./TeamSetup.tsx";
-
-/** "Plan work in sprints": the switch, as Settings has it (step 15). */
-export function SprintsSwitch({
-	on,
-	onChange,
-}: {
-	on: boolean;
-	onChange: (on: boolean) => void;
-}) {
-	return (
-		<Switch
-			id="plan-in-sprints"
-			label={t("planInSprints")}
-			info={<Bullets text={t("planInSprintsNote")} />}
-			checked={on}
-			onChange={onChange}
-		/>
-	);
-}
 
 /** The advanced settings of setup, opened in place on the last screen: team rules and the checks. */
 export function AdvancedSettings() {
@@ -237,19 +217,6 @@ export function AdvancedSettings() {
 				</span>
 			</section>
 
-			<section className={styles.card} aria-labelledby="planning">
-				<h2 id="planning" className={styles.heading}>
-					{t("rulesPlanning")}
-				</h2>
-				<SprintsSwitch
-					on={draft.team.policy.planInSprints === true}
-					onChange={(planInSprints) =>
-						change(
-							withTeam({ policy: { ...draft.team.policy, planInSprints } }),
-						)
-					}
-				/>
-			</section>
 			{elsewhere.length > 0 && (
 				<p role="alert" className={styles.alert}>
 					{elsewhere.map((e) => said(e.code)).join(" ")}

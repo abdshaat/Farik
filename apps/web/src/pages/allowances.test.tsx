@@ -1,6 +1,7 @@
 import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
+	cleanup,
 	fireEvent,
 	screen,
 	waitFor,
@@ -124,7 +125,7 @@ const VIDEOS = {
 	of: 5,
 };
 const WIDE = "(min-width: 1024px)";
-const sprintPeriod = { kind: "sprint", sprint_id: "S2" };
+const dayPeriod = { kind: "day", day: "2026-10-16" };
 
 const teamGot = (
 	servers: object[],
@@ -145,7 +146,7 @@ async function kaiPage(
 	servers: object[] = [],
 	connectors: object[] = [],
 	rows: object[] = [],
-	period: object = sprintPeriod,
+	period: object = dayPeriod,
 ) {
 	const { container, socket } = await renderApp("/team/kai");
 	const s = socket as FakeSocket;
@@ -217,7 +218,7 @@ describe("allowances on the screens", () => {
 		// Signed in is not connected yet: the step asks how many, each starting at the kit's.
 		expect(
 			await within(dialog).findByText(
-				"How many may Kai make each sprint without asking?",
+				"How many may Kai make each day without asking?",
 			),
 		).toBeTruthy();
 		expect(s.calls("connector.connect")).toHaveLength(0);
@@ -254,7 +255,7 @@ describe("allowances on the screens", () => {
 			await within(dialog).findByText("Higgsfield is connected to Kai"),
 		).toBeTruthy();
 		expect(
-			within(dialog).getByText("make up to 12 images and 5 videos each sprint"),
+			within(dialog).getByText("make up to 12 images and 5 videos each day"),
 		).toBeTruthy();
 		expect(within(dialog).getByText("check your credits")).toBeTruthy();
 		expect(within(dialog).getByText("making more than that")).toBeTruthy();
@@ -308,7 +309,7 @@ describe("allowances on the screens", () => {
 		});
 		// A tool at 0 asks every time: it is not in what runs, and it is in what asks.
 		expect(
-			await within(dialog).findByText("make up to 20 images each sprint"),
+			await within(dialog).findByText("make up to 20 images each day"),
 		).toBeTruthy();
 		const asks = within(dialog)
 			.getByText("Kai asks you first before")
@@ -348,9 +349,7 @@ describe("allowances on the screens", () => {
 		);
 		const higgsfield = kitRow("Higgsfield");
 		expect(
-			within(higgsfield).getByText(
-				"This sprint: 14 of 20 images, 2 of 5 videos.",
-			),
+			within(higgsfield).getByText("Today: 14 of 20 images, 2 of 5 videos."),
 		).toBeTruthy();
 		// Canva has no allowance, so no such button.
 		expect(within(kitRow("Canva")).queryByText(/Change how many/)).toBeNull();
@@ -360,7 +359,7 @@ describe("allowances on the screens", () => {
 			}),
 		);
 		const dialog = await screen.findByRole("dialog", {
-			name: "How many may Kai make each sprint without asking?",
+			name: "How many may Kai make each day without asking?",
 		});
 		expect(within(dialog).getByText("14 made so far")).toBeTruthy();
 		expect(within(dialog).getByText("2 made so far")).toBeTruthy();
@@ -399,7 +398,7 @@ describe("allowances on the screens", () => {
 			}),
 		);
 		const dialog = await screen.findByRole("dialog", {
-			name: "How many may Kai make each sprint without asking?",
+			name: "How many may Kai make each day without asking?",
 		});
 		expect(
 			(within(dialog).getByLabelText(/^Images/) as HTMLInputElement).value,
@@ -419,7 +418,7 @@ describe("allowances on the screens", () => {
 			}),
 		);
 		const dialog = await screen.findByRole("dialog", {
-			name: "How many may Kai make each sprint without asking?",
+			name: "How many may Kai make each day without asking?",
 		});
 		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 		const change = await sent(s, "connector.allowances");
@@ -461,18 +460,18 @@ describe("allowances on the screens", () => {
 		);
 		await answerQuery(s, "models.list", { models: [] });
 		await answerQuery(s, "allowances.list", {
-			period: sprintPeriod,
+			period: dayPeriod,
 			rows: [ROW, VIDEOS],
 		});
 		expect(
 			await screen.findByRole("dialog", {
-				name: "How many may Kai make each sprint without asking?",
+				name: "How many may Kai make each day without asking?",
 			}),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});
 
-	it("board_shows_each_allowance_beside_the_sprint", async () => {
+	it("board_shows_each_allowance_for_the_day", async () => {
 		const { container, socket } = await renderApp("/board");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
@@ -480,18 +479,8 @@ describe("allowances on the screens", () => {
 		await answerQuery(s, "tasks.list", { tasks: [] });
 		await answerQuery(s, "waiting.list", { waiting: [] });
 		await answerQuery(s, "team.activity", { activity: [] });
-		await answerQuery(s, "sprint.current", {
-			sprint_id: "S2",
-			done: 4,
-			total: 7,
-		});
-		await answerQuery(s, "backlog.summary", {
-			plan_in_sprints: false,
-			count: 0,
-		});
-		await answerQuery(s, "sprints.list", { sprints: [] });
 		let seq = 0;
-		const list = async (rows: object[], period: object = sprintPeriod) => {
+		const list = async (rows: object[], period: object = dayPeriod) => {
 			// The page asks again after an event, and is answered with what is made by then.
 			if (seq > 0) await eventArrives(s, seq);
 			seq += 1;
@@ -506,8 +495,8 @@ describe("allowances on the screens", () => {
 				.getAllByRole("listitem")
 				.map((item) => item.textContent);
 		expect(lines()).toEqual([
-			"Kai: 14 of 20 images this sprint",
-			"Kai: 2 of 5 videos this sprint",
+			"Kai: 14 of 20 images today",
+			"Kai: 2 of 5 videos today",
 		]);
 		await expectNoAxeViolations(container);
 		// At the number, the line says Kai asks first.
@@ -524,12 +513,7 @@ describe("allowances on the screens", () => {
 				"Kai: 21 of 20 images. Kai asks you before making more. Extra images were ones you approved.",
 			),
 		);
-		expect(lines()[1]).toBe("Kai: 2 of 5 videos this sprint");
-		// With no sprint running, the count is the day's.
-		await list([ROW], { kind: "day", day: "2026-10-02" });
-		await waitFor(() =>
-			expect(lines()).toEqual(["Kai: 14 of 20 images today"]),
-		);
+		expect(lines()[1]).toBe("Kai: 2 of 5 videos today");
 	});
 
 	it("costs_lists_what_was_made_on_other_services", async () => {
@@ -541,12 +525,7 @@ describe("allowances on the screens", () => {
 		await answerQuery(s, "costs.summary", {
 			today_usd: 6.12,
 			daily_limit_usd: null,
-			sprint: {
-				sprint_id: "S2",
-				status: "open",
-				spent_usd: 11.84,
-				budget_usd: 20,
-			},
+			sprint: null,
 			agents: [],
 			conversations_today_usd: 0.42,
 		});
@@ -568,7 +547,7 @@ describe("allowances on the screens", () => {
 			},
 		});
 		await answerQuery(s, "allowances.list", {
-			period: sprintPeriod,
+			period: dayPeriod,
 			rows: [ROW, { ...VIDEOS, used: 6 }],
 		});
 		const section = await screen.findByRole("region", {
@@ -594,8 +573,8 @@ describe("allowances on the screens", () => {
 			.map((row) => within(row).getByRole("rowheader").textContent);
 		expect(names).toEqual(["Kai", "Kai"]);
 		expect(cells).toEqual([
-			["Higgsfield", "14 of 20 images", "This sprint"],
-			["Higgsfield", "6 of 5 videos", "This sprint"],
+			["Higgsfield", "14 of 20 images", "Today"],
+			["Higgsfield", "6 of 5 videos", "Today"],
 		]);
 		const bill =
 			"Catervas counts what agents made, not what the service charges. Check your bill there.";
@@ -606,12 +585,12 @@ describe("allowances on the screens", () => {
 		expect(within(section).queryByRole("table")).toBeNull();
 		expect(within(section).getAllByText("Kai, on Higgsfield")).toHaveLength(2);
 		expect(within(section).getByText("14 of 20 images")).toBeTruthy();
-		expect(within(section).getAllByText("This sprint")).toHaveLength(2);
+		expect(within(section).getAllByText("Today")).toHaveLength(2);
 		expect(within(section).getByText(bill)).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});
 
-	it("costs_says_today_with_no_sprint_open", async () => {
+	it("costs_and_allowances_count_by_the_day", async () => {
 		const { socket } = await renderApp("/costs");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
@@ -641,14 +620,34 @@ describe("allowances on the screens", () => {
 			},
 		});
 		await answerQuery(s, "allowances.list", {
-			period: { kind: "day", day: "2026-09-22" },
+			period: dayPeriod,
 			rows: [ROW],
 		});
 		const section = await screen.findByRole("region", {
 			name: "Made on other services",
 		});
 		expect(within(section).getByText("Today")).toBeTruthy();
-		expect(within(section).queryByText("This sprint")).toBeNull();
+		expect(document.body.textContent).not.toMatch(/sprint/i);
+		const metrics = s.calls("query").filter((f) => f.params.name === "metrics");
+		expect(metrics.map((f) => f.params.params)).toEqual([{}]);
+		cleanup();
+
+		await kaiPage(
+			[HIGGSFIELD],
+			[entry({ generate_image: 20, generate_video: 5 })],
+			CONNECTED,
+			[ROW],
+		);
+		fireEvent.click(
+			within(kitRow("Higgsfield")).getByRole("button", {
+				name: "Change how many Kai may make with Higgsfield",
+			}),
+		);
+		expect(
+			await screen.findByRole("dialog", {
+				name: "How many may Kai make each day without asking?",
+			}),
+		).toBeTruthy();
 	});
 
 	it("tool_approval_says_the_count_for_a_tool_with_an_allowance", async () => {
@@ -658,7 +657,7 @@ describe("allowances on the screens", () => {
 		await answerQuery(s, "team.get", teamGot([], [HIGGSFIELD]));
 		await answerQuery(s, "team.activity", { activity: [] });
 		await answerQuery(s, "allowances.list", {
-			period: sprintPeriod,
+			period: dayPeriod,
 			rows: [{ ...ROW, used: 20 }, VIDEOS],
 		});
 		await answerQuery(s, "waiting.list", {
@@ -688,9 +687,7 @@ describe("allowances on the screens", () => {
 			),
 		).toBeTruthy();
 		expect(
-			await within(dialog).findByText(
-				"Kai has made 20 of 20 images this sprint.",
-			),
+			await within(dialog).findByText("Kai has made 20 of 20 images today."),
 		).toBeTruthy();
 		const change = within(dialog).getByRole("link", {
 			name: "Change how many",
@@ -711,7 +708,7 @@ describe("allowances on the screens", () => {
 		await answerQuery(s, "team.get", teamGot([], [HIGGSFIELD]));
 		await answerQuery(s, "team.activity", { activity: [] });
 		await answerQuery(s, "allowances.list", {
-			period: sprintPeriod,
+			period: dayPeriod,
 			rows: [ROW],
 		});
 		await answerQuery(s, "waiting.list", {
@@ -747,7 +744,7 @@ describe("allowances on the screens", () => {
 		await answerStatus(s, false);
 		await answerQuery(s, "team.get", teamGot([], [HIGGSFIELD]));
 		await answerQuery(s, "team.activity", { activity: [] });
-		await answerQuery(s, "allowances.list", { period: sprintPeriod, rows: [] });
+		await answerQuery(s, "allowances.list", { period: dayPeriod, rows: [] });
 		await answerQuery(s, "waiting.list", {
 			waiting: [
 				{

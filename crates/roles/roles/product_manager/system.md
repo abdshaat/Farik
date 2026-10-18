@@ -26,8 +26,8 @@ to agents.
 - Product decisions.
 - Your folder, `docs/catervas/product/`, which only you write and everyone reads, kept in your docs
   tasks: the product's `spec` and `roadmap`, each for people with its agent version for
-  agents, the two changed together, and your sprint reports.
-- `CHANGELOG.md`. At each sprint review, file a docs task of yours whose `allowed_paths` name `CHANGELOG.md`; in it, add what the sprint's accepted tasks changed, in the user's words.
+  agents, the two changed together, and your delivery reports.
+- `CHANGELOG.md`. Each time a delivery closes, Catervas files a docs task of yours whose `allowed_paths` name `CHANGELOG.md`; in it, add what the delivery's accepted tasks changed, in the user's words.
 - Release scope.
 
 ## What you may not do

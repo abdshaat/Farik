@@ -71,8 +71,6 @@ pub mod show;
 
 #[cfg(unix)]
 mod skill;
-/// One sprint, and how it went.
-pub mod sprint;
 /// Who drives a project, and how a command reaches it.
 #[cfg(unix)]
 mod start;
@@ -363,12 +361,8 @@ enum Commands {
         #[arg(long)]
         limit: Option<usize>,
     },
-    /// Show the harness metrics over the whole project, or one sprint's, (F17).
-    Metrics {
-        /// Only this sprint's rows and costs.
-        #[arg(long)]
-        sprint: Option<String>,
-    },
+    /// Show the harness metrics over the whole project (F17).
+    Metrics,
     /// Say where the files and the log disagree, and what else this project got wrong.
     Doctor,
     /// Show the team's rules (5.12).
@@ -433,7 +427,7 @@ enum Commands {
         /// `<tool>=denied`. A tool left unlabelled is `paid`.
         #[arg(long = "tag")]
         tags: Vec<String>,
-        /// How many calls each sprint the agent makes of a kit service's spending tool without
+        /// How many calls each day the agent makes of a kit service's spending tool without
         /// asking, `<tool>=<number>` from 0 to 1000; repeat it for each. Left out, the kit's number.
         #[arg(long = "allowance")]
         allowances: Vec<String>,
@@ -508,6 +502,12 @@ enum Commands {
         task_id: String,
         /// Where it goes.
         status: StatusArgument,
+        /// More tries for a task that used its tries, counting the one this starts.
+        #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
+        extra_tries: Option<u8>,
+        /// The contract's own sessions and dollars again, for a task that spent them.
+        #[arg(long, conflicts_with = "extra_tries")]
+        extra_room: bool,
         /// What the next session about it is told.
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         message: Vec<String>,
@@ -553,11 +553,6 @@ enum Commands {
     Renewal {
         #[command(subcommand)]
         command: RenewalCommands,
-    },
-    /// Start, end, or show a sprint (5.5).
-    Sprint {
-        #[command(subcommand)]
-        command: SprintCommands,
     },
     /// Pause the whole team: no rule runs and no session starts until `catervas resume`.
     Pause,
@@ -747,23 +742,6 @@ enum ConnectorCommands {
     /// Look eBay listings up with the user's own developer keys (used by the Procurement
     /// Specialist's kit).
     Ebay,
-}
-
-#[derive(Subcommand)]
-enum SprintCommands {
-    /// Start a sprint, which the team plans from the ready backlog.
-    Start {
-        /// What it may spend, in dollars. Left out, it has no budget of its own.
-        #[arg(long)]
-        budget: Option<f64>,
-    },
-    /// End the open sprint; its unfinished tasks leave it and keep their status.
-    End,
-    /// Show the sprint named, else the open one, else the latest.
-    Show {
-        /// The sprint, as S<n>.
-        sprint_id: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -1183,10 +1161,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Cancel { .. }
         | Commands::Say { .. }
         | Commands::Pause
-        | Commands::Resume
-        | Commands::Sprint {
-            command: SprintCommands::Start { .. } | SprintCommands::End,
-        } => open_project(&io.cwd, now).and_then(|project| {
+        | Commands::Resume => open_project(&io.cwd, now).and_then(|project| {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
@@ -1229,18 +1204,15 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Task {
             command: TaskCommands::Show { task_id, diff },
         } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id, *diff)),
-        Commands::Sprint {
-            command: SprintCommands::Show { sprint_id },
-        } => open_project(&io.cwd, now)
-            .and_then(|project| sprint::show(&project, sprint_id.as_deref())),
         Commands::Channel { last } => {
             open_project(&io.cwd, now).and_then(|project| channel::channel(&project, *last))
         }
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
-        Commands::Metrics { sprint } => open_project(&io.cwd, now)
-            .and_then(|project| metrics::metrics(&project, sprint.as_deref())),
+        Commands::Metrics => {
+            open_project(&io.cwd, now).and_then(|project| metrics::metrics(&project))
+        }
         Commands::Doctor => {
             let found =
                 open_project(&io.cwd, now).and_then(|project| doctor::doctor(&project, now));
@@ -1548,6 +1520,8 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
         Commands::Resolve {
             task_id,
             status,
+            extra_tries,
+            extra_room,
             message,
         } => (
             "resolve",
@@ -1555,7 +1529,8 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 task_id: task(task_id)?,
                 to: (*status).into(),
                 message: message.join(" "),
-                extra_tries: None,
+                extra_tries: *extra_tries,
+                extra_room: *extra_room,
             },
         ),
         Commands::Cancel { task_id, reason } => (
@@ -1566,17 +1541,6 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 reason: reason.join(" "),
             },
         ),
-        Commands::Sprint {
-            command: SprintCommands::Start { budget },
-        } => (
-            "sprint start",
-            Command::SprintStart {
-                budget_usd: *budget,
-            },
-        ),
-        Commands::Sprint {
-            command: SprintCommands::End,
-        } => ("sprint end", Command::SprintEnd),
         Commands::Pause => ("pause", Command::TeamPause),
         Commands::Resume => ("resume", Command::TeamResume),
         Commands::Say { text } => (
@@ -1590,6 +1554,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             Command::ChatMessagePost {
                 agent_id: agent.clone(),
                 text: text.join(" "),
+                as_task: false,
             },
         ),
         Commands::Marketing {
@@ -1903,4 +1868,39 @@ fn usage(error: &clap::Error, io: &mut CliIo<'_>) -> i32 {
 /// closed, which is not something to tell the person about on the stream that just closed.
 fn say(stream: &mut Box<dyn Write + '_>, line: &str) {
     let _ = writeln!(stream, "{}", printable::printable(line));
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::{Command, CommandFactory};
+
+    use super::Cli;
+
+    /// Every command's help, at every depth, with the command's own name for the failure.
+    fn helps(command: &mut Command, path: &str, found: &mut Vec<(String, String)>) {
+        found.push((path.to_string(), command.render_long_help().to_string()));
+        let names: Vec<String> = command
+            .get_subcommands()
+            .map(|sub| sub.get_name().to_string())
+            .collect();
+        for name in names {
+            if let Some(sub) = command.find_subcommand_mut(&name) {
+                helps(sub, &format!("{path} {name}"), found);
+            }
+        }
+    }
+
+    /// Deliveries replace sprints (ADR 0062): no help text speaks of a sprint.
+    #[test]
+    fn the_help_never_mentions_a_sprint() {
+        let mut found = Vec::new();
+        helps(&mut Cli::command(), "catervas", &mut found);
+        assert!(found.len() > 20, "{} commands", found.len());
+        let hits: Vec<&str> = found
+            .iter()
+            .filter(|(_, help)| help.to_lowercase().contains("sprint"))
+            .map(|(path, _)| path.as_str())
+            .collect();
+        assert!(hits.is_empty(), "{hits:?}");
+    }
 }

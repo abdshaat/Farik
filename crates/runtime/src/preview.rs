@@ -25,8 +25,90 @@ use crate::session::{McpServerConfig, McpTransport};
 pub mod docker;
 
 /// A dead port on the preview's loopback: every request the browser does not make to `localhost`
-/// goes to it, and fails, whatever the namespace lets through (step 12's confinement).
+/// or `host.docker.internal` goes to it, and fails, whatever the namespace lets through (step 12's
+/// confinement).
 pub const BLACKHOLE_PROXY: &str = "http://127.0.0.1:9";
+
+/// The hosts the browser reaches past the dead proxy: the preview, and the owner's computer (ADR 0067).
+pub const PROXY_BYPASS: &str = "localhost,host.docker.internal";
+
+/// The origins the browser may request beside the preview's: the owner's computer, on any port.
+pub const OWNER_ORIGINS: [&str; 2] = [
+    "http://host.docker.internal:*",
+    "https://host.docker.internal:*",
+];
+
+/// What stands for a value of that file in a text Catervas records.
+pub const HIDDEN: &str = "[hidden]";
+
+/// The shortest value `PreviewEnv::hide` hides: a shorter one (`1`, `on`, a port) is no secret.
+const HIDDEN_FROM: usize = 4;
+
+/// The owner's environment file for the preview, from the project folder (ADR 0067).
+pub const PREVIEW_ENV: &str = ".catervas/local/preview.env";
+
+/// The owner's environment file for the preview: where it is, and its values, kept only to hide
+/// them from the text Catervas records. Docker reads the file itself.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PreviewEnv {
+    path: PathBuf,
+    values: Vec<String>,
+}
+
+impl PreviewEnv {
+    /// The file under `root` when it is a file (a link is followed), else `None`.
+    #[must_use]
+    pub fn read(root: &Path) -> Option<Self> {
+        let path = std::path::absolute(root.join(PREVIEW_ENV)).ok()?;
+        if !path.is_file() {
+            return None;
+        }
+        // Docker's env-file rules, for hiding only: a line without `=` has no value, and a file
+        // that is not UTF-8 text has none (Docker reads it, or refuses it in its own words).
+        let values = std::fs::read_to_string(&path)
+            .map(|text| {
+                text.lines()
+                    .map(str::trim_start)
+                    .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                    .filter_map(|line| line.split_once('=').map(|(_, value)| value.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(Self { path, values })
+    }
+
+    /// `text` with every value of the file of at least four characters replaced by `HIDDEN`,
+    /// the longest first so that a value holding another is hidden whole.
+    #[must_use]
+    pub fn hide(&self, text: &str) -> String {
+        let mut values: Vec<&String> = self
+            .values
+            .iter()
+            .filter(|value| value.chars().count() >= HIDDEN_FROM)
+            .collect();
+        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+        values.into_iter().fold(text.to_string(), |hidden, value| {
+            hidden.replace(value.as_str(), HIDDEN)
+        })
+    }
+
+    /// Where the file is, absolute.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl fmt::Debug for PreviewEnv {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "PreviewEnv {{ path: {}, values: {} }}",
+            self.path.display(),
+            self.values.len()
+        )
+    }
+}
 
 /// axe-core, as `packages/ui` pins it for the web tests, which the page check runs in the page.
 pub const AXE_SOURCE: &str = include_str!("../assets/axe.min.js");
@@ -128,7 +210,8 @@ pub trait PreviewFactory: Send + Sync {
     /// for every factory but `PolledPreviews`.
     fn settle(&self) {}
     /// Prepares the preview when `preview.prepare` is set, then starts it and waits for it to
-    /// answer. `tree` is the task branch's `HEAD^{tree}` the preview is of.
+    /// answer. `tree` is the task branch's `HEAD^{tree}` the preview is of. `env` is the owner's
+    /// environment file, passed to `prepare` and `start` alone (ADR 0067).
     ///
     /// # Errors
     ///
@@ -140,6 +223,7 @@ pub trait PreviewFactory: Send + Sync {
         worktree: &Path,
         preview: &Preview,
         tree: &str,
+        env: Option<&PreviewEnv>,
     ) -> Result<Box<dyn RunningPreview>, PreviewError>;
 }
 
@@ -158,6 +242,7 @@ impl PreviewFactory for NoPreviews {
         _worktree: &Path,
         _preview: &Preview,
         _tree: &str,
+        _env: Option<&PreviewEnv>,
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         Err(PreviewError::DockerUnavailable {
             detail: "Catervas runs without Docker's sandbox".to_string(),
@@ -273,9 +358,10 @@ impl PreviewFactory for PolledPreviews {
         worktree: &Path,
         preview: &Preview,
         tree: &str,
+        env: Option<&PreviewEnv>,
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         self.inner
-            .start(project_id, task_id, worktree, preview, tree)
+            .start(project_id, task_id, worktree, preview, tree, env)
     }
 }
 
@@ -333,7 +419,8 @@ pub fn disallowed_tools(definition: &ConnectorDefinition) -> Vec<String> {
 
 /// The MCP server a session's browser is: `definition`'s image run by docker in the preview's
 /// network namespace, as the user, named and labelled, with every request that is not to
-/// `localhost` sent to `BLACKHOLE_PROXY`, and only the preview's origin allowed. `output_dir` is
+/// `localhost` or `host.docker.internal` sent to `BLACKHOLE_PROXY`, and only the preview's origin
+/// and the owner's computer allowed. `output_dir` is
 /// where it writes what it saves.
 #[must_use]
 pub fn connector_server(
@@ -377,9 +464,12 @@ pub fn connector_server(
         BLACKHOLE_PROXY.to_string(),
         // Playwright drops Chromium's own loopback bypass once a proxy is set, so it is named.
         "--proxy-bypass".to_string(),
-        "localhost".to_string(),
+        PROXY_BYPASS.to_string(),
         "--allowed-origins".to_string(),
-        preview.origin(),
+        std::iter::once(preview.origin())
+            .chain(OWNER_ORIGINS.map(String::from))
+            .collect::<Vec<_>>()
+            .join(";"),
         "--output-dir".to_string(),
         "/output".to_string(),
     ]);
@@ -522,7 +612,7 @@ pub fn check_page(
         "--proxy-server".to_string(),
         BLACKHOLE_PROXY.to_string(),
         "--proxy-bypass".to_string(),
-        "localhost".to_string(),
+        PROXY_BYPASS.to_string(),
         "--tags".to_string(),
         AXE_TAGS.join(","),
     ]);
@@ -635,13 +725,15 @@ pub(crate) mod fixtures {
     use catervas_core::contract::TaskId;
     use catervas_core::team::Preview;
 
-    use super::{CheckError, PreviewError, PreviewFactory, RunningPreview, Spawn};
+    use super::{CheckError, PreviewEnv, PreviewError, PreviewFactory, RunningPreview, Spawn};
 
     /// A factory that starts `NamedPreview`s, or fails with `fails`, and keeps each `prepare` it
     /// was asked to run.
     pub(crate) struct FakePreviews {
         pub(crate) fails: Option<PreviewError>,
         pub(crate) prepared: Mutex<Vec<Option<String>>>,
+        /// The path of the environment file each `start` was asked with.
+        pub(crate) envs: Mutex<Vec<Option<std::path::PathBuf>>>,
     }
 
     impl FakePreviews {
@@ -649,6 +741,7 @@ pub(crate) mod fixtures {
             Self {
                 fails: None,
                 prepared: Mutex::new(Vec::new()),
+                envs: Mutex::new(Vec::new()),
             }
         }
 
@@ -656,6 +749,7 @@ pub(crate) mod fixtures {
             Self {
                 fails: Some(error),
                 prepared: Mutex::new(Vec::new()),
+                envs: Mutex::new(Vec::new()),
             }
         }
     }
@@ -672,7 +766,9 @@ pub(crate) mod fixtures {
             _worktree: &Path,
             preview: &Preview,
             _tree: &str,
+            env: Option<&PreviewEnv>,
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
+            crate::locked(&self.envs).push(env.map(|env| env.path().to_path_buf()));
             crate::locked(&self.prepared).push(preview.prepare.clone());
             match &self.fails {
                 Some(error) => Err(error.clone()),
@@ -699,6 +795,7 @@ pub(crate) mod fixtures {
             _worktree: &Path,
             _preview: &Preview,
             _tree: &str,
+            _env: Option<&PreviewEnv>,
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a preview factory was asked to start a preview");
         }
@@ -788,6 +885,7 @@ pub(crate) mod fixtures {
             _worktree: &Path,
             _preview: &Preview,
             _tree: &str,
+            _env: Option<&PreviewEnv>,
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a held factory was asked to start a preview");
         }
@@ -1192,10 +1290,13 @@ mod tests {
             .expect("the pinned image");
         let server_args = &args[image + 1..];
         assert_eq!(after(server_args, "--proxy-server"), ["http://127.0.0.1:9"]);
-        assert_eq!(after(server_args, "--proxy-bypass"), ["localhost"]);
+        assert_eq!(
+            after(server_args, "--proxy-bypass"),
+            ["localhost,host.docker.internal"]
+        );
         assert_eq!(
             after(server_args, "--allowed-origins"),
-            ["http://localhost:4400"]
+            ["http://localhost:4400;http://host.docker.internal:*;https://host.docker.internal:*"]
         );
         assert_eq!(after(server_args, "--output-dir"), ["/output"]);
         assert!(server_args.contains(&"--isolated".to_string()), "{args:?}");

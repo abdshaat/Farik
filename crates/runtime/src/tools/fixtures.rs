@@ -6,12 +6,10 @@ use std::sync::Arc;
 
 use catervas_core::branch::task_branch;
 use catervas_core::contract::fixtures::a_contract_wire;
-use catervas_core::contract::{TaskId, validate_contract};
+use catervas_core::contract::validate_contract;
 use catervas_core::criteria::fixtures::a_criteria_library_wire;
 use catervas_core::criteria::validate_criteria;
 use catervas_core::governor::permissions::PermissionTier;
-use catervas_core::sprint::fixtures::an_open_sprint_wire;
-use catervas_core::sprint::validate_sprint;
 use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
 use catervas_core::team::{Team, validate_team};
 use catervas_protocol::clock::{Clock, FixedClock};
@@ -392,6 +390,18 @@ impl TestProject {
         raises: Option<&str>,
         change: impl FnOnce(&mut Value),
     ) {
+        self.filed_extra(task, (status, kind, parent), &json!({}), raises, change);
+    }
+
+    /// `filed_given_to`'s ground: a task whose `task.created` body also holds `extra`.
+    fn filed_extra(
+        &self,
+        task: &str,
+        (status, kind, parent): (&str, &str, Option<&str>),
+        extra: &Value,
+        raises: Option<&str>,
+        change: impl FnOnce(&mut Value),
+    ) {
         let mut wire = a_contract_wire();
         wire["id"] = json!(task);
         wire["status"] = json!(status);
@@ -418,7 +428,30 @@ impl TestProject {
         if let Some(plan) = raises {
             body["raises"] = json!(plan);
         }
+        if let Some(extra) = extra.as_object() {
+            for (key, value) in extra {
+                body[key] = value.clone();
+            }
+        }
         self.record(task, "task.created", &body);
+    }
+
+    /// `filed_with` a standalone task the owner gave `agent` in its chat (ADR 0063): its
+    /// `task.created` also names `agent` in `given_to`.
+    pub(crate) fn filed_given_to(
+        &self,
+        task: &str,
+        status: &str,
+        agent: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.filed_extra(
+            task,
+            (status, "task", None),
+            &json!({ "given_to": agent }),
+            None,
+            change,
+        );
     }
 
     /// `filed_with` and no change.
@@ -426,28 +459,10 @@ impl TestProject {
         self.filed_with(task, status, kind, parent, |_| {});
     }
 
-    /// Sprint `sprint` open with `budget_usd` and holding `tasks`, as starting and planning it
-    /// would leave it: its file, each task's contract naming it, `sprint.started` by the human, and
+    /// Sprint `sprint` open with `budget_usd` and holding `tasks`, as the log of a project made
+    /// before ADR 0062 records starting and planning it: `sprint.started` by the human, and
     /// `sprint.planned` by the Product Manager when it holds a task.
     pub(crate) fn open_sprint(&self, sprint: &str, budget_usd: Option<f64>, tasks: &[&str]) {
-        let files = &self.deps.files;
-        let mut wire = an_open_sprint_wire();
-        wire["id"] = json!(sprint);
-        wire["task_ids"] = json!(tasks);
-        if let Some(usd) = budget_usd {
-            wire["budget_usd"] = json!(usd);
-        }
-        files
-            .write_sprint(&validate_sprint(&wire).expect("the fixture is a sprint"))
-            .expect("the sprint is written");
-        for task in tasks {
-            let id: TaskId = task.parse().expect("a task id");
-            let mut contract = files.read_contract(&id).expect("the contract reads");
-            contract.sprint = Some(sprint.to_string());
-            files
-                .write_contract(&contract)
-                .expect("the contract is written");
-        }
         self.record(
             "",
             "sprint.started",

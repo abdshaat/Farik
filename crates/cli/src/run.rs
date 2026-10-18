@@ -3,8 +3,7 @@
 
 use catervas_runtime::claude::CredentialKind;
 use catervas_runtime::credential::Source;
-use catervas_runtime::orchestrator::{TickReport, TickRules, TickScope};
-use catervas_runtime::sprints::backlog;
+use catervas_runtime::orchestrator::{Progress, TickReport, TickRules, TickScope};
 use catervas_store::files::Sandbox;
 use serde_json::{Value, json};
 
@@ -16,7 +15,7 @@ use crate::{CliIo, say};
 /// The exit code after Ctrl-C, as a shell reports a process that SIGINT ended.
 pub(crate) const INTERRUPTED: i32 = 130;
 /// What the first Ctrl-C says.
-const STOPPING: &str = "stopping after the current session; Ctrl-C again aborts it";
+const STOPPING: &str = "stopping after the running sessions; Ctrl-C again aborts them";
 /// Why the second Ctrl-C stops the running sessions.
 const INTERRUPTED_BY: &str = "interrupted by Ctrl-C";
 
@@ -128,17 +127,7 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         return;
     }
     if let Some((kind, source)) = driver.credential {
-        let what = match kind {
-            CredentialKind::ApiKey => "an API key",
-            CredentialKind::SubscriptionToken => "a subscription token",
-        };
-        let name = credential_name((kind, source));
-        let line = match source {
-            Source::Environment => format!("credential: {name} ({what})"),
-            Source::Keychain => format!("credential: {what}, kept in your computer's keychain"),
-            Source::File => format!("credential: {what}, kept in catervas's credential.json"),
-        };
-        printer.line(&line, &Value::Null);
+        printer.line(&credential_line(kind, source), &Value::Null);
     }
     if recovered.sessions_interrupted + recovered.worktrees_removed + recovered.tasks_resumed > 0 {
         printer.line(
@@ -150,6 +139,24 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
             ),
             &Value::Null,
         );
+    }
+}
+
+/// The line that says which credential the start chose and where it is kept. The private file is
+/// said plainly: it is where the key goes when this computer's keychain cannot be used (ADR 0022).
+fn credential_line(kind: CredentialKind, source: Source) -> String {
+    let what = match kind {
+        CredentialKind::ApiKey => "an API key",
+        CredentialKind::SubscriptionToken => "a subscription token",
+    };
+    let name = credential_name((kind, source));
+    match source {
+        Source::Environment => format!("credential: {name} ({what})"),
+        Source::Keychain => format!("credential: {what}, kept in your computer's keychain"),
+        Source::File => format!(
+            "credential: {what}, kept in a private file only you can read, credential.json in \
+             catervas's settings folder: catervas could not use this computer's keychain"
+        ),
     }
 }
 
@@ -181,27 +188,42 @@ pub(crate) async fn ticks(
     let mut last_wait: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
     let mut last_idle: Option<String> = None;
     loop {
-        if driver.orchestrator.is_stopped() {
-            printer.line("stopped", &json!({ "stopped": true }));
-            return Ended::Stopped;
-        }
         let orchestrator = std::sync::Arc::clone(&driver.orchestrator);
-        let tick = orchestrator.tick_within(scope);
-        tokio::pin!(tick);
-        let report = loop {
+        let next = orchestrator.next(scope);
+        tokio::pin!(next);
+        let progress = loop {
             tokio::select! {
-                report = &mut tick => break report,
+                progress = &mut next => break progress,
                 Some(()) = driver.interrupts.recv() => {
                     *presses += 1;
                     interrupted(driver, printer, *presses);
                 }
             }
         };
+        let report = match progress {
+            None => {
+                printer.line("stopped", &json!({ "stopped": true }));
+                return Ended::Stopped;
+            }
+            Some(Err(error)) => {
+                return drain(driver, printer, presses, scope, error.to_string()).await;
+            }
+            Some(Ok(Progress::Started {
+                agent_id,
+                task_id,
+                purpose,
+            })) => {
+                last_idle = None;
+                print_started(printer, &agent_id, task_id.as_ref(), &purpose);
+                continue;
+            }
+            Some(Ok(Progress::Ticked(report))) => report,
+        };
         match report {
-            Ok(TickReport::Idle {
+            TickReport::Idle {
                 why,
                 until: Some(until),
-            }) => {
+            } => {
                 if last_wait.as_ref() != Some(&(why.clone(), until)) {
                     printer.line(
                         &why,
@@ -211,7 +233,7 @@ pub(crate) async fn ticks(
                 }
                 wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
-            Ok(TickReport::Idle { why, until: None }) => {
+            TickReport::Idle { why, until: None } => {
                 if last_idle.as_ref() != Some(&why) || matches!(on_idle, OnIdle::Return) {
                     printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
                     last_idle = Some(why.clone());
@@ -222,41 +244,97 @@ pub(crate) async fn ticks(
                 let until = printer.io.clock.now() + IDLE_WAIT;
                 wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
-            Ok(TickReport::Acted { task_id, what }) => {
+            acted => {
                 last_idle = None;
-                printer.line(
-                    &format!("{}: {what}", task_id.as_str()),
-                    &json!({ "task_id": task_id.as_str(), "what": what }),
-                );
+                print_acted(printer, &acted);
                 after(printer);
             }
-            Ok(TickReport::Sprint { sprint_id, what }) => {
-                last_idle = None;
-                printer.line(
-                    &format!("{sprint_id}: {what}"),
-                    &json!({ "sprint_id": sprint_id, "what": what }),
-                );
-                after(printer);
+        }
+    }
+}
+
+/// Says that a session started, and for what.
+fn print_started(
+    printer: &mut Printer<'_, '_>,
+    agent_id: &str,
+    task_id: Option<&catervas_core::contract::TaskId>,
+    purpose: &str,
+) {
+    let text = match task_id {
+        Some(task) => format!(
+            "{}: {agent_id} started its {purpose} session",
+            task.as_str()
+        ),
+        None => format!("{agent_id}: started its {purpose} session"),
+    };
+    printer.line(
+        &text,
+        &json!({
+            "started": purpose,
+            "agent_id": agent_id,
+            "task_id": task_id.map(|task| task.as_str()),
+        }),
+    );
+}
+
+/// Says what a tick that did something did; an idle one says nothing here.
+fn print_acted(printer: &mut Printer<'_, '_>, report: &TickReport) {
+    match report {
+        TickReport::Acted { task_id, what } => printer.line(
+            &format!("{}: {what}", task_id.as_str()),
+            &json!({ "task_id": task_id.as_str(), "what": what }),
+        ),
+        TickReport::Delivery { delivery_id, what } => printer.line(
+            &format!("{delivery_id}: {what}"),
+            &json!({ "delivery_id": delivery_id, "what": what }),
+        ),
+        TickReport::Conversation { agent_id, what } | TickReport::Chat { agent_id, what } => {
+            printer.line(
+                &format!("{agent_id}: {what}"),
+                &json!({ "agent_id": agent_id, "what": what }),
+            );
+        }
+        TickReport::FolderChange { change, what } => printer.line(
+            &format!("folder-{change}: {what}"),
+            &json!({ "folder_change": change, "what": what }),
+        ),
+        TickReport::Idle { .. } => {}
+    }
+}
+
+/// A tick failed (`error`): stops the run as the first Ctrl-C does and lets the running sessions
+/// end, printing what they do, so that no session is left running when the daemon shuts down
+/// (ADR 0064). Ctrl-C is heard meanwhile.
+async fn drain(
+    driver: &mut Driver,
+    printer: &mut Printer<'_, '_>,
+    presses: &mut u32,
+    scope: &TickScope,
+    error: String,
+) -> Ended {
+    driver.orchestrator.stop();
+    let orchestrator = std::sync::Arc::clone(&driver.orchestrator);
+    loop {
+        let next = orchestrator.next(scope);
+        tokio::pin!(next);
+        let progress = loop {
+            tokio::select! {
+                progress = &mut next => break progress,
+                Some(()) = driver.interrupts.recv() => {
+                    *presses += 1;
+                    interrupted(driver, printer, *presses);
+                }
             }
-            Ok(
-                TickReport::Conversation { agent_id, what } | TickReport::Chat { agent_id, what },
-            ) => {
-                last_idle = None;
-                printer.line(
-                    &format!("{agent_id}: {what}"),
-                    &json!({ "agent_id": agent_id, "what": what }),
-                );
-                after(printer);
-            }
-            Ok(TickReport::FolderChange { change, what }) => {
-                last_idle = None;
-                printer.line(
-                    &format!("folder-{change}: {what}"),
-                    &json!({ "folder_change": change, "what": what }),
-                );
-                after(printer);
-            }
-            Err(error) => return Ended::Failed(error.to_string()),
+        };
+        match progress {
+            None => return Ended::Failed(error),
+            Some(Err(again)) => report_error(printer, &again.to_string()),
+            Some(Ok(Progress::Started {
+                agent_id,
+                task_id,
+                purpose,
+            })) => print_started(printer, &agent_id, task_id.as_ref(), &purpose),
+            Some(Ok(Progress::Ticked(report))) => print_acted(printer, &report),
         }
     }
 }
@@ -293,7 +371,7 @@ pub(crate) fn interrupted(driver: &Driver, printer: &mut Printer<'_, '_>, presse
             for session in driver.daemon.session_ids() {
                 driver.daemon.request_stop(&session, INTERRUPTED_BY);
             }
-            printer.note("aborting the current session");
+            printer.note("aborting the running sessions");
         }
         _ => printer.note("already stopping"),
     }
@@ -317,17 +395,6 @@ pub(crate) async fn finish(
     };
     match waiting_now(project) {
         Ok(waiting) => print_waiting(printer, &waiting),
-        Err(error) => {
-            report_error(printer, &error);
-            code = 1;
-        }
-    }
-    match backlog_now(project) {
-        Ok(0) => {}
-        Ok(count) => printer.line(
-            &format!("start a sprint: {count} waits in the Backlog (`catervas sprint start`)"),
-            &json!({ "backlog": { "count": count } }),
-        ),
         Err(error) => {
             report_error(printer, &error);
             code = 1;
@@ -365,26 +432,6 @@ pub(crate) fn waiting_now(project: &Project) -> Result<Vec<Waiting>, String> {
     waiting(&project.log, &projections, &project.files, &team)
 }
 
-/// How much work waits in the Backlog for a sprint to start (ADR 0028): the Backlog's rows with no
-/// parent while no sprint is open, so an epic counts once; none while a sprint is open, since its
-/// Backlog waits for the next one rather than for the human.
-fn backlog_now(project: &Project) -> Result<usize, String> {
-    let team = project
-        .files
-        .read_team()
-        .map_err(|error| error.to_string())?;
-    let projections = project.projections()?;
-    if projections
-        .open_sprint()
-        .map_err(|error| error.to_string())?
-        .is_some()
-    {
-        return Ok(0);
-    }
-    let board = projections.board().map_err(|error| error.to_string())?;
-    Ok(backlog(&team, None, &board).count())
-}
-
 /// Prints what waits on the human: a person's lines, or one `{"waiting_on_you"}` object.
 pub(crate) fn print_waiting(printer: &mut Printer<'_, '_>, waiting: &[Waiting]) {
     if printer.as_json {
@@ -419,4 +466,28 @@ pub(crate) fn refuse(io: &mut CliIo<'_>, as_json: bool, error: &str) -> i32 {
     };
     report_error(&mut printer, error);
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use catervas_runtime::claude::CredentialKind;
+    use catervas_runtime::credential::Source;
+
+    use super::credential_line;
+
+    #[test]
+    fn says_where_the_credential_is_kept() {
+        let file = credential_line(CredentialKind::SubscriptionToken, Source::File);
+        assert!(file.contains("a private file only you can read"), "{file}");
+        assert!(
+            file.contains("could not use this computer's keychain"),
+            "{file}"
+        );
+        assert!(!file.contains("catervas's credential.json"), "{file}");
+        let keychain = credential_line(CredentialKind::ApiKey, Source::Keychain);
+        assert!(
+            keychain.contains("kept in your computer's keychain"),
+            "{keychain}"
+        );
+    }
 }

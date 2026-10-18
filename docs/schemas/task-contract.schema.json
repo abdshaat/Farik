@@ -187,6 +187,12 @@
       "maxLength": 32,
       "description": "The member repository of a project folder that this task changes, by the name repos.yaml gives it. Set by the Product Manager; read only in a project folder, for a task whose assignee_role changes code; fixed once set (docs/SPEC.md 5.11, ADR 0057). A builder's task with no repo changes only the project's documents."
     },
+    "branch": {
+      "type": "string",
+      "pattern": "^(feat|fix|docs)/[a-z0-9]+(-[a-z0-9]+)*$",
+      "maxLength": 64,
+      "description": "The branch the task works on, chosen by Catervas from its type and title when its worktree is first made, and never changed (ADR 0066). Absent until then, and on a task started before 0.119, whose branch is feature/, fix/ or docs/ and its id. Written only by Catervas."
+    },
     "budget": {
       "type": "object",
       "additionalProperties": false,

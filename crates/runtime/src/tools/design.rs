@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::folders::is_hunt;
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{PermissionTier, check_design_plan};
 use catervas_core::team::Team;
@@ -23,7 +24,7 @@ use serde_json::{Value, json};
 
 use super::refusal::Refusal;
 use super::work::opens_with_a_summary;
-use super::{Call, ToolError};
+use super::{Call, ToolDeps, ToolError};
 use crate::preview::{CheckTheme, CheckWidth, check_page};
 use crate::prompt::untrusted_block;
 use crate::session::SessionPurpose;
@@ -121,22 +122,27 @@ pub(crate) fn read_design_plan(
 }
 
 /// The plan gate of a call of `role`'s needing `tier` in a session of `task`, read from the log at
-/// the call (ADR 0026): a UI/UX Designer's writes wait for its task's plan to be approved, and one
-/// with no task has no plan to wait for. Every other role passes without the log being read.
+/// the call (ADR 0026): a UI/UX Designer's writes wait for its task's plan to be approved, unless
+/// the task is a bug hunt, and one with no task has no plan to wait for. Every other role passes
+/// without the log being read.
 ///
 /// # Errors
 ///
 /// The gate's refusal, in its words; or the log's failure, as `failed`.
 pub(crate) fn design_plan_gate(
-    log: &EventLog,
+    deps: &ToolDeps,
     role: Role,
     tier: PermissionTier,
     task: Option<&TaskId>,
 ) -> Result<(), ToolError> {
     let approved = match task {
-        Some(task) if role == Role::UiUxDesigner => read_design_plan(log, task)
-            .map_err(super::failed)?
-            .is_some_and(|plan| plan.state == PlanState::Approved),
+        // A bug hunt skips the design plan (ADR 0063): it changes no screen.
+        Some(task) if role == Role::UiUxDesigner => {
+            is_hunt(&deps.files.read_contract(task).map_err(super::failed)?)
+                || read_design_plan(&deps.log, task)
+                    .map_err(super::failed)?
+                    .is_some_and(|plan| plan.state == PlanState::Approved)
+        }
         _ => false,
     };
     check_design_plan(role, tier, approved).map_err(|refusal| Refusal::Tool(refusal).into())
@@ -548,6 +554,37 @@ mod tests {
         &args[image + 1..]
     }
 
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_plan_gate_passes_a_designers_hunt() {
+        use catervas_core::contract::{Role, TaskId};
+        use catervas_core::governor::permissions::PermissionTier;
+
+        let project = TestProject::new(
+            "tools-plan-gate-hunt",
+            &a_team_of_three(super::super::fixtures::browsing),
+        );
+        let designers = |id: &str, paths: Value| {
+            project.filed_with(id, "in_progress", "task", None, |wire| {
+                wire["assignee_role"] = json!("ui_ux_designer");
+                wire["allowed_paths"] = paths;
+            });
+        };
+        designers("CTV-1", json!(["docs/catervas/design/ui-bug-hunt.html"]));
+        designers("CTV-2", json!(["site/**"]));
+        let gate = |id: &str| {
+            super::design_plan_gate(
+                &project.deps,
+                Role::UiUxDesigner,
+                PermissionTier::GitLocal,
+                Some(&TaskId::try_from(id.to_string()).expect("an id")),
+            )
+        };
+        assert!(gate("CTV-1").is_ok(), "a hunt needs no design plan");
+        let reason = refused(gate("CTV-2").map(|()| json!(null)));
+        assert!(reason.starts_with("design_plan_not_approved: "), "{reason}");
+    }
+
     const A_VIOLATION: &str = r#"{"violations":[{"rule":"button-name","impact":"critical","target":"button.menu","help":"Buttons must have discernible text"}]}"#;
 
     #[test]
@@ -591,7 +628,10 @@ mod tests {
             );
             assert_eq!(after(script, "--module-root"), ["/app/node_modules"]);
             assert_eq!(after(script, "--proxy-server"), ["http://127.0.0.1:9"]);
-            assert_eq!(after(script, "--proxy-bypass"), ["localhost"]);
+            assert_eq!(
+                after(script, "--proxy-bypass"),
+                ["localhost,host.docker.internal"]
+            );
             assert_eq!(
                 after(script, "--tags"),
                 ["wcag2a,wcag2aa,wcag21a,wcag21aa,wcag22aa"]

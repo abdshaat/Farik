@@ -25,6 +25,9 @@ pub struct TaskDiff {
     /// Whether the task works in a private folder (6.6), which is not shown: `diff` is then empty,
     /// and `files` names what changed in the folder since the copy taken when it was assigned.
     pub private_folder: bool,
+    /// The task's branch, as Catervas recorded it at the task's start (ADR 0066); `None` for an
+    /// epic and for a task in a private folder.
+    pub branch: Option<String>,
 }
 
 /// The diff of `contract`, whose events are `history`. A task's branch is diffed against the
@@ -70,12 +73,13 @@ pub fn diff_of(
             added: 0,
             removed: 0,
             private_folder: true,
+            branch: None,
         });
     }
     if contract.kind != TaskKind::Epic {
-        return Ok(counted(branch_diff(
-            files, project, team, contract, history,
-        )?));
+        let mut diff = counted(branch_diff(files, project, team, contract, history)?);
+        diff.branch = Some(task_branch(contract));
+        return Ok(diff);
     }
     let mut ordered: Vec<&(TaskContract, Vec<CatervasEvent>)> = children
         .iter()
@@ -203,6 +207,7 @@ fn counted(diff: String) -> TaskDiff {
         added,
         removed,
         private_folder: false,
+        branch: None,
     }
 }
 

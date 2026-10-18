@@ -74,3 +74,29 @@
 	margin: 0;
 	overflow-wrap: anywhere;
 }
+
+.choices {
+	display: grid;
+	gap: var(--catervas-space-4);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.choice {
+	display: grid;
+	justify-items: start;
+	gap: var(--catervas-space-1);
+	min-width: 0;
+}
+
+.choice p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.choice a {
+	max-width: 100%;
+	white-space: normal;
+	margin-inline-start: 0;
+}

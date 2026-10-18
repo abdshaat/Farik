@@ -66,8 +66,10 @@ pub struct FolderDocDecision {
 )]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FolderChange {
-    /// Its number (`docs/folder-<n>`).
+    /// Its number, the name `catervas integrate folder-<n>` takes.
     pub change: u64,
+    /// The branch it was made on: the event's `branch`, else `docs/folder-<change>` (ADR 0066).
+    pub branch: String,
     /// The files it holds.
     pub paths: Vec<String>,
     /// Whether it carries the owner's approval.
@@ -117,12 +119,14 @@ fn settle(docs: &mut FolderDocs, proposals: &[u64], state: ProposalState) {
 fn add_change(
     docs: &mut FolderDocs,
     change: u64,
+    branch: Option<String>,
     paths: Vec<String>,
     by: Result<Vec<u64>, String>,
 ) {
     if docs.changes.iter().all(|known| known.change != change) {
         docs.changes.push(FolderChange {
             change,
+            branch: branch.unwrap_or_else(|| format!("docs/folder-{change}")),
             paths,
             approved: by.is_ok(),
             proposals: by.clone().unwrap_or_default(),
@@ -186,6 +190,7 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
                 add_change(
                     &mut docs,
                     body.change.get(),
+                    body.branch.as_ref().map(|branch| branch.to_string()),
                     vec![body.path.to_string()],
                     Err(body.written_by.clone()),
                 );
@@ -195,6 +200,10 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
                 if change_of(&mut docs, change).is_none() {
                     docs.changes.push(FolderChange {
                         change,
+                        branch: body.branch.as_ref().map_or_else(
+                            || format!("docs/folder-{change}"),
+                            |branch| branch.to_string(),
+                        ),
                         paths: vec![body.path.to_string()],
                         approved: false,
                         proposals: Vec::new(),
@@ -232,7 +241,13 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
                             }
                         }
                     }
-                    add_change(&mut docs, change.get(), paths, Ok(proposals.clone()));
+                    add_change(
+                        &mut docs,
+                        change.get(),
+                        body.branch.as_ref().map(|branch| branch.to_string()),
+                        paths,
+                        Ok(proposals.clone()),
+                    );
                 }
                 settle(&mut docs, &proposals, ProposalState::Approved);
             }
@@ -489,6 +504,7 @@ mod tests {
             docs.changes[0],
             FolderChange {
                 change: 2,
+                branch: "docs/folder-2".to_string(),
                 paths: vec![ROADMAP.to_string()],
                 proposals: Vec::new(),
                 written_by: None,

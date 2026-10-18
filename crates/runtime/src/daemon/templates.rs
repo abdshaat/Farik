@@ -16,7 +16,6 @@ use super::team::{
     Refused, append, errors_wire, internal, off_the_worker, suggested, team_updated, web_of, worked,
 };
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, NOT_FOUND, REFUSED};
-use crate::sprints::sprint_work;
 use crate::templates::{TemplateError, TemplateListing, Templates, builtin, builtins};
 use crate::tools::ToolDeps;
 
@@ -181,13 +180,7 @@ fn answer(
             )),
         }
     }
-    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
-    let open = open.as_ref().map(|open| open.sprint_id.as_str());
-    effects.extend(describe_change(
-        before,
-        &applied.team,
-        &sprint_work(before, open, &board),
-    ));
+    effects.extend(describe_change(before, &applied.team));
     Ok(json!({
         "team": applied.team,
         "kept": applied.kept,
@@ -620,25 +613,6 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn previews_the_work_a_switch_touches() {
-        let (harness, folder) = templated("templates-switch", |wire| {
-            wire["policy"]["plan_in_sprints"] = json!(true);
-        });
-        harness.ready("CTV-1");
-        let mut off = pair();
-        off["policy"]["plan_in_sprints"] = json!(false);
-        saved(&folder, &off);
-        let effects = preview(&harness, "pair")["effects"].clone();
-        assert!(
-            effects.as_array().expect("effects").contains(&json!(
-                "Add a login page, waiting in the Backlog, can start now."
-            )),
-            "{effects}"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn lists_whole_templates() {
         let (harness, folder) = templated("templates-whole", |_| {});
         saved(&folder, &pair());
@@ -674,7 +648,7 @@ mod tests {
         assert_eq!(listed["unreadable"], json!([{ "slug": "broken" }]));
     }
 
-    /// A template that switches "Plan work in sprints" off frees the Backlog at once.
+    /// A template applied wakes the team at once.
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn wakes_the_team_when_a_template_is_applied() {
@@ -1012,7 +986,6 @@ mod tests {
                 "agent_ids": ["pm", "dev-a", "dev-b", "noor"],
                 "updated_by": "human",
                 "template": "Pair",
-                "plan_in_sprints": false,
             })
         );
         assert!(
@@ -1264,6 +1237,7 @@ mod tests {
                 in_reply_to: None,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("posted");

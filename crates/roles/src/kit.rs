@@ -42,7 +42,7 @@ pub enum KitConnector {
         entry: McpServerWire,
         /// What the user reads while connecting.
         copy: SetupCopy,
-        /// The calls per sprint a user may pre-approve, by tool (step 05b).
+        /// The calls per day a user may pre-approve, by tool (step 05b).
         allowances: BTreeMap<String, KitAllowance>,
         /// The tools the owner's approved marketing plan approves (ADR 0042): `external_effect`
         /// tools of Catervas's own connector only. Not part of the entry or its hash.
@@ -83,7 +83,7 @@ pub struct SetupCopy {
 /// What a user may pre-approve for a spending tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KitAllowance {
-    /// The default calls per sprint.
+    /// The default calls per day.
     pub calls: u32,
     /// A plural noun, such as "images".
     pub what: String,
@@ -200,7 +200,6 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "catervafying-the-repository",
         ),
         Role::ScrumMaster => embedded!("scrum_master":
-            "planning-a-sprint",
             "running-ceremonies",
             "writing-escalation-digests",
             "catervafying-the-repository",
@@ -2206,7 +2205,6 @@ mod tests {
             &[
                 "you cannot set one",
                 "The user sets the daily limit in Settings",
-                "when they start the sprint",
             ],
         );
     }
@@ -2292,7 +2290,7 @@ mod tests {
         }
         for (role, count) in [
             (Role::ProductManager, 6),
-            (Role::ScrumMaster, 4),
+            (Role::ScrumMaster, 3),
             (Role::Architect, 7),
             (Role::SoftwareDeveloper, 8),
             (Role::UiUxDesigner, 1),
@@ -2300,6 +2298,42 @@ mod tests {
         ] {
             assert_eq!(load_kit(role).expect("a kit").skills.len(), count, "{role}");
         }
+    }
+
+    #[test]
+    fn catervafying_skills_name_the_new_work() {
+        let text = |role: Role| {
+            let kit = load_kit(role).expect("a shipped kit");
+            let skill = kit
+                .skills
+                .iter()
+                .find(|skill| skill.name == "catervafying-the-repository")
+                .expect("the skill");
+            assert!(skill.description.starts_with("Use when"), "{role}");
+            skill.session_files["SKILL.md"].clone()
+        };
+        let developer = text(Role::SoftwareDeveloper);
+        for needle in ["`catervas_file_bug`", "bug-hunt", "Bugs filed"] {
+            assert!(developer.contains(needle), "the Developer lacks {needle}");
+        }
+        let designer = text(Role::UiUxDesigner);
+        for needle in [
+            "`catervas_file_bug`",
+            "ui-bug-hunt",
+            "Bugs filed",
+            "`catervas_check_page`",
+        ] {
+            assert!(designer.contains(needle), "the Designer lacks {needle}");
+        }
+        let marketing = text(Role::MarketingSpecialist);
+        for needle in [
+            "`catervas_request_connection`",
+            "`catervas_schedule_post`",
+            "docs/catervas/marketing/kickoff",
+        ] {
+            assert!(marketing.contains(needle), "Marketing lacks {needle}");
+        }
+        assert!(!marketing.contains("and only that"));
     }
 
     #[test]
@@ -2344,7 +2378,6 @@ mod tests {
         assert_eq!(
             names,
             [
-                "planning-a-sprint",
                 "running-ceremonies",
                 "writing-escalation-digests",
                 "catervafying-the-repository",

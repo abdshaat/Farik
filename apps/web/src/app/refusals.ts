@@ -14,6 +14,8 @@ const WORDS: Record<string, keyof typeof en> = {
 	name: "refuseName",
 	keeps_read: "refuseKeepsRead",
 	status_from_card: "refuseStatusFromCard",
+	integration_branch_name: "refuseBranchName",
+	integration_branch_missing: "refuseBranchMissing",
 	last_of_role: "refuseLastOfRole",
 	too_short: "requestTooShort",
 	template_exists: "templateExists",
@@ -38,8 +40,8 @@ const WORDS: Record<string, keyof typeof en> = {
 	extra_tries_only_for_tries: "refuseExtraTries",
 	same_status: "refuseSameStatus",
 	agent_retired: "refuseAgentRetired",
-	sprint_open: "refuseSprintOpen",
-	no_sprint_open: "refuseNoSprintOpen",
+	agent_not_active: "refuseAgentNotActive",
+	task_too_short: "refuseTaskTooShort",
 	triage_refused: "refuseTriage",
 	lock_refused: "refuseLock",
 	// The owner's decisions on a marketing plan (SPEC 6.5).
@@ -133,7 +135,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	skill_description_invalid: "skillDescriptionInvalid",
 	skill_name_taken: "skillNameTaken",
 	skill_limit_reached: "skillLimitReached",
-	// The owner's Start of the documenting sprint (SPEC 4.1).
+	// The owner's Start of the documenting work (SPEC 4.1).
 	catervafication_started: "refuseCatervaficationStarted",
 	catervafication_new_project: "refuseCatervaficationNewProject",
 	catervafication_no_product_manager: "refuseCatervaficationNoPm",

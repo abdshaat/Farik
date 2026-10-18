@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use catervas::{CliIo, run_cli};
 use catervas_protocol::clock::FixedClock;
-use catervas_runtime::sprints::{PlannedBy, plan_sprint};
 use catervas_store::git::fixtures::TempRepo;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -1056,123 +1055,6 @@ fn prints_the_channel_counts() {
     );
 }
 
-#[cfg(unix)]
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-#[allow(
-    clippy::too_many_lines,
-    reason = "the whole of what a sprint's metrics print, one line per purpose"
-)]
-fn prints_the_metrics_of_a_sprint() {
-    use serde_json::json;
-
-    let repository = a_project_with_a_task("read-metrics-sprint");
-    let started = run_in(&repository.path, &["sprint", "start"]);
-    assert_eq!(started.code, 0, "{}", started.err);
-    plan_sprint(
-        &project::tool_deps(&repository),
-        &["CTV-1".parse().expect("a task id")],
-        &PlannedBy::Governor,
-    )
-    .expect("CTV-1 is planned into S1");
-
-    let by = |actor: &str| json!({ "actor": actor, "requested_by": actor });
-    project::moved(
-        &repository,
-        "CTV-1",
-        "in_progress",
-        "verifying",
-        &by("assignee"),
-    );
-    project::moved(
-        &repository,
-        "CTV-1",
-        "verifying",
-        "accepted",
-        &by("product_manager"),
-    );
-    project::record_on(
-        &repository,
-        "CTV-1",
-        Some(("dev-a", "s1")),
-        "cost.recorded",
-        &json!({
-            "purpose": "implement",
-            "model_id": "claude-sonnet-4-5",
-            "usage": {
-                "input_tokens": 1000,
-                "output_tokens": 100,
-                "cache_read_tokens": 0,
-                "cache_write_tokens": 0
-            },
-            "cost_usd": 1.0
-        }),
-        at(),
-    );
-
-    let ran = run_in(&repository.path, &["metrics", "--sprint", "S1"]);
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    assert_eq!(
-        ran.out.lines().collect::<Vec<_>>(),
-        [
-            "accepted tasks: 1",
-            "first-pass acceptance: 100.0%",
-            "human interventions per accepted task: 0.00",
-            "cost per accepted task: $1.00",
-            "  triage: $0.00",
-            "  refine: $0.00",
-            "  plan: $0.00",
-            "  explore: $0.00",
-            "  implement: $1.00",
-            "  verify: $0.00",
-            "  ceremony: $0.00",
-            "  conversation: $0.00",
-            "criteria verified by command, test, or artifact: 100.0%",
-            "active weeks: 1",
-            "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0",
-        ]
-    );
-
-    let as_json = run_in(&repository.path, &["metrics", "--sprint", "S1", "--json"]);
-    assert_eq!(as_json.code, 0, "{}", as_json.err);
-    let metrics: Value = serde_json::from_str(as_json.out.trim()).expect("one JSON object");
-    assert_eq!(
-        metrics,
-        json!({
-            "accepted_tasks": 1,
-            "first_pass_acceptance_rate": 1.0,
-            "interventions_per_accepted_task": 0.0,
-            "cost_per_accepted_task_usd": {
-                "total": 1.0,
-                "by_purpose": {
-                    "triage": 0.0,
-                    "refine": 0.0,
-                    "plan": 0.0,
-                    "explore": 0.0,
-                    "implement": 1.0,
-                    "verify": 0.0,
-                    "ceremony": 0.0,
-                    "conversation": 0.0
-                }
-            },
-            "mechanically_verified_criteria_share": 1.0,
-            "active_weeks": 1,
-            "messages": {
-                "reaction": 0,
-                "ambient": 0,
-                "reply": 0,
-                "ceremony": 0,
-                "system": 0,
-                "human": 0
-            }
-        })
-    );
-
-    let unknown = run_in(&repository.path, &["metrics", "--sprint", "S9"]);
-    assert_eq!(unknown.code, 1, "{}{}", unknown.out, unknown.err);
-    assert!(unknown.err.contains("S9"), "{}", unknown.err);
-}
-
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn prints_the_control_characters_an_agent_wrote_escaped() {
@@ -1197,21 +1079,6 @@ fn prints_the_control_characters_an_agent_wrote_escaped() {
         "{:?}",
         shown.out
     );
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn says_there_is_no_sprint_yet() {
-    let repository = TempRepo::new("read-sprint-none");
-    repository.write("Cargo.lock", "version = 4\n");
-    repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
-    repository.commit_at("a project", COMMITTED);
-    run_in(&repository.path, &["init"]);
-
-    let ran = run_in(&repository.path, &["sprint", "show"]);
-
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    assert!(ran.out.contains("no sprint yet"), "{}", ran.out);
 }
 
 #[test]

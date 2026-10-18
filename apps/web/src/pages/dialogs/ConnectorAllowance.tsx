@@ -13,7 +13,7 @@ import styles from "../pages.module.css";
 import type { KitService } from "../Team.tsx";
 
 /**
- * "Change how many": the numbers an agent may make of a kit service's spending tools each sprint
+ * "Change how many": the numbers an agent may make of a kit service's spending tools each day
  * without asking, from the agent's page (ADR 0037). It starts at the numbers the entry holds, says
  * how many were made so far, and refuses a number over 1,000 at its field. When Catervas has changed
  * the service since it was connected, the numbers cannot change until it is connected again.

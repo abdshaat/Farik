@@ -93,7 +93,7 @@ pub(crate) fn carry(
         team_name: team.name.to_string(),
         updated_by: HUMAN.to_string(),
         template: None,
-        plan_in_sprints: Some(team.plans_in_sprints()),
+        plan_in_sprints: None,
     });
     for body in std::iter::once(updated).chain(mailbox) {
         let event = to.event(body, now, None)?;

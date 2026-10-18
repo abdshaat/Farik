@@ -408,6 +408,34 @@ pub fn waiting(
             ..item(row, WaitingKind::Help, agent, line)
         });
     }
+    // A task its agent blocked waits on the owner from the moment it is blocked, with the
+    // agent's own words (ADR 0068); the owner answers it as an escalation is answered.
+    for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
+        let moves = log.read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            kinds: vec![EventKind::TaskTransitioned],
+            ..EventQuery::default()
+        })?;
+        let blocking = last_move_into(&moves, TaskStatus::Blocked);
+        let blocker = blocking.and_then(|event| match &event.body {
+            EventBody::TaskTransitioned(body) => body.blocker.as_ref(),
+            _ => None,
+        });
+        // The agent that blocked it is the one stuck: the reviewer or the planner as well as the
+        // assignee (ADR 0069).
+        let agent = blocking
+            .and_then(|event| event.envelope.ids.agent_id.as_deref())
+            .or(row.assignee_id.as_deref());
+        let line = format!(
+            "{} is stuck: {}",
+            name_of(team, agent.unwrap_or("the team")),
+            blocker.map_or("it did not say why", |blocker| blocker.description.as_str())
+        );
+        waiting.push(Waiting {
+            reason: Some(BLOCKED.to_string()),
+            ..item(row, WaitingKind::Help, agent, line)
+        });
+    }
     for row in board
         .iter()
         .filter(|row| row.status == TaskStatus::Verifying)
@@ -802,6 +830,9 @@ pub fn name_of(team: &Team, id: &str) -> String {
         .map_or_else(|| id.to_string(), |agent| agent.display_name.to_string())
 }
 
+/// The reason a blocked task's row carries: no escalation was raised, its agent blocked it.
+pub const BLOCKED: &str = "blocked";
+
 /// Why a task escalated, as the log words it, in words a person reads.
 #[must_use]
 pub fn reason_in_words(reason: &str) -> &'static str {
@@ -816,6 +847,7 @@ pub fn reason_in_words(reason: &str) -> &'static str {
         "readiness_failures" => "its plan keeps failing its checks",
         "integration" => "its work could not be added to the project",
         "explicit_request" => "it asked for you",
+        BLOCKED => "it is stuck",
         _ => "it did not say why",
     }
 }
@@ -1074,6 +1106,31 @@ mod tests {
         let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
             .expect("the store reads");
         assert_eq!(listed[0].line, "Linus finished it and Grace reviewed it");
+    }
+
+    #[test]
+    fn names_the_agent_that_blocked_the_task() {
+        let board = Board::new("waiting-blocker");
+        let people = (Some("linus"), Some("grace"));
+        board.file("CTV-1", "Reviewed work", |_| {});
+        board.moved(at(9, 1), "CTV-1", ("draft", "verifying"), "linus", people);
+        board.put(
+            at(9, 2),
+            Some("CTV-1"),
+            Some("grace"),
+            "task.transitioned",
+            json!({
+                "from": "verifying", "to": "blocked", "actor": "reviewer",
+                "requested_by": "grace", "gate": "blocker_written",
+                "effects": ["stamp_blocked_at"], "iteration": 0, "assignee": "linus",
+                "reviewer": "grace",
+                "blocker": { "description": "the checks cannot run git", "needed": "git in the checks" }
+            }),
+        );
+        let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
+            .expect("the store reads");
+        assert_eq!(listed[0].line, "Grace is stuck: the checks cannot run git");
+        assert_eq!(listed[0].agent_id.as_deref(), Some("grace"));
     }
 
     #[test]

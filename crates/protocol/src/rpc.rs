@@ -326,4 +326,39 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn refuses_the_sprint_queries() {
+        let q = |name: &str, params: Value| {
+            request(1, "query", &json!({ "name": name, "params": params }))
+        };
+        for refused in [
+            q("sprint.current", json!({})),
+            q("sprints.list", json!({})),
+            q("sprint.get", json!({ "sprint_id": "S1" })),
+            q("backlog.summary", json!({})),
+            q("metrics", json!({ "sprint_id": "S1" })),
+        ] {
+            assert!(rpc_request_from_value(&refused).is_err(), "{refused}");
+        }
+        rpc_request_from_value(&q("metrics", json!({}))).expect("the project's metrics read");
+
+        let row = json!({
+            "task_id": "CTV-1", "kind": "task", "title": "A", "status": "ready", "risk": "low",
+            "triaged": true, "locked": false, "updated_seq": 1, "cost_usd": 0, "iteration": 0,
+            "awaiting_integration": false, "waiting_on_human": false, "awaiting_approval": false,
+            "verifications": 0, "rejections": 0, "interventions": 0,
+        });
+        let costs = json!({
+            "today_usd": 0, "daily_limit_usd": null, "conversations_today_usd": 0,
+            "agents": [{ "agent_id": "dev-a", "today_usd": 0 }],
+        });
+        for (definition, value) in [("taskProjection", row), ("costsSummaryResult", costs)] {
+            let errors: Vec<String> = super::validator_for(definition)
+                .iter_errors(&value)
+                .map(|e| e.to_string())
+                .collect();
+            assert!(errors.is_empty(), "{definition}: {errors:?}");
+        }
+    }
 }
