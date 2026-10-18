@@ -30,7 +30,7 @@ use super::messages::{
     Changes, ReviewBrief, accept_message, design_review_message, review_message,
 };
 use super::requests;
-use super::rules::{Waiting, acted, active, asleep, spent};
+use super::rules::{Waiting, acted, active, spent, unavailable};
 use super::session::{SessionAsk, run_session};
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, repository_refused, session_dir,
@@ -532,7 +532,7 @@ async fn design_review_first(
         return Ok(Some(ran_criteria(row, ran)));
     };
     if spent(deps, team, contract, &mut waiting.day_spent)?
-        | asleep(deps, designer, &mut waiting.slept)?
+        | unavailable(deps, designer, &mut waiting.slept)?
     {
         return Ok(Some(ran_criteria(row, ran)));
     }
@@ -625,7 +625,7 @@ async fn review(
     let deps = &orchestrator.deps;
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, reviewer, &mut waiting.slept)?
+        | unavailable(deps, reviewer, &mut waiting.slept)?
     {
         return Ok(ran_criteria(row, ran));
     }
@@ -812,7 +812,7 @@ async fn accept(
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     if spent(deps, team, &contract, &mut waiting.day_spent)?
-        | asleep(deps, product_manager, &mut waiting.slept)?
+        | unavailable(deps, product_manager, &mut waiting.slept)?
     {
         return Ok(ran_criteria(row, ran));
     }
