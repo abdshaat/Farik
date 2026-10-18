@@ -27,7 +27,7 @@ Checklist (ticked in the commits that do them):
 - [x] Plan 2
 - [x] Plan 3
 - [x] Plan 4
-- [ ] Plan 5
+- [x] Plan 5
 - [ ] Plan 6
 - [ ] Plan 7
 - [ ] Plan 8

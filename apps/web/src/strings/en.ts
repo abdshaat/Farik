@@ -813,6 +813,8 @@ export const en = {
 	filterCancelled: "Show cancelled",
 	laneTabs: "Lanes",
 	laneEmpty: "Nothing here right now.",
+	boardShowAll: "Show all {count}",
+	boardShowFewer: "Show fewer",
 	markAccepted: "Accepted",
 	markWriting: "Writing",
 	markBuilding: "Building",

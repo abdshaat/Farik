@@ -57,7 +57,7 @@ Tests:
 
 - `shows_each_row_with_its_mark` (updated in place) — its assertion that "Gift card page" names its epic becomes: the row's meta line has the text "CTV-<n> · Gift cards" (use the fixture's id for "Gift card page"), with the class `styles.meta`; the review row's `getByText("CTV-9")` becomes `getByText("CTV-9")` on the meta line (it has no parent, so the meta line is the id alone and the existing assertion still holds); the title link of "New checkout page" has the class `styles.title3` and `title` "New checkout page". Everything else in the test is unchanged. Fails first because the epic's name is its own line and there is no meta class.
 
-- [ ] `feat(web): a board card shows its id and epic on one line and its title in three`
+- [x] `feat(web): a board card shows its id and epic on one line and its title in three`
 
 ### Task 2: Done shows what waits and the five most recent
 
@@ -70,7 +70,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `lanes.test.ts`, `reads_the_number_of_a_task_id` — `taskNumber("CTV-31")` is 31, `taskNumber("CTV-9")` is 9, `taskNumber("odd")` is 0. Fails first because the function does not exist.
 - `Board.test.tsx`, `caps_done_and_shows_all` (new) — wide; `tasks.list` answers eight accepted tasks `CTV-1` to `CTV-8` (titles "Done 1" to "Done 8"), and `waiting.list` one `integration` row for `CTV-2`. Asserts the Done region's heading count is 8; the Done list shows six rows, in this order: "Done 2" (waits on the owner, kept although old), "Done 4", "Done 5", "Done 6", "Done 7", "Done 8"; a button "Show all 8" with `aria-expanded="false"`; clicking it shows eight rows in board order and the button "Show fewer"; no axe violations. Then on a phone (`media.set(WIDE, false)`), choosing the "Done 8" tab shows the same six rows and the same button. Fails first because Done shows all eight.
 
-- [ ] `feat(web): the board's Done lane shows what waits on you and the five most recent`
+- [x] `feat(web): the board's Done lane shows what waits on you and the five most recent`
 
 ## Verification
 
