@@ -68,8 +68,11 @@ pub(super) async fn verifying(
     let deps = &orchestrator.deps;
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
+    // Only a refusal of the governor's own parks the task: an agent's refused request is told to
+    // its reviewer's next session instead (ADR 0069).
     if history.iter().any(|event| {
-        event.envelope.seq > since && matches!(event.body, EventBody::TransitionRefused(_))
+        event.envelope.seq > since
+            && matches!(&event.body, EventBody::TransitionRefused(body) if body.requested_by == GOVERNOR)
     }) {
         return Ok(None);
     }
@@ -632,6 +635,16 @@ async fn review(
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
     let context = context(deps, team, &row.task_id)?;
+    let refused: Vec<String> = history
+        .iter()
+        .filter(|event| event.envelope.seq > since)
+        .filter_map(|event| match &event.body {
+            EventBody::TransitionRefused(body) if body.requested_by == reviewer.id.as_str() => {
+                Some(body.details.join("; "))
+            }
+            _ => None,
+        })
+        .collect();
     // A task in a private folder has no branch to diff: its reviewer is told which files changed
     // in the folder, and reads each beside its copy from the start of the task (6.6).
     let (diff, files);
@@ -661,6 +674,7 @@ async fn review(
         completion_note: context.done.completion_note.as_deref(),
         changes,
         unanswered,
+        refused: &refused,
     });
     let end = run_session(
         deps,
@@ -1116,6 +1130,45 @@ mod tests {
             .expect("read")
             .1
             .state
+    }
+
+    /// A `transition.refused` of `verifying -> blocked` on CTV-2 that `by` asked for.
+    fn refused_blocking(harness: &Harness, by: &str) {
+        harness.project.record(
+            "CTV-2",
+            "transition.refused",
+            &json!({
+                "from": "verifying",
+                "to": "blocked",
+                "actor": "assignee",
+                "requested_by": by,
+                "refusal": "no_such_transition",
+                "details": ["no such transition: from verifying to blocked"]
+            }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn reviews_again_after_the_reviewers_request_was_refused() {
+        let harness = a_harness("review-after-refusal", browsing);
+        a_developers_change(&harness, "done.txt");
+        refused_blocking(&harness, "ada");
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 1).await;
+        assert_eq!(who(&started), [("ada", SessionPurpose::Verify)]);
+        let prompt = &started[0].initial_prompt;
+        assert!(
+            prompt.contains("Catervas refused your last request"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("no such transition"), "{prompt}");
+
+        // The governor's own refusal still passes the task over.
+        let harness = a_harness("review-after-governor-refusal", browsing);
+        a_developers_change(&harness, "done.txt");
+        refused_blocking(&harness, "governor");
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 2).await;
+        assert!(started.is_empty(), "{:?}", who(&started));
     }
 
     #[tokio::test]

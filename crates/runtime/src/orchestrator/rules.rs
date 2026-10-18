@@ -4901,7 +4901,9 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn passes_over_a_task_whose_request_was_refused() {
+    async fn asks_again_after_a_requests_refusal() {
+        // An agent's refused request no longer parks the task (ADR 0069): the Product Manager is
+        // asked again, and refused again, because the completion note is still missing.
         let harness = Harness::new("orch-verify-refused", |_| {});
         harness.verifying_with("CTV-1", true, false, |_| {});
         let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1(), accept_ctv_1()]);
@@ -4913,16 +4915,10 @@ mod tests {
             .await
             .expect("the Product Manager's session runs");
         assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
-        let report = orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string(),
-                until: None,
-            }
-        );
-        assert_eq!(adapter.started().len(), 2);
+        assert_eq!(adapter.started().len(), 3);
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 2);
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
     }
 
@@ -4930,7 +4926,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn runs_until_idle_past_a_refused_acceptance() {
         let harness = Harness::new("orch-verify-refused-run", |_| {});
-        harness.verifying_with("CTV-1", true, false, |_| {});
+        // The task's sessions bound the retries (ADR 0069).
+        harness.verifying_with("CTV-1", true, false, |wire| {
+            wire["budget"]["max_sessions"] = json!(3);
+        });
         let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4941,10 +4940,11 @@ mod tests {
             vec![
                 ("dev-b".to_string(), SessionPurpose::Verify),
                 ("pm".to_string(), SessionPurpose::Verify),
+                ("pm".to_string(), SessionPurpose::Verify),
             ]
         );
-        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 2);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
     }
 
     #[tokio::test]

@@ -1150,6 +1150,9 @@ pub(super) struct ReviewBrief<'a> {
     pub(super) changes: Changes<'a>,
     /// The criteria a review note was written without answering, on a second asking.
     pub(super) unanswered: &'a [String],
+    /// What Catervas refused of the reviewer's own requests since the task entered `verifying`,
+    /// oldest first (ADR 0069).
+    pub(super) refused: &'a [String],
 }
 
 /// The reviewer's `verify` session's message: the task's id and title, what is still unanswered
@@ -1160,11 +1163,18 @@ pub(super) struct ReviewBrief<'a> {
 pub(super) fn review_message(brief: &ReviewBrief<'_>) -> String {
     let contract = brief.contract;
     let task = contract.id.as_str();
-    let message = format!(
+    let mut message = format!(
         "Verify {task} as its reviewer. Its title: {}{}",
         untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES),
         still_unanswered(brief.unanswered)
     );
+    if !brief.refused.is_empty() {
+        message = format!(
+            "{message}\n\nCatervas refused your last request: {}\nAsk for a move the first \
+             message allows, or block the task with `catervas_declare_blocked`.",
+            untrusted_block("refused", &brief.refused.join("\n"), NOTE_CAP_BYTES)
+        );
+    }
     let (ran, changes) = match &brief.changes {
         Changes::Diff(diff) => (
             "ran its `command`, `test`, and `artifact` criteria in the task's sandbox",
@@ -1671,6 +1681,7 @@ mod tests {
             completion_note: None,
             changes: Changes::Diff(""),
             unanswered: &[],
+            refused: &[],
         });
         assert!(
             message.contains("The diff from the integration branch to docs/CTV-1: "),
@@ -1754,6 +1765,7 @@ mod tests {
             completion_note: None,
             changes: Changes::Folder(&files),
             unanswered: &[],
+            refused: &[],
         });
 
         // A workbook is read with the sheet tool, a note with `Read`, each beside its copy from
@@ -1785,6 +1797,7 @@ mod tests {
             completion_note: None,
             changes: Changes::Folder(&workbooks),
             unanswered: &[],
+            refused: &[],
         });
         assert!(!message.contains("`Read`"), "{message}");
         assert!(message.contains("`baseline: true`"), "{message}");
@@ -1807,6 +1820,7 @@ mod tests {
             completion_note: None,
             changes: Changes::Folder(&files),
             unanswered: &[],
+            refused: &[],
         });
 
         // The list is the files' words and sits in one untrusted block, which no name can close.
@@ -1848,6 +1862,7 @@ mod tests {
             completion_note: None,
             changes: Changes::Diff(&diff),
             unanswered: &[],
+            refused: &[],
         });
 
         let kept = message.matches('+').count();
