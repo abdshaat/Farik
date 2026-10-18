@@ -30,6 +30,8 @@ type Part = {
 	/** The saved team's own check, which a part shows until it has a draft. */
 	base: Checked | undefined;
 	done: () => void;
+	/** Whether the project is online, so that finished work opens a pull request. */
+	online?: boolean;
 };
 
 /**
@@ -38,10 +40,11 @@ type Part = {
  * each page draws its own parts with `key(name)`, so saving one starts only that one again.
  */
 export function useRuleParts() {
-	const { data, again } = useQuery<{ team: Team; membersPresent?: boolean }>(
-		"team.get",
-		{},
-	);
+	const { data, again } = useQuery<{
+		team: Team;
+		membersPresent?: boolean;
+		online?: boolean;
+	}>("team.get", {});
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
 		"team.validate",
@@ -55,6 +58,7 @@ export function useRuleParts() {
 		saved: data?.team as Team,
 		defaults,
 		base,
+		online: Boolean(data?.online),
 		done: () => {
 			setRounds((r) => ({ ...r, [name]: (r[name] ?? 0) + 1 }));
 			again();
@@ -227,10 +231,10 @@ export function Spend(part: Part) {
 	);
 }
 
-export function Finish() {
+export function Finish({ online }: Pick<Part, "online">) {
 	return (
 		<Part id="rules-finish" title={t("rulesFinish")}>
-			<p>{t("rulesFinishPullRequest")}</p>
+			<p>{t(online ? "finishLead" : "finishLeadLocal")}</p>
 		</Part>
 	);
 }

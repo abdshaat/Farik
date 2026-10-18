@@ -57,7 +57,7 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 			page.getByLabel(/^Yes, the Developer and Architect may/),
 		).toBeChecked();
 		await expect(
-			page.getByLabel(/^No, keep everything on this computer/),
+			page.getByLabel(/^No, keep work in progress on this computer/),
 		).toBeChecked();
 		await screenshots(page, "setup-permissions");
 		await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -68,9 +68,11 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		await page.getByRole("button", { name: "Continue", exact: true }).click();
 
 		await expect(page).toHaveURL(/\/setup\/finish$/);
-		// No choice is left: accepted work always opens a pull request for the owner to merge.
+		// No choice is left, and this project has no origin: finished work waits for a merge by hand.
 		await expect(
-			page.getByText("Accepted work opens a pull request for you to merge."),
+			page.getByText(
+				"Your project isn\u2019t online, so finished work stays on this computer for you to merge yourself.",
+			),
 		).toBeVisible();
 		await page.getByRole("button", { name: "Start the team" }).click();
 		// An existing project is offered a Catervafication; "Later" goes on to Today.
@@ -107,7 +109,9 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 			name: "How finished work is added",
 		});
 		await expect(
-			finish.getByText("Finished work opens a pull request for you to merge."),
+			finish.getByText(
+				"Your project isn\u2019t online, so finished work stays on this computer for you to merge yourself.",
+			),
 		).toBeVisible();
 		await expect(finish.getByRole("radio")).toHaveCount(0);
 		await screenshots(page, "settings");

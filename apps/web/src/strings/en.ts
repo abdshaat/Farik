@@ -274,14 +274,14 @@ export const en = {
 	mayCommandsNoNote: "The team cannot test anything.",
 	mayStillChecks:
 		"Catervas still runs every check itself; the agents cannot run commands.",
-	mayPush: "May the Developer send its work to your online repository?",
+	mayPush: "May the Developer send its work in progress online?",
 	mayPushNoteOne:
-		"Only {name}, the Developer, sends code, and only to its own branches.\nNothing reaches your main branch without you.",
+		"Only {name}, the Developer, sends code, and only to its own branches.\nNothing reaches your main branch without you.\nEither way, Catervas itself opens a pull request for finished work when your project is online.",
 	mayPushNoteMany:
-		"Only the Developers send code, and only to their own branches.\nNothing reaches your main branch without you.",
-	mayPushYes: "Yes, on its own branches",
-	mayPushYesNote: "Useful if you review work on GitHub.",
-	mayPushNo: "No, keep everything on this computer",
+		"Only the Developers send code, and only to their own branches.\nNothing reaches your main branch without you.\nEither way, Catervas itself opens a pull request for finished work when your project is online.",
+	mayPushYes: "Yes, to its own branches",
+	mayPushYesNote: "Useful if you follow work on GitHub as it happens.",
+	mayPushNo: "No, keep work in progress on this computer",
 	mayPushNoNote: "The safer choice.",
 	mayAlready: "What each agent may do already",
 	mayAlreadyShow: "Show what each agent may do",
@@ -307,7 +307,9 @@ export const en = {
 	firstDay:
 		"A first full day for the suggested team of six costs about twenty-five dollars (an estimate) on your own key at today’s prices. A smaller team costs less.",
 	finishTitle: "When a piece of work is done, what happens to it?",
-	finishLead: "Accepted work opens a pull request for you to merge.",
+	finishLead: "Finished work opens a pull request on GitHub for you to merge.",
+	finishLeadLocal:
+		"Your project isn\u2019t online, so finished work stays on this computer for you to merge yourself.",
 	finishSafe:
 		"Rules for the whole team and the checks every piece of work must pass are already set to safe choices.",
 	startTeam: "Start the team",
@@ -385,7 +387,7 @@ export const en = {
 	tierGitLocalNote: "Never your main branch.",
 	tierNetwork: "Use the internet",
 	tierNetworkNote: "Looks things up, reads web pages.",
-	tierGitRemote: "Push to GitHub and open pull requests",
+	tierGitRemote: "Send its own branches to GitHub while it works",
 	tierGitRemoteNote: "Off until you give it.",
 	tierExternal: "Do things outside your computer",
 	tierExternalNote: "Mail, posts, deploys. Only a payment asks you.",
@@ -798,8 +800,6 @@ export const en = {
 	rulesSpend: "Daily spending limit",
 	rulesSpendTitle: "What the team may spend",
 	rulesFinish: "How finished work is added",
-	rulesFinishPullRequest:
-		"Finished work opens a pull request for you to merge.",
 	rulesBranch: "Where finished work goes",
 	rulesBranchHint:
 		"The branch pull requests go into. Leave it empty for the repository’s main branch.",
@@ -1499,18 +1499,18 @@ export const en = {
 		"{name} also holds your answers about what they may do, spending and checking plans. You will see them on the next screens, already chosen.",
 	templateMeta: "{names} · saved {date}",
 	finishLeadSaved:
-		"Accepted work opens a pull request for you to merge. {name}’s other answers are already chosen; change them if this project needs others.",
+		"{name}\u2019s other answers are already chosen; change them if this project needs others.",
 	finishCarried: "What they may do, from {name}",
 	finishCommands: "Run commands on this computer",
-	finishPush: "Send work to your online repository",
+	finishPush: "The Developer sends its work in progress online",
 	finishYes: "Yes.",
 	finishNo: "No.",
 	finishCommandsYes:
 		"The team may run commands, in a sealed box away from your other files.",
 	finishCommandsNo:
 		"Nobody runs commands; Catervas still runs every check itself.",
-	finishPushYes: "The Developer may send work to its own branches online.",
-	finishPushNo: "Everything stays on this computer.",
+	finishPushYes: "It sends its own branches to GitHub while it works.",
+	finishPushNo: "It keeps its work in progress on this computer.",
 	finishCarriedBefore:
 		"You answered these when you saved the team, so Catervas does not ask again. Change them any time in ",
 	finishCarriedAfter: ".",
