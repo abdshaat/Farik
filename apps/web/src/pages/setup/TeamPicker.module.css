@@ -105,6 +105,11 @@
 	background: var(--catervas-color-page);
 }
 
+.faces[data-size="large"] img {
+	width: 48px;
+	height: 48px;
+}
+
 /* On a small card the faces overlap a little, so four fit on one line. */
 .faces:not([data-size]) {
 	gap: 0;
@@ -112,11 +117,6 @@
 
 .faces:not([data-size]) img + img {
 	margin-inline-start: -6px;
-}
-
-.faces[data-size="large"] img {
-	width: 48px;
-	height: 48px;
 }
 
 .plus {
@@ -238,14 +238,14 @@
 	image-rendering: pixelated;
 }
 
-.row[data-off] .rowFace,
-.row[data-off] .rowWho {
-	opacity: 0.55;
-}
-
 .rowWho {
 	display: grid;
 	min-width: 0;
+}
+
+.row[data-off] .rowFace,
+.row[data-off] .rowWho {
+	opacity: 0.55;
 }
 
 .rowName {
