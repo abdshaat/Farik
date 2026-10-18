@@ -148,7 +148,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   `"MERGEABLE"` gives `Open { Mergeable }`, `"UNKNOWN"` and a missing field give `Open { Unknown }`;
   the call's arguments end with `--json state,mergeCommit,mergeable`. Fails first on the arguments.
 
-- [ ] `feat(runtime): read whether a pull request still merges`
+- [x] `feat(runtime): read whether a pull request still merges`
 
 ### Task 13: the store merges into a kept branch and keeps the conflicts
 

@@ -632,7 +632,7 @@ fn through_the_forge(
         }
     };
     match state {
-        PullRequestState::Open => Ok(Some(IntegrationOutcome::AwaitingForge)),
+        PullRequestState::Open { .. } => Ok(Some(IntegrationOutcome::AwaitingForge)),
         PullRequestState::Merged { sha } => {
             record_integrated(
                 tools,
