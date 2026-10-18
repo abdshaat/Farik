@@ -129,8 +129,9 @@ pub(super) async fn draft(
 
 /// Rule 9: a contract `refining`. A contract written since refining began and not judged since,
 /// or one filed whole (a breakdown's child, or a contract the human holds) and not judged since
-/// refining began, is judged by the governor's rules alone: `escalated` asked as the governor
-/// first, whose rows open on three readiness failures, then `ready`. No agent judges a contract
+/// refining began, is judged by the governor's rules alone: `ready` asked as the governor first,
+/// then `escalated` when that is refused, whose rows open on the third readiness failure. No agent
+/// judges a contract
 /// (ADR 0061). Otherwise the Product Manager gets a refine session.
 pub(super) async fn refining(
     deps: &OrchestratorDeps,
@@ -235,8 +236,9 @@ pub(super) fn given_agent<'a>(
     })
 }
 
-/// Asks the governor to judge a contract: `escalated` first, because asking for `ready` on a
-/// passing epic fails on its missing approval and would count as a readiness failure, then `ready`.
+/// Asks the governor to judge a contract: `ready` first, so that a passing contract records no
+/// refusal, and `escalated` only when `ready` is refused, whose rows open on the third failure of
+/// the Definition of Ready, counting the one just evaluated.
 fn judge(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -254,13 +256,13 @@ fn judge(
             team,
         )
     };
-    let what = match ask(TaskStatus::Escalated)? {
-        TransitionOutcome::Moved(_) => "escalated its contract to the human".to_string(),
-        TransitionOutcome::Refused(_) => match ask(TaskStatus::Ready)? {
-            TransitionOutcome::Moved(_) => "judged its contract ready".to_string(),
-            TransitionOutcome::Refused(refusal) => format!(
+    let what = match ask(TaskStatus::Ready)? {
+        TransitionOutcome::Moved(_) => "judged its contract ready".to_string(),
+        TransitionOutcome::Refused(not_ready) => match ask(TaskStatus::Escalated)? {
+            TransitionOutcome::Moved(_) => "escalated its contract to the human".to_string(),
+            TransitionOutcome::Refused(_) => format!(
                 "judged its contract, which is not ready: {}",
-                refusal_details(&refusal).join("; ")
+                refusal_details(&not_ready).join("; ")
             ),
         },
     };
@@ -1748,8 +1750,9 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert!(adapter.started().is_empty());
-        let refused = last(&harness, EventKind::TransitionRefused).expect("the refusal");
-        let EventBody::TransitionRefused(body) = &refused.body else {
+        // The refusal of `ready` is first, and the escalation's follows it (ADR 0069).
+        let refused = harness.events(&[EventKind::TransitionRefused]);
+        let EventBody::TransitionRefused(body) = &refused[0].body else {
             panic!("a refusal");
         };
         assert!(
@@ -1986,6 +1989,27 @@ mod tests {
             )
         );
         assert!(!harness.row("CTV-1").awaiting_approval);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_a_passing_contract_without_a_refusal() {
+        let harness = Harness::new("req-judge-ready-first", |_| {});
+        let adapter = harness.recorded(vec![refine_writes_task_ctv_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the task is written");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            moves_of(&harness, "CTV-1").last().map(String::as_str),
+            Some("refining -> ready")
+        );
+        assert!(
+            harness.events(&[EventKind::TransitionRefused]).is_empty(),
+            "a passing contract records no refusal"
+        );
     }
 
     #[tokio::test]
