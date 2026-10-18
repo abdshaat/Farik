@@ -333,6 +333,10 @@ pub enum Waited {
 /// notify `commands` and would otherwise sit until the sleeping agent wakes.
 const RECHECK: chrono::Duration = chrono::Duration::seconds(60);
 
+/// The longest a wait lasts while a finished task waits for its merge: the forge is read once a
+/// tick (rule 2), and the owner merging on GitHub or by hand should not wait a minute to be seen.
+const MERGE_RECHECK: chrono::Duration = chrono::Duration::seconds(15);
+
 /// Which of the rules a tick runs (`docs/SPEC.md` 8.2): every one, the planning ones, or the
 /// refining ones.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -680,7 +684,8 @@ impl Orchestrator {
             return None;
         }
         let now = self.deps.tools.clock.now();
-        let capped = until.map_or(now + RECHECK, |until| until.min(now + RECHECK));
+        let limit = now + self.recheck();
+        let capped = until.map_or(limit, |until| until.min(limit));
         tokio::select! {
             Some(started) = ticks.started.recv() => Some(Ok(started.into_progress())),
             joined = ticks.set.join_next() => match ended(joined) {
@@ -691,6 +696,15 @@ impl Orchestrator {
             () = stopped => None,
             () = self.commands.notified() => None,
             () = self.deps.daemon.wakes().notified() => None,
+        }
+    }
+
+    /// How long a wait may last: `MERGE_RECHECK` while any task awaits its integration, else
+    /// `RECHECK`. A store error reads as `RECHECK`.
+    fn recheck(&self) -> chrono::Duration {
+        match self.deps.tools.projections.board() {
+            Ok(board) if board.iter().any(|row| row.awaiting_integration) => MERGE_RECHECK,
+            _ => RECHECK,
         }
     }
 
@@ -741,7 +755,7 @@ impl Orchestrator {
         if self.is_stopped() {
             return Waited::Stopped;
         }
-        let capped = until.min(self.deps.tools.clock.now() + RECHECK);
+        let capped = until.min(self.deps.tools.clock.now() + self.recheck());
         tokio::select! {
             () = self.deps.sleeper.sleep_until(capped) => Waited::Reached,
             () = stopped => Waited::Stopped,
@@ -1260,6 +1274,23 @@ mod tests {
             orchestrator.deps.tools.clock.now(),
             at() + chrono::Duration::seconds(60),
             "a wait an hour away is capped at a minute, not run to the end"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn caps_a_wait_at_fifteen_seconds_while_a_merge_waits() {
+        let harness = Harness::new("orch-wait-merge-cap", |_| {});
+        harness.accepted("CTV-1");
+        let orchestrator = harness.orchestrator_at(harness.recorded(Vec::new()), at());
+
+        let ended = waited(&orchestrator, at() + chrono::Duration::hours(1)).await;
+
+        assert_eq!(ended, super::Waited::Reached);
+        assert_eq!(
+            orchestrator.deps.tools.clock.now(),
+            at() + chrono::Duration::seconds(15),
+            "a merge waiting on the owner is looked for every fifteen seconds"
         );
     }
 
