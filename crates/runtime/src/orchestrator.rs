@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -485,11 +485,27 @@ pub struct RecoveryReport {
     pub tasks_resumed: u32,
 }
 
+/// A task's held sandbox, and whether it was made for Catervas's checks, which see the git store
+/// (ADR 0069): an agent's session is never given one of those.
+struct Held {
+    sandbox: Arc<dyn Sandbox>,
+    for_checks: bool,
+}
+
+/// Whom a held sandbox is for.
+#[derive(Clone, Copy)]
+enum SandboxFor<'a> {
+    /// An agent's session: it never sees the git store.
+    Agent,
+    /// Catervas's checks, which see this store read-only when there is one.
+    Checks(Option<&'a Path>),
+}
+
 /// Catervas running a project's team.
 pub struct Orchestrator {
     deps: OrchestratorDeps,
     /// Each task's sandbox, made the first time a session of the task needs one in this process.
-    sandboxes: Mutex<BTreeMap<TaskId, Arc<dyn Sandbox>>>,
+    sandboxes: Mutex<BTreeMap<TaskId, Held>>,
     /// Read before each tick `next` starts.
     stopped: AtomicBool,
     /// Notified by `stop`, so that a wait for a sleeping agent ends at once.
@@ -807,18 +823,48 @@ impl Orchestrator {
     }
 
     /// The task's sandbox: the one made for it earlier in this process, or a new one rooted at
-    /// its worktree, with the network on when its assignee holds `network`.
+    /// its worktree, with the network on when its assignee holds `network`. It never sees the git
+    /// store: a sandbox made for the checks is dropped for it.
     fn sandbox_for(
         &self,
         task_id: &TaskId,
         team: &Team,
     ) -> Result<Arc<dyn Sandbox>, OrchestratorError> {
+        self.held_sandbox(task_id, team, SandboxFor::Agent)
+    }
+
+    /// The task's sandbox for Catervas's own checks (ADR 0069): like `sandbox_for`, and, given
+    /// `git_store`, it also sees that store read-only. Reused only by the checks; the next
+    /// `sandbox_for` drops it and makes the agent's own.
+    fn sandbox_for_checks(
+        &self,
+        task_id: &TaskId,
+        team: &Team,
+        git_store: Option<&Path>,
+    ) -> Result<Arc<dyn Sandbox>, OrchestratorError> {
+        self.held_sandbox(task_id, team, SandboxFor::Checks(git_store))
+    }
+
+    /// `sandbox_for` and `sandbox_for_checks`: the held sandbox when it is of the kind asked for
+    /// (`whom`, with the store to mount for the checks'), else a
+    /// new one that replaces it. A container sandbox's `create` removes a container of the task's
+    /// name first, which is what ends the one replaced.
+    fn held_sandbox(
+        &self,
+        task_id: &TaskId,
+        team: &Team,
+        whom: SandboxFor<'_>,
+    ) -> Result<Arc<dyn Sandbox>, OrchestratorError> {
+        let for_checks = matches!(whom, SandboxFor::Checks(_));
         let mut sandboxes = self
             .sandboxes
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if let Some(sandbox) = sandboxes.get(task_id) {
-            return Ok(Arc::clone(sandbox));
+        if let Some(held) = sandboxes.get(task_id) {
+            if held.for_checks == for_checks {
+                return Ok(Arc::clone(&held.sandbox));
+            }
+            sandboxes.remove(task_id);
         }
         let assignee = self
             .deps
@@ -846,14 +892,25 @@ impl Orchestrator {
                 .filter(|root| Some(&root.path) != project.as_ref())
                 .map(|root| (root.name, root.path))
                 .collect();
-        let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
-            &self.deps.tools.ids.project_id,
-            task_id,
-            &folder,
-            network,
-            &reads,
-        )?);
-        sandboxes.insert(task_id.clone(), Arc::clone(&sandbox));
+        let project_id = &self.deps.tools.ids.project_id;
+        let made = match whom {
+            SandboxFor::Checks(Some(store)) => self
+                .deps
+                .sandboxes
+                .create_checking(project_id, task_id, &folder, network, &reads, store)?,
+            SandboxFor::Checks(None) | SandboxFor::Agent => self
+                .deps
+                .sandboxes
+                .create(project_id, task_id, &folder, network, &reads)?,
+        };
+        let sandbox: Arc<dyn Sandbox> = Arc::from(made);
+        sandboxes.insert(
+            task_id.clone(),
+            Held {
+                sandbox: Arc::clone(&sandbox),
+                for_checks,
+            },
+        );
         Ok(sandbox)
     }
 
@@ -1636,6 +1693,42 @@ mod tests {
                 ("infra".to_string(), path(1))
             ]]
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_agent_session_never_reuses_the_checks_sandbox() {
+        use std::sync::Arc;
+
+        use crate::orchestrator::fixtures::CountingSandboxFactory;
+
+        let harness = Harness::new("sandbox-checks", |_| {});
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator =
+            harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
+        let team = orchestrator.deps.tools.files.read_team().expect("the team");
+        let task: TaskId = "CTV-1".parse().expect("a task id");
+        let store = std::path::Path::new("/tmp/catervas-the-store/.git");
+
+        let checking = orchestrator
+            .sandbox_for_checks(&task, &team, Some(store))
+            .expect("the checks' sandbox is made");
+        let again = orchestrator
+            .sandbox_for_checks(&task, &team, Some(store))
+            .expect("the checks' sandbox is reused");
+        assert!(Arc::ptr_eq(&checking, &again));
+        assert_eq!(sandboxes.stores("CTV-1"), [store.to_path_buf()]);
+
+        let agent = orchestrator
+            .sandbox_for(&task, &team)
+            .expect("the agent's sandbox is made");
+        assert!(!Arc::ptr_eq(&checking, &agent), "an agent never gets it");
+        let again = orchestrator
+            .sandbox_for(&task, &team)
+            .expect("the agent's sandbox is reused");
+        assert!(Arc::ptr_eq(&agent, &again));
+        assert_eq!(sandboxes.created("CTV-1"), 2);
     }
 
     #[test]

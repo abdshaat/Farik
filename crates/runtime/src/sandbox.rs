@@ -97,6 +97,26 @@ pub trait SandboxFactory: Send + Sync {
         reads: &[(String, PathBuf)],
     ) -> Result<Box<dyn Sandbox>, SandboxError>;
 
+    /// A sandbox for Catervas's own checks of `task_id`, which also sees `git_store` read-only at
+    /// its own path so that the worktree's `.git` file resolves and a check can run git (ADR 0069).
+    /// A host sandbox has git already, and the default makes a plain sandbox.
+    ///
+    /// # Errors
+    ///
+    /// As `create`.
+    fn create_checking(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+        reads: &[(String, PathBuf)],
+        git_store: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        let _ = git_store;
+        self.create(project_id, task_id, worktree, network, reads)
+    }
+
     /// A second sandbox for `task_id` of `project_id`, rooted at `worktree` (the task's base
     /// branch, checked out on its own) with the network off, for running the task's new tests
     /// against the code they are meant to fail on (5.4). It must not collide with the task's own

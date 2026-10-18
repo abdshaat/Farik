@@ -337,65 +337,79 @@ async fn run_what_catervas_runs(
         &repository.integration_branch,
         &contract.id,
     );
-    for criterion in &pending {
-        let mut alone = contract.clone();
-        alone.exit_criteria = vec![(*criterion).clone()];
-        let sandbox = orchestrator.sandbox_for(&contract.id, team)?;
-        let factory = Arc::clone(&deps.sandboxes);
-        let root = repository.git.root().to_path_buf();
-        let project = deps.tools.git.root().to_path_buf();
-        let project_id = deps.tools.ids.project_id.clone();
-        let base = base.clone();
-        let outcomes = tokio::task::spawn_blocking(move || {
-            let git = Git::open(root);
-            let base_worktree = project
-                .join(".catervas/local/worktrees")
-                .join(format!("{}-base", alone.id.as_str()));
-            let head = task_branch(&alone);
-            let input = NewTestsInput {
-                git: &git,
-                base_worktree: &base_worktree,
-                base: &base,
-                head: &head,
-                sandboxes: factory.as_ref(),
-                project_id: &project_id,
-                task_id: &alone.id,
+    // The checks' container sees the repository's git store read-only, unless its settings hold a
+    // password (ADR 0069).
+    let git_store = if repository.git.config_holds_a_secret()? {
+        None
+    } else {
+        Some(repository.git.common_dir(&worktree(deps, &contract.id))?)
+    };
+    // The checks' container is dropped after them on every path out, an error included, so that
+    // no session of an agent is ever given it.
+    let ran = async {
+        for criterion in &pending {
+            let mut alone = contract.clone();
+            alone.exit_criteria = vec![(*criterion).clone()];
+            let sandbox =
+                orchestrator.sandbox_for_checks(&contract.id, team, git_store.as_deref())?;
+            let factory = Arc::clone(&deps.sandboxes);
+            let root = repository.git.root().to_path_buf();
+            let project = deps.tools.git.root().to_path_buf();
+            let project_id = deps.tools.ids.project_id.clone();
+            let base = base.clone();
+            let outcomes = tokio::task::spawn_blocking(move || {
+                let git = Git::open(root);
+                let base_worktree = project
+                    .join(".catervas/local/worktrees")
+                    .join(format!("{}-base", alone.id.as_str()));
+                let head = task_branch(&alone);
+                let input = NewTestsInput {
+                    git: &git,
+                    base_worktree: &base_worktree,
+                    base: &base,
+                    head: &head,
+                    sandboxes: factory.as_ref(),
+                    project_id: &project_id,
+                    task_id: &alone.id,
+                };
+                run_criteria(&alone, sandbox.as_ref(), RunBy::Reviewer, Some(&input))
+            })
+            .await
+            .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()));
+            let results = match outcomes {
+                Ok(outcomes) => outcomes
+                    .into_iter()
+                    .filter_map(|outcome| match outcome {
+                        CriterionOutcome::Result(result) => Some(result),
+                        CriterionOutcome::NeedsReview { .. }
+                        | CriterionOutcome::NeedsHuman { .. } => None,
+                    })
+                    .collect(),
+                Err(error) if fails_the_criterion(&error) => {
+                    orchestrator.forget_sandbox(&contract.id);
+                    vec![CriterionResult {
+                        criterion_id: criterion.id.to_string(),
+                        passed: false,
+                        evidence: error.to_string(),
+                        run_by: RunBy::Reviewer,
+                    }]
+                }
+                Err(error) => {
+                    return Ok(CatervasRan::Unrunnable(format!(
+                        "Catervas could not run {} for the reviewer: {error}",
+                        criterion.id.as_str()
+                    )));
+                }
             };
-            run_criteria(&alone, sandbox.as_ref(), RunBy::Reviewer, Some(&input))
-        })
-        .await
-        .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()));
-        let results = match outcomes {
-            Ok(outcomes) => outcomes
-                .into_iter()
-                .filter_map(|outcome| match outcome {
-                    CriterionOutcome::Result(result) => Some(result),
-                    CriterionOutcome::NeedsReview { .. } | CriterionOutcome::NeedsHuman { .. } => {
-                        None
-                    }
-                })
-                .collect(),
-            Err(error) if fails_the_criterion(&error) => {
-                orchestrator.forget_sandbox(&contract.id);
-                vec![CriterionResult {
-                    criterion_id: criterion.id.to_string(),
-                    passed: false,
-                    evidence: error.to_string(),
-                    run_by: RunBy::Reviewer,
-                }]
+            for result in results {
+                record_run(deps, contract, result)?;
             }
-            Err(error) => {
-                return Ok(CatervasRan::Unrunnable(format!(
-                    "Catervas could not run {} for the reviewer: {error}",
-                    criterion.id.as_str()
-                )));
-            }
-        };
-        for result in results {
-            record_run(deps, contract, result)?;
         }
+        Ok::<_, OrchestratorError>(CatervasRan::Criteria(pending.len()))
     }
-    Ok(CatervasRan::Criteria(pending.len()))
+    .await;
+    orchestrator.forget_sandbox(&contract.id);
+    ran
 }
 
 /// Records `result` as the reviewer's run, which Catervas made.
