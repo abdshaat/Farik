@@ -335,6 +335,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "path": "/home/me/Code/shop-api"
         }),
         EventKind::DocumentRewriteStarted => json!({ "tasks": ["CTV-1", "CTV-2"] }),
+        EventKind::WorktreeTidied => json!({ "put_back": ["tsconfig.json"], "removed": [] }),
         EventKind::TaskReassigned => {
             json!({ "from": "dev-a", "to": "dev-b", "reason": "resumed" })
         }

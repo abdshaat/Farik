@@ -68,7 +68,17 @@ export function HelpNeeded() {
 	const name = builder?.displayName ?? t("you");
 	const reviewer =
 		contract.reviewerRole && active(agents, contract.reviewerRole);
-	const raised = events.findLast((e) => e.kind === "escalation.raised");
+	// A task its agent blocked waits on the owner with the agent's words (ADR 0068).
+	const blocked =
+		contract.status === "blocked"
+			? events.findLast(
+					(e) => e.kind === "task.transitioned" && e.body.to === "blocked",
+				)
+			: undefined;
+	const raised = blocked
+		? undefined
+		: events.findLast((e) => e.kind === "escalation.raised");
+	const waitingSince = blocked ?? raised;
 	const catervass =
 		!raised?.agentId || CATERVASS.includes(raised.body.reason ?? "");
 	// What was tried since the human last answered an escalation of this task.
@@ -111,6 +121,21 @@ export function HelpNeeded() {
 				</h1>
 				<p className={styles.muted}>{id}</p>
 			</div>
+			{blocked && (
+				<section className={own.letter} aria-labelledby="explains">
+					<p id="explains" className={styles.muted}>
+						{builder
+							? signed("helpExplains", builder)
+							: t("helpCatervasExplains")}
+					</p>
+					<p>{blocked.body.blocker?.description ?? t("helpBlockedNoWords")}</p>
+					{blocked.body.blocker?.needed && (
+						<p>
+							{t("helpBlockedNeeds", { needed: blocked.body.blocker.needed })}
+						</p>
+					)}
+				</section>
+			)}
 			{raised && (
 				<section className={own.letter} aria-labelledby="explains">
 					<p id="explains" className={styles.muted}>
@@ -184,7 +209,9 @@ export function HelpNeeded() {
 				<dl className={own.facts}>
 					<dt>{t("helpWaiting")}</dt>
 					<dd>
-						{raised ? `${raised.recordedAt.slice(11, 16)} UTC` : t("notYet")}
+						{waitingSince
+							? `${waitingSince.recordedAt.slice(11, 16)} UTC`
+							: t("notYet")}
 					</dd>
 					<dt>{t("gateTries")}</dt>
 					<dd>

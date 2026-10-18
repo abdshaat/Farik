@@ -9,7 +9,7 @@ use catervas_core::team::Team;
 use catervas_protocol::event::{EventBody, EventKind};
 use catervas_store::activity::status_in_words;
 use catervas_store::files::ProjectFiles;
-use catervas_store::waiting::name_of;
+use catervas_store::waiting::{BLOCKED, name_of};
 use catervas_store::{EventLog, EventQuery, Projections, StoreError};
 use serde_json::{Value, json};
 
@@ -251,6 +251,14 @@ pub fn escalation_choices(offer: &Offer<'_>) -> Vec<Choice> {
             change(offer),
             cancel(offer),
         ],
+        BLOCKED => vec![
+            choice(
+                "Answer and carry on",
+                format!("{who} reads your answer and carries on with {id}."),
+                resolve(TaskStatus::InProgress, None, false),
+            ),
+            cancel(offer),
+        ],
         "permission" | "explicit_request" => {
             let mut offered: Vec<Choice> = carry_on(offer, "is told what you wrote")
                 .into_iter()
@@ -305,11 +313,17 @@ pub fn offer_for(
     team: &Team,
     task_id: &TaskId,
 ) -> Result<Option<Vec<Choice>>, StoreError> {
-    let Some(open) = open_escalations(log, projections)?
+    // A task its agent blocked is answered as an escalation is (ADR 0068).
+    let blocked = projections
+        .task(task_id)?
+        .is_some_and(|row| row.status == TaskStatus::Blocked);
+    let reason = match open_escalations(log, projections)?
         .into_iter()
         .find(|open| &open.task_id == task_id)
-    else {
-        return Ok(None);
+    {
+        Some(open) => open.reason,
+        None if blocked => BLOCKED.to_string(),
+        None => return Ok(None),
     };
     let history = log.read(&EventQuery {
         task_id: Some(task_id.clone()),
@@ -339,7 +353,7 @@ pub fn offer_for(
         })?;
     Ok(Some(escalation_choices(&Offer {
         task_id: task_id.as_str(),
-        reason: &open.reason,
+        reason: &reason,
         before,
         who: &who,
         product_manager: &product_manager,

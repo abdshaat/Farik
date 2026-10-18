@@ -376,6 +376,63 @@ describe("task detail", () => {
 		expect(told).toEqual([en.toldConnectionRequested]);
 	});
 
+	it("names_the_files_catervas_put_back_in_a_tasks_history", async () => {
+		await opened(CONTRACT, [], {
+			"task.history": {
+				events: [
+					event(
+						22,
+						"worktree.tidied",
+						{ put_back: ["tsconfig.json"], removed: ["build-info.txt"] },
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		const told = within(screen.getByRole("tabpanel"))
+			.getAllByRole("listitem")
+			.map((line) => line.querySelector("span")?.textContent);
+		expect(told).toEqual([
+			"Catervas put back files a tool changed outside this task: tsconfig.json, build-info.txt.",
+		]);
+	});
+
+	it("shows_why_a_blocked_task_is_stuck_and_how_to_answer", async () => {
+		await opened({ ...CONTRACT, status: "blocked" }, [], {
+			"task.history": {
+				events: [
+					event(
+						23,
+						"task.transitioned",
+						{
+							from: "in_progress",
+							to: "blocked",
+							requested_by: "theo",
+							blocker: {
+								description: "next build rewrote tsconfig.json",
+								needed: "the file put back",
+							},
+						},
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		const stuck = await screen.findByRole("region", {
+			name: en.taskBlockedTitle,
+		});
+		expect(
+			within(stuck).getByText("next build rewrote tsconfig.json"),
+		).toBeTruthy();
+		expect(
+			within(stuck)
+				.getByRole("link", { name: en.taskBlockedAnswer })
+				.getAttribute("href"),
+		).toBe("/tasks/CTV-1/help");
+	});
+
 	it("shows_the_designers_plan_and_who_approved_it", async () => {
 		// The plan was written the day the page is read, so the page says "today".
 		vi.useFakeTimers({ toFake: ["Date"] });

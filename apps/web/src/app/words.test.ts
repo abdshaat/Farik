@@ -37,7 +37,7 @@ describe("refusal sentences", () => {
 				en.refuseNotWaiting,
 			"not_awaiting_approval: CTV-1 is ready and no approval is asked of the human":
 				en.refuseNotWaiting,
-			"not_escalated: CTV-1 is ready, and only an escalation is resolved":
+			"not_escalated: CTV-1 is ready, and only an escalation or a blocked task is resolved":
 				en.refuseNotWaiting,
 			"review_first: the reviewer has not finished; send back once the review is in":
 				en.refuseReviewFirst,
