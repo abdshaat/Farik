@@ -186,7 +186,7 @@ Tests:
   and "Reviewed by" with the review note's first sentence and none of its second, holds neither the
   completion note nor the intent, and is at most 1500 characters. Fails first on `## Intent`.
 
-- [ ] `fix(runtime): a pull request says what changed and how it was verified, briefly`
+- [x] `fix(runtime): a pull request says what changed and how it was verified, briefly`
 
 ## Verification
 

@@ -962,44 +962,86 @@ fn merged_by_hand(
     }
 }
 
-/// The pull request's body: a task's contract intent, then the last completion and review notes; a
-/// folder change's paths, one per line, then a line for the owner's approval.
+/// The pull request's body (ADR 0069), short and composed by Catervas: for a task, its summary and
+/// its criteria's texts, and the first sentence of the last review an agent wrote; for a folder
+/// change, its documents and how they were checked.
 fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, OrchestratorError> {
+    let team = tools.files.read_team().ok();
+    let display_name = |id: &str| {
+        team.as_ref()
+            .and_then(|team| team.agents.iter().find(|agent| agent.id.as_str() == id))
+            .map_or_else(|| id.to_string(), |agent| agent.display_name.to_string())
+    };
     let task_id = match subject {
         Subject::Task(task_id) => task_id,
         Subject::FolderChange(change) => {
             let held = folder_change(tools, *change)?;
-            let mut body = held.paths.join("\n");
-            body.push('\n');
-            if held.approved {
-                body.push_str("\nApproved by the owner on Today.\n");
-            }
-            return Ok(body);
+            let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
+            let documents: Vec<String> = plain_names(&paths)
+                .split(" and ")
+                .map(ToString::to_string)
+                .collect();
+            let how = if held.approved {
+                "Approved by the owner on Today.".to_string()
+            } else if held.edited {
+                "Saved by the owner on the Files page.".to_string()
+            } else {
+                let author = held
+                    .written_by
+                    .as_deref()
+                    .map_or_else(|| "the team".to_string(), display_name);
+                format!(
+                    "Written by {author} at the delivery's review; the team's documents are not \
+                     reviewed (ADR 0061)."
+                )
+            };
+            return Ok(catervas_core::forge_text::pull_request_body(
+                &documents
+                    .iter()
+                    .map(|name| format!("- {name}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                &[how],
+                None,
+            ));
         }
     };
     let contract = tools.files.read_contract(task_id)?;
-    let intent = without_task_ids(contract.intent.as_str(), &title_of(tools));
-    let notes = tools.log.read(&EventQuery {
-        task_id: Some(task_id.clone()),
-        kinds: vec![EventKind::NoteWritten],
-        ..EventQuery::default()
-    })?;
-    let last_note = |kind: NoteWrittenBodyKind| {
-        notes
-            .iter()
-            .rev()
-            .find_map(|event| match &event.body {
-                EventBody::NoteWritten(body) if body.kind == kind => {
-                    Some(without_task_ids(&body.text, &title_of(tools)))
-                }
-                _ => None,
-            })
-            .unwrap_or_else(|| "(none was written)".to_string())
-    };
-    Ok(format!(
-        "## Intent\n\n{intent}\n\n## Completion note\n\n{}\n\n## Review note\n\n{}\n",
-        last_note(NoteWrittenBodyKind::Completion),
-        last_note(NoteWrittenBodyKind::Review)
+    let plain = |text: &str| without_task_ids(text, &title_of(tools));
+    let changed = plain(
+        contract
+            .summary
+            .as_ref()
+            .map_or(contract.title.as_str(), |summary| summary.as_str()),
+    );
+    let checks: Vec<String> = contract
+        .exit_criteria
+        .iter()
+        .map(|criterion| plain(criterion.text.as_str()))
+        .collect();
+    let review = tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![EventKind::NoteWritten],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.body {
+            EventBody::NoteWritten(body)
+                if body.kind == NoteWrittenBodyKind::Review && body.written_by != "catervas" =>
+            {
+                Some((display_name(&body.written_by), plain(&body.text)))
+            }
+            _ => None,
+        });
+    Ok(catervas_core::forge_text::pull_request_body(
+        &changed,
+        &checks,
+        review
+            .as_ref()
+            .map(|(name, note)| (name.as_str(), note.as_str())),
     ))
 }
 
@@ -1928,7 +1970,7 @@ mod tests {
         harness.project.record(
             "CTV-1",
             "note.written",
-            &json!({ "kind": "review", "text": "C1 still passes, on a second look.", "written_by": "dev-b" }),
+            &json!({ "kind": "review", "text": "C1 still passes, on a second look. The second sentence stays out.", "written_by": "dev-b" }),
         );
         harness.gh.answers("list", "[]", "", 0);
         harness
@@ -1954,23 +1996,29 @@ mod tests {
             .files
             .read_contract(&task("CTV-1"))
             .expect("the contract reads");
-        let places: Vec<usize> = [
-            "## Intent",
-            contract.intent.as_str(),
-            "## Completion note",
-            "Added done.txt; nothing left out.",
-            "## Review note",
-            "C1 still passes, on a second look.",
-        ]
-        .iter()
-        .map(|text| {
-            body.find(text)
-                .unwrap_or_else(|| panic!("{text:?} in {body}"))
-        })
-        .collect();
-        assert!(places.is_sorted(), "{body}");
-        assert!(!body.contains("C1 passes; done.txt is there."), "{body}");
-
+        let headings: Vec<&str> = body
+            .lines()
+            .filter(|line| line.starts_with("## "))
+            .collect();
+        assert_eq!(
+            headings,
+            ["## What changed", "## How it was verified"],
+            "{body}"
+        );
+        for criterion in &contract.exit_criteria {
+            assert!(body.contains(criterion.text.as_str()), "{body}");
+        }
+        assert!(
+            body.contains("- Reviewed by dev-b: C1 still passes, on a second look."),
+            "{body}"
+        );
+        assert!(!body.contains("The second sentence stays out."), "{body}");
+        assert!(
+            !body.contains("Added done.txt; nothing left out."),
+            "{body}"
+        );
+        assert!(!body.contains(contract.intent.as_str()), "{body}");
+        assert!(body.chars().count() <= 1500, "{body}");
         harness.gh.answers("view", OPEN, "", 0);
         assert_eq!(
             orchestrator.integrate(&task("CTV-1")).await,
@@ -2134,7 +2182,7 @@ mod tests {
         harness.project.record(
             "CTV-1",
             "note.written",
-            &json!({ "kind": "review", "text": "C1 passes.", "written_by": "dev-b" }),
+            &json!({ "kind": "review", "text": "C1 passes; CTV-2 still owes the pies.", "written_by": "dev-b" }),
         );
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         let mut by_assignee = people.clone();
@@ -2845,7 +2893,13 @@ mod tests {
             "{create:?}"
         );
         assert!(create.contains(&branch), "{create:?}");
-        assert_eq!(harness.gh.stdin_of("create"), format!("{CADENCE}\n"));
+        assert_eq!(
+            harness.gh.stdin_of("create"),
+            format!(
+                "## What changed\n\n- {name}\n\n## How it was verified\n\n- Written by sm at the \
+                 delivery's review; the team's documents are not reviewed (ADR 0061)."
+            )
+        );
         let opened = folder_events(&harness, EventKind::FolderChangeOpened);
         assert_eq!(
             opened[0]["body"],
