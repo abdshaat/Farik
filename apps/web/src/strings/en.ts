@@ -839,13 +839,17 @@ export const en = {
 	taskChecked: "Catervas checks it",
 	taskTry: "Try {try} of {of}.",
 	taskTabs: "About this task",
-	tabSummary: "Summary and checks",
+	tabSummary: "Summary",
 	tabHistory: "History",
 	tabPlan: "The plan",
 	tabChanges: "Code changes",
 	tabNotes: "Notes",
 	taskFor: "What this task is for",
-	taskChecks: "What Catervas checks",
+	taskChecks: "Checks",
+	checksSummary: "{passed} of {count} checks passed.",
+	checksFailedLast: "{n} failed last time.",
+	checksShowEach: "Show each check",
+	pageLoading: "Loading…",
 	checkFailed: "Failed last time",
 	checkNotRun: "Not run yet",
 	taskHistoryHint:
@@ -922,7 +926,6 @@ export const en = {
 	taskAddHint:
 		"Once the task is accepted, Catervas opens a pull request into your integration branch, for you to merge.",
 	taskAdd: "Add to the project",
-	taskAddNotYet: "Not yet: the task has not been accepted.",
 	taskAddByPullRequest:
 		"Accepted. Catervas opens a pull request for it, for you to merge.",
 	riskLowWhy: "Low. The team may accept it without you.",

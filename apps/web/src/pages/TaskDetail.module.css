@@ -117,3 +117,18 @@
 	margin: 0;
 	padding-left: var(--catervas-space-5);
 }
+
+/* The checks' list, folded away under "Show each check". */
+.checks summary {
+	min-height: 24px;
+	cursor: pointer;
+}
+
+.checks summary:focus-visible {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: 2px;
+}
+
+.checks ul {
+	margin-top: var(--catervas-space-2);
+}

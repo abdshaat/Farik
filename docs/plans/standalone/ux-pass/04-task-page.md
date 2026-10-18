@@ -53,7 +53,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `says_it_is_loading` (new) — renders `/tasks/CTV-1` with the connection up but `contract.get` not yet answered (use the same `renderApp` and `answerStatus` the file's `openedGate` uses, answering `team.get` only); asserts `getByRole("status")` has text "Loading…" and the link "Back to the board" is present (`taskBack`'s words; read them from `en.ts`). Fails first because the page renders nothing.
 - `e2e/board.spec.ts` line 98: expect "CTV-1. Theo is doing it, and Ada reviews it." (exact text; the e2e task is on its first try). Before line 107's `panel.getByText("Passed")`, click `panel.getByText("Show each check")`: in Chromium the checks are hidden inside the closed `details` (jsdom does not hide them, so the unit test alone would not catch it).
 
-- [ ] `feat(web): the task page shows the agent's note first and its checks in one line`
+- [x] `feat(web): the task page shows the agent's note first and its checks in one line`
 
 ## Verification
 
