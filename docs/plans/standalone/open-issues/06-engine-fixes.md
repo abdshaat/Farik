@@ -130,7 +130,7 @@ Tests:
   "Docs: Report for delivery 1", and with a roadmap path beside it "Docs: Update …".
   `opens_a_pull_request_for_a_folder_change` (integrate.rs) keeps passing.
 
-- [ ] `fix(core): a delivery's report is titled by its name`
+- [x] `fix(core): a delivery's report is titled by its name`
 
 ### Task 19: an added agent gets its role's defaults
 

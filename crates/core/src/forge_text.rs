@@ -3,6 +3,7 @@
 
 use crate::branch::ChangeType;
 use crate::contract::TaskId;
+use crate::folders::is_delivery_report;
 
 /// Where each `CTV-<digits>` match in `text` is: its start, its end, and whether it starts a word
 /// (the character before it is not ASCII alphanumeric, or there is none).
@@ -33,6 +34,17 @@ pub fn pull_request_title(
     title_of: &dyn Fn(&TaskId) -> Option<String>,
 ) -> String {
     format!("{}: {}", kind.word(), without_task_ids(title, title_of))
+}
+
+/// A folder change's pull request title: `Docs: {names}` when every path is a delivery's report
+/// (the name already says what it is), else `Docs: Update {names}` (ADR 0069).
+#[must_use]
+pub fn folder_change_title(paths: &[&str], names: &str) -> String {
+    if !paths.is_empty() && paths.iter().all(|path| is_delivery_report(path)) {
+        format!("Docs: {names}")
+    } else {
+        format!("Docs: Update {names}")
+    }
 }
 
 /// `text` with each task id replaced by `"<its title>"`, or by `another task` when `title_of`
@@ -76,9 +88,10 @@ pub fn task_id_in(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{pull_request_title, task_id_in, without_task_ids};
+    use super::{folder_change_title, pull_request_title, task_id_in, without_task_ids};
     use crate::branch::ChangeType;
     use crate::contract::TaskId;
+    use crate::folders::document_name;
 
     fn known(id: &TaskId) -> Option<String> {
         (id.as_str() == "CTV-2").then(|| "Pie pre-orders".to_string())
@@ -116,5 +129,28 @@ mod tests {
         ] {
             assert_eq!(task_id_in(text).as_deref(), id, "{text}");
         }
+    }
+
+    #[test]
+    fn titles_a_delivery_report_by_its_name() {
+        let name = |path: &str| document_name(path, &|_: &str| None);
+        assert_eq!(
+            name("docs/catervas/product/reports/D1.html"),
+            "Report for delivery 1"
+        );
+        assert_eq!(
+            name("docs/catervas/product/reports/D12.md"),
+            "Report for delivery 12"
+        );
+        assert_eq!(name("docs/catervas/product/reports/Dx.md"), "Dx");
+        let report = "docs/catervas/product/reports/D1.html";
+        assert_eq!(
+            folder_change_title(&[report], "Report for delivery 1"),
+            "Docs: Report for delivery 1"
+        );
+        assert_eq!(
+            folder_change_title(&[report, "docs/catervas/product/roadmap.html"], "Roadmap"),
+            "Docs: Update Roadmap"
+        );
     }
 }

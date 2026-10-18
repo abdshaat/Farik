@@ -9,7 +9,7 @@ use std::sync::Arc;
 use catervas_core::branch::{change_type, task_branch};
 use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::is_plan_task;
-use catervas_core::forge_text::{pull_request_title, without_task_ids};
+use catervas_core::forge_text::{folder_change_title, pull_request_title, without_task_ids};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Team, task_private_folder};
@@ -173,7 +173,7 @@ impl Subject {
             Self::FolderChange(change) => {
                 let held = folder_change(tools, *change)?;
                 let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
-                Ok(format!("Docs: Update {}", plain_names(&paths)))
+                Ok(folder_change_title(&paths, &plain_names(&paths)))
             }
         }
     }
