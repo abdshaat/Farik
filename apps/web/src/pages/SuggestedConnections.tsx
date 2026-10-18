@@ -15,7 +15,7 @@ export type Suggestion = {
 	/** The agent's own reason, when it asked for this service (ADR 0063). */
 	why?: string;
 };
-export const SUGGESTIONS_SHOWN = 4;
+export const SUGGESTIONS_SHOWN = 2;
 
 type Pair = { agent: string; server: string };
 type Requested = Pair & { why: string };

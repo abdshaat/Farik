@@ -24,7 +24,7 @@ SPEC is recorded once, by the last plan: each change is a few words in 4.2, 6.7,
 Checklist (ticked in the commits that do them):
 
 - [x] Plan 1
-- [ ] Plan 2
+- [x] Plan 2
 - [ ] Plan 3
 - [ ] Plan 4
 - [ ] Plan 5

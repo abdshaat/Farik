@@ -72,7 +72,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `folds_the_merge_group_after_three` (new) — five `integration` rows (CTV-11 to CTV-15, titles "one" to "five"). Asserts the heading "Ready for you to merge (5)" and that the merge list shows three list items and a button "Show all 5" with `aria-expanded="false"`; clicking it shows five items and the button reads "Show fewer" with `aria-expanded="true"`; clicking again shows three. Fails first because all five show.
 - Every other lookup of `{ name: en.waitingList }` (`Today.test.tsx` lines 313, 436, 621, 652, 706, 756, 785, 999, 1022, 1155, 1235, 1361, 1519, 2232; `SellerMail.test.tsx` 406, 454, 463, 477; `DataPipeline.test.tsx` 13; `RaiseBudget.test.tsx` 14; `PurchaseOrder.test.tsx` 17) names instead the group that holds the row the test looks at: `en.waitingGroupSetUp` for the key-refused, `preview_missing`, `designer_needs_sandbox` and `designer_needs_browser` rows; `en.waitingGroupMerge` for `integration` rows, a folder change's included (line 313); `en.waitingGroupAnswer` for every other row and for document-change cards. Line 386-387 (the Catervafication card is not in the list) asserts the card's title is in none of the three group lists (`queryAllByRole("list")` filtered by those names). No assertion about a row's content changes and no test is deleted.
 
-- [ ] `feat(web): Today groups what waits on the owner by what to do`
+- [x] `feat(web): Today groups what waits on the owner by what to do`
 
 ### Task 2: what moved before the suggested connections, two of them
 
@@ -84,7 +84,7 @@ Tests:
 - `puts_what_moved_before_the_suggested_connections` (new) — with one move and three suggested services (use `KIT_LINEAR` / `KIT_NOTION` fixtures as the existing connections test at `Today.test.tsx:2541` does), asserts the h2 "What moved since yesterday" precedes the h2 "Suggested connections" in document order (`compareDocumentPosition`), and the suggestions list shows two rows and a "Show all 3" button. Fails first because the connections come first and show three.
 - The existing test that clicks "Show all 6" (`Today.test.tsx:2541`) keeps its words; any count of rows shown before the click changes from 4 to 2.
 
-- [ ] `feat(web): Today shows what moved before two suggested connections`
+- [x] `feat(web): Today shows what moved before two suggested connections`
 
 ## Verification
 

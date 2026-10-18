@@ -288,6 +288,23 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	overflow: hidden;
 }
 
+/* An agent's words on a question or a stuck task: three lines, the rest on its page. */
+.clamp3 {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	line-clamp: 3;
+	overflow: hidden;
+	overflow-wrap: anywhere;
+}
+
+.groupTitle {
+	margin: var(--catervas-space-4) 0 var(--catervas-space-2);
+	font:
+		600 var(--catervas-type-body-size) / var(--catervas-type-body-line-height)
+		var(--catervas-type-body-family);
+}
+
 .figures {
 	display: flex;
 	flex-wrap: wrap;
