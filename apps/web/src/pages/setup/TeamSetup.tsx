@@ -4,6 +4,7 @@ import { Outlet, useNavigate, useOutletContext } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { saidAll } from "../../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
+import type { Effort } from "../../components/ModelFields.tsx";
 import { t } from "../../strings/t.ts";
 import type { Template } from "../SavedTeams.tsx";
 import {
@@ -21,7 +22,8 @@ export type Agent = {
 	avatar?: string;
 	persona?: string;
 	status: string;
-	model?: unknown;
+	/** Its own model and effort; either left out is its role's. */
+	model?: { id?: string; effort?: Effort } | undefined;
 	/** The connectors its sessions get (spec 5.6). */
 	mcpServers?: McpServer[];
 };
@@ -50,6 +52,8 @@ export type Team = {
 		documentFormat?: "html" | "markdown";
 		/** The branch finished work goes into; absent means the repository's main branch. */
 		integrationBranch?: string;
+		/** One agent working alone, outside any team function (ADR 0071). */
+		solo?: boolean;
 		[key: string]: unknown;
 	};
 	rules: {
@@ -86,12 +90,24 @@ export type Draft = {
 	/** The saved team's name, when it started from one; its permission answers are not asked again. */
 	from?: string;
 };
-export type Start = "suggested" | "builtin" | "saved" | "scratch";
+export type Start = "suggested" | "builtin" | "saved" | "scratch" | "solo";
+/** Why a ready-made team fits the folder: what the scan found most of. */
+export type SuggestedTeam = {
+	slug: string;
+	signal: "code" | "money" | "shop" | "new";
+	language: string | null;
+	tests: boolean;
+};
+/** A role's own model, effort and persona, as Catervas ships it. */
+export type RoleDefault = { model: string; effort: Effort; persona: string };
 /** What `team.propose` answers: the suggested team and checks, and the agents this computer cannot run. */
 export type Proposed = {
 	team: Team;
 	criteria: Library;
 	unavailable?: { agentId: string }[];
+	/** Every ready-made team, the one the folder fits best first. */
+	suggestedTeams?: SuggestedTeam[];
+	roleDefaults?: Partial<Record<Role, RoleDefault>>;
 };
 type Setup = {
 	draft: Draft;
@@ -132,7 +148,8 @@ export function teamOf(draft: Draft): Team {
 	const preview =
 		agents.some((a) => a.role === "ui_ux_designer") && previewOf(draft.preview);
 	// The daemon may still answer `planInSprints`; the setup never sends it back.
-	const { planInSprints: _, ...policy } = draft.team.policy;
+	const { planInSprints: _, solo: __, ...rest } = draft.team.policy;
+	const policy = draft.start === "solo" ? { ...rest, solo: true } : rest;
 	return { ...draft.team, policy, agents, ...(preview && { preview }) };
 }
 
@@ -177,7 +194,9 @@ export function draftOf(
 	proposed: Proposed,
 	start: Start,
 	template?: Template,
+	soloRole: Role = "software_developer",
 ): Draft {
+	if (start === "solo") return soloDraftOf(proposed, soloRole);
 	const draft = teamDraftOf(proposed, start, template);
 	const members = [...draft.members];
 	for (const role of MORE_ROLES) {
@@ -191,6 +210,49 @@ export function draftOf(
 	return { ...draft, members };
 }
 
+/** An agent of `role` as Catervas ships it: the suggested one, else the role's defaults. */
+export function agentOfRole(
+	proposed: Proposed,
+	role: Role,
+	agents: Agent[],
+): Agent {
+	const suggested = proposed.team.agents.find((a) => a.role === role);
+	const shipped = proposed.roleDefaults?.[role];
+	const like: Agent = suggested ?? {
+		id: "",
+		displayName: "",
+		role,
+		status: "active",
+		...(shipped && {
+			persona: shipped.persona,
+			model: { id: shipped.model, effort: shipped.effort },
+		}),
+	};
+	// The suggested agent keeps its own name and picture unless the team already has them.
+	return suggested &&
+		!agents.some((a) => a.displayName === suggested.displayName)
+		? suggested
+		: {
+				...someone(agents, like),
+				...(like.persona !== undefined && { persona: like.persona }),
+				...(like.model && { model: like.model }),
+			};
+}
+
+/** One agent of `role`, alone: the suggested one's name and picture, or a spare one. */
+function soloDraftOf(proposed: Proposed, role: Role): Draft {
+	return {
+		team: proposed.team,
+		criteria: proposed.criteria,
+		answers: {},
+		preview: formOf(proposed.team.preview),
+		start: "solo",
+		members: [
+			{ agent: agentOfRole(proposed, role, []), on: true, key: 0, more: false },
+		],
+	};
+}
+
 /** `draftOf`'s team rows, before "More roles". */
 function teamDraftOf(
 	proposed: Proposed,
@@ -199,7 +261,16 @@ function teamDraftOf(
 ): Draft {
 	const unavailable = unavailableRoles(proposed);
 	const suggested = proposed.team.agents;
-	const role = (r: Agent["role"]) => suggested.find((a) => a.role === r);
+	const role = (r: Agent["role"]) => {
+		const shipped = proposed.roleDefaults?.[r];
+		return (
+			suggested.find((a) => a.role === r) ??
+			(shipped && {
+				persona: shipped.persona,
+				model: { id: shipped.model, effort: shipped.effort },
+			})
+		);
+	};
 	const base = {
 		team: proposed.team,
 		criteria: proposed.criteria,
@@ -240,7 +311,7 @@ function teamDraftOf(
 			...base,
 			members: (["product_manager", "software_developer"] as const).flatMap(
 				(r, key) => {
-					const agent = role(r);
+					const agent = suggested.find((a) => a.role === r);
 					return agent
 						? [
 								{

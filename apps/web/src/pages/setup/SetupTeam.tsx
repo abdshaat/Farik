@@ -2,49 +2,42 @@ import {
 	AVATAR_URLS,
 	type AvatarKey,
 	Button,
-	Choice,
 	InfoTip,
+	type Role,
 } from "@catervas/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, refusalsOf, said } from "../../app/refusals.ts";
+import { useQuery } from "../../app/store.ts";
 import { Bullets } from "../../components/Bullets.tsx";
+import {
+	effortLine,
+	type ModelOption,
+	modelName,
+} from "../../components/ModelFields.tsx";
 import { t } from "../../strings/t.ts";
 import pages from "../pages.module.css";
-import {
-	builtinMeta,
-	Faces,
-	templateMeta,
-	useTemplates,
-} from "../SavedTeams.tsx";
+import { type Template, useTemplates } from "../SavedTeams.tsx";
+import { AgentSheet, JOB_ROLES } from "./AgentSheet.tsx";
 import { PreviewFields } from "./PreviewFields.tsx";
-import styles from "./setup.module.css";
+import setup from "./setup.module.css";
+import styles from "./TeamPicker.module.css";
 import {
+	type Agent,
+	agentOfRole,
 	type Draft,
 	draftOf,
 	ringOf,
 	roleName,
-	type Start,
-	someone,
+	type SuggestedTeam,
 	teamOf,
 	useSetup,
 } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Checked = { errors: Refusal[] };
-
-/** Each role's job, in the words of the approved setup mockups. */
-const JOBS = {
-	product_manager: "jobProductManager",
-	scrum_master: "jobScrumMaster",
-	architect: "jobArchitect",
-	software_developer: "jobDeveloper",
-	marketing_specialist: "jobMarketing",
-	ui_ux_designer: "jobDesigner",
-	finance_specialist: "jobFinance",
-	procurement_specialist: "jobProcurement",
-} as const;
+type Member = Draft["members"][number];
 
 /** Each ready-made team's line, by its slug; a slug Catervas does not know shows its names alone. */
 const BUILTIN_LINES = {
@@ -52,109 +45,166 @@ const BUILTIN_LINES = {
 	"online-store": "builtinOnlineStore",
 	"financial-analysis": "builtinFinancialAnalysis",
 } as const;
+/** The most people a team may hold. */
+const MOST = 7;
 
-/** Setup's fifth step: where the team starts from, then its agents, named, and anyone added. */
+/** A way to start, as the cards name it. */
+type Way =
+	| { kind: "builtin" | "saved"; slug: string; template: Template }
+	| { kind: "solo" | "scratch" };
+
+/** Which card the draft stands for. */
+function pickOf(draft: Draft, cards: Way[]): string {
+	if (draft.start === "solo" || draft.start === "scratch") return draft.start;
+	const found = cards.find(
+		(c) =>
+			(c.kind === "builtin" || c.kind === "saved") &&
+			c.kind === draft.start &&
+			c.template.name === draft.from,
+	);
+	return found ? keyOf(found) : "";
+}
+
+function keyOf(card: Way): string {
+	return card.kind === "builtin" || card.kind === "saved"
+		? `${card.kind}:${card.slug}`
+		: card.kind;
+}
+
+/** The one line under the title: why the first card is first. */
+function pickedLine(top: SuggestedTeam | undefined): string {
+	if (!top) return t("pickedNone");
+	if (top.signal === "money") return t("pickedMoney");
+	if (top.signal === "shop") return t("pickedShop");
+	if (top.signal === "new") return t("pickedNew");
+	if (!top.language) return t("pickedCodeAny");
+	return t(top.tests ? "pickedCodeTests" : "pickedCode", {
+		language: top.language,
+	});
+}
+
+/** The job one agent alone takes by default, from what the folder holds most of. */
+function soloRoleFor(top: SuggestedTeam | undefined): Role {
+	if (top?.signal === "money") return "finance_specialist";
+	if (top?.signal === "shop") return "marketing_specialist";
+	return "software_developer";
+}
+
+/** A row of faces, each in its role's ring. */
+function Faces({
+	agents,
+	size,
+}: {
+	agents: { role: Role; avatar?: string | undefined }[];
+	size?: "large";
+}) {
+	return (
+		<span className={styles.faces} data-size={size}>
+			{agents.map((a, i) => {
+				const src = AVATAR_URLS[a.avatar as AvatarKey];
+				return src ? (
+					// biome-ignore lint/suspicious/noArrayIndexKey: two agents may share a picture
+					<img key={i} src={src} alt="" style={ringOf(a.role)} />
+				) : null;
+			})}
+		</span>
+	);
+}
+
+/** Setup's fifth step: a card per way to start, the folder's team first, then who is on it. */
 export function SetupTeam() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
 	const { draft, proposed, change, unavailable, checkAgain } = useSetup();
-	const { listing, noFolder } = useTemplates();
-	const builtin = listing?.builtin ?? [];
-	const saved = listing?.templates ?? [];
-	// One chosen team per start, so switching starts never carries the other's choice.
-	const [slugs, setSlugs] = useState<{ builtin?: string; saved?: string }>({});
-	// The team a picker shows as chosen: the one picked here, else the one the rows already hold
-	// (the draft outlives this screen, so Back comes back to it), else the first.
-	const pick = (start: "builtin" | "saved") => {
-		const list = start === "builtin" ? builtin : saved;
-		return (
-			slugs[start] ??
-			(draft.start === start
-				? list.find((l) => l.template.name === draft.from)?.slug
-				: undefined) ??
-			list[0]?.slug
-		);
+	const { listing } = useTemplates();
+	const { data: modelList } = useQuery<{ models: ModelOption[] }>(
+		"models.list",
+		{},
+	);
+	const models = modelList?.models ?? [];
+	const order = proposed.suggestedTeams ?? [];
+	const rank = (slug: string) => {
+		const at = order.findIndex((s) => s.slug === slug);
+		return at < 0 ? order.length : at;
 	};
-	const begin = (start: Start, chosen?: string) => {
-		setErrors([]);
-		if (start === "builtin" || start === "saved") {
-			const list = start === "builtin" ? builtin : saved;
-			const slug = chosen ?? pick(start);
-			setSlugs({ ...slugs, [start]: slug });
-			change(
-				draftOf(proposed, start, list.find((s) => s.slug === slug)?.template),
-			);
-		} else change(draftOf(proposed, start));
-	};
-	const scratch = draft.start === "scratch";
-	const [errors, setErrors] = useState<Checked["errors"]>([]);
+	const builtin = [...(listing?.builtin ?? [])].sort(
+		(a, b) => rank(a.slug) - rank(b.slug),
+	);
+	const top = order[0];
+	const soloRole = soloRoleFor(top);
+	const cards: Way[] = [
+		...builtin.map((b) => ({ kind: "builtin" as const, ...b })),
+		{ kind: "solo" },
+		...(listing?.templates ?? []).map((s) => ({
+			kind: "saved" as const,
+			...s,
+		})),
+		{ kind: "scratch" },
+	];
+	const [hero, ...rest] = cards;
+	const [errors, setErrors] = useState<Refusal[]>([]);
 	const [busy, setBusy] = useState(false);
-	const [editing, setEditing] = useState(() => !draft.preview.start.trim());
-	const on = draft.members.filter((m) => m.on);
-	// From scratch, the Product Manager and one more have to be ticked and named before going on;
-	// a role offered under "More roles" is named by the daemon's check when it is ticked.
-	const held =
-		scratch &&
-		(on.length < 2 ||
-			draft.members.some(
-				(m) => m.on && !m.more && !m.agent.displayName.trim(),
-			));
-	const pm =
-		draft.members.find((m) => m.agent.role === "product_manager")?.agent
-			.displayName ?? roleName("product_manager");
-	const developer =
-		draft.members.find((m) => m.agent.role === "software_developer")?.agent
-			.displayName ?? roleName("software_developer");
-	// An error's path names the agent by its place on the team, which leaves out the unticked.
-	const at = (spot: number) =>
-		errors.filter(
-			(e) => e.path.split("/").slice(1, 3).join("/") === `agents/${spot}`,
+	const [open, setOpen] = useState<number>();
+	const [editingPreview, setEditingPreview] = useState(
+		() => !draft.preview.start.trim(),
+	);
+
+	const choose = (card: Way) => {
+		setErrors([]);
+		change(
+			card.kind === "builtin" || card.kind === "saved"
+				? draftOf(proposed, card.kind, card.template)
+				: draftOf(proposed, card.kind, undefined, soloRole),
 		);
+	};
+	// A first visit starts on the card the folder fits best, not on the old suggested six.
+	const first = builtin[0];
+	useEffect(() => {
+		if (draft.start === "suggested" && first)
+			change(draftOf(proposed, "builtin", first.template));
+	}, [draft.start, first, proposed, change]);
+
+	const solo = draft.start === "solo";
+	const picked = pickOf(draft, cards);
+	const shown = draft.members
+		.map((member, index) => ({ member, index }))
+		.filter(({ member }) => !member.more || member.on);
+	const on = draft.members.filter((m) => m.on);
+	const unnamed = on.some((m) => !m.agent.displayName.trim());
+	const at = (member: Member) =>
+		member.on
+			? errors.filter(
+					(e) =>
+						e.path.split("/").slice(1, 3).join("/") ===
+						`agents/${on.indexOf(member)}`,
+				)
+			: [];
 	const loose = errors.filter(
 		(e) => !/^\/agents\/\d+/.test(e.path) && !e.path.startsWith("/preview"),
 	);
 
-	const set = (index: number, next: Partial<{ on: boolean; name: string }>) => {
+	const update = (index: number, next: Partial<Member>) => {
 		setErrors([]);
 		change({
 			...draft,
 			members: draft.members.map((m, i) =>
-				i !== index
-					? m
-					: {
-							...m,
-							on: next.on ?? m.on,
-							agent: {
-								...m.agent,
-								displayName: next.name ?? m.agent.displayName,
-							},
-						},
+				i === index ? { ...m, ...next } : m,
 			),
 		});
 	};
 	const add = () => {
 		setErrors([]);
-		// A ready-made team may hold no Developer: the newcomer is like the suggested one.
-		const developer = proposed.team.agents.find(
-			(a) => a.role === "software_developer",
+		const agent = agentOfRole(
+			proposed,
+			"software_developer",
+			draft.members.map((m) => m.agent),
 		);
-		if (!developer) return;
+		const key = Math.max(-1, ...draft.members.map((m) => m.key)) + 1;
 		change({
 			...draft,
-			members: [
-				...draft.members,
-				{
-					agent: someone(
-						draft.members.map((m) => m.agent),
-						developer,
-					),
-					on: true,
-					// An id is handed out again once its name changes; a row's key is its own.
-					key: draft.members.length,
-					more: false,
-				},
-			],
+			members: [...draft.members, { agent, on: true, key, more: true }],
 		});
+		setOpen(draft.members.length);
 	};
 	const onward = async () => {
 		if (!client) return;
@@ -173,68 +223,199 @@ export function SetupTeam() {
 		setBusy(false);
 	};
 
-	/** One row: its tick, its picture in its role's ring, its role over its name, and its job. */
-	const row = (member: Draft["members"][number], index: number) => {
-		const { agent, on: included } = member;
-		const role = roleName(agent.role);
-		const avatar = AVATAR_URLS[agent.avatar as AvatarKey];
-		const nameId = `name-${index}`;
-		const why = included ? at(on.indexOf(member)) : [];
-		const whyId = `why-${index}`;
-		const designer = agent.role === "ui_ux_designer";
-		const cannot = unavailable.includes(agent.role);
+	const card = (c: Way, big = false) => {
+		const key = keyOf(c);
+		const chosen = picked === key;
+		const suggested = big && c.kind === "builtin" && order.length > 0;
+		const { name, line, agents } =
+			c.kind === "builtin" || c.kind === "saved"
+				? {
+						name: c.template.name,
+						line:
+							c.kind === "builtin" && c.slug in BUILTIN_LINES
+								? t(BUILTIN_LINES[c.slug as keyof typeof BUILTIN_LINES])
+								: t("pickSavedLine"),
+						agents: c.template.agents.map((a) => ({
+							role: a.role,
+							avatar: a.avatar ?? agentOfRole(proposed, a.role, []).avatar,
+						})),
+					}
+				: c.kind === "solo"
+					? {
+							name: t("pickSolo"),
+							line: t("pickSoloLine"),
+							agents: [agentOfRole(proposed, soloRole, [])],
+						}
+					: {
+							name: t("pickScratch"),
+							line: t("pickScratchLine"),
+							agents: [agentOfRole(proposed, "product_manager", [])],
+						};
 		return (
-			<li key={member.key} className={styles.member}>
-				{(member.more || !scratch || agent.role !== "product_manager") && (
-					<input
-						type="checkbox"
-						checked={included}
-						disabled={cannot}
-						aria-label={t("teamInclude").replace("{role}", role)}
-						onChange={(e) => set(index, { on: e.target.checked })}
-					/>
-				)}
-				{avatar && (
-					<img
-						className={styles.face}
-						style={ringOf(agent.role)}
-						src={avatar}
-						alt=""
-					/>
-				)}
-				<span className={styles.who}>
-					<label htmlFor={nameId}>{role}</label>
-					<input
-						id={nameId}
-						className={styles.input}
-						value={agent.displayName}
-						aria-label={t("teamName").replace("{role}", role)}
-						aria-invalid={why.length > 0 || undefined}
-						aria-describedby={why.length > 0 ? whyId : undefined}
-						onChange={(e) => set(index, { name: e.target.value })}
-					/>
-				</span>
-				<span className={styles.persona}>
-					{!member.more && scratch && agent.role === "product_manager"
-						? t("teamScratchNote")
-						: !member.more && draft.from
-							? agent.persona
-							: t(JOBS[agent.role], { pm, developer })}
-				</span>
-				{why.length > 0 && (
-					<span id={whyId} className={styles.error}>
-						{why.map((e) => said(e.code)).join(" ")}
+			<label
+				key={key}
+				className={styles.card}
+				data-big={big || undefined}
+				data-chosen={chosen || undefined}
+			>
+				<input
+					type="radio"
+					className={styles.radio}
+					name="start"
+					value={key}
+					checked={chosen}
+					onChange={() => choose(c)}
+				/>
+				{chosen && (
+					<span className={styles.check} aria-hidden="true">
+						✓
 					</span>
 				)}
+				<span className={styles.facesRow}>
+					<Faces agents={agents} {...(big && { size: "large" as const })} />
+					{c.kind === "scratch" && (
+						<span className={styles.plus} aria-hidden="true">
+							+
+						</span>
+					)}
+				</span>
+				<span className={styles.cardText}>
+					<span className={styles.cardName}>
+						{name}
+						{suggested && (
+							<span className={styles.badge}>{t("pickSuggested")}</span>
+						)}
+					</span>
+					<span className={styles.cardLine}>{line}</span>
+				</span>
+			</label>
+		);
+	};
+
+	const row = ({ member, index }: { member: Member; index: number }) => {
+		const { agent } = member;
+		const avatar = AVATAR_URLS[agent.avatar as AvatarKey];
+		const cannot = unavailable.includes(agent.role);
+		const why = at(member);
+		const shipped = proposed.roleDefaults?.[agent.role];
+		const modelId = agent.model?.id ?? shipped?.model;
+		const effort = agent.model?.effort ?? shipped?.effort;
+		const name = agent.displayName.trim();
+		return (
+			<li key={member.key}>
+				<button
+					type="button"
+					className={styles.row}
+					data-off={!member.on || undefined}
+					aria-label={t("whoEdit", { name: name || roleName(agent.role) })}
+					onClick={() => setOpen(index)}
+				>
+					{avatar && (
+						<img
+							className={styles.rowFace}
+							style={ringOf(agent.role)}
+							src={avatar}
+							alt=""
+						/>
+					)}
+					<span className={styles.rowWho}>
+						<span className={styles.rowName}>
+							{name || <em>{t("whoNeedsName")}</em>}
+						</span>
+						<span className={styles.rowRole}>{roleName(agent.role)}</span>
+					</span>
+					<span className={styles.rowModel}>
+						{cannot ? (
+							<span>{t("whoNeedsDocker")}</span>
+						) : !member.on ? (
+							<span>{t("whoOff")}</span>
+						) : (
+							<>
+								<span className={styles.rowModelName}>
+									{modelName(modelId, models)}
+								</span>
+								<span>{effortLine(effort)}</span>
+							</>
+						)}
+					</span>
+					<span className={styles.chevron} aria-hidden="true">
+						›
+					</span>
+				</button>
+				{why.length > 0 && (
+					<p className={styles.rowError}>
+						{why.map((e) => said(e.code)).join(" ")}
+					</p>
+				)}
+			</li>
+		);
+	};
+
+	const sheet = () => {
+		if (open === undefined) return null;
+		const member = draft.members[open];
+		if (!member) return null;
+		const { agent } = member;
+		const shipped = proposed.roleDefaults?.[agent.role];
+		const cannot = unavailable.includes(agent.role);
+		const designer = agent.role === "ui_ux_designer";
+		const close = () => setOpen(undefined);
+		const why = at(member);
+		return (
+			<AgentSheet
+				agent={agent}
+				index={open}
+				on={member.on}
+				models={models}
+				roleModel={shipped ? { id: shipped.model, effort: shipped.effort } : {}}
+				jobs={
+					solo
+						? JOB_ROLES.filter(
+								(r) => r !== "scrum_master" && r !== "ui_ux_designer",
+							)
+						: member.more
+							? JOB_ROLES.filter((r) => r !== "product_manager")
+							: []
+				}
+				solo={solo}
+				required={agent.role === "product_manager" && !member.more}
+				error={why.map((e) => said(e.code)).join(" ") || undefined}
+				onChange={(next) => update(open, { agent: next })}
+				onRole={(role) =>
+					update(open, {
+						agent: {
+							...agentOfRole(
+								proposed,
+								role,
+								draft.members.filter((_, i) => i !== open).map((m) => m.agent),
+							),
+							// A name the owner typed stays; a suggested one follows the job.
+							...(agent.displayName.trim() &&
+								!proposed.team.agents.some(
+									(a) => a.displayName === agent.displayName,
+								) && { displayName: agent.displayName }),
+						},
+					})
+				}
+				onToggle={(next) => update(open, { on: next })}
+				onRemove={
+					member.more && !solo
+						? () => {
+								close();
+								change({
+									...draft,
+									members: draft.members.filter((_, i) => i !== open),
+								});
+							}
+						: undefined
+				}
+				onClose={close}
+			>
 				{cannot && (
-					<div className={styles.memberCard}>
-						<strong>{t("teamNeedsSandbox")}</strong>
-						<p>
-							{t("teamNeedsSandboxNote", {
-								designer: agent.displayName,
-							})}
-						</p>
-						<div className={styles.buttons}>
+					<section className={styles.notice}>
+						<h3>{t("teamNeedsSandbox")}</h3>
+						<p>{t("teamNeedsSandboxNote", { designer: agent.displayName })}</p>
+						<div className={setup.buttons}>
 							<Button onClick={checkAgain}>{t("teamCheckAgain")}</Button>
 							<a
 								href="https://docs.docker.com/get-started/get-docker/"
@@ -244,70 +425,23 @@ export function SetupTeam() {
 								{t("teamInstallDocker")}
 							</a>
 						</div>
-					</div>
-				)}
-				{designer && included && (
-					<section
-						className={styles.memberCard}
-						aria-labelledby={`preview-${index}`}
-					>
-						{editing || errors.some((e) => e.path.startsWith("/preview")) ? (
-							<>
-								<div className={pages.titled}>
-									<h2 id={`preview-${index}`}>
-										{t("previewSetupTitle", { designer: agent.displayName })}
-									</h2>
-									<InfoTip id={`preview-${index}-more-info`}>
-										<Bullets text={t("previewMore")} />
-									</InfoTip>
-								</div>
-								<Bullets
-									text={t("previewSetupLead", { designer: agent.displayName })}
-								/>
-								<div id={`preview-${index}-fields`}>
-									<PreviewFields
-										id={`preview-${index}`}
-										form={draft.preview}
-										designer={agent.displayName}
-										errors={errors}
-										onChange={(preview) => {
-											setErrors(
-												errors.filter((e) => !e.path.startsWith("/preview")),
-											);
-											change({ ...draft, preview });
-										}}
-									/>
-								</div>
-							</>
-						) : (
-							<>
-								<h2 id={`preview-${index}`}>{t("previewTitle")}</h2>
-								<p>
-									{t("previewFound", {
-										designer: agent.displayName,
-										start: draft.preview.start.trim(),
-									})}
-								</p>
-								<Button
-									kind="quiet"
-									expanded={false}
-									controls={`preview-${index}-fields`}
-									onClick={() => {
-										setEditing(true);
-										requestAnimationFrame(() =>
-											document
-												.getElementById(`preview-${index}-start`)
-												?.focus(),
-										);
-									}}
-								>
-									{t("previewChange")}
-								</Button>
-							</>
-						)}
 					</section>
 				)}
-			</li>
+				{designer && member.on && !cannot && (
+					<PreviewSection
+						draft={draft}
+						index={open}
+						designer={agent.displayName}
+						errors={errors}
+						editing={editingPreview}
+						onEdit={() => setEditingPreview(true)}
+						onChange={(preview) => {
+							setErrors(errors.filter((e) => !e.path.startsWith("/preview")));
+							change({ ...draft, preview });
+						}}
+					/>
+				)}
+			</AgentSheet>
 		);
 	};
 
@@ -315,128 +449,118 @@ export function SetupTeam() {
 		<Wizard
 			step={4}
 			title={t("teamTitle")}
-			lead={t(scratch ? "teamLeadScratch" : "teamLead")}
+			lead={pickedLine(top)}
 			carried={!!draft.from}
 		>
-			<Choice<Start>
-				name="start"
-				legend={t("startsLegend")}
-				value={draft.start}
-				onChange={(start) => begin(start)}
-				options={[
-					{
-						value: "suggested",
-						label: t("startSuggested"),
-						description: t("startSuggestedNote"),
-					},
-					{
-						value: "builtin",
-						label: t("startBuiltin"),
-						description: t("startBuiltinNote"),
-						disabled: !builtin.length,
-						after: draft.start === "builtin" && (
-							<div className={styles.which}>
-								<Choice<string>
-									name="builtin"
-									legend={t("startWhichBuiltin")}
-									value={pick("builtin") ?? ""}
-									onChange={(chosen) => begin("builtin", chosen)}
-									options={builtin.map(({ slug, template }) => ({
-										value: slug,
-										label: template.name,
-										description:
-											slug in BUILTIN_LINES
-												? t(BUILTIN_LINES[slug as keyof typeof BUILTIN_LINES])
-												: builtinMeta(template),
-										extra: <Faces agents={template.agents} />,
-									}))}
-								/>
-							</div>
-						),
-					},
-					{
-						value: "saved",
-						label: t("startSaved"),
-						description: noFolder
-							? t("templateNoFolder")
-							: saved.length
-								? t("startSavedNote")
-								: t("startSavedNone"),
-						disabled: !saved.length,
-						after: draft.start === "saved" && (
-							<div className={styles.which}>
-								<Choice<string>
-									name="saved"
-									legend={t("startWhich")}
-									value={pick("saved") ?? ""}
-									onChange={(chosen) => begin("saved", chosen)}
-									options={saved.map(({ slug, template }) => ({
-										value: slug,
-										label: template.name,
-										description: templateMeta(template),
-										extra: <Faces agents={template.agents} />,
-									}))}
-								/>
-							</div>
-						),
-					},
-					{
-						value: "scratch",
-						label: t("startScratch"),
-						description: t("startScratchNote"),
-					},
-				]}
-			/>
-			{draft.from && <p>{t("teamLeadSaved", { name: draft.from })}</p>}
-			<ul className={styles.members} aria-label={t("teamMembers")}>
-				{draft.members.map(
-					(member, index) => !member.more && row(member, index),
-				)}
-			</ul>
-			<span>
-				<Button kind="quiet" onClick={add}>
-					{t("teamAdd")}
-				</Button>
-			</span>
-			{draft.members.some((m) => m.more) && (
-				<section className={styles.more} aria-labelledby="more-roles">
-					<h2 id="more-roles">{t("setupMoreRoles")}</h2>
-					<p>{t("setupMoreRolesNote")}</p>
-					<ul className={styles.members} aria-labelledby="more-roles">
-						{draft.members.map(
-							(member, index) => member.more && row(member, index),
-						)}
-					</ul>
-				</section>
-			)}
-			{draft.from && (
-				<p className={styles.note}>
-					{t("teamSavedAnswers", { name: draft.from })}
-				</p>
-			)}
+			<fieldset className={styles.cards}>
+				<legend className={styles.hidden}>{t("pickStarts")}</legend>
+				{hero && card(hero, true)}
+				<div className={styles.grid}>{rest.map((c) => card(c))}</div>
+			</fieldset>
+			<section className={styles.who} aria-labelledby="who-title">
+				<h2 id="who-title" className={styles.whoTitle}>
+					{t(solo ? "whoSoloTitle" : "whoTitle")}
+				</h2>
+				<ul className={styles.list}>
+					{shown.map(row)}
+					{!solo && on.length < MOST && (
+						<li>
+							<button type="button" className={styles.addRow} onClick={add}>
+								<span className={styles.addMark} aria-hidden="true">
+									+
+								</span>
+								{t("teamAdd")}
+							</button>
+						</li>
+					)}
+				</ul>
+			</section>
 			{loose.length > 0 && (
-				<p role="alert" className={styles.alert}>
+				<p role="alert" className={setup.alert}>
 					{loose.map((e) => said(e.code)).join(" ")}
 				</p>
 			)}
-			<div className={styles.foot}>
+			<div className={setup.foot}>
 				<Button onClick={() => navigate("/setup/scan")}>{t("back")}</Button>
 				<span>
-					{held && <span className={styles.note}>{t("teamNameAll")}</span>}
+					{unnamed && <span className={setup.note}>{t("teamNameAll")}</span>}
 					<Button
 						kind="primary"
 						busy={busy}
-						disabled={on.length === 0 || held}
+						disabled={on.length === 0 || unnamed}
 						onClick={onward}
 					>
-						{t(
-							on.length === 6 && draft.start === "suggested"
-								? "teamContinueSix"
-								: "teamContinue",
-						)}
+						{solo && on[0]
+							? t("soloContinue", { name: on[0].agent.displayName })
+							: t("teamContinue")}
 					</Button>
 				</span>
 			</div>
+			{sheet()}
 		</Wizard>
+	);
+}
+
+/** How the Designer opens the app: what Catervas found, or the fields to say it. */
+function PreviewSection({
+	draft,
+	index,
+	designer,
+	errors,
+	editing,
+	onEdit,
+	onChange,
+}: {
+	draft: Draft;
+	index: number;
+	designer: string;
+	errors: Refusal[];
+	editing: boolean;
+	onEdit: () => void;
+	onChange: (preview: Draft["preview"]) => void;
+}) {
+	const id = `preview-${index}`;
+	return (
+		<section className={styles.notice} aria-labelledby={id}>
+			{editing || errors.some((e) => e.path.startsWith("/preview")) ? (
+				<>
+					<div className={pages.titled}>
+						<h3 id={id}>{t("previewSetupTitle", { designer })}</h3>
+						<InfoTip id={`${id}-more-info`}>
+							<Bullets text={t("previewMore")} />
+						</InfoTip>
+					</div>
+					<div id={`${id}-fields`}>
+						<PreviewFields
+							id={id}
+							form={draft.preview}
+							designer={designer}
+							errors={errors}
+							onChange={onChange}
+						/>
+					</div>
+				</>
+			) : (
+				<>
+					<h3 id={id}>{t("previewTitle")}</h3>
+					<p>
+						{t("previewFound", { designer, start: draft.preview.start.trim() })}
+					</p>
+					<Button
+						kind="quiet"
+						expanded={false}
+						controls={`${id}-fields`}
+						onClick={() => {
+							onEdit();
+							requestAnimationFrame(() =>
+								document.getElementById(`${id}-start`)?.focus(),
+							);
+						}}
+					>
+						{t("previewChange")}
+					</Button>
+				</>
+			)}
+		</section>
 	);
 }

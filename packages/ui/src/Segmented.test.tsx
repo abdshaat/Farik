@@ -30,7 +30,7 @@ describe("Segmented", () => {
 	it("is a named group of options picked with a click or the arrow keys", async () => {
 		const onChange = vi.fn();
 		const { container } = render(<Wrapper onChange={onChange} />);
-		const group = screen.getByRole("radiogroup", { name: "Effort" });
+		const group = screen.getByRole("group", { name: "Effort" });
 		expect(group).toBeTruthy();
 		expect((screen.getByLabelText("Medium") as HTMLInputElement).checked).toBe(
 			true,

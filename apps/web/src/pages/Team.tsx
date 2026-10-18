@@ -12,6 +12,7 @@ import { useConnection } from "../app/connection.tsx";
 import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { Bullets } from "../components/Bullets.tsx";
+import { type Effort, effortWord } from "../components/ModelFields.tsx";
 import { t } from "../strings/t.ts";
 import { SaveTemplate } from "./dialogs/SaveTemplate.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
@@ -49,7 +50,7 @@ export type Tier =
 /** What the daemon works out for an agent: its model as its sessions run it, in words, and its tiers. */
 export type Effective = {
 	id: string;
-	model: Model & { effort: "low" | "medium" | "high" };
+	model: Model & { effort: Effort };
 	tiers: Tier[];
 	baseTiers: Tier[];
 };
@@ -170,6 +171,8 @@ export function Team() {
 	const agents = team.agents.filter((a) => a.status !== "retired");
 	const designer = agents.find((a) => a.role === "ui_ux_designer");
 	const developer = agents.find((a) => a.role === "software_developer");
+	// One agent alone has no team to add to or to swap for a saved one (ADR 0071).
+	const solo = team.policy.solo === true;
 	return (
 		<div className={styles.page}>
 			<div className={styles.titled}>
@@ -183,10 +186,14 @@ export function Team() {
 					.replace("{count}", String(agents.length))
 					.replace("{name}", team.name)}
 			</p>
-			<div className={styles.actions}>
-				<Button onClick={() => setOpen("use")}>{t("templateUseOpen")}</Button>
-				<Button onClick={() => setOpen("save")}>{t("templateSaveOpen")}</Button>
-			</div>
+			{!solo && (
+				<div className={styles.actions}>
+					<Button onClick={() => setOpen("use")}>{t("templateUseOpen")}</Button>
+					<Button onClick={() => setOpen("save")}>
+						{t("templateSaveOpen")}
+					</Button>
+				</div>
+			)}
 			{savedAs && (
 				<p role="status" className={styles.notice}>
 					{t("savedAsBefore")}
@@ -250,6 +257,12 @@ export function Team() {
 									{effective.find((e) => e.id === agent.id)?.model.label ??
 										t("agentModelRole")}
 								</dd>
+								<dt>{t("agentEffort")}</dt>
+								<dd>
+									{effortWord(
+										effective.find((e) => e.id === agent.id)?.model.effort,
+									)}
+								</dd>
 							</dl>
 							<div className={styles.actions}>
 								<Link to={`/team/${agent.id}`}>
@@ -270,7 +283,7 @@ export function Team() {
 					);
 				})}
 			</ul>
-			<AddSomeone team={team} most={most ?? 0} />
+			{!solo && <AddSomeone team={team} most={most ?? 0} />}
 			<section className={styles.section} aria-labelledby="changes-heading">
 				<h2 id="changes-heading">{t("teamChangesTitle")}</h2>
 				<Bullets text={t("teamChangesBody")} />

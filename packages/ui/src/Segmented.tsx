@@ -23,11 +23,10 @@ export function Segmented<V extends string>({
 	/** A note on the whole group, kept behind an info button by the legend. */
 	info?: ReactNode;
 	/** One short line under the track, such as what the chosen option means. */
-	hint?: string;
+	hint?: string | undefined;
 }) {
 	return (
 		<fieldset
-			role="radiogroup"
 			className={styles.group}
 			aria-describedby={hint ? `${name}-hint` : undefined}
 		>

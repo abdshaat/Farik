@@ -21,7 +21,6 @@
 .track {
 	clear: both;
 	display: flex;
-	flex-wrap: wrap;
 	gap: 2px;
 	padding: 2px;
 	border: 1px solid var(--catervas-color-control-border);
@@ -29,17 +28,18 @@
 	background: var(--catervas-color-page);
 }
 
+/* Segments share the track by their words; a two-word label breaks at its space, never mid-word. */
 .segment {
 	flex: 1 1 auto;
+	min-width: min-content;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	min-height: 40px;
-	padding: 0 var(--catervas-space-3);
+	padding: 2px 6px;
 	border-radius: calc(var(--catervas-radius-raised) - 2px);
 	color: var(--catervas-color-ink);
 	cursor: pointer;
-	white-space: nowrap;
 	text-align: center;
 	font:
 		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
