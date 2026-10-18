@@ -176,10 +176,7 @@ test("work runs on the board by itself, from its plan to the team's look back", 
 		await page.goto(at("/costs"));
 		const theo = page.getByRole("row", { name: /^Theo/ });
 		await expect(theo.getByRole("rowheader")).toHaveText(/^Theo/);
-		await expect(theo.getByRole("cell")).toHaveText([
-			"$0.03",
-			"Nothing to do right now",
-		]);
+		await expect(theo.getByRole("cell")).toHaveText(["$0.03"]);
 		await expect(page.getByText("1 of 1", { exact: true })).toBeVisible();
 		await noSprint(page);
 		// On a phone no amount, and no one-word column name, breaks in the middle.
