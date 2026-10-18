@@ -56,6 +56,8 @@ pub struct PromptInput<'a> {
     /// The agent versions that are behind the document for people beside them, for the Team
     /// rules' line about them (`docs/SPEC.md` 5.17).
     pub stale_twins: &'a [String],
+    /// Whether the agent works alone for the owner, with no team (ADR 0071).
+    pub solo: bool,
     /// The project's repositories when the session may read them (5.6), for the Team rules' line
     /// about where they are; none for a one-repository project and for a session that reads no
     /// other repository.
@@ -222,7 +224,7 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
     let bodies: [Option<String>; 11] = [
         Some(role_section(input.role)),
         Some(untrusted_notice(input.connectors)),
-        Some(you_section(input.agent)),
+        Some(you_section(input.agent, input.solo)),
         input
             .project_scan
             .and_then(|scan| untrusted("project_scan", scan, 16 * KIB)),
@@ -438,8 +440,11 @@ fn demoted(markdown: &str, by: usize) -> String {
 
 /// The agent's name, then its persona as the user wrote it. A persona never grants anything; it is
 /// character, not permission.
-fn you_section(agent: &Agent) -> String {
-    let name = format!("You are {}.", agent.display_name.as_str());
+fn you_section(agent: &Agent, solo: bool) -> String {
+    let mut name = format!("You are {}.", agent.display_name.as_str());
+    if solo {
+        name.push_str(" You work alone for the owner, with no team.");
+    }
     match agent
         .persona
         .as_deref()
@@ -726,6 +731,7 @@ mod tests {
                 connectors: &[],
                 active_roles: &[],
                 stale_twins: &[],
+                solo: false,
                 members: &[],
                 own_repo: None,
                 document_format: DocumentFormat::Html,
@@ -735,6 +741,22 @@ mod tests {
 
     fn a_product_manager() -> Inputs {
         Inputs::new(Role::ProductManager, "product_manager")
+    }
+
+    #[test]
+    fn tells_one_agent_alone_that_it_has_no_team() {
+        let inputs = Inputs::new(Role::SoftwareDeveloper, "software_developer");
+        let team = assembled(&inputs.full(SessionPurpose::Implement));
+        assert!(!team.contains("work alone"), "{team}");
+        let alone = assembled(&PromptInput {
+            solo: true,
+            ..inputs.full(SessionPurpose::Implement)
+        });
+        assert!(
+            section(&alone, "You").starts_with("You are ")
+                && section(&alone, "You").contains("You work alone for the owner, with no team."),
+            "{alone}"
+        );
     }
 
     fn assembled(input: &PromptInput<'_>) -> String {

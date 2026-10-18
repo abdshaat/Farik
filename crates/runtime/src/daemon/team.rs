@@ -1722,6 +1722,9 @@ fn code_of(error: &ValidationError) -> &'static str {
             "needs_product_manager"
         }
         ["agents"] if message.starts_with("an agent id names") => "repeated_id",
+        ["agents"] if message.starts_with("A team needs two agents") => "too_few",
+        ["agents"] if message.starts_with("solo_one_agent: ") => "solo_one_agent",
+        ["agents", _, "role"] if message.starts_with("solo_role: ") => "solo_role",
         ["agents"] if message.ends_with(WORKED) => "worked",
         ["agents", _, "display_name"] => "name",
         ["agents", _, "revokes"] => "keeps_read",
@@ -4312,6 +4315,11 @@ pub(super) mod tests {
         assert_eq!(
             codes(&|team| team["agents"][1]["id"] = json!("pm")),
             ["/agents repeated_id"]
+        );
+        assert_eq!(
+            codes(&|team| team["policy"]["solo"] = json!(true)),
+            ["/agents solo_one_agent"],
+            "one agent alone is one agent"
         );
         assert_eq!(
             codes(&|team| team["agents"][1]["display_name"] = json!("")),

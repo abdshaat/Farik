@@ -339,11 +339,14 @@ impl Transitions {
         let context = self.context(request, ask, team)?;
         // The agent the owner gave a task in its chat holds its plan with the Product Manager's
         // standing while it is drafted or refined (ADR 0063).
+        // One agent alone has no assigner, so it also assigns its own task (ADR 0071).
         let the_given_agent = request.actor == TransitionActor::ProductManager
-            && matches!(
+            && (matches!(
                 context.contract.status,
                 TaskStatus::Draft | TaskStatus::Refining
-            )
+            ) || (team.is_solo()
+                && context.contract.status == TaskStatus::Ready
+                && request.to == TaskStatus::Assigned))
             && request.agent_id.is_some()
             && given_to(&self.log, &request.task_id)?.as_deref()
                 == request.agent_id.as_deref().map(str::trim);
@@ -770,6 +773,7 @@ impl Transitions {
             review_passed: review_passed(&history),
             extra_iterations: extra_tries(&history),
             design_plan_returns: crate::tools::design::returns(&history),
+            solo: team.is_solo(),
             design_reviewer: match (review.state, review.recorded_by) {
                 (ReviewState::Failed, Some((designer, _))) => Some(designer),
                 _ => None,
@@ -827,7 +831,8 @@ impl Transitions {
     ///
     /// What the log or the board refuses.
     pub fn awaits_the_product_plan(&self) -> Result<bool, TransitionError> {
-        if new_project(&self.log)?.is_none() {
+        // One agent alone has no Product Manager to write a plan, so nothing waits for one (ADR 0071).
+        if new_project(&self.log)?.is_none() || self.files.read_team()?.is_solo() {
             return Ok(false);
         }
         let plans = product_plan_tasks(&self.log)?;
@@ -891,6 +896,7 @@ impl Transitions {
             rules: team.rules(),
             awaits_the_product_plan: self.awaits_the_product_plan()?,
             is_the_product_plan: is_the_product_plan(history),
+            solo: team.is_solo(),
             repos: self.files.read_repos()?.map(|listed| {
                 listed
                     .repos
@@ -1243,7 +1249,8 @@ fn refused_before_the_governor(
     if contract.status != TaskStatus::Ready || request.to != TaskStatus::Assigned {
         return None;
     }
-    let human_reviews = reviewed_by_the_human(contract, team);
+    // The human reviews an epic the Product Manager holds; nobody reviews one agent alone's task.
+    let human_reviews = reviewed_by_the_human(contract, team) || team.is_solo();
     let mut details = Vec::new();
     for (what, id) in [
         ("assignee", &ask.assignee_id),
@@ -1531,6 +1538,7 @@ fn assignment(
         private_folder_busy: false,
         // Filled by `context`, which reads the contracts of the tasks in the lane.
         lane_builder: None,
+        solo: team.is_solo(),
     })
 }
 

@@ -6243,6 +6243,9 @@
             "question_length",
             "integration_branch_name",
             "integration_branch_missing",
+            "too_few",
+            "solo_one_agent",
+            "solo_role",
             "invalid"
           ],
           "description": "The refusal as the page words it for a person; the message is for a log, and invalid is any refusal with no words of its own."

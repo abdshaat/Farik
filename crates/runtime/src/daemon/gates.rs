@@ -22,7 +22,7 @@ use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::marketing::{
     CapScope, PlanSpend, RaiseAsk, Raised, active_plan, check_raise, parse_amount,
 };
-use catervas_core::team::Team;
+use catervas_core::team::{AgentStatus, Team};
 use catervas_protocol::command::{Command, CommandReply};
 use catervas_protocol::event::{
     CatervasEvent, ContractWrittenBody, EventBody, EventKind, event_to_value, new_event,
@@ -651,6 +651,7 @@ fn catervafication_get(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
         .is_some()
         || new_project(&deps.log).map_err(|e| internal(&e))?.is_some();
     let offered = !begun
+        && !team.is_solo()
         && roles
             .first()
             .is_some_and(|(role, _)| *role == catervas_core::contract::Role::ProductManager);
@@ -874,6 +875,9 @@ fn file_words(
     from_chat_message: Option<u64>,
 ) -> Result<Value, Failure> {
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    if team.is_solo() {
+        return file_for_the_one_agent(deps, &team, text);
+    }
     let request =
         request_from_text(text, placeholder_budget_usd(&team.rules())).map_err(|sentence| {
             let mut refused = Failure::new(REFUSED, sentence.clone());
@@ -901,6 +905,42 @@ fn file_words(
     })?;
     deps.projections.catch_up().map_err(|e| internal(&e))?;
     Ok(json!({ "task_id": filed.id }))
+}
+
+/// `request.file` for one agent alone (ADR 0071): the owner's words are posted in the agent's chat
+/// and filed as a task given to it, as "Send as a task" does, so a given task's rules hold.
+fn file_for_the_one_agent(deps: &ToolDeps, team: &Team, text: &str) -> Result<Value, Failure> {
+    use crate::orchestrator::CommandError;
+
+    let agent = team
+        .agents
+        .iter()
+        .find(|agent| agent.status != AgentStatus::Retired)
+        .ok_or_else(|| internal(&"the team has no agent"))?;
+    let refused = |reason: &str| Failure::new(REFUSED, reason);
+    match crate::orchestrator::human::posted_in_chat(
+        deps,
+        agent.id.as_str(),
+        text.to_string(),
+        true,
+    ) {
+        Ok((_, Some(task))) => {
+            deps.projections.catch_up().map_err(|e| internal(&e))?;
+            Ok(json!({ "task_id": task }))
+        }
+        Ok((_, None)) => Err(internal(&"the request filed no task")),
+        Err(CommandError::Refused { reason }) if reason.starts_with("task_too_short: ") => {
+            let mut failure = refused(TOO_SHORT);
+            failure.data = Some(json!({ "errors": [{
+                "path": "/text", "message": TOO_SHORT, "code": "too_short",
+            }] }));
+            Err(failure)
+        }
+        Err(CommandError::Refused { reason }) => Err(refused(&reason)),
+        Err(CommandError::Invalid { detail }) => Err(refused(&detail)),
+        Err(CommandError::NotFound { what }) => Err(Failure::new(NOT_FOUND, what)),
+        Err(CommandError::Failed { detail }) => Err(internal(&detail)),
+    }
 }
 
 /// A refusal of a raise, coded as `team.save`'s are, so that the page words it without matching
@@ -3419,6 +3459,74 @@ pub(super) mod tests {
                 "line": "Kai has Playwright off, so Catervas gives Kai no work. Turn Playwright \
                          on for Kai on the Team page"
             }])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn one_agent_alone_takes_a_request_to_accepted_with_no_team() {
+        use crate::recorded::fixtures::{
+            implement_finishes_ctv_1, refine_writes_task_for_theo_ctv_1,
+        };
+        use crate::session::SessionPurpose;
+        use catervas_core::contract::TaskStatus;
+        use catervas_core::team::fixtures::an_agent_wire;
+
+        let harness = Harness::new("gates-solo", |wire| {
+            wire["agents"] = json!([an_agent_wire("theo", "software_developer")]);
+            wire["policy"]["solo"] = json!(true);
+        });
+        let filed = call(
+            &harness.daemon,
+            "request.file",
+            &json!({ "text": "The repository has a done.txt at its root, so that a run can be checked for it." }),
+            "requestFileResult",
+        );
+        assert_eq!(filed, json!({ "task_id": "CTV-1" }));
+        assert_eq!(
+            catervas_store::requests::given_to(
+                &harness.project.deps.log,
+                &"CTV-1".parse().expect("a task id")
+            )
+            .expect("the log reads")
+            .as_deref(),
+            Some("theo"),
+            "the request is the one agent's task, given in its chat"
+        );
+
+        let adapter = harness.recorded(vec![
+            refine_writes_task_for_theo_ctv_1(),
+            implement_finishes_ctv_1(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime is made");
+        for _ in 0..12 {
+            if harness.row("CTV-1").status == TaskStatus::Accepted {
+                break;
+            }
+            runtime
+                .block_on(orchestrator.tick())
+                .expect("the tick runs");
+        }
+
+        let row = harness.row("CTV-1");
+        assert_eq!(row.status, TaskStatus::Accepted, "{row:?}");
+        assert_eq!(row.reviewer_id, None, "nobody reviews it");
+        let sessions: Vec<_> = adapter
+            .started()
+            .iter()
+            .map(|spec| (spec.agent_id.clone(), spec.purpose))
+            .collect();
+        assert_eq!(
+            sessions,
+            [
+                ("theo".to_string(), SessionPurpose::Refine),
+                ("theo".to_string(), SessionPurpose::Implement),
+            ],
+            "no Product Manager session, no review session"
         );
     }
 

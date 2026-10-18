@@ -365,7 +365,7 @@ fn catervafy_a_new_project(
     scope: &TickScope,
     team: &Team,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if !delivery_rules_run(scope) {
+    if !delivery_rules_run(scope) || team.is_solo() {
         return Ok(None);
     }
     let tools = &deps.tools;
@@ -457,7 +457,7 @@ fn close_a_delivery(
     scope: &TickScope,
     team: &Team,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if !delivery_rules_run(scope) {
+    if !delivery_rules_run(scope) || team.is_solo() {
         return Ok(None);
     }
     let tools = &deps.tools;
@@ -1924,22 +1924,29 @@ fn ready_given(
     {
         return Ok(None);
     }
-    let Some(assigner) = assigner(team) else {
+    // One agent alone assigns its own task and has no reviewer (ADR 0071).
+    let solo = team.is_solo();
+    let Some(assigner) = (if solo { Some(agent) } else { assigner(team) }) else {
         return Ok(None);
     };
-    let reviewer = team
-        .active_agents()
-        .find(|other| {
-            Role::from(other.role) == contract.reviewer_role
-                && other.id.as_str() != agent.id.as_str()
-        })
-        .or_else(|| {
-            (Role::from(agent.role) == contract.reviewer_role
-                && contract.reviewer_role.reviews_its_own())
-            .then_some(agent)
-        });
-    let Some(reviewer) = reviewer else {
-        return Ok(None);
+    let reviewer = if solo {
+        None
+    } else {
+        let reviewer = team
+            .active_agents()
+            .find(|other| {
+                Role::from(other.role) == contract.reviewer_role
+                    && other.id.as_str() != agent.id.as_str()
+            })
+            .or_else(|| {
+                (Role::from(agent.role) == contract.reviewer_role
+                    && contract.reviewer_role.reviews_its_own())
+                .then_some(agent)
+            });
+        let Some(reviewer) = reviewer else {
+            return Ok(None);
+        };
+        Some(reviewer)
     };
     if !assignable(deps, team, contract, assigner, agent.id.as_str())? {
         return Ok(None);
@@ -1957,7 +1964,7 @@ fn ready_given(
         },
         &TransitionAsk {
             assignee_id: Some(agent.id.to_string()),
-            reviewer_id: Some(reviewer.id.to_string()),
+            reviewer_id: reviewer.map(|reviewer| reviewer.id.to_string()),
             ..TransitionAsk::default()
         },
         team,

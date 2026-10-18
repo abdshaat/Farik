@@ -121,6 +121,9 @@ pub struct TransitionContext {
     /// (F9), set by the runtime only then: that agent may ask for `verifying -> rejected` as the
     /// reviewer does.
     pub design_reviewer: Option<String>,
+    /// Whether the team is one agent alone (ADR 0071): nobody reviews a task, and Catervas verifies
+    /// it alone.
+    pub solo: bool,
 }
 
 /// What the runtime must record along with the move.
@@ -455,7 +458,7 @@ fn governor_may_verify(
 ) -> GateResult {
     if actor == TransitionActor::Governor
         && matches!(gate, GateId::DefinitionOfDone | GateId::RejectionReasons)
-        && !catervas_verifies_alone(&context.contract)
+        && !catervas_verifies_alone(&context.contract, context.solo)
     {
         return Err(vec![
             "Catervas accepts or rejects on its own only a task that changes no code and whose every criterion it runs (ADR 0061)"
@@ -734,6 +737,7 @@ mod tests {
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
             lane_builder: None,
+            solo: false,
         }
     }
 
@@ -813,6 +817,7 @@ mod tests {
             extra_iterations: 0,
             design_plan_returns: 0,
             design_reviewer: None,
+            solo: false,
         }
     }
 

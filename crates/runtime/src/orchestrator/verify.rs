@@ -89,7 +89,7 @@ pub(super) async fn verifying(
         )
         .await;
     }
-    if catervas_verifies_alone(&contract) {
+    if catervas_verifies_alone(&contract, team.is_solo()) {
         return verify_alone(orchestrator, team, row, &contract, waiting).await;
     }
     let Some(reviewer) = active(team, row.reviewer_id.as_deref()) else {

@@ -33,7 +33,7 @@
     },
     "agents": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 1,
       "maxItems": 7,
       "items": {
         "$ref": "#/$defs/templateAgent"
@@ -102,6 +102,10 @@
         },
         "integration": {
           "$ref": "#/$defs/integration"
+        },
+        "solo": {
+          "type": "boolean",
+          "description": "The template is one agent alone (ADR 0071). Left out, it is a team."
         },
         "document_format": {
           "type": "string",

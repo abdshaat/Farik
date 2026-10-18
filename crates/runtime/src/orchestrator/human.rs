@@ -510,6 +510,17 @@ fn post_chat_message(
     text: String,
     as_task: bool,
 ) -> Result<CommandReport, CommandError> {
+    posted_in_chat(tools, agent_id, text, as_task).map(|(report, _)| report)
+}
+
+/// `post_chat_message`, and the id of the task it filed when sent `as_task`. A solo team's
+/// `request.file` files the owner's request this way too (ADR 0071).
+pub(crate) fn posted_in_chat(
+    tools: &ToolDeps,
+    agent_id: &str,
+    text: String,
+    as_task: bool,
+) -> Result<(CommandReport, Option<TaskId>), CommandError> {
     let team = tools.files.read_team().map_err(failed)?;
     let Some(agent) = team
         .agents
@@ -553,10 +564,13 @@ fn post_chat_message(
         ChatError::Store(error) => failed(error),
     })?;
     let Some(wire) = contract else {
-        return Ok(CommandReport {
-            said: format!("sent to {}", agent.display_name.as_str()),
-            events: vec![seq],
-        });
+        return Ok((
+            CommandReport {
+                said: format!("sent to {}", agent.display_name.as_str()),
+                events: vec![seq],
+            },
+            None,
+        ));
     };
     let task = file_given_task(
         &tools.files,
@@ -582,14 +596,17 @@ fn post_chat_message(
             .iter()
             .map(|event| event.envelope.seq),
     );
-    Ok(CommandReport {
-        said: format!(
-            "given to {} as {}",
-            agent.display_name.as_str(),
-            task.id.as_str()
-        ),
-        events,
-    })
+    Ok((
+        CommandReport {
+            said: format!(
+                "given to {} as {}",
+                agent.display_name.as_str(),
+                task.id.as_str()
+            ),
+            events,
+        },
+        Some(task.id),
+    ))
 }
 
 /// The contract of the task the owner gives `agent` in its chat (ADR 0063): the owner's words as
@@ -2330,6 +2347,15 @@ fn forget_connector_keys(tools: &ToolDeps, daemon: &DaemonState, team: &Team, ag
 /// last active agent of a role the team cannot work without (D18). Section 10's foolproof
 /// configuration: the refusal says what to do.
 fn leaves_a_gap(team: &Team, name: &str, role: Role, status: AgentStatus) -> Option<String> {
+    // One agent alone may be paused, and may not leave: the project has no one else (ADR 0071).
+    if team.is_solo() {
+        return (status == AgentStatus::Retired).then(|| {
+            format!(
+                "last_of_role: {name} is working alone; set up a team before {name} leaves, or \
+                 pause {name} instead."
+            )
+        });
+    }
     if status == AgentStatus::Active || team.has_active(role) {
         return None;
     }
@@ -4716,6 +4742,23 @@ mod tests {
         assert_eq!(
             super::leaves_a_gap(&team, "Pm", Role::ProductManager, AgentStatus::Paused).as_deref(),
             Some("last_of_role: Pm is your only Product Manager; add another before Pm stops.")
+        );
+        // One agent alone may pause and may not retire (ADR 0071).
+        wire["agents"] = json!([an_agent_wire("theo", "software_developer")]);
+        wire["policy"]["solo"] = json!(true);
+        let alone = validate_team(&wire).expect("one agent alone");
+        assert_eq!(
+            super::leaves_a_gap(&alone, "Theo", Role::SoftwareDeveloper, AgentStatus::Paused),
+            None
+        );
+        assert!(
+            super::leaves_a_gap(
+                &alone,
+                "Theo",
+                Role::SoftwareDeveloper,
+                AgentStatus::Retired
+            )
+            .is_some_and(|reason| reason.starts_with("last_of_role: "))
         );
     }
 
