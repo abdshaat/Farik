@@ -34,6 +34,8 @@ export type HistoryEvent = {
 		costUsd?: number;
 		detail?: string;
 		reason?: string;
+		putBack?: string[];
+		removed?: string[];
 	};
 };
 
