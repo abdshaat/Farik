@@ -108,7 +108,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   $12.80 in a day: $7.20 of $20.00 is left." and not "Today the team has spent". Fails first on the
   old line.
 
-- [ ] `fix(web): setup's spending example no longer reads as the team's spend`
+- [x] `fix(web): setup's spending example no longer reads as the team's spend`
 
 ### Task 24: Settings sets the integration branch
 
