@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { Board } from "../pages/Board.tsx";
 import { Chats } from "../pages/Chats.tsx";
+import { ChatsAlias } from "../pages/ChatsAlias.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
@@ -80,6 +81,8 @@ export function App() {
 				<Route path="/board" element={<Board />} />
 				<Route path="/channel" element={<Chats />} />
 				<Route path="/channel/:id" element={<Chats />} />
+				<Route path="/chats" element={<Navigate to="/channel" replace />} />
+				<Route path="/chats/:id" element={<ChatsAlias />} />
 				<Route path="/files" element={<Files />} />
 				<Route path="/files/*" element={<Files />} />
 				<Route path="/costs" element={<Costs />} />

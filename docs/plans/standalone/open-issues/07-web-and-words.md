@@ -138,7 +138,7 @@ Tests:
 - `opens_the_chats_at_chats` — rendering the app's routes at `/chats` shows the chats page (as
   `/channel` does), and at `/chats/theo` Theo's one-to-one chat; neither shows `en.noPage`.
 
-- [ ] `fix(web): /chats opens the chats`
+- [x] `fix(web): /chats opens the chats`
 
 ### Task 26: the stale words
 
