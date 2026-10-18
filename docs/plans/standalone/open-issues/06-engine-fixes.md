@@ -116,7 +116,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   `a_project_whose_toolchain_it_does_not_know_gets_no_criteria` keeps a project with neither a
   lockfile nor a `package.json`.
 
-- [ ] `fix(store): a project with a package.json and no lockfile is an npm project`
+- [x] `fix(store): a project with a package.json and no lockfile is an npm project`
 
 ### Task 18: a delivery report is titled by its name
 
