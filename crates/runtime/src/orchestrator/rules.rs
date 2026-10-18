@@ -1607,11 +1607,16 @@ fn resume(
     };
     let history = deps.tools.log.read(&EventQuery {
         task_id: Some(task_id.clone()),
-        kinds: vec![EventKind::TaskTransitioned, EventKind::NoteWritten],
+        kinds: vec![
+            EventKind::TaskTransitioned,
+            EventKind::NoteWritten,
+            EventKind::PullRequestConflicted,
+        ],
         ..EventQuery::default()
     })?;
     let mut last_note = None;
     let mut rejection = None;
+    let mut conflicts = None;
     for event in &history {
         match &event.body {
             EventBody::TaskTransitioned(body) if body.to.to_string() == "rejected" => {
@@ -1628,6 +1633,12 @@ fn resume(
                     rejection = None;
                 }
             }
+            EventBody::TaskTransitioned(body) if body.to.to_string() == "verifying" => {
+                conflicts = None;
+            }
+            EventBody::PullRequestConflicted(body) => {
+                conflicts = Some((body.into.clone(), body.paths.clone()));
+            }
             EventBody::NoteWritten(body) => {
                 last_note = Some((body.kind.to_string(), body.text.clone()));
             }
@@ -1638,6 +1649,7 @@ fn resume(
         last_commit,
         last_note,
         rejection,
+        conflicts,
         posts: posts_heard_by(deps, agent)?,
     }))
 }

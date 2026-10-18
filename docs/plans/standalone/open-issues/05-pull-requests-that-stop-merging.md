@@ -208,7 +208,7 @@ Tests:
   `commits_through_the_tool_on_the_tasks_worktree`) — a file holding `<<<<<<< HEAD` is refused
   `conflict_markers` and no commit is made; once the markers are gone the same call commits.
 
-- [ ] `feat(runtime): the assignee resolves a pull request's conflicts and commits no markers`
+- [x] `feat(runtime): the assignee resolves a pull request's conflicts and commits no markers`
 
 ### Task 16: a delivery counts a task once
 

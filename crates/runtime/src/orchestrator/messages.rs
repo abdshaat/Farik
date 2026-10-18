@@ -109,6 +109,10 @@ pub(super) struct Resume {
     /// What the agent hears of its social posts that settled since its previous implement session
     /// started, one entry each (`posts_heard`).
     pub(super) posts: Vec<String>,
+    /// The integration branch and the files a merge of it into the branch left conflicted, when
+    /// the task's pull request stopped merging and no move into `verifying` has followed
+    /// (ADR 0069).
+    pub(super) conflicts: Option<(String, Vec<String>)>,
 }
 
 /// What `agent` hears of the posts of `posts` that settled after the event numbered `since`, the
@@ -1042,6 +1046,17 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
         );
         message = format!("{message}\n\nResuming: {commit}; {note}");
     }
+    if let Some((into, paths)) = &resume.conflicts {
+        message = format!(
+            "{message}\n\nYour pull request no longer merges into {into}: other work changed the \
+             same files. Catervas merged {into} into your branch in this worktree and left the \
+             conflicts in: {}\nResolve each one, keeping what both sides meant; run the checks; \
+             commit with `catervas_git_commit`, which finishes the merge; then ask for \
+             `verifying`. If a conflicted file is outside your allowed paths, block the task with \
+             `catervas_declare_blocked`.",
+            untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
+        );
+    }
     // What happened to the agent's posts comes last, after the rest.
     for heard in &resume.posts {
         message = format!("{message}\n\n{heard}");
@@ -1629,7 +1644,40 @@ mod tests {
             last_note: note.map(|text| ("progress".to_string(), text.to_string())),
             rejection: None,
             posts: Vec::new(),
+            conflicts: None,
         }
+    }
+
+    #[test]
+    fn tells_the_assignee_which_files_conflict() {
+        let conflicted = Resume {
+            conflicts: Some((
+                "catervas/next".to_string(),
+                vec!["components/NoteInput.tsx".to_string()],
+            )),
+            ..resume(false, None)
+        };
+
+        let message = implement_message(&contract(), &conflicted);
+
+        assert!(
+            message.contains("no longer merges into catervas/next"),
+            "{message}"
+        );
+        assert!(message.contains("components/NoteInput.tsx"), "{message}");
+        assert!(message.contains("conflicts"), "{message}");
+        assert!(message.contains("catervas_declare_blocked"), "{message}");
+        assert_eq!(
+            implement_message(&contract(), &resume(false, None)),
+            implement_message(
+                &contract(),
+                &Resume {
+                    conflicts: None,
+                    ..resume(false, None)
+                }
+            )
+        );
+        assert!(!implement_message(&contract(), &resume(false, None)).contains("no longer merges"));
     }
 
     #[test]
