@@ -127,7 +127,7 @@ Tests:
   `en.rulesBranch`, `en.rulesDocuments` (line 224's expectation); with `membersPresent: true` the
   field is absent. Fails first: no field.
 
-- [ ] `feat(web): settings sets the branch finished work goes into`
+- [x] `feat(web): settings sets the branch finished work goes into`
 
 ### Task 25: `/chats` opens the chats
 

@@ -112,6 +112,7 @@ pub(super) fn query(
                     .map(|(agent, server)| json!({ "agent": agent, "server": server }))
                     .collect::<Vec<_>>()
             );
+            answer["members_present"] = json!(members_present(deps)?);
             answer["preview_env_present"] =
                 json!(crate::preview::PreviewEnv::read(deps.files.root()).is_some());
             answer["requested_connections"] = json!(
@@ -1661,6 +1662,8 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["agents", _, "display_name"] => "name",
         ["agents", _, "revokes"] => "keeps_read",
         ["agents", _, "status"] if message == FROM_THE_CARD => "status_from_card",
+        ["policy", "integration_branch"] if message.starts_with(BRANCH_NAME) => BRANCH_NAME,
+        ["policy", "integration_branch"] if message.starts_with(BRANCH_MISSING) => BRANCH_MISSING,
         _ => "invalid",
     }
 }
@@ -1705,11 +1708,69 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
             }
         }
     }
+    errors.extend(integration_branch_errors(deps, &before, &after)?);
     if errors.is_empty() {
         Ok((before, after))
     } else {
         Err(Refused::Errors(errors))
     }
+}
+
+/// Words the integration branch's two refusals start with, which `code_of` reads.
+const BRANCH_NAME: &str = "integration_branch_name";
+const BRANCH_MISSING: &str = "integration_branch_missing";
+
+/// The refusals of a new integration branch (ADR 0069): a name git would not allow, and a name no
+/// local branch of the project has. A branch already saved is not asked again, and a project of
+/// several repositories keeps each member's branch in `repos.yaml`, so it is not asked there.
+fn integration_branch_errors(
+    deps: &ToolDeps,
+    before: &Team,
+    after: &Team,
+) -> Result<Vec<ValidationError>, Refused> {
+    let Some(branch) = after.policy.integration_branch.as_ref().map(|b| b.as_str()) else {
+        return Ok(Vec::new());
+    };
+    if before
+        .policy
+        .integration_branch
+        .as_ref()
+        .map(|b| b.as_str())
+        == Some(branch)
+        || members_present(deps).map_err(Refused::Failed)?
+    {
+        return Ok(Vec::new());
+    }
+    let said = |message: &str| {
+        vec![ValidationError {
+            path: "/policy/integration_branch".to_string(),
+            message: message.to_string(),
+        }]
+    };
+    if matches!(
+        deps.git.check_branch_name(branch),
+        Err(catervas_store::GitError::CommandFailed { .. })
+    ) {
+        return Ok(said(&format!(
+            "{BRANCH_NAME}: git does not allow {branch} as a branch name"
+        )));
+    }
+    match deps.git.has_local_branch(branch) {
+        Ok(true) => Ok(Vec::new()),
+        Ok(false) => Ok(said(&format!(
+            "{BRANCH_MISSING}: the project has no branch {branch}"
+        ))),
+        Err(error) => Err(Refused::Failed(internal(&error))),
+    }
+}
+
+/// Whether the project folder lists member repositories (ADR 0057).
+fn members_present(deps: &ToolDeps) -> Result<bool, Failure> {
+    Ok(deps
+        .files
+        .read_repos()
+        .map_err(|e| internal(&e))?
+        .is_some_and(|repos| !repos.repos.is_empty()))
 }
 
 /// `after`'s skills as `before` holds them, whatever the browser sent: only `skill_save`,
@@ -3987,6 +4048,55 @@ pub(super) mod tests {
             checked["agents"][4]["tiers"],
             json!(["read", "write_workspace", "network", "git_local"])
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_integration_branch_the_project_does_not_have() {
+        let harness = driven("team-integration-branch");
+        let before = team_file(&harness);
+        let check = |branch: &str| {
+            let mut team = before.clone();
+            team["policy"]["integration_branch"] = json!(branch);
+            query(
+                &harness.daemon,
+                "team.validate",
+                &json!({ "team": team }),
+                "teamValidateResult",
+            )
+        };
+        let codes = |checked: &Value| -> Vec<String> {
+            checked["errors"]
+                .as_array()
+                .expect("errors")
+                .iter()
+                .map(|error| {
+                    format!(
+                        "{} {}",
+                        error["path"].as_str().unwrap_or_default(),
+                        error["code"].as_str().unwrap_or_default()
+                    )
+                })
+                .collect()
+        };
+
+        assert_eq!(
+            codes(&check("catervas/next")),
+            ["/policy/integration_branch integration_branch_missing"]
+        );
+        assert_eq!(
+            codes(&check("bad..name")),
+            ["/policy/integration_branch integration_branch_name"]
+        );
+        harness.project.repo.git(&["branch", "catervas/next"]);
+        let checked = check("catervas/next");
+        assert_eq!(codes(&checked), Vec::<String>::new());
+        assert_eq!(
+            checked["effects"],
+            json!(["Finished work goes into catervas/next."])
+        );
+        let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        assert_eq!(got["members_present"], json!(false));
     }
 
     #[test]

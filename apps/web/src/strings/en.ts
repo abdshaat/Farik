@@ -17,7 +17,7 @@ export const en = {
 	sectionGeneralSummary: "Theme and language",
 	sectionAllowedActionsSummary: "What agents may do",
 	sectionSpendingSummary: "The daily limit",
-	sectionWorkSummary: "How documents are written",
+	sectionWorkSummary: "How documents are written, and where finished work goes",
 	sectionYourAppSummary: "How to open your app",
 	sectionSavedTeamsSummary: "Your saved teams",
 	sectionComputerSummary: "Folder and connection",
@@ -790,6 +790,13 @@ export const en = {
 	rulesFinish: "How finished work is added",
 	rulesFinishPullRequest:
 		"Finished work opens a pull request for you to merge.",
+	rulesBranch: "Where finished work goes",
+	rulesBranchHint:
+		"The branch pull requests go into. Leave it empty for the repository’s main branch.",
+	rulesBranchLabel: "Branch",
+	refuseBranchName: "Git does not allow that as a branch name.",
+	refuseBranchMissing:
+		"This project has no branch of that name yet. Make it, then save.",
 	accountConfirm:
 		"Disconnecting pauses your team until you start Catervas again and connect an account.",
 	accountDisconnectYes: "Disconnect and pause the team",

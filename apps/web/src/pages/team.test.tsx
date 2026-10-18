@@ -962,6 +962,53 @@ describe("team page", () => {
 		expect(within(finish).queryByRole("radio")).toBeNull();
 	});
 
+	it("sets_the_integration_branch", async () => {
+		const { s, part } = await settings(TEAM, "/settings/work");
+		const branch = part(en.rulesBranch);
+		const field = within(branch).getByLabelText(en.rulesBranchLabel);
+		fireEvent.change(field, { target: { value: "catervas/next" } });
+		await validated(s, ["Finished work goes into catervas/next."]);
+		const save = () =>
+			within(branch).getByRole("button", {
+				name: en.agentSave,
+			}) as HTMLButtonElement;
+		await waitFor(() => expect(save().disabled).toBe(false));
+		fireEvent.click(save());
+		expect((await saved(s)).policy).toMatchObject({
+			integration_branch: "catervas/next",
+		});
+		cleanup();
+
+		// Emptied, the key is left out and finished work goes to the main branch again.
+		const named = {
+			...TEAM,
+			policy: { ...TEAM.policy, integration_branch: "catervas/next" },
+		};
+		const again = await settings(named, "/settings/work");
+		const second = again.part(en.rulesBranch);
+		const input = within(second).getByLabelText(
+			en.rulesBranchLabel,
+		) as HTMLInputElement;
+		expect(input.value).toBe("catervas/next");
+		fireEvent.change(input, { target: { value: "" } });
+		await validated(again.s, []);
+		const clear = within(second).getByRole("button", {
+			name: en.agentSave,
+		}) as HTMLButtonElement;
+		await waitFor(() => expect(clear.disabled).toBe(false));
+		fireEvent.click(clear);
+		expect("integration_branch" in (await saved(again.s)).policy).toBe(false);
+		cleanup();
+
+		// A project of several repositories keeps each one's branch in its own file.
+		const members = await settings(TEAM, "/settings/work", {
+			members_present: true,
+		});
+		expect(
+			within(members.main).queryByRole("region", { name: en.rulesBranch }),
+		).toBeNull();
+	});
+
 	it("switches_the_document_format", async () => {
 		// TEAM has no document_format: a team without the key writes HTML.
 		expect("document_format" in TEAM.policy).toBe(false);

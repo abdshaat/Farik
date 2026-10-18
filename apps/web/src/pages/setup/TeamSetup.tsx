@@ -48,6 +48,8 @@ export type Team = {
 		permissions?: { runCommands?: boolean; push?: boolean };
 		/** The format new documents are written in; absent means HTML. */
 		documentFormat?: "html" | "markdown";
+		/** The branch finished work goes into; absent means the repository's main branch. */
+		integrationBranch?: string;
 		[key: string]: unknown;
 	};
 	rules: {

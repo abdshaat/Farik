@@ -45,6 +45,12 @@ pub fn describe_change(old: &Team, new: &Team) -> Vec<String> {
             .to_string(),
         );
     }
+    if old.policy.integration_branch != new.policy.integration_branch {
+        said.push(match &new.policy.integration_branch {
+            Some(branch) => format!("Finished work goes into {}.", branch.as_str()),
+            None => "Finished work goes into the repository's main branch.".to_string(),
+        });
+    }
     let (was, is) = (old.permissions(), permissions);
     if was.run_commands != is.run_commands {
         if is.run_commands {

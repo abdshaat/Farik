@@ -38,7 +38,10 @@ type Part = {
  * each page draws its own parts with `key(name)`, so saving one starts only that one again.
  */
 export function useRuleParts() {
-	const { data, again } = useQuery<{ team: Team }>("team.get", {});
+	const { data, again } = useQuery<{ team: Team; membersPresent?: boolean }>(
+		"team.get",
+		{},
+	);
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
 		"team.validate",
@@ -62,7 +65,12 @@ export function useRuleParts() {
 		name === "spend"
 			? `spend-${rounds.spend ?? 0}-${data?.team.budgets.dailyUsd}`
 			: `${name}-${rounds[name] ?? 0}`;
-	return { ready: Boolean(data), part, key };
+	return {
+		ready: Boolean(data),
+		part,
+		key,
+		membersPresent: Boolean(data?.membersPresent),
+	};
 }
 
 /** A rules page's heading, with the note that a change starts with each agent's next work. */
@@ -223,6 +231,38 @@ export function Finish() {
 	return (
 		<Part id="rules-finish" title={t("rulesFinish")}>
 			<p>{t("rulesFinishPullRequest")}</p>
+		</Part>
+	);
+}
+
+/** The branch finished work goes into; empty is the repository's main branch (ADR 0069). */
+export function IntegrationBranch(part: Part) {
+	const { saved } = part;
+	const was = saved.policy.integrationBranch ?? "";
+	const [mine, setMine] = useState<string>();
+	const now = mine ?? was;
+	const { integrationBranch: _, ...rest } = saved.policy;
+	const next =
+		now.trim() === was
+			? saved
+			: {
+					...saved,
+					policy: {
+						...rest,
+						...(now.trim() !== "" && { integrationBranch: now.trim() }),
+					},
+				};
+	const { foot } = useChange(part, next);
+	return (
+		<Part id="rules-branch" title={t("rulesBranch")}>
+			<p className={styles.muted}>{t("rulesBranchHint")}</p>
+			<TextField
+				id="integration-branch"
+				label={t("rulesBranchLabel")}
+				value={now}
+				onChange={setMine}
+			/>
+			{foot}
 		</Part>
 	);
 }

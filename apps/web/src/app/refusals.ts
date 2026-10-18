@@ -14,6 +14,8 @@ const WORDS: Record<string, keyof typeof en> = {
 	name: "refuseName",
 	keeps_read: "refuseKeepsRead",
 	status_from_card: "refuseStatusFromCard",
+	integration_branch_name: "refuseBranchName",
+	integration_branch_missing: "refuseBranchMissing",
 	last_of_role: "refuseLastOfRole",
 	too_short: "requestTooShort",
 	template_exists: "templateExists",
