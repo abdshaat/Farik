@@ -1343,9 +1343,20 @@ pub(crate) struct CountingSandboxFactory {
     read: Mutex<BTreeMap<String, Vec<Reads>>>,
     based: Mutex<BTreeMap<String, u32>>,
     removed: Mutex<BTreeMap<String, u32>>,
+    checked: Mutex<BTreeMap<String, Vec<PathBuf>>>,
 }
 
 impl CountingSandboxFactory {
+    /// For each sandbox `create_checking` made for `task`, in order, the git store it was given.
+    pub(crate) fn stores(&self, task: &str) -> Vec<PathBuf> {
+        self.checked
+            .lock()
+            .expect("no test panics holding it")
+            .get(task)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// How many times `create_base` was called for `task`.
     pub(crate) fn based(&self, task: &str) -> u32 {
         self.based
@@ -1414,6 +1425,24 @@ impl SandboxFactory for CountingSandboxFactory {
             .or_default()
             .push(reads.to_vec());
         HostSandboxFactory.create(project_id, task_id, worktree, network, reads)
+    }
+
+    fn create_checking(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+        reads: &[(String, PathBuf)],
+        git_store: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        self.checked
+            .lock()
+            .expect("no test panics holding it")
+            .entry(task_id.as_str().to_string())
+            .or_default()
+            .push(git_store.to_path_buf());
+        self.create(project_id, task_id, worktree, network, reads)
     }
 
     fn create_base(

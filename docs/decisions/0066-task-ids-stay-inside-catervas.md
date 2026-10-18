@@ -2,6 +2,7 @@
 
 Date: 2026-10-17
 Status: accepted (the founder, 2026-10-17, quoted below; the rules decided by the planner the same day)
+Amended 2026-10-17 by ADR 0069: a delivery's report is titled by its name ("Docs: Report for delivery <n>"), and a pull request's body is two short sections, what changed and how it was verified, composed by Catervas (decisions 10 and 11).
 
 The founder: "make the task ID 'CTV-num' visible only internally, any PR open to github must be
 named things like Docs, Fix, Feat, etc." Asked where, the founder answered: everywhere on GitHub.

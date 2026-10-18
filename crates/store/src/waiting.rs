@@ -416,12 +416,16 @@ pub fn waiting(
             kinds: vec![EventKind::TaskTransitioned],
             ..EventQuery::default()
         })?;
-        let blocker =
-            last_move_into(&moves, TaskStatus::Blocked).and_then(|event| match &event.body {
-                EventBody::TaskTransitioned(body) => body.blocker.as_ref(),
-                _ => None,
-            });
-        let agent = row.assignee_id.as_deref();
+        let blocking = last_move_into(&moves, TaskStatus::Blocked);
+        let blocker = blocking.and_then(|event| match &event.body {
+            EventBody::TaskTransitioned(body) => body.blocker.as_ref(),
+            _ => None,
+        });
+        // The agent that blocked it is the one stuck: the reviewer or the planner as well as the
+        // assignee (ADR 0069).
+        let agent = blocking
+            .and_then(|event| event.envelope.ids.agent_id.as_deref())
+            .or(row.assignee_id.as_deref());
         let line = format!(
             "{} is stuck: {}",
             name_of(team, agent.unwrap_or("the team")),
@@ -1102,6 +1106,31 @@ mod tests {
         let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
             .expect("the store reads");
         assert_eq!(listed[0].line, "Linus finished it and Grace reviewed it");
+    }
+
+    #[test]
+    fn names_the_agent_that_blocked_the_task() {
+        let board = Board::new("waiting-blocker");
+        let people = (Some("linus"), Some("grace"));
+        board.file("CTV-1", "Reviewed work", |_| {});
+        board.moved(at(9, 1), "CTV-1", ("draft", "verifying"), "linus", people);
+        board.put(
+            at(9, 2),
+            Some("CTV-1"),
+            Some("grace"),
+            "task.transitioned",
+            json!({
+                "from": "verifying", "to": "blocked", "actor": "reviewer",
+                "requested_by": "grace", "gate": "blocker_written",
+                "effects": ["stamp_blocked_at"], "iteration": 0, "assignee": "linus",
+                "reviewer": "grace",
+                "blocker": { "description": "the checks cannot run git", "needed": "git in the checks" }
+            }),
+        );
+        let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
+            .expect("the store reads");
+        assert_eq!(listed[0].line, "Grace is stuck: the checks cannot run git");
+        assert_eq!(listed[0].agent_id.as_deref(), Some("grace"));
     }
 
     #[test]

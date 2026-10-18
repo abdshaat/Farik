@@ -112,6 +112,7 @@ pub(super) fn query(
                     .map(|(agent, server)| json!({ "agent": agent, "server": server }))
                     .collect::<Vec<_>>()
             );
+            answer["members_present"] = json!(members_present(deps)?);
             answer["preview_env_present"] =
                 json!(crate::preview::PreviewEnv::read(deps.files.root()).is_some());
             answer["requested_connections"] = json!(
@@ -1400,6 +1401,36 @@ pub(super) fn suggested() -> Result<Vec<Agent>, Failure> {
         .collect()
 }
 
+/// An agent the saved team does not have yet gets its role's shipped persona when it came with
+/// none, and a UI/UX Designer the built-in browser when it came with no connectors, as the
+/// suggested team's agents have them (ADR 0069). An agent already saved is never touched, so a
+/// persona the owner cleared stays cleared.
+fn with_role_defaults(before: &Team, wire: &mut Value) -> Result<(), Failure> {
+    let Some(agents) = wire.get_mut("agents").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for agent in agents {
+        let id = agent["id"].as_str().unwrap_or_default();
+        if before.agents.iter().any(|saved| saved.id.as_str() == id) {
+            continue;
+        }
+        let Ok(role) = serde_json::from_value::<Role>(agent["role"].clone()) else {
+            continue;
+        };
+        if agent["persona"]
+            .as_str()
+            .is_none_or(|text| text.trim().is_empty())
+        {
+            let shipped = load_role(role).map_err(|e| internal(&e))?;
+            agent["persona"] = json!(shipped.persona);
+        }
+        if role == Role::UiUxDesigner && agent.get("mcp_servers").is_none() {
+            agent["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+        }
+    }
+    Ok(())
+}
+
 /// `models.list`: the newest model of each family the prices name.
 fn models(deps: &ToolDeps) -> Result<Value, Failure> {
     let models: Vec<Value> = newest(deps)?
@@ -1631,6 +1662,8 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["agents", _, "display_name"] => "name",
         ["agents", _, "revokes"] => "keeps_read",
         ["agents", _, "status"] if message == FROM_THE_CARD => "status_from_card",
+        ["policy", "integration_branch"] if message.starts_with(BRANCH_NAME) => BRANCH_NAME,
+        ["policy", "integration_branch"] if message.starts_with(BRANCH_MISSING) => BRANCH_MISSING,
         _ => "invalid",
     }
 }
@@ -1640,11 +1673,13 @@ fn code_of(error: &ValidationError) -> &'static str {
 /// seen work from is retired rather than removed, except in `setup`, whose starter team is
 /// replaced.
 fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), Refused> {
-    let mut after = validate_team(wire).map_err(Refused::Errors)?;
     let before = deps
         .files
         .read_team()
         .map_err(|e| Refused::Failed(internal(&e)))?;
+    let mut wire = wire.clone();
+    with_role_defaults(&before, &mut wire).map_err(Refused::Failed)?;
+    let mut after = validate_team(&wire).map_err(Refused::Errors)?;
     keep_pins(&before, &mut after);
     let mut errors = Vec::new();
     for (index, agent) in after.agents.iter().enumerate() {
@@ -1673,11 +1708,69 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
             }
         }
     }
+    errors.extend(integration_branch_errors(deps, &before, &after)?);
     if errors.is_empty() {
         Ok((before, after))
     } else {
         Err(Refused::Errors(errors))
     }
+}
+
+/// Words the integration branch's two refusals start with, which `code_of` reads.
+const BRANCH_NAME: &str = "integration_branch_name";
+const BRANCH_MISSING: &str = "integration_branch_missing";
+
+/// The refusals of a new integration branch (ADR 0069): a name git would not allow, and a name no
+/// local branch of the project has. A branch already saved is not asked again, and a project of
+/// several repositories keeps each member's branch in `repos.yaml`, so it is not asked there.
+fn integration_branch_errors(
+    deps: &ToolDeps,
+    before: &Team,
+    after: &Team,
+) -> Result<Vec<ValidationError>, Refused> {
+    let Some(branch) = after.policy.integration_branch.as_ref().map(|b| b.as_str()) else {
+        return Ok(Vec::new());
+    };
+    if before
+        .policy
+        .integration_branch
+        .as_ref()
+        .map(|b| b.as_str())
+        == Some(branch)
+        || members_present(deps).map_err(Refused::Failed)?
+    {
+        return Ok(Vec::new());
+    }
+    let said = |message: &str| {
+        vec![ValidationError {
+            path: "/policy/integration_branch".to_string(),
+            message: message.to_string(),
+        }]
+    };
+    if matches!(
+        deps.git.check_branch_name(branch),
+        Err(catervas_store::GitError::CommandFailed { .. })
+    ) {
+        return Ok(said(&format!(
+            "{BRANCH_NAME}: git does not allow {branch} as a branch name"
+        )));
+    }
+    match deps.git.has_local_branch(branch) {
+        Ok(true) => Ok(Vec::new()),
+        Ok(false) => Ok(said(&format!(
+            "{BRANCH_MISSING}: the project has no branch {branch}"
+        ))),
+        Err(error) => Err(Refused::Failed(internal(&error))),
+    }
+}
+
+/// Whether the project folder lists member repositories (ADR 0057).
+fn members_present(deps: &ToolDeps) -> Result<bool, Failure> {
+    Ok(deps
+        .files
+        .read_repos()
+        .map_err(|e| internal(&e))?
+        .is_some_and(|repos| !repos.repos.is_empty()))
 }
 
 /// `after`'s skills as `before` holds them, whatever the browser sent: only `skill_save`,
@@ -2610,6 +2703,63 @@ pub(super) mod tests {
             crate::skills::confirm_skill(&harness.project.deps, &level, "api-style", &hash, false)
                 .expect_err("refused at confirm");
         assert_eq!(confirmed.code(), "skill_file_not_text");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn gives_an_added_agent_its_roles_persona_and_a_designer_its_browser() {
+        let harness = Harness::new("rpc-role-defaults", |_| {});
+        let mut sent = team_file(&harness);
+        let template = sent["agents"][1].clone();
+        // An agent already saved whose persona the save leaves out stays without one.
+        sent["agents"][1]
+            .as_object_mut()
+            .expect("an agent")
+            .remove("persona");
+        for (id, role) in [("noor", "software_developer"), ("iris", "ui_ux_designer")] {
+            let mut agent = template.clone();
+            let fields = agent.as_object_mut().expect("an agent");
+            fields.remove("persona");
+            fields.remove("mcp_servers");
+            fields.remove("skills");
+            agent["id"] = json!(id);
+            agent["display_name"] = json!(id);
+            agent["role"] = json!(role);
+            sent["agents"].as_array_mut().expect("agents").push(agent);
+        }
+
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": sent }),
+            "emptyResult",
+        );
+
+        let saved = team_file(&harness);
+        let agent = |id: &str| {
+            saved["agents"]
+                .as_array()
+                .expect("agents")
+                .iter()
+                .find(|agent| agent["id"] == id)
+                .unwrap_or_else(|| panic!("{id} is saved"))
+                .clone()
+        };
+        let shipped = |role| super::load_role(role).expect("the role ships").persona;
+        assert_eq!(
+            agent("noor")["persona"],
+            json!(shipped(super::Role::SoftwareDeveloper))
+        );
+        assert_eq!(
+            agent("iris")["persona"],
+            json!(shipped(super::Role::UiUxDesigner))
+        );
+        assert_eq!(
+            agent("iris")["mcp_servers"],
+            json!([{ "name": "playwright", "source": "builtin" }])
+        );
+        assert_eq!(agent("noor").get("mcp_servers"), None);
+        assert_eq!(agent("dev-a").get("persona"), None, "a saved agent is left");
     }
 
     #[test]
@@ -3898,6 +4048,55 @@ pub(super) mod tests {
             checked["agents"][4]["tiers"],
             json!(["read", "write_workspace", "network", "git_local"])
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_integration_branch_the_project_does_not_have() {
+        let harness = driven("team-integration-branch");
+        let before = team_file(&harness);
+        let check = |branch: &str| {
+            let mut team = before.clone();
+            team["policy"]["integration_branch"] = json!(branch);
+            query(
+                &harness.daemon,
+                "team.validate",
+                &json!({ "team": team }),
+                "teamValidateResult",
+            )
+        };
+        let codes = |checked: &Value| -> Vec<String> {
+            checked["errors"]
+                .as_array()
+                .expect("errors")
+                .iter()
+                .map(|error| {
+                    format!(
+                        "{} {}",
+                        error["path"].as_str().unwrap_or_default(),
+                        error["code"].as_str().unwrap_or_default()
+                    )
+                })
+                .collect()
+        };
+
+        assert_eq!(
+            codes(&check("catervas/next")),
+            ["/policy/integration_branch integration_branch_missing"]
+        );
+        assert_eq!(
+            codes(&check("bad..name")),
+            ["/policy/integration_branch integration_branch_name"]
+        );
+        harness.project.repo.git(&["branch", "catervas/next"]);
+        let checked = check("catervas/next");
+        assert_eq!(codes(&checked), Vec::<String>::new());
+        assert_eq!(
+            checked["effects"],
+            json!(["Finished work goes into catervas/next."])
+        );
+        let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        assert_eq!(got["members_present"], json!(false));
     }
 
     #[test]

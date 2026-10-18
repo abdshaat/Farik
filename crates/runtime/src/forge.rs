@@ -43,7 +43,10 @@ pub struct Issue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PullRequestState {
     /// Neither merged nor closed.
-    Open,
+    Open {
+        /// Whether it would merge now, as the forge last worked it out.
+        mergeable: Mergeable,
+    },
     /// Merged, leaving this commit on its base branch.
     Merged {
         /// The merge commit.
@@ -51,6 +54,17 @@ pub enum PullRequestState {
     },
     /// Closed without merging.
     Closed,
+}
+
+/// Whether an open pull request merges into its base, as the forge says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mergeable {
+    /// It merges.
+    Mergeable,
+    /// Its base changed the same lines: it does not merge.
+    Conflicting,
+    /// The forge has not worked it out yet (it does after a push), or said nothing.
+    Unknown,
 }
 
 /// Why the forge could not answer.
@@ -79,12 +93,14 @@ impl fmt::Display for ForgeError {
 
 impl std::error::Error for ForgeError {}
 
-/// What `gh pr view --json state,mergeCommit` answers.
+/// What `gh pr view --json state,mergeCommit,mergeable` answers.
 #[derive(Deserialize)]
 struct Viewed {
     state: String,
     #[serde(rename = "mergeCommit")]
     merge_commit: Option<MergeCommit>,
+    #[serde(default)]
+    mergeable: Option<String>,
 }
 
 /// A merged pull request's commit, `null` until the merge.
@@ -166,11 +182,19 @@ impl Forge {
     ///
     /// As `open_pull_request`.
     pub fn pull_request_state(&self, url: &str) -> Result<PullRequestState, ForgeError> {
-        let viewed = self.run(&["pr", "view", url, "--json", "state,mergeCommit"], None)?;
+        let viewed = self.run(
+            &["pr", "view", url, "--json", "state,mergeCommit,mergeable"],
+            None,
+        )?;
         let read: Viewed =
             serde_json::from_str(&viewed).map_err(|_| unreadable("gh pr view", &viewed))?;
+        let mergeable = match read.mergeable.as_deref() {
+            Some("MERGEABLE") => Mergeable::Mergeable,
+            Some("CONFLICTING") => Mergeable::Conflicting,
+            _ => Mergeable::Unknown,
+        };
         match (read.state.as_str(), read.merge_commit) {
-            ("OPEN", _) => Ok(PullRequestState::Open),
+            ("OPEN", _) => Ok(PullRequestState::Open { mergeable }),
             ("CLOSED", _) => Ok(PullRequestState::Closed),
             ("MERGED", Some(commit)) => Ok(PullRequestState::Merged { sha: commit.oid }),
             _ => Err(unreadable("gh pr view", &viewed)),
@@ -237,7 +261,7 @@ fn unreadable(command: &str, output: &str) -> ForgeError {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Forge, ForgeError, Issue, PullRequest, PullRequestState};
+    use super::{Forge, ForgeError, Issue, Mergeable, PullRequest, PullRequestState};
     use crate::orchestrator::fixtures::FakeGh;
 
     const BODY: &str = "## Intent\nDone.\n";
@@ -346,13 +370,35 @@ mod tests {
                 sha: "abc".to_string()
             })
         );
+        let open = |mergeable| Ok(PullRequestState::Open { mergeable });
+        gh.answers(
+            "view",
+            r#"{"mergeCommit":null,"state":"OPEN","mergeable":"CONFLICTING"}"#,
+            "",
+            0,
+        );
+        assert_eq!(forge.pull_request_state(url), open(Mergeable::Conflicting));
+        gh.answers(
+            "view",
+            r#"{"mergeCommit":null,"state":"OPEN","mergeable":"MERGEABLE"}"#,
+            "",
+            0,
+        );
+        assert_eq!(forge.pull_request_state(url), open(Mergeable::Mergeable));
+        gh.answers(
+            "view",
+            r#"{"mergeCommit":null,"state":"OPEN","mergeable":"UNKNOWN"}"#,
+            "",
+            0,
+        );
+        assert_eq!(forge.pull_request_state(url), open(Mergeable::Unknown));
         gh.answers("view", r#"{"mergeCommit":null,"state":"OPEN"}"#, "", 0);
-        assert_eq!(forge.pull_request_state(url), Ok(PullRequestState::Open));
+        assert_eq!(forge.pull_request_state(url), open(Mergeable::Unknown));
         gh.answers("view", r#"{"mergeCommit":null,"state":"CLOSED"}"#, "", 0);
         assert_eq!(forge.pull_request_state(url), Ok(PullRequestState::Closed));
         assert_eq!(
             gh.calls()[0],
-            strings(&["pr", "view", url, "--json", "state,mergeCommit"])
+            strings(&["pr", "view", url, "--json", "state,mergeCommit,mergeable"])
         );
     }
 

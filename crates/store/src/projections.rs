@@ -704,6 +704,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::EscalationResolved(_)
         | EventBody::TaskRoomGranted(_)
         | EventBody::WorktreeTidied(_)
+        | EventBody::PullRequestConflicted(_)
+        | EventBody::PullRequestRefreshed(_)
         | EventBody::AgentUpdated(_)
         | EventBody::SprintStarted(_)
         | EventBody::SprintPlanned(_)
@@ -832,8 +834,10 @@ fn apply_move(
     let counted = counted_sql();
     update(
         transaction,
-        // Nothing leaves `accepted` (5.2), so only a move into it touches the flag; the
-        // row's kind and the move's effects say whether there is a branch to integrate.
+        // Only a move into `accepted` sets the flag; the row's kind and the move's effects say
+        // whether there is a branch to integrate. The one move out of it (ADR 0069: a pull
+        // request that stopped merging goes back to its assignee) clears it, so Today lists no
+        // merge to wait for.
         &format!(
             "UPDATE task_projections
          SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
@@ -842,6 +846,7 @@ fn apply_move(
                                  AND status NOT IN ({counted})
                                 THEN ?6 ELSE counted_seq END,
              awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task' AND ?8
+                                         WHEN status = 'accepted' THEN 0
                                          ELSE awaiting_integration END,
              verifications = verifications + (?2 = 'verifying'),
              rejections = rejections + (?2 = 'rejected'),

@@ -9,18 +9,21 @@ use std::sync::Arc;
 use catervas_core::branch::{change_type, task_branch};
 use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::is_plan_task;
-use catervas_core::forge_text::{pull_request_title, without_task_ids};
+use catervas_core::forge_text::{folder_change_title, pull_request_title, without_task_ids};
+use catervas_core::governor::transition::TransitionRequest;
+use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind,
-    NoteWrittenBodyKind, PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    NoteWrittenBodyKind, PullRequestConflictedBody, PullRequestOpenedBody,
+    PullRequestRefreshedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
 };
 use catervas_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
 use catervas_store::files::FilesError;
 use catervas_store::folder_docs::{FolderChange, folder_docs};
 use catervas_store::repos::{TaskRepositoryError, task_repository};
 use catervas_store::{
-    EventQuery, Git, GitError, TaskProjection, material, names_of, project_document,
+    EventQuery, Git, GitError, MergeOutcome, TaskProjection, material, names_of, project_document,
     rescan_members, scan_project, seeded_library,
 };
 
@@ -30,10 +33,13 @@ use super::{
     task_repository_of, worktree,
 };
 use crate::channel::post_system;
-use crate::forge::{Forge, PullRequestState};
+use crate::forge::{Forge, Mergeable, PullRequestState};
 use crate::tools::ToolDeps;
 use crate::tools::folders::plain_names;
-use crate::transitions::{INTEGRATION_LOCK, integration_lock, is_move_into};
+use crate::transitions::{
+    INTEGRATION_LOCK, TransitionAsk, TransitionOutcome, integration_lock, is_move_into,
+    refusal_details,
+};
 
 /// Who asked for an integration: the tick, on the team's policy, or the human.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +70,10 @@ pub(super) async fn awaiting(
         IntegrationOutcome::Escalated { detail, scan } => format!(
             "escalated its integration to the human: {detail}{}",
             scan.map(|scan| scan.to_string()).unwrap_or_default()
+        ),
+        IntegrationOutcome::SentBack { paths } => format!(
+            "sent it back to its assignee: its pull request no longer merges ({})",
+            paths.join(", ")
         ),
         IntegrationOutcome::AwaitingForge | IntegrationOutcome::AwaitingHand { .. } => {
             return Ok(None);
@@ -163,7 +173,7 @@ impl Subject {
             Self::FolderChange(change) => {
                 let held = folder_change(tools, *change)?;
                 let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
-                Ok(format!("Docs: Update {}", plain_names(&paths)))
+                Ok(folder_change_title(&paths, &plain_names(&paths)))
             }
         }
     }
@@ -219,7 +229,9 @@ pub(super) async fn awaiting_folder_changes(
             IntegrationOutcome::Escalated { detail, .. } => {
                 format!("escalated its integration to the human: {detail}")
             }
-            IntegrationOutcome::AwaitingForge | IntegrationOutcome::AwaitingHand { .. } => {
+            IntegrationOutcome::AwaitingForge
+            | IntegrationOutcome::SentBack { .. }
+            | IntegrationOutcome::AwaitingHand { .. } => {
                 continue;
             }
         };
@@ -381,7 +393,7 @@ fn integrate_locked(
         }
     }
     let integrated_before = integrations_of(tools, subject)?;
-    let outcome = through_the_forge(tools, subject, &target, asker)?;
+    let outcome = through_the_forge(tools, team, subject, &target, asker)?;
     // A folder change touches no language, toolchain, test or criterion: no scan to refresh.
     let Subject::Task(task_id) = subject else {
         return Ok(outcome);
@@ -615,6 +627,7 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId, git: &Git) -> Result<ScanRefresh, 
 /// the human asks and the branch is in the integration branch all the same.
 fn through_the_forge(
     tools: &ToolDeps,
+    team: &Team,
     subject: &Subject,
     target: &IntegrationTarget,
     asker: Asker,
@@ -632,7 +645,10 @@ fn through_the_forge(
         }
     };
     match state {
-        PullRequestState::Open => Ok(Some(IntegrationOutcome::AwaitingForge)),
+        PullRequestState::Open {
+            mergeable: Mergeable::Conflicting,
+        } => stopped_merging(tools, team, subject, target, &branch, &url).map(Some),
+        PullRequestState::Open { .. } => Ok(Some(IntegrationOutcome::AwaitingForge)),
         PullRequestState::Merged { sha } => {
             record_integrated(
                 tools,
@@ -660,6 +676,112 @@ fn through_the_forge(
         }
         PullRequestState::Closed => {
             closed_for_the_human(tools, subject, &url, target, &branch).map(Some)
+        }
+    }
+}
+
+/// An open pull request that no longer merges (ADR 0069). A folder change's is escalated. A
+/// task's branch is brought up to date by merging the integration branch into it in its own
+/// worktree, made again for the purpose: a clean merge is pushed to the same pull request; a
+/// conflicted one is left there with its markers, and the task goes back to its assignee.
+fn stopped_merging(
+    tools: &ToolDeps,
+    team: &Team,
+    subject: &Subject,
+    target: &IntegrationTarget,
+    branch: &str,
+    url: &str,
+) -> Result<IntegrationOutcome, OrchestratorError> {
+    let into = target.into.as_str();
+    let Subject::Task(task_id) = subject else {
+        let detail = format!("the pull request {url} no longer merges into {into}");
+        return escalate(tools, subject, detail);
+    };
+    if let Err(error) = target.git.fetch_fast_forward("origin", into) {
+        let detail = format!(
+            "the pull request {url} no longer merges, and the local {into} could not be brought \
+             up to the remote's: {}",
+            git_words(&error)
+        );
+        return escalate(tools, subject, detail);
+    }
+    // The branch already holds all of the integration branch: the forge's answer is stale, as it
+    // is for a while after a push, and there is nothing to bring up to date.
+    if target.git.commit_count(branch, into)? == 0 {
+        return Ok(IntegrationOutcome::AwaitingForge);
+    }
+    let worktree = tools
+        .files
+        .root()
+        .join(".catervas/local/worktrees")
+        .join(task_id.as_str());
+    if !worktree.is_dir() {
+        target.git.add_worktree(&worktree, branch)?;
+    }
+    let message = format!("chore: bring up to date with {into}");
+    match target
+        .git
+        .merge_keeping_conflicts(&worktree, into, &message)?
+    {
+        MergeOutcome::Merged { sha } => {
+            let pushed = target.git.push("origin", &format!("refs/heads/{branch}"));
+            target.git.remove_worktree(&worktree)?;
+            if let Err(error) = pushed {
+                let detail = format!(
+                    "pushing {branch} after bringing it up to date failed: {}",
+                    git_words(&error)
+                );
+                return escalate(tools, subject, detail);
+            }
+            append(
+                tools,
+                task_id,
+                None,
+                None,
+                EventBody::PullRequestRefreshed(PullRequestRefreshedBody {
+                    url: url.to_string(),
+                    sha,
+                }),
+            )?;
+            Ok(IntegrationOutcome::AwaitingForge)
+        }
+        MergeOutcome::Conflicts(paths) => {
+            append(
+                tools,
+                task_id,
+                None,
+                None,
+                EventBody::PullRequestConflicted(PullRequestConflictedBody {
+                    url: url.to_string(),
+                    into: into.to_string(),
+                    paths: paths.iter().take(200).cloned().collect(),
+                }),
+            )?;
+            let outcome = tools.transitions.request(
+                &TransitionRequest {
+                    task_id: task_id.clone(),
+                    to: TaskStatus::Assigned,
+                    actor: TransitionActor::Governor,
+                    agent_id: None,
+                },
+                &TransitionAsk {
+                    pull_request_conflicts: Some(paths.clone()),
+                    ..TransitionAsk::default()
+                },
+                team,
+            )?;
+            match outcome {
+                TransitionOutcome::Moved(_) => Ok(IntegrationOutcome::SentBack { paths }),
+                TransitionOutcome::Refused(refusal) => {
+                    let _ = target.git.remove_worktree(&worktree);
+                    let detail = format!(
+                        "the pull request {url} no longer merges into {into}, and the task could \
+                         not be sent back: {}",
+                        refusal_details(&refusal).join("; ")
+                    );
+                    escalate(tools, subject, detail)
+                }
+            }
         }
     }
 }
@@ -840,44 +962,86 @@ fn merged_by_hand(
     }
 }
 
-/// The pull request's body: a task's contract intent, then the last completion and review notes; a
-/// folder change's paths, one per line, then a line for the owner's approval.
+/// The pull request's body (ADR 0069), short and composed by Catervas: for a task, its summary and
+/// its criteria's texts, and the first sentence of the last review an agent wrote; for a folder
+/// change, its documents and how they were checked.
 fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, OrchestratorError> {
+    let team = tools.files.read_team().ok();
+    let display_name = |id: &str| {
+        team.as_ref()
+            .and_then(|team| team.agents.iter().find(|agent| agent.id.as_str() == id))
+            .map_or_else(|| id.to_string(), |agent| agent.display_name.to_string())
+    };
     let task_id = match subject {
         Subject::Task(task_id) => task_id,
         Subject::FolderChange(change) => {
             let held = folder_change(tools, *change)?;
-            let mut body = held.paths.join("\n");
-            body.push('\n');
-            if held.approved {
-                body.push_str("\nApproved by the owner on Today.\n");
-            }
-            return Ok(body);
+            let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
+            let documents: Vec<String> = plain_names(&paths)
+                .split(" and ")
+                .map(ToString::to_string)
+                .collect();
+            let how = if held.approved {
+                "Approved by the owner on Today.".to_string()
+            } else if held.edited {
+                "Saved by the owner on the Files page.".to_string()
+            } else {
+                let author = held
+                    .written_by
+                    .as_deref()
+                    .map_or_else(|| "the team".to_string(), display_name);
+                format!(
+                    "Written by {author} at the delivery's review; the team's documents are not \
+                     reviewed (ADR 0061)."
+                )
+            };
+            return Ok(catervas_core::forge_text::pull_request_body(
+                &documents
+                    .iter()
+                    .map(|name| format!("- {name}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                &[how],
+                None,
+            ));
         }
     };
     let contract = tools.files.read_contract(task_id)?;
-    let intent = without_task_ids(contract.intent.as_str(), &title_of(tools));
-    let notes = tools.log.read(&EventQuery {
-        task_id: Some(task_id.clone()),
-        kinds: vec![EventKind::NoteWritten],
-        ..EventQuery::default()
-    })?;
-    let last_note = |kind: NoteWrittenBodyKind| {
-        notes
-            .iter()
-            .rev()
-            .find_map(|event| match &event.body {
-                EventBody::NoteWritten(body) if body.kind == kind => {
-                    Some(without_task_ids(&body.text, &title_of(tools)))
-                }
-                _ => None,
-            })
-            .unwrap_or_else(|| "(none was written)".to_string())
-    };
-    Ok(format!(
-        "## Intent\n\n{intent}\n\n## Completion note\n\n{}\n\n## Review note\n\n{}\n",
-        last_note(NoteWrittenBodyKind::Completion),
-        last_note(NoteWrittenBodyKind::Review)
+    let plain = |text: &str| without_task_ids(text, &title_of(tools));
+    let changed = plain(
+        contract
+            .summary
+            .as_ref()
+            .map_or(contract.title.as_str(), |summary| summary.as_str()),
+    );
+    let checks: Vec<String> = contract
+        .exit_criteria
+        .iter()
+        .map(|criterion| plain(criterion.text.as_str()))
+        .collect();
+    let review = tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![EventKind::NoteWritten],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.body {
+            EventBody::NoteWritten(body)
+                if body.kind == NoteWrittenBodyKind::Review && body.written_by != "catervas" =>
+            {
+                Some((display_name(&body.written_by), plain(&body.text)))
+            }
+            _ => None,
+        });
+    Ok(catervas_core::forge_text::pull_request_body(
+        &changed,
+        &checks,
+        review
+            .as_ref()
+            .map(|(name, note)| (name.as_str(), note.as_str())),
     ))
 }
 
@@ -1806,7 +1970,7 @@ mod tests {
         harness.project.record(
             "CTV-1",
             "note.written",
-            &json!({ "kind": "review", "text": "C1 still passes, on a second look.", "written_by": "dev-b" }),
+            &json!({ "kind": "review", "text": "C1 still passes, on a second look. The second sentence stays out.", "written_by": "dev-b" }),
         );
         harness.gh.answers("list", "[]", "", 0);
         harness
@@ -1832,23 +1996,29 @@ mod tests {
             .files
             .read_contract(&task("CTV-1"))
             .expect("the contract reads");
-        let places: Vec<usize> = [
-            "## Intent",
-            contract.intent.as_str(),
-            "## Completion note",
-            "Added done.txt; nothing left out.",
-            "## Review note",
-            "C1 still passes, on a second look.",
-        ]
-        .iter()
-        .map(|text| {
-            body.find(text)
-                .unwrap_or_else(|| panic!("{text:?} in {body}"))
-        })
-        .collect();
-        assert!(places.is_sorted(), "{body}");
-        assert!(!body.contains("C1 passes; done.txt is there."), "{body}");
-
+        let headings: Vec<&str> = body
+            .lines()
+            .filter(|line| line.starts_with("## "))
+            .collect();
+        assert_eq!(
+            headings,
+            ["## What changed", "## How it was verified"],
+            "{body}"
+        );
+        for criterion in &contract.exit_criteria {
+            assert!(body.contains(criterion.text.as_str()), "{body}");
+        }
+        assert!(
+            body.contains("- Reviewed by dev-b: C1 still passes, on a second look."),
+            "{body}"
+        );
+        assert!(!body.contains("The second sentence stays out."), "{body}");
+        assert!(
+            !body.contains("Added done.txt; nothing left out."),
+            "{body}"
+        );
+        assert!(!body.contains(contract.intent.as_str()), "{body}");
+        assert!(body.chars().count() <= 1500, "{body}");
         harness.gh.answers("view", OPEN, "", 0);
         assert_eq!(
             orchestrator.integrate(&task("CTV-1")).await,
@@ -1856,6 +2026,122 @@ mod tests {
         );
         assert_eq!(opened(&harness).len(), 1);
         assert_eq!(creates(&harness), 1);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    const CONFLICTING: &str = r#"{"mergeCommit":null,"state":"OPEN","mergeable":"CONFLICTING"}"#;
+
+    /// `main` gains a commit writing `path`, on the project and on `origin`: other work landed.
+    fn main_moves_on(harness: &Harness, path: &str, text: &str) {
+        harness.commit_at_root(path, text, "docs: other work landed first");
+        git_in(&harness.project.repo.path, &["push", "origin", "main"]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_back_a_pull_request_that_stopped_merging() {
+        let (harness, origin) = a_pull_request("int-pr-conflicts", true);
+        let git = &harness.project.deps.git;
+        let side = harness.worktree("CTV-1");
+        git.add_worktree(&side, &harness.branch("CTV-1"))
+            .expect("the branch is checked out");
+        std::fs::write(side.join("README.md"), "the task's line\n").expect("written");
+        git.commit(&side, "Edit README", &["README.md".to_string()])
+            .expect("committed");
+        git.remove_worktree(&side).expect("it is taken away");
+        main_moves_on(&harness, "README.md", "main wrote this first\n");
+        harness.gh.answers("view", CONFLICTING, "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let conflicted = harness.events(&[EventKind::PullRequestConflicted]);
+        let [conflicted] = conflicted.as_slice() else {
+            panic!("expected one: {conflicted:?}");
+        };
+        let EventBody::PullRequestConflicted(body) = &conflicted.body else {
+            panic!("{conflicted:?}");
+        };
+        assert_eq!(body.url, PULL_URL);
+        assert_eq!(body.into, "main");
+        assert_eq!(body.paths, vec!["README.md".to_string()]);
+        let row = harness.row("CTV-1");
+        assert_eq!(row.status, catervas_core::contract::TaskStatus::Assigned);
+        assert!(
+            !row.awaiting_integration,
+            "Today lists no merge to wait for"
+        );
+        let moved = harness
+            .events(&[EventKind::TaskTransitioned])
+            .pop()
+            .expect("a move");
+        let EventBody::TaskTransitioned(moved) = &moved.body else {
+            panic!("{moved:?}");
+        };
+        assert_eq!(moved.requested_by, "governor");
+        assert_eq!(
+            serde_json::to_value(moved.gate).expect("a gate"),
+            json!("pull_request_conflicted")
+        );
+        let worktree = harness.worktree("CTV-1");
+        let text = std::fs::read_to_string(worktree.join("README.md")).expect("read");
+        assert!(text.contains("<<<<<<< "), "{text}");
+        assert!(
+            harness
+                .project
+                .deps
+                .git
+                .is_merging(&worktree)
+                .expect("the read works")
+        );
+
+        orchestrator.tick().await.expect("the next tick runs");
+        assert_eq!(
+            harness.row("CTV-1").status,
+            catervas_core::contract::TaskStatus::InProgress
+        );
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refreshes_a_pull_request_that_merges_again() {
+        let (harness, origin) = a_pull_request("int-pr-refreshes", true);
+        main_moves_on(&harness, "other.txt", "other work\n");
+        let old_tip = at_root(&harness, &["rev-parse", &harness.branch("CTV-1")]);
+        harness.gh.answers("view", CONFLICTING, "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let refreshed = harness.events(&[EventKind::PullRequestRefreshed]);
+        let [refreshed] = refreshed.as_slice() else {
+            panic!("expected one: {refreshed:?}");
+        };
+        let EventBody::PullRequestRefreshed(body) = &refreshed.body else {
+            panic!("{refreshed:?}");
+        };
+        assert_eq!(body.url, PULL_URL);
+        let branch = harness.branch("CTV-1");
+        assert_eq!(git_output_in(&origin, &["rev-parse", &branch]), body.sha);
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", &format!("{}^1", body.sha)]),
+            old_tip
+        );
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", &format!("{}^2", body.sha)]),
+            git_output_in(&origin, &["rev-parse", "main"])
+        );
+        assert_eq!(
+            harness.row("CTV-1").status,
+            catervas_core::contract::TaskStatus::Accepted
+        );
+        assert!(!harness.worktree("CTV-1").exists());
+
+        // The forge still says it conflicts, as it does for a while after a push: nothing repeats.
+        orchestrator.tick().await.expect("the next tick runs");
+        assert_eq!(harness.events(&[EventKind::PullRequestRefreshed]).len(), 1);
+        assert!(!harness.worktree("CTV-1").exists());
         let _ = std::fs::remove_dir_all(&origin);
     }
 
@@ -1896,7 +2182,7 @@ mod tests {
         harness.project.record(
             "CTV-1",
             "note.written",
-            &json!({ "kind": "review", "text": "C1 passes.", "written_by": "dev-b" }),
+            &json!({ "kind": "review", "text": "C1 passes; CTV-2 still owes the pies.", "written_by": "dev-b" }),
         );
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         let mut by_assignee = people.clone();
@@ -2607,7 +2893,13 @@ mod tests {
             "{create:?}"
         );
         assert!(create.contains(&branch), "{create:?}");
-        assert_eq!(harness.gh.stdin_of("create"), format!("{CADENCE}\n"));
+        assert_eq!(
+            harness.gh.stdin_of("create"),
+            format!(
+                "## What changed\n\n- {name}\n\n## How it was verified\n\n- Written by sm at the \
+                 delivery's review; the team's documents are not reviewed (ADR 0061)."
+            )
+        );
         let opened = folder_events(&harness, EventKind::FolderChangeOpened);
         assert_eq!(
             opened[0]["body"],

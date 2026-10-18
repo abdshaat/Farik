@@ -215,13 +215,18 @@ describe("settings directory", () => {
 			en.rulesMay,
 			en.rulesSpendTitle,
 			en.rulesFinish,
+			en.rulesBranch,
 			en.rulesDocuments,
 			en.uiPathsTitle,
 		];
 		const pages = [
 			["allowed-actions", en.sectionAllowedActions, [en.rulesMay]],
 			["spending", en.sectionSpending, [en.rulesSpendTitle]],
-			["work", en.sectionWork, [en.rulesFinish, en.rulesDocuments]],
+			[
+				"work",
+				en.sectionWork,
+				[en.rulesFinish, en.rulesBranch, en.rulesDocuments],
+			],
 		] as const;
 		for (const [path, name, held] of pages) {
 			const { container, s } = await open(`/settings/${path}`, rules);

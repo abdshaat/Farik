@@ -1541,6 +1541,8 @@ async fn in_progress(
     let Some(resume) = resume(deps, team, &contract, assignee)? else {
         return Ok(None);
     };
+    // What a tool changed outside the task's paths is put back before the agent works (ADR 0069).
+    deps.tools.transitions.tidy(&row.task_id, team, None)?;
     // A task in a private folder (6.6) has no worktree to give a sandbox, and no command to run.
     let executor: Option<Arc<dyn Executor>> = if task_private_folder(&contract).is_some() {
         None
@@ -1605,11 +1607,16 @@ fn resume(
     };
     let history = deps.tools.log.read(&EventQuery {
         task_id: Some(task_id.clone()),
-        kinds: vec![EventKind::TaskTransitioned, EventKind::NoteWritten],
+        kinds: vec![
+            EventKind::TaskTransitioned,
+            EventKind::NoteWritten,
+            EventKind::PullRequestConflicted,
+        ],
         ..EventQuery::default()
     })?;
     let mut last_note = None;
     let mut rejection = None;
+    let mut conflicts = None;
     for event in &history {
         match &event.body {
             EventBody::TaskTransitioned(body) if body.to.to_string() == "rejected" => {
@@ -1626,6 +1633,12 @@ fn resume(
                     rejection = None;
                 }
             }
+            EventBody::TaskTransitioned(body) if body.to.to_string() == "verifying" => {
+                conflicts = None;
+            }
+            EventBody::PullRequestConflicted(body) => {
+                conflicts = Some((body.into.clone(), body.paths.clone()));
+            }
             EventBody::NoteWritten(body) => {
                 last_note = Some((body.kind.to_string(), body.text.clone()));
             }
@@ -1636,6 +1649,7 @@ fn resume(
         last_commit,
         last_note,
         rejection,
+        conflicts,
         posts: posts_heard_by(deps, agent)?,
     }))
 }
@@ -3738,6 +3752,75 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn puts_back_what_tools_changed_before_the_work_session() {
+        let harness = Harness::new("orch-tidy-before-work", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(worktree.join("README.md"), "a tool rewrote this\n").expect("written");
+        std::fs::write(worktree.join("stray.txt"), "a build left this\n").expect("written");
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1()]);
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes);
+
+        orchestrator.tick().await.expect("the session runs");
+
+        let tidied = harness.events(&[EventKind::WorktreeTidied]);
+        let [tidied] = tidied.as_slice() else {
+            panic!("expected one tidy: {tidied:?}");
+        };
+        let EventBody::WorktreeTidied(body) = &tidied.body else {
+            panic!("{tidied:?}");
+        };
+        assert_eq!(body.put_back, vec!["README.md".to_string()]);
+        assert_eq!(body.removed, vec!["stray.txt".to_string()]);
+        assert_eq!(tidied.envelope.ids.agent_id, None);
+        let started = harness.events(&[EventKind::SessionStarted]);
+        assert!(
+            tidied.envelope.seq < started[0].envelope.seq,
+            "the tidy comes before the session"
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("README.md")).expect("read"),
+            "the first line\n"
+        );
+
+        // A merge left in progress is not tidied: its staged changes are the other branch's.
+        let harness = Harness::new("orch-tidy-in-a-merge", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let worktree = harness.worktree("CTV-1");
+        let task_branch = harness.branch("CTV-1");
+        std::fs::write(worktree.join("NOTICE"), "one\n").expect("written");
+        git_in(&worktree, &["add", "-A"]);
+        git_in(&worktree, &["commit", "-m", "the notice"]);
+        git_in(&worktree, &["checkout", "-b", "side"]);
+        std::fs::write(worktree.join("README.md"), "the side's line\n").expect("written");
+        std::fs::write(worktree.join("NOTICE"), "one\ntwo\n").expect("written");
+        git_in(&worktree, &["commit", "-am", "the side"]);
+        git_in(&worktree, &["checkout", &task_branch]);
+        std::fs::write(worktree.join("README.md"), "the task's line\n").expect("written");
+        git_in(&worktree, &["commit", "-am", "the task"]);
+        let merged = std::process::Command::new("git")
+            .args(["merge", "side"])
+            .current_dir(&worktree)
+            .output()
+            .expect("git runs");
+        assert!(!merged.status.success(), "the merge conflicts");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        orchestrator.tick().await.expect("the session runs");
+
+        assert!(harness.events(&[EventKind::WorktreeTidied]).is_empty());
+        let readme = std::fs::read_to_string(worktree.join("README.md")).expect("read");
+        assert!(readme.contains("<<<<<<<"), "{readme}");
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("NOTICE")).expect("read"),
+            "one\ntwo\n"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn resumes_an_implement_session_that_stopped_early() {
         let harness = Harness::new("orch-resume", |_| {});
         harness.assigned("CTV-1", "dev-a", "dev-b");
@@ -4901,7 +4984,9 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn passes_over_a_task_whose_request_was_refused() {
+    async fn asks_again_after_a_requests_refusal() {
+        // An agent's refused request no longer parks the task (ADR 0069): the Product Manager is
+        // asked again, and refused again, because the completion note is still missing.
         let harness = Harness::new("orch-verify-refused", |_| {});
         harness.verifying_with("CTV-1", true, false, |_| {});
         let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1(), accept_ctv_1()]);
@@ -4913,16 +4998,10 @@ mod tests {
             .await
             .expect("the Product Manager's session runs");
         assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
-        let report = orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string(),
-                until: None,
-            }
-        );
-        assert_eq!(adapter.started().len(), 2);
+        assert_eq!(adapter.started().len(), 3);
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 2);
         assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
     }
 
@@ -4930,7 +5009,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn runs_until_idle_past_a_refused_acceptance() {
         let harness = Harness::new("orch-verify-refused-run", |_| {});
-        harness.verifying_with("CTV-1", true, false, |_| {});
+        // The task's sessions bound the retries (ADR 0069).
+        harness.verifying_with("CTV-1", true, false, |wire| {
+            wire["budget"]["max_sessions"] = json!(3);
+        });
         let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4941,10 +5023,11 @@ mod tests {
             vec![
                 ("dev-b".to_string(), SessionPurpose::Verify),
                 ("pm".to_string(), SessionPurpose::Verify),
+                ("pm".to_string(), SessionPurpose::Verify),
             ]
         );
-        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 2);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
     }
 
     #[tokio::test]

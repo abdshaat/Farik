@@ -47,6 +47,7 @@ use catervas_store::git::stale_twins;
 use catervas_store::git::task_base;
 use catervas_store::product_plan::{is_the_product_plan, new_project, product_plan_tasks};
 use catervas_store::repos::{TaskRepositoryError, task_repository};
+use catervas_store::requests::given_to;
 
 /// Where the integration lock lives, under the project root.
 pub(crate) const INTEGRATION_LOCK: &str = ".catervas/local/integration.lock";
@@ -138,6 +139,9 @@ pub struct TransitionAsk {
     /// the folder (6.6): it has no commit to show its work, and the gate reads these from the
     /// folder.
     pub workbooks: Option<Vec<String>>,
+    /// The files that conflict when an accepted task's pull request no longer merges, for the
+    /// move back to `assigned` (ADR 0069): Catervas found them merging the integration branch.
+    pub pull_request_conflicts: Option<Vec<String>>,
 }
 
 /// The governor's answer to a hand-over of a task whose wait cleared.
@@ -330,10 +334,26 @@ impl Transitions {
         let _held = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
         let ask = &tidied(ask);
         if request.to == TaskStatus::Verifying {
-            self.put_back_strays(request, ask, team)?;
+            self.tidy(&request.task_id, team, Some((request, ask)))?;
         }
         let context = self.context(request, ask, team)?;
-        let decided = match refused_before_the_governor(request, ask, team, &context.contract) {
+        // The agent the owner gave a task in its chat holds its plan with the Product Manager's
+        // standing while it is drafted or refined (ADR 0063).
+        let the_given_agent = request.actor == TransitionActor::ProductManager
+            && matches!(
+                context.contract.status,
+                TaskStatus::Draft | TaskStatus::Refining
+            )
+            && request.agent_id.is_some()
+            && given_to(&self.log, &request.task_id)?.as_deref()
+                == request.agent_id.as_deref().map(str::trim);
+        let decided = match refused_before_the_governor(
+            request,
+            ask,
+            team,
+            &context.contract,
+            the_given_agent,
+        ) {
             Some(refusal) => Err(refusal),
             None => evaluate_transition(request, &context),
         };
@@ -603,14 +623,31 @@ impl Transitions {
         ask: &TransitionAsk,
         body: EventBody,
     ) -> Result<(), TransitionError> {
-        let ids = EventIds {
-            task_id: Some(request.task_id.clone()),
+        self.append_about(
+            &request.task_id,
             // An agent's id when an agent asked; the human and the governor are not agents.
-            agent_id: match request.actor {
+            match request.actor {
                 TransitionActor::Human | TransitionActor::Governor => None,
                 _ => request.agent_id.clone(),
             },
-            session_id: ask.session_id.clone(),
+            ask.session_id.clone(),
+            body,
+        )
+    }
+
+    /// Appends one event about `task_id`, stamped with the agent and session it names, and
+    /// projects it.
+    fn append_about(
+        &self,
+        task_id: &TaskId,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+        body: EventBody,
+    ) -> Result<(), TransitionError> {
+        let ids = EventIds {
+            task_id: Some(task_id.clone()),
+            agent_id,
+            session_id,
             ..self.ids.clone()
         };
         let event =
@@ -710,6 +747,15 @@ impl Transitions {
             work,
             blocker: ask.blocker.clone(),
             blocker_resolution: ask.blocker_resolution.clone(),
+            blocked_from: last_move_into(&history, TaskStatus::Blocked).and_then(|event| {
+                match &event.body {
+                    EventBody::TaskTransitioned(body) => {
+                        TaskStatus::from_str(&body.from.to_string()).ok()
+                    }
+                    _ => None,
+                }
+            }),
+            pull_request_conflicts: ask.pull_request_conflicts.clone().unwrap_or_default(),
             blocked_at: last_move_into(&history, TaskStatus::Blocked)
                 .map(|event| event.envelope.recorded_at),
             now,
@@ -906,7 +952,8 @@ impl Transitions {
     }
 
     /// Puts back what tools changed in the task's worktree outside its allowed paths before a move
-    /// into `verifying` is judged (ADR 0068): a tracked file changed or deleted there is restored
+    /// into `verifying` is judged (ADR 0068) and before each work session (ADR 0069, `by` is `None`;
+    /// nothing while a merge is in progress there): a tracked file changed or deleted there is restored
     /// from the task branch's last commit, and an untracked file git does not ignore is deleted,
     /// then `worktree.tidied` records both. The assignee's own tools cannot write outside the
     /// paths and the sandbox has no git, so nothing else can undo a `next dev` or a build that
@@ -918,13 +965,18 @@ impl Transitions {
     ///
     /// `Files` when the contract cannot be read or a file cannot be deleted, `Git` when git
     /// cannot read or restore the worktree, and what the log refuses.
-    fn put_back_strays(
+    pub fn tidy(
         &self,
-        request: &TransitionRequest,
-        ask: &TransitionAsk,
+        task_id: &TaskId,
         team: &Team,
+        by: Option<(&TransitionRequest, &TransitionAsk)>,
     ) -> Result<(), TransitionError> {
-        let contract = self.files.read_contract(&request.task_id)?;
+        // `request` holds the lock already; a tidy before a work session takes it itself.
+        let _held = match by {
+            Some(_) => None,
+            None => Some(self.requests.lock().unwrap_or_else(PoisonError::into_inner)),
+        };
+        let contract = self.files.read_contract(task_id)?;
         if task_private_folder(&contract).is_some() {
             return Ok(());
         }
@@ -947,6 +999,9 @@ impl Transitions {
             Err(error) => return Err(error.into()),
         };
         let git = &repository.git;
+        if git.is_merging(&worktree)? {
+            return Ok(());
+        }
         let outside = |path: &String| {
             matches!(
                 check_allowed_paths(std::slice::from_ref(path), &contract.allowed_paths),
@@ -976,9 +1031,20 @@ impl Transitions {
                 detail: format!("{path} in the task's worktree cannot be deleted: {error}"),
             })?;
         }
-        self.append(
-            request,
-            ask,
+        let (agent_id, session_id) = match by {
+            Some((request, ask)) => (
+                match request.actor {
+                    TransitionActor::Human | TransitionActor::Governor => None,
+                    _ => request.agent_id.clone(),
+                },
+                ask.session_id.clone(),
+            ),
+            None => (None, None),
+        };
+        self.append_about(
+            task_id,
+            agent_id,
+            session_id,
             EventBody::WorktreeTidied(WorktreeTidiedBody {
                 put_back,
                 removed: removed.into_iter().collect(),
@@ -1148,6 +1214,7 @@ fn refused_before_the_governor(
     ask: &TransitionAsk,
     team: &Team,
     contract: &TaskContract,
+    the_given_agent: bool,
 ) -> Option<TransitionRefusal> {
     let role = match request.actor {
         TransitionActor::ProductManager => Role::ProductManager,
@@ -1157,14 +1224,15 @@ fn refused_before_the_governor(
         | TransitionActor::Governor
         | TransitionActor::Human => return None,
     };
-    let holds = request
-        .agent_id
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|id| {
-            team.active_agents()
-                .any(|agent| agent.id.as_str() == id && Role::from(agent.role) == role)
-        });
+    let holds = the_given_agent
+        || request
+            .agent_id
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|id| {
+                team.active_agents()
+                    .any(|agent| agent.id.as_str() == id && Role::from(agent.role) == role)
+            });
     if !holds {
         return Some(TransitionRefusal::NotTheNamedAgent {
             actor: request.actor,
@@ -1363,6 +1431,7 @@ fn gate_wire(gate: GateId) -> GateWire {
         GateId::IterationLimitReached => GateWire::IterationLimitReached,
         GateId::GovernorEscalation => GateWire::GovernorEscalation,
         GateId::HumanRejection => GateWire::HumanRejection,
+        GateId::PullRequestConflicted => GateWire::PullRequestConflicted,
     }
 }
 

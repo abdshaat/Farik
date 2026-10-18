@@ -1025,6 +1025,10 @@
             }
           }
         },
+        "members_present": {
+          "type": "boolean",
+          "description": "Whether the project folder's repos.yaml lists member repositories (ADR 0057, ADR 0069): each keeps its own integration branch there, so Settings shows no branch field for the team."
+        },
         "preview_env_present": {
           "type": "boolean",
           "description": "Whether the owner's `.catervas/local/preview.env` is there for the preview (ADR 0067). Never its names or values."
@@ -1178,6 +1182,7 @@
         "sandboxed",
         "hidden_suggestions",
         "preview_env_present",
+        "members_present",
         "requested_connections"
       ]
     },
@@ -6183,6 +6188,8 @@
             "judge_not_held",
             "no_questions",
             "question_length",
+            "integration_branch_name",
+            "integration_branch_missing",
             "invalid"
           ],
           "description": "The refusal as the page words it for a person; the message is for a log, and invalid is any refusal with no words of its own."

@@ -5,6 +5,7 @@ import styles from "../pages.module.css";
 import {
 	Documents,
 	Finish,
+	IntegrationBranch,
 	RulesTitle,
 	UiPaths,
 	useRuleParts,
@@ -12,7 +13,7 @@ import {
 
 /** How work runs: how finished work is added, how documents are written, and the UI patterns. */
 export function Work() {
-	const { ready, part, key } = useRuleParts();
+	const { ready, part, key, membersPresent } = useRuleParts();
 	const [advanced, setAdvanced] = useState(false);
 	return (
 		<div className={styles.page}>
@@ -20,6 +21,9 @@ export function Work() {
 			{ready && (
 				<>
 					<Finish key={key("finish")} {...part("finish")} />
+					{!membersPresent && (
+						<IntegrationBranch key={key("branch")} {...part("branch")} />
+					)}
 					<Documents key={key("documents")} {...part("documents")} />
 					<ShowAdvanced
 						open={advanced}

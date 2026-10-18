@@ -223,7 +223,7 @@ describe("team setup", () => {
 		// Each row says the role's job, as the approved mockup does.
 		expect(
 			within(list).getByText(
-				"Keeps the project well built, and reviews the work before you see it.",
+				"Keeps the project well built, and reviews every change to its code.",
 			),
 		).toBeTruthy();
 		expect(within(list).queryByText("Ada persona")).toBeNull();
@@ -328,7 +328,7 @@ describe("team setup", () => {
 		expect(include.checked).toBe(true);
 		expect(
 			within(include.closest("li") as HTMLElement).getByText(
-				"Looks at your app the way a customer does, plans changes to its screens, and makes them once Mira agrees. Checks every screen Theo builds.",
+				"Looks at your app the way a customer does, plans changes to its screens and makes them. Checks every screen Theo builds.",
 			),
 		).toBeTruthy();
 		expect(
@@ -1408,8 +1408,11 @@ describe("team setup", () => {
 			target: { value: "20" },
 		});
 		expect(
-			screen.getByText("Today the team has spent $12.80, of $20.00 a day."),
+			screen.getByText(
+				"Say the team spends $12.80 in a day: $7.20 of $20.00 is left.",
+			),
 		).toBeTruthy();
+		expect(screen.queryByText(/Today the team has spent/)).toBeNull();
 		expect(
 			screen.getByText("At $20.00, everyone pauses and you get a message."),
 		).toBeTruthy();
@@ -1421,7 +1424,7 @@ describe("team setup", () => {
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		const meter = screen.getByRole("meter", {
-			name: "Today the team has spent $12.80, of $20.00 a day.",
+			name: "Say the team spends $12.80 in a day: $7.20 of $20.00 is left.",
 		}) as HTMLMeterElement;
 		expect(meter.value).toBeCloseTo(12.8);
 		expect(meter.max).toBe(20);

@@ -116,6 +116,8 @@ pub(crate) enum Refusal {
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
+    /// A commit named a file that still holds the markers of a merge's conflict (ADR 0069).
+    ConflictMarkers { path: String },
     /// A commit message that names a task, whose id stays inside Catervas (ADR 0066).
     CommitMessageNamesATask { id: String },
     /// A marketing plan refused as a whole, under the code it names: asked outside the
@@ -222,6 +224,7 @@ impl Refusal {
             | Self::NotTheNamedAgent { .. } => self.reach(),
             Self::Command(refusal) => command(refusal),
             Self::PathIsADirectory { .. }
+            | Self::ConflictMarkers { .. }
             | Self::CommitMessageNamesATask { .. }
             | Self::OutsideWorkspace { .. } => self.workspace(),
             Self::ChannelLimit { detail } => ("channel_limit", detail.clone()),
@@ -312,6 +315,10 @@ impl Refusal {
             Self::PathIsADirectory { path } => (
                 "path_is_a_directory",
                 format!("{path} is a directory; name the files to commit"),
+            ),
+            Self::ConflictMarkers { path } => (
+                "conflict_markers",
+                format!("{path} still holds conflict markers; resolve them first"),
             ),
             Self::CommitMessageNamesATask { id } => (
                 "commit_message_names_a_task",

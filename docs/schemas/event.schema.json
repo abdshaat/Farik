@@ -176,7 +176,9 @@
         "delivery.closed",
         "task.reassigned",
         "connection.requested",
-        "worktree.tidied"
+        "worktree.tidied",
+        "pull_request.conflicted",
+        "pull_request.refreshed"
       ]
     },
     "eventBodyWire": {
@@ -292,7 +294,9 @@
         { "$ref": "#/$defs/deliveryClosedBody" },
         { "$ref": "#/$defs/taskReassignedBody" },
         { "$ref": "#/$defs/connectionRequestedBody" },
-        { "$ref": "#/$defs/worktreeTidiedBody" }
+        { "$ref": "#/$defs/worktreeTidiedBody" },
+        { "$ref": "#/$defs/pullRequestConflictedBody" },
+        { "$ref": "#/$defs/pullRequestRefreshedBody" }
       ]
     },
     "contractSummary": {
@@ -498,7 +502,7 @@
       "title": "Gate Id",
       "description": "The gate of the row a move took (docs/SPEC.md section 5.2); none for a row with no gate.",
       "type": "string",
-      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection"]
+      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection", "pull_request_conflicted"]
     },
     "blockerWire": {
       "title": "Blocker Wire",
@@ -2007,6 +2011,29 @@
       "properties": {
         "put_back": { "type": "array", "items": { "type": "string" } },
         "removed": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "pullRequestConflictedBody": {
+      "title": "Pull Request Conflicted Body",
+      "description": "An accepted task's pull request no longer merges into the integration branch (ADR 0069, docs/SPEC.md 5.14): Catervas merged into the branch, left the conflicts in the task's worktree and sent the task back to its assignee. url is the pull request, into the branch it should merge into, paths the conflicted files, relative to the worktree. It is about one task and names no actor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "into", "paths"],
+      "properties": {
+        "url": { "type": "string" },
+        "into": { "type": "string" },
+        "paths": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string" } }
+      }
+    },
+    "pullRequestRefreshedBody": {
+      "title": "Pull Request Refreshed Body",
+      "description": "An accepted task's pull request stopped merging, and Catervas brought its branch up to date with a clean merge and pushed it (ADR 0069, docs/SPEC.md 5.14): url is the pull request, sha the merge commit now at the branch's tip. It is about one task and names no actor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha"],
+      "properties": {
+        "url": { "type": "string" },
+        "sha": { "type": "string" }
       }
     },
     "connectorTag": {

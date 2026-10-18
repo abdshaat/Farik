@@ -80,13 +80,17 @@ impl Default for TeamRules {
     }
 }
 
+/// The team's own documents (ADR 0051), which are never a change to the interface (ADR 0069).
+pub const TEAM_DOCUMENTS: &str = "docs/catervas/";
+
 /// Whether a task's change touches the interface (ADR 0026): its assignee is a Software Developer,
 /// and its contract sets `ui_change` or one of its changed paths matches a UI glob. The paths are
 /// the task branch's committed changes against its merge base, never the worktree.
 ///
 /// Matched as the protected paths are (`check_protected_paths`: case-insensitive, normalised), and
 /// it fails closed: a glob that does not compile, or a path that climbs, counts as a UI change, so
-/// the Designer looks rather than nobody.
+/// the Designer looks rather than nobody. A path under `docs/catervas/` is a document, not the
+/// interface, whatever its extension.
 #[must_use]
 pub fn is_ui_change(
     contract: &TaskContract,
@@ -94,9 +98,16 @@ pub fn is_ui_change(
     changed_paths: &[String],
     ui_paths: &[String],
 ) -> bool {
+    let outside_the_documents: Vec<String> = changed_paths
+        .iter()
+        .filter(|path| {
+            !path.starts_with(TEAM_DOCUMENTS) || path.split('/').any(|part| part == "..")
+        })
+        .cloned()
+        .collect();
     assignee_role == Role::SoftwareDeveloper
         && (contract.ui_change == Some(true)
-            || check_protected_paths(changed_paths, ui_paths).is_err())
+            || check_protected_paths(&outside_the_documents, ui_paths).is_err())
 }
 
 /// The default team rules, built once.
@@ -135,6 +146,35 @@ mod tests {
         assert!(
             !is_ui_change(&plain, developer, &changed("app/Button.tsx"), &[]),
             "an empty ui_paths and no field is no UI change"
+        );
+        // A team's own documents are never a change to the interface, whatever their extension
+        // (ADR 0069), while the field and every other path still count.
+        assert!(!is_ui_change(
+            &plain,
+            developer,
+            &changed("docs/catervas/engineering/bug-hunt.html"),
+            &defaults
+        ));
+        assert!(is_ui_change(
+            &plain,
+            developer,
+            &changed("site/index.html"),
+            &defaults
+        ));
+        assert!(is_ui_change(
+            &flagged,
+            developer,
+            &changed("docs/catervas/engineering/bug-hunt.html"),
+            &defaults
+        ));
+        assert!(
+            is_ui_change(
+                &plain,
+                developer,
+                &changed("docs/catervas/../../app/Button.tsx"),
+                &defaults
+            ),
+            "a path that climbs out of the documents is still judged"
         );
         // The rule covers only a Developer's task: the Designer's own work and the Marketing
         // Specialist's pages are reviewed as before.

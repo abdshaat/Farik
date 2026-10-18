@@ -469,12 +469,34 @@ fn without_member(path: &str) -> String {
         )
 }
 
+/// The number of the delivery whose report `path` is: `docs/catervas/product/reports/D<n>` in
+/// either format, the agent version too, in the project or in a member's place.
+fn delivery_report_number(path: &str) -> Option<String> {
+    let path = normalise(path).unwrap_or_else(|| path.to_string());
+    let project_wide = without_member(&path);
+    let file = project_wide.strip_prefix("docs/catervas/product/reports/")?;
+    let stem = stem_of(file)?;
+    let stem = stem.strip_suffix(".agent").unwrap_or(stem);
+    let digits = stem.strip_prefix('D')?;
+    (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| digits.to_string())
+}
+
+/// Whether `path` is a delivery's report (ADR 0069), a document named by its delivery.
+#[must_use]
+pub fn is_delivery_report(path: &str) -> bool {
+    delivery_report_number(path).is_some()
+}
+
 /// What the Files page calls a document: its fixed name, "Plan: <title>" for a file directly in a
 /// folder's `plans/` whose stem `title_of` knows, else its file stem as [`plain_name`] has it.
 #[must_use]
 pub fn document_name(path: &str, title_of: &dyn Fn(&str) -> Option<String>) -> String {
     let path = normalise(path).unwrap_or_else(|| path.to_string());
     let project_wide = without_member(&path);
+    if let Some(number) = delivery_report_number(&path) {
+        return format!("Report for delivery {number}");
+    }
     if let Some((_, name)) = DOCUMENT_STEMS
         .iter()
         .find(|(known, _)| stem_of(&project_wide) == Some(*known))

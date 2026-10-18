@@ -5,6 +5,7 @@ use catervas_core::branch::task_branch;
 use catervas_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use catervas_core::folders::{DocumentFormat, with_format};
 use catervas_core::governor::done::CriterionResult;
+use catervas_core::governor::gates::Blocker;
 use catervas_core::marketing::network_name;
 use catervas_core::team::{Agent, Team, task_private_folder};
 use catervas_protocol::event::{
@@ -108,6 +109,10 @@ pub(super) struct Resume {
     /// What the agent hears of its social posts that settled since its previous implement session
     /// started, one entry each (`posts_heard`).
     pub(super) posts: Vec<String>,
+    /// The integration branch and the files a merge of it into the branch left conflicted, when
+    /// the task's pull request stopped merging and no move into `verifying` has followed
+    /// (ADR 0069).
+    pub(super) conflicts: Option<(String, Vec<String>)>,
 }
 
 /// What `agent` hears of the posts of `posts` that settled after the event numbered `since`, the
@@ -178,6 +183,7 @@ pub(super) fn refine_message(
     contract: &TaskContract,
     ask_first: bool,
     failures: &[String],
+    stuck: Option<&Blocker>,
 ) -> String {
     let task = contract.id.as_str();
     let kind = match contract.kind {
@@ -200,6 +206,17 @@ pub(super) fn refine_message(
             failures.join("\n")
         );
     }
+    if let Some(blocker) = stuck {
+        message = format!(
+            "This task came back to its plan because the agent working on it was stuck:\n{}\n\n\
+             Change the contract so the work can be done.\n\n{message}",
+            untrusted_block(
+                "blocker",
+                &format!("{}\nNeeded: {}", blocker.description, blocker.needed),
+                RESULTS_CAP_BYTES
+            )
+        );
+    }
     message
 }
 
@@ -214,13 +231,14 @@ pub(super) fn given_task_message(
     agent: &Agent,
     first: bool,
     failures: &[String],
+    stuck: Option<&Blocker>,
 ) -> String {
     format!(
         "{}\n\n{}",
         GIVEN_TASK_LEAD
             .replace("{name}", agent.display_name.as_str())
             .replace("{role}", &agent.role.to_string()),
-        refine_message(contract, first, failures)
+        refine_message(contract, first, failures, stuck)
     )
 }
 
@@ -1028,6 +1046,17 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
         );
         message = format!("{message}\n\nResuming: {commit}; {note}");
     }
+    if let Some((into, paths)) = &resume.conflicts {
+        message = format!(
+            "{message}\n\nYour pull request no longer merges into {into}: other work changed the \
+             same files. Catervas merged {into} into your branch in this worktree and left the \
+             conflicts in: {}\nResolve each one, keeping what both sides meant; run the checks; \
+             commit with `catervas_git_commit`, which finishes the merge; then ask for \
+             `verifying`. If a conflicted file is outside your allowed paths, block the task with \
+             `catervas_declare_blocked`.",
+            untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
+        );
+    }
     // What happened to the agent's posts comes last, after the rest.
     for heard in &resume.posts {
         message = format!("{message}\n\n{heard}");
@@ -1136,6 +1165,11 @@ pub(super) struct ReviewBrief<'a> {
     pub(super) changes: Changes<'a>,
     /// The criteria a review note was written without answering, on a second asking.
     pub(super) unanswered: &'a [String],
+    /// What Catervas refused of the reviewer's own requests since the task entered `verifying`,
+    /// oldest first (ADR 0069).
+    pub(super) refused: &'a [String],
+    /// The UI/UX Designer's latest design review since the task entered `verifying`, as JSON.
+    pub(super) design_review: Option<&'a str>,
 }
 
 /// The reviewer's `verify` session's message: the task's id and title, what is still unanswered
@@ -1146,11 +1180,18 @@ pub(super) struct ReviewBrief<'a> {
 pub(super) fn review_message(brief: &ReviewBrief<'_>) -> String {
     let contract = brief.contract;
     let task = contract.id.as_str();
-    let message = format!(
+    let mut message = format!(
         "Verify {task} as its reviewer. Its title: {}{}",
         untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES),
         still_unanswered(brief.unanswered)
     );
+    if !brief.refused.is_empty() {
+        message = format!(
+            "{message}\n\nCatervas refused your last request: {}\nAsk for a move the first \
+             message allows, or block the task with `catervas_declare_blocked`.",
+            untrusted_block("refused", &brief.refused.join("\n"), NOTE_CAP_BYTES)
+        );
+    }
     let (ran, changes) = match &brief.changes {
         Changes::Diff(diff) => (
             "ran its `command`, `test`, and `artifact` criteria in the task's sandbox",
@@ -1173,8 +1214,13 @@ pub(super) fn review_message(brief: &ReviewBrief<'_>) -> String {
     format!(
         "{message}\n\nCatervas {ran}, as its \
          reviewer: {results}\n\n{rubrics}\n\nThe assignee's completion note: \
-         {note}\n\n{changes}\n\nWrite the review note with `catervas_write_note` of kind \
+         {note}\n\n{designer}{changes}\n\nWrite the review note with `catervas_write_note` of kind \
          `review`, mapping each criterion to its evidence.",
+        designer = brief.design_review.map_or_else(String::new, |checks| format!(
+            "The UI/UX Designer checked this change in the running app before you. How its pages \
+             look and behave is their check, not yours: {}\n\n",
+            untrusted_block("design_review", checks, RESULTS_CAP_BYTES)
+        )),
         results = untrusted_block("results", &results_text(brief.results), RESULTS_CAP_BYTES),
         rubrics = rubrics(contract),
         note = untrusted_block(
@@ -1316,6 +1362,7 @@ fn listed(ids: &[String]) -> String {
 mod tests {
     use catervas_core::contract::fixtures::a_contract_wire;
     use catervas_core::contract::{Role, TaskContract, TaskKind, validate_contract};
+    use catervas_core::governor::gates::Blocker;
     use catervas_protocol::event::{CatervasEvent, event_from_value};
     use catervas_store::git::HeadSummary;
     use serde_json::{Value, json};
@@ -1597,7 +1644,40 @@ mod tests {
             last_note: note.map(|text| ("progress".to_string(), text.to_string())),
             rejection: None,
             posts: Vec::new(),
+            conflicts: None,
         }
+    }
+
+    #[test]
+    fn tells_the_assignee_which_files_conflict() {
+        let conflicted = Resume {
+            conflicts: Some((
+                "catervas/next".to_string(),
+                vec!["components/NoteInput.tsx".to_string()],
+            )),
+            ..resume(false, None)
+        };
+
+        let message = implement_message(&contract(), &conflicted);
+
+        assert!(
+            message.contains("no longer merges into catervas/next"),
+            "{message}"
+        );
+        assert!(message.contains("components/NoteInput.tsx"), "{message}");
+        assert!(message.contains("conflicts"), "{message}");
+        assert!(message.contains("catervas_declare_blocked"), "{message}");
+        assert_eq!(
+            implement_message(&contract(), &resume(false, None)),
+            implement_message(
+                &contract(),
+                &Resume {
+                    conflicts: None,
+                    ..resume(false, None)
+                }
+            )
+        );
+        assert!(!implement_message(&contract(), &resume(false, None)).contains("no longer merges"));
     }
 
     #[test]
@@ -1656,6 +1736,8 @@ mod tests {
             completion_note: None,
             changes: Changes::Diff(""),
             unanswered: &[],
+            refused: &[],
+            design_review: None,
         });
         assert!(
             message.contains("The diff from the integration branch to docs/CTV-1: "),
@@ -1739,6 +1821,8 @@ mod tests {
             completion_note: None,
             changes: Changes::Folder(&files),
             unanswered: &[],
+            refused: &[],
+            design_review: None,
         });
 
         // A workbook is read with the sheet tool, a note with `Read`, each beside its copy from
@@ -1770,6 +1854,8 @@ mod tests {
             completion_note: None,
             changes: Changes::Folder(&workbooks),
             unanswered: &[],
+            refused: &[],
+            design_review: None,
         });
         assert!(!message.contains("`Read`"), "{message}");
         assert!(message.contains("`baseline: true`"), "{message}");
@@ -1792,6 +1878,8 @@ mod tests {
             completion_note: None,
             changes: Changes::Folder(&files),
             unanswered: &[],
+            refused: &[],
+            design_review: None,
         });
 
         // The list is the files' words and sits in one untrusted block, which no name can close.
@@ -1833,6 +1921,8 @@ mod tests {
             completion_note: None,
             changes: Changes::Diff(&diff),
             unanswered: &[],
+            refused: &[],
+            design_review: None,
         });
 
         let kept = message.matches('+').count();
@@ -1863,14 +1953,69 @@ mod tests {
     #[test]
     fn asks_for_questions_first_only_of_an_epic_that_has_not_asked() {
         let ask = "ask the user every question you need";
-        let first = refine_message(&an_epic(), true, &[]);
+        let first = refine_message(&an_epic(), true, &[], None);
         assert!(first.starts_with("This is an epic: "), "{first}");
         assert!(first.contains(ask), "{first}");
-        let asked = refine_message(&an_epic(), false, &[]);
+        let asked = refine_message(&an_epic(), false, &[], None);
         assert!(!asked.contains(ask), "{asked}");
-        let task = refine_message(&contract(), true, &[]);
+        let task = refine_message(&contract(), true, &[], None);
         assert!(!task.contains(ask), "{task}");
         assert!(task.contains(", a task, "), "{task}");
+    }
+
+    #[test]
+    fn shows_the_reviewer_the_designers_checks() {
+        let contract = contract();
+        let brief = |design_review| ReviewBrief {
+            contract: &contract,
+            results: &[],
+            completion_note: None,
+            changes: Changes::Diff("+ a line"),
+            unanswered: &[],
+            refused: &[],
+            design_review,
+        };
+        let message = review_message(&brief(Some(
+            "{\"pass\":true,\"reasons\":\"fits at 375 and 1024\",\"checks\":[]}",
+        )));
+        assert!(
+            message.contains("How its pages look and behave is their check"),
+            "{message}"
+        );
+        assert!(
+            message.contains("<untrusted source=\"design_review\">"),
+            "{message}"
+        );
+        assert!(message.contains("fits at 375 and 1024"), "{message}");
+        let plain = review_message(&brief(None));
+        assert!(!plain.contains("How its pages look and behave"), "{plain}");
+        assert!(!plain.contains("fits at 375 and 1024"), "{plain}");
+    }
+
+    #[test]
+    fn tells_the_plan_why_the_work_came_back() {
+        let blocker = Blocker {
+            description: "the contract allows colour only, the contrast comes from the fade-in"
+                .to_string(),
+            needed: "allow components/BoardDemo.tsx".to_string(),
+        };
+        let message = refine_message(&contract(), true, &[], Some(&blocker));
+        assert!(message.contains("came back to its plan"), "{message}");
+        assert!(
+            message.contains("<untrusted source=\"blocker\">"),
+            "{message}"
+        );
+        assert!(
+            message.contains("the contrast comes from the fade-in"),
+            "{message}"
+        );
+        assert!(
+            message.contains("allow components/BoardDemo.tsx"),
+            "{message}"
+        );
+        assert!(message.contains("Change the contract"), "{message}");
+        let plain = refine_message(&contract(), true, &[], None);
+        assert!(!plain.contains("came back to its plan"), "{plain}");
     }
 
     #[test]

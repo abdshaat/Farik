@@ -597,6 +597,53 @@ fn merges_a_branch_into_a_worktree_only() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn merges_into_a_kept_branch_and_leaves_its_conflicts() {
+    // A pull request that stopped merging is brought up to date in a worktree made again on its
+    // kept branch; a conflict stays there, markers and all, for the branch's author (ADR 0069).
+    let repository = TempRepo::new("merge-keeping");
+    let git = repository.adapter();
+    repository.write("f.txt", "line\n");
+    repository.commit("docs: f");
+    let worktree = repository.path.join(".catervas/local/worktrees/a");
+    git.create_worktree(&worktree, "fix/a", "main")
+        .expect("the worktree is made");
+    std::fs::write(worktree.join("f.txt"), "a's line\n").expect("written");
+    git_in(&worktree, &["commit", "-am", "fix: a"]);
+    git.remove_worktree(&worktree).expect("it is taken away");
+    repository.write("f.txt", "main's line\n");
+    repository.commit("docs: main writes it too");
+
+    git.add_worktree(&worktree, "fix/a")
+        .expect("the kept branch is checked out again");
+    let outcome = git
+        .merge_keeping_conflicts(&worktree, "main", "chore: up to date")
+        .expect("the merge runs");
+
+    assert_eq!(outcome, MergeOutcome::Conflicts(vec!["f.txt".to_string()]));
+    assert!(git.is_merging(&worktree).expect("the read works"));
+    let text = std::fs::read_to_string(worktree.join("f.txt")).expect("read");
+    assert!(text.contains("<<<<<<< "), "{text}");
+
+    // A change that does not touch main's merges clean.
+    git.remove_worktree(&worktree).expect("it is taken away");
+    let clean = repository.path.join(".catervas/local/worktrees/b");
+    git.create_worktree(&clean, "fix/b", "main~1")
+        .expect("the worktree is made");
+    std::fs::write(clean.join("g.txt"), "b's file\n").expect("written");
+    git_in(&clean, &["add", "g.txt"]);
+    git_in(&clean, &["commit", "-m", "fix: b"]);
+    let outcome = git
+        .merge_keeping_conflicts(&clean, "main", "chore: up to date")
+        .expect("the merge runs");
+    let MergeOutcome::Merged { sha } = outcome else {
+        panic!("it merged cleanly: {outcome:?}");
+    };
+    assert_eq!(git_output_in(&clean, &["rev-parse", "HEAD"]), sha);
+    assert!(!git.is_merging(&clean).expect("the read works"));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn commits_the_named_paths_and_returns_the_sha() {
     let repository = TempRepo::new("commit-paths");
     repository.write("named.txt", "the one to commit\n");
@@ -1882,4 +1929,43 @@ fn held_document_keeps_the_format_it_finds() {
         held_document(&adapter, "HEAD", stem, Html).expect("reads"),
         Some("docs/catervas/product/spec.md".to_string())
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_a_worktrees_git_store_and_a_password_in_its_settings() {
+    let repository = TempRepo::new("common-dir-and-secret");
+    let git = repository.adapter();
+    let worktree = repository.path.join(".catervas/local/worktrees/CTV-1");
+    git.create_worktree(&worktree, "catervas/CTV-1", "main")
+        .expect("the worktree is made");
+
+    let store = git.common_dir(&worktree).expect("the store is found");
+    assert_eq!(
+        store,
+        repository
+            .path
+            .join(".git")
+            .canonicalize()
+            .expect("the store exists")
+    );
+
+    assert!(!git.config_holds_a_secret().expect("no remote reads"));
+    repository.git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://someone:tok3n@github.com/a/b.git",
+    ]);
+    assert!(git.config_holds_a_secret().expect("the read works"));
+    repository.git(&["remote", "set-url", "origin", "https://github.com/a/b.git"]);
+    assert!(!git.config_holds_a_secret().expect("the read works"));
+    repository.git(&["remote", "set-url", "origin", "git@github.com:a/b.git"]);
+    assert!(!git.config_holds_a_secret().expect("the read works"));
+    repository.git(&[
+        "config",
+        "http.https://github.com/.extraheader",
+        "AUTHORIZATION: basic eA==",
+    ]);
+    assert!(git.config_holds_a_secret().expect("the read works"));
 }

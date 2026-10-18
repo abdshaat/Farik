@@ -689,20 +689,59 @@ pub fn check_human_triage(status: TaskStatus, has_parent: bool) -> GateResult {
     verdict(reasons)
 }
 
-/// The `BlockerResolved` gate of `blocked -> in_progress` (`docs/SPEC.md` section 5.2): a written
-/// resolution, so that the next session knows what changed.
+/// Where an answer sends a blocked task back to (ADR 0069): the review or the plan it was blocked
+/// in, else work.
+#[must_use]
+pub fn return_from_block(blocked_from: Option<TaskStatus>) -> TaskStatus {
+    match blocked_from {
+        Some(TaskStatus::Verifying) => TaskStatus::Verifying,
+        Some(TaskStatus::Refining) => TaskStatus::Refining,
+        _ => TaskStatus::InProgress,
+    }
+}
+
+/// The `BlockerResolved` gate of `blocked -> in_progress`, `blocked -> verifying` and
+/// `blocked -> refining` (`docs/SPEC.md` section 5.2): a written resolution, so that the next
+/// session knows what changed, and a target the block came from; `refining` is open to any block.
 ///
 /// # Errors
 ///
-/// One reason when nothing was written.
-pub fn check_blocker_resolved(resolution: Option<&str>) -> GateResult {
-    if resolution.is_some_and(is_written) {
+/// One reason when nothing was written, or when the task was blocked in a status the answer does
+/// not lead back to.
+pub fn check_blocker_resolved(
+    resolution: Option<&str>,
+    blocked_from: Option<TaskStatus>,
+    to: TaskStatus,
+) -> GateResult {
+    if !resolution.is_some_and(is_written) {
+        return Err(vec![
+            "a blocker is cleared with a written resolution, so that the next session knows what changed"
+                .to_string(),
+        ]);
+    }
+    let back = return_from_block(blocked_from);
+    if to == TaskStatus::Refining || to == back {
         return Ok(());
     }
-    Err(vec![
-        "a blocker is cleared with a written resolution, so that the next session knows what changed"
-            .to_string(),
-    ])
+    let from = blocked_from.map_or_else(|| "working".to_string(), |from| from.to_string());
+    Err(vec![format!(
+        "the task was blocked while {from}, so an answer sends it back to {back}"
+    )])
+}
+
+/// The `PullRequestConflicted` gate of `accepted -> assigned` (ADR 0069): the task's pull request
+/// no longer merges, so its author has the conflicts to resolve.
+///
+/// # Errors
+///
+/// One reason when the pull request merges.
+pub fn check_pull_request_conflicted(conflicts: &[String]) -> GateResult {
+    if conflicts.is_empty() {
+        return Err(vec![
+            "the task's pull request merges, so it stays accepted".to_string(),
+        ]);
+    }
+    Ok(())
 }
 
 /// What the reviewer wrote when it rejected the work.
@@ -2129,12 +2168,20 @@ mod tests {
     #[test]
     fn clears_a_blocker_only_with_a_written_resolution() {
         assert_eq!(
-            check_blocker_resolved(Some("The password is in the vault.")),
+            check_blocker_resolved(
+                Some("The password is in the vault."),
+                None,
+                TaskStatus::InProgress
+            ),
             Ok(())
         );
         for nothing in [None, Some(""), Some("\n")] {
             assert_eq!(
-                reasons(check_blocker_resolved(nothing)),
+                reasons(check_blocker_resolved(
+                    nothing,
+                    None,
+                    TaskStatus::InProgress
+                )),
                 [
                     "a blocker is cleared with a written resolution, so that the next session knows what changed"
                 ]

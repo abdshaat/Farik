@@ -207,6 +207,38 @@ describe("chats", () => {
 		);
 	});
 
+	it("opens_the_chats_at_chats", async () => {
+		media.set(WIDE, true);
+		// `/channel` stays the chats' place: `/chats` and `/chats/theo` open it.
+		const team = await renderApp("/chats");
+		const t = team.socket as FakeSocket;
+		await answerStatus(t, false);
+		await answerQuery(t, "team.get", { team: TEAM });
+		await answerQuery(t, "chats.list", LIST);
+		await answerQuery(t, "channel.messages", { messages: [] });
+		await answerQuery(t, "waiting.list", { waiting: [] });
+		const list = await screen.findByRole("navigation", { name: en.chats });
+		expect(
+			within(list).getByRole("link", { current: "page" }).getAttribute("href"),
+		).toBe("/channel");
+		expect(screen.queryByText(en.noPage)).toBeNull();
+		cleanup();
+
+		const one = await renderApp("/chats/theo");
+		const o = one.socket as FakeSocket;
+		await answerStatus(o, false);
+		await answerQuery(o, "team.get", { team: TEAM });
+		await answerQuery(o, "chats.list", LIST);
+		await answerQuery(o, "chat.messages", { messages: [], waiting: null });
+		expect(
+			await screen.findByRole("heading", {
+				level: 1,
+				name: "Talking with Theo",
+			}),
+		).toBeTruthy();
+		expect(screen.queryByText(en.noPage)).toBeNull();
+	});
+
 	it("fills_the_window_on_the_chats", async () => {
 		const rootOf = async () =>
 			(await screen.findByRole("main")).parentElement as HTMLElement;
@@ -1140,7 +1172,7 @@ describe("chats", () => {
 		});
 		expect(
 			await screen.findByText(
-				"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+				"To start the product plan, your team needs an Architect or a Scrum Master. Add one on the Team page.",
 			),
 		).toBeTruthy();
 	});
@@ -1159,7 +1191,7 @@ describe("chats", () => {
 			],
 			[
 				"product_plan_no_reviewer",
-				"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+				"To start the product plan, your team needs an Architect or a Scrum Master. Add one on the Team page.",
 			],
 		] as const;
 		for (const [code, words] of plan) {

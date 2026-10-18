@@ -2,6 +2,7 @@
 
 Date: 2026-10-17
 Status: accepted (the controller, 2026-10-17, after two stalls found in a live Catervafication run on a Next.js project)
+Amended 2026-10-17 by ADR 0069: the tidy also runs before each implement session and never during a merge (decision 7); a blocked task's choices go back where the block came from and offer "Ask {pm} to change the plan" (item 2; decisions 1 and 2).
 
 Amends:
 - **SPEC 5.2**'s `in_progress -> verifying` row: the clean-worktree rule is unchanged, and is judged after Catervas tidies.
