@@ -106,6 +106,7 @@ pub(super) fn query(
                 serde_json::to_value(team.without_old_keys()).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(catervas_core::team::MAX_AGENTS);
             answer["sandboxed"] = json!(deps.transitions.sandboxed());
+            answer["online"] = json!(online(state, deps));
             answer["hidden_suggestions"] = json!(
                 crate::connectors::hidden_suggestions(deps.files.root())
                     .into_iter()
@@ -1764,6 +1765,29 @@ fn integration_branch_errors(
     }
 }
 
+/// Whether finished work can go online: the repository has an `origin`, and for a project folder
+/// every member's repository has one. A git error counts as `false`.
+fn online(state: &DaemonState, deps: &ToolDeps) -> bool {
+    let members = match deps.files.read_repos() {
+        Ok(Some(repos)) if !repos.repos.is_empty() => repos.repos,
+        Ok(_) => return deps.git.has_remote("origin").unwrap_or(false),
+        Err(_) => return false,
+    };
+    let Some(home) = state.home() else {
+        return false;
+    };
+    members.iter().all(|member| {
+        catervas_store::repos::member_root(home, &member.path)
+            .ok()
+            .and_then(|root| {
+                catervas_store::git::Git::open(root)
+                    .has_remote("origin")
+                    .ok()
+            })
+            .unwrap_or(false)
+    })
+}
+
 /// Whether the project folder lists member repositories (ADR 0057).
 fn members_present(deps: &ToolDeps) -> Result<bool, Failure> {
     Ok(deps
@@ -2949,6 +2973,20 @@ pub(super) mod tests {
             let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
             assert_eq!(got["sandboxed"], json!(sandboxed), "{name}");
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_says_whether_the_project_is_online() {
+        let harness = Harness::new("team-get-online", |_| {});
+        let _ = harness.orchestrator(harness.recorded(Vec::new()));
+        let online = |harness: &Harness| {
+            query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["online"].clone()
+        };
+        assert_eq!(online(&harness), json!(false));
+
+        harness.with_origin();
+        assert_eq!(online(&harness), json!(true));
     }
 
     #[test]
