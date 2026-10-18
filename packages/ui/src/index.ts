@@ -10,6 +10,7 @@ export { KanbanColumn } from "./KanbanColumn.tsx";
 export { List } from "./List.tsx";
 export { type DiffFile, parseDiff } from "./parse-diff.ts";
 export { RoleTag } from "./RoleTag.tsx";
+export { Segmented } from "./Segmented.tsx";
 export type { Role } from "./role.ts";
 export { StatusWord } from "./StatusWord.tsx";
 export { Stepper } from "./Stepper.tsx";

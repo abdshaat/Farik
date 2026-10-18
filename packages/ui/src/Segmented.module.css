@@ -1,0 +1,81 @@
+.group {
+	border: 0;
+	margin: 0;
+	padding: 0;
+	min-width: 0;
+	font:
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
+}
+
+/* The legend floats so the info button sits beside its text, not under it. */
+.legend {
+	float: inline-start;
+	padding: 0;
+	margin-inline-end: var(--catervas-space-1);
+	margin-bottom: var(--catervas-space-2);
+	font-weight: 600;
+	color: var(--catervas-color-ink);
+}
+
+.track {
+	clear: both;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px;
+	padding: 2px;
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-raised);
+	background: var(--catervas-color-page);
+}
+
+.segment {
+	flex: 1 1 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 40px;
+	padding: 0 var(--catervas-space-3);
+	border-radius: calc(var(--catervas-radius-raised) - 2px);
+	color: var(--catervas-color-ink);
+	cursor: pointer;
+	white-space: nowrap;
+	text-align: center;
+	font:
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
+}
+
+.segment:hover {
+	background: var(--catervas-color-surface);
+}
+
+/* The chosen segment is filled in the ink colour, the band's midnight in the light theme. */
+.segment:has(.radio:checked) {
+	background: var(--catervas-color-ink);
+	color: var(--catervas-color-page);
+	font-weight: 600;
+}
+
+.segment:has(.radio:focus-visible) {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: 2px;
+}
+
+/* The radio stays for the keyboard and the screen reader; the segment is what is seen. */
+.radio {
+	position: absolute;
+	opacity: 0;
+	width: 1px;
+	height: 1px;
+	margin: 0;
+	pointer-events: none;
+}
+
+.hint {
+	margin: var(--catervas-space-1) 0 0;
+	color: var(--catervas-color-ink-muted);
+	font:
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
+}
