@@ -10,7 +10,7 @@ import { refusedBy } from "../../test/schema.ts";
 /** Today with the request waiting; its row's own button opened. */
 async function opened(button: "Approve" | "Decline", dialogName: string) {
 	const { container, s } = await todayWith({ waiting: [PAID_ROW], team: TEAM });
-	const list = await screen.findByRole("list", { name: en.waitingList });
+	const list = await screen.findByRole("list", { name: en.waitingGroupAnswer });
 	fireEvent.click(
 		within(within(list).getByRole("listitem")).getByRole("button", {
 			name: button,

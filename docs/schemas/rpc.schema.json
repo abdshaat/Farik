@@ -1025,6 +1025,10 @@
             }
           }
         },
+        "online": {
+          "type": "boolean",
+          "description": "Whether the project is online: its repository has an origin, and for a project folder every member's repository has one. Finished work then opens a pull request; otherwise it waits on this computer for a merge by hand (spec 5.6, 5.14)."
+        },
         "members_present": {
           "type": "boolean",
           "description": "Whether the project folder's repos.yaml lists member repositories (ADR 0057, ADR 0069): each keeps its own integration branch there, so Settings shows no branch field for the team."
@@ -1183,6 +1187,7 @@
         "hidden_suggestions",
         "preview_env_present",
         "members_present",
+        "online",
         "requested_connections"
       ]
     },
@@ -1806,11 +1811,26 @@
             "ready",
             "missing",
             "too_old",
-            "not_running"
+            "not_running",
+            "preparing"
           ]
         },
         "version": {
           "type": "string"
+        },
+        "done": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The build step reached, while preparing and the build has said."
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The build's steps in all."
+        },
+        "failed": {
+          "type": "string",
+          "description": "Docker's last words, on a missing item whose last build failed."
         }
       },
       "required": [

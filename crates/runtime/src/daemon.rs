@@ -243,6 +243,8 @@ pub struct DaemonState {
     spend_reads: Mutex<BTreeMap<String, SpendRead>>,
     /// Woken when a campaign is made, so that the spend watch, which waits for the first, reads.
     campaign_made: tokio::sync::Notify,
+    /// The sandbox image's build, run in the background while setup waits (ADR 0070).
+    image_build: crate::computer::ImageBuild,
 }
 
 /// What the spend watch knows of one plan (step 08g): when it last tried, what it last read, why
@@ -338,6 +340,7 @@ impl DaemonState {
             google_ads_api: OnceLock::new(),
             spend_reads: Mutex::default(),
             campaign_made: tokio::sync::Notify::new(),
+            image_build: crate::computer::ImageBuild::default(),
         }
     }
 
@@ -369,6 +372,7 @@ impl DaemonState {
             google_ads_api: OnceLock::new(),
             spend_reads: Mutex::default(),
             campaign_made: tokio::sync::Notify::new(),
+            image_build: crate::computer::ImageBuild::default(),
         }
     }
 
@@ -448,6 +452,10 @@ impl DaemonState {
     }
 
     /// The notice the first campaign made wakes.
+    pub(crate) fn image_build(&self) -> &crate::computer::ImageBuild {
+        &self.image_build
+    }
+
     pub(crate) fn campaign_made(&self) -> &tokio::sync::Notify {
         &self.campaign_made
     }

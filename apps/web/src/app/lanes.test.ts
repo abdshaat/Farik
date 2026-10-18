@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LANES, type Lane, laneOf, type TaskRow } from "./lanes.ts";
+import { LANES, type Lane, laneOf, type TaskRow, taskNumber } from "./lanes.ts";
 import type { TaskStatus } from "./words.ts";
 
 const row = (status: TaskStatus, awaitingApproval = false): TaskRow => ({
@@ -40,5 +40,13 @@ describe("lanes", () => {
 			"review",
 			"done",
 		]);
+	});
+});
+
+describe("task numbers", () => {
+	it("reads_the_number_of_a_task_id", () => {
+		expect(taskNumber("CTV-31")).toBe(31);
+		expect(taskNumber("CTV-9")).toBe(9);
+		expect(taskNumber("odd")).toBe(0);
 	});
 });

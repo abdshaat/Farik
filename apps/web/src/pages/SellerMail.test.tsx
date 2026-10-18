@@ -403,7 +403,9 @@ describe("an order's press", () => {
 
 	it("approve_and_send_shows_the_order_s_email", async () => {
 		await todayWithMail({ waiting: waitingOrder(SEND) });
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		fireEvent.click(
 			await within(list).findByRole("button", {
 				name: "Approve and send to Pie Box Pros",
@@ -451,7 +453,9 @@ describe("an order's press", () => {
 			waiting: waitingOrder(SEND),
 			mailbox: { ...MAILBOX, sent_today: 50 },
 		});
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		await within(list).findByRole("button", { name: en.orderApprove });
 		expect(
 			within(list).queryByRole("button", { name: /Approve and send/ }),
@@ -460,7 +464,9 @@ describe("an order's press", () => {
 
 	it("approve_and_send_needs_the_email_and_a_mailbox", async () => {
 		await todayWithMail({ waiting: waitingOrder(undefined) });
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		await within(list).findByRole("button", { name: en.orderApprove });
 		expect(
 			within(list).queryByRole("button", { name: /Approve and send/ }),
@@ -474,7 +480,9 @@ describe("an order's press", () => {
 
 	it("approve_and_send_needs_a_mailbox", async () => {
 		await todayWithMail({ waiting: waitingOrder(SEND), mailbox: NO_MAILBOX });
-		const list = await screen.findByRole("list", { name: en.waitingList });
+		const list = await screen.findByRole("list", {
+			name: en.waitingGroupAnswer,
+		});
 		await within(list).findByRole("button", { name: en.orderApprove });
 		expect(
 			within(list).queryByRole("button", { name: /Approve and send/ }),

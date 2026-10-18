@@ -29,6 +29,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	not_paused: "refuseNotPaused",
 	already_answered: "refuseAlreadyAnswered",
 	already_accepted: "refuseAlreadyAccepted",
+	not_merged: "refuseNotMerged",
 	not_waiting_for_the_human: "refuseNotWaiting",
 	not_awaiting_approval: "refuseNotWaiting",
 	not_escalated: "refuseNotWaiting",

@@ -94,9 +94,9 @@ test("work runs on the board by itself, from its plan to the team's look back", 
 		await task.click();
 		await expect(page).toHaveURL(/\/tasks\/CTV-1$/);
 		await expect(
-			page.getByText(
-				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
-			),
+			page.getByText("CTV-1. Theo is doing it, and Ada reviews it.", {
+				exact: true,
+			}),
 		).toBeVisible();
 		const panel = page.getByRole("tabpanel");
 		await expect(
@@ -104,7 +104,8 @@ test("work runs on the board by itself, from its plan to the team's look back", 
 				"The repository has a done.txt at its root, so that a run can be checked for it.",
 			),
 		).toBeVisible();
-		await expect(panel.getByText("Passed")).toBeVisible();
+		await panel.getByText("Show each check").click();
+		await expect(panel.getByText("Passed", { exact: true })).toBeVisible();
 		await page.getByRole("tab", { name: "History" }).click();
 		await expect(panel.getByText("Mira moved it to Done.")).toBeVisible();
 		await expect(
@@ -175,10 +176,7 @@ test("work runs on the board by itself, from its plan to the team's look back", 
 		await page.goto(at("/costs"));
 		const theo = page.getByRole("row", { name: /^Theo/ });
 		await expect(theo.getByRole("rowheader")).toHaveText(/^Theo/);
-		await expect(theo.getByRole("cell")).toHaveText([
-			"$0.03",
-			"Nothing to do right now",
-		]);
+		await expect(theo.getByRole("cell")).toHaveText(["$0.03"]);
 		await expect(page.getByText("1 of 1", { exact: true })).toBeVisible();
 		await noSprint(page);
 		// On a phone no amount, and no one-word column name, breaks in the middle.

@@ -8,9 +8,9 @@ A role's kit names the services that make the role better (`docs/design/role-kit
 
 ## What the user sees
 
-1. **A section on Today, "Suggested connections",** under "Waiting on you" and above the seller mail, renewals and the posts going out. It appears only while there is something to suggest; with nothing to suggest there is no section, not an empty one.
+1. **A section on Today, "Suggested connections",** after "What moved" (changed by the UX pass, 2026-10-17). It appears only while there is something to suggest; with nothing to suggest there is no section, not an empty one.
 2. **One row per service and agent.** Each row shows the service's logo and title, then the agent's name and the kit's one-line "about" ("Mira · Schedules social posts"), with the kit's "why" behind the usual info button. Two actions: **Connect**, which opens that agent's page with the service's connect dialog already open, and **Not now**, which removes the row for good.
-3. **At most four rows show at first.** With more, a line under them says "Show all 9" and opens the rest; "Show fewer" folds them back.
+3. **At most two rows show at first (four until the UX pass, 2026-10-17).** With more, a line under them says "Show all 9" and opens the rest; "Show fewer" folds them back.
 4. **On a phone** the section is the same, under the same heading, the rows stacked as Today's other rows are.
 
 ## What is suggested

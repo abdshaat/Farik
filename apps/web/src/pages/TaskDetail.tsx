@@ -1,4 +1,4 @@
-import { Button, DiffView, StatusWord } from "@catervas/ui";
+import { Button, DiffView, InfoTip, StatusWord } from "@catervas/ui";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useCommand } from "../app/command.ts";
@@ -211,7 +211,16 @@ export function TaskDetail() {
 		!costs ||
 		!detail
 	)
-		return null;
+		return (
+			<div className={page.layout}>
+				<div className={page.main}>
+					<Link to="/board">{t("taskBack")}</Link>
+					<p role="status" className={styles.muted}>
+						{t("pageLoading")}
+					</p>
+				</div>
+			</div>
+		);
 
 	const contract = plan.contract;
 	const events = history.events;
@@ -247,9 +256,11 @@ export function TaskDetail() {
 			? plans <= NTH.length
 				? t("designPlanCount", { Nth: capital(NTH[plans - 1] ?? "") })
 				: t("designPlanCountMany", { n: plans })
-			: t("taskTry")
-					.replace("{try}", String(tries.try))
-					.replace("{of}", String(tries.of)),
+			: tries.try > 1
+				? t("taskTry")
+						.replace("{try}", String(tries.try))
+						.replace("{of}", String(tries.of))
+				: "",
 	]
 		.filter(Boolean)
 		.join(" ");
@@ -387,11 +398,15 @@ export function TaskDetail() {
 		document.getElementById(`tab-${next}`)?.focus();
 	};
 
+	const outcomes = contract.exitCriteria.map(
+		(c) => checked.checks.find((k) => k.criterionId === c.id)?.passed,
+	);
+	const passedChecks = outcomes.filter((o) => o === true).length;
+	const failedChecks = outcomes.filter((o) => o === false).length;
+
 	const panels: Record<Tab, ReactNode> = {
 		summary: (
 			<>
-				<h2>{t("taskFor")}</h2>
-				<p>{contract.intent}</p>
 				{summary && (summaryBy || checkedByCatervas) && (
 					<section className={own.letter} aria-labelledby="summary-signed">
 						<p id="summary-signed" className={styles.muted}>
@@ -419,26 +434,45 @@ export function TaskDetail() {
 						builder={names.developer}
 					/>
 				)}
-				<h2 id="checks">{t("taskChecks")}</h2>
-				<ul className={own.checks} aria-labelledby="checks">
-					{contract.exitCriteria.map((c) => {
-						const check = checked.checks.find((k) => k.criterionId === c.id);
-						return (
-							<li key={c.id}>
-								<span>{c.text}</span>
-								<span className={styles.muted}>
-									{t(
-										!check
-											? "checkNotRun"
-											: check.passed
-												? "checkPassed"
-												: "checkFailed",
-									)}
-								</span>
-							</li>
-						);
-					})}
-				</ul>
+				<h2>{t("taskFor")}</h2>
+				<p>{contract.intent}</p>
+				{contract.exitCriteria.length > 0 && (
+					<>
+						<h2 id="checks">{t("taskChecks")}</h2>
+						<p>
+							{t("checksSummary", {
+								passed: passedChecks,
+								count: contract.exitCriteria.length,
+							})}
+							{failedChecks > 0 &&
+								` ${t("checksFailedLast", { n: failedChecks })}`}
+						</p>
+						<details className={page.checks}>
+							<summary>{t("checksShowEach")}</summary>
+							<ul className={own.checks} aria-labelledby="checks">
+								{contract.exitCriteria.map((c) => {
+									const check = checked.checks.find(
+										(k) => k.criterionId === c.id,
+									);
+									return (
+										<li key={c.id}>
+											<span>{c.text}</span>
+											<span className={styles.muted}>
+												{t(
+													!check
+														? "checkNotRun"
+														: check.passed
+															? "checkPassed"
+															: "checkFailed",
+												)}
+											</span>
+										</li>
+									);
+								})}
+							</ul>
+						</details>
+					</>
+				)}
 			</>
 		),
 		history: (
@@ -742,45 +776,47 @@ export function TaskDetail() {
 						</tbody>
 					</table>
 				</section>
-				<section className={styles.section} aria-labelledby="adding">
-					<h2 id="adding">{t("taskAddTitle")}</h2>
-					{diff.privateFolder ? (
-						<p>
-							{t("taskAddNothing", {
-								role: roleWord(contract.assigneeRole as Agent["role"]),
-							})}
-						</p>
-					) : (
-						<>
-							<p className={styles.muted}>{t("taskAddHint")}</p>
-							{integrated ? (
-								<p>
-									{t("taskAdded").replace("{day}", day(integrated.recordedAt))}
-								</p>
-							) : awaitsIntegration ? (
-								<div className={styles.actions}>
-									<Button
-										kind="primary"
-										busy={busy}
-										onClick={() =>
-											send({ command: "task_integrate", body: { taskId: id } })
-										}
-									>
-										{t("taskAdd")}
-									</Button>
-								</div>
-							) : (
-								<p>
-									{t(
-										contract.status !== "accepted"
-											? "taskAddNotYet"
-											: "taskAddByPullRequest",
-									)}
-								</p>
+				{(diff.privateFolder ||
+					integrated ||
+					awaitsIntegration ||
+					contract.status === "accepted") && (
+					<section className={styles.section} aria-labelledby="adding">
+						<div className={styles.titled}>
+							<h2 id="adding">{t("taskAddTitle")}</h2>
+							{!diff.privateFolder && (
+								<InfoTip id="adding-info">{t("taskAddHint")}</InfoTip>
 							)}
-						</>
-					)}
-				</section>
+						</div>
+						{diff.privateFolder ? (
+							<p>
+								{t("taskAddNothing", {
+									role: roleWord(contract.assigneeRole as Agent["role"]),
+								})}
+							</p>
+						) : integrated ? (
+							<p>
+								{t("taskAdded").replace("{day}", day(integrated.recordedAt))}
+							</p>
+						) : awaitsIntegration ? (
+							<div className={styles.actions}>
+								<Button
+									kind="primary"
+									busy={busy}
+									onClick={() =>
+										send({
+											command: "task_integrate",
+											body: { taskId: id },
+										})
+									}
+								>
+									{t("taskAdd")}
+								</Button>
+							</div>
+						) : (
+							<p>{t("taskAddByPullRequest")}</p>
+						)}
+					</section>
+				)}
 				{(session || cancellable) && (
 					<div className={page.stack}>
 						{session && (

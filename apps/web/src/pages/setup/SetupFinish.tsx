@@ -1,6 +1,7 @@
 import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { useQuery } from "../../app/store.ts";
 import { ShowAdvanced } from "../../components/ShowAdvanced.tsx";
 import { t } from "../../strings/t.ts";
 import { AdvancedSettings } from "./SetupAdvanced.tsx";
@@ -14,15 +15,20 @@ export function SetupFinish() {
 	const { draft } = useSetup();
 	const { start, busy, refused } = useStart();
 	const [advanced, setAdvanced] = useState(false);
+	// Whether finished work can open a pull request depends on the project having an origin.
+	const { data: team } = useQuery<{ online?: boolean }>("team.get", {});
+	const said = team
+		? t(team.online ? "finishLead" : "finishLeadLocal")
+		: undefined;
 
 	return (
 		<Wizard
 			step={7}
 			title={t("finishTitle")}
 			lead={
-				draft.from
-					? t("finishLeadSaved", { name: draft.from })
-					: t("finishLead")
+				draft.from && said
+					? `${said} ${t("finishLeadSaved", { name: draft.from })}`
+					: (said ?? "")
 			}
 			carried={!!draft.from}
 		>

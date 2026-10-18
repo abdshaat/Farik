@@ -542,3 +542,9 @@
 	gap: var(--catervas-space-3);
 	align-items: center;
 }
+
+/* The safe box's build: one bar the width of the row's text, in the working mark's colour. */
+.progress {
+	width: 100%;
+	accent-color: var(--catervas-color-status-working);
+}

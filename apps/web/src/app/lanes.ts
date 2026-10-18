@@ -52,3 +52,10 @@ export function laneOf(task: TaskRow): Lane {
 	if (task.status === "escalated" && task.awaitingApproval) return "planning";
 	return PLACES[task.status];
 }
+
+/** The number in a task id ("CTV-31" → 31); 0 when it has none. */
+export function taskNumber(id: string): number {
+	const digits = id.slice(id.lastIndexOf("-") + 1);
+	const n = /^\d+$/.test(digits) ? Number(digits) : 0;
+	return n;
+}
