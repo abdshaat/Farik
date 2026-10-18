@@ -156,7 +156,7 @@ Tests:
   private file only you can read" and "could not use this computer's keychain", and not "catervas's
   credential.json"; `Keychain` still says "kept in your computer's keychain".
 
-- [ ] `fix(cli): say plainly that the key is in a private file when there is no keychain`
+- [x] `fix(cli): say plainly that the key is in a private file when there is no keychain`
 
 ### Task 21: the serving tests keep to their own folder
 

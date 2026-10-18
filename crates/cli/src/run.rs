@@ -127,17 +127,7 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         return;
     }
     if let Some((kind, source)) = driver.credential {
-        let what = match kind {
-            CredentialKind::ApiKey => "an API key",
-            CredentialKind::SubscriptionToken => "a subscription token",
-        };
-        let name = credential_name((kind, source));
-        let line = match source {
-            Source::Environment => format!("credential: {name} ({what})"),
-            Source::Keychain => format!("credential: {what}, kept in your computer's keychain"),
-            Source::File => format!("credential: {what}, kept in catervas's credential.json"),
-        };
-        printer.line(&line, &Value::Null);
+        printer.line(&credential_line(kind, source), &Value::Null);
     }
     if recovered.sessions_interrupted + recovered.worktrees_removed + recovered.tasks_resumed > 0 {
         printer.line(
@@ -149,6 +139,24 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
             ),
             &Value::Null,
         );
+    }
+}
+
+/// The line that says which credential the start chose and where it is kept. The private file is
+/// said plainly: it is where the key goes when this computer's keychain cannot be used (ADR 0022).
+fn credential_line(kind: CredentialKind, source: Source) -> String {
+    let what = match kind {
+        CredentialKind::ApiKey => "an API key",
+        CredentialKind::SubscriptionToken => "a subscription token",
+    };
+    let name = credential_name((kind, source));
+    match source {
+        Source::Environment => format!("credential: {name} ({what})"),
+        Source::Keychain => format!("credential: {what}, kept in your computer's keychain"),
+        Source::File => format!(
+            "credential: {what}, kept in a private file only you can read, credential.json in \
+             catervas's settings folder: catervas could not use this computer's keychain"
+        ),
     }
 }
 
@@ -458,4 +466,28 @@ pub(crate) fn refuse(io: &mut CliIo<'_>, as_json: bool, error: &str) -> i32 {
     };
     report_error(&mut printer, error);
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use catervas_runtime::claude::CredentialKind;
+    use catervas_runtime::credential::Source;
+
+    use super::credential_line;
+
+    #[test]
+    fn says_where_the_credential_is_kept() {
+        let file = credential_line(CredentialKind::SubscriptionToken, Source::File);
+        assert!(file.contains("a private file only you can read"), "{file}");
+        assert!(
+            file.contains("could not use this computer's keychain"),
+            "{file}"
+        );
+        assert!(!file.contains("catervas's credential.json"), "{file}");
+        let keychain = credential_line(CredentialKind::ApiKey, Source::Keychain);
+        assert!(
+            keychain.contains("kept in your computer's keychain"),
+            "{keychain}"
+        );
+    }
 }
