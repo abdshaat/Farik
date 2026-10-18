@@ -814,6 +814,8 @@ export const en = {
 	laneEmpty: "Nothing here right now.",
 	boardShowAll: "Show all {count}",
 	boardShowFewer: "Show fewer",
+	boardThinking: "{name} · {role} — thinking",
+	boardThinkingBare: "{name} — thinking",
 	markAccepted: "Accepted",
 	markWriting: "Writing",
 	markBuilding: "Building",
