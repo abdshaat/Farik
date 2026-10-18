@@ -1541,6 +1541,8 @@ async fn in_progress(
     let Some(resume) = resume(deps, team, &contract, assignee)? else {
         return Ok(None);
     };
+    // What a tool changed outside the task's paths is put back before the agent works (ADR 0069).
+    deps.tools.transitions.tidy(&row.task_id, team, None)?;
     // A task in a private folder (6.6) has no worktree to give a sandbox, and no command to run.
     let executor: Option<Arc<dyn Executor>> = if task_private_folder(&contract).is_some() {
         None
@@ -3733,6 +3735,75 @@ mod tests {
                     &event.body,
                     EventBody::NoteWritten(body) if body.kind == NoteWrittenBodyKind::Completion
                 ))
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn puts_back_what_tools_changed_before_the_work_session() {
+        let harness = Harness::new("orch-tidy-before-work", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(worktree.join("README.md"), "a tool rewrote this\n").expect("written");
+        std::fs::write(worktree.join("stray.txt"), "a build left this\n").expect("written");
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1()]);
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes);
+
+        orchestrator.tick().await.expect("the session runs");
+
+        let tidied = harness.events(&[EventKind::WorktreeTidied]);
+        let [tidied] = tidied.as_slice() else {
+            panic!("expected one tidy: {tidied:?}");
+        };
+        let EventBody::WorktreeTidied(body) = &tidied.body else {
+            panic!("{tidied:?}");
+        };
+        assert_eq!(body.put_back, vec!["README.md".to_string()]);
+        assert_eq!(body.removed, vec!["stray.txt".to_string()]);
+        assert_eq!(tidied.envelope.ids.agent_id, None);
+        let started = harness.events(&[EventKind::SessionStarted]);
+        assert!(
+            tidied.envelope.seq < started[0].envelope.seq,
+            "the tidy comes before the session"
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("README.md")).expect("read"),
+            "the first line\n"
+        );
+
+        // A merge left in progress is not tidied: its staged changes are the other branch's.
+        let harness = Harness::new("orch-tidy-in-a-merge", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let worktree = harness.worktree("CTV-1");
+        let task_branch = harness.branch("CTV-1");
+        std::fs::write(worktree.join("NOTICE"), "one\n").expect("written");
+        git_in(&worktree, &["add", "-A"]);
+        git_in(&worktree, &["commit", "-m", "the notice"]);
+        git_in(&worktree, &["checkout", "-b", "side"]);
+        std::fs::write(worktree.join("README.md"), "the side's line\n").expect("written");
+        std::fs::write(worktree.join("NOTICE"), "one\ntwo\n").expect("written");
+        git_in(&worktree, &["commit", "-am", "the side"]);
+        git_in(&worktree, &["checkout", &task_branch]);
+        std::fs::write(worktree.join("README.md"), "the task's line\n").expect("written");
+        git_in(&worktree, &["commit", "-am", "the task"]);
+        let merged = std::process::Command::new("git")
+            .args(["merge", "side"])
+            .current_dir(&worktree)
+            .output()
+            .expect("git runs");
+        assert!(!merged.status.success(), "the merge conflicts");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        orchestrator.tick().await.expect("the session runs");
+
+        assert!(harness.events(&[EventKind::WorktreeTidied]).is_empty());
+        let readme = std::fs::read_to_string(worktree.join("README.md")).expect("read");
+        assert!(readme.contains("<<<<<<<"), "{readme}");
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("NOTICE")).expect("read"),
+            "one\ntwo\n"
         );
     }
 

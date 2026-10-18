@@ -331,7 +331,7 @@ impl Transitions {
         let _held = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
         let ask = &tidied(ask);
         if request.to == TaskStatus::Verifying {
-            self.put_back_strays(request, ask, team)?;
+            self.tidy(&request.task_id, team, Some((request, ask)))?;
         }
         let context = self.context(request, ask, team)?;
         // The agent the owner gave a task in its chat holds its plan with the Product Manager's
@@ -620,14 +620,31 @@ impl Transitions {
         ask: &TransitionAsk,
         body: EventBody,
     ) -> Result<(), TransitionError> {
-        let ids = EventIds {
-            task_id: Some(request.task_id.clone()),
+        self.append_about(
+            &request.task_id,
             // An agent's id when an agent asked; the human and the governor are not agents.
-            agent_id: match request.actor {
+            match request.actor {
                 TransitionActor::Human | TransitionActor::Governor => None,
                 _ => request.agent_id.clone(),
             },
-            session_id: ask.session_id.clone(),
+            ask.session_id.clone(),
+            body,
+        )
+    }
+
+    /// Appends one event about `task_id`, stamped with the agent and session it names, and
+    /// projects it.
+    fn append_about(
+        &self,
+        task_id: &TaskId,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+        body: EventBody,
+    ) -> Result<(), TransitionError> {
+        let ids = EventIds {
+            task_id: Some(task_id.clone()),
+            agent_id,
+            session_id,
             ..self.ids.clone()
         };
         let event =
@@ -932,7 +949,8 @@ impl Transitions {
     }
 
     /// Puts back what tools changed in the task's worktree outside its allowed paths before a move
-    /// into `verifying` is judged (ADR 0068): a tracked file changed or deleted there is restored
+    /// into `verifying` is judged (ADR 0068) and before each work session (ADR 0069, `by` is `None`;
+    /// nothing while a merge is in progress there): a tracked file changed or deleted there is restored
     /// from the task branch's last commit, and an untracked file git does not ignore is deleted,
     /// then `worktree.tidied` records both. The assignee's own tools cannot write outside the
     /// paths and the sandbox has no git, so nothing else can undo a `next dev` or a build that
@@ -944,13 +962,18 @@ impl Transitions {
     ///
     /// `Files` when the contract cannot be read or a file cannot be deleted, `Git` when git
     /// cannot read or restore the worktree, and what the log refuses.
-    fn put_back_strays(
+    pub fn tidy(
         &self,
-        request: &TransitionRequest,
-        ask: &TransitionAsk,
+        task_id: &TaskId,
         team: &Team,
+        by: Option<(&TransitionRequest, &TransitionAsk)>,
     ) -> Result<(), TransitionError> {
-        let contract = self.files.read_contract(&request.task_id)?;
+        // `request` holds the lock already; a tidy before a work session takes it itself.
+        let _held = match by {
+            Some(_) => None,
+            None => Some(self.requests.lock().unwrap_or_else(PoisonError::into_inner)),
+        };
+        let contract = self.files.read_contract(task_id)?;
         if task_private_folder(&contract).is_some() {
             return Ok(());
         }
@@ -973,6 +996,9 @@ impl Transitions {
             Err(error) => return Err(error.into()),
         };
         let git = &repository.git;
+        if git.is_merging(&worktree)? {
+            return Ok(());
+        }
         let outside = |path: &String| {
             matches!(
                 check_allowed_paths(std::slice::from_ref(path), &contract.allowed_paths),
@@ -1002,9 +1028,20 @@ impl Transitions {
                 detail: format!("{path} in the task's worktree cannot be deleted: {error}"),
             })?;
         }
-        self.append(
-            request,
-            ask,
+        let (agent_id, session_id) = match by {
+            Some((request, ask)) => (
+                match request.actor {
+                    TransitionActor::Human | TransitionActor::Governor => None,
+                    _ => request.agent_id.clone(),
+                },
+                ask.session_id.clone(),
+            ),
+            None => (None, None),
+        };
+        self.append_about(
+            task_id,
+            agent_id,
+            session_id,
             EventBody::WorktreeTidied(WorktreeTidiedBody {
                 put_back,
                 removed: removed.into_iter().collect(),

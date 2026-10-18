@@ -490,6 +490,22 @@ impl Git {
         run_git(path, &restore).map(|_| ())
     }
 
+    /// Whether a merge is in progress in the worktree at `worktree`: it has a `MERGE_HEAD`.
+    ///
+    /// # Errors
+    ///
+    /// As `status`.
+    pub fn is_merging(&self, worktree: &Path) -> Result<bool, GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(worktree)?;
+        match run_git(worktree, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]) {
+            Ok(_) => Ok(true),
+            // `-q` makes git exit 1 and say nothing when there is no such reference.
+            Err(GitError::CommandFailed { stderr, .. }) if stderr.is_empty() => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Commits `paths` of the tree at `path` with `message`, and answers the new commit's sha.
     ///
     /// Only the named paths are staged (`git --literal-pathspecs add -- <paths>`), so what else a

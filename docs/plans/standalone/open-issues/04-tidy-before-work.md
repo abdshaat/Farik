@@ -100,7 +100,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
   merged line (staged, so the tidy would otherwise have put it back). Fails first: no
   `worktree.tidied` before the session.
 
-- [ ] `fix(runtime): put back what tools changed before each work session too`
+- [x] `fix(runtime): put back what tools changed before each work session too`
 
 ## Verification
 
