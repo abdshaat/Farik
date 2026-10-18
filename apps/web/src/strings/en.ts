@@ -229,8 +229,7 @@ export const en = {
 	scanWrongSaved: "Saved. Your team reads it before it starts.",
 	scanRight: "That's right",
 	teamTitle: "Who should be on your team?",
-	teamLead:
-		"We suggest six, one for each job. You can rename them now or later. To add a second developer, choose “Add someone”.",
+	teamLead: "Six people, one for each job. Rename anyone now or later.",
 	teamMembers: "Your team",
 	teamInclude: "Include the {role}",
 	jobProductManager:
@@ -247,8 +246,7 @@ export const en = {
 	jobProcurement:
 		"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
 	setupMoreRoles: "More roles",
-	setupMoreRolesNote:
-		"Roles Catervas does not suggest. Tick one to add it to your team; a team has seven people at most.",
+	setupMoreRolesNote: "Tick one to add it. Seven people at most.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",
@@ -339,8 +337,9 @@ export const en = {
 		"Say what must be true of finished work, in at least 10 characters.",
 	checkAdd: "Add a check",
 	team: "Team",
-	teamPageLead:
-		"{count} agents work on {name}. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
+	teamPageRules:
+		"A team needs a Product Manager.\nEveryone else is up to you.\nSeven people at most.",
+	teamPageLead: "{count} agents work on {name}.",
 	agentEditLink: "Edit {name}",
 	agentPause: "Pause {name}",
 	agentResume: "Resume {name}",
@@ -350,11 +349,11 @@ export const en = {
 	agentModelRole: "The role’s model",
 	teamChangesTitle: "Pause, retire or replace",
 	teamChangesBody:
-		"Pausing stops an agent from taking new work; it finishes nothing halfway. Retiring removes it from the team but keeps what it learned in your project, so whoever replaces it can read it. Changes start with the agent’s next piece of work, never in the middle of one.",
+		"Pause: the agent takes no new work and leaves nothing half done.\nRetire: it leaves the team; what it learned stays in your project for whoever replaces it.\nA change starts with the agent’s next piece of work.",
 	teamCostTitle: "What a team like this costs",
 	teamCostNote: "It is a guide, not a limit.",
 	teamCostDesigner:
-		"{designer} uses the same model as {developer}, so {designer} adds to what a day costs. Before {designer} changes a screen, {designer} looks at it and writes a plan, and that costs a little too.",
+		"{designer} uses the same model as {developer}, so a day costs more.\nBefore changing a screen, {designer} writes a plan, which costs a little too.",
 	teamCostLimitBefore: "Set a limit in ",
 	teamCostLimitAfter: ".",
 	agentBack: "Back to your team",
@@ -1451,8 +1450,7 @@ export const en = {
 	waitingNeedsBrowser: "{agent}’s browser is off",
 	waitingNeedsBrowserLine:
 		"{designer} opens your app with Playwright. Turn Playwright on for {designer} on the Team page; until then {designer} takes no work, and nobody checks the screens {developer} builds.",
-	startsLegend:
-		"Start from the team Catervas suggests, from a ready-made team, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
+	startsLegend: "Where should your team come from?",
 	startSuggested: "The suggested team",
 	startSuggestedNote:
 		"Six people, one for each job. A good start for a first project.",

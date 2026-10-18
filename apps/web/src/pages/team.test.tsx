@@ -205,6 +205,14 @@ describe("team page", () => {
 				.getAttribute("href"),
 		).toBe("/team/theo");
 		expect(screen.getByText(en.firstDay, { exact: false })).toBeTruthy();
+		expect(screen.getByText("5 agents work on Corner Bakery.")).toBeTruthy();
+		for (const line of en.teamPageRules.split("\n")) onlyInTips(line);
+		const changes = screen.getByRole("region", { name: en.teamChangesTitle });
+		expect(
+			within(changes)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual(en.teamChangesBody.split("\n"));
 		// The figure is the suggested six's; a team of another size is told how it compares.
 		expect(en.firstDay).toMatch(/A smaller team costs less\.$/);
 		await expectNoAxeViolations(container);
@@ -232,9 +240,7 @@ describe("team page", () => {
 		// A team of four has no sixth agent.
 		expect(cost.textContent).not.toMatch(/sixth/);
 		expect(
-			within(cost).getByText("so Iris adds to what a day costs", {
-				exact: false,
-			}),
+			within(cost).getByText("so a day costs more", { exact: false }),
 		).toBeTruthy();
 	});
 
@@ -286,13 +292,15 @@ describe("team page", () => {
 			"var(--catervas-color-role-ui-ux-designer)",
 		);
 		// The cost section says what the Designer, and its plans, add.
-		expect(
-			screen.getByText(
-				"Iris uses the same model as Theo, so Iris adds to what a day costs. Before Iris changes a screen, Iris looks at it and writes a plan, and that costs a little too.",
-				{ exact: false },
-			),
-		).toBeTruthy();
 		const cost = screen.getByRole("region", { name: en.teamCostTitle });
+		expect(
+			within(cost)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			"Iris uses the same model as Theo, so a day costs more.",
+			"Before changing a screen, Iris writes a plan, which costs a little too.",
+		]);
 		expect(
 			within(cost).getByRole("link", { name: "Costs" }).getAttribute("href"),
 		).toBe("/costs");
@@ -2211,9 +2219,8 @@ describe("team templates", () => {
 	it("says_the_team_needs_a_product_manager_alone", async () => {
 		await opened("/team");
 		const lead = await screen.findByText(/agents work on/);
-		expect(lead.textContent).toBe(
-			"5 agents work on Corner Bakery. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
-		);
+		expect(lead.textContent).toBe("5 agents work on Corner Bakery.");
+		onlyInTips("A team needs a Product Manager.");
 	});
 
 	it("refusedLine_knows_no_developer_rule", async () => {

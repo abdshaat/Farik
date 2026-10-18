@@ -59,7 +59,7 @@ Tests, each watched to fail for the stated reason before the code that satisfies
 - `shows_the_designer_card_in_its_colour` (updated, `team.test.tsx:278-282`) — its `getByText("Iris uses the same model as Theo, so Iris adds …")` becomes two list items inside the region "What a team like this costs": "Iris uses the same model as Theo, so a day costs more." and "Before changing a screen, Iris writes a plan, which costs a little too."; the "Costs" link assertion is unchanged.
 - `counts_no_agents_in_the_designer_cost_line_of_a_small_team` (updated, line 233) — its `getByText("so Iris adds to what a day costs", { exact: false })` becomes `getByText("so a day costs more", { exact: false })`; the "no sixth" assertion is unchanged.
 
-- [ ] `feat(web): the Team page explains itself in bullets and an ⓘ`
+- [x] `feat(web): the Team page explains itself in bullets and an ⓘ`
 
 ### Task 2: setup's team step in fewer words
 
@@ -71,7 +71,7 @@ Tests:
 - `setup/team.test.tsx` line 322: `expect(en.teamLead).toBe("Six people, one for each job. Rename anyone now or later.")` replaces the `toMatch(/^We suggest six…/)`; line 321's `findByText(en.teamLead)` is unchanged and passes with the new words; line 473 finds the new `setupMoreRolesNote`; lines 1979 and 2043 find the group by the new `startsLegend` ("Where should your team come from?") and the order test at 2036–2050 still holds. The changed `toBe` fails first against the old words.
 - No Playwright journey matches the old lead, legend or note (checked 2026-10-17 with grep over `apps/web/e2e`); `setup-team.spec.ts` and `templates.spec.ts` are re-run.
 
-- [ ] `feat(web): setup's team step says less`
+- [x] `feat(web): setup's team step says less`
 
 ## Verification
 

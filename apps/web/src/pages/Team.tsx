@@ -1,10 +1,17 @@
-import { AVATAR_URLS, type AvatarKey, Button, RoleTag } from "@catervas/ui";
+import {
+	AVATAR_URLS,
+	type AvatarKey,
+	Button,
+	InfoTip,
+	RoleTag,
+} from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { agentLine } from "../app/agentLine.ts";
 import { useConnection } from "../app/connection.tsx";
 import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
+import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
 import { SaveTemplate } from "./dialogs/SaveTemplate.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
@@ -165,7 +172,12 @@ export function Team() {
 	const developer = agents.find((a) => a.role === "software_developer");
 	return (
 		<div className={styles.page}>
-			<h1 className={styles.title}>{t("teamMembers")}</h1>
+			<div className={styles.titled}>
+				<h1 className={styles.title}>{t("teamMembers")}</h1>
+				<InfoTip id="team-rules-info">
+					<Bullets text={t("teamPageRules")} />
+				</InfoTip>
+			</div>
 			<p>
 				{t("teamPageLead")
 					.replace("{count}", String(agents.length))
@@ -261,20 +273,24 @@ export function Team() {
 			<AddSomeone team={team} most={most ?? 0} />
 			<section className={styles.section} aria-labelledby="changes-heading">
 				<h2 id="changes-heading">{t("teamChangesTitle")}</h2>
-				<p>{t("teamChangesBody")}</p>
+				<Bullets text={t("teamChangesBody")} />
 			</section>
 			<section className={styles.section} aria-labelledby="cost-heading">
 				<h2 id="cost-heading">{t("teamCostTitle")}</h2>
 				{designer && developer ? (
-					<p>
-						{t("teamCostDesigner", {
-							designer: designer.displayName,
-							developer: developer.displayName,
-						})}{" "}
-						{t("teamCostLimitBefore")}
-						<Link to="/costs">{t("costs")}</Link>
-						{t("teamCostLimitAfter")}
-					</p>
+					<>
+						<Bullets
+							text={t("teamCostDesigner", {
+								designer: designer.displayName,
+								developer: developer.displayName,
+							})}
+						/>
+						<p>
+							{t("teamCostLimitBefore")}
+							<Link to="/costs">{t("costs")}</Link>
+							{t("teamCostLimitAfter")}
+						</p>
+					</>
 				) : (
 					<p>
 						{t("firstDay")} {t("teamCostNote")}
