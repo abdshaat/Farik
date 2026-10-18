@@ -139,6 +139,9 @@ pub struct TransitionAsk {
     /// the folder (6.6): it has no commit to show its work, and the gate reads these from the
     /// folder.
     pub workbooks: Option<Vec<String>>,
+    /// The files that conflict when an accepted task's pull request no longer merges, for the
+    /// move back to `assigned` (ADR 0069): Catervas found them merging the integration branch.
+    pub pull_request_conflicts: Option<Vec<String>>,
 }
 
 /// The governor's answer to a hand-over of a task whose wait cleared.
@@ -752,7 +755,7 @@ impl Transitions {
                     _ => None,
                 }
             }),
-            pull_request_conflicts: Vec::new(),
+            pull_request_conflicts: ask.pull_request_conflicts.clone().unwrap_or_default(),
             blocked_at: last_move_into(&history, TaskStatus::Blocked)
                 .map(|event| event.envelope.recorded_at),
             now,

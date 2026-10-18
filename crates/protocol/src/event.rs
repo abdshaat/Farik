@@ -33,12 +33,12 @@ pub use crate::generated::event::{
     MarketingPlanProposedBody, MarketingPlanProposedBodyFormat, MarketingPlanReturnedBody,
     MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
     PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
-    ProjectStartedBody, ProposedRequest, PullRequestOpenedBody, QuestionAnsweredBody,
-    QuestionAskedBody, QuestionChoice, ReasonBody, RequestTriagedBody, RequestTriagedBodySize,
-    RetroAppendedBody, ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason,
-    SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
-    SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody, SprintEndedBody,
-    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    ProjectStartedBody, ProposedRequest, PullRequestConflictedBody, PullRequestOpenedBody,
+    PullRequestRefreshedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody,
+    RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
+    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
+    SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody,
+    SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
     TaskCreatedBodyFiledAs, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskReassignedBody,
     TaskReassignedBodyReason, TaskRoomGrantedBody, TaskTransitionedBody,
     TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
@@ -271,6 +271,8 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::DeliveryClosed => "deliveryClosedBody",
         EventKind::TaskReassigned => "taskReassignedBody",
         EventKind::WorktreeTidied => "worktreeTidiedBody",
+        EventKind::PullRequestConflicted => "pullRequestConflictedBody",
+        EventKind::PullRequestRefreshed => "pullRequestRefreshedBody",
     }
 }
 
@@ -332,6 +334,8 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::CatervaficationStarted
             | EventKind::TaskReassigned
             | EventKind::WorktreeTidied
+            | EventKind::PullRequestConflicted
+            | EventKind::PullRequestRefreshed
     )
 }
 
@@ -486,13 +490,15 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::DeliveryClosed(_)
         | EventBody::TaskReassigned(_)
         | EventBody::ConnectionRequested(_)
-        | EventBody::WorktreeTidied(_) => None,
+        | EventBody::WorktreeTidied(_)
+        | EventBody::PullRequestConflicted(_)
+        | EventBody::PullRequestRefreshed(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 120] = [
+pub const EVERY_KIND: [EventKind; 122] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -613,6 +619,8 @@ pub const EVERY_KIND: [EventKind; 120] = [
     EventKind::TaskReassigned,
     EventKind::ConnectionRequested,
     EventKind::WorktreeTidied,
+    EventKind::PullRequestConflicted,
+    EventKind::PullRequestRefreshed,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -1014,6 +1022,12 @@ pub enum EventBody {
     /// Catervas put back what tools changed in a task's worktree outside its paths (ADR 0068).
     #[serde(rename = "worktree.tidied")]
     WorktreeTidied(WorktreeTidiedBody),
+    /// An accepted task's pull request stopped merging and went back to its assignee (ADR 0069).
+    #[serde(rename = "pull_request.conflicted")]
+    PullRequestConflicted(PullRequestConflictedBody),
+    /// An accepted task's pull request stopped merging and Catervas brought it up to date (ADR 0069).
+    #[serde(rename = "pull_request.refreshed")]
+    PullRequestRefreshed(PullRequestRefreshedBody),
 }
 
 impl EventBody {
@@ -1142,6 +1156,8 @@ impl EventBody {
             Self::DeliveryClosed(_) => EventKind::DeliveryClosed,
             Self::TaskReassigned(_) => EventKind::TaskReassigned,
             Self::WorktreeTidied(_) => EventKind::WorktreeTidied,
+            Self::PullRequestConflicted(_) => EventKind::PullRequestConflicted,
+            Self::PullRequestRefreshed(_) => EventKind::PullRequestRefreshed,
         }
     }
 }
@@ -2162,7 +2178,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 120);
+        assert_eq!(EVERY_KIND.len(), 122);
     }
 
     #[test]
@@ -2191,7 +2207,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 120);
+        assert_eq!(EVERY_KIND.len(), 122);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2615,7 +2631,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 120);
+        assert_eq!(EVERY_KIND.len(), 122);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2756,7 +2772,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 120);
+        assert_eq!(EVERY_KIND.len(), 122);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3071,7 +3087,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 120);
+        assert_eq!(EVERY_KIND.len(), 122);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

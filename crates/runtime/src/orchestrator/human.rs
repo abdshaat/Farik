@@ -1874,6 +1874,11 @@ async fn integrate(
             "{}'s pull request is open on the forge, waiting for its merge",
             task_id.as_str()
         ),
+        Ok(IntegrationOutcome::SentBack { paths }) => format!(
+            "{} no longer merges: it went back to its assignee to resolve {}",
+            task_id.as_str(),
+            paths.join(", ")
+        ),
         Ok(IntegrationOutcome::AwaitingHand { branch, into }) => format!(
             "{}: {branch} waits for you to merge it into {into}",
             task_id.as_str()
@@ -2063,6 +2068,9 @@ async fn integrate_folder_change(
         }
         Ok(IntegrationOutcome::AwaitingForge) => {
             format!("{name}'s pull request is open on the forge, waiting for its merge")
+        }
+        Ok(IntegrationOutcome::SentBack { paths }) => {
+            format!("{name} no longer merges: {}", paths.join(", "))
         }
         Ok(IntegrationOutcome::AwaitingHand { branch, into }) => {
             format!("{name}: {branch} waits for you to merge it into {into}")

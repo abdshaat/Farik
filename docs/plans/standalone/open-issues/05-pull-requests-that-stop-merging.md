@@ -190,7 +190,7 @@ Tests:
   answering `CONFLICTING` (a stale answer): a further tick appends no second
   `pull_request.refreshed` and makes no worktree.
 
-- [ ] `feat(runtime): bring a pull request that stopped merging up to date or send it back`
+- [x] `feat(runtime): bring a pull request that stopped merging up to date or send it back`
 
 ### Task 15: the assignee is told, and cannot commit markers
 

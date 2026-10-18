@@ -375,6 +375,13 @@ pub enum IntegrationOutcome {
     },
     /// Its pull request is open on the forge, waiting for the human.
     AwaitingForge,
+    /// Its pull request stopped merging: the integration branch was merged into the task's
+    /// branch, the conflicts were left in its worktree and the task went back to its assignee
+    /// (ADR 0069).
+    SentBack {
+        /// The conflicted files.
+        paths: Vec<String>,
+    },
     /// The project has no `origin` to open a pull request on: the branch waits for the human to
     /// merge it into the integration branch by hand.
     AwaitingHand {
