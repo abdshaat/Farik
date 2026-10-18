@@ -22,6 +22,16 @@ describe("mapping", () => {
 		});
 	});
 
+	it("keeps_the_role_names_that_key_the_role_defaults", () => {
+		// `team.propose` keys each role's shipped model by the role's wire name.
+		const wire = {
+			role_defaults: { finance_specialist: { model: "m", effort: "low" } },
+		};
+		expect(toCamel(wire)).toEqual({
+			roleDefaults: wire.role_defaults,
+		});
+	});
+
 	it("keeps_the_names_a_user_gave_tools_keys_and_headers", () => {
 		// A connector's tools, keys and headers are named by the user or the server, not the wire.
 		const camel = {

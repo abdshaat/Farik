@@ -5,6 +5,7 @@
 // server chose (`list_bases`, `API_KEY`, `Authorization`), not the wire. So are the paths of a
 // skill's `files` (`SKILL.md`, `references/api_notes.md`).
 const NAMED = new Set([
+	"role_defaults",
 	"tools",
 	"keys",
 	"tags",

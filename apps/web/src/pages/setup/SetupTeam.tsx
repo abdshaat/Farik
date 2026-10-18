@@ -24,7 +24,6 @@ import { PreviewFields } from "./PreviewFields.tsx";
 import setup from "./setup.module.css";
 import styles from "./TeamPicker.module.css";
 import {
-	type Agent,
 	agentOfRole,
 	type Draft,
 	draftOf,
