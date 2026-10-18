@@ -356,7 +356,9 @@
           "enum": [
             "low",
             "medium",
-            "high"
+            "high",
+            "xhigh",
+            "max"
           ],
           "description": "How hard the model thinks. The runtime passes this value to the program as it is (catervas_runtime::SessionSpec::effort)."
         }

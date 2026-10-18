@@ -17,6 +17,11 @@ agents:
     role: software_developer
     avatar: developer
     persona: "Builds it and tests it"
+  - id: iris
+    display_name: Iris
+    role: ui_ux_designer
+    avatar: extra-1
+    persona: "Makes it clear, calm and easy to use"
   - id: kai
     display_name: Kai
     role: marketing_specialist

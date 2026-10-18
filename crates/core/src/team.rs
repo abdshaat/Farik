@@ -33,10 +33,12 @@ pub mod fixtures;
 
 mod defaults;
 mod describe;
+mod suggest;
 mod template;
 
 pub use defaults::{SMALL_ENOUGH_QUESTION, TeamDefaults, defaults};
-pub use describe::{MODEL_FAMILIES, describe_change};
+pub use describe::{MODEL_FAMILIES, describe_change, model_name};
+pub use suggest::{Signal, SuggestedTeam, suggest_teams};
 pub use template::{
     TeamTemplate, TemplateAgent, TemplateApplied, apply_template, template_from_team,
     template_slug, validate_template,
