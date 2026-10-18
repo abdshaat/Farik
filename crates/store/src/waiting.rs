@@ -408,6 +408,30 @@ pub fn waiting(
             ..item(row, WaitingKind::Help, agent, line)
         });
     }
+    // A task its agent blocked waits on the owner from the moment it is blocked, with the
+    // agent's own words (ADR 0068); the owner answers it as an escalation is answered.
+    for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
+        let moves = log.read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            kinds: vec![EventKind::TaskTransitioned],
+            ..EventQuery::default()
+        })?;
+        let blocker =
+            last_move_into(&moves, TaskStatus::Blocked).and_then(|event| match &event.body {
+                EventBody::TaskTransitioned(body) => body.blocker.as_ref(),
+                _ => None,
+            });
+        let agent = row.assignee_id.as_deref();
+        let line = format!(
+            "{} is stuck: {}",
+            name_of(team, agent.unwrap_or("the team")),
+            blocker.map_or("it did not say why", |blocker| blocker.description.as_str())
+        );
+        waiting.push(Waiting {
+            reason: Some(BLOCKED.to_string()),
+            ..item(row, WaitingKind::Help, agent, line)
+        });
+    }
     for row in board
         .iter()
         .filter(|row| row.status == TaskStatus::Verifying)
@@ -802,6 +826,9 @@ pub fn name_of(team: &Team, id: &str) -> String {
         .map_or_else(|| id.to_string(), |agent| agent.display_name.to_string())
 }
 
+/// The reason a blocked task's row carries: no escalation was raised, its agent blocked it.
+pub const BLOCKED: &str = "blocked";
+
 /// Why a task escalated, as the log words it, in words a person reads.
 #[must_use]
 pub fn reason_in_words(reason: &str) -> &'static str {
@@ -816,6 +843,7 @@ pub fn reason_in_words(reason: &str) -> &'static str {
         "readiness_failures" => "its plan keeps failing its checks",
         "integration" => "its work could not be added to the project",
         "explicit_request" => "it asked for you",
+        BLOCKED => "it is stuck",
         _ => "it did not say why",
     }
 }
