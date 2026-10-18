@@ -175,7 +175,8 @@
         "document_rewrite.started",
         "delivery.closed",
         "task.reassigned",
-        "connection.requested"
+        "connection.requested",
+        "worktree.tidied"
       ]
     },
     "eventBodyWire": {
@@ -290,7 +291,8 @@
         { "$ref": "#/$defs/documentRewriteStartedBody" },
         { "$ref": "#/$defs/deliveryClosedBody" },
         { "$ref": "#/$defs/taskReassignedBody" },
-        { "$ref": "#/$defs/connectionRequestedBody" }
+        { "$ref": "#/$defs/connectionRequestedBody" },
+        { "$ref": "#/$defs/worktreeTidiedBody" }
       ]
     },
     "contractSummary": {
@@ -1994,6 +1996,17 @@
       "properties": {
         "server": { "type": "string", "minLength": 1, "maxLength": 64 },
         "why": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "worktreeTidiedBody": {
+      "title": "Worktree Tidied Body",
+      "description": "Catervas put back, from the task branch's last commit, the files a tool changed or made in the task's worktree outside the task's allowed paths, before it judged a move that needs a clean worktree (ADR 0068, docs/SPEC.md 5.2): put_back is the tracked files it restored, removed the untracked files (neither tracked nor ignored) it deleted, each relative to the worktree, sorted, each once, and at least one of the two not empty. Changes inside the allowed paths are never touched. It is about one task and names no actor: Catervas tidies.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["put_back", "removed"],
+      "properties": {
+        "put_back": { "type": "array", "items": { "type": "string" } },
+        "removed": { "type": "array", "items": { "type": "string" } }
       }
     },
     "connectorTag": {

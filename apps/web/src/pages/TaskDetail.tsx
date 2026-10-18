@@ -105,6 +105,7 @@ const TOLD: Record<string, keyof typeof en> = {
 	"design_plan.returned": "toldDesignReturned",
 	"catervafication.started": "toldCatervafication",
 	"connection.requested": "toldConnectionRequested",
+	"worktree.tidied": "toldTidied",
 };
 
 /** The body fields that name who did it, one per kind that has one. */
@@ -356,7 +357,11 @@ export function TaskDetail() {
 				"{status}",
 				e.body.to ? statusWord(e.body.to as Contract["status"]) : "",
 			)
-			.replace("{usd}", dollars(e.body.costUsd ?? 0));
+			.replace("{usd}", dollars(e.body.costUsd ?? 0))
+			.replace(
+				"{files}",
+				[...(e.body.putBack ?? []), ...(e.body.removed ?? [])].join(", "),
+			);
 	};
 
 	const onKey = (e: KeyboardEvent) => {

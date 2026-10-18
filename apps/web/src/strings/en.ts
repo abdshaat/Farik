@@ -2461,4 +2461,6 @@ export const en = {
 		"A first piece of work where your team reads your project, writes down what it learns, looks for bugs and starts your marketing.",
 	toldCatervafication: "Catervas filed it to document the project.",
 	toldConnectionRequested: "Asked you to connect a service.",
+	toldTidied:
+		"Catervas put back files a tool changed outside this task: {files}.",
 };

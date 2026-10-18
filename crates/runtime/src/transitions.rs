@@ -21,6 +21,7 @@ use catervas_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
     FolderWork, ReassignmentInput, Rejection, WorkState, check_reassignment,
 };
+use catervas_core::governor::paths::{PathRefusal, check_allowed_paths};
 use catervas_core::governor::readiness::{LanedTask, ParentState, ReadinessContext};
 use catervas_core::governor::team_rules::is_ui_change;
 use catervas_core::governor::transition::{
@@ -36,8 +37,9 @@ use catervas_protocol::event::{
     EventIds, EventKind, GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind, RejectionWire,
     TaskReassignedBody, TaskReassignedBodyReason, TaskStatusWire, TaskTransitionedBody,
     TaskTransitionedBodyEffectsItem, TransitionActorWire, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal, new_event,
+    TransitionRefusedBodyRefusal, WorktreeTidiedBody, new_event,
 };
+use catervas_store::Uncommitted;
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use catervas_store::git::integration_branch;
@@ -327,6 +329,9 @@ impl Transitions {
         // is read afresh here, so there is nothing to distrust in the lock itself.
         let _held = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
         let ask = &tidied(ask);
+        if request.to == TaskStatus::Verifying {
+            self.put_back_strays(request, ask, team)?;
+        }
         let context = self.context(request, ask, team)?;
         let decided = match refused_before_the_governor(request, ask, team, &context.contract) {
             Some(refusal) => Err(refusal),
@@ -898,6 +903,87 @@ impl Transitions {
             folder: None,
         };
         Ok((work, git.changed_paths(base, &branch)?))
+    }
+
+    /// Puts back what tools changed in the task's worktree outside its allowed paths before a move
+    /// into `verifying` is judged (ADR 0068): a tracked file changed or deleted there is restored
+    /// from the task branch's last commit, and an untracked file git does not ignore is deleted,
+    /// then `worktree.tidied` records both. The assignee's own tools cannot write outside the
+    /// paths and the sandbox has no git, so nothing else can undo a `next dev` or a build that
+    /// rewrote `tsconfig.json`. A change inside the paths is the agent's uncommitted work and is
+    /// never touched; the clean-worktree rule still refuses it. A task in a private folder, with
+    /// no worktree, or whose member is gone has nothing to tidy.
+    ///
+    /// # Errors
+    ///
+    /// `Files` when the contract cannot be read or a file cannot be deleted, `Git` when git
+    /// cannot read or restore the worktree, and what the log refuses.
+    fn put_back_strays(
+        &self,
+        request: &TransitionRequest,
+        ask: &TransitionAsk,
+        team: &Team,
+    ) -> Result<(), TransitionError> {
+        let contract = self.files.read_contract(&request.task_id)?;
+        if task_private_folder(&contract).is_some() {
+            return Ok(());
+        }
+        let worktree = self
+            .files
+            .root()
+            .join(".catervas/local/worktrees")
+            .join(contract.id.as_str());
+        if !worktree.is_dir() {
+            return Ok(());
+        }
+        let repository = match task_repository(
+            &self.files,
+            team,
+            &self.git,
+            contract.repo.as_ref().map(|repo| repo.as_str()),
+        ) {
+            Ok(repository) => repository,
+            Err(TaskRepositoryError::Missing { .. }) => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        let git = &repository.git;
+        let outside = |path: &String| {
+            matches!(
+                check_allowed_paths(std::slice::from_ref(path), &contract.allowed_paths),
+                Err(PathRefusal::Violations(_))
+            )
+        };
+        let mut put_back = BTreeSet::new();
+        let mut removed = BTreeSet::new();
+        for entry in git.uncommitted_in(&worktree)? {
+            match entry {
+                Uncommitted::Changed(path) if outside(&path) => {
+                    put_back.insert(path);
+                }
+                Uncommitted::Untracked(path) if outside(&path) => {
+                    removed.insert(path);
+                }
+                _ => {}
+            }
+        }
+        if put_back.is_empty() && removed.is_empty() {
+            return Ok(());
+        }
+        let put_back: Vec<String> = put_back.into_iter().collect();
+        git.put_back(&worktree, &put_back)?;
+        for path in &removed {
+            std::fs::remove_file(worktree.join(path)).map_err(|error| TransitionError::Files {
+                detail: format!("{path} in the task's worktree cannot be deleted: {error}"),
+            })?;
+        }
+        self.append(
+            request,
+            ask,
+            EventBody::WorktreeTidied(WorktreeTidiedBody {
+                put_back,
+                removed: removed.into_iter().collect(),
+            }),
+        )
     }
 
     /// What a task in the private `folder` has done there (6.6): the workbooks it `named`, which of
@@ -2746,6 +2832,103 @@ mod tests {
         assert_eq!(context.work.commits, 0);
         assert!(!context.work.worktree_clean);
         assert!(context.done.changed_paths.is_empty());
+    }
+
+    /// ADR 0068: a tool the assignee ran (`next dev`, `npm run build`) rewrote tracked files outside
+    /// the task's paths, which the assignee cannot write or restore. Asking for `verifying`, Catervas
+    /// puts them back from the last commit, records what it put back, and the move goes through;
+    /// an uncommitted change inside the task's paths is the agent's own work and is never touched.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn puts_back_what_tools_changed_outside_the_tasks_paths() {
+        let project = Project::new("stray-changes", a_team(|_| {}), at(12));
+        project
+            .repo
+            .write("tsconfig.json", "{ \"strict\": true }\n");
+        project.repo.write("next-env.d.ts", "// the original\n");
+        project.repo.commit("the app's settings");
+        project.file("CTV-1", |wire| {
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The owner signs in.",
+                "satisfies": ["R1"],
+                "verification": { "method": "human", "question": "Can you sign in?" }
+            }]);
+        });
+        project.created("CTV-1", "ready");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("CTV-1", "ready", "assigned", &people, at(10));
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(10));
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
+        project
+            .repo
+            .adapter()
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
+            .expect("the worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.rs"), "fn form() {}\n").expect("written");
+        git_in(&worktree, &["add", "-A"]);
+        git_in(&worktree, &["commit", "-m", "the form"]);
+        let verifying = a_request(
+            "CTV-1",
+            TaskStatus::Verifying,
+            TransitionActor::Assignee,
+            Some("dev-a"),
+        );
+
+        // The agent's own uncommitted work inside its paths still refuses, and stays.
+        std::fs::write(worktree.join("src/login/form.rs"), "fn form() { todo }\n").expect("w");
+        std::fs::write(worktree.join("tsconfig.json"), "{ \"strict\": false }\n").expect("w");
+        let TransitionOutcome::Refused(refusal) =
+            project.ask(&verifying, &TransitionAsk::default())
+        else {
+            panic!("uncommitted work inside the task's paths was let through");
+        };
+        assert!(
+            refusal_details(&refusal)
+                .iter()
+                .any(|reason| reason.contains("not committed")),
+            "{refusal:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("src/login/form.rs")).expect("read"),
+            "fn form() { todo }\n"
+        );
+        git_in(&worktree, &["checkout", "--", "src/login/form.rs"]);
+
+        // Only tools' changes outside the paths: put back, recorded, and the move goes through.
+        std::fs::write(worktree.join("tsconfig.json"), "{ \"strict\": false }\n").expect("w");
+        std::fs::remove_file(worktree.join("next-env.d.ts")).expect("removed");
+        std::fs::write(worktree.join("build-info.txt"), "made by a build\n").expect("w");
+        let outcome = project.ask(&verifying, &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("tsconfig.json")).expect("read"),
+            "{ \"strict\": true }\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("next-env.d.ts")).expect("read"),
+            "// the original\n"
+        );
+        assert!(!worktree.join("build-info.txt").exists());
+        let tidied: Vec<(Vec<String>, Vec<String>)> = project
+            .events("CTV-1", &[EventKind::WorktreeTidied])
+            .into_iter()
+            .map(|event| match event.body {
+                EventBody::WorktreeTidied(body) => (body.put_back, body.removed),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            tidied.last().expect("the put-back is recorded"),
+            &(
+                vec!["next-env.d.ts".to_string(), "tsconfig.json".to_string()],
+                vec!["build-info.txt".to_string()]
+            )
+        );
     }
 
     /// A project folder with members `app` and `infra`, and `CTV-1` in `app`, `in_progress` under

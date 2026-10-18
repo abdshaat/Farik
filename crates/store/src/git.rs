@@ -113,6 +113,19 @@ pub enum CommitOutcome {
     Linked(String),
 }
 
+/// One uncommitted path of a working tree, as `Git::uncommitted_in` reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Uncommitted {
+    /// A file the last commit holds, changed, deleted or retyped, staged or not: putting it back
+    /// from that commit undoes the change whole.
+    Changed(String),
+    /// A file git neither tracks nor ignores.
+    Untracked(String),
+    /// Anything else: an added, renamed, copied or conflicted path, which Catervas does not put
+    /// back.
+    Other(String),
+}
+
 /// One repository, at a path.
 ///
 /// Every method runs `git` as a child process. Catervas does not reimplement git: a repository is the
@@ -413,6 +426,68 @@ impl Git {
         self.require_repository()?;
         self.require_worktree_of_this_repository(path)?;
         run_git(path, &["status", "--porcelain", "--untracked-files=normal"])
+    }
+
+    /// Every uncommitted path of the tree at `path`, one entry per file (`--untracked-files=all`),
+    /// in the order git lists them. What `is_clean` counts, read path by path.
+    ///
+    /// # Errors
+    ///
+    /// As `status`.
+    pub fn uncommitted_in(&self, path: &Path) -> Result<Vec<Uncommitted>, GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(path)?;
+        let listed = run_git_untrimmed(
+            path,
+            &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        )?;
+        let mut entries = Vec::new();
+        let mut fields = listed.split('\0').filter(|field| !field.is_empty());
+        while let Some(field) = fields.next() {
+            let (Some(code), Some(file)) = (field.get(..2), field.get(3..)) else {
+                continue;
+            };
+            let file = file.to_string();
+            let mut code = code.chars();
+            let (staged, unstaged) = (code.next().unwrap_or(' '), code.next().unwrap_or(' '));
+            entries.push(match (staged, unstaged) {
+                ('?', '?') => Uncommitted::Untracked(file),
+                ('R' | 'C', _) => {
+                    // A rename or copy names its source next.
+                    fields.next();
+                    Uncommitted::Other(file)
+                }
+                ('A' | 'U', _) | (_, 'U') | ('D', 'D') => Uncommitted::Other(file),
+                _ => Uncommitted::Changed(file),
+            });
+        }
+        Ok(entries)
+    }
+
+    /// Puts `paths` of the tree at `path` back as its last commit holds them, in the index and on
+    /// disk (`git restore --source=HEAD --staged --worktree`), each read as a path, never a pattern.
+    /// Every path must be one the last commit holds.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `path` is not a working tree of this repository or a path is not in
+    /// the last commit.
+    pub fn put_back(&self, path: &Path, paths: &[String]) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(path)?;
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut restore = vec![
+            "--literal-pathspecs",
+            "restore",
+            "--source=HEAD",
+            "--staged",
+            "--worktree",
+            "--",
+        ];
+        restore.extend(paths.iter().map(String::as_str));
+        run_git(path, &restore).map(|_| ())
     }
 
     /// Commits `paths` of the tree at `path` with `message`, and answers the new commit's sha.
