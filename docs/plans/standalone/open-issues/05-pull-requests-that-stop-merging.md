@@ -163,7 +163,7 @@ Tests:
   on a second branch whose change does not touch `main`'s, it answers `Merged { sha }` with `sha`
   the worktree's `HEAD` and `is_merging` `false`. Fails first: the methods do not exist.
 
-- [ ] `feat(store): merge into a kept branch's worktree and leave the conflicts there`
+- [x] `feat(store): merge into a kept branch's worktree and leave the conflicts there`
 
 ### Task 14: rule 2 refreshes or sends back
 

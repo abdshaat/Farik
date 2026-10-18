@@ -273,6 +273,20 @@ impl Git {
         Ok(())
     }
 
+    /// Makes a worktree at `path` with the existing local branch `branch` checked out: a task's
+    /// kept branch, whose worktree was removed when the task was accepted.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the path is taken, the branch does not exist, or it is checked out
+    /// in another worktree.
+    pub fn add_worktree(&self, path: &Path, branch: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        let path = path_argument(path)?;
+        self.at_root(&["worktree", "add", &path, branch])?;
+        Ok(())
+    }
+
     /// Removes the worktree at `path`, keeping its branch.
     ///
     /// Forced, because a task's worktree holds whatever its session built — untracked output that
@@ -857,6 +871,31 @@ impl Git {
         from: &str,
         message: &str,
     ) -> Result<MergeOutcome, GitError> {
+        self.merge_in_worktree(worktree, from, message, false)
+    }
+
+    /// As `merge_in`, but a conflicted merge is left in progress in the worktree, its markers in
+    /// the files, for whoever resolves it (ADR 0069); the paths are answered all the same.
+    ///
+    /// # Errors
+    ///
+    /// As `merge_in`.
+    pub fn merge_keeping_conflicts(
+        &self,
+        worktree: &Path,
+        from: &str,
+        message: &str,
+    ) -> Result<MergeOutcome, GitError> {
+        self.merge_in_worktree(worktree, from, message, true)
+    }
+
+    fn merge_in_worktree(
+        &self,
+        worktree: &Path,
+        from: &str,
+        message: &str,
+        keep_conflicts: bool,
+    ) -> Result<MergeOutcome, GitError> {
         self.require_repository()?;
         self.require_worktree_of_this_repository(worktree)?;
         match run_git(
@@ -873,7 +912,9 @@ impl Git {
                 if conflicts.is_empty() {
                     return Err(refusal);
                 }
-                run_git(worktree, &["merge", "--abort"])?;
+                if !keep_conflicts {
+                    run_git(worktree, &["merge", "--abort"])?;
+                }
                 Ok(MergeOutcome::Conflicts(conflicts))
             }
         }

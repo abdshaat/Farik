@@ -597,6 +597,53 @@ fn merges_a_branch_into_a_worktree_only() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn merges_into_a_kept_branch_and_leaves_its_conflicts() {
+    // A pull request that stopped merging is brought up to date in a worktree made again on its
+    // kept branch; a conflict stays there, markers and all, for the branch's author (ADR 0069).
+    let repository = TempRepo::new("merge-keeping");
+    let git = repository.adapter();
+    repository.write("f.txt", "line\n");
+    repository.commit("docs: f");
+    let worktree = repository.path.join(".catervas/local/worktrees/a");
+    git.create_worktree(&worktree, "fix/a", "main")
+        .expect("the worktree is made");
+    std::fs::write(worktree.join("f.txt"), "a's line\n").expect("written");
+    git_in(&worktree, &["commit", "-am", "fix: a"]);
+    git.remove_worktree(&worktree).expect("it is taken away");
+    repository.write("f.txt", "main's line\n");
+    repository.commit("docs: main writes it too");
+
+    git.add_worktree(&worktree, "fix/a")
+        .expect("the kept branch is checked out again");
+    let outcome = git
+        .merge_keeping_conflicts(&worktree, "main", "chore: up to date")
+        .expect("the merge runs");
+
+    assert_eq!(outcome, MergeOutcome::Conflicts(vec!["f.txt".to_string()]));
+    assert!(git.is_merging(&worktree).expect("the read works"));
+    let text = std::fs::read_to_string(worktree.join("f.txt")).expect("read");
+    assert!(text.contains("<<<<<<< "), "{text}");
+
+    // A change that does not touch main's merges clean.
+    git.remove_worktree(&worktree).expect("it is taken away");
+    let clean = repository.path.join(".catervas/local/worktrees/b");
+    git.create_worktree(&clean, "fix/b", "main~1")
+        .expect("the worktree is made");
+    std::fs::write(clean.join("g.txt"), "b's file\n").expect("written");
+    git_in(&clean, &["add", "g.txt"]);
+    git_in(&clean, &["commit", "-m", "fix: b"]);
+    let outcome = git
+        .merge_keeping_conflicts(&clean, "main", "chore: up to date")
+        .expect("the merge runs");
+    let MergeOutcome::Merged { sha } = outcome else {
+        panic!("it merged cleanly: {outcome:?}");
+    };
+    assert_eq!(git_output_in(&clean, &["rev-parse", "HEAD"]), sha);
+    assert!(!git.is_merging(&clean).expect("the read works"));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn commits_the_named_paths_and_returns_the_sha() {
     let repository = TempRepo::new("commit-paths");
     repository.write("named.txt", "the one to commit\n");
