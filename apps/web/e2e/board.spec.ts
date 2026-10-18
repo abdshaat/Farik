@@ -105,7 +105,7 @@ test("work runs on the board by itself, from its plan to the team's look back", 
 			),
 		).toBeVisible();
 		await panel.getByText("Show each check").click();
-		await expect(panel.getByText("Passed")).toBeVisible();
+		await expect(panel.getByText("Passed", { exact: true })).toBeVisible();
 		await page.getByRole("tab", { name: "History" }).click();
 		await expect(panel.getByText("Mira moved it to Done.")).toBeVisible();
 		await expect(
