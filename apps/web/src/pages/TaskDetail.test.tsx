@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
+import type { FakeSocket } from "../test/fake-socket.ts";
 import {
 	COMPLETION,
 	event,
@@ -20,7 +21,8 @@ import {
 	TASK,
 } from "../test/gate.ts";
 import { TEAM } from "../test/plan.ts";
-import { answerQuery } from "../test/render-app.tsx";
+import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import { onlyInTips } from "../test/tips.ts";
 import gate from "./Gate.module.css";
 
 const IRIS = {
@@ -192,13 +194,11 @@ describe("task detail", () => {
 			await screen.findByRole("heading", { level: 1, name: "Gift cards" }),
 		).toBeTruthy();
 		expect(
-			screen.getByText(
-				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
-			),
+			screen.getByText("CTV-1. Theo is doing it, and Ada reviews it."),
 		).toBeTruthy();
 		const tabs = screen.getAllByRole("tab");
 		expect(tabs.map((tab) => tab.textContent)).toEqual([
-			"Summary and checks",
+			"Summary",
 			"History",
 			"The plan",
 			"Code changes",
@@ -213,15 +213,30 @@ describe("task detail", () => {
 		expect(document.activeElement?.textContent).toBe("Notes");
 		fireEvent.keyDown(tabs[4] as HTMLElement, { key: "Home" });
 		expect(screen.getByRole("tab", { selected: true }).textContent).toBe(
-			"Summary and checks",
+			"Summary",
 		);
 
-		// Summary and checks: what it is for, the latest summary signed, and each check's word.
+		// Summary: the latest note signed, what it is for, the checks in a line, then each one.
 		expect(within(panel()).getByText(TASK.intent)).toBeTruthy();
+		const note = within(panel()).getByText("Ada, your Architect, reviewed it");
+		const intent = within(panel()).getByRole("heading", {
+			name: "What this task is for",
+		});
+		const checksHeading = within(panel()).getByRole("heading", {
+			name: "Checks",
+		});
+		const follows = (a: Node, b: Node) =>
+			a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
+		expect(follows(note, intent)).toBeTruthy();
+		expect(follows(intent, checksHeading)).toBeTruthy();
 		expect(
-			within(panel()).getByText("Ada, your Architect, reviewed it"),
+			within(panel()).getByText("1 of 3 checks passed. 1 failed last time."),
 		).toBeTruthy();
-		const checks = within(panel()).getAllByRole("listitem");
+		const each = within(panel()).getByText("Show each check");
+		expect(each.closest("details")).not.toBeNull();
+		const checks = within(each.closest("details") as HTMLElement).getAllByRole(
+			"listitem",
+		);
 		expect(checks.map((c) => c.textContent)).toEqual([
 			"A test purchase of each amount goes through.Passed",
 			"A test email arrives with a working code.Failed last time",
@@ -943,9 +958,7 @@ describe("task detail", () => {
 		});
 		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
 		expect(
-			screen.getByText(
-				"CTV-1. Ada is doing it, and Catervas checks it. Try 1 of 4.",
-			),
+			screen.getByText("CTV-1. Ada is doing it, and Catervas checks it."),
 		).toBeTruthy();
 		expect(screen.queryByText(/reviews it/)).toBeNull();
 		expect(
@@ -957,10 +970,27 @@ describe("task detail", () => {
 		// A Developer's task is code: its reviewer still reviews it.
 		await opened();
 		expect(
+			await screen.findByText("CTV-1. Theo is doing it, and Ada reviews it."),
+		).toBeTruthy();
+		cleanup();
+
+		// The try count shows from the second try.
+		await opened(CONTRACT, [], { "task.tries": { try: 2, of: 4 } });
+		expect(
 			await screen.findByText(
-				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 2 of 4.",
 			),
 		).toBeTruthy();
+	});
+
+	it("says_it_is_loading", async () => {
+		const { socket } = await renderApp("/tasks/CTV-1");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "team.get", { team: TEAM });
+		// contract.get has not answered yet.
+		expect((await screen.findByRole("status")).textContent).toBe("Loading…");
+		expect(screen.getByRole("link", { name: en.taskBack })).toBeTruthy();
 	});
 
 	it("says_catervas_checks_a_hunt", async () => {
@@ -968,7 +998,7 @@ describe("task detail", () => {
 		await opened(hunt(["docs/catervas/engineering/bug-hunt.html"]));
 		expect(
 			await screen.findByText(
-				"CTV-1. Theo is doing it, and Catervas checks it. Try 1 of 4.",
+				"CTV-1. Theo is doing it, and Catervas checks it.",
 			),
 		).toBeTruthy();
 		expect(screen.queryByText(/reviews it/)).toBeNull();
@@ -976,9 +1006,7 @@ describe("task detail", () => {
 
 		await opened(hunt(["docs/catervas/engineering/bug-hunt.html", "src/**"]));
 		expect(
-			await screen.findByText(
-				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
-			),
+			await screen.findByText("CTV-1. Theo is doing it, and Ada reviews it."),
 		).toBeTruthy();
 	});
 
@@ -1029,12 +1057,10 @@ describe("task detail", () => {
 				],
 			},
 		});
-		const adding = await screen.findByRole("region", {
-			name: "Adding it to your project",
-		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
 		expect(
-			within(adding).getByText(/^Not yet: the task has not been accepted/),
-		).toBeTruthy();
+			screen.queryByRole("region", { name: "Adding it to your project" }),
+		).toBeNull();
 		expect(
 			screen.queryByRole("button", { name: "Add to the project" }),
 		).toBeNull();
@@ -1112,6 +1138,8 @@ describe("task detail", () => {
 				"Accepted. Catervas opens a pull request for it, for you to merge.",
 			),
 		).toBeTruthy();
+		// Its hint is behind an ⓘ.
+		onlyInTips(en.taskAddHint);
 		cleanup();
 		await opened({ ...CONTRACT, status: "accepted" }, [], {
 			"team.get": {

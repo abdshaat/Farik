@@ -1,9 +1,10 @@
 import { expectNoAxeViolations } from "@catervas/ui/test";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import { onlyInTips } from "../test/tips.ts";
 
 const TEAM = {
 	name: "Corner Bakery",
@@ -78,8 +79,18 @@ describe("questions page", () => {
 		expect(screen.getByText("Cards keep their value forever.")).toBeTruthy();
 		await expectNoAxeViolations(container);
 
-		fireEvent.click(screen.getByRole("radio", { name: "After a year" }));
-		fireEvent.click(screen.getByRole("button", { name: en.sendAnswer }));
+		expect(screen.queryAllByRole("radio")).toEqual([]);
+		const choices = screen.getByRole("list", { name: "Mira suggests" });
+		const [never, after] = within(choices).getAllByRole(
+			"button",
+		) as HTMLButtonElement[];
+		expect(never?.textContent).toBe("Never");
+		expect(
+			document.getElementById(never?.getAttribute("aria-describedby") ?? "")
+				?.textContent,
+		).toBe("Cards keep their value forever.");
+		// One press sends the answer; no "Send answer" is pressed.
+		fireEvent.click(after as HTMLButtonElement);
 		const byChoice = await command(s, 0);
 		expect(byChoice.params).toEqual({
 			command: {
@@ -87,16 +98,15 @@ describe("questions page", () => {
 				body: { question_id: 12, answer: "After a year" },
 			},
 		});
+		// While it is out, the other answers wait.
+		expect((never as HTMLButtonElement).disabled).toBe(true);
 		await s.reply(byChoice, { said: "answered", events: [20] });
 
 		const words = screen.getByRole("textbox", { name: en.ownWordsMany });
-		expect(screen.queryByText(en.wordsWin)).toBeNull();
+		const send = await screen.findByRole("button", { name: en.sendAnswer });
+		expect((send as HTMLButtonElement).disabled).toBe(true);
 		fireEvent.change(words, { target: { value: "Only after five years." } });
-		// The choice is still picked: the page says the words go instead.
-		expect(words.getAttribute("aria-describedby")).toBeTruthy();
-		expect(screen.getByText(en.wordsWin)).toBeTruthy();
-		// Once the first answer is taken, the button is free again.
-		fireEvent.click(await screen.findByRole("button", { name: en.sendAnswer }));
+		fireEvent.click(send);
 		const byWords = await command(s, 1);
 		expect(byWords.params).toEqual({
 			command: {
@@ -129,6 +139,11 @@ describe("questions page", () => {
 		).toBeTruthy();
 		expect(screen.getByText("Mira, your Product Manager, asks")).toBeTruthy();
 		await expectNoAxeViolations(container);
+		// The explanation is an ⓘ beside the title, not a section under the card.
+		onlyInTips("A question is not a problem: Mira just needs your answer.");
+		expect(
+			screen.queryByRole("heading", { name: "About questions" }),
+		).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: "Let Mira decide" }));
 		expect((await command(s, 0)).params).toEqual({

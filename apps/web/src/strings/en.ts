@@ -229,8 +229,7 @@ export const en = {
 	scanWrongSaved: "Saved. Your team reads it before it starts.",
 	scanRight: "That's right",
 	teamTitle: "Who should be on your team?",
-	teamLead:
-		"We suggest six, one for each job. You can rename them now or later. To add a second developer, choose “Add someone”.",
+	teamLead: "Six people, one for each job. Rename anyone now or later.",
 	teamMembers: "Your team",
 	teamInclude: "Include the {role}",
 	jobProductManager:
@@ -247,8 +246,7 @@ export const en = {
 	jobProcurement:
 		"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
 	setupMoreRoles: "More roles",
-	setupMoreRolesNote:
-		"Roles Catervas does not suggest. Tick one to add it to your team; a team has seven people at most.",
+	setupMoreRolesNote: "Tick one to add it. Seven people at most.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",
@@ -339,8 +337,9 @@ export const en = {
 		"Say what must be true of finished work, in at least 10 characters.",
 	checkAdd: "Add a check",
 	team: "Team",
-	teamPageLead:
-		"{count} agents work on {name}. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
+	teamPageRules:
+		"A team needs a Product Manager.\nEveryone else is up to you.\nSeven people at most.",
+	teamPageLead: "{count} agents work on {name}.",
 	agentEditLink: "Edit {name}",
 	agentPause: "Pause {name}",
 	agentResume: "Resume {name}",
@@ -350,11 +349,11 @@ export const en = {
 	agentModelRole: "The role’s model",
 	teamChangesTitle: "Pause, retire or replace",
 	teamChangesBody:
-		"Pausing stops an agent from taking new work; it finishes nothing halfway. Retiring removes it from the team but keeps what it learned in your project, so whoever replaces it can read it. Changes start with the agent’s next piece of work, never in the middle of one.",
+		"Pause: the agent takes no new work and leaves nothing half done.\nRetire: it leaves the team; what it learned stays in your project for whoever replaces it.\nA change starts with the agent’s next piece of work.",
 	teamCostTitle: "What a team like this costs",
 	teamCostNote: "It is a guide, not a limit.",
 	teamCostDesigner:
-		"{designer} uses the same model as {developer}, so {designer} adds to what a day costs. Before {designer} changes a screen, {designer} looks at it and writes a plan, and that costs a little too.",
+		"{designer} uses the same model as {developer}, so a day costs more.\nBefore changing a screen, {designer} writes a plan, which costs a little too.",
 	teamCostLimitBefore: "Set a limit in ",
 	teamCostLimitAfter: ".",
 	agentBack: "Back to your team",
@@ -442,7 +441,11 @@ export const en = {
 	suggestionsLine: "{agent} · {about}",
 	suggestionsAsked: "{agent} asks: {why}",
 	waitingTitle: "Waiting on you ({count})",
-	waitingList: "Waiting on you",
+	waitingGroupSetUp: "Needs setting up",
+	waitingGroupAnswer: "Needs your answer",
+	waitingGroupMerge: "Ready for you to merge",
+	waitingGroupCount: "{group} ({count})",
+	waitingAbout: "About “{title}”",
 	waitingNone: "Nothing waits on you.",
 	waitingApproval: "Approve the plan for {title}",
 	waitingAcceptance: "Accept {title}",
@@ -533,7 +536,6 @@ export const en = {
 	laterQuestion: "{agent} shows this once you answer question {n}.",
 	suggests: "{agent} suggests",
 	ownWordsMany: "Or say it in your own words",
-	wordsWin: "Your own words are sent instead of the choice.",
 	ownWordsOne: "Or answer in your own words",
 	sendAnswer: "Send answer",
 	letDecide: "Let {agent} decide",
@@ -541,10 +543,8 @@ export const en = {
 	oneQuestionTitle: "{agent} has a question",
 	oneQuestionLead: "About {id}. {agent} stopped until you answer.",
 	asks: "{agent}, your {role}, asks",
-	aboutQuestions: "About questions",
-	aboutQuestionsBody:
-		"A question is not a problem. {agent} just needs your answer to carry on.",
-	aboutQuestionsNext: "Your answer goes straight into {agent}’s next session.",
+	aboutQuestionsTips:
+		"A question is not a problem: {agent} just needs your answer.\nYour answer goes straight into {agent}’s next session.",
 	approveTitle: "Approve the plan for {title}",
 	planTitle: "The plan for {title}",
 	approveLead: "Plan {id}.",
@@ -812,6 +812,8 @@ export const en = {
 	filterCancelled: "Show cancelled",
 	laneTabs: "Lanes",
 	laneEmpty: "Nothing here right now.",
+	boardShowAll: "Show all {count}",
+	boardShowFewer: "Show fewer",
 	markAccepted: "Accepted",
 	markWriting: "Writing",
 	markBuilding: "Building",
@@ -838,13 +840,17 @@ export const en = {
 	taskChecked: "Catervas checks it",
 	taskTry: "Try {try} of {of}.",
 	taskTabs: "About this task",
-	tabSummary: "Summary and checks",
+	tabSummary: "Summary",
 	tabHistory: "History",
 	tabPlan: "The plan",
 	tabChanges: "Code changes",
 	tabNotes: "Notes",
 	taskFor: "What this task is for",
-	taskChecks: "What Catervas checks",
+	taskChecks: "Checks",
+	checksSummary: "{passed} of {count} checks passed.",
+	checksFailedLast: "{n} failed last time.",
+	checksShowEach: "Show each check",
+	pageLoading: "Loading…",
 	checkFailed: "Failed last time",
 	checkNotRun: "Not run yet",
 	taskHistoryHint:
@@ -921,7 +927,6 @@ export const en = {
 	taskAddHint:
 		"Once the task is accepted, Catervas opens a pull request into your integration branch, for you to merge.",
 	taskAdd: "Add to the project",
-	taskAddNotYet: "Not yet: the task has not been accepted.",
 	taskAddByPullRequest:
 		"Accepted. Catervas opens a pull request for it, for you to merge.",
 	riskLowWhy: "Low. The team may accept it without you.",
@@ -946,12 +951,11 @@ export const en = {
 	costsByAgent: "By agent",
 	costsAgent: "Agent",
 	costsTodayColumn: "Today",
-	costsNow: "Right now",
 	costsResting:
-		"Resting is not a problem. An agent whose AI account reached its usage limit stops, writes down where it was, and picks up again at the time shown. The rest of the team keeps working.",
-	costsConversations: "Conversations today:",
-	costsConversationsWhy:
-		"Your chats with the team; they count toward the daily limit.",
+		"An agent whose AI account reached its usage limit rests.\nIt picks up again at the time Today shows.\nThe rest of the team keeps working.",
+	costsChatsRow: "Your chats with the team",
+	costsChatsInfo: "They count toward the daily limit.",
+	costsMore: "More numbers",
 	costsHowWell: "How well the team works",
 	costsWholeProject: "Across the whole project.",
 	metricNotYet: "Not yet: no work has been accepted",
@@ -1446,8 +1450,7 @@ export const en = {
 	waitingNeedsBrowser: "{agent}’s browser is off",
 	waitingNeedsBrowserLine:
 		"{designer} opens your app with Playwright. Turn Playwright on for {designer} on the Team page; until then {designer} takes no work, and nobody checks the screens {developer} builds.",
-	startsLegend:
-		"Start from the team Catervas suggests, from a ready-made team, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
+	startsLegend: "Where should your team come from?",
 	startSuggested: "The suggested team",
 	startSuggestedNote:
 		"Six people, one for each job. A good start for a first project.",

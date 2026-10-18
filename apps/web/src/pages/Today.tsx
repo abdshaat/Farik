@@ -2,6 +2,7 @@ import mark from "@catervas/brand/assets/logo-mark-1254.png";
 import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { agentLine } from "../app/agentLine.ts";
 import { useCommand } from "../app/command.ts";
 import { useConnection } from "../app/connection.tsx";
 import { type ProductPlanState, projectName } from "../app/productPlan.ts";
@@ -44,6 +45,12 @@ import { SuggestedConnections } from "./SuggestedConnections.tsx";
 import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
 import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
+import {
+	GROUP_ORDER,
+	groupOf,
+	MERGE_SHOWN,
+	type WaitingGroup,
+} from "./waitingGroups.ts";
 
 type Activity = { agentId: string; state: string; line: string };
 type Kind =
@@ -217,6 +224,60 @@ export function Today() {
 	const waitsForPlan = t("todayWaitsForPlan", {
 		project: projectName(plan?.newProject?.name ?? ""),
 	});
+	// One row, whatever its kind.
+	const row = (item: Waiting): ReactNode =>
+		item.kind === "tool_approval" ? (
+			<ToolApprovalRow
+				key={`${item.kind}-${item.approval}`}
+				item={item}
+				agent={agent(item.agentId)}
+				allowances={allowances}
+				kits={team?.kits ?? []}
+			/>
+		) : item.kind === "marketing_plan" ? (
+			<MarketingPlanRow
+				key={`${item.kind}-${item.plan}`}
+				item={item}
+				agent={agent(item.agentId)}
+			/>
+		) : item.kind === "social_post" ? (
+			<PostRequestRow
+				key={`${item.kind}-${item.post}`}
+				item={item}
+				agent={agent(item.agentId)}
+				now={new Date()}
+			/>
+		) : isAds(item.kind) ? (
+			<AdsRow
+				key={`${item.kind}-${item.plan}`}
+				item={item as AdsAsk}
+				agent={agent(item.agentId)}
+			/>
+		) : item.kind === "purchase_order" ? (
+			<PurchaseOrderRow
+				key={`${item.kind}-${item.order}`}
+				item={item as OrderWaiting}
+				agent={agent(item.agentId)}
+				now={new Date()}
+			/>
+		) : item.kind === "data_pipeline" ? (
+			<PipelineRow
+				key={`${item.kind}-${item.pipeline}`}
+				item={item}
+				agent={agent(item.agentId)}
+			/>
+		) : (
+			<WaitingRow
+				key={`${item.kind}-${item.taskId ?? `folder-${item.folderChange}`}`}
+				item={item}
+				agent={agent(item.agentId)}
+				developer={
+					agents.find(
+						(a) => a.role === "software_developer" && a.status !== "retired",
+					)?.displayName ?? ""
+				}
+			/>
+		);
 	return (
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("today")}</h1>
@@ -258,68 +319,20 @@ export function Today() {
 					{waiting.waiting.length === 0 && cards.length === 0 && !keyRefused ? (
 						<p className={styles.muted}>{t("waitingNone")}</p>
 					) : (
-						<ul className={styles.rows} aria-label={t("waitingList")}>
-							{keyRefused && <KeyRefusedRow />}
-							{waiting.waiting.map((item) =>
-								item.kind === "tool_approval" ? (
-									<ToolApprovalRow
-										key={`${item.kind}-${item.approval}`}
-										item={item}
-										agent={agent(item.agentId)}
-										allowances={allowances}
-										kits={team?.kits ?? []}
-									/>
-								) : item.kind === "marketing_plan" ? (
-									<MarketingPlanRow
-										key={`${item.kind}-${item.plan}`}
-										item={item}
-										agent={agent(item.agentId)}
-									/>
-								) : item.kind === "social_post" ? (
-									<PostRequestRow
-										key={`${item.kind}-${item.post}`}
-										item={item}
-										agent={agent(item.agentId)}
-										now={new Date()}
-									/>
-								) : isAds(item.kind) ? (
-									<AdsRow
-										key={`${item.kind}-${item.plan}`}
-										item={item as AdsAsk}
-										agent={agent(item.agentId)}
-									/>
-								) : item.kind === "purchase_order" ? (
-									<PurchaseOrderRow
-										key={`${item.kind}-${item.order}`}
-										item={item as OrderWaiting}
-										agent={agent(item.agentId)}
-										now={new Date()}
-									/>
-								) : item.kind === "data_pipeline" ? (
-									<PipelineRow
-										key={`${item.kind}-${item.pipeline}`}
-										item={item}
-										agent={agent(item.agentId)}
-									/>
-								) : (
-									<WaitingRow
-										key={`${item.kind}-${item.taskId ?? `folder-${item.folderChange}`}`}
-										item={item}
-										agent={agent(item.agentId)}
-										developer={
-											agents.find(
-												(a) =>
-													a.role === "software_developer" &&
-													a.status !== "retired",
-											)?.displayName ?? ""
-										}
-									/>
-								),
-							)}
-							{planChanges &&
-								cards.map((card) => {
+						GROUP_ORDER.map((group) => {
+							const rows: ReactNode[] = [];
+							if (group === "set_up" && keyRefused) {
+								rows.push(<KeyRefusedRow key="key-refused" />);
+							}
+							for (const item of waiting.waiting) {
+								if (groupOf(item.kind) === group) {
+									rows.push(row(item));
+								}
+							}
+							if (group === "answer" && planChanges) {
+								for (const card of cards) {
 									const one = agent(card.agentId);
-									return (
+									rows.push(
 										<li key={`plan-${card.sprintId}-${card.agentId}`}>
 											<DocumentChanges
 												card={card}
@@ -327,20 +340,19 @@ export function Today() {
 												agent={one}
 												again={askPlanChangesAgain}
 											/>
-										</li>
+										</li>,
 									);
-								})}
-						</ul>
+								}
+							}
+							if (rows.length === 0) return null;
+							return (
+								<WaitingGroupSection key={group} group={group}>
+									{rows}
+								</WaitingGroupSection>
+							);
+						})
 					)}
 				</section>
-			)}
-			{team && (
-				<SuggestedConnections
-					team={team.team}
-					kits={team.kits ?? []}
-					hidden={team.hiddenSuggestions ?? []}
-					requested={team.requestedConnections ?? []}
-				/>
 			)}
 			<SellerMailSections
 				agents={agents}
@@ -374,8 +386,65 @@ export function Today() {
 					)}
 				</section>
 			)}
+			{team && (
+				<SuggestedConnections
+					team={team.team}
+					kits={team.kits ?? []}
+					hidden={team.hiddenSuggestions ?? []}
+					requested={team.requestedConnections ?? []}
+				/>
+			)}
 			<ChannelPreview agents={agents} />
 		</div>
+	);
+}
+
+const GROUP_NAME: Record<WaitingGroup, keyof typeof en> = {
+	set_up: "waitingGroupSetUp",
+	answer: "waitingGroupAnswer",
+	merge: "waitingGroupMerge",
+};
+
+/** One group of "Waiting on you": its heading with the count, and its rows; the merge group
+ * shows three and folds the rest behind "Show all". */
+function WaitingGroupSection({
+	group,
+	children,
+}: {
+	group: WaitingGroup;
+	children: ReactNode[];
+}) {
+	const [open, setOpen] = useState(false);
+	const name = t(GROUP_NAME[group]);
+	const folds = group === "merge" && children.length > MERGE_SHOWN;
+	const shown = folds && !open ? children.slice(0, MERGE_SHOWN) : children;
+	const listId = `waiting-group-${group}`;
+	return (
+		<section aria-labelledby={`${listId}-heading`}>
+			<h3 id={`${listId}-heading`} className={styles.groupTitle}>
+				{t("waitingGroupCount", {
+					group: name,
+					count: String(children.length),
+				})}
+			</h3>
+			<ul id={listId} className={styles.rows} aria-label={name}>
+				{shown}
+			</ul>
+			{folds && (
+				<div className={styles.movedMore}>
+					<Button
+						kind="quiet"
+						expanded={open}
+						controls={listId}
+						onClick={() => setOpen(!open)}
+					>
+						{open
+							? t("suggestionsShowFewer")
+							: t("suggestionsShowAll", { count: children.length })}
+					</Button>
+				</div>
+			)}
+		</section>
 	);
 }
 
@@ -490,13 +559,16 @@ function AgentEntry({
 	agent: Agent | undefined;
 }) {
 	const name = agent?.displayName ?? one.agentId;
+	const shown = visibly(agentLine(one));
 	return (
 		<li className={styles.agent}>
 			<AgentPicture agent={agent} size={48} />
 			<span className={styles.who}>
 				<strong>{name}</strong> {agent && <RoleTag role={agent.role} />}
 			</span>
-			<span className={styles.line}>{one.line}</span>
+			<span className={styles.line} title={shown}>
+				{shown}
+			</span>
 		</li>
 	);
 }
@@ -581,7 +653,18 @@ function WaitingRow({
 				<strong id={titleId}>
 					{t(kind.title, { title: item.title, agent: name })}
 				</strong>
-				<span>
+				{(item.kind === "question" || item.kind === "help") && (
+					<span className={styles.muted}>
+						{t("waitingAbout", { title: item.title })}
+					</span>
+				)}
+				<span
+					className={
+						item.kind === "question" || item.kind === "help"
+							? styles.clamp3
+							: undefined
+					}
+				>
 					{kind.line ? t(kind.line, { designer: name, developer }) : item.line}
 				</span>
 				{item.kind === "acceptance" && item.taskId && (

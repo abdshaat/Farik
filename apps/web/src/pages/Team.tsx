@@ -1,9 +1,17 @@
-import { AVATAR_URLS, type AvatarKey, Button, RoleTag } from "@catervas/ui";
+import {
+	AVATAR_URLS,
+	type AvatarKey,
+	Button,
+	InfoTip,
+	RoleTag,
+} from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
+import { agentLine } from "../app/agentLine.ts";
 import { useConnection } from "../app/connection.tsx";
 import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
+import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
 import { SaveTemplate } from "./dialogs/SaveTemplate.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
@@ -154,7 +162,7 @@ export function Team() {
 	const { team, effective, most, again } = useTeam();
 	const status = useStatus();
 	const { data: activity } = useQuery<{
-		activity: { agentId: string; line: string }[];
+		activity: { agentId: string; state: string; line: string }[];
 	}>("team.activity", {});
 	const [open, setOpen] = useState<"save" | "use">();
 	const [savedAs, setSavedAs] = useState<string>();
@@ -164,7 +172,12 @@ export function Team() {
 	const developer = agents.find((a) => a.role === "software_developer");
 	return (
 		<div className={styles.page}>
-			<h1 className={styles.title}>{t("teamMembers")}</h1>
+			<div className={styles.titled}>
+				<h1 className={styles.title}>{t("teamMembers")}</h1>
+				<InfoTip id="team-rules-info">
+					<Bullets text={t("teamPageRules")} />
+				</InfoTip>
+			</div>
 			<p>
 				{t("teamPageLead")
 					.replace("{count}", String(agents.length))
@@ -208,6 +221,7 @@ export function Team() {
 				{agents.map((agent) => {
 					const name = agent.displayName;
 					const paused = agent.status === "paused";
+					const doing = activity?.activity.find((a) => a.agentId === agent.id);
 					const avatar = AVATAR_URLS[agent.avatar as AvatarKey];
 					return (
 						<li key={agent.id} className={styles.card}>
@@ -228,10 +242,7 @@ export function Team() {
 							<p className={styles.muted}>
 								{paused
 									? t("agentPaused")
-									: visibly(
-											activity?.activity.find((a) => a.agentId === agent.id)
-												?.line ?? t("agentActive"),
-										)}
+									: visibly(doing ? agentLine(doing) : t("agentActive"))}
 							</p>
 							<dl className={styles.facts}>
 								<dt>{t("agentModel")}</dt>
@@ -262,20 +273,24 @@ export function Team() {
 			<AddSomeone team={team} most={most ?? 0} />
 			<section className={styles.section} aria-labelledby="changes-heading">
 				<h2 id="changes-heading">{t("teamChangesTitle")}</h2>
-				<p>{t("teamChangesBody")}</p>
+				<Bullets text={t("teamChangesBody")} />
 			</section>
 			<section className={styles.section} aria-labelledby="cost-heading">
 				<h2 id="cost-heading">{t("teamCostTitle")}</h2>
 				{designer && developer ? (
-					<p>
-						{t("teamCostDesigner", {
-							designer: designer.displayName,
-							developer: developer.displayName,
-						})}{" "}
-						{t("teamCostLimitBefore")}
-						<Link to="/costs">{t("costs")}</Link>
-						{t("teamCostLimitAfter")}
-					</p>
+					<>
+						<Bullets
+							text={t("teamCostDesigner", {
+								designer: designer.displayName,
+								developer: developer.displayName,
+							})}
+						/>
+						<p>
+							{t("teamCostLimitBefore")}
+							<Link to="/costs">{t("costs")}</Link>
+							{t("teamCostLimitAfter")}
+						</p>
+					</>
 				) : (
 					<p>
 						{t("firstDay")} {t("teamCostNote")}

@@ -1,6 +1,7 @@
-import { Avatar, type AvatarKey, Button } from "@catervas/ui";
+import { Avatar, type AvatarKey, Button, InfoTip, RoleTag } from "@catervas/ui";
 import { useState } from "react";
 import { useQuery } from "../app/store.ts";
+import { Bullets } from "../components/Bullets.tsx";
 import { useWide } from "../shell/Shell.tsx";
 import { t } from "../strings/t.ts";
 import { type AllowanceRow, countSaid, useAllowances } from "./allowances.tsx";
@@ -9,7 +10,7 @@ import own from "./Costs.module.css";
 import { DailyLimit } from "./dialogs/DailyLimit.tsx";
 import { dollars } from "./Gate.tsx";
 import styles from "./pages.module.css";
-import { roleName, type Team } from "./setup/TeamSetup.tsx";
+import type { Team } from "./setup/TeamSetup.tsx";
 import type { RoleKit } from "./Team.tsx";
 
 type Summary = {
@@ -18,7 +19,6 @@ type Summary = {
 	agents: { agentId: string; todayUsd: number }[];
 	conversationsTodayUsd: number;
 };
-type Activity = { agentId: string; line: string };
 type Words = { words: string; usd: number };
 type Metrics = {
 	acceptedTasks: number;
@@ -43,13 +43,9 @@ export function Costs() {
 	const allowances = useAllowances();
 	const wide = useWide();
 	const { data: summary } = useQuery<Summary>("costs.summary", {});
-	const { data: activity } = useQuery<{ activity: Activity[] }>(
-		"team.activity",
-		{},
-	);
 	const { data: metrics } = useQuery<Metrics>("metrics", {});
 	const [limiting, setLimiting] = useState(false);
-	if (!team || !summary || !activity || !metrics) return null;
+	if (!team || !summary || !metrics) return null;
 	const today = dollars(summary.todayUsd);
 
 	const rate = (
@@ -57,12 +53,19 @@ export function Costs() {
 		value: string | null,
 		note?: string,
 	) => (
-		<div key={key}>
-			<dt>{t(key)}</dt>
+		<div key={key} className={own.tile}>
+			<dt>
+				{t(key)}
+				{value !== null && note && (
+					<>
+						{" "}
+						<InfoTip id={`metric-${key}-info`}>{note}</InfoTip>
+					</>
+				)}
+			</dt>
 			<dd className={value === null ? undefined : own.value}>
 				{value ?? t("metricNotYet")}
 			</dd>
-			{value !== null && note && <dd className={styles.muted}>{note}</dd>}
 		</div>
 	);
 	const m = metrics;
@@ -89,54 +92,59 @@ export function Costs() {
 				<Button onClick={() => setLimiting(true)}>{t("costsSetLimit")}</Button>
 			</div>
 			<section className={styles.section} aria-labelledby="by-agent">
-				<h2 id="by-agent">{t("costsByAgent")}</h2>
+				<div className={styles.titled}>
+					<h2 id="by-agent">{t("costsByAgent")}</h2>
+					<InfoTip id="resting-info">
+						<Bullets text={t("costsResting")} />
+					</InfoTip>
+				</div>
 				<table className={own.table} aria-labelledby="by-agent">
 					<thead>
 						<tr>
 							<th scope="col">{t("costsAgent")}</th>
-							<th scope="col">{t("costsTodayColumn")}</th>
-							<th scope="col">{t("costsNow")}</th>
+							<th scope="col" className={own.amount}>
+								{t("costsTodayColumn")}
+							</th>
 						</tr>
 					</thead>
 					<tbody>
-						{summary.agents.map((row) => {
-							const agent = team.team.agents.find((a) => a.id === row.agentId);
-							const name = agent?.displayName ?? row.agentId;
-							return (
-								<tr key={row.agentId}>
-									<th scope="row">
-										<span className={own.agent}>
-											{agent?.avatar && (
-												<Avatar
-													avatarKey={agent.avatar as AvatarKey}
-													name={name}
-													size={32}
-												/>
-											)}
-											<span>{name}</span>
-										</span>
-										{agent && (
-											<span className={board.small}>
-												{roleName(agent.role)}
+						{[...summary.agents]
+							.sort((a, b) => b.todayUsd - a.todayUsd)
+							.map((row) => {
+								const agent = team.team.agents.find(
+									(a) => a.id === row.agentId,
+								);
+								const name = agent?.displayName ?? row.agentId;
+								return (
+									<tr key={row.agentId}>
+										<th scope="row">
+											<span className={own.agent}>
+												{agent?.avatar && (
+													<Avatar
+														avatarKey={agent.avatar as AvatarKey}
+														name={name}
+														size={32}
+													/>
+												)}
+												<span>{name}</span>
+												{agent && <RoleTag role={agent.role} />}
 											</span>
-										)}
-									</th>
-									<td>{dollars(row.todayUsd)}</td>
-									<td>
-										{activity.activity.find((a) => a.agentId === row.agentId)
-											?.line ?? ""}
-									</td>
-								</tr>
-							);
-						})}
+										</th>
+										<td className={own.amount}>{dollars(row.todayUsd)}</td>
+									</tr>
+								);
+							})}
+						<tr>
+							<th scope="row">
+								{t("costsChatsRow")}{" "}
+								<InfoTip id="chats-info">{t("costsChatsInfo")}</InfoTip>
+							</th>
+							<td className={own.amount}>
+								{dollars(summary.conversationsTodayUsd)}
+							</td>
+						</tr>
 					</tbody>
 				</table>
-				<p className={styles.muted}>{t("costsResting")}</p>
-				<p>
-					{t("costsConversations")}{" "}
-					<strong>{dollars(summary.conversationsTodayUsd)}</strong>.{" "}
-					{t("costsConversationsWhy")}
-				</p>
 			</section>
 			{allowances && allowances.rows.length > 0 && (
 				<section className={styles.section} aria-labelledby="made-elsewhere">
@@ -224,14 +232,17 @@ export function Costs() {
 						t("metricChecksNote"),
 					)}
 				</dl>
-				<p>{t("metricWeeks").replace("{n}", String(m.activeWeeks))}</p>
-				<p>
-					{t("metricMessages")
-						.replace("{reaction}", String(m.messages.reaction))
-						.replace("{reply}", String(m.messages.reply))
-						.replace("{ceremony}", String(m.messages.ceremony))
-						.replace("{human}", String(m.messages.human))}
-				</p>
+				<details className={own.more}>
+					<summary>{t("costsMore")}</summary>
+					<p>{t("metricWeeks").replace("{n}", String(m.activeWeeks))}</p>
+					<p>
+						{t("metricMessages")
+							.replace("{reaction}", String(m.messages.reaction))
+							.replace("{reply}", String(m.messages.reply))
+							.replace("{ceremony}", String(m.messages.ceremony))
+							.replace("{human}", String(m.messages.human))}
+					</p>
+				</details>
 			</section>
 			{limiting && (
 				<DailyLimit team={team.team} onClose={() => setLimiting(false)} />

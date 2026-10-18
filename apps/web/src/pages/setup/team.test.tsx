@@ -319,7 +319,9 @@ describe("team setup", () => {
 		);
 		await answerStatus(s, false, 1, { setup_pending: true });
 		expect(await screen.findByText(en.teamLead)).toBeTruthy();
-		expect(en.teamLead).toMatch(/^We suggest six, one for each job\./);
+		expect(en.teamLead).toBe(
+			"Six people, one for each job. Rename anyone now or later.",
+		);
 		const list = await screen.findByRole("list", { name: en.teamMembers });
 		expect(membersOf(list)).toHaveLength(6);
 		const include = screen.getByRole("checkbox", {

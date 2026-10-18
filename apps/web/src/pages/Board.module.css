@@ -126,6 +126,27 @@
 	white-space: nowrap;
 }
 
+/* A card's title: three lines, the whole title in its title attribute. */
+.title3 {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	line-clamp: 3;
+	overflow: hidden;
+}
+
+/* A card's id and its epic's name, on one muted line cut with an ellipsis. */
+.meta {
+	margin: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--catervas-color-ink-muted);
+	font:
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
+}
+
 .small {
 	margin: 0;
 	color: var(--catervas-color-ink-muted);
