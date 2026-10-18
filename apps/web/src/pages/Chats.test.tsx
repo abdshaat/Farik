@@ -1172,7 +1172,7 @@ describe("chats", () => {
 		});
 		expect(
 			await screen.findByText(
-				"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+				"To start the product plan, your team needs an Architect or a Scrum Master. Add one on the Team page.",
 			),
 		).toBeTruthy();
 	});
@@ -1191,7 +1191,7 @@ describe("chats", () => {
 			],
 			[
 				"product_plan_no_reviewer",
-				"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+				"To start the product plan, your team needs an Architect or a Scrum Master. Add one on the Team page.",
 			],
 		] as const;
 		for (const [code, words] of plan) {

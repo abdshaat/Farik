@@ -154,7 +154,7 @@ Tests:
   it", "checks the plan before you read it" or "have their notes checked"; and `en` has no key
   `nextSmall3` or `nextSmall4`. Fails first on "once {pm} agrees".
 
-- [ ] `fix(web): words that match the product since only code is reviewed and chats take work`
+- [x] `fix(web): words that match the product since only code is reviewed and chats take work`
 
 ## Verification
 

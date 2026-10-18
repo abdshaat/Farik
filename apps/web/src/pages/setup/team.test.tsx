@@ -223,7 +223,7 @@ describe("team setup", () => {
 		// Each row says the role's job, as the approved mockup does.
 		expect(
 			within(list).getByText(
-				"Keeps the project well built, and reviews the work before you see it.",
+				"Keeps the project well built, and reviews every change to its code.",
 			),
 		).toBeTruthy();
 		expect(within(list).queryByText("Ada persona")).toBeNull();
@@ -328,7 +328,7 @@ describe("team setup", () => {
 		expect(include.checked).toBe(true);
 		expect(
 			within(include.closest("li") as HTMLElement).getByText(
-				"Looks at your app the way a customer does, plans changes to its screens, and makes them once Mira agrees. Checks every screen Theo builds.",
+				"Looks at your app the way a customer does, plans changes to its screens and makes them. Checks every screen Theo builds.",
 			),
 		).toBeTruthy();
 		expect(

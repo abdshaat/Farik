@@ -59,7 +59,7 @@ export const en = {
 		"Your agents’ connections were copied from {from} (1 service). Use different keys for this project?",
 	keysKeep: "Keep them",
 	keysChoose: "Choose different keys",
-	pausedStillYours: "You can still answer, approve and accept.",
+	pausedStillYours: "You can still answer questions and merge pull requests.",
 	eventsCaption: "The last 100 events, newest first",
 	eventSeq: "Seq",
 	eventTime: "Time",
@@ -237,11 +237,11 @@ export const en = {
 		"Turns what you ask for into a plan, and asks you when something is unclear.",
 	jobScrumMaster: "Hands out the work and keeps the team unblocked.",
 	jobArchitect:
-		"Keeps the project well built, and reviews the work before you see it.",
+		"Keeps the project well built, and reviews every change to its code.",
 	jobDeveloper: "Builds and tests what the plan asks for.",
 	jobMarketing: "Writes posts, pages and a plan for getting the word out.",
 	jobDesigner:
-		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees. Checks every screen {developer} builds.",
+		"Looks at your app the way a customer does, plans changes to its screens and makes them. Checks every screen {developer} builds.",
 	jobFinance:
 		"Keeps the books: what your business owns, spends, earns and has at stake.",
 	jobProcurement:
@@ -304,7 +304,7 @@ export const en = {
 		"Some limits are always on, whatever you choose. No agent works on one thing for more than 30 minutes at a time, and a piece of work sent back three times comes to you.",
 	firstDay:
 		"A first full day for the suggested team of six costs about twenty-five dollars (an estimate) on your own key at today’s prices. A smaller team costs less.",
-	finishTitle: "When you accept a piece of work, what happens to it?",
+	finishTitle: "When a piece of work is done, what happens to it?",
 	finishLead: "Accepted work opens a pull request for you to merge.",
 	finishSafe:
 		"Rules for the whole team and the checks every piece of work must pass are already set to safe choices.",
@@ -323,8 +323,8 @@ export const en = {
 	ruleTests: "Every code change comes with new tests",
 	ruleTestsNote:
 		"A plan for code is not ready until it asks for tests of the change.",
-	ruleDeveloper: "Only the Developer changes code",
-	ruleDeveloperNote: "Everyone else may only change documents and plans.",
+	ruleDeveloper: "Only the Developer and the UI/UX Designer change code",
+	ruleDeveloperNote: "Everyone else changes documents and plans.",
 	ruleMaxCost: "Most one piece of work may cost",
 	ruleMaxCostHint: "In US dollars. Leave it empty for no limit.",
 	alwaysOn: "Always on",
@@ -332,11 +332,11 @@ export const en = {
 	checksLead: "Catervas runs these itself before work reaches you.",
 	checkFound: "Found in your project. Runs: {command}",
 	checkYours: "Added by you.",
-	checkReviewed: "Someone on the team reviewed it",
-	checkReviewedNote: "Another agent reads the work before you see it.",
+	checkReviewed: "An agent reviews every change to code",
+	checkReviewedNote: "Other work is checked by the checks Catervas runs.",
 	checkNew: "A new check",
 	checkNewHint:
-		"Say what must be true of finished work, in at least 10 characters. Another agent checks it.",
+		"Say what must be true of finished work, in at least 10 characters.",
 	checkAdd: "Add a check",
 	team: "Team",
 	teamPageLead:
@@ -457,7 +457,7 @@ export const en = {
 	waitingToolApprovalLine:
 		"To {tool}, for {task} {title}. {agent} waits until you decide.",
 	toolApprovalStopped:
-		"{agent} stopped to ask before changing something outside your project.",
+		"{agent} stopped to ask before something that costs money.",
 	toolApprovalTool: "Tool",
 	toolApprovalLabelled: ", labelled “{tag}”",
 	toolApprovalService: "Service",
@@ -512,8 +512,9 @@ export const en = {
 	nextSmall1:
 		"{pm} asks you anything that is unclear. You will see it on Today.",
 	nextSmall2: "{pm} writes the plan and Catervas checks it is complete.",
-	nextSmall3: "The team builds it, and a teammate reviews the work.",
-	nextSmall4: "You accept the work, or send it back with a note.",
+	nextSmall3:
+		"The team builds it. Catervas runs the checks, and an agent reviews any change to code.",
+	nextSmall4: "When it is done, it opens a pull request for you to merge.",
 	aboutRequest: "About this request",
 	aboutSent: "Sent",
 	aboutSizedBy: "Sized by",
@@ -525,7 +526,7 @@ export const en = {
 	notYet: "Not yet",
 	questionsTitle: "{agent}’s questions",
 	questionsLead:
-		"Plan {id}. {agent} asks before writing the plan, so the plan matches what you want.",
+		"{agent} asked these about {id}. Your answers go into the work.",
 	questionsNone: "There are no questions for {id}.",
 	youAnswered: "You answered:",
 	answered: "Answered",
@@ -958,10 +959,10 @@ export const en = {
 	metricFirstTryValue: "{first} of {accepted}",
 	metricFirstTryNote: "The rest were sent back once before they passed.",
 	metricNeeded: "Times the team needed you, per finished task",
-	metricNeededNote: "Approvals, answers, and help when stuck.",
+	metricNeededNote: "Answers, payments, and help when stuck.",
 	metricCost: "Average cost of a finished task",
 	metricChecks: "Checks Catervas runs itself",
-	metricChecksNote: "The others are judged by a reviewer or by you.",
+	metricChecksNote: "The others are judged by a reviewer.",
 	metricWeeks: "Active weeks: {n}",
 	metricMessages:
 		"Messages: {reaction} reactions, {reply} replies, {ceremony} from meetings, {human} from you",
@@ -974,9 +975,8 @@ export const en = {
 	chatsPast: "Past teammates",
 	chatsTitle: "Talking with {name}",
 	chatsIntro:
-		"{name} answers from memory and from reading the project, and changes nothing here. When work is needed, {name} suggests a request, and you decide whether to send it.",
-	chatsIntroPhone:
-		"{name} answers from memory and the project, and changes nothing.",
+		"{name} answers from memory and from reading the project. Work you ask {name} for becomes {name}’s task; work for someone else comes back as a request for you to send.",
+	chatsIntroPhone: "{name} answers, and takes on the work you ask for.",
 	chatsBack: "Back to Team",
 	chatsNoSuch: "No such teammate",
 	chatsLabel: "Message {name}",
@@ -2436,7 +2436,7 @@ export const en = {
 	refusePlanOpen: "{name} is drafting your product plan already.",
 	refusePlanNoWriter: "Your team has no Product Manager at work to write it.",
 	refusePlanNoReviewer:
-		"An Architect or a Scrum Master checks the plan before you read it. Add one on the Team page.",
+		"To start the product plan, your team needs an Architect or a Scrum Master. Add one on the Team page.",
 	refuseTooLarge:
 		"This is too long to save here: a document can be at most about 256 KB.",
 	// The end of setup for a project that already exists (4.1, 5.17).
@@ -2468,7 +2468,7 @@ export const en = {
 	refuseCatervaficationNoPm:
 		"Your Product Manager is paused. Resume them on the Team page, then start.",
 	refuseCatervaficationNoWriters:
-		"No one on your team can both write and have their notes checked. Add an Architect or a Scrum Master on the Team page, then start.",
+		"To start, your team needs an Architect or a Scrum Master. Add one on the Team page, then start.",
 	cardTitle: "Your team hasn’t documented this project yet",
 	cardLead:
 		"A first piece of work where your team reads your project, writes down what it learns, looks for bugs and starts your marketing.",
